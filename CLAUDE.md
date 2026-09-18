@@ -88,6 +88,24 @@ The 8× imbalance in code volume between `androidMain` and
 `desktopMain` is real and growing. New Android-only additions
 should be infrequent and intentional.
 
+### 7. A new section is declared with `sections.flag()`, in both shells
+
+This bug shipped with nearly every new drawer section: open it, and back
+does nothing and picking another section from the drawer does nothing.
+Each section used to be its own boolean that had to be written into
+hand-kept reset lists and given a back handler; the render is a `when`
+that shows the first true flag, so one missing from the reset list can
+never be left.
+
+Declare every full-screen section as
+`var fooOpen by remember { sections.flag() }` in **both** shells
+(`androidMain/ui/TalonApp.kt` and `commonMain/compose/App.kt`).
+`io.nisfeb.talon.ui.Sections` then resets it and backs out of it without
+anyone listing it anywhere. `SectionFlagsGuardTest` fails the build for a
+section flag made with `mutableStateOf(false)`. Before calling a new
+section done, check that back leaves it and that the drawer can switch
+away from it, not only that it opens.
+
 ## Test coverage caveat
 
 `desktopTest` (~7k lines) carries most of the automated coverage.

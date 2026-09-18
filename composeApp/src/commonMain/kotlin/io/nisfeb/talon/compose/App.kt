@@ -254,10 +254,13 @@ fun App(
     var landingProgress by remember { mutableStateOf<io.nisfeb.talon.ui.LandingProgress?>(null) }
     var landingHidden by remember { mutableStateOf(false) }
     var settingsStartOnAccount by remember { mutableStateOf(false) }
-    var showSettings by remember { mutableStateOf(false) }
-    var showSidebarSettings by remember { mutableStateOf(false) }
-    var showApps by remember { mutableStateOf(false) }
-    var showLoops by remember { mutableStateOf(false) }
+    // Every full-screen section is a flag made here, so the resets and
+    // the back gesture cannot miss one. See Sections for the bug this ends.
+    val sections = remember { io.nisfeb.talon.ui.Sections() }
+    var showSettings by remember { sections.flag() }
+    var showSidebarSettings by remember { sections.flag() }
+    var showApps by remember { sections.flag() }
+    var showLoops by remember { sections.flag() }
     var openChat by remember { mutableStateOf<String?>(null) }
     // Optional message id to scroll-and-flash when DmChatScreen mounts /
     // re-mounts on a new whom. Set when navigating from bookmarks (or any
@@ -331,33 +334,33 @@ fun App(
     val switchShipAction: () -> Unit = {
         applyRightPaneState(RightPaneStateReducer.switchShip(rightPaneSnapshot()))
     }
-    var showSelfProfile by remember { mutableStateOf(false) }
+    var showSelfProfile by remember { sections.flag() }
     /** A message being written, if any. Owns the detail pane while it
      *  is open, so a reply cannot be lost behind the thread it answers. */
     var mailComposing by remember { mutableStateOf<io.nisfeb.talon.ui.screens.MailIntent?>(null) }
     /** The mail thread the reader is on. The reader itself is the next
      *  slice; until it lands this records the tap and nothing renders it. */
     var openMailThread by remember { mutableStateOf<String?>(null) }
-    var showStatusFeed by remember { mutableStateOf(false) }
-    var showInvites by remember { mutableStateOf(false) }
-    var showActions by remember { mutableStateOf(false) }
-    var showBookmarks by remember { mutableStateOf(false) }
-    var showCalendar by remember { mutableStateOf(false) }
+    var showStatusFeed by remember { sections.flag() }
+    var showInvites by remember { sections.flag() }
+    var showActions by remember { sections.flag() }
+    var showBookmarks by remember { sections.flag() }
+    var showCalendar by remember { sections.flag() }
     var calendarPageOpen by remember { mutableStateOf(false) }
     var assistantListen by remember { mutableStateOf(false) }
-    var showActivity by remember { mutableStateOf(false) }
-    var showSearch by remember { mutableStateOf(false) }
-    var showAssistant by remember { mutableStateOf(false) }
+    var showActivity by remember { sections.flag() }
+    var showSearch by remember { sections.flag() }
+    var showAssistant by remember { sections.flag() }
     /** The assistant claims the whole content area; a thread or group-info
      *  pane left open would dock beside it and swallow clicks meant for it. */
     val openAssistantAction: () -> Unit = {
         closeRightPaneAction()
         showAssistant = true
     }
-    var showNewDm by remember { mutableStateOf(false) }
-    var showContacts by remember { mutableStateOf(false) }
-    var showWatchwords by remember { mutableStateOf(false) }
-    var showGroupAdminList by remember { mutableStateOf(false) }
+    var showNewDm by remember { sections.flag() }
+    var showContacts by remember { sections.flag() }
+    var showWatchwords by remember { sections.flag() }
+    var showGroupAdminList by remember { sections.flag() }
     var openGroupAdminFlag by remember { mutableStateOf<String?>(null) }
     var openGroupHomeFlag by remember { mutableStateOf<String?>(null) }
     /** A ship whose invite-me code was scanned or tapped: message it, or invite it to a group. */
@@ -388,20 +391,7 @@ fun App(
     // which outranks openChat in the right-pane `when`. Close them all
     // first, or the tap sets openChat and shows nothing.
     val jumpToChat: (String) -> Unit = { who ->
-        showSettings = false
-        showApps = false
-        showSelfProfile = false
-        showStatusFeed = false
-        showInvites = false
-        showBookmarks = false
-        showCalendar = false
-        showActivity = false
-        showSearch = false
-        showAssistant = false
-        showNewDm = false
-        showContacts = false
-        showWatchwords = false
-        showGroupAdminList = false
+        sections.closeAll()
         openGroupAdminFlag = null
         openGroupHomeFlag = null
         profileSheetShip = null
@@ -571,6 +561,9 @@ fun App(
     PlatformBackHandler(enabled = showStatusFeed) {
         showStatusFeed = false
     }
+    // Below every handler that follows in priority: it answers only for
+    // a section that has none of its own.
+    PlatformBackHandler(enabled = sections.anyOpen) { sections.closeLast() }
     PlatformBackHandler(enabled = showInvites) {
         showInvites = false
     }
@@ -2243,6 +2236,12 @@ fun App(
                         actions = orreryActions,
                         onBack = { showActions = false },
                         onShown = { orreryRepo.refreshActions() },
+                        onDecide = { a, status ->
+                            loopScope.launch {
+                                orreryRepo.setAction(a.id, status)
+                                orreryRepo.refreshActions()
+                            }
+                        },
                     ) { a -> openAction = a }
                     showWatchwords -> WatchwordsScreen(
                         db = db,
@@ -2905,27 +2904,14 @@ fun App(
                             // content with the rail still visible, so clicking
                             // ANY rail item must close it (the Assistant case
                             // below re-opens it, so clicking A is a no-op).
-                            showAssistant = false
                             // And leaving whichever of the others was open.
                             // The render is a `when` over these flags, so it
                             // shows the first one that is true rather than the
                             // one most recently asked for: left set, they pile
-                            // up and the earliest keeps winning. Harmless on a
-                            // rail, where people tended to come back the way
-                            // they went in; not harmless behind a drawer,
-                            // which is built for going straight from one
-                            // section to the next.
-                            showSelfProfile = false
-                            showWatchwords = false
-                            showGroupAdminList = false
-                            showInvites = false
-                            showSettings = false
-                            showApps = false
-                            showLoops = false
-                            showContacts = false
-                            showSearch = false
-                            showNewDm = false
-                            showCalendar = false
+                            // up and the earliest keeps winning. Every one the
+                            // registry made, so a new section cannot be left
+                            // out of this and stick.
+                            sections.closeAll()
                             // Clear the rail badge for items that show
                             // freshness signals — rail clicks were missing
                             // the markXSeen calls the kebab paths in

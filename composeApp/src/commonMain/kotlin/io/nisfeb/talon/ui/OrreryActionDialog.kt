@@ -49,9 +49,18 @@ fun OrreryActionDialog(
         }
     }
 
+    // The ship allows a proposal to be approved or dismissed and nothing
+    // else, and an approved action to be done, failed or dismissed. The
+    // buttons follow that, instead of offering a Done the ship refuses.
+    val proposed = action.status == "proposed"
+
     fun carryOut() {
         busy = true
         scope.launch {
+            // A proposal is approved on the way: doing it is saying yes.
+            if (proposed) {
+                orrery.setAction(action.id, "approved").onFailure { note = it.message; busy = false; return@launch }
+            }
             val failed = runCatching {
                 when {
                     message != null -> send(message.whom, message.text)
@@ -85,10 +94,18 @@ fun OrreryActionDialog(
                     Spacer(Modifier.height(8.dp))
                     Text("About " + action.about.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (action.kind !in setOf("task", "note") && !executable) {
-                    Spacer(Modifier.height(8.dp))
-                    Text("Talon cannot carry this kind out; mark it done once you have, or dismiss it.", style = MaterialTheme.typography.bodySmall)
-                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    when {
+                        proposed && executable -> "Waiting for you. Sending or adding it approves it too."
+                        proposed && action.kind == "task" -> "Waiting for you. Approved, it goes on your calendar's task list."
+                        proposed -> "Waiting for you."
+                        executable -> "Approved, not yet done."
+                        action.kind == "task" -> "Approved, and on your task list. Mark it done here or tick it there."
+                        else -> "Approved. Talon cannot carry this kind out; mark it done once you have."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 note?.let {
                     Spacer(Modifier.height(8.dp))
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -96,11 +113,25 @@ fun OrreryActionDialog(
             }
         },
         confirmButton = {
-            if (executable) TextButton(enabled = !busy, onClick = { carryOut() }) { Text(if (message != null) "Send it" else "Add it") }
-            else TextButton(enabled = !busy, onClick = { move("done") }) { Text("Done") }
-        },
-        dismissButton = {
-            TextButton(enabled = !busy, onClick = { move("dismissed") }) { Text("Dismiss", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
+            ) {
+                TextButton(enabled = !busy, onClick = onClose) { Text("Close", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                TextButton(enabled = !busy, onClick = { move("dismissed") }) {
+                    Text("Dismiss", color = MaterialTheme.colorScheme.error)
+                }
+                when {
+                    // Doing it, where Talon can: that approves a proposal too.
+                    executable -> {
+                        if (proposed) TextButton(enabled = !busy, onClick = { move("approved") }) { Text("Approve only") }
+                        androidx.compose.material3.Button(enabled = !busy, onClick = { carryOut() }) {
+                            Text(if (message != null) "Send it" else "Add it")
+                        }
+                    }
+                    proposed -> androidx.compose.material3.Button(enabled = !busy, onClick = { move("approved") }) { Text("Approve") }
+                    else -> androidx.compose.material3.Button(enabled = !busy, onClick = { move("done") }) { Text("Mark done") }
+                }
+            }
         },
     )
 }

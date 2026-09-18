@@ -578,16 +578,20 @@ fun TalonApp(
     // opened conversation still snaps to the newest message.
     val chatScrollState = remember(openWhom) { LazyListState() }
     val chatScrollAnchored = remember(openWhom) { mutableStateOf(false) }
-    var searchOpen by remember { mutableStateOf(false) }
+    // Every full-screen section is a flag made here, so the drawer's
+    // reset and the back button cannot miss one. See Sections for the
+    // bug this ends.
+    val sections = remember { io.nisfeb.talon.ui.Sections() }
+    var searchOpen by remember { sections.flag() }
     var revealGroupRequest by remember { mutableStateOf<String?>(null) }
-    var newDmOpen by remember { mutableStateOf(false) }
+    var newDmOpen by remember { sections.flag() }
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
     var viewerImageList by remember {
         mutableStateOf<io.nisfeb.talon.ui.screens.ViewerImageList?>(null)
     }
-    var editingProfile by remember { mutableStateOf(false) }
-    var statusFeedOpen by remember { mutableStateOf(false) }
-    var mailOpen by remember { mutableStateOf(initialOpenMail) }
+    var editingProfile by remember { sections.flag() }
+    var statusFeedOpen by remember { sections.flag() }
+    var mailOpen by remember { sections.flag(initialOpenMail) }
     /** A ship the profile sheet asked us to write to, consumed by the
      *  mail screen when it opens. */
     var mailTo by remember { mutableStateOf<String?>(null) }
@@ -613,16 +617,16 @@ fun TalonApp(
             }
         }
     }
-    var bookmarksOpen by remember { mutableStateOf(false) }
-    var calendarOpen by remember { mutableStateOf(false) }
+    var bookmarksOpen by remember { sections.flag() }
+    var calendarOpen by remember { sections.flag() }
     var calendarPageOpen by remember { mutableStateOf(false) }
     /** The mail thread a tap outside mail asked for. */
     var pendingMailThread by remember { mutableStateOf<String?>(null) }
     /** The home widget asked the assistant to listen as it opens. */
     var assistantListen by remember { mutableStateOf(false) }
-    var activityOpen by remember { mutableStateOf(false) }
-    var contactsOpen by remember { mutableStateOf(false) }
-    var watchwordsOpen by remember { mutableStateOf(false) }
+    var activityOpen by remember { sections.flag() }
+    var contactsOpen by remember { sections.flag() }
+    var watchwordsOpen by remember { sections.flag() }
     // Curated contact book (%contacts /v1/book) — gates add affordances
     // and backs the Contacts screen.
     val bookContacts by app.repo.bookContacts.collectAsState()
@@ -630,9 +634,9 @@ fun TalonApp(
     // onOpenAssistant below); collected here so a toggle/key change
     // recomposes the gate live.
     val aiState by app.aiSettings.state.collectAsState()
-    var homeOpen by remember { mutableStateOf(false) }
-    var settingsOpen by remember { mutableStateOf(false) }
-    var assistantOpen by remember { mutableStateOf(false) }
+    var homeOpen by remember { sections.flag() }
+    var settingsOpen by remember { sections.flag() }
+    var assistantOpen by remember { sections.flag() }
     inviteShipFromCode?.let { ship ->
         io.nisfeb.talon.ui.InviteToGroupDialog(
             db = app.db, repo = app.repo, ship = ship, shipName = io.nisfeb.talon.ui.shipHandle(ship),
@@ -645,13 +649,13 @@ fun TalonApp(
             },
         )
     }
-    var loopsOpen by remember { mutableStateOf(false) }
-    var sidebarSettingsOpen by remember { mutableStateOf(false) }
-    var appsOpen by remember { mutableStateOf(false) }
-    var adminListOpen by remember { mutableStateOf(false) }
+    var loopsOpen by remember { sections.flag() }
+    var sidebarSettingsOpen by remember { sections.flag() }
+    var appsOpen by remember { sections.flag() }
+    var adminListOpen by remember { sections.flag() }
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
-    var invitesOpen by remember { mutableStateOf(false) }
-    var actionsOpen by remember { mutableStateOf(false) }
+    var invitesOpen by remember { sections.flag() }
+    var actionsOpen by remember { sections.flag() }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
     /** Login-handoff QR generator. Reachable from the LoginScreen
      *  "Generate QR for someone" link (pre-login) and from settings
@@ -684,25 +688,9 @@ fun TalonApp(
      * branch wins for ever.
      */
     fun closeSections() {
-        statusFeedOpen = false
-        mailOpen = false
-        bookmarksOpen = false
-        calendarOpen = false
-        activityOpen = false
-        watchwordsOpen = false
-        contactsOpen = false
-        homeOpen = false
-        settingsOpen = false
-        sidebarSettingsOpen = false
-        appsOpen = false
-        adminListOpen = false
+        // Every section flag, including any added after this was written.
+        sections.closeAll()
         adminGroupFlag = null
-        invitesOpen = false
-        searchOpen = false
-        newDmOpen = false
-        editingProfile = false
-        assistantOpen = false
-        loopsOpen = false
         groupInfoOpenFor = null
         groupInfoDrilldown = null
         // An open conversation is a thing to put down too. It is not a
@@ -1454,6 +1442,10 @@ fun TalonApp(
         // overlays everything else (you can open it from a chat, which
         // means both `viewerImageUrl` and `openWhom` are non-null at
         // the same time), so its handler is registered last.
+        // Registered first, so every handler below outranks it: it only
+        // answers for a section that has none of its own, which is every
+        // section somebody adds and forgets to give one.
+        BackHandler(enabled = sections.anyOpen) { sections.closeLast() }
         BackHandler(enabled = editingProfile) { editingProfile = false }
         BackHandler(enabled = statusFeedOpen) { statusFeedOpen = false }
         BackHandler(enabled = mailOpen) { mailOpen = false }
@@ -2036,6 +2028,12 @@ fun TalonApp(
                 onBack = { actionsOpen = false },
                 modifier = mod,
                 onShown = { orreryRepo.refreshActions() },
+                onDecide = { a, status ->
+                    appScope.launch {
+                        orreryRepo.setAction(a.id, status)
+                        orreryRepo.refreshActions()
+                    }
+                },
             ) { a -> openAction = a }
 
             openGroupFlag != null -> GroupHomeScreen(
