@@ -86,15 +86,32 @@ data class CalendarWrite(
     val bodyId: String,
     val facts: Facts,
     /**
-     * The occurrences now written, each with the time it ends, so the
-     * next pass does not write them again and a pass that finds one
-     * gone knows both times its rows were anchored at.
+     * The occurrences now written: each with the time it ends, so a
+     * pass that finds one gone knows both times its rows were anchored
+     * at, and whether what was written about it is settled.
      */
-    val occurrences: List<Pair<String, Long>>,
+    val occurrences: List<Occurrence>,
     /** True when this write creates the body, so the caller knows a decision was made. */
     val creates: Boolean,
 ) {
-    val occurrenceKeys: List<String> get() = occurrences.map { it.first }
+    val occurrenceKeys: List<String> get() = occurrences.map { it.key }
+}
+
+/**
+ * One occurrence this pass wrote about. [settled] is false while what
+ * was written is only the schedule, which a later pass replaces with
+ * what happened once the time has passed.
+ */
+data class Occurrence(val key: String, val endMs: Long, val settled: Boolean) {
+    /** What the pass remembers, the end first so an older record still reads. */
+    val record: String get() = "$endMs:" + if (settled) "f" else "s"
+
+    companion object {
+        /** Whether a remembered occurrence is still waiting to be said in the past tense. */
+        fun unsettled(record: String): Boolean = record.substringAfter(':', "") == "s"
+
+        fun endOf(record: String): Long? = record.substringBefore(':').toLongOrNull()
+    }
 }
 
 /** The occurrences of a window, grouped into the events they belong to. */
@@ -147,9 +164,9 @@ fun calendarWrite(
     val kind = existing?.substringBefore('/')
     return when {
         kind == "activity" -> occurrencesOn(existing!!, subject, written, nowMs, changed, ours, people)
-        kind == "situation" -> onSituation(existing!!, subject, written, changed, people)
+        kind == "situation" -> onSituation(existing!!, subject, written, changed, people, nowMs)
         subject.repeats -> newActivity(subject, written, ourShip, nowMs, ours, people)
-        else -> newSituation(subject, written, ourShip, people)
+        else -> newSituation(subject, written, ourShip, people, nowMs)
     }
 }
 
@@ -164,13 +181,13 @@ private fun occurrencesOn(
     people: EventPeople,
 ): CalendarWrite {
     val obs = mutableListOf<Obs>()
-    val keys = mutableListOf<Pair<String, Long>>()
+    val keys = mutableListOf<Occurrence>()
     if (changed) obs += activityContent(id, subject, nowMs, ours, people)
     for (row in subject.occurrences.filter { it.l <= nowMs }) {
         val key = occurrenceKey(subject, row)
         if (key in written) continue
         obs += Obs(id, "last", JsonPrimitive(isoUtc(row.l)), row.l, sourceKind = "calendar", sourceId = source(subject))
-        keys += key to row.r
+        keys += Occurrence(key, row.r, settled = true)
     }
     nextOf(subject, nowMs)?.let { (next, anchor) ->
         obs += Obs(id, "next", JsonPrimitive(isoUtc(next)), anchor, sourceKind = "calendar", sourceId = source(subject))
@@ -185,12 +202,16 @@ private fun onSituation(
     written: Set<String>,
     changed: Boolean,
     people: EventPeople,
+    nowMs: Long,
 ): CalendarWrite {
     val row = subject.occurrences.last()
     val key = occurrenceKey(subject, row)
     if (key in written && !changed) return CalendarWrite(id, Facts(), emptyList(), creates = false)
     return CalendarWrite(
-        id, Facts(observations = situationObs(id, subject, row, people)), listOf(key to row.r), creates = false,
+        id,
+        Facts(observations = situationObs(id, subject, row, nowMs, people)),
+        listOf(Occurrence(key, row.r, settled = row.r <= nowMs)),
+        creates = false,
     )
 }
 
@@ -212,7 +233,7 @@ private fun newActivity(
         .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
     val body = OBody(id, name = subject.title, aliases = aliases)
     val obs = mutableListOf<Obs>()
-    val keys = mutableListOf<Pair<String, Long>>()
+    val keys = mutableListOf<Occurrence>()
     fun obs(attr: String, value: JsonElement, at: Long) =
         obs.add(Obs(id, attr, value, at, sourceKind = "calendar", sourceId = source(subject)))
     obs += activityContent(id, subject, nowMs, ours, people, create = true)
@@ -220,14 +241,20 @@ private fun newActivity(
         val key = occurrenceKey(subject, row)
         if (key in written) continue
         obs("last", JsonPrimitive(isoUtc(row.l)), row.l)
-        keys += key to row.r
+        keys += Occurrence(key, row.r, settled = true)
     }
     nextOf(subject, nowMs)?.let { (next, anchor) -> obs("next", JsonPrimitive(isoUtc(next)), anchor) }
     return CalendarWrite(id, Facts(listOf(body) + cast(subject, people, create = true).second, obs), keys, creates = true)
 }
 
 /** A one-off the ship does not have: a situation, started and ended. */
-private fun newSituation(subject: CalendarSubject, written: Set<String>, ourShip: String, people: EventPeople): CalendarWrite {
+private fun newSituation(
+    subject: CalendarSubject,
+    written: Set<String>,
+    ourShip: String,
+    people: EventPeople,
+    nowMs: Long,
+): CalendarWrite {
     val row = subject.occurrences.last()
     val id = situationIdFor(subject)
     val aliases = (listOf(subject.uid) + subject.first.tags).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
@@ -235,8 +262,11 @@ private fun newSituation(subject: CalendarSubject, written: Set<String>, ourShip
     val key = occurrenceKey(subject, row)
     return CalendarWrite(
         id,
-        Facts(listOf(body) + cast(subject, people, create = true).second, situationObs(id, subject, row, people, create = true)),
-        listOf(key to row.r),
+        Facts(
+            listOf(body) + cast(subject, people, create = true).second,
+            situationObs(id, subject, row, nowMs, people, create = true),
+        ),
+        listOf(Occurrence(key, row.r, settled = row.r <= nowMs)),
         creates = true,
     )
 }
@@ -326,32 +356,45 @@ fun staleOccurrences(
         if (!key.startsWith(prefix)) return@mapNotNull null
         val start = key.removePrefix(prefix).toLongOrNull() ?: return@mapNotNull null
         if (start in here || start !in fromMs..toMs) return@mapNotNull null
-        key to listOfNotNull(start, end.toLongOrNull())
+        key to listOfNotNull(start, Occurrence.endOf(end))
     }.sortedBy { it.second.first() }
 }
 
 /**
- * What a one-off says about itself. No status: a situation is open
- * until something says closed, and the owner's retire pass closes it at
- * its end. An "open" row dated after a close reopens it, which is how a
- * late reminder reopened a trip that had been over for months.
+ * What a one-off says about itself.
+ *
+ * A time ahead is a schedule and a time behind is a fact: `starts` and
+ * `ends` say when it is meant to happen and are dated when we learned
+ * it, because a row dated in the future is hidden until then, and
+ * `started` and `ended` say what happened, each at its own moment.
+ * Nothing is said in the past tense about something still ahead.
+ *
+ * No status either: a situation is open until something says closed,
+ * and the owner's retire pass closes it at its end. An "open" row dated
+ * after a close reopens it, which is how a late reminder reopened a
+ * trip that had been over for months.
  */
 private fun situationObs(
     id: String,
     subject: CalendarSubject,
     row: CalendarRow,
+    nowMs: Long,
     people: EventPeople = EventPeople.NONE,
     create: Boolean = false,
 ): List<Obs> = buildList {
     fun obs(attr: String, value: JsonElement, at: Long, conf: Int = 100) =
         add(Obs(id, attr, value, at, conf = conf, sourceKind = "calendar", sourceId = source(subject)))
-    obs("started", JsonPrimitive(isoUtc(row.l)), row.l)
-    obs("ended", JsonPrimitive(isoUtc(row.r)), row.r)
-    obs("participants", buildJsonObject { put("ref", "person/me") }, row.l)
+    if (row.l > nowMs) obs("starts", JsonPrimitive(isoUtc(row.l)), nowMs) else obs("started", JsonPrimitive(isoUtc(row.l)), row.l)
+    if (row.r > nowMs) obs("ends", JsonPrimitive(isoUtc(row.r)), nowMs) else obs("ended", JsonPrimitive(isoUtc(row.r)), row.r)
+    // Who is in it and where it is were learned when we read it, so on
+    // something still ahead they are dated now rather than hidden until
+    // the day arrives.
+    val learned = minOf(row.l, nowMs)
+    obs("participants", buildJsonObject { put("ref", "person/me") }, learned)
     for (who in cast(subject, people, create).first) {
-        obs("participants", buildJsonObject { put("ref", who) }, row.l, conf = 85)
+        obs("participants", buildJsonObject { put("ref", who) }, learned, conf = 85)
     }
-    if (row.location.isNotBlank()) obs("location", JsonPrimitive(row.location), row.l)
+    if (row.location.isNotBlank()) obs("location", JsonPrimitive(row.location), learned)
 }
 
 /**

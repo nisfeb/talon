@@ -322,9 +322,17 @@ class OrreryRepo(
                     // An occurrence the calendar no longer has at a time
                     // this install can still see: moved, or called off.
                     val dropped = if (decided == null) emptySet() else retractMoved(a, row.token, decided, subject, seen, s, nowMs)
+                    // An occurrence the ship was told the schedule of,
+                    // which has since happened: what was said in the
+                    // future tense is said again in the past.
+                    val due = seen.any { (key, record) ->
+                        Occurrence.unsettled(record) && (Occurrence.endOf(record) ?: Long.MAX_VALUE) <= nowMs &&
+                            key !in dropped
+                    }
                     // A new time, place or description means what the
                     // ship was told no longer describes the event.
-                    val changed = mark != null && (mark.substringAfter('|', "") != digest || dropped.isNotEmpty())
+                    val changed = mark != null &&
+                        (mark.substringAfter('|', "") != digest || dropped.isNotEmpty() || due)
                     // Ask the ship before making anything: by the title it
                     // goes by, then by the calendar's own id, which
                     // reconcile keeps as an alias of the activity it built.
@@ -352,7 +360,7 @@ class OrreryRepo(
                         )
                     }
                     if (mark != "${write.bodyId}|$digest") remember(subject.key, "${write.bodyId}|$digest")
-                    write.occurrences.forEach { (key, end) -> remember(key, end.toString()) }
+                    write.occurrences.forEach { remember(it.key, it.record) }
                 }
             }.onFailure { Log.i(TAG, "calendar skipped: ${it.message}") }
 

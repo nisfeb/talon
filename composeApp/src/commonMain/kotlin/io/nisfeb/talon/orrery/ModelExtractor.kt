@@ -183,11 +183,12 @@ object ModelExtractor {
                 }
                 else -> continue
             }
-            // An event is open until something says closed, and the
-            // owner's retire pass closes it at its end. A row saying
-            // open, dated later, reopens what was over.
+            // A situation's status is open, closed or cancelled and
+            // nothing else: upcoming, under way and over are read off
+            // its times. Open goes too, dated later than a close it
+            // would reopen, and the calendar writes no status at all.
             if (attr == "status" && subject.startsWith("situation/") &&
-                (value as? JsonPrimitive)?.content.equals("open", ignoreCase = true)
+                (value as? JsonPrimitive)?.content?.lowercase() !in SITUATION_STATUS
             ) continue
             // A value has to come from the words, or it came from the
             // model's memory: the string itself, or the named body's name
@@ -235,6 +236,9 @@ object ModelExtractor {
 
     /** How many of the messages before this one the model is shown. */
     const val CONTEXT_MESSAGES = 4
+
+    /** All a situation's status may say; the times say whether it is ahead, on or over. */
+    private val SITUATION_STATUS = setOf("closed", "cancelled")
 
     /** Where a feeling goes so that it never lands on status. Never sent. */
     private val SINK = setOf("mood", "feeling", "feelings", "emotion")

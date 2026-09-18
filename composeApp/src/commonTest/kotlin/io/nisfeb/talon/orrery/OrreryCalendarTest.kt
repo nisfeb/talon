@@ -81,14 +81,41 @@ class OrreryCalendarTest {
     }
 
     @Test
-    fun `no hit and it happens once makes a situation with started and ended`() {
+    fun `a one-off ahead of us is a schedule, not something that happened`() {
         val s = subject(row(noon, title = "Bed delivery", uid = "UID-1"))
-        val w = calendarWrite(s, null, emptyList(), emptySet(), me, noon)
+        val soon = noon - 3_600_000 // an hour before it is due
+        val w = calendarWrite(s, null, emptyList(), emptySet(), me, soon)
         assertEquals("situation/bed-delivery", w.facts.bodies.single().id)
         assertTrue("UID-1" in w.facts.bodies.single().aliases)
+        assertEquals(listOf("ends", "participants", "starts"), w.facts.observations.map { it.attr }.sorted())
+        // Dated when we learned it: a row dated ahead is hidden until then.
+        assertEquals(soon, w.facts.observations.single { it.attr == "starts" }.atMs)
+        assertEquals(JsonPrimitive(isoUtc(noon)), w.facts.observations.single { it.attr == "starts" }.value)
+        assertEquals(soon, w.facts.observations.single { it.attr == "participants" }.atMs)
+        assertTrue(w.facts.observations.none { it.attr == "status" })
+        assertEquals(false, w.occurrences.single().settled, "nothing has happened yet")
+    }
+
+    @Test
+    fun `a one-off under way has started, and still only ends`() {
+        val s = subject(row(noon, title = "Bed delivery", uid = "UID-1"))
+        val w = calendarWrite(s, null, emptyList(), emptySet(), me, noon + 60_000)
+        assertEquals(listOf("ends", "participants", "started"), w.facts.observations.map { it.attr }.sorted())
+        assertEquals(noon, w.facts.observations.single { it.attr == "started" }.atMs, "at its own moment")
+        assertEquals(noon + 60_000, w.facts.observations.single { it.attr == "ends" }.atMs)
+        assertEquals(false, w.occurrences.single().settled)
+    }
+
+    @Test
+    fun `a one-off that is over is said in the past tense, and settles`() {
+        val s = subject(row(noon, title = "Bed delivery", uid = "UID-1"))
+        val w = calendarWrite(s, null, emptyList(), emptySet(), me, noon + 2 * 3_600_000)
+        assertEquals(listOf("ended", "participants", "started"), w.facts.observations.map { it.attr }.sorted())
         assertEquals(noon, w.facts.observations.single { it.attr == "started" }.atMs)
         assertEquals(noon + 1_800_000, w.facts.observations.single { it.attr == "ended" }.atMs)
         assertTrue(w.facts.observations.none { it.attr == "status" })
+        assertEquals(true, w.occurrences.single().settled)
+        assertEquals("${noon + 1_800_000}:f", w.occurrences.single().record)
     }
 
     @Test
@@ -147,7 +174,7 @@ class OrreryCalendarTest {
         val written = calendarWrite(s, "situation/bed-delivery", emptyList(), emptySet(), me, noon).occurrenceKeys.toSet()
         assertTrue(calendarWrite(s, "situation/bed-delivery", emptyList(), written, me, noon).facts.observations.isEmpty())
         val again = calendarWrite(s, "situation/bed-delivery", emptyList(), written, me, noon, changed = true)
-        assertEquals(listOf("ended", "location", "participants", "started"), again.facts.observations.map { it.attr }.sorted())
+        assertEquals(listOf("ends", "location", "participants", "started"), again.facts.observations.map { it.attr }.sorted())
         assertEquals(noon, again.facts.observations.single { it.attr == "started" }.atMs)
     }
 
@@ -232,6 +259,21 @@ class OrreryCalendarTest {
         val again = calendarWrite(s, "situation/opti-sail", emptyList(), emptySet(), me, noon, changed = true, people = cast)
         assertEquals(listOf("person/me", "person/linus"), refs(again))
         assertTrue(again.facts.bodies.isEmpty())
+    }
+
+    @Test
+    fun `a remembered occurrence says whether it still owes a past tense`() {
+        val ahead = Occurrence("occ:default/E9/1", 5L, settled = false)
+        assertEquals("5:s", ahead.record)
+        assertTrue(Occurrence.unsettled(ahead.record))
+        assertEquals(5L, Occurrence.endOf(ahead.record))
+        val over = Occurrence("occ:default/E9/1", 5L, settled = true)
+        assertEquals("5:f", over.record)
+        assertTrue(!Occurrence.unsettled(over.record))
+        // A record written before this rule carries the end alone, and
+        // what that pass wrote was already the past tense.
+        assertEquals(5L, Occurrence.endOf("5"))
+        assertTrue(!Occurrence.unsettled("5"))
     }
 
     @Test
