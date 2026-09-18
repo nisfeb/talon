@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -348,8 +349,8 @@ fun CalendarScreen(
     // A task shows the moment it is typed, greyed, until the calendar's
     // own copy arrives with the refresh after the poke.
     var pendingTasks by remember { mutableStateOf(listOf<CalendarTask>()) }
-    fun addTask(name: String, due: LocalDate?, cal: String?) {
-        val d = EventDraft(name = name, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = listOfNotNull(tagFilter))
+    fun addTask(name: String, due: LocalDate?, cal: String?, note: String = "") {
+        val d = EventDraft(name = name, note = note, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = listOfNotNull(tagFilter))
         val ghost = CalendarTask(
             id = "pending-${nowMs()}", cal = cal ?: "default", cat = "todo",
             meta = buildJsonObject { put("name", name); if (tagFilter != null) put("tags", kotlinx.serialization.json.JsonArray(listOf(kotlinx.serialization.json.JsonPrimitive(tagFilter!!)))) },
@@ -494,6 +495,15 @@ fun CalendarScreen(
                 },
                 pending = pendingTasks,
                 onAdd = ::addTask,
+                onMore = { n, due, c, note ->
+                    editing = null to EventDraft(
+                        name = n, note = note, cat = EventCat.TODO, date = due ?: today, due = due,
+                        cal = c, tags = listOfNotNull(tagFilter),
+                    )
+                    editingIdx = null
+                    editingStartMs = null
+                    editingAllDay = false
+                },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
             return@Column
@@ -932,6 +942,11 @@ private fun spanLabel(r: CalendarRow, day: LocalDate, zone: TimeZone, twentyFour
 }
 
 /** The event form. Saves the whole series; a single occurrence can be skipped. */
+/** The colours an entry can be given here: a spread that reads on light and dark. */
+private val ENTRY_COLOURS = listOf(
+    "#c0392b", "#d35400", "#f39c12", "#27ae60", "#16a085", "#2980b9", "#1e3a5f", "#8e44ad", "#7f8c8d",
+)
+
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun EventEditor(
@@ -1105,6 +1120,28 @@ private fun EventEditor(
                                 d = d.copy(tags = kept + t)
                             }, label = { Text("#$t") })
                         }
+                    }
+                }
+                // Its own colour, or the calendar's. The calendar keeps any
+                // colour, so one set elsewhere shows as chosen here too.
+                Text("Colour", style = MaterialTheme.typography.labelMedium)
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    FilterChip(selected = d.color.isBlank(), onClick = { d = d.copy(color = "") }, label = { Text("Calendar's") })
+                    (ENTRY_COLOURS + listOf(d.color).filter { it.isNotBlank() && it !in ENTRY_COLOURS }).forEach { hex ->
+                        val c = calendarHexColor(hex) ?: return@forEach
+                        Box(
+                            Modifier.size(28.dp).clip(CircleShape).background(c)
+                                .then(
+                                    if (d.color.equals(hex, ignoreCase = true)) {
+                                        Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
+                                    } else Modifier,
+                                )
+                                .clickable { d = d.copy(color = hex) },
+                        )
                     }
                 }
                 if (postToLabel != null) {
@@ -1411,10 +1448,13 @@ private fun TasksView(
     status: String?,
     onTick: (id: String, done: Boolean) -> Unit,
     onOpen: (CalendarTask) -> Unit,
-    onAdd: (name: String, due: LocalDate?, cal: String?) -> Unit,
+    onAdd: (name: String, due: LocalDate?, cal: String?, note: String) -> Unit,
+    /** The full editor, for everything a task can carry, starting from what is typed. */
+    onMore: (name: String, due: LocalDate?, cal: String?, note: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var name by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
     var due by remember { mutableStateOf<LocalDate?>(null) }
     var cal by remember(calendars, defaultCal) { mutableStateOf(defaultCal ?: calendars.firstOrNull()?.id) }
     var picking by remember { mutableStateOf(false) }
@@ -1422,8 +1462,8 @@ private fun TasksView(
     fun add() {
         val n = name.trim()
         if (n.isEmpty()) return
-        onAdd(n, due, cal)
-        name = ""; due = null
+        onAdd(n, due, cal, note.trim())
+        name = ""; note = ""; due = null
     }
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1435,6 +1475,19 @@ private fun TasksView(
             )
             TextButton(onClick = { picking = true }) { Text(due?.let { "${it.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[it.monthNumber - 1]}" } ?: "Due") }
             IconButton(onClick = ::add, enabled = name.isNotBlank()) { Icon(Icons.Filled.Add, contentDescription = "Add task") }
+        }
+        // A description as soon as there is something to describe; the
+        // rest of what a task carries is one tap further, in the editor.
+        if (name.isNotBlank()) {
+            OutlinedTextField(
+                value = note, onValueChange = { note = it }, placeholder = { Text("Description") },
+                minLines = 1, maxLines = 4,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+            TextButton(
+                onClick = { onMore(name.trim(), due, cal, note.trim()); name = ""; note = ""; due = null },
+                modifier = Modifier.padding(horizontal = 8.dp),
+            ) { Text("More: place, tags, colour") }
         }
         if (calendars.size > 1) {
             LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

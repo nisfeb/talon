@@ -52,6 +52,22 @@ fun titleFromMessage(text: String, max: Int = 72): String {
 }
 
 /**
+ * What the title left out, for the description.
+ *
+ * When the title is the whole first line, that is every line after it.
+ * When the title had to be cut, it is the whole message, so nothing
+ * that was said is lost to a title that only had room for part of it.
+ */
+fun descriptionFromMessage(text: String, title: String): String {
+    val lines = text.lines()
+    val first = lines.indexOfFirst { it.isNotBlank() }
+    if (first < 0) return ""
+    val whole = lines[first].trim()
+    if (title != whole) return text.trim()
+    return lines.drop(first + 1).joinToString("\n").trim()
+}
+
+/**
  * Make an event or a todo out of a message.
  *
  * Small on purpose: what it is called, and when. Everything else a
@@ -64,6 +80,7 @@ fun titleFromMessage(text: String, max: Int = 72): String {
 fun MessageToCalendarDialog(
     kind: FromMessage,
     initialTitle: String,
+    initialNote: String,
     zone: TimeZone,
     nowMs: Long,
     twentyFourHour: Boolean,
@@ -72,6 +89,7 @@ fun MessageToCalendarDialog(
 ) {
     val here = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone)
     var title by remember { mutableStateOf(initialTitle) }
+    var note by remember { mutableStateOf(initialNote) }
     // The next hour, which is nearly always what somebody means when
     // they make an event out of what was just said.
     var date by remember { mutableStateOf(if (kind == FromMessage.Event && here.hour >= 23) here.date.plusDay() else here.date) }
@@ -89,6 +107,14 @@ fun MessageToCalendarDialog(
                     onValueChange = { title = it },
                     label = { Text("Title") },
                     modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("Description") },
+                    minLines = 2,
+                    maxLines = 8,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 )
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     TextButton(onClick = { picking = true }) {
@@ -116,10 +142,11 @@ fun MessageToCalendarDialog(
                 onClick = {
                     onSave(
                         if (kind == FromMessage.Event) {
-                            EventDraft(name = title.trim(), date = date, minuteOfDay = minute, durMin = 60)
+                            EventDraft(name = title.trim(), note = note.trim(), date = date, minuteOfDay = minute, durMin = 60)
                         } else {
                             EventDraft(
                                 name = title.trim(),
+                                note = note.trim(),
                                 cat = EventCat.TODO,
                                 date = date,
                                 due = date.takeIf { dated },

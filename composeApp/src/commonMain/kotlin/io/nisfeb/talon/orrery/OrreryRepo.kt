@@ -111,6 +111,7 @@ class OrreryRepo(
             probe()
             _enabled.value = db.orreryAccounts().get(ship) != null
             if (_enabled.value) startLoop()
+            if (_availability.value == OrreryAvailability.PRESENT) refreshActions()
             runCatching { refreshModel() }
         }
     }
@@ -638,9 +639,22 @@ class OrreryRepo(
     suspend fun setAction(id: String, status: String, note: String = ""): Result<Unit> = runCatching {
         val a = api ?: error("Not attached to a ship.")
         val s = ship ?: error("Not attached to a ship.")
-        val row = db.orreryAccounts().get(s) ?: error("The pipe is off.")
-        a.transition(row.token, id, status, note)
+        // This install's key where it has one, else the owner's own say.
+        a.transition(db.orreryAccounts().get(s)?.token, id, status, note)
         _actions.value = _actions.value.filterNot { it.id == id }
+    }
+
+    /**
+     * What is waiting for an answer, read now. Needs nothing but orrery
+     * on the ship: the pipe feeds orrery, and answering it is another
+     * matter.
+     */
+    suspend fun refreshActions() {
+        val a = api ?: return
+        val s = ship ?: return
+        runCatching { a.actions(db.orreryAccounts().get(s)?.token) }
+            .onSuccess { _actions.value = it }
+            .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
     }
 
     /** The cloud rung, opened once, only while the person has it on and a key is set. */

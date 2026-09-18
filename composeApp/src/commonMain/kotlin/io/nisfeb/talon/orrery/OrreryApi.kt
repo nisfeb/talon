@@ -189,9 +189,18 @@ class OrreryApi(
         }
     }
 
-    /** The open actions the key may see: proposed and approved, newest first as the ship lists them. */
-    suspend fun actions(token: String, status: String = "open"): List<OrreryAction> {
-        val text = request(bare, HttpMethod.Get, "/api/actions?status=$status") { header(HttpHeaders.Authorization, "Bearer $token") }
+    /**
+     * The open actions, newest first as the ship lists them: under the
+     * key when there is one, else as the owner, who may always see and
+     * answer them. Reviewing a proposal is the owner's act, so it does
+     * not wait on this install having a key.
+     */
+    suspend fun actions(token: String?, status: String = "open"): List<OrreryAction> {
+        val text = if (token != null) {
+            request(bare, HttpMethod.Get, "/api/actions?status=$status") { header(HttpHeaders.Authorization, "Bearer $token") }
+        } else {
+            request(owner, HttpMethod.Get, "/api/actions?status=$status")
+        }
         val arr = reading { Json.parseToJsonElement(text) }.let { it as? kotlinx.serialization.json.JsonArray ?: it.jsonObject["actions"]?.jsonArray }.orEmpty()
         return arr.mapNotNull { e ->
             val a = e.jsonObject
@@ -209,9 +218,13 @@ class OrreryApi(
     }
 
     /** Move an action: approved, done, dismissed or failed, with a note where one is due. */
-    suspend fun transition(token: String, id: String, status: String, note: String = "") {
+    suspend fun transition(token: String?, id: String, status: String, note: String = "") {
         val body = buildJsonObject { put("status", status); if (note.isNotBlank()) put("note", note.take(500)) }
-        request(bare, HttpMethod.Post, "/api/actions/$id", body.toString()) { header(HttpHeaders.Authorization, "Bearer $token") }
+        if (token != null) {
+            request(bare, HttpMethod.Post, "/api/actions/$id", body.toString()) { header(HttpHeaders.Authorization, "Bearer $token") }
+        } else {
+            request(owner, HttpMethod.Post, "/api/actions/$id", body.toString())
+        }
     }
 
     /** One observe batch under the key. Per-item answers, in order. */

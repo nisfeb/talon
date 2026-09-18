@@ -447,7 +447,8 @@ fun TalonApp(
     }
     var openAction by remember { mutableStateOf<io.nisfeb.talon.orrery.OrreryAction?>(null) }
     // Whether the pipe is on at all: the actions section is its.
-    val orreryOn by orreryRepo.enabled.collectAsState()
+    val orreryOn = orreryRepo.availability.collectAsState().value ==
+        io.nisfeb.talon.orrery.OrreryAvailability.PRESENT
     openAction?.let { action ->
         io.nisfeb.talon.ui.OrreryActionDialog(
             action = action,
@@ -2034,6 +2035,7 @@ fun TalonApp(
                 actions = orreryActions,
                 onBack = { actionsOpen = false },
                 modifier = mod,
+                onShown = { orreryRepo.refreshActions() },
             ) { a -> openAction = a }
 
             openGroupFlag != null -> GroupHomeScreen(

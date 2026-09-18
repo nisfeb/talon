@@ -580,6 +580,9 @@ fun DmChatScreen(
             MessageToCalendarDialog(
                 kind = kind,
                 initialTitle = titleFromMessage(StoryCache.textFor(target.id, target.contentJson)),
+                initialNote = StoryCache.textFor(target.id, target.contentJson).let { said ->
+                    descriptionFromMessage(said, titleFromMessage(said))
+                },
                 zone = runCatching { kotlinx.datetime.TimeZone.of(zoneId ?: "") }
                     .getOrElse { kotlinx.datetime.TimeZone.currentSystemDefault() },
                 nowMs = io.nisfeb.talon.util.nowMs(),

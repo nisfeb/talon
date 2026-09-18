@@ -37,8 +37,11 @@ fun OrreryActionsScreen(
     actions: List<OrreryAction>,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Read what is waiting now, rather than whatever the last pass saw. */
+    onShown: suspend () -> Unit = {},
     onOpen: (OrreryAction) -> Unit,
 ) {
+    androidx.compose.runtime.LaunchedEffect(Unit) { onShown() }
     Column(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),

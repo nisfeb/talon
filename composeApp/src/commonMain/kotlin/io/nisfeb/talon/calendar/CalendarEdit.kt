@@ -95,6 +95,15 @@ data class EventDraft(
     val due: LocalDate? = null,
     val done: Boolean = false,
     val doneMs: Long? = null,
+    /** "#rrggbb", or blank for the calendar's own colour. */
+    val color: String = "",
+    /**
+     * Whatever else the entry carries that this editor does not show:
+     * an orrery task's link back to its action, a field another client
+     * wrote. Sent back as it came. Without it, saving an edit rebuilt
+     * the entry from the fields above and dropped the rest.
+     */
+    val otherMeta: JsonObject = JsonObject(emptyMap()),
 ) {
     val repeats: Boolean get() = cat != EventCat.TODO && cat != EventCat.DATE && (rawKind != null || repeat != Repeat.ONCE)
 }
@@ -131,7 +140,9 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
     if (id != null) put("id", id)
     put("cat", d.cat.wire)
     putJsonObject("meta") {
+        d.otherMeta.forEach { (k, v) -> put(k, v) }
         put("name", d.name.trim())
+        if (d.color.isNotBlank()) put("color", d.color.trim())
         if (d.note.isNotBlank()) put("note", d.note.trim())
         if (d.location.isNotBlank()) put("location", d.location.trim())
         if (d.tags.isNotEmpty()) put("tags", JsonArray(d.tags.map { JsonPrimitive(it) }))
@@ -206,6 +217,9 @@ fun followingBody(d: EventDraft, occurrence: LocalDateTime): JsonObject =
     eventBody(d.copy(date = occurrence.date, rawStartMs = d.rawStartMs?.let { occurrence.date.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds() }))
 
 /** The editor's draft for an event.json answer, or null for a shape it cannot edit. */
+/** The meta fields the editor shows and writes itself. Everything else rides through. */
+private val EDITED_META = setOf("name", "note", "location", "tags", "color")
+
 fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
     fun str(k: String) = e[k]?.jsonPrimitive?.contentOrNull
     fun num(k: String) = e[k]?.jsonPrimitive?.intOrNull
@@ -216,6 +230,8 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
         name = metaStr("name"), note = metaStr("note"), location = metaStr("location"),
         cal = str("cal"), cat = cat, date = today,
         tags = (meta?.get("tags") as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
+        color = metaStr("color"),
+        otherMeta = JsonObject(meta.orEmpty().filterKeys { it !in EDITED_META }),
     )
     if (cat == EventCat.TODO) {
         val due = e["due_ms"]?.jsonPrimitive?.longOrNull?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date }

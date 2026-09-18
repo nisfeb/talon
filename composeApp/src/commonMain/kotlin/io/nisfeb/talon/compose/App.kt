@@ -1021,7 +1021,8 @@ fun App(
             if (mailShipUrl != null && ship != null) orreryRepo.attach(mailShipUrl, ship) else orreryRepo.detach()
         }
         val orreryActions by orreryRepo.actions.collectAsState()
-        val orreryOn by orreryRepo.enabled.collectAsState()
+        val orreryOn = orreryRepo.availability.collectAsState().value ==
+        io.nisfeb.talon.orrery.OrreryAvailability.PRESENT
         // The private model, from Settings, into the ladder.
         LaunchedEffect(aiSettings, uiSettings) {
             io.nisfeb.talon.orrery.movePrivateModelIn(aiSettings, uiSettings)
@@ -2241,6 +2242,7 @@ fun App(
                     showActions -> io.nisfeb.talon.ui.screens.OrreryActionsScreen(
                         actions = orreryActions,
                         onBack = { showActions = false },
+                        onShown = { orreryRepo.refreshActions() },
                     ) { a -> openAction = a }
                     showWatchwords -> WatchwordsScreen(
                         db = db,

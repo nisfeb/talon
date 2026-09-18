@@ -12,6 +12,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class CalendarEditTest {
@@ -226,5 +227,23 @@ class CalendarEditTest {
         val (s, e) = long.bounds(TimeZone.UTC)
         assertEquals(utcMidnight, s)
         assertEquals(utcMidnight + 90 * 86_400_000L, e, "the full ninety days, not the capped list's end")
+    }
+
+    @Test fun `an edit keeps the colour and everything it does not show`() {
+        // A task as the ship holds it, mirrored from orrery and coloured.
+        val onShip = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"cat":"todo","cal":"default","done":false,"due_ms":null,
+               "meta":{"name":"Book the ferry","note":"the description","color":"#c0392b",
+                       "orrery":"act-123","priority":"5"}}""",
+        ).jsonObject
+        val d = assertNotNull(draftFromEvent(onShip, day))
+        assertEquals("the description", d.note)
+        assertEquals("#c0392b", d.color)
+        val back = eventBody(d.copy(name = "Book the ferry, Friday"), id = "t1")["meta"]!!.jsonObject
+        assertEquals("Book the ferry, Friday", back["name"]!!.jsonPrimitive.content, "the edit lands")
+        assertEquals("#c0392b", back["color"]!!.jsonPrimitive.content, "the colour survives")
+        assertEquals("act-123", back["orrery"]!!.jsonPrimitive.content, "and so does the link orrery finds it by")
+        assertEquals("5", back["priority"]!!.jsonPrimitive.content, "and a field another client wrote")
+        assertEquals("the description", back["note"]!!.jsonPrimitive.content)
     }
 }
