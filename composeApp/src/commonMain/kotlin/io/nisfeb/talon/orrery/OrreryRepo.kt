@@ -306,6 +306,11 @@ class OrreryRepo(
             facts += triage(a, row, posts, s, nowMs, url, freshMail) { key -> remember(key) }
 
             runCatching { CalendarApi(http, url).window(nowMs - BACKFILL_MS, nowMs + AHEAD_MS) }.onSuccess { w ->
+                // The calendars this ship keeps itself. An event on one
+                // another ship shares is not ours to name an organizer for.
+                val ourCalendars = runCatching {
+                    CalendarApi(http, url).calendars().filter { it.kind == "local" }.map { it.id }.toSet()
+                }.getOrDefault(emptySet())
                 for (subject in calendarSubjects(w.rows)) {
                     // The body decided for this event, and the event as
                     // it was when that decision was made.
@@ -329,7 +334,9 @@ class OrreryRepo(
                             addAll(runCatching { a.resolve(subject.uid, row.token) }.getOrDefault(emptyList()))
                         }
                     }
-                    val write = calendarWrite(subject, decided, hits, seen.keys - dropped, s, nowMs, changed)
+                    val write = calendarWrite(
+                        subject, decided, hits, seen.keys - dropped, s, nowMs, changed, subject.cal in ourCalendars,
+                    )
                     facts += write.facts
                     if (mark != "${write.bodyId}|$digest") remember(subject.key, "${write.bodyId}|$digest")
                     write.occurrences.forEach { (key, end) -> remember(key, end.toString()) }
@@ -426,6 +433,7 @@ class OrreryRepo(
         val bodies: List<KnownBody>,
         val index: NameIndex,
         val attrs: Map<String, List<String>>,
+        val notes: Map<String, Map<String, String>>,
         val model: LocalModel?,
         val gate: PatternGate?,
         var modelRuns: Int = 0,
@@ -438,7 +446,7 @@ class OrreryRepo(
         val gate = if (model != null && emb != null) runCatching {
             PatternGate.build(emb, db.orreryNoticed().snippets(s, "confirmed", GATE_EXAMPLES), db.orreryNoticed().snippets(s, "discarded", GATE_EXAMPLES))
         }.getOrNull() else null
-        return Reading(view.bodies, NameIndex(view.bodies), view.attrs, model, gate)
+        return Reading(view.bodies, NameIndex(view.bodies), view.attrs, view.notes, model, gate)
     }
 
     /**
@@ -488,12 +496,20 @@ class OrreryRepo(
             remember(key)
             if (!inScope(m.whom, text, s, ourNick, allowed)) continue
             val kind = if (m.whom.startsWith("~") || m.whom.startsWith("0v")) "talon-dm" else "talon-chat"
-            up += triageText(r, s, nowMs, text, m.author, m.sentMs, m.whom, m.id, kind, "talon://chat/${m.whom}?id=${m.id}")
+            // A message is read with the ones before it: "yes, at 8"
+            // says nothing alone. They are for reading only, and the
+            // claims are held to the words of this one.
+            val before = db.messages().before(m.whom, m.sentMs, ModelExtractor.CONTEXT_MESSAGES).reversed()
+                .map { it.author to StoryCache.textFor(it.id, it.contentJson) }
+                .filter { it.second.isNotBlank() }
+            up += triageText(r, s, nowMs, text, m.author, m.sentMs, m.whom, m.id, kind, "talon://chat/${m.whom}?id=${m.id}", before)
         }
         // A call's words, by speaker: each run of one voice is one message.
         for ((address, lines) in spoken) {
-            mergeSpoken(lines).forEachIndexed { i, sp ->
-                up += triageText(r, s, nowMs, sp.text, sp.ship, nowMs, address, "$i", "talon-call", "$address#$i")
+            val said = mergeSpoken(lines)
+            said.forEachIndexed { i, sp ->
+                val before = said.subList(maxOf(0, i - ModelExtractor.CONTEXT_MESSAGES), i).map { it.ship to it.text }
+                up += triageText(r, s, nowMs, sp.text, sp.ship, nowMs, address, "$i", "talon-call", "$address#$i", before)
             }
         }
         // Mail is addressed to us, so every message in a fresh thread is in scope.
@@ -508,7 +524,20 @@ class OrreryRepo(
     }
 
     /** One text through the rules and the model; what it claims goes to the tray or up. */
-    private suspend fun triageText(r: Reading, s: String, nowMs: Long, text: String, author: String, atMs: Long, whom: String, postId: String, kind: String, sourceId: String): Facts {
+    private suspend fun triageText(
+        r: Reading,
+        s: String,
+        nowMs: Long,
+        text: String,
+        author: String,
+        atMs: Long,
+        whom: String,
+        postId: String,
+        kind: String,
+        sourceId: String,
+        /** What was said before this, in the same conversation, for reading only. */
+        context: List<Pair<String, String>> = emptyList(),
+    ): Facts {
         var up = Facts()
         // The rules first, then the model where there is one: the same
         // claim from both is one row, and the rules got there.
@@ -520,7 +549,7 @@ class OrreryRepo(
             (runCatching { emb.embed(text) }.getOrNull()?.let { r.gate.worthAModel(it) } ?: true)
         val byModel = if (r.model != null && worth && r.modelRuns < MODEL_PER_PASS && text.length >= 8) {
             r.modelRuns++
-            ModelExtractor.extract(r.model, r.index, r.bodies, text, author, atMs, s, r.attrs)
+            ModelExtractor.extract(r.model, r.index, r.bodies, text, author, atMs, s, r.attrs, r.notes, context)
         } else emptyList()
         for (n in byRules + byModel) {
             val trusted = trusted(s, n.attr)

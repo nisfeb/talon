@@ -84,6 +84,62 @@ class ModelExtractorTest {
     }
 
     @Test
+    fun `a feeling has somewhere to go, and nothing comes of it`() {
+        // The prompt offers mood so that "want to scream" does not land
+        // on status, which is a circumstance an onlooker would state.
+        val answer = """{"claims":[
+            {"subject":"person/sarah","attr":"status","value":"on jury duty","conf":80},
+            {"subject":"person/sarah","attr":"mood","value":"frustrated","conf":60},
+            {"subject":"person/sarah","attr":"feelings","value":"fed up","conf":60}
+        ]}"""
+        val out = ModelExtractor.parse(answer, index, "~bus", 1L, me)
+        assertEquals(listOf("status" to "on jury duty"), out.map { it.attr to it.value.jsonPrimitive.content })
+    }
+
+    @Test
+    fun `an event is never said to be open`() {
+        val here = NameIndex(listOf(KnownBody("situation/bed-delivery", "Bed delivery", emptyList(), null)))
+        val answer = """{"claims":[
+            {"subject":"situation/bed-delivery","attr":"status","value":"open","conf":90},
+            {"subject":"situation/bed-delivery","attr":"status","value":"closed","conf":90}
+        ]}"""
+        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me)
+        assertEquals(listOf("closed"), out.map { it.value.jsonPrimitive.content }, "open reopens what the ship retired")
+    }
+
+    @Test
+    fun `a status that reads like the message before is a reading of it`() {
+        val answer = """{"claims":[{"subject":"person/sarah","attr":"status","value":"stranded, waiting for a tow","conf":80}]}"""
+        val earlier = listOf("car died on route 9, stranded waiting for a tow")
+        assertTrue(
+            ModelExtractor.parse(answer, index, "~bus", 1L, me, null, emptyMap(), "still here", earlier).isEmpty(),
+            "the words are the earlier message's, not this one's",
+        )
+        assertEquals(
+            1,
+            ModelExtractor.parse(answer, index, "~bus", 1L, me, null, emptyMap(), "still stranded", earlier).size,
+        )
+        // A status of the new message stands even when it shares no word
+        // with it: a paraphrase is the whole point of the attribute.
+        val paraphrase = """{"claims":[{"subject":"person/sarah","attr":"status","value":"at the DMV","conf":80}]}"""
+        assertEquals(1, ModelExtractor.parse(paraphrase, index, "~bus", 1L, me, null, emptyMap(), "stuck at the DMV all day", earlier).size)
+        assertEquals(1, ModelExtractor.parse(answer, index, "~bus", 1L, me, null, emptyMap(), "still here").size)
+    }
+
+    @Test
+    fun `the prompt carries the ship's own wording and what was said before`() {
+        val u = ModelExtractor.user(
+            emptyList(), "~bus", "person/bus", "2026-09-17T12:00:00Z", "yes, at 8",
+            notes = mapOf("person" to mapOf("status" to "what they are dealing with now, not a feeling")),
+            context = listOf("~zod" to "dinner thursday?", "~bus" to "which one"),
+        )
+        assertTrue("person.status: what they are dealing with now, not a feeling" in u, u)
+        assertTrue("Claim nothing from these" in u, u)
+        assertTrue("- ~zod: dinner thursday?" in u, u)
+        assertTrue("Message: yes, at 8" in u, u)
+    }
+
+    @Test
     fun `a fake model's answer goes through extract`() = kotlinx.coroutines.test.runTest {
         val fake = object : LocalModel {
             override val rung = "fake"

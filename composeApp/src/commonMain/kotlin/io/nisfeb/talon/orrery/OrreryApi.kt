@@ -17,6 +17,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -93,10 +94,18 @@ class OrreryApi(
             )
         }
         // The ship's vocabulary per kind, trimmed to what the key may see.
-        val attrs = o["schema"]?.jsonObject?.get("kinds")?.jsonObject?.mapValues { (_, k) ->
+        val kinds = o["schema"]?.jsonObject?.get("kinds")?.jsonObject.orEmpty()
+        val attrs = kinds.mapValues { (_, k) ->
             k.jsonObject["attrs"]?.jsonArray.orEmpty().mapNotNull { it.jsonPrimitive.content }
-        }.orEmpty()
-        return StateView(rev = o["rev"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L, bodies = bodies, attrs = attrs)
+        }
+        // What the owner says those attributes mean, where they have
+        // said: a ship seeded before version 11 says nothing here.
+        val notes = kinds.mapValues { (_, k) ->
+            k.jsonObject["notes"]?.jsonObject.orEmpty()
+                .mapNotNull { (attr, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.let { attr to it } }
+                .toMap()
+        }.filterValues { it.isNotEmpty() }
+        return StateView(o["rev"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L, bodies, attrs, notes)
     }
 
     /**
@@ -317,7 +326,13 @@ data class OrreryAction(
     val by: String,
 )
 
-data class StateView(val rev: Long, val bodies: List<KnownBody>, val attrs: Map<String, List<String>> = emptyMap())
+data class StateView(
+    val rev: Long,
+    val bodies: List<KnownBody>,
+    val attrs: Map<String, List<String>> = emptyMap(),
+    /** What the ship says each attribute means, by kind then attr. */
+    val notes: Map<String, Map<String, String>> = emptyMap(),
+)
 
 data class ItemAnswer(val id: String?, val ok: Boolean, val existing: Boolean, val error: String?)
 

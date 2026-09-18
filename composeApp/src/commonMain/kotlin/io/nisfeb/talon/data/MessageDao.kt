@@ -123,6 +123,18 @@ abstract class MessageDao {
     """)
     abstract suspend fun newestIdFor(whom: String): String?
 
+    /**
+     * The messages just before [beforeMs] in one conversation, newest
+     * first, ours among them: a reply reads right only with what it
+     * answers. Callers reverse it for the oldest first.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE whom = :whom AND isDeleted = 0 AND parentId IS NULL AND sentMs < :beforeMs
+        ORDER BY sentMs DESC LIMIT :limit
+    """)
+    abstract suspend fun before(whom: String, beforeMs: Long, limit: Int): List<MessageEntity>
+
     /** Other people's posts after [sinceMs], oldest first, for a cursor walk. */
     @Query("""
         SELECT * FROM messages

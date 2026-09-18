@@ -87,6 +87,11 @@ fun calendarSubjects(rows: List<CalendarRow>): List<CalendarSubject> =
  * written: a new time, place or description. Then what the event is
  * gets said again, at the anchor it is true from, and a row at the same
  * time with the same value is the same observation to the ship.
+ *
+ * [ours] says the event sits on a calendar this ship keeps itself,
+ * which is the only case where the person whose orrery this is can be
+ * named as the one who holds it. On a calendar another ship shares,
+ * whose event it is is not ours to say.
  */
 fun calendarWrite(
     subject: CalendarSubject,
@@ -96,13 +101,14 @@ fun calendarWrite(
     ourShip: String,
     nowMs: Long,
     changed: Boolean = false,
+    ours: Boolean = false,
 ): CalendarWrite {
     val existing = decided ?: hits.firstOrNull { it.kind == "activity" || it.kind == "situation" }?.id
     val kind = existing?.substringBefore('/')
     return when {
-        kind == "activity" -> occurrencesOn(existing!!, subject, written, nowMs, changed)
+        kind == "activity" -> occurrencesOn(existing!!, subject, written, nowMs, changed, ours)
         kind == "situation" -> onSituation(existing!!, subject, written, changed)
-        subject.repeats -> newActivity(subject, written, ourShip, nowMs)
+        subject.repeats -> newActivity(subject, written, ourShip, nowMs, ours)
         else -> newSituation(subject, written, ourShip)
     }
 }
@@ -114,10 +120,11 @@ private fun occurrencesOn(
     written: Set<String>,
     nowMs: Long,
     changed: Boolean,
+    ours: Boolean,
 ): CalendarWrite {
     val obs = mutableListOf<Obs>()
     val keys = mutableListOf<Pair<String, Long>>()
-    if (changed) obs += activityContent(id, subject, nowMs)
+    if (changed) obs += activityContent(id, subject, nowMs, ours)
     for (row in subject.occurrences.filter { it.l <= nowMs }) {
         val key = occurrenceKey(subject, row)
         if (key in written) continue
@@ -143,7 +150,7 @@ private fun onSituation(id: String, subject: CalendarSubject, written: Set<Strin
  * and the title as aliases so the next client to ask resolves it, and
  * every occurrence so far as a `last` row at its own time.
  */
-private fun newActivity(subject: CalendarSubject, written: Set<String>, ourShip: String, nowMs: Long): CalendarWrite {
+private fun newActivity(subject: CalendarSubject, written: Set<String>, ourShip: String, nowMs: Long, ours: Boolean): CalendarWrite {
     val id = activityIdFor(subject)
     val aliases = (listOf(subject.uid, subject.title, normalizeTitle(subject.title)) + subject.first.tags)
         .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
@@ -152,7 +159,7 @@ private fun newActivity(subject: CalendarSubject, written: Set<String>, ourShip:
     val keys = mutableListOf<Pair<String, Long>>()
     fun obs(attr: String, value: JsonElement, at: Long) =
         obs.add(Obs(id, attr, value, at, sourceKind = "calendar", sourceId = source(subject)))
-    obs += activityContent(id, subject, nowMs)
+    obs += activityContent(id, subject, nowMs, ours)
     for (row in subject.occurrences.filter { it.l <= nowMs }) {
         val key = occurrenceKey(subject, row)
         if (key in written) continue
@@ -178,7 +185,7 @@ private fun newSituation(subject: CalendarSubject, written: Set<String>, ourShip
  * runs on, where it is and that we are in it, true from the last time
  * it came round. Said again whenever the event itself changes.
  */
-private fun activityContent(id: String, subject: CalendarSubject, nowMs: Long): List<Obs> {
+private fun activityContent(id: String, subject: CalendarSubject, nowMs: Long, ours: Boolean): List<Obs> {
     val asOf = subject.occurrences.lastOrNull { it.l <= nowMs }?.l ?: subject.first.l
     return buildList {
         fun obs(attr: String, value: JsonElement) =
@@ -186,6 +193,9 @@ private fun activityContent(id: String, subject: CalendarSubject, nowMs: Long): 
         obs("cadence", JsonPrimitive(subject.first.kind))
         obs("schedule", JsonPrimitive(scheduleOf(subject)))
         obs("participants", buildJsonObject { put("ref", "person/me") })
+        // Only for a calendar this ship keeps: on one another ship
+        // shares, whose activity it is is that ship's to say.
+        if (ours) obs("organizer", buildJsonObject { put("ref", "person/me") })
         if (subject.location.isNotBlank()) obs("location", JsonPrimitive(subject.location))
     }
 }

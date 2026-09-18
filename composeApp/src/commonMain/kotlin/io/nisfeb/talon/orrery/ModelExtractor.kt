@@ -42,15 +42,33 @@ object ModelExtractor {
         You read one chat message and write down what it states is true now about the listed bodies. Answer with JSON only, in this shape: {"claims":[{"subject":"<id>","attr":"<word>","value":<value>,"conf":<0-100>,"until_hours":<number, optional>}]}
         subject is copied exactly from the listed ids, or is the author's id. Only the author and the bodies the message names can be subjects. attr is one short lowercase word: status, location, phone, email. value is a short string; or {"ref":"<listed id>"} when it names a listed body; or null when something has stopped being true. conf is how sure you are. until_hours is how long a temporary claim holds, such as being somewhere. At most three claims.
         Claim only what the message states as fact about now. A question, a joke, a wish, a plan, or the past is nothing: {"claims":[]}.
+        A status is what someone is doing or dealing with right now, in plain words, as an onlooker would put it: "on jury duty", "stranded, waiting for a tow", "travelling", "sick". It is never a feeling, a quote or a wish. A feeling goes under mood, which is thrown away, so that it never lands on status.
+        Earlier messages are there so the new one reads right: a reply, a pronoun, a mood that carries over. Claim nothing from them.
 
         Example. Author: ~bus (person/bus). Message: lol did you see the game last night
         {"claims":[]}
 
         Example. Author: ~bus (person/bus). Message: my new number is 555-0142
         {"claims":[{"subject":"person/bus","attr":"phone","value":"555-0142","conf":90}]}
+
+        Example. Author: ~bus (person/bus). Message: jury duty makes me want to scream
+        {"claims":[{"subject":"person/bus","attr":"status","value":"on jury duty","conf":80},{"subject":"person/bus","attr":"mood","value":"frustrated","conf":60}]}
+
+        Example. Author: ~bus (person/bus). Message: ugh, Mondays
+        {"claims":[]}
     """.trimIndent()
 
-    fun user(bodies: List<KnownBody>, author: String, authorId: String, atIso: String, text: String): String = buildString {
+    fun user(
+        bodies: List<KnownBody>,
+        author: String,
+        authorId: String,
+        atIso: String,
+        text: String,
+        /** What the ship says its own attributes mean, by kind then attr. */
+        notes: Map<String, Map<String, String>> = emptyMap(),
+        /** The messages before this one in the same conversation, oldest first. */
+        context: List<Pair<String, String>> = emptyList(),
+    ): String = buildString {
         append("Bodies:\n")
         for (b in bodies.take(60)) {
             append("- ").append(b.id)
@@ -59,21 +77,46 @@ object ModelExtractor {
             if (extra.isNotEmpty()) append(" (").append(extra.take(6).joinToString(", ")).append(")")
             append('\n')
         }
+        // The ship's own wording wins over ours: it is the owner who
+        // decides what an attribute of theirs means.
+        val said = notes.flatMap { (kind, byAttr) -> byAttr.map { (attr, note) -> "$kind.$attr: $note" } }
+        if (said.isNotEmpty()) {
+            append("What the attributes mean:\n")
+            said.take(12).forEach { append("- ").append(it.take(200)).append('\n') }
+        }
+        if (context.isNotEmpty()) {
+            append("Earlier messages, for reading only, oldest first. Claim nothing from these:\n")
+            for ((who, line) in context.takeLast(CONTEXT_MESSAGES)) {
+                append("- ").append(who).append(": ").append(line.take(300)).append('\n')
+            }
+        }
         append("Author: ").append(author).append(" (").append(authorId).append(")\n")
         append("When: ").append(atIso).append('\n')
         append("Message: ").append(text.take(1200)).append('\n')
     }
 
     /** Ask [model] about one message. Empty on any failure to answer in shape. */
-    suspend fun extract(model: LocalModel, index: NameIndex, bodies: List<KnownBody>, text: String, author: String, atMs: Long, ourShip: String, attrs: Map<String, List<String>> = emptyMap()): List<Noticed> {
+    suspend fun extract(
+        model: LocalModel,
+        index: NameIndex,
+        bodies: List<KnownBody>,
+        text: String,
+        author: String,
+        atMs: Long,
+        ourShip: String,
+        attrs: Map<String, List<String>> = emptyMap(),
+        notes: Map<String, Map<String, String>> = emptyMap(),
+        context: List<Pair<String, String>> = emptyList(),
+    ): List<Noticed> {
         if (text.isBlank() || text.trimEnd().endsWith("?")) return emptyList()
         val authorId = index.authorId(author, ourShip)
-        val answer = runCatching { model.complete(SYSTEM, user(bodies, author, authorId, isoUtc(atMs), text), GRAMMAR, MAX_TOKENS) }
+        val prompt = user(bodies, author, authorId, isoUtc(atMs), text, notes, context)
+        val answer = runCatching { model.complete(SYSTEM, prompt, GRAMMAR, MAX_TOKENS) }
             .getOrElse { io.nisfeb.talon.util.Log.w("ModelExtractor", "${model.rung} did not answer: ${it.message}", it); return emptyList() }
         // Only the author and what the message names may be claimed about: a
         // small model otherwise writes what it remembers, not what it read.
         val mentioned = index.find(text).map { it.first.id }.toSet() + authorId + (if (author == ourShip) setOf("person/me") else emptySet())
-        return parse(answer, index, author, atMs, ourShip, mentioned, attrs, text)
+        return parse(answer, index, author, atMs, ourShip, mentioned, attrs, text, context.map { it.second })
     }
 
     /** The claims in [answer] that pass, each with the body a stranger's claim needs. */
@@ -89,6 +132,8 @@ object ModelExtractor {
         attrs: Map<String, List<String>> = emptyMap(),
         /** The message, when a value must be found in its words to stand. */
         text: String? = null,
+        /** The earlier messages shown, which a claim may have been read from instead. */
+        context: List<String> = emptyList(),
     ): List<Noticed> {
         val authorId = index.authorId(author, ourShip)
         val root = runCatching { Json.parseToJsonElement(answer.trim()).jsonObject }.getOrNull() ?: return emptyList()
@@ -111,6 +156,9 @@ object ModelExtractor {
             // cannot write either. Under any other name it would write
             // them in plain sight of every key, so they are dropped.
             if (attr in SENSITIVE || attr in SENSITIVE_BY_ANOTHER_NAME) continue
+            // The prompt offers these so a feeling has somewhere to go
+            // that is not status. Nothing comes of them here.
+            if (attr in SINK) continue
             val known = attrs[subject.substringBefore('/')]
             if (known != null && attr !in known && attr !in ALWAYS) continue
             val value: JsonElement = when (val v = o["value"]) {
@@ -131,11 +179,22 @@ object ModelExtractor {
                 }
                 else -> continue
             }
+            // An event is open until something says closed, and the
+            // owner's retire pass closes it at its end. A row saying
+            // open, dated later, reopens what was over.
+            if (attr == "status" && subject.startsWith("situation/") &&
+                (value as? JsonPrimitive)?.content.equals("open", ignoreCase = true)
+            ) continue
             // A value has to come from the words, or it came from the
             // model's memory: the string itself, or the named body's name
             // or an alias, must be in the message. A status is the one
-            // attr whose whole point is a paraphrase.
+            // attr whose whole point is a paraphrase, so it is judged
+            // against the earlier messages instead: one that reads like
+            // them and not like this message is a reading of them.
             if (text != null && attr != "status" && !grounded(value, text, index)) continue
+            if (text != null && attr == "status" && !sharesAWord(value, text) &&
+                context.any { sharesAWord(value, it) }
+            ) continue
             val conf = (o["conf"]?.jsonPrimitive?.doubleOrNull ?: 50.0).toInt().coerceIn(0, MAX_CONF)
             if (conf < 30) continue
             val until = o["until_hours"]?.jsonPrimitive?.doubleOrNull?.takeIf { it > 0 && it <= 24 * 30 }?.let { atMs + (it * HOUR_MS).toLong() }
@@ -144,6 +203,16 @@ object ModelExtractor {
         }
         return out.distinctBy { it.subject to it.attr }
     }
+
+    /** Whether a paraphrase could be of this text: one word of four letters or more in common. */
+    private fun sharesAWord(value: JsonElement, text: String): Boolean {
+        val said = (value as? JsonPrimitive)?.content?.lowercase() ?: return true
+        val words = WORD.findAll(text.lowercase()).map { it.value }.filter { it.length >= 4 }.toSet()
+        if (words.isEmpty()) return false
+        return WORD.findAll(said).any { it.value.length >= 4 && it.value in words }
+    }
+
+    private val WORD = Regex("[a-z0-9']+")
 
     private fun grounded(value: JsonElement, text: String, index: NameIndex): Boolean = when (value) {
         is JsonNull -> true
@@ -159,6 +228,12 @@ object ModelExtractor {
     private val ATTR = Regex("[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?")
     /** Attrs any kind may carry whatever the schema lists. */
     private val ALWAYS = setOf("status", "location")
+
+    /** How many of the messages before this one the model is shown. */
+    const val CONTEXT_MESSAGES = 4
+
+    /** Where a feeling goes so that it never lands on status. Never sent. */
+    private val SINK = setOf("mood", "feeling", "feelings", "emotion")
 
     /** The two names the ship keeps from keys (orrery's starter policy). */
     private val SENSITIVE = setOf("health", "income")

@@ -3,6 +3,7 @@ package io.nisfeb.talon.orrery
 import io.nisfeb.talon.calendar.CalendarRow
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -165,6 +166,21 @@ class OrreryCalendarTest {
             listOf(noon - week, noon - week + 1_800_000),
             stale.single().second,
             "both times its rows were anchored at, so the end goes with the start",
+        )
+    }
+
+    @Test
+    fun `an activity on our own calendar names who holds it`() {
+        val s = subject(row(noon - week, "weekly"), row(noon, "weekly"))
+        val ours = calendarWrite(s, null, emptyList(), emptySet(), me, noon + 3_600_000, ours = true)
+        assertEquals(
+            "person/me",
+            ours.facts.observations.single { it.attr == "organizer" }.value.jsonObject["ref"]!!.jsonPrimitive.content,
+        )
+        val theirs = calendarWrite(s, null, emptyList(), emptySet(), me, noon + 3_600_000)
+        assertTrue(
+            theirs.facts.observations.none { it.attr == "organizer" },
+            "on a calendar another ship shares, whose it is is not ours to say",
         )
     }
 
