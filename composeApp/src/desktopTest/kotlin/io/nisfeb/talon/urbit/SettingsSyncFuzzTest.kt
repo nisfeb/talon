@@ -177,6 +177,16 @@ private class NoopAiSettings : AiSettingsRepository {
         baseUrl: String?,
     ) {}
     override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
+    override fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String) {
+        _state.value = _state.value.copy(
+            privateBaseUrl = baseUrl?.takeIf { it.isNotBlank() },
+            privateModel = model?.takeIf { it.isNotBlank() },
+            privateApiKey = apiKey,
+        )
+    }
+    override fun setFrontierReadsMessages(on: Boolean) {
+        _state.value = _state.value.copy(frontierReadsMessages = on)
+    }
     override fun setBraveApiKey(key: String) {}
     override fun setSttApiKey(key: String) {}
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {}

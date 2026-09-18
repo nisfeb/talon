@@ -6,6 +6,7 @@ import de.kherud.llama.ModelParameters
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
@@ -110,6 +111,10 @@ internal class OpenAiShapeModel(private val http: HttpClient, private val server
             }
             val resp = http.post("${server.base}/v1/chat/completions") {
                 contentType(ContentType.Application.Json)
+                // A server of your own usually wants no key. One behind a
+                // proxy, or a hosted private model, does.
+                LocalModels.serverKey.takeIf { it.isNotBlank() }
+                    ?.let { header(io.ktor.http.HttpHeaders.Authorization, "Bearer $it") }
                 setBody(body.toString())
                 timeout { requestTimeoutMillis = 180_000 }
             }

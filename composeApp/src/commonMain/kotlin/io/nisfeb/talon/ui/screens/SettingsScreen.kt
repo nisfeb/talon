@@ -742,11 +742,12 @@ fun SettingsScreen(
             }
             if (safeTab == SettingsTab.Ai) {
             Text(
-                "AI",
+                "Frontier model",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
             )
             Text(
-                "Enable AI features by pasting an API key. Features are hidden when no key is set.",
+                "Writes summaries, answers in the assistant, and carries out what the analyst proposes. " +
+                    "It can be a service or a server of your own. Features are hidden until it is set.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1124,9 +1125,9 @@ fun SettingsScreen(
 
             }
             if (safeTab == SettingsTab.Ai) {
-            // Orrery: the pipe, and the model that reads messages for it,
-            // which is its own configuration and not the provider above.
-            orrery?.let { OrrerySettingsSection(it, uiSettings) }
+            // The other model, and then what Talon feeds orrery with it.
+            PrivateModelSection(orrery, aiSettings)
+            orrery?.let { OrrerySettingsSection(it) }
             // Loops — scheduled agent prompts. Needs a cloud key (it runs
             // the agent) and a platform that can fire it, so it's gated on
             // isLoopsSupported (Android via AlarmManager; desktop via the

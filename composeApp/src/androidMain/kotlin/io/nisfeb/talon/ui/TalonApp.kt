@@ -425,7 +425,10 @@ fun TalonApp(
     val orreryRepo = remember(app.session) {
         io.nisfeb.talon.orrery.OrreryRepo(
             app.session.http, appScope, app.db, io.nisfeb.talon.ui.platformLabel, app.searchEmbedderClient,
-            cloud = io.nisfeb.talon.orrery.CloudTriage(app.uiSettings.orreryCloudTriage, app.uiSettings::setOrreryCloudTriage) { app.aiSettings.state.value },
+            cloud = io.nisfeb.talon.orrery.CloudTriage(
+                io.nisfeb.talon.orrery.frontierReadsMessages(app.aiSettings),
+                app.aiSettings::setFrontierReadsMessages,
+            ) { app.aiSettings.state.value },
             book = { app.repo.bookContacts.value },
             standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),
         )
@@ -438,8 +441,10 @@ fun TalonApp(
         else orreryRepo.detach()
     }
     val orreryActions by orreryRepo.actions.collectAsState()
-    LaunchedEffect(app.uiSettings) { app.uiSettings.orreryServerUrl.collect { io.nisfeb.talon.orrery.LocalModels.serverUrl = it } }
-    LaunchedEffect(app.uiSettings) { app.uiSettings.orreryServerModel.collect { io.nisfeb.talon.orrery.LocalModels.serverModel = it } }
+    LaunchedEffect(app.aiSettings) {
+        io.nisfeb.talon.orrery.movePrivateModelIn(app.aiSettings, app.uiSettings)
+        app.aiSettings.state.collect { io.nisfeb.talon.orrery.LocalModels.usePrivate(it.private) }
+    }
     var openAction by remember { mutableStateOf<io.nisfeb.talon.orrery.OrreryAction?>(null) }
     openAction?.let { action ->
         io.nisfeb.talon.ui.OrreryActionDialog(

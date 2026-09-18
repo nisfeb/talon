@@ -912,6 +912,11 @@ class SettingsSyncImpl(
                     } else if (cfg.sttApiKeyRemovedAtMs > 0L) {
                         put("sttApiKeyRemovedAtMs", cfg.sttApiKeyRemovedAtMs)
                     }
+                    // The private model. Its address is not a secret but
+                    // it travels with the key that opens it.
+                    cfg.privateBaseUrl?.let { put("privateBaseUrl", it) }
+                    cfg.privateModel?.let { put("privateModel", it) }
+                    if (cfg.privateApiKey.isNotBlank()) put("privateApiKey", cfg.privateApiKey)
                 },
             )
         }
@@ -923,6 +928,7 @@ class SettingsSyncImpl(
                 // legacy seed from the rc8-era recovery path.
                 put("schemaVersion", AI_SCHEMA_V2)
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
+                put("frontierReadsMessages", cfg.frontierReadsMessages)
                 put("smartFeaturesEnabled", cfg.smartFeaturesEnabled)
                 put("askUrbitEnabled", cfg.askUrbitEnabled)
                 put("agentEnabled", cfg.agentEnabled)
@@ -1114,6 +1120,7 @@ class SettingsSyncImpl(
         val features = if (schemaVersion >= AI_SCHEMA_V2) {
             current.copy(
                 catchMeUpEnabled = bool("catchMeUpEnabled", current.catchMeUpEnabled),
+                frontierReadsMessages = bool("frontierReadsMessages", current.frontierReadsMessages),
                 smartFeaturesEnabled = bool("smartFeaturesEnabled", current.smartFeaturesEnabled),
                 askUrbitEnabled = bool("askUrbitEnabled", current.askUrbitEnabled),
                 agentEnabled = bool("agentEnabled", current.agentEnabled),
@@ -1170,6 +1177,10 @@ class SettingsSyncImpl(
                     baseUrl = obj["baseUrl"].asStr() ?: current.baseUrl,
                     // Same "only overwrite when present and non-empty" guard.
                     braveApiKey = obj["braveApiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.braveApiKey,
+                    // The private model, on the same absent-keeps-local terms.
+                    privateBaseUrl = obj["privateBaseUrl"].asStr() ?: current.privateBaseUrl,
+                    privateModel = obj["privateModel"].asStr() ?: current.privateModel,
+                    privateApiKey = obj["privateApiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.privateApiKey,
                     // Unlike apiKey, present-but-empty here means the user
                     // cleared the key on a peer — nothing ever seeded
                     // sttApiKey:"" — so adopt "" and let the removal

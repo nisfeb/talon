@@ -395,6 +395,61 @@ class SettingsSyncApplyBucketTest {
     }
 
     @Test
+    fun `the private model travels with the credentials, and is not lost by a peer`() = runBlocking {
+        aiSettings.applyRemote(
+            AiSettings.Config(
+                provider = AiSettings.Provider.OpenAi, apiKey = "sk-mine", model = null, syncEnabled = true,
+            ),
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_AI_SETTINGS,
+            buildJsonObject {
+                put(SettingsSyncImpl.AI_KEYS_ENTRY, buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "OpenAi")
+                    put("apiKey", "sk-mine")
+                    put("privateBaseUrl", "http://localhost:1234")
+                    put("privateModel", "qwen2.5-7b")
+                    put("privateApiKey", "local-key")
+                })
+            },
+        )
+        val after = aiSettings.state.value
+        assertEquals("http://localhost:1234", after.privateBaseUrl, "a server set on one machine reaches the others")
+        assertEquals("qwen2.5-7b", after.privateModel)
+        assertEquals("local-key", after.privateApiKey)
+        // A peer that has a frontier key but no private model of its own
+        // says nothing about one, and what is here stays.
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_AI_SETTINGS,
+            buildJsonObject {
+                put(SettingsSyncImpl.AI_KEYS_ENTRY, buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "OpenAi")
+                    put("apiKey", "sk-mine")
+                })
+            },
+        )
+        assertEquals("http://localhost:1234", aiSettings.state.value.privateBaseUrl)
+        assertEquals("local-key", aiSettings.state.value.privateApiKey)
+    }
+
+    @Test
+    fun `letting the frontier model read messages is a preference, and off by default`() = runBlocking {
+        assertEquals(false, aiSettings.state.value.frontierReadsMessages)
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_AI_SETTINGS,
+            buildJsonObject {
+                put("config", buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("frontierReadsMessages", true)
+                })
+            },
+        )
+        assertEquals(true, aiSettings.state.value.frontierReadsMessages)
+    }
+
+    @Test
     fun `only a device that has credentials writes the credentials entry`() {
         // What decides it, since the push itself needs a live channel.
         val bare = AiSettings.Config(provider = AiSettings.Provider.OpenAi, apiKey = "", model = null)
@@ -1276,6 +1331,16 @@ internal class FakeAiSettings : AiSettingsRepository {
         baseUrl: String?,
     ) { /* unused */ }
     override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
+    override fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String) {
+        _state.value = _state.value.copy(
+            privateBaseUrl = baseUrl?.takeIf { it.isNotBlank() },
+            privateModel = model?.takeIf { it.isNotBlank() },
+            privateApiKey = apiKey,
+        )
+    }
+    override fun setFrontierReadsMessages(on: Boolean) {
+        _state.value = _state.value.copy(frontierReadsMessages = on)
+    }
     override fun setBraveApiKey(key: String) {
         _state.value = _state.value.copy(braveApiKey = key)
     }

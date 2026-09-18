@@ -37,3 +37,31 @@ class CloudRung(private val config: () -> AiSettings.Config) : Rung() {
 
 /** The phone's choice to leave reading to a computer, and the setter behind the switch. */
 class StandDown(val on: StateFlow<Boolean>, val set: (Boolean) -> Unit)
+
+/**
+ * The switch that lets the frontier model read messages, as a flow.
+ * It lives with the rest of the AI configuration, so it follows the
+ * person across their devices like every other setting.
+ */
+fun frontierReadsMessages(
+    settings: io.nisfeb.talon.ai.AiSettingsRepository,
+): kotlinx.coroutines.flow.StateFlow<Boolean> = io.nisfeb.talon.util.mapState(settings.state) { it.frontierReadsMessages }
+
+/**
+ * Carry the private model's address across from where it used to be
+ * kept, once. It was a per-device preference and is now part of the
+ * configuration that syncs, which is the whole point: a person who set
+ * up their own server on the computer should not have to set it up
+ * again on the laptop.
+ */
+suspend fun movePrivateModelIn(
+    settings: io.nisfeb.talon.ai.AiSettingsRepository,
+    ui: io.nisfeb.talon.ui.UiSettings,
+) {
+    val cfg = settings.state.value
+    if (cfg.privateBaseUrl != null || cfg.privateModel != null) return
+    val url = ui.orreryServerUrl.value.trim()
+    val model = ui.orreryServerModel.value.trim()
+    if (url.isEmpty() && model.isEmpty()) return
+    settings.setPrivateModel(url.ifEmpty { null }, model.ifEmpty { null }, cfg.privateApiKey)
+}

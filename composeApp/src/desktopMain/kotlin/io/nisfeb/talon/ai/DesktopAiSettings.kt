@@ -168,6 +168,22 @@ class DesktopAiSettings : AiSettingsRepository {
         onStateChange?.invoke(cfg, false)
     }
 
+    override fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String) {
+        val cfg = _state.value.copy(
+            privateBaseUrl = baseUrl?.trim()?.takeIf { it.isNotEmpty() },
+            privateModel = model?.trim()?.takeIf { it.isNotEmpty() },
+            privateApiKey = apiKey.trim(),
+        )
+        persist(cfg)
+        onStateChange?.invoke(cfg, false)
+    }
+
+    override fun setFrontierReadsMessages(on: Boolean) {
+        val cfg = _state.value.copy(frontierReadsMessages = on)
+        persist(cfg)
+        onStateChange?.invoke(cfg, false)
+    }
+
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
         val cfg = _state.value.withPrompt(kind, value)
         persist(cfg)

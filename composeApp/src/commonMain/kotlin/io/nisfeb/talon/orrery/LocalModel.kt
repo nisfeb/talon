@@ -56,6 +56,20 @@ object LocalModels {
     @kotlin.concurrent.Volatile var serverUrl: String = ""
     @kotlin.concurrent.Volatile var serverModel: String = ""
 
+    /** The key that server wants, where it wants one. Most want none. */
+    @kotlin.concurrent.Volatile var serverKey: String = ""
+
+    /** The private model's settings, as one call from wherever they are kept. */
+    suspend fun usePrivate(slot: io.nisfeb.talon.ai.AiSettings.Slot) {
+        val url = slot.baseUrl.orEmpty()
+        val name = slot.model.orEmpty()
+        if (url == serverUrl && name == serverModel && slot.apiKey == serverKey) return
+        serverUrl = url
+        serverModel = name
+        serverKey = slot.apiKey
+        reset()
+    }
+
     private val lock = Mutex()
     private var opened: Pair<Rung, LocalModel>? = null
     private val failed = mutableSetOf<String>()

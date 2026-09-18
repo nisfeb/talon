@@ -36,7 +36,10 @@ class OrreryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val repo = OrreryRepo(
             app.session.http, scope, app.db, io.nisfeb.talon.ui.platformLabel, app.searchEmbedderClient,
-            cloud = CloudTriage(app.uiSettings.orreryCloudTriage, app.uiSettings::setOrreryCloudTriage) { app.aiSettings.state.value },
+            cloud = CloudTriage(
+                io.nisfeb.talon.orrery.frontierReadsMessages(app.aiSettings),
+                app.aiSettings::setFrontierReadsMessages,
+            ) { app.aiSettings.state.value },
             book = { app.repo.bookContacts.value },
             standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),
         )

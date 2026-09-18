@@ -29,6 +29,15 @@ interface AiSettingsRepository {
         baseUrl: String? = null,
     )
 
+    /**
+     * The private model: where it is, what it is called and the key it
+     * wants, or blanks for whatever this device can run itself.
+     */
+    fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String)
+
+    /** Whether the frontier model may read messages too. Off by default. */
+    fun setFrontierReadsMessages(on: Boolean)
+
     fun setFeature(feature: AiSettings.Feature, enabled: Boolean)
     fun setSyncEnabled(enabled: Boolean)
 

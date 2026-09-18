@@ -90,6 +90,21 @@ class IosAiSettings : AiSettingsRepository {
         )
     }
 
+    override fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String) {
+        commit(
+            _state.value.copy(
+                privateBaseUrl = baseUrl?.trim()?.takeIf { it.isNotEmpty() },
+                privateModel = model?.trim()?.takeIf { it.isNotEmpty() },
+                privateApiKey = apiKey.trim(),
+            ),
+            fireChange = true,
+        )
+    }
+
+    override fun setFrontierReadsMessages(on: Boolean) {
+        commit(_state.value.copy(frontierReadsMessages = on), fireChange = true)
+    }
+
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
         commit(_state.value.withPrompt(kind, value), fireChange = true)
     }

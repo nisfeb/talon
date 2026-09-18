@@ -229,6 +229,16 @@ private class FakeAiSettingsRepository : AiSettingsRepository {
         baseUrl: String?,
     ) { /* unused in these tests */ }
     override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
+    override fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String) {
+        _state.value = _state.value.copy(
+            privateBaseUrl = baseUrl?.takeIf { it.isNotBlank() },
+            privateModel = model?.takeIf { it.isNotBlank() },
+            privateApiKey = apiKey,
+        )
+    }
+    override fun setFrontierReadsMessages(on: Boolean) {
+        _state.value = _state.value.copy(frontierReadsMessages = on)
+    }
     override fun setBraveApiKey(key: String) {
         _state.value = _state.value.copy(braveApiKey = key)
     }

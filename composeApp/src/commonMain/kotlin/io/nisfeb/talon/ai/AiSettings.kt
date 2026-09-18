@@ -21,12 +21,46 @@ object AiSettings {
         Custom("Custom (OpenAI endpoint)"),
     }
 
+    /**
+     * One model Talon can reach, whichever of the two it is.
+     *
+     * Either may be on this machine or across the world, and either
+     * may need a key or none: what decides it is the address, not the
+     * word. A blank [baseUrl] on the private model means the device's
+     * own, whatever it has.
+     */
+    data class Slot(
+        val provider: Provider?,
+        val apiKey: String,
+        val model: String?,
+        val baseUrl: String?,
+    ) {
+        val hasKey: Boolean get() = apiKey.isNotBlank()
+    }
+
     @Serializable
     data class Config(
         val provider: Provider,
         val apiKey: String,
         val model: String?,
         val baseUrl: String? = null,
+        /**
+         * The private model: the one that reads your messages.
+         *
+         * Blank [privateBaseUrl] means whatever this device can run
+         * itself, which is what every platform falls back to. A URL
+         * points it at a server instead, on this machine or another of
+         * yours, with a key only where that server wants one.
+         */
+        val privateApiKey: String = "",
+        val privateModel: String? = null,
+        val privateBaseUrl: String? = null,
+        /**
+         * Let the frontier model read messages too. Off, and it stays
+         * off until it is chosen: every message it reads leaves the
+         * device. Was the orrery "cloud triage" switch.
+         */
+        val frontierReadsMessages: Boolean = false,
         // Feature toggles default to true so a fresh install starts with
         // the full feature set on. Capability flags still hide what a
         // platform can't run. Users who explicitly disable a feature keep
@@ -80,13 +114,21 @@ object AiSettings {
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
 
+        /** The model everything but message reading uses. */
+        val frontier: Slot get() = Slot(provider, apiKey, model, baseUrl)
+
+        /** The model that reads messages, when it is not this device's own. */
+        val private: Slot get() = Slot(null, privateApiKey, privateModel, privateBaseUrl)
+
         /**
          * Whether this device has anything to say about credentials. A
          * device with none never writes them to the ship, so saving a
          * preference here cannot wipe the copy another device put there.
          */
         fun hasCredentials(): Boolean =
-            apiKey.isNotBlank() || braveApiKey.isNotBlank() || sttApiKey.isNotBlank() || sttApiKeyRemovedAtMs > 0L
+            apiKey.isNotBlank() || braveApiKey.isNotBlank() || sttApiKey.isNotBlank() ||
+                privateApiKey.isNotBlank() || privateBaseUrl?.isNotBlank() == true ||
+                sttApiKeyRemovedAtMs > 0L
 
         /** The unified assistant is on (current flag or the legacy one).
          *  Gates MCP + web access, which are now part of the assistant. */

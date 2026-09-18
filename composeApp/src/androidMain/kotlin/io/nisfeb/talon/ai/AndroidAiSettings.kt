@@ -88,6 +88,25 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         onStateChange?.invoke(_state.value, false)
     }
 
+    override fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String) {
+        val url = baseUrl?.trim()?.takeIf { it.isNotEmpty() }
+        val name = model?.trim()?.takeIf { it.isNotEmpty() }
+        val key = apiKey.trim()
+        prefs.edit()
+            .putString(KEY_PRIVATE_BASE_URL, url)
+            .putString(KEY_PRIVATE_MODEL, name)
+            .putString(KEY_PRIVATE_API_KEY, key)
+            .apply()
+        _state.value = _state.value.copy(privateBaseUrl = url, privateModel = name, privateApiKey = key)
+        onStateChange?.invoke(_state.value, false)
+    }
+
+    override fun setFrontierReadsMessages(on: Boolean) {
+        prefs.edit().putBoolean(KEY_FRONTIER_READS, on).apply()
+        _state.value = _state.value.copy(frontierReadsMessages = on)
+        onStateChange?.invoke(_state.value, false)
+    }
+
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
         prefs.edit().putString(promptKey(kind), value).apply()
         _state.value = _state.value.withPrompt(kind, value)
@@ -119,6 +138,10 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putString(KEY_BRAVE_API_KEY, config.braveApiKey)
             .putString(KEY_STT_API_KEY, config.sttApiKey)
             .putLong(KEY_STT_REMOVED_AT, config.sttApiKeyRemovedAtMs)
+            .putString(KEY_PRIVATE_BASE_URL, config.privateBaseUrl?.takeIf { it.isNotBlank() })
+            .putString(KEY_PRIVATE_MODEL, config.privateModel?.takeIf { it.isNotBlank() })
+            .putString(KEY_PRIVATE_API_KEY, config.privateApiKey)
+            .putBoolean(KEY_FRONTIER_READS, config.frontierReadsMessages)
             .putString(KEY_URBIT_KNOWLEDGE_PROMPT, config.urbitKnowledgePrompt)
             .putString(KEY_ASSISTANT_PROMPT, config.assistantPrompt)
             .putString(KEY_LOOP_PROMPT, config.loopPrompt)
@@ -138,6 +161,9 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .remove(KEY_BASE_URL)
             .remove(KEY_BRAVE_API_KEY)
             .remove(KEY_STT_API_KEY)
+            .remove(KEY_PRIVATE_BASE_URL)
+            .remove(KEY_PRIVATE_MODEL)
+            .remove(KEY_PRIVATE_API_KEY)
             .remove(KEY_URBIT_KNOWLEDGE_PROMPT)
             .remove(KEY_ASSISTANT_PROMPT)
             .remove(KEY_LOOP_PROMPT)
@@ -185,6 +211,10 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             braveApiKey = prefs.getString(KEY_BRAVE_API_KEY, "").orEmpty(),
             sttApiKey = prefs.getString(KEY_STT_API_KEY, "").orEmpty(),
             sttApiKeyRemovedAtMs = prefs.getLong(KEY_STT_REMOVED_AT, 0L),
+            privateBaseUrl = prefs.getString(KEY_PRIVATE_BASE_URL, null)?.takeIf { it.isNotBlank() },
+            privateModel = prefs.getString(KEY_PRIVATE_MODEL, null)?.takeIf { it.isNotBlank() },
+            privateApiKey = prefs.getString(KEY_PRIVATE_API_KEY, "").orEmpty(),
+            frontierReadsMessages = prefs.getBoolean(KEY_FRONTIER_READS, false),
             urbitKnowledgePrompt = prefs.getString(KEY_URBIT_KNOWLEDGE_PROMPT, "").orEmpty(),
             assistantPrompt = prefs.getString(KEY_ASSISTANT_PROMPT, "").orEmpty(),
             loopPrompt = prefs.getString(KEY_LOOP_PROMPT, "").orEmpty(),
@@ -234,6 +264,10 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         private const val KEY_BASE_URL = "base_url"
         private const val KEY_BRAVE_API_KEY = "brave_api_key"
         private const val KEY_STT_API_KEY = "stt_api_key"
+        private const val KEY_PRIVATE_BASE_URL = "private_base_url"
+        private const val KEY_PRIVATE_MODEL = "private_model"
+        private const val KEY_PRIVATE_API_KEY = "private_api_key"
+        private const val KEY_FRONTIER_READS = "frontier_reads_messages"
         private const val KEY_STT_REMOVED_AT = "stt_api_key_removed_at"
         private const val KEY_URBIT_KNOWLEDGE_PROMPT = "urbit_knowledge_prompt"
         private const val KEY_ASSISTANT_PROMPT = "assistant_prompt"

@@ -36,15 +36,13 @@ import io.nisfeb.talon.ui.isTouchPrimary
 import kotlinx.coroutines.launch
 
 /**
- * Orrery under Settings > AI: the pipe's switch, and the model that
- * reads messages for it. That model is its own configuration on
- * purpose. The AI provider above it is for summaries and for carrying
- * out the analyst's actions; what reads your messages is a local
- * model, chosen here, unless you say otherwise with the one switch
- * that names the cost.
+ * Orrery under Settings > AI: the pipe's switch, and on a phone the
+ * choice to leave the reading to a computer. Which model does the
+ * reading is set above, under Private model, because that is a
+ * question about models rather than about this one app.
  */
 @Composable
-fun OrrerySettingsSection(orrery: OrreryRepo, uiSettings: UiSettings) {
+fun OrrerySettingsSection(orrery: OrreryRepo) {
     val scope = rememberCoroutineScope()
     val availability by orrery.availability.collectAsState()
     val on by orrery.enabled.collectAsState()
@@ -112,63 +110,6 @@ fun OrrerySettingsSection(orrery: OrreryRepo, uiSettings: UiSettings) {
     }
     (note ?: error)?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
 
-    Spacer(Modifier.height(12.dp))
-    Text("Reads with", style = MaterialTheme.typography.bodyLarge)
-    val modelLine = when {
-        !isLocalTriageSupported -> "No local model on this platform yet. The rules alone read messages."
-        model == null -> "Looking."
-        model!!.second == RungStatus.Ready -> "Reads with ${model!!.first}."
-        model!!.second is RungStatus.NeedsDownload -> "${model!!.first} can read messages here after a download of about ${(model!!.second as RungStatus.NeedsDownload).bytes / 1_000_000} MB."
-        else -> (model!!.second as RungStatus.Unavailable).reason
-    }
-    Text(modelLine, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    if (model?.second is RungStatus.NeedsDownload) {
-        if (download != null) LinearProgressIndicator(progress = { download!! }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
-        else TextButton(onClick = { scope.launch { orrery.prepareModel().onFailure { note = it.message ?: "The download did not finish." } } }) { Text("Download the model") }
-    }
-
-    if (!isTouchPrimary) {
-        // The triage's own server. Empty fields look on the usual ports and
-        // take the server's best model by name; anything typed is used as is.
-        val savedUrl by uiSettings.orreryServerUrl.collectAsState()
-        val savedModel by uiSettings.orreryServerModel.collectAsState()
-        var url by remember(savedUrl) { mutableStateOf(savedUrl) }
-        var modelName by remember(savedModel) { mutableStateOf(savedModel) }
-        Spacer(Modifier.height(8.dp))
-        Text("Local model server", style = MaterialTheme.typography.bodyMedium)
-        Text(
-            "LM Studio or Ollama on this computer, or another machine of yours. Leave both empty to use whichever is running on its usual port and its best model.",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OutlinedTextField(
-            value = url,
-            onValueChange = { url = it },
-            label = { Text("Server URL") },
-            placeholder = { Text("http://localhost:1234") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        )
-        OutlinedTextField(
-            value = modelName,
-            onValueChange = { modelName = it },
-            label = { Text("Model") },
-            placeholder = { Text("the server's best, by name") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        )
-        val dirty = url.trim() != savedUrl || modelName.trim() != savedModel
-        if (dirty) {
-            TextButton(onClick = {
-                uiSettings.setOrreryServerUrl(url.trim())
-                uiSettings.setOrreryServerModel(modelName.trim())
-                LocalModels.serverUrl = url.trim()
-                LocalModels.serverModel = modelName.trim()
-                scope.launch { LocalModels.reset(); orrery.refreshModel() }
-            }) { Text("Use this server") }
-        }
-    }
-
     if (isTouchPrimary) orrery.standDown?.let { sd ->
         val standing by sd.on.collectAsState()
         val yielding by orrery.yielding.collectAsState()
@@ -183,23 +124,6 @@ fun OrrerySettingsSection(orrery: OrreryRepo, uiSettings: UiSettings) {
                 )
             }
             Switch(checked = standing, onCheckedChange = { sd.set(it) })
-        }
-    }
-
-    orrery.cloud?.let { cloud ->
-        val cloudOn by cloud.on.collectAsState()
-        val hasKey = cloud.config().apiKey.isNotBlank()
-        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Read with the AI provider above instead", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    if (hasKey) "Every message the triage reads leaves this device for ${cloud.config().provider.label}. A larger model reads better; that is the trade."
-                    else "Needs an API key above. Off until then.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(checked = cloudOn && hasKey, enabled = hasKey, onCheckedChange = { want -> cloud.set(want); scope.launch { orrery.refreshModel() } })
         }
     }
 
