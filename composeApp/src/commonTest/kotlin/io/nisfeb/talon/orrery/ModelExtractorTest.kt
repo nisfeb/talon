@@ -84,6 +84,20 @@ class ModelExtractorTest {
     }
 
     @Test
+    fun `whether a medical fact may be written is the ship's to say`() {
+        val claim = """{"claims":[{"subject":"person/sarah","attr":"health","value":"biopsy came back clear","conf":80}]}"""
+        // The ship's schema view for this key does not name health, so
+        // the key may not write it and the claim goes.
+        assertTrue(ModelExtractor.parse(claim, index, "~bus", 1L, me, null, mapOf("person" to listOf("status"))).isEmpty())
+        // A key the owner minted to write what it can never read is
+        // told so by the schema it is served.
+        assertEquals(
+            1,
+            ModelExtractor.parse(claim, index, "~bus", 1L, me, null, mapOf("person" to listOf("status", "health"))).size,
+        )
+    }
+
+    @Test
     fun `a feeling has somewhere to go, and nothing comes of it`() {
         // The prompt offers mood so that "want to scream" does not land
         // on status, which is a circumstance an onlooker would state.

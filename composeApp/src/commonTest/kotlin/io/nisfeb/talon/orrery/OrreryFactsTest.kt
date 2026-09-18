@@ -77,11 +77,20 @@ class OrreryFactsTest {
         assertEquals(null, contactStatus(c.copy(statusUpdatedMs = null)), "a line with no time says nothing")
     }
 
+
     @Test
-    fun `a digest notices a rename and ignores a replay`() {
-        val a = OBody("person/bus", "Bus", listOf("Bus", "~bus"))
-        assertEquals(bodyDigest(a), bodyDigest(OBody("person/bus", "Bus", listOf("~bus", "Bus"))))
-        assertTrue(bodyDigest(a) != bodyDigest(a.copy(name = "Bussy")))
+    fun `a body the ship has learns the names it lacks, and is never remade`() {
+        val body = OBody("person/bus", "Buster", listOf("Buster", "~bus", "bus"))
+        // Nothing to say: the ship answers to all of them already.
+        assertTrue(teachNames(body, setOf("Buster", "~bus", "bus")).isEmpty())
+        // A new nickname goes up as an alias with no name of its own, so
+        // the ship keeps whatever the owner called them.
+        val taught = teachNames(body, setOf("~bus")).single()
+        assertEquals(null, taught.name)
+        assertEquals(listOf("Buster", "bus"), taught.aliases)
+        // No such body: made whole, or left alone where a pass may not make one.
+        assertEquals(listOf(body), teachNames(body, null))
+        assertTrue(teachNames(body, null, make = false).isEmpty(), "names alone would come back hollow")
     }
 
     @Test

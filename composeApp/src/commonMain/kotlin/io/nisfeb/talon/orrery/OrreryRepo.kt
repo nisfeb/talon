@@ -271,15 +271,13 @@ class OrreryRepo(
                 val handle = shipHandle(c.ship)
                 val id = people.idFor(c.ship, c.nickname ?: handle)
                 val body = personBody(c, id, handle, shipHandleLong(c.ship))
-                // The body only when the ship has no such person, or when
-                // what it goes by has actually changed.
-                val digest = bodyDigest(body)
-                val known = sent.get(s, "person:${c.ship}")?.value
-                val fresh = known != "$id|$digest"
-                if (fresh) remember("person:${c.ship}", "$id|$digest")
-                // The body only. A status line is read, not sent: see
-                // contactStatus, and the triage below.
-                facts += Facts(bodies = if (fresh && !people.shipHasBody(id)) listOf(body) else emptyList())
+                // A body the ship does not have is made. One it has is
+                // taught the names it lacks and nothing else: an upsert
+                // carrying aliases alone unions them and leaves the
+                // ship's own name, so a new nickname arrives without
+                // remaking a body the owner may have merged. What the
+                // ship goes by is read from the ship, not remembered.
+                facts += Facts(bodies = teachNames(body, people.goesBy(body.id)))
             }
 
             val posts = db.messages().postsAfter(row.messagesCursor, s, MESSAGES_PER_PASS)
@@ -341,6 +339,18 @@ class OrreryRepo(
                         subject.cal in ourCalendars, cast,
                     )
                     facts += write.facts
+                    // A renamed event: the ship keeps the name it has and
+                    // learns the new one as an alias, so whoever resolves
+                    // by either finds the one body.
+                    if (changed && decided != null && view != null) {
+                        facts += Facts(
+                            bodies = teachNames(
+                                OBody(decided, name = null, aliases = listOf(subject.title, normalizeTitle(subject.title))),
+                                people.goesBy(decided),
+                                make = false,
+                            ),
+                        )
+                    }
                     if (mark != "${write.bodyId}|$digest") remember(subject.key, "${write.bodyId}|$digest")
                     write.occurrences.forEach { (key, end) -> remember(key, end.toString()) }
                 }
@@ -416,9 +426,14 @@ class OrreryRepo(
         private val byShip: Map<String, String> = bodies.mapNotNull { b -> b.ship?.let { it to b.id } }.toMap()
         private val known: Set<String> = bodies.map { it.id }.toSet()
         private val names: List<Pair<String, String>> = bodies.filter { it.id.startsWith("person/") }.map { (it.name ?: "") to it.id }
+        private val called: Map<String, Set<String>> =
+            bodies.associate { b -> b.id to (b.aliases + listOfNotNull(b.name)).toSet() }
         private val decided = mutableMapOf<String, String>()
 
         fun shipHasBody(id: String): Boolean = id in known
+
+        /** What the ship already calls a body it has, or null when it has no such body. */
+        fun goesBy(id: String): Set<String>? = called[id]
 
         /** Never suspends on the ship more than once per person per pass. */
         fun idFor(ship: String, name: String?): String {

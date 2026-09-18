@@ -152,15 +152,18 @@ object ModelExtractor {
             if (mentioned != null && subject !in mentioned) continue
             val attr = o["attr"]?.jsonPrimitive?.content?.trim()?.lowercase() ?: continue
             if (!ATTR.matches(attr)) continue
-            // A medical fact is `health` and a money fact is `income`,
-            // both of which the policy keeps from keys, so this client
-            // cannot write either. Under any other name it would write
-            // them in plain sight of every key, so they are dropped.
-            if (attr in SENSITIVE || attr in SENSITIVE_BY_ANOTHER_NAME) continue
+            // A medical fact is `health` and a money fact is `income`.
+            // Whether this client may write them is the ship's to say,
+            // not a constant here: its schema view names them for a key
+            // the owner minted to write what it can never read, and for
+            // no other. Under any other name they would land in plain
+            // sight of every key, so those names go whatever the scope.
+            val known = attrs[subject.substringBefore('/')]
+            if (attr in SENSITIVE && known?.contains(attr) != true) continue
+            if (attr in SENSITIVE_BY_ANOTHER_NAME) continue
             // The prompt offers these so a feeling has somewhere to go
             // that is not status. Nothing comes of them here.
             if (attr in SINK) continue
-            val known = attrs[subject.substringBefore('/')]
             if (known != null && attr !in known && attr !in ALWAYS) continue
             val value: JsonElement = when (val v = o["value"]) {
                 null -> continue
@@ -236,7 +239,11 @@ object ModelExtractor {
     /** Where a feeling goes so that it never lands on status. Never sent. */
     private val SINK = setOf("mood", "feeling", "feelings", "emotion")
 
-    /** The two names the ship keeps from keys (orrery's starter policy). */
+    /**
+     * The two names the ship keeps from keys (orrery's starter policy).
+     * A key minted with `sensitive: write` may observe them, and the
+     * ship says so by listing them in the schema it serves that key.
+     */
     private val SENSITIVE = setOf("health", "income")
 
     /** What a model reaches for when it means one of those two. */

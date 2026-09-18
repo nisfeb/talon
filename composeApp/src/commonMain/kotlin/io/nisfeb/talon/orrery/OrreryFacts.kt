@@ -87,9 +87,22 @@ fun contactStatus(c: ContactEntity): Pair<String, Long>? {
     return status to at
 }
 
-/** What a body says about itself, so a rename is noticed and a replay is not. */
-fun bodyDigest(body: OBody): String =
-    (listOf(body.name.orEmpty()) + body.aliases.sorted()).joinToString("|").hashCode().toString(16)
+/**
+ * What to send for a body the ship may already have. [goesBy] is every
+ * name it answers to there, or null when it has no such body.
+ *
+ * A body it has is taught the names it lacks and nothing else: an
+ * upsert carrying aliases and no name unions them and leaves the ship's
+ * own name where it is, which is how a new nickname arrives without
+ * remaking a body the owner may have merged. A body it lacks is sent
+ * whole, and only when [make] says this is a pass that may make one:
+ * names alone would come back as a hollow body named after its slug.
+ */
+fun teachNames(body: OBody, goesBy: Set<String>?, make: Boolean = true): List<OBody> {
+    if (goesBy == null) return if (make) listOf(body) else emptyList()
+    val fresh = (body.aliases + listOfNotNull(body.name)).filter { it.isNotBlank() }.distinct() - goesBy
+    return if (fresh.isEmpty()) emptyList() else listOf(OBody(body.id, name = null, aliases = fresh))
+}
 
 /** Somebody wrote to us, or where we could see it. Our own posts say nothing. */
 fun messageFacts(m: MessageEntity, ourShip: String, subjectId: String): Obs? {
