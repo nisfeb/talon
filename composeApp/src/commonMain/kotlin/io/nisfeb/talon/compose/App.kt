@@ -340,6 +340,7 @@ fun App(
     var openMailThread by remember { mutableStateOf<String?>(null) }
     var showStatusFeed by remember { mutableStateOf(false) }
     var showInvites by remember { mutableStateOf(false) }
+    var showActions by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
     var showCalendar by remember { mutableStateOf(false) }
     var calendarPageOpen by remember { mutableStateOf(false) }
@@ -583,6 +584,7 @@ fun App(
     PlatformBackHandler(enabled = showSearch) { showSearch = false }
     PlatformBackHandler(enabled = showNewDm) { showNewDm = false }
     PlatformBackHandler(enabled = showWatchwords) { showWatchwords = false }
+    PlatformBackHandler(enabled = showActions) { showActions = false }
     PlatformBackHandler(enabled = showContacts) { showContacts = false }
     PlatformBackHandler(
         enabled = openGroupAdminFlag != null,
@@ -1019,6 +1021,7 @@ fun App(
             if (mailShipUrl != null && ship != null) orreryRepo.attach(mailShipUrl, ship) else orreryRepo.detach()
         }
         val orreryActions by orreryRepo.actions.collectAsState()
+        val orreryOn by orreryRepo.enabled.collectAsState()
         // The private model, from Settings, into the ladder.
         LaunchedEffect(aiSettings, uiSettings) {
             io.nisfeb.talon.orrery.movePrivateModelIn(aiSettings, uiSettings)
@@ -2235,6 +2238,10 @@ fun App(
                         onOpenContact = { patp -> profileSheetShip = patp },
                         onBack = { showContacts = false },
                     )
+                    showActions -> io.nisfeb.talon.ui.screens.OrreryActionsScreen(
+                        actions = orreryActions,
+                        onBack = { showActions = false },
+                    ) { a -> openAction = a }
                     showWatchwords -> WatchwordsScreen(
                         db = db,
                         watchwordsSyncEnabled = watchwordsSyncEnabled,
@@ -2613,6 +2620,7 @@ fun App(
                                     http = http,
                                     aiSettings = aiSettings,
                                     uiSettings = uiSettings,
+                                    calendar = calendarRepo,
                                     ourPatp = ship,
                                     whom = openChat!!,
                                     initialScrollMessageId = openChatFocusMessageId,
@@ -2816,14 +2824,19 @@ fun App(
                             aiState.assistantOn() &&
                             aiState.hasKey()
                         val enabledItems: List<RailItem> = remember(
-                            railVisibility, railItemOrder, assistantEnabled,
+                            railVisibility, railItemOrder, assistantEnabled, orreryOn,
                         ) {
                             railItemOrder.filter { item ->
                                 // Map.isVisible enforces the Chats always-on invariant
                                 // (regardless of map state) and falls back to true
                                 // for absent entries.
                                 val visible = railVisibility.isVisible(item)
-                                val gateOk = item != RailItem.Assistant || assistantEnabled
+                                val gateOk = when (item) {
+                                    RailItem.Assistant -> assistantEnabled
+                                    // A section nobody can fill is noise.
+                                    RailItem.Actions -> orreryOn
+                                    else -> true
+                                }
                                 visible && gateOk
                             }
                         }
@@ -2869,8 +2882,12 @@ fun App(
                         val menuBadges = remember(
                             railStatusFeed, railPendingInvites,
                             railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship, calendarShares,
+                            orreryActions,
                         ) {
                             MenuBadges(
+                                // A proposal is a question, and a question
+                                // nobody sees is the same as no question.
+                                actionsWaiting = orreryActions.any { it.status == "proposed" },
                                 calendarOffers = !calendarShares?.offers.isNullOrEmpty(),
                                 statusesFresh = railStatusFeed.any { c ->
                                     (c.statusUpdatedMs ?: 0L) > railEffectiveStatusesSeenMs &&
@@ -2955,6 +2972,7 @@ fun App(
                                 RailItem.Watchwords -> showWatchwords = true
                                 RailItem.Administration -> showGroupAdminList = true
                                 RailItem.Invites -> showInvites = true
+                                RailItem.Actions -> showActions = true
                                 RailItem.Settings -> showSettings = true
                                 // pane tabs handled above; never reaches here
                                 RailItem.Home, RailItem.Chats, RailItem.Mail, RailItem.Calendar,

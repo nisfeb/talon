@@ -290,6 +290,7 @@ internal fun railIcon(item: RailItem): ImageVector? = when (item) {
     RailItem.Watchwords -> Icons.Filled.Search
     RailItem.Administration -> Icons.Filled.Build
     RailItem.Invites -> Icons.Filled.Email
+    RailItem.Actions -> TalonIcons.Checklist
     RailItem.Settings -> Icons.Filled.Settings
 }
 
@@ -306,6 +307,7 @@ internal fun railLabel(item: RailItem): String = when (item) {
     RailItem.Watchwords -> "Watchwords"
     RailItem.Administration -> "Administration"
     RailItem.Invites -> "Invites"
+    RailItem.Actions -> "Actions"
     RailItem.Settings -> "Settings"
 }
 

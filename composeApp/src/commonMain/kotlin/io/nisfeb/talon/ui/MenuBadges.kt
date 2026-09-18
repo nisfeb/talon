@@ -17,6 +17,8 @@ data class MenuBadges(
     val invitesPending: Boolean = false,
     /** A calendar another ship offered, waiting to be accepted. */
     val calendarOffers: Boolean = false,
+    /** Orrery has proposed something and is waiting for an answer. */
+    val actionsWaiting: Boolean = false,
 ) {
     /**
      * Read-site helper: returns true if [item]'s rail icon should
@@ -28,6 +30,7 @@ data class MenuBadges(
         RailItem.Statuses -> statusesFresh
         RailItem.Invites -> invitesPending
         RailItem.Calendar -> calendarOffers
+        RailItem.Actions -> actionsWaiting
         else -> false
     }
 }

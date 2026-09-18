@@ -95,7 +95,9 @@ class RailItemTest {
             RailItem.Invites,
             RailItem.Assistant,
         )
-        assertEquals(custom, sanitizeRailItemOrder(custom))
+        // An order saved before a section existed keeps its shape, and
+        // the new section joins the end rather than going missing.
+        assertEquals(custom + RailItem.Actions, sanitizeRailItemOrder(custom))
     }
 
     @Test

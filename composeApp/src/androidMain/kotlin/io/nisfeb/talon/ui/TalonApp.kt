@@ -446,6 +446,8 @@ fun TalonApp(
         app.aiSettings.state.collect { io.nisfeb.talon.orrery.LocalModels.usePrivate(it.private) }
     }
     var openAction by remember { mutableStateOf<io.nisfeb.talon.orrery.OrreryAction?>(null) }
+    // Whether the pipe is on at all: the actions section is its.
+    val orreryOn by orreryRepo.enabled.collectAsState()
     openAction?.let { action ->
         io.nisfeb.talon.ui.OrreryActionDialog(
             action = action,
@@ -648,6 +650,7 @@ fun TalonApp(
     var adminListOpen by remember { mutableStateOf(false) }
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
     var invitesOpen by remember { mutableStateOf(false) }
+    var actionsOpen by remember { mutableStateOf(false) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
     /** Login-handoff QR generator. Reachable from the LoginScreen
      *  "Generate QR for someone" link (pre-login) and from settings
@@ -1546,6 +1549,7 @@ fun TalonApp(
             adminGroupFlag != null -> "GroupAdmin($adminGroupFlag)"
             adminListOpen -> "AdminList"
             invitesOpen -> "Invites"
+            actionsOpen -> "Actions"
             openGroupFlag != null -> "GroupHome($openGroupFlag)"
             sidebarSettingsOpen -> "SidebarSettings"
             appsOpen -> "Apps"
@@ -1598,6 +1602,7 @@ fun TalonApp(
                         when (item) {
                             io.nisfeb.talon.ui.RailItem.Assistant ->
                                 isAssistantSupported && aiState.assistantOn() && aiState.hasKey()
+                            io.nisfeb.talon.ui.RailItem.Actions -> orreryOn
                             else -> true
                         }
                     },
@@ -1622,6 +1627,7 @@ fun TalonApp(
                             io.nisfeb.talon.ui.RailItem.Watchwords -> watchwordsOpen = true
                             io.nisfeb.talon.ui.RailItem.Administration -> adminListOpen = true
                             io.nisfeb.talon.ui.RailItem.Invites -> invitesOpen = true
+                            io.nisfeb.talon.ui.RailItem.Actions -> actionsOpen = true
                             io.nisfeb.talon.ui.RailItem.Settings -> settingsOpen = true
                         }
                     },
@@ -2023,6 +2029,12 @@ fun TalonApp(
                 onBack = { invitesOpen = false },
                 modifier = mod,
             )
+
+            actionsOpen -> io.nisfeb.talon.ui.screens.OrreryActionsScreen(
+                actions = orreryActions,
+                onBack = { actionsOpen = false },
+                modifier = mod,
+            ) { a -> openAction = a }
 
             openGroupFlag != null -> GroupHomeScreen(
                 db = app.db,
@@ -2512,6 +2524,7 @@ fun TalonApp(
                     http = app.ktorHttp,
                     aiSettings = app.aiSettings,
                     uiSettings = app.uiSettings,
+                    calendar = calendarRepo,
                     ourPatp = loggedInShip ?: "",
                     whom = openWhom!!,
                     initialScrollMessageId = pendingScrollMessageId,

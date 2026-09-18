@@ -173,6 +173,9 @@ fun DmChatScreen(
         onRecorded: (path: String, durationMs: Long) -> Unit,
     ) -> Unit)? = null,
     locationProvider: io.nisfeb.talon.ui.LocationProvider? = null,
+    /** The calendar, where this ship has one: what lets a message
+     *  become an event or a task without leaving the conversation. */
+    calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
     /** Inline play/pause control for the voice preview row. Android
      *  wires an ExoPlayer-backed control; desktop passes null and
      *  the preview row hides the play button (still allows send/cancel). */
@@ -566,6 +569,32 @@ fun DmChatScreen(
     var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
     var confirmingReport by remember { mutableStateOf<MessageEntity?>(null) }
     var publishTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    // What was said, on its way to becoming an event or a task.
+    var calendarTarget by remember { mutableStateOf<Pair<FromMessage, MessageEntity>?>(null) }
+    calendarTarget?.let { (kind, target) ->
+        val cal = calendar
+        if (cal == null) {
+            calendarTarget = null
+        } else {
+            val zoneId by cal.zone.collectAsState()
+            MessageToCalendarDialog(
+                kind = kind,
+                initialTitle = titleFromMessage(StoryCache.textFor(target.id, target.contentJson)),
+                zone = runCatching { kotlinx.datetime.TimeZone.of(zoneId ?: "") }
+                    .getOrElse { kotlinx.datetime.TimeZone.currentSystemDefault() },
+                nowMs = io.nisfeb.talon.util.nowMs(),
+                twentyFourHour = uiSettings.homeTwentyFourHour.collectAsState().value,
+                onDismiss = { calendarTarget = null },
+                onSave = { draft ->
+                    calendarTarget = null
+                    scope.launch {
+                        val ok = cal.poke(io.nisfeb.talon.calendar.eventBody(draft))
+                        if (!ok) composerState.sendError = "The calendar did not take it."
+                    }
+                },
+            )
+        }
+    }
 
     val canSend = remember(whom) {
         whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
@@ -966,6 +995,12 @@ fun DmChatScreen(
                 onPublish = {
                     actionTarget = null
                     publishTarget = target
+                },
+                onMakeEvent = calendar?.let {
+                    { actionTarget = null; calendarTarget = FromMessage.Event to target }
+                },
+                onMakeTask = calendar?.let {
+                    { actionTarget = null; calendarTarget = FromMessage.Task to target }
                 },
                 onTogglePin = {
                     val wasPinned = pinnedPostId == target.id
@@ -2156,6 +2191,9 @@ private fun MessageActionMenu(
     onReport: () -> Unit,
     onPublish: () -> Unit,
     onTogglePin: () -> Unit,
+    /** Make an event or a task of what was said. Null where the ship has no calendar. */
+    onMakeEvent: (() -> Unit)? = null,
+    onMakeTask: (() -> Unit)? = null,
 ) {
     val isMine = message.author == ourPatp
     val canReply = message.parentId == null
@@ -2315,6 +2353,8 @@ private fun MessageActionMenu(
             if (canReply) {
                 ActionRow(onClick = onReply, label = "Reply in thread")
             }
+            onMakeEvent?.let { ActionRow(onClick = it, label = "New event") }
+            onMakeTask?.let { ActionRow(onClick = it, label = "New task") }
             if (canQuote) {
                 ActionRow(onClick = onQuote, label = "Quote")
             }
