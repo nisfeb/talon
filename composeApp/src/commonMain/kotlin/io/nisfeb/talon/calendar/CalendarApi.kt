@@ -73,6 +73,13 @@ data class CalendarTask(
     val tags: List<String> get() = meta.metaTags()
 }
 
+/**
+ * A ball is a path, and the shell routes on its segments: encoding it
+ * whole turns every separator into %2F and the poke comes back 404, so
+ * each segment is encoded and the slashes are left alone.
+ */
+internal fun String.asPath(): String = split('/').joinToString("/") { it.encodeURLParameter() }
+
 internal fun JsonObject.metaStr(k: String): String = this[k]?.jsonPrimitive?.contentOrNull.orEmpty()
 internal fun JsonObject.metaTags(): List<String> = (this["tags"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
 
@@ -215,7 +222,7 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
      * what config.json named. True when the shell accepted it.
      */
     suspend fun poke(ball: String, body: JsonObject): Boolean =
-        postJson("$base/grubbery/api/poke/${ball.encodeURLParameter()}/calendar.calendar?blot=/json", body)
+        postJson("$base/grubbery/api/poke/${ball.asPath()}/calendar.calendar?blot=/json", body)
 
     private suspend fun postForJson(url: String, body: JsonObject): JsonObject? {
         val resp = try {
