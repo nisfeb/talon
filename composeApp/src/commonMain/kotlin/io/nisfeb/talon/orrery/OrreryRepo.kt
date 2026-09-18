@@ -198,6 +198,40 @@ class OrreryRepo(
     }
 
     /**
+     * What the ship was told about occurrences the calendar has since
+     * moved or called off, taken back, and those occurrences forgotten
+     * so the new times are written as new. Rows of this event only, and
+     * only inside the window, which is the one stretch of time this
+     * install can see the truth of.
+     */
+    private suspend fun retractMoved(
+        a: OrreryApi,
+        token: String,
+        bodyId: String,
+        subject: CalendarSubject,
+        seen: Map<String, String>,
+        s: String,
+        nowMs: Long,
+    ): Set<String> {
+        val stale = staleOccurrences(subject, seen, nowMs - BACKFILL_MS, nowMs + AHEAD_MS)
+        if (stale.isEmpty()) return emptySet()
+        val rows = runCatching { a.observationsOf(bodyId, token) }
+            .onFailure { Log.i(TAG, "timeline skipped: ${it.message}") }
+            .getOrNull() ?: return emptySet()
+        val here = subject.occurrences.flatMap { listOf(it.l, it.r) }.toSet()
+        val gone = stale.flatMap { it.second }.toSet() - here
+        val src = "${subject.cal}/${subject.uid}"
+        for (o in rows) {
+            if (o.sourceId != src || !o.stands || o.atMs !in gone) continue
+            runCatching { a.retract(o.id, "the calendar no longer has this event at this time", token) }
+                .onFailure { Log.i(TAG, "retract skipped: ${it.message}") }
+        }
+        val keys = stale.map { it.first }.toSet()
+        keys.forEach { db.orrerySent().forget(s, it) }
+        return keys
+    }
+
+    /**
      * One pass over every source from its cursor. Safe to call any
      * time, and safe to run again from nothing: the ship is asked what
      * it already has before anything is made, every occurrence and
@@ -273,7 +307,19 @@ class OrreryRepo(
 
             runCatching { CalendarApi(http, url).window(nowMs - BACKFILL_MS, nowMs + AHEAD_MS) }.onSuccess { w ->
                 for (subject in calendarSubjects(w.rows)) {
-                    val decided = sent.get(s, subject.key)?.value?.takeIf { it.isNotBlank() }
+                    // The body decided for this event, and the event as
+                    // it was when that decision was made.
+                    val mark = sent.get(s, subject.key)?.value?.takeIf { it.isNotBlank() }
+                    val decided = mark?.substringBefore('|')
+                    val digest = subject.digest
+                    val seen = sent.under(s, "occ:${subject.cal}/${subject.uid}/")
+                        .associate { it.key to it.value }
+                    // An occurrence the calendar no longer has at a time
+                    // this install can still see: moved, or called off.
+                    val dropped = if (decided == null) emptySet() else retractMoved(a, row.token, decided, subject, seen, s, nowMs)
+                    // A new time, place or description means what the
+                    // ship was told no longer describes the event.
+                    val changed = mark != null && (mark.substringAfter('|', "") != digest || dropped.isNotEmpty())
                     // Ask the ship before making anything: by the title it
                     // goes by, then by the calendar's own id, which
                     // reconcile keeps as an alias of the activity it built.
@@ -283,12 +329,10 @@ class OrreryRepo(
                             addAll(runCatching { a.resolve(subject.uid, row.token) }.getOrDefault(emptyList()))
                         }
                     }
-                    val written = sent.some(s, subject.occurrences.map { occurrenceKey(subject, it) })
-                        .map { it.key }.toSet()
-                    val write = calendarWrite(subject, decided, hits, written, s, nowMs)
+                    val write = calendarWrite(subject, decided, hits, seen.keys - dropped, s, nowMs, changed)
                     facts += write.facts
-                    if (decided == null) remember(subject.key, write.bodyId)
-                    write.occurrenceKeys.forEach { remember(it) }
+                    if (mark != "${write.bodyId}|$digest") remember(subject.key, "${write.bodyId}|$digest")
+                    write.occurrences.forEach { (key, end) -> remember(key, end.toString()) }
                 }
             }.onFailure { Log.i(TAG, "calendar skipped: ${it.message}") }
 

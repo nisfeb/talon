@@ -178,6 +178,13 @@ interface OrrerySentDao {
     @Query("SELECT * FROM orrery_sent WHERE ship = :ship AND key IN (:keys)")
     suspend fun some(ship: String, keys: List<String>): List<OrrerySentEntity>
 
+    /** Every key under one prefix: the occurrences of one event, whatever times they were at. */
+    @Query("SELECT * FROM orrery_sent WHERE ship = :ship AND key LIKE :prefix || '%'")
+    suspend fun under(ship: String, prefix: String): List<OrrerySentEntity>
+
+    @Query("DELETE FROM orrery_sent WHERE ship = :ship AND key = :key")
+    suspend fun forget(ship: String, key: String)
+
     @Upsert
     suspend fun put(row: OrrerySentEntity)
 

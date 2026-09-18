@@ -19,12 +19,20 @@ class OrreryCalendarTest {
     private val noon = 1_789_646_400_000L // 2026-09-17T12:00:00Z
     private val week = 7L * 24 * 3_600_000
 
-    private fun row(startMs: Long, kind: String = "once", title: String = "Standup", uid: String = "E9", location: String = "") =
+    private fun row(
+        startMs: Long,
+        kind: String = "once",
+        title: String = "Standup",
+        uid: String = "E9",
+        location: String = "",
+        note: String = "",
+    ) =
         CalendarRow(
             id = uid, cal = "default", kind = kind,
             meta = buildJsonObject {
                 put("name", JsonPrimitive(title))
                 if (location.isNotEmpty()) put("location", JsonPrimitive(location))
+                if (note.isNotEmpty()) put("note", JsonPrimitive(note))
             },
             l = startMs, r = startMs + 1_800_000,
         )
@@ -106,6 +114,58 @@ class OrreryCalendarTest {
         val s = calendarSubjects(rows).single()
         assertTrue(s.repeats, "the same event twice is a series the calendar did not label")
         assertEquals("activity/standup", calendarWrite(s, null, emptyList(), emptySet(), me, noon).bodyId)
+    }
+
+    @Test
+    fun `an edited time, place or description is a different event to the one we sent`() {
+        val was = subject(row(noon, location = "the office", note = "bring the laptop")).digest
+        assertEquals(was, subject(row(noon, location = "the office", note = "bring the laptop")).digest)
+        assertTrue(was != subject(row(noon, location = "the cafe", note = "bring the laptop")).digest, "place")
+        assertTrue(was != subject(row(noon, location = "the office", note = "bring nothing")).digest, "description")
+        assertTrue(was != subject(row(noon, title = "Retro", location = "the office", note = "bring the laptop")).digest, "title")
+        assertTrue(was != subject(row(noon, "weekly", location = "the office", note = "bring the laptop")).digest, "cadence")
+    }
+
+    @Test
+    fun `an activity that changed says what it is again, without repeating its occurrences`() {
+        val s = subject(row(noon - week, "weekly", location = "the cafe"), row(noon, "weekly", location = "the cafe"))
+        val written = calendarWrite(s, "activity/standup", emptyList(), emptySet(), me, noon + 3_600_000)
+            .occurrenceKeys.toSet()
+        val again = calendarWrite(s, "activity/standup", emptyList(), written, me, noon + 3_600_000, changed = true)
+        val attrs = again.facts.observations.map { it.attr }.toSet()
+        assertTrue(attrs.containsAll(setOf("cadence", "schedule", "participants", "location")), "$attrs")
+        assertEquals("the cafe", again.facts.observations.single { it.attr == "location" }.value.jsonPrimitive.content)
+        assertEquals(noon, again.facts.observations.first { it.attr == "location" }.atMs, "true from the last time it came round")
+        assertTrue(again.facts.observations.none { it.attr == "last" }, "an occurrence already sent is still not sent twice")
+        assertTrue(again.facts.bodies.isEmpty(), "a body is made once or never")
+    }
+
+    @Test
+    fun `a one-off that changed is said again although its occurrence was written`() {
+        val s = subject(row(noon, title = "Bed delivery", uid = "UID-1", location = "the flat"))
+        val written = calendarWrite(s, "situation/bed-delivery", emptyList(), emptySet(), me, noon).occurrenceKeys.toSet()
+        assertTrue(calendarWrite(s, "situation/bed-delivery", emptyList(), written, me, noon).facts.observations.isEmpty())
+        val again = calendarWrite(s, "situation/bed-delivery", emptyList(), written, me, noon, changed = true)
+        assertEquals(listOf("ended", "location", "participants", "started"), again.facts.observations.map { it.attr }.sorted())
+        assertEquals(noon, again.facts.observations.single { it.attr == "started" }.atMs)
+    }
+
+    @Test
+    fun `an occurrence the calendar has moved away from is stale, one it never reached is not`() {
+        val s = subject(row(noon, "weekly"), row(noon + week, "weekly"))
+        val seen = mapOf(
+            "occ:default/E9/${noon - week}" to "${noon - week + 1_800_000}", // moved: in the window, no longer there
+            "occ:default/E9/$noon" to "${noon + 1_800_000}", // still there
+            "occ:default/E9/${noon - 40 * week}" to "", // before the window: nothing to judge it by
+            "occ:default/OTHER/${noon - week}" to "", // another event entirely
+        )
+        val stale = staleOccurrences(s, seen, noon - 30 * week, noon + 4 * week)
+        assertEquals(listOf("occ:default/E9/${noon - week}"), stale.map { it.first })
+        assertEquals(
+            listOf(noon - week, noon - week + 1_800_000),
+            stale.single().second,
+            "both times its rows were anchored at, so the end goes with the start",
+        )
     }
 
     @Test

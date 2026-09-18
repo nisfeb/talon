@@ -123,6 +123,44 @@ class OrreryApi(
     }
 
     /**
+     * One body's timeline as the ship keeps it: what was said about it,
+     * when, from where, and whether the row still stands. Read before
+     * taking anything back, because an observation's id is a hash the
+     * ship computes and no client can work out for itself.
+     */
+    suspend fun observationsOf(id: String, token: String): List<KnownObs> {
+        val text = request(bare, HttpMethod.Get, "/api/body/$id") {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        val rows = reading { Json.parseToJsonElement(text).jsonObject }["observations"]?.jsonArray.orEmpty()
+        return rows.mapNotNull { e ->
+            val o = e.jsonObject
+            KnownObs(
+                id = o["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                attr = o["attr"]?.jsonPrimitive?.content ?: "",
+                atMs = o["at"]?.jsonPrimitive?.content
+                    ?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+                    ?: return@mapNotNull null,
+                sourceId = o["source"]?.jsonObject?.get("id")?.jsonPrimitive?.content ?: "",
+                status = o["status"]?.jsonPrimitive?.content ?: "",
+            )
+        }
+    }
+
+    /**
+     * Take one observation back, with a note saying why. The row stays
+     * where it was and stops counting: the ship's fold takes the latest
+     * `at` it has, so a row left behind by an event that moved earlier
+     * would otherwise outlive the truth.
+     */
+    suspend fun retract(id: String, note: String, token: String) {
+        val body = buildJsonObject { put("id", id); put("note", note.take(MAX_NOTE)) }
+        request(bare, HttpMethod.Post, "/api/retract", body.toString()) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+    }
+
+    /**
      * This ship's minted keys, as the owner sees them: no secret, but
      * when each was last used, to the hour. The owner cookie only; a
      * phone holds it too, which is how it knows a computer is on the
@@ -229,6 +267,8 @@ class OrreryApi(
 
     companion object {
         const val APP_PATH = "/apps/orrery"
+        /** The ship refuses a longer note on a retraction. */
+        private const val MAX_NOTE = 500
         private const val NOT_FOUND = 404
         private const val FORBIDDEN = 403
         // activity is in this list because a recurring event is one:
@@ -255,6 +295,11 @@ data class MintedKey(val id: String, val token: String)
 /** A body the ship matched, and how. */
 data class ResolvedBody(val id: String, val kind: String, val name: String, val match: String) {
     val isExact: Boolean get() = match == "exact"
+}
+
+/** One row of a body's timeline, as far as a client needs to read it. */
+data class KnownObs(val id: String, val attr: String, val atMs: Long, val sourceId: String, val status: String) {
+    val stands: Boolean get() = status != "retracted"
 }
 
 /** One of this ship's keys, as the owner lists them. */

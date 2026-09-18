@@ -61,6 +61,34 @@ class OrreryApiTest {
     }
 
     @Test
+    fun `a body's timeline reads out with the ids only the ship can know`() = runTest {
+        val rows = api(
+            body = """{"id":"activity/standup","observations":[
+                {"id":"o-1","attr":"last","value":"2026-09-17T12:00:00Z","at":"2026-09-17T12:00:00Z",
+                 "source":{"kind":"calendar","id":"default/E9"},"status":"live"},
+                {"id":"o-2","attr":"started","value":"x","at":"2026-09-10T12:00:00Z",
+                 "source":{"kind":"calendar","id":"default/E9"},"status":"retracted"},
+                {"attr":"next","at":"2026-09-24T12:00:00Z","status":"live"}]}""",
+        ).observationsOf("activity/standup", "k1.secret")
+        assertEquals("https://ship/apps/orrery/api/body/activity/standup", seen!!.url.toString())
+        assertEquals("Bearer k1.secret", seen!!.headers[HttpHeaders.Authorization])
+        assertEquals(listOf("o-1", "o-2"), rows.map { it.id }, "a row with no id is not one we can take back")
+        assertEquals(1_789_646_400_000L, rows.first().atMs)
+        assertEquals("default/E9", rows.first().sourceId)
+        assertEquals(listOf(true, false), rows.map { it.stands })
+    }
+
+    @Test
+    fun `a retraction goes up under the key, with its reason`() = runTest {
+        api().retract("o-1", "the calendar no longer has this event at this time", "k1.secret")
+        assertEquals("https://ship/apps/orrery/api/retract", seen!!.url.toString())
+        val sent = Json.parseToJsonElement((seen!!.body as TextContent).text).jsonObject
+        assertEquals("o-1", sent["id"]!!.jsonPrimitive.content)
+        assertEquals("the calendar no longer has this event at this time", sent["note"]!!.jsonPrimitive.content)
+        assertNull(seen!!.headers[HttpHeaders.Cookie], "never the owner's cookie")
+    }
+
+    @Test
     fun `open actions read out, and a transition goes up with its note`() = runTest {
         val list = api(body = """[{"id":"1758-a","kind":"message","title":"Tell Sarah","payload":{"recipient":"~sampel-palnet","text":"on my way"},"about":["person/sarah"],"due":null,"by":"claude-code","proposed":"2026-09-17T00:00:00Z","status":"approved","note":"","history":[]}]""")
             .actions("k1.secret")

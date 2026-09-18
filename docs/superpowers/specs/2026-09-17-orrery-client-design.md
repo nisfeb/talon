@@ -29,6 +29,8 @@ The ship is the source of truth and the owner's reconcile pass consolidates what
 7. **Sensitive facts keep their two names.** `health` and `income` are the ship's, kept from keys by policy, so the triage writes neither and drops a claim that reaches for another name for them.
 8. **Replay-safe by construction.** The pipe can be turned off and on, or run again from nothing, and the ship ends up the same.
 
+Said once is not said for ever: an event people edit has to go through the pass again. The decision remembered for `cal:<cal>/<uid>` carries a hash of the event as against its times, over the title, the note, the place, the cadence and the tags, so a rewritten description or a new location is noticed on the next pass and what the event is gets said again. A time is caught the other way round: an occurrence this install wrote that the window no longer holds has moved or been called off, and its rows are retracted by id, read from `GET /api/body/<id>`, because the ship keeps the latest `at` of the rows it has and a meeting moved earlier would otherwise go on reading as the time it used to be at. Each occurrence is remembered with its end as well as its start, so the rows at both anchors come back off together, and the occurrence is forgotten so the new time is written as new. Only inside the window, which is the one stretch of time the client can see the truth of.
+
 ## 4. The structural pipe
 
 | Talon data | Body | Observations | source kind and id |
