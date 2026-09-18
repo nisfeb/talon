@@ -198,6 +198,32 @@ class OrreryRepo(
     }
 
     /**
+     * An orrery task is a todo in the calendar, so the person sees it
+     * where they see the rest of what they have to do. The link is kept
+     * in the todo, never here, which is what makes a pass that starts
+     * from nothing safe.
+     */
+    private suspend fun mirrorTasks(a: OrreryApi, token: String, url: String) {
+        val actions = a.actions(token, status = "all")
+        if (actions.none { it.kind == "task" }) return
+        val cal = CalendarApi(http, url)
+        val moves = taskMoves(actions, cal.tasks())
+        if (moves.isEmpty()) return
+        val ball = cal.config().ball.takeIf { it.isNotBlank() } ?: return
+        for (m in moves) {
+            when (m) {
+                is TaskMove.Make -> cal.poke(ball, todoBody(m.action))
+                is TaskMove.Tick -> cal.poke(ball, io.nisfeb.talon.calendar.doneBody(m.todoId, true))
+                is TaskMove.Drop -> cal.poke(ball, io.nisfeb.talon.calendar.deleteBody(m.todoId))
+                // The owner ticked it where they saw it. If an executor
+                // holds the claim the ship refuses, and the next pass
+                // finds it still ticked and says so again.
+                is TaskMove.Report -> a.transition(token, m.actionId, "done", "ticked in the calendar")
+            }
+        }
+    }
+
+    /**
      * What the ship was told about occurrences the calendar has since
      * moved or called off, taken back, and those occurrences forgotten
      * so the new times are written as new. Rows of this event only, and
@@ -379,6 +405,7 @@ class OrreryRepo(
             if (record.isNotEmpty()) sent.putAll(record)
             db.orreryAccounts().upsert(row.copy(messagesCursor = messagesCursor, mailCursor = mailCursor, calendarCursor = nowMs))
             runCatching { a.actions(row.token) }.onSuccess { _actions.value = it }.onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
+            runCatching { mirrorTasks(a, row.token, url) }.onFailure { Log.i(TAG, "tasks skipped: ${it.message}") }
             _lastPushMs.value = nowMs
             _error.value = if (refused == 0) null else "$refused refused: ${firstReason ?: "no reason given"}"
         } catch (e: OrreryError.Refused) {

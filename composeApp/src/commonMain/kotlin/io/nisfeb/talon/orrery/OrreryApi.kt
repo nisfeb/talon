@@ -190,8 +190,8 @@ class OrreryApi(
     }
 
     /** The open actions the key may see: proposed and approved, newest first as the ship lists them. */
-    suspend fun actions(token: String): List<OrreryAction> {
-        val text = request(bare, HttpMethod.Get, "/api/actions?status=open") { header(HttpHeaders.Authorization, "Bearer $token") }
+    suspend fun actions(token: String, status: String = "open"): List<OrreryAction> {
+        val text = request(bare, HttpMethod.Get, "/api/actions?status=$status") { header(HttpHeaders.Authorization, "Bearer $token") }
         val arr = reading { Json.parseToJsonElement(text) }.let { it as? kotlinx.serialization.json.JsonArray ?: it.jsonObject["actions"]?.jsonArray }.orEmpty()
         return arr.mapNotNull { e ->
             val a = e.jsonObject

@@ -46,7 +46,7 @@ Said once is not said for ever: an event people edit has to go through the pass 
 | A calendar event with a location | none | `person/me.location = <place>` at the start until the end, conf 60 | `calendar`, `<cal>/<id>` |
 | A call whose transcript was published, 1:1 or a party line | `situation/call-<time>`, name from the transcript's title, and a `person/<ship>` for each speaker | `started`, `participants` = me and every speaker, `transcript` = the Lattice address; `person/x.last-contact` for each speaker | `talon-call`, the transcript's `urb://` address |
 
-Calendar tasks stay in the calendar. Orrery's `task` is its own list, and orrery's `calendar` action kind runs the other way: the analyst proposes, Talon creates the event. Groups get no bodies in v1.
+Orrery's tasks and the calendar's todos are one list, and Talon is what keeps them in step, being the client that reads both. An approved or claimed `task` becomes a todo carrying the action's id in `meta.orrery`, which the calendar passes through untouched, so a pass that remembers nothing still finds the todo it made. An action the ship marks done ticks its todo, one dismissed or failed takes the todo away, and a todo the person ticks where they saw it tells the ship the action is done. Nothing reopens what the other side closed. A todo is never read back as an event: the reader takes `timed`, `allday` and `date` rows and nothing else. Orrery's `calendar` action kind runs the other way, the analyst proposing and Talon creating the event. Groups get no bodies in v1.
 
 A body slug for a person is the @p without its sig, with `--` for a comet's separators. The ship is identity, so resolve matches it exactly, and a share is addressed by it.
 

@@ -108,6 +108,12 @@ fun doneBody(id: String, done: Boolean): JsonObject = buildJsonObject {
     put("done", done)
 }
 
+/** Take an event or a todo away. */
+fun deleteBody(id: String): JsonObject = buildJsonObject {
+    put("action", "del-event")
+    put("id", id)
+}
+
 /** "work, family" -> ["work", "family"]: trimmed, blanks and repeats dropped. */
 fun parseTags(text: String): List<String> =
     text.split(',').map { it.trim().trimStart('#') }.filter { it.isNotEmpty() }.distinct()

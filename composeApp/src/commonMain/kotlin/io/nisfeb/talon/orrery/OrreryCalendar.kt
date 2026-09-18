@@ -114,9 +114,14 @@ data class Occurrence(val key: String, val endMs: Long, val settled: Boolean) {
     }
 }
 
+/** What the calendar calls an event. A todo is not one. */
+private val EVENT_CATS = setOf("timed", "allday", "date")
+
 /** The occurrences of a window, grouped into the events they belong to. */
 fun calendarSubjects(rows: List<CalendarRow>): List<CalendarSubject> =
-    rows.filter { !it.isTask && it.name.isNotBlank() && it.r > it.l }
+    // By kind, not by what it is not: a todo is never an event, and
+    // neither is anything else the calendar grows later.
+    rows.filter { it.cat in EVENT_CATS && it.name.isNotBlank() && it.r > it.l }
         .groupBy { it.cal to it.id }
         .map { (k, occ) ->
             val sorted = occ.sortedBy { it.l }
@@ -189,8 +194,8 @@ private fun occurrencesOn(
         obs += Obs(id, "last", JsonPrimitive(isoUtc(row.l)), row.l, sourceKind = "calendar", sourceId = source(subject))
         keys += Occurrence(key, row.r, settled = true)
     }
-    nextOf(subject, nowMs)?.let { (next, anchor) ->
-        obs += Obs(id, "next", JsonPrimitive(isoUtc(next)), anchor, sourceKind = "calendar", sourceId = source(subject))
+    nextOf(subject, nowMs)?.let { (next, anchor, ends) ->
+        obs += Obs(id, "next", JsonPrimitive(isoUtc(next)), anchor, untilMs = ends, sourceKind = "calendar", sourceId = source(subject))
     }
     return CalendarWrite(id, Facts(observations = obs), keys, creates = false)
 }
@@ -243,7 +248,9 @@ private fun newActivity(
         obs("last", JsonPrimitive(isoUtc(row.l)), row.l)
         keys += Occurrence(key, row.r, settled = true)
     }
-    nextOf(subject, nowMs)?.let { (next, anchor) -> obs("next", JsonPrimitive(isoUtc(next)), anchor) }
+    nextOf(subject, nowMs)?.let { (next, anchor, ends) ->
+        obs.add(Obs(id, "next", JsonPrimitive(isoUtc(next)), anchor, untilMs = ends, sourceKind = "calendar", sourceId = source(subject)))
+    }
     return CalendarWrite(id, Facts(listOf(body) + cast(subject, people, create = true).second, obs), keys, creates = true)
 }
 
@@ -398,16 +405,19 @@ private fun situationObs(
 }
 
 /**
- * The next occurrence and the time it became the next one: the end of
- * the one before it. An `at` in the future would not count until it
- * arrived, and the clock is not the event's own time, so the previous
- * occurrence's end is the honest anchor. A series with none behind it
- * has only today to stand on.
+ * The next occurrence, the time it became the next one, and the time
+ * it stops being it.
+ *
+ * The anchor is the end of the occurrence before it: an `at` in the
+ * future would not count until it arrived, and the clock is not the
+ * event's own time. The expiry is the occurrence's own end, so a next
+ * that has happened stops standing without anybody coming back to
+ * retract it. A series with none behind it has only today to stand on.
  */
-private fun nextOf(subject: CalendarSubject, nowMs: Long): Pair<Long, Long>? {
+private fun nextOf(subject: CalendarSubject, nowMs: Long): Triple<Long, Long, Long>? {
     val next = subject.occurrences.firstOrNull { it.l > nowMs } ?: return null
     val previous = subject.occurrences.lastOrNull { it.l <= nowMs }
-    return next.l to (previous?.r ?: dayOf(nowMs).second)
+    return Triple(next.l, previous?.r ?: dayOf(nowMs).second, next.r)
 }
 
 /** A readable rule for the schema's `schedule`, from what the calendar says. */
