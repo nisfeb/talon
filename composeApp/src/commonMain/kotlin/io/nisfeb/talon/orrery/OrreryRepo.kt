@@ -277,10 +277,9 @@ class OrreryRepo(
                 val known = sent.get(s, "person:${c.ship}")?.value
                 val fresh = known != "$id|$digest"
                 if (fresh) remember("person:${c.ship}", "$id|$digest")
-                facts += Facts(
-                    bodies = if (fresh && !people.shipHasBody(id)) listOf(body) else emptyList(),
-                    observations = contactStatus(c, id),
-                )
+                // The body only. A status line is read, not sent: see
+                // contactStatus, and the triage below.
+                facts += Facts(bodies = if (fresh && !people.shipHasBody(id)) listOf(body) else emptyList())
             }
 
             val posts = db.messages().postsAfter(row.messagesCursor, s, MESSAGES_PER_PASS)
@@ -303,7 +302,7 @@ class OrreryRepo(
                 )
                 mailCursor = freshMail.maxOfOrNull { it.last } ?: mailCursor
             }.onFailure { Log.i(TAG, "mail skipped: ${it.message}") }
-            facts += triage(a, row, posts, s, nowMs, url, freshMail) { key -> remember(key) }
+            facts += triage(a, row, posts, s, nowMs, url, freshMail, book) { key, value -> remember(key, value) }
 
             runCatching { CalendarApi(http, url).window(nowMs - BACKFILL_MS, nowMs + AHEAD_MS) }.onSuccess { w ->
                 // The calendars this ship keeps itself. An event on one
@@ -311,6 +310,9 @@ class OrreryRepo(
                 val ourCalendars = runCatching {
                     CalendarApi(http, url).calendars().filter { it.kind == "local" }.map { it.id }.toSet()
                 }.getOrDefault(emptySet())
+                // Who the ship keeps, so a name in a title lands on the
+                // person it already has.
+                val cast = view?.let { EventPeople.of(it.bodies) } ?: EventPeople.NONE
                 for (subject in calendarSubjects(w.rows)) {
                     // The body decided for this event, and the event as
                     // it was when that decision was made.
@@ -335,7 +337,8 @@ class OrreryRepo(
                         }
                     }
                     val write = calendarWrite(
-                        subject, decided, hits, seen.keys - dropped, s, nowMs, changed, subject.cal in ourCalendars,
+                        subject, decided, hits, seen.keys - dropped, s, nowMs, changed,
+                        subject.cal in ourCalendars, cast,
                     )
                     facts += write.facts
                     if (mark != "${write.bodyId}|$digest") remember(subject.key, "${write.bodyId}|$digest")
@@ -465,10 +468,17 @@ class OrreryRepo(
         nowMs: Long,
         url: String,
         freshMail: List<io.nisfeb.talon.mail.InboxEntry>,
-        remember: (String) -> Unit,
+        book: Set<String>,
+        remember: (String, String) -> Unit,
     ): Facts {
         val spoken = pendingLock.withLock { transcripts.toList().also { transcripts.clear() } }
-        if (posts.isEmpty() && spoken.isEmpty() && freshMail.isEmpty()) return Facts()
+        // Status lines change when nothing is said, so they are counted
+        // in before the pass decides it has nothing to do.
+        val lines = db.contacts().all().filter { it.ship == s || it.ship in book }
+            .mapNotNull { c -> contactStatus(c)?.let { (line, at) -> Triple(c.ship, line, at) } }
+        val read = db.orrerySent().some(s, lines.map { "status:${it.first}" }).associate { it.key to it.value }
+        val fresh = lines.filter { (ship, line, _) -> read["status:$ship"] != line.hashCode().toString(16) }
+        if (posts.isEmpty() && spoken.isEmpty() && freshMail.isEmpty() && fresh.isEmpty()) return Facts()
         // A phone with a computer on the job leaves the reading to it. The
         // phone's cursor still moves; the computer reads these from its
         // own, which did not. ponytail: a computer that never returns
@@ -493,7 +503,7 @@ class OrreryRepo(
             val key = "msg:${m.whom}/${m.id}"
             if (key in handled) continue
             val text = StoryCache.textFor(m.id, m.contentJson)
-            remember(key)
+            remember(key, "")
             if (!inScope(m.whom, text, s, ourNick, allowed)) continue
             val kind = if (m.whom.startsWith("~") || m.whom.startsWith("0v")) "talon-dm" else "talon-chat"
             // A message is read with the ones before it: "yes, at 8"
@@ -511,6 +521,15 @@ class OrreryRepo(
                 val before = said.subList(maxOf(0, i - ModelExtractor.CONTEXT_MESSAGES), i).map { it.ship to it.text }
                 up += triageText(r, s, nowMs, sp.text, sp.ship, nowMs, address, "$i", "talon-call", "$address#$i", before)
             }
+        }
+        // A status line, read the way a message is read. Once per line:
+        // the digest is of the words, so a line put back says nothing new.
+        for ((ship, line, at) in fresh.take(STATUS_PER_PASS)) {
+            remember("status:$ship", line.hashCode().toString(16))
+            up += triageText(
+                r, s, nowMs, line, ship, at.coerceAtMost(nowMs), "contact:$ship", ship,
+                "contacts", "talon://profile/$ship",
+            )
         }
         // Mail is addressed to us, so every message in a fresh thread is in scope.
         for (e in freshMail.take(MAIL_THREADS_PER_PASS)) {
@@ -646,6 +665,9 @@ class OrreryRepo(
         const val TRUST_AFTER = 3
         // ponytail: a per-pass cap; a per-day budget when a phone needs one.
         const val MODEL_PER_PASS = 20
+
+        /** Status lines read in one pass, so a first run does not spend every model run on them. */
+        const val STATUS_PER_PASS = 5
         const val GATE_EXAMPLES = 50
         private const val SCOPE_KEY = "scope:activity"
         const val MAIL_THREADS_PER_PASS = 10

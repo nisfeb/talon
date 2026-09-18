@@ -184,6 +184,56 @@ class OrreryCalendarTest {
         )
     }
 
+    private val cast = EventPeople.of(listOf(
+        KnownBody("person/linus", "Linus Quill", listOf("Linus"), null),
+        KnownBody("person/magnus", "Magnus", emptyList(), "~sampel-palnet"),
+    ))
+
+    private fun refs(w: CalendarWrite) =
+        w.facts.observations.filter { it.attr == "participants" }.map { it.value.jsonObject["ref"]!!.jsonPrimitive.content }
+
+    @Test
+    fun `everyone the event names is in it, and the ship's own people are used`() {
+        val s = subject(row(noon, title = "Rose and Linus- Opti Sail", uid = "S1"))
+        val w = calendarWrite(s, null, emptyList(), emptySet(), me, noon, people = cast)
+        assertEquals(listOf("person/me", "person/rose", "person/linus"), refs(w))
+        assertEquals(
+            listOf("person/rose"),
+            w.facts.bodies.filter { it.id.startsWith("person/") }.map { it.id },
+            "Linus the ship already has; Rose it does not, so Rose is made once",
+        )
+        assertEquals("Rose", w.facts.bodies.single { it.id == "person/rose" }.name)
+    }
+
+    @Test
+    fun `a production, a team or a place is never a person`() {
+        val none = subject(row(noon, "weekly", title = "Nutcracker rehearsal", uid = "S2"))
+        val w = calendarWrite(none, null, emptyList(), emptySet(), me, noon + 60_000, people = cast)
+        assertEquals(listOf("person/me"), refs(w))
+        assertTrue(w.facts.bodies.none { it.id.startsWith("person/") }, "no body for a ballet")
+        // A leading word the ship does keep as a person is that person.
+        val known = subject(row(noon, "weekly", title = "Magnus Fencing Lesson", uid = "S3"))
+        val w2 = calendarWrite(known, null, emptyList(), emptySet(), me, noon + 60_000, people = cast)
+        assertEquals(listOf("person/me", "person/magnus"), refs(w2))
+    }
+
+    @Test
+    fun `a description names whoever the ship already knows`() {
+        val s = subject(row(noon, title = "Sailing", uid = "S4", note = "bring Linus's helmet"))
+        val w = calendarWrite(s, null, emptyList(), emptySet(), me, noon, people = cast)
+        assertEquals(listOf("person/me", "person/linus"), refs(w))
+    }
+
+    @Test
+    fun `an event said again names nobody new`() {
+        // A rename must not recreate somebody the owner's reconcile merged
+        // away: only the pass that makes the event may make a person.
+        val s = subject(row(noon, title = "Rose and Linus- Opti Sail", uid = "S5"))
+        val again = calendarWrite(s, "situation/opti-sail", emptyList(), emptySet(), me, noon, changed = true, people = cast)
+        assertEquals(listOf("person/me", "person/linus"), refs(again))
+        assertTrue(again.facts.bodies.isEmpty())
+    }
+
     @Test
     fun `tasks and nameless rows are not events`() {
         assertTrue(calendarSubjects(listOf(row(noon).copy(cat = "todo"))).isEmpty())

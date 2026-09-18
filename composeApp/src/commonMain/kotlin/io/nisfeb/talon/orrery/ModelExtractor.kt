@@ -42,6 +42,7 @@ object ModelExtractor {
         You read one chat message and write down what it states is true now about the listed bodies. Answer with JSON only, in this shape: {"claims":[{"subject":"<id>","attr":"<word>","value":<value>,"conf":<0-100>,"until_hours":<number, optional>}]}
         subject is copied exactly from the listed ids, or is the author's id. Only the author and the bodies the message names can be subjects. attr is one short lowercase word: status, location, phone, email. value is a short string; or {"ref":"<listed id>"} when it names a listed body; or null when something has stopped being true. conf is how sure you are. until_hours is how long a temporary claim holds, such as being somewhere. At most three claims.
         Claim only what the message states as fact about now. A question, a joke, a wish, a plan, or the past is nothing: {"claims":[]}.
+        conf is 90 for a plain statement, 60 for something you are reading into it, 40 for a guess. A medical or a money fact is not yours to write: leave it out.
         A status is what someone is doing or dealing with right now, in plain words, as an onlooker would put it: "on jury duty", "stranded, waiting for a tow", "travelling", "sick". It is never a feeling, a quote or a wish. A feeling goes under mood, which is thrown away, so that it never lands on status.
         Earlier messages are there so the new one reads right: a reply, a pronoun, a mood that carries over. Claim nothing from them.
 

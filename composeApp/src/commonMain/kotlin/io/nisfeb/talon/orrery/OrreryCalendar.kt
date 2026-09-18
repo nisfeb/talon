@@ -17,6 +17,45 @@ import kotlinx.serialization.json.put
  * with fixtures.
  */
 
+/**
+ * The people the ship keeps, by the first name each goes by. Built
+ * from the state view, so a name in a title lands on the person the
+ * ship already has rather than a second one by the same name.
+ */
+class EventPeople(
+    private val byFirstName: Map<String, String>,
+    /**
+     * Whether the ship's own people were read this pass. Nobody is
+     * created when they were not: a name that looks new against an
+     * empty view is a twin of somebody the ship already has.
+     */
+    val known: Boolean = true,
+) {
+    fun idFor(name: String): String? = byFirstName[name.trim().lowercase()]
+
+    /** The people named in [text] whom the ship already keeps. */
+    fun named(text: String?): List<String> =
+        WORDS.split((text ?: "").lowercase()).filter { it.length >= 2 }.mapNotNull { byFirstName[it] }.distinct()
+
+    companion object {
+        val NONE = EventPeople(emptyMap(), known = false)
+        private val WORDS = Regex("[^a-z0-9]+")
+
+        /** By the name and every alias a person body carries, a ship's @p aside. */
+        fun of(bodies: List<KnownBody>): EventPeople {
+            val out = mutableMapOf<String, String>()
+            for (b in bodies.filter { it.id.startsWith("person/") }) {
+                for (word in (listOfNotNull(b.name) + b.aliases)) {
+                    if (word.startsWith("~") || word.isBlank()) continue
+                    // putIfAbsent is the JVM's; common code cannot have it.
+                    firstNameOf(word)?.let { if (it !in out) out[it] = b.id }
+                }
+            }
+            return EventPeople(out)
+        }
+    }
+}
+
 /** One event and the occurrences of it the window holds, newest last. */
 data class CalendarSubject(
     val cal: String,
@@ -102,14 +141,15 @@ fun calendarWrite(
     nowMs: Long,
     changed: Boolean = false,
     ours: Boolean = false,
+    people: EventPeople = EventPeople.NONE,
 ): CalendarWrite {
     val existing = decided ?: hits.firstOrNull { it.kind == "activity" || it.kind == "situation" }?.id
     val kind = existing?.substringBefore('/')
     return when {
-        kind == "activity" -> occurrencesOn(existing!!, subject, written, nowMs, changed, ours)
-        kind == "situation" -> onSituation(existing!!, subject, written, changed)
-        subject.repeats -> newActivity(subject, written, ourShip, nowMs, ours)
-        else -> newSituation(subject, written, ourShip)
+        kind == "activity" -> occurrencesOn(existing!!, subject, written, nowMs, changed, ours, people)
+        kind == "situation" -> onSituation(existing!!, subject, written, changed, people)
+        subject.repeats -> newActivity(subject, written, ourShip, nowMs, ours, people)
+        else -> newSituation(subject, written, ourShip, people)
     }
 }
 
@@ -121,10 +161,11 @@ private fun occurrencesOn(
     nowMs: Long,
     changed: Boolean,
     ours: Boolean,
+    people: EventPeople,
 ): CalendarWrite {
     val obs = mutableListOf<Obs>()
     val keys = mutableListOf<Pair<String, Long>>()
-    if (changed) obs += activityContent(id, subject, nowMs, ours)
+    if (changed) obs += activityContent(id, subject, nowMs, ours, people)
     for (row in subject.occurrences.filter { it.l <= nowMs }) {
         val key = occurrenceKey(subject, row)
         if (key in written) continue
@@ -138,11 +179,19 @@ private fun occurrencesOn(
 }
 
 /** The same one-off seen again: its own facts, on the body the ship has. */
-private fun onSituation(id: String, subject: CalendarSubject, written: Set<String>, changed: Boolean): CalendarWrite {
+private fun onSituation(
+    id: String,
+    subject: CalendarSubject,
+    written: Set<String>,
+    changed: Boolean,
+    people: EventPeople,
+): CalendarWrite {
     val row = subject.occurrences.last()
     val key = occurrenceKey(subject, row)
     if (key in written && !changed) return CalendarWrite(id, Facts(), emptyList(), creates = false)
-    return CalendarWrite(id, Facts(observations = situationObs(id, subject, row)), listOf(key to row.r), creates = false)
+    return CalendarWrite(
+        id, Facts(observations = situationObs(id, subject, row, people)), listOf(key to row.r), creates = false,
+    )
 }
 
 /**
@@ -150,7 +199,14 @@ private fun onSituation(id: String, subject: CalendarSubject, written: Set<Strin
  * and the title as aliases so the next client to ask resolves it, and
  * every occurrence so far as a `last` row at its own time.
  */
-private fun newActivity(subject: CalendarSubject, written: Set<String>, ourShip: String, nowMs: Long, ours: Boolean): CalendarWrite {
+private fun newActivity(
+    subject: CalendarSubject,
+    written: Set<String>,
+    ourShip: String,
+    nowMs: Long,
+    ours: Boolean,
+    people: EventPeople,
+): CalendarWrite {
     val id = activityIdFor(subject)
     val aliases = (listOf(subject.uid, subject.title, normalizeTitle(subject.title)) + subject.first.tags)
         .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
@@ -159,7 +215,7 @@ private fun newActivity(subject: CalendarSubject, written: Set<String>, ourShip:
     val keys = mutableListOf<Pair<String, Long>>()
     fun obs(attr: String, value: JsonElement, at: Long) =
         obs.add(Obs(id, attr, value, at, sourceKind = "calendar", sourceId = source(subject)))
-    obs += activityContent(id, subject, nowMs, ours)
+    obs += activityContent(id, subject, nowMs, ours, people, create = true)
     for (row in subject.occurrences.filter { it.l <= nowMs }) {
         val key = occurrenceKey(subject, row)
         if (key in written) continue
@@ -167,17 +223,55 @@ private fun newActivity(subject: CalendarSubject, written: Set<String>, ourShip:
         keys += key to row.r
     }
     nextOf(subject, nowMs)?.let { (next, anchor) -> obs("next", JsonPrimitive(isoUtc(next)), anchor) }
-    return CalendarWrite(id, Facts(listOf(body), obs), keys, creates = true)
+    return CalendarWrite(id, Facts(listOf(body) + cast(subject, people, create = true).second, obs), keys, creates = true)
 }
 
 /** A one-off the ship does not have: a situation, started and ended. */
-private fun newSituation(subject: CalendarSubject, written: Set<String>, ourShip: String): CalendarWrite {
+private fun newSituation(subject: CalendarSubject, written: Set<String>, ourShip: String, people: EventPeople): CalendarWrite {
     val row = subject.occurrences.last()
     val id = situationIdFor(subject)
     val aliases = (listOf(subject.uid) + subject.first.tags).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
     val body = OBody(id, name = subject.title, aliases = aliases)
     val key = occurrenceKey(subject, row)
-    return CalendarWrite(id, Facts(listOf(body), situationObs(id, subject, row)), listOf(key to row.r), creates = true)
+    return CalendarWrite(
+        id,
+        Facts(listOf(body) + cast(subject, people, create = true).second, situationObs(id, subject, row, people, create = true)),
+        listOf(key to row.r),
+        creates = true,
+    )
+}
+
+/**
+ * Everyone the event names. Its title is certain of some ("Adelaide-
+ * Ballet/Tap", "Magnus Birthday"), and its leading word names a person
+ * only where the ship already keeps one by that name, so a production,
+ * a team or a place stays what it is. Its description names whoever the
+ * ship already knows: "bring Linus's helmet" is Linus.
+ *
+ * A name the ship lacks is created, which is the one place this client
+ * makes a person body without being told to by a contact. The ship's
+ * own reconcile reads titles the same way.
+ */
+private fun cast(subject: CalendarSubject, people: EventPeople, create: Boolean): Pair<List<String>, List<OBody>> {
+    val ids = mutableListOf<String>()
+    val made = mutableListOf<OBody>()
+    val (certain, lead) = namesInTitle(subject.title)
+    for (name in certain) {
+        val id = people.idFor(name)
+        if (id != null) {
+            ids += id
+        } else if (create && people.known) {
+            val slug = name.lowercase().replace(Regex("[^a-z0-9-]+"), "-").trim('-')
+            if (slug.isNotEmpty()) {
+                ids += "person/$slug"
+                made += OBody("person/$slug", name = name)
+            }
+        }
+    }
+    if (certain.isEmpty() && lead != null) people.idFor(lead)?.let { ids += it }
+    ids += people.named(subject.title)
+    ids += people.named(subject.first.note)
+    return ids.distinct().filter { it != "person/me" } to made.distinctBy { it.id }
 }
 
 /**
@@ -185,14 +279,24 @@ private fun newSituation(subject: CalendarSubject, written: Set<String>, ourShip
  * runs on, where it is and that we are in it, true from the last time
  * it came round. Said again whenever the event itself changes.
  */
-private fun activityContent(id: String, subject: CalendarSubject, nowMs: Long, ours: Boolean): List<Obs> {
+private fun activityContent(
+    id: String,
+    subject: CalendarSubject,
+    nowMs: Long,
+    ours: Boolean,
+    people: EventPeople = EventPeople.NONE,
+    create: Boolean = false,
+): List<Obs> {
     val asOf = subject.occurrences.lastOrNull { it.l <= nowMs }?.l ?: subject.first.l
     return buildList {
-        fun obs(attr: String, value: JsonElement) =
-            add(Obs(id, attr, value, asOf, sourceKind = "calendar", sourceId = source(subject)))
+        fun obs(attr: String, value: JsonElement, conf: Int = 100) =
+            add(Obs(id, attr, value, asOf, conf = conf, sourceKind = "calendar", sourceId = source(subject)))
         obs("cadence", JsonPrimitive(subject.first.kind))
         obs("schedule", JsonPrimitive(scheduleOf(subject)))
         obs("participants", buildJsonObject { put("ref", "person/me") })
+        for (who in cast(subject, people, create).first) {
+            obs("participants", buildJsonObject { put("ref", who) }, conf = 85)
+        }
         // Only for a calendar this ship keeps: on one another ship
         // shares, whose activity it is is that ship's to say.
         if (ours) obs("organizer", buildJsonObject { put("ref", "person/me") })
@@ -232,12 +336,21 @@ fun staleOccurrences(
  * its end. An "open" row dated after a close reopens it, which is how a
  * late reminder reopened a trip that had been over for months.
  */
-private fun situationObs(id: String, subject: CalendarSubject, row: CalendarRow): List<Obs> = buildList {
-    fun obs(attr: String, value: JsonElement, at: Long) =
-        add(Obs(id, attr, value, at, sourceKind = "calendar", sourceId = source(subject)))
+private fun situationObs(
+    id: String,
+    subject: CalendarSubject,
+    row: CalendarRow,
+    people: EventPeople = EventPeople.NONE,
+    create: Boolean = false,
+): List<Obs> = buildList {
+    fun obs(attr: String, value: JsonElement, at: Long, conf: Int = 100) =
+        add(Obs(id, attr, value, at, conf = conf, sourceKind = "calendar", sourceId = source(subject)))
     obs("started", JsonPrimitive(isoUtc(row.l)), row.l)
     obs("ended", JsonPrimitive(isoUtc(row.r)), row.r)
     obs("participants", buildJsonObject { put("ref", "person/me") }, row.l)
+    for (who in cast(subject, people, create).first) {
+        obs("participants", buildJsonObject { put("ref", who) }, row.l, conf = 85)
+    }
     if (row.location.isNotBlank()) obs("location", JsonPrimitive(row.location), row.l)
 }
 

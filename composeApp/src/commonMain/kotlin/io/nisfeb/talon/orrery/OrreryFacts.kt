@@ -72,11 +72,19 @@ fun personBody(c: ContactEntity, id: String, handle: String?, longHandle: String
     return OBody(id, name = nick ?: handle, aliases = aliases)
 }
 
-/** What their status line says, when it says anything and says when. */
-fun contactStatus(c: ContactEntity, id: String): List<Obs> {
-    val status = c.status?.trim()?.takeIf { it.isNotEmpty() } ?: return emptyList()
-    val at = c.statusUpdatedMs ?: return emptyList()
-    return listOf(Obs(id, "status", JsonPrimitive(status), at, sourceKind = "contacts", sourceId = c.ship))
+/**
+ * What their status line says, when it says anything and says when.
+ *
+ * Not a fact, and not sent as one. Tlon's status field is a social
+ * field: people write jokes, in-jokes, emoji and quotes in it, and a
+ * status in orrery is what somebody is doing or dealing with. So the
+ * line goes to the triage like any other text, and what the reader
+ * makes of it lands in the tray for the person to judge.
+ */
+fun contactStatus(c: ContactEntity): Pair<String, Long>? {
+    val status = c.status?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val at = c.statusUpdatedMs ?: return null
+    return status to at
 }
 
 /** What a body says about itself, so a rename is noticed and a replay is not. */

@@ -70,11 +70,11 @@ class OrreryFactsTest {
         // The ship may already keep them as person/sarah; the pass says
         // which body this is, and the body just says what it looks like.
         assertEquals(OBody("person/sarah", "Bus", listOf("Bus", "~bus")), personBody(c, "person/sarah", handle = "~bus", longHandle = null))
-        val status = contactStatus(c, "person/sarah").single()
-        assertEquals("status", status.attr)
-        assertEquals(JsonPrimitive("at the shop"), status.value)
-        assertEquals(noon, status.atMs)
-        assertTrue(contactStatus(c.copy(status = null), "person/sarah").isEmpty())
+        // The status line is text to be read, not a fact to be sent:
+        // Tlon's field is social, and a joke is not a circumstance.
+        assertEquals("at the shop" to noon, contactStatus(c))
+        assertEquals(null, contactStatus(c.copy(status = null)))
+        assertEquals(null, contactStatus(c.copy(statusUpdatedMs = null)), "a line with no time says nothing")
     }
 
     @Test

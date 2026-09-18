@@ -39,6 +39,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -202,14 +203,20 @@ class OrreryLiveTest {
                 withTimeout(60_000) { while (repo.lastPushMs.value == null) delay(200) }
                 assertEquals(null, repo.error.value, "the pass reported nothing refused")
                 val noticed = db.orreryNoticed().pending(ship).first()
-                assertEquals(listOf("location"), noticed.map { it.attr }, "the triage read the DM against the ship's bodies: $noticed")
-                assertEquals(personId(peer), noticed.single().subject)
+                // The DM says where they are. The status line may add a
+                // claim of its own, which is the tray's business too.
+                val located = noticed.filter { it.attr == "location" }
+                assertEquals(1, located.size, "the triage read the DM against the ship's bodies: $noticed")
+                assertEquals(personId(peer), located.single().subject)
 
                 val body = owner.get("$url/apps/orrery/api/body/${personId(peer)}").bodyAsText()
                 val view = Json.parseToJsonElement(body).jsonObject
                 assertTrue("last-contact" in body, "the ship holds the contact: $body")
-                assertTrue("on the road" in body, "and the status line: $body")
                 assertTrue("Sampel" in body, "with the nickname as an alias: $body")
+                // Tlon's status field is a social one. What it says is
+                // read like any other text and waits in the tray; it is
+                // never sent as a fact about the person.
+                assertFalse("on the road" in body, "a status line went up as a fact: $body")
                 println("OrreryLiveTest: ship view keys ${view.keys}")
 
                 // The whole point of the sent-record: a pass that runs
