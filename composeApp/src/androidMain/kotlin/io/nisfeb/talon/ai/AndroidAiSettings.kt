@@ -82,9 +82,17 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
     }
 
     override fun setSttApiKey(key: String) {
-        val removedAt = if (key.isBlank()) io.nisfeb.talon.util.nowMs() else 0L
-        prefs.edit().putString(KEY_STT_API_KEY, key).putLong(KEY_STT_REMOVED_AT, removedAt).apply()
-        _state.value = _state.value.copy(sttApiKey = key, sttApiKeyRemovedAtMs = removedAt)
+        val now = io.nisfeb.talon.util.nowMs()
+        val removedAt = if (key.isBlank()) now else 0L
+        val setAt = if (key.isBlank()) _state.value.sttApiKeySetAtMs else now
+        prefs.edit()
+            .putString(KEY_STT_API_KEY, key)
+            .putLong(KEY_STT_REMOVED_AT, removedAt)
+            .putLong(KEY_STT_SET_AT, setAt)
+            .apply()
+        _state.value = _state.value.copy(
+            sttApiKey = key, sttApiKeyRemovedAtMs = removedAt, sttApiKeySetAtMs = setAt,
+        )
         onStateChange?.invoke(_state.value, false)
     }
 
@@ -121,7 +129,11 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         onStateChange?.invoke(_state.value, wasEnabled && !enabled)
     }
 
-    override fun applyRemote(config: AiSettings.Config) {
+    override fun applyRemote(remote: AiSettings.Config) {
+        // A credential this device holds is never dropped by arriving
+        // state. See keepingCredentials: the rule lives here so that no
+        // future caller can lose a key by accident.
+        val config = remote.keepingCredentials(_state.value)
         prefs.edit()
             .putString(KEY_PROVIDER, config.provider.name)
             .putString(KEY_API_KEY, config.apiKey)
@@ -138,6 +150,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putString(KEY_BRAVE_API_KEY, config.braveApiKey)
             .putString(KEY_STT_API_KEY, config.sttApiKey)
             .putLong(KEY_STT_REMOVED_AT, config.sttApiKeyRemovedAtMs)
+            .putLong(KEY_STT_SET_AT, config.sttApiKeySetAtMs)
             .putString(KEY_PRIVATE_BASE_URL, config.privateBaseUrl?.takeIf { it.isNotBlank() })
             .putString(KEY_PRIVATE_MODEL, config.privateModel?.takeIf { it.isNotBlank() })
             .putString(KEY_PRIVATE_API_KEY, config.privateApiKey)
@@ -211,6 +224,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             braveApiKey = prefs.getString(KEY_BRAVE_API_KEY, "").orEmpty(),
             sttApiKey = prefs.getString(KEY_STT_API_KEY, "").orEmpty(),
             sttApiKeyRemovedAtMs = prefs.getLong(KEY_STT_REMOVED_AT, 0L),
+            sttApiKeySetAtMs = prefs.getLong(KEY_STT_SET_AT, 0L),
             privateBaseUrl = prefs.getString(KEY_PRIVATE_BASE_URL, null)?.takeIf { it.isNotBlank() },
             privateModel = prefs.getString(KEY_PRIVATE_MODEL, null)?.takeIf { it.isNotBlank() },
             privateApiKey = prefs.getString(KEY_PRIVATE_API_KEY, "").orEmpty(),
@@ -264,6 +278,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         private const val KEY_BASE_URL = "base_url"
         private const val KEY_BRAVE_API_KEY = "brave_api_key"
         private const val KEY_STT_API_KEY = "stt_api_key"
+        private const val KEY_STT_SET_AT = "stt_api_key_set_at"
         private const val KEY_PRIVATE_BASE_URL = "private_base_url"
         private const val KEY_PRIVATE_MODEL = "private_model"
         private const val KEY_PRIVATE_API_KEY = "private_api_key"

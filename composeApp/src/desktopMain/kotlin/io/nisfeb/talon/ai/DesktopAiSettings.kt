@@ -160,9 +160,11 @@ class DesktopAiSettings : AiSettingsRepository {
     }
 
     override fun setSttApiKey(key: String) {
+        val now = io.nisfeb.talon.util.nowMs()
         val cfg = _state.value.copy(
             sttApiKey = key,
-            sttApiKeyRemovedAtMs = if (key.isBlank()) io.nisfeb.talon.util.nowMs() else 0L,
+            sttApiKeyRemovedAtMs = if (key.isBlank()) now else 0L,
+            sttApiKeySetAtMs = if (key.isBlank()) _state.value.sttApiKeySetAtMs else now,
         )
         persist(cfg)
         onStateChange?.invoke(cfg, false)
@@ -203,8 +205,12 @@ class DesktopAiSettings : AiSettingsRepository {
         // re-firing onStateChange so we don't pingpong back to the ship.
         // Atomic (same as persist) so a kill mid-write can't truncate
         // the file and wipe the key on next launch.
-        writeAtomically(config)
-        _state.value = config
+        // A credential this device holds is never dropped by arriving
+        // state. See keepingCredentials: the rule lives here so that no
+        // future caller can lose a key by accident.
+        val kept = config.keepingCredentials(_state.value)
+        writeAtomically(kept)
+        _state.value = kept
     }
 
     override fun clear() {

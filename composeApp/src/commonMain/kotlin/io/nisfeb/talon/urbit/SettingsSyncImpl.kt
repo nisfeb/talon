@@ -491,6 +491,17 @@ class SettingsSyncImpl(
                     .onFailure { Log.w(TAG, "ai-settings upgrade push failed", it) }
             }
         }
+        // A key typed while signed out reached no ship, and nothing
+        // pushed it afterwards unless some other setting happened to
+        // change. On every connect, a device that has credentials makes
+        // sure the ship has them. Idempotent: the same entry again.
+        val creds = (deskMap?.get(BUCKET_AI_SETTINGS) as? JsonObject)?.get(AI_KEYS_ENTRY)
+        val cfg = aiSettings.state.value
+        if (cfg.syncEnabled && cfg.hasCredentials() && creds == null) {
+            Log.i(TAG, "ship has no credentials entry — seeding from this device")
+            runCatching { pushAiSettings() }
+                .onFailure { Log.w(TAG, "credentials seed push failed", it) }
+        }
 
         // Subscribe for live updates from other devices.
         runCatching { ch.subscribe("settings", "/desk/$DESK") }

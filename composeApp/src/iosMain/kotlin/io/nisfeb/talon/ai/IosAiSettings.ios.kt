@@ -20,16 +20,30 @@ class IosAiSettings : AiSettingsRepository {
     override val state: StateFlow<AiSettings.Config> = _state.asStateFlow()
     override var onStateChange: ((AiSettings.Config, Boolean) -> Unit)? = null
 
+    /**
+     * Whether the file was read. It is written with complete
+     * protection, so it cannot be read while the device is locked, and
+     * this app can be started locked by a call. A failed read used to
+     * become defaults, and minting a device id then wrote those
+     * defaults straight over the keys. Nothing is written until a read
+     * has succeeded or the file has been found to be absent.
+     */
+    private var readTheFile = false
+
     private fun loadOrDefault(): AiSettings.Config {
-        val loaded = IosFiles.read(AI_FILE)?.let {
+        val raw = IosFiles.read(AI_FILE)
+        val loaded = raw?.let {
             runCatching { json.decodeFromString<AiSettings.Config>(it) }.getOrNull()
         }
+        // Absent is a fresh install and safe to write. Present but
+        // unreadable, or present and unparseable, is not.
+        readTheFile = loaded != null || !IosFiles.exists(AI_FILE)
         val cfg = loaded ?: AiSettings.Config(
             provider = AiSettings.Provider.Anthropic,
             apiKey = "",
             model = null,
         )
-        return if (cfg.deviceId.isBlank()) {
+        return if (cfg.deviceId.isBlank() && readTheFile) {
             cfg.copy(deviceId = NSUUID().UUIDString).also { persist(it) }
         } else {
             cfg
@@ -37,6 +51,12 @@ class IosAiSettings : AiSettingsRepository {
     }
 
     private fun persist(cfg: AiSettings.Config) {
+        // Never write over a file we could not read: that is how the
+        // keys went, permanently, with no copy anywhere.
+        if (!readTheFile) {
+            io.nisfeb.talon.util.Log.w("IosAiSettings", "not writing over a config that could not be read")
+            return
+        }
         IosFiles.write(AI_FILE, json.encodeToString(AiSettings.Config.serializer(), cfg))
     }
 
@@ -82,10 +102,13 @@ class IosAiSettings : AiSettingsRepository {
 
     override fun setSttApiKey(key: String) {
         commit(
-            _state.value.copy(
-                sttApiKey = key,
-                sttApiKeyRemovedAtMs = if (key.isBlank()) io.nisfeb.talon.util.nowMs() else 0L,
-            ),
+            io.nisfeb.talon.util.nowMs().let { now ->
+                _state.value.copy(
+                    sttApiKey = key,
+                    sttApiKeyRemovedAtMs = if (key.isBlank()) now else 0L,
+                    sttApiKeySetAtMs = if (key.isBlank()) _state.value.sttApiKeySetAtMs else now,
+                )
+            },
             fireChange = true,
         )
     }
@@ -112,8 +135,11 @@ class IosAiSettings : AiSettingsRepository {
     override fun applyRemote(config: AiSettings.Config) {
         // Remote config shouldn't clobber our stable device id, and this
         // path never re-fires onStateChange (mirrors desktop).
-        val merged =
-            if (config.deviceId.isBlank()) config.copy(deviceId = _state.value.deviceId) else config
+        // A credential this device holds is never dropped by arriving
+        // state. See keepingCredentials: the rule lives here so that no
+        // future caller can lose a key by accident.
+        val merged = (if (config.deviceId.isBlank()) config.copy(deviceId = _state.value.deviceId) else config)
+            .keepingCredentials(_state.value)
         _state.value = merged
         persist(merged)
     }

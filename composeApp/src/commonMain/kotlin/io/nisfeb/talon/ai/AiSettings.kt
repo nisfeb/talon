@@ -99,6 +99,14 @@ object AiSettings {
          * blank everyone's by pushing.
          */
         val sttApiKeyRemovedAtMs: Long = 0L,
+        /**
+         * When this device last set the transcription key. A removal
+         * only counts if it happened after: without this, setting a key
+         * here reset the removal stamp to zero and a peer's old removal,
+         * still sitting on the ship, blanked the key again on the next
+         * pull. That is the "I just typed it and it vanished" loop.
+         */
+        val sttApiKeySetAtMs: Long = 0L,
         // Editable agent system-prompt parts. Each blank = use its built-in
         // default; the effective prompt for a role is the shared knowledge
         // followed by that role's specifics (see AgentPrompt/LoopPrompt).
@@ -204,4 +212,33 @@ object AiSettings {
             requiresCloudKey = true,
         ),
     }
+}
+
+/**
+ * What arriving state may not do: drop a credential this device holds.
+ *
+ * The one rule that has been missing. This bug has been fixed four
+ * times, each time by guarding the path that had just lost a key, and
+ * each time a new path appeared: a peer's push, an entry that replaced
+ * a whole blob, a stale removal stamp. A blank is not a value here. It
+ * is the absence of one, and absence never wins against something
+ * real. A deliberate removal says so with a stamp and is the only way
+ * a credential goes.
+ *
+ * Enforced in the store rather than in the sync layer, so that a
+ * future caller has to break the rule on purpose to lose a key.
+ */
+fun AiSettings.Config.keepingCredentials(of: AiSettings.Config): AiSettings.Config {
+    val removalWins = sttApiKeyRemovedAtMs > maxOf(of.sttApiKeySetAtMs, of.sttApiKeyRemovedAtMs)
+    return copy(
+        apiKey = apiKey.ifBlank { of.apiKey },
+        braveApiKey = braveApiKey.ifBlank { of.braveApiKey },
+        privateApiKey = privateApiKey.ifBlank { of.privateApiKey },
+        privateBaseUrl = privateBaseUrl ?: of.privateBaseUrl,
+        privateModel = privateModel ?: of.privateModel,
+        model = model ?: of.model,
+        baseUrl = baseUrl ?: of.baseUrl,
+        sttApiKey = if (sttApiKey.isNotBlank() || removalWins) sttApiKey else of.sttApiKey,
+        sttApiKeySetAtMs = maxOf(sttApiKeySetAtMs, of.sttApiKeySetAtMs),
+    )
 }
