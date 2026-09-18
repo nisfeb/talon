@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
@@ -29,7 +32,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.notify.IosVoipBridge
 import io.nisfeb.talon.util.nowMs
+import androidx.compose.ui.interop.UIKitViewController
 import kotlinx.cinterop.ExperimentalForeignApi
+import platform.AVFoundation.AVLayerVideoGravityResizeAspect
+import platform.AVKit.AVPlayerViewController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import platform.AVFAudio.AVAudioPlayer
@@ -244,12 +250,50 @@ actual fun VoicePreviewPlayButton(path: String, enabled: Boolean) {
     }
 }
 
-/** Audio plays in the row; video stays a link, as on desktop. */
+/** Both play in the row. */
 actual fun platformInlineMediaPlayer(): (@Composable (url: String, kind: MediaKind) -> Unit)? = { url, kind ->
     when (kind) {
         MediaKind.AUDIO -> IosInlineAudioPlayer(url)
-        MediaKind.VIDEO -> FallbackInlineMediaRow(url, kind)
+        MediaKind.VIDEO -> IosInlineVideoPlayer(url)
     }
+}
+
+/**
+ * A video in the chat row, played by AVKit's own controller: it brings
+ * the transport, the scrubber and full screen with it, and letterboxes
+ * whatever shape the video turns out to be inside the 16:9 the row
+ * reserves. Sending someone to Safari to watch a clip they were sent
+ * in a message is not watching it in Talon.
+ *
+ * Nothing loads until the row is on screen, and leaving the row pauses
+ * it: a scrolled-past video that keeps playing is a phone that gets
+ * warm in your pocket.
+ */
+@OptIn(ExperimentalForeignApi::class, androidx.compose.ui.ExperimentalComposeUiApi::class)
+@Composable
+private fun IosInlineVideoPlayer(url: String) {
+    val controller = remember(url) {
+        AVPlayerViewController().apply {
+            player = AVPlayer(uRL = NSURL.URLWithString(url) ?: NSURL(string = "about:blank"))
+            showsPlaybackControls = true
+            videoGravity = AVLayerVideoGravityResizeAspect
+        }
+    }
+    DisposableEffect(url) {
+        onDispose {
+            controller.player?.pause()
+            controller.player = null
+        }
+    }
+    UIKitViewController(
+        factory = { controller },
+        modifier = Modifier
+            .fillMaxWidth()
+            .widthIn(max = 420.dp)
+            .aspectRatio(16f / 9f)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.Black),
+    )
 }
 
 @OptIn(ExperimentalForeignApi::class)
