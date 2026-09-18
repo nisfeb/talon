@@ -2896,7 +2896,25 @@ fun App(
                                 mailComposing = null
                             }
                             item.toRailTab()?.let { tab ->
-                                uiSettings.setActiveRailTab(tab)
+                                // Three of the pane tabs are lists that live
+                                // inside the rail's left column: the rail
+                                // supplies their header, and the window its
+                                // insets. With no rail on screen they render
+                                // bare, under the notch, with nothing to tap
+                                // to get back. Compact opens the screen
+                                // instead, which is what the kebab does.
+                                val paneOnly = !expanded && item in setOf(
+                                    RailItem.Statuses, RailItem.Bookmarks, RailItem.Activity,
+                                )
+                                if (paneOnly) {
+                                    when (item) {
+                                        RailItem.Statuses -> showStatusFeed = true
+                                        RailItem.Bookmarks -> showBookmarks = true
+                                        else -> showActivity = true
+                                    }
+                                } else {
+                                    uiSettings.setActiveRailTab(tab)
+                                }
                             } ?: when (item) {
                                 RailItem.Assistant -> openAssistantAction()
                                 RailItem.Profile -> showSelfProfile = true
@@ -3146,9 +3164,11 @@ fun App(
                                         invites = homeInvites,
                                         onOpenInvites = { showInvites = true },
                                         onOpenContact = { other -> profileSheetShip = other },
-                                        onOpenStatuses = {
-                                            uiSettings.setActiveRailTab(RailTab.Statuses)
-                                        },
+                                        // The same rule the kebab menu uses: a rail
+                                        // to switch only where one is on screen.
+                                        // Switching it on a phone put the bare list
+                                        // under the notch with no way back.
+                                        onOpenStatuses = onOpenStatusFeed,
                                         onPlacePicked = { p ->
                                             uiSettings.setHomePlace(
                                                 io.nisfeb.talon.ui.HomePlaceCodec.encode(p),
