@@ -39,6 +39,19 @@ class OrreryTasksTest {
     }
 
     @Test
+    fun `two installs making the same todo leaves one, the ticked one if either is`() {
+        val moves = taskMoves(
+            listOf(action("a1", "approved")),
+            listOf(todo("t1", "a1"), todo("t2", "a1", done = true), todo("t3", "a1")),
+        )
+        // t2 stays, and being ticked it reports the action done.
+        assertEquals(
+            listOf(TaskMove.Drop("t1"), TaskMove.Drop("t3"), TaskMove.Report("a1")),
+            moves,
+        )
+    }
+
+    @Test
     fun `a proposal is a question, not a task`() {
         assertTrue(taskMoves(listOf(action("a1", "proposed")), emptyList()).isEmpty())
     }

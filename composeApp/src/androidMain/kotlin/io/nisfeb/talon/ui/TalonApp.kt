@@ -2031,7 +2031,6 @@ fun TalonApp(
                 onDecide = { a, status ->
                     appScope.launch {
                         orreryRepo.setAction(a.id, status)
-                        orreryRepo.refreshActions()
                     }
                 },
             ) { a -> openAction = a }

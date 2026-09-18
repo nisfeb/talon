@@ -2239,7 +2239,6 @@ fun App(
                         onDecide = { a, status ->
                             loopScope.launch {
                                 orreryRepo.setAction(a.id, status)
-                                orreryRepo.refreshActions()
                             }
                         },
                     ) { a -> openAction = a }

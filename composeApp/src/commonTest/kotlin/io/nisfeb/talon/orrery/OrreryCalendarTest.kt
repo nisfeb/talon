@@ -281,4 +281,44 @@ class OrreryCalendarTest {
         assertTrue(calendarSubjects(listOf(row(noon).copy(cat = "todo"))).isEmpty())
         assertTrue(calendarSubjects(listOf(row(noon, title = ""))).isEmpty())
     }
+
+    @Test
+    fun `an event that left the calendar is cancelled if it was ahead, and said once`() {
+        val gone = vanishedEvents(
+            written = mapOf(
+                "cal:work/ahead" to "situation/dentist|d1",
+                "cal:work/behind" to "situation/review|d2",
+                "cal:work/kept" to "situation/lunch|d3",
+                "cal:work/series" to "activity/standup|d4",
+                "cal:old/ahead" to "situation/offsite|d5",
+            ),
+            occurrences = mapOf(
+                "occ:work/ahead/${noon + week}" to "",
+                "occ:work/behind/${noon - week}" to "",
+                "occ:work/kept/${noon + week}" to "",
+                "occ:work/series/${noon + week}" to "",
+                "occ:old/ahead/${noon + week}" to "",
+            ),
+            kept = setOf("cal:work/kept"),
+            calendars = setOf("work"),
+            nowMs = noon,
+        )
+        val row = gone.facts.observations.single()
+        assertEquals("situation/dentist", row.subject)
+        assertEquals("status", row.attr)
+        assertEquals(JsonPrimitive("cancelled"), row.value)
+        assertEquals(noon, row.atMs, "at is the moment it was noticed")
+        assertEquals("work/ahead", row.sourceId, "the calendar's uid is the source")
+        assertTrue(gone.facts.bodies.isEmpty(), "the body is never touched")
+        // Past and series are settled without a word; a calendar that
+        // went as a whole, and an event still kept, are not judged.
+        assertEquals(
+            setOf(
+                "cal:work/ahead", "occ:work/ahead/${noon + week}",
+                "cal:work/behind", "occ:work/behind/${noon - week}",
+                "cal:work/series", "occ:work/series/${noon + week}",
+            ),
+            gone.forget.toSet(),
+        )
+    }
 }

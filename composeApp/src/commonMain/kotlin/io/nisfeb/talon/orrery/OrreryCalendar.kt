@@ -367,6 +367,50 @@ fun staleOccurrences(
     }.sortedBy { it.second.first() }
 }
 
+/** What to tell the ship about events that left the calendar, and which records are then done with. */
+data class Vanished(val facts: Facts, val forget: List<String>)
+
+/**
+ * The events this install wrote that the calendar no longer keeps at
+ * all. [written] is the `cal:` records, [occurrences] the `occ:` ones,
+ * [kept] the `cal:` keys of every entry the calendar still has, near or
+ * far (a window would lose an event moved past its edge).
+ *
+ * A one-off still ahead was cancelled: one `status: cancelled` row,
+ * never a deleted body; the owner's retire pass prunes it in time. One
+ * already behind is over, which is retire's to say. A series says
+ * nothing: its `next` lapses on its own. Either way the uid is settled
+ * and its records go, so it is said once.
+ *
+ * A calendar that went away as a whole is not evidence its events
+ * were called off, so those are left alone.
+ */
+fun vanishedEvents(
+    written: Map<String, String>,
+    occurrences: Map<String, String>,
+    kept: Set<String>,
+    calendars: Set<String>,
+    nowMs: Long,
+): Vanished {
+    val occByRef = occurrences.keys.groupBy { it.removePrefix("occ:").substringBeforeLast('/') }
+    val cancel = mutableListOf<Obs>()
+    val forget = mutableListOf<String>()
+    for ((key, mark) in written) {
+        if (!key.startsWith("cal:") || key in kept) continue
+        val ref = key.removePrefix("cal:")
+        if (ref.substringBefore('/') !in calendars) continue
+        val occ = occByRef[ref].orEmpty()
+        val body = mark.substringBefore('|')
+        val ahead = occ.any { (it.substringAfterLast('/').toLongOrNull() ?: 0) > nowMs }
+        if (body.startsWith("situation/") && ahead) {
+            cancel += Obs(body, "status", JsonPrimitive("cancelled"), nowMs, sourceKind = "calendar", sourceId = ref)
+        }
+        forget += key
+        forget += occ
+    }
+    return Vanished(Facts(observations = cancel), forget)
+}
+
 /**
  * What a one-off says about itself.
  *

@@ -96,6 +96,9 @@ class OrreryRepo(
     private val pending = mutableListOf<Facts>()
     private val transcripts = mutableListOf<Pair<String, List<Spoken>>>()
     private val pendingLock = Mutex()
+    // The pass and an answer can both reach the mirror; one at a time,
+    // or both see no todo and each make one.
+    private val mirrorLock = Mutex()
     private var shipUrl: String? = null
     private var ship: String? = null
     private var loop: Job? = null
@@ -204,13 +207,13 @@ class OrreryRepo(
      * in the todo, never here, which is what makes a pass that starts
      * from nothing safe.
      */
-    private suspend fun mirrorTasks(a: OrreryApi, token: String, url: String) {
+    private suspend fun mirrorTasks(a: OrreryApi, token: String?, url: String) = mirrorLock.withLock {
         val actions = a.actions(token, status = "all")
-        if (actions.none { it.kind == "task" }) return
+        if (actions.none { it.kind == "task" }) return@withLock
         val cal = CalendarApi(http, url)
         val moves = taskMoves(actions, cal.tasks())
-        if (moves.isEmpty()) return
-        val ball = cal.config().ball.takeIf { it.isNotBlank() } ?: return
+        if (moves.isEmpty()) return@withLock
+        val ball = cal.config().ball.takeIf { it.isNotBlank() } ?: return@withLock
         for (m in moves) {
             when (m) {
                 is TaskMove.Make -> cal.poke(ball, todoBody(m.action))
@@ -288,6 +291,7 @@ class OrreryRepo(
             val view = runCatching { a.state(row.token) }.getOrNull()
             val sent = db.orrerySent()
             val record = mutableListOf<io.nisfeb.talon.data.OrrerySentEntity>()
+            val forgets = mutableListOf<String>()
             fun remember(key: String, value: String = "") {
                 record += io.nisfeb.talon.data.OrrerySentEntity(s, key, value, nowMs)
             }
@@ -332,9 +336,8 @@ class OrreryRepo(
             runCatching { CalendarApi(http, url).window(nowMs - BACKFILL_MS, nowMs + AHEAD_MS) }.onSuccess { w ->
                 // The calendars this ship keeps itself. An event on one
                 // another ship shares is not ours to name an organizer for.
-                val ourCalendars = runCatching {
-                    CalendarApi(http, url).calendars().filter { it.kind == "local" }.map { it.id }.toSet()
-                }.getOrDefault(emptySet())
+                val calendars = runCatching { CalendarApi(http, url).calendars() }.getOrDefault(emptyList())
+                val ourCalendars = calendars.filter { it.kind == "local" }.map { it.id }.toSet()
                 // Who the ship keeps, so a name in a title lands on the
                 // person it already has.
                 val cast = view?.let { EventPeople.of(it.bodies) } ?: EventPeople.NONE
@@ -389,6 +392,25 @@ class OrreryRepo(
                     if (mark != "${write.bodyId}|$digest") remember(subject.key, "${write.bodyId}|$digest")
                     write.occurrences.forEach { remember(it.key, it.record) }
                 }
+                // An event this install wrote that the calendar no longer
+                // keeps at all. Read from the full listing: the window
+                // also loses an event moved past its edge.
+                // ponytail: only what this install remembers writing; a
+                // cleared record (pipe off and on) forgets what to cancel.
+                runCatching { CalendarApi(http, url).events() }.onSuccess { all ->
+                    // An empty listing is likelier a hiccup than every
+                    // event deleted at once, and a cancel is not undone.
+                    if (all.isEmpty()) return@onSuccess
+                    val gone = vanishedEvents(
+                        written = sent.under(s, "cal:").associate { it.key to it.value },
+                        occurrences = sent.under(s, "occ:").associate { it.key to it.value },
+                        kept = all.map { "cal:${it.cal}/${it.id}" }.toSet(),
+                        calendars = calendars.map { it.id }.toSet(),
+                        nowMs = nowMs,
+                    )
+                    facts += gone.facts
+                    forgets += gone.forget
+                }.onFailure { Log.i(TAG, "vanished events skipped: ${it.message}") }
             }.onFailure { Log.i(TAG, "calendar skipped: ${it.message}") }
 
             var refused = 0
@@ -404,6 +426,7 @@ class OrreryRepo(
             // Only once the ship has taken them: a pass that failed
             // halfway must be free to say the same things again.
             if (record.isNotEmpty()) sent.putAll(record)
+            forgets.forEach { sent.forget(s, it) }
             db.orreryAccounts().upsert(row.copy(messagesCursor = messagesCursor, mailCursor = mailCursor, calendarCursor = nowMs))
             runCatching { a.actions(row.token) }.onSuccess { _actions.value = it }.onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
             runCatching { mirrorTasks(a, row.token, url) }.onFailure { Log.i(TAG, "tasks skipped: ${it.message}") }
@@ -642,6 +665,7 @@ class OrreryRepo(
         // This install's key where it has one, else the owner's own say.
         a.transition(db.orreryAccounts().get(s)?.token, id, status, note)
         _actions.value = _actions.value.filterNot { it.id == id }
+        refreshActions()
     }
 
     /**
@@ -652,9 +676,14 @@ class OrreryRepo(
     suspend fun refreshActions() {
         val a = api ?: return
         val s = ship ?: return
-        runCatching { a.actions(db.orreryAccounts().get(s)?.token) }
+        val url = shipUrl ?: return
+        val token = db.orreryAccounts().get(s)?.token
+        runCatching { a.actions(token) }
             .onSuccess { _actions.value = it }
             .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
+        // An approved task becomes a todo wherever it can be approved,
+        // not only on the install that runs the pipe.
+        runCatching { mirrorTasks(a, token, url) }.onFailure { Log.i(TAG, "tasks skipped: ${it.message}") }
     }
 
     /** The cloud rung, opened once, only while the person has it on and a key is set. */

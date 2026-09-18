@@ -155,7 +155,10 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
     suspend fun calendars(): List<CalendarInfo> = decode(get("/calendars.json"))
 
     /** The tasks, dated or not: the full listing, kept to `cat == todo`. */
-    suspend fun tasks(): List<CalendarTask> = decode<List<CalendarTask>>(get("/events.json")).filter { it.cat == "todo" }
+    suspend fun tasks(): List<CalendarTask> = events().filter { it.cat == "todo" }
+
+    /** Every entry the calendar keeps, dated or not, near or far. */
+    suspend fun events(): List<CalendarTask> = decode(get("/events.json"))
 
     suspend fun config(): CalendarConfig = decode(get("/config.json"))
 

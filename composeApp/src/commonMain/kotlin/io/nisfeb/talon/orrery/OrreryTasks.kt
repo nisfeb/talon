@@ -64,8 +64,14 @@ private val REFUSED = setOf("dismissed", "failed")
  */
 fun taskMoves(actions: List<OrreryAction>, todos: List<CalendarTask>): List<TaskMove> {
     val tasks = actions.filter { it.kind == "task" }
-    val byAction = todos.mapNotNull { t -> t.orreryAction()?.let { it to t } }.toMap()
+    // Two installs passing at once can each make the todo. The first
+    // ticked one, else the first, is the todo; the rest go.
+    val linked = todos.filter { it.orreryAction() != null }
+        .groupBy { it.orreryAction()!! }
+        .mapValues { (_, ts) -> ts.sortedByDescending { it.done } }
+    val byAction = linked.mapValues { it.value.first() }
     val out = mutableListOf<TaskMove>()
+    linked.values.forEach { ts -> ts.drop(1).forEach { out += TaskMove.Drop(it.id) } }
     for (a in tasks) {
         val todo = byAction[a.id]
         when {
