@@ -66,6 +66,13 @@ class OrreryLiveTest {
         }.orEmpty().toSet()
     }
 
+    /** One attribute as the ship folds it: the row that wins on `at`, then on the order it saw them. */
+    private suspend fun folded(http: io.ktor.client.HttpClient, url: String, bodyId: String, attr: String): String? {
+        val text = http.get("$url/apps/orrery/api/body/$bodyId").bodyAsText()
+        return Json.parseToJsonElement(text).jsonObject["attrs"]?.jsonObject?.get(attr)
+            ?.jsonObject?.get("value")?.jsonPrimitive?.content
+    }
+
     /** A ship, a database and a scope for one test, cleaned up after. */
     private fun live(block: suspend (io.ktor.client.HttpClient, AppDatabase, CoroutineScope, String, String) -> Unit) {
         if (url.isNullOrBlank() || cookie.isNullOrBlank() || ship.isNullOrBlank()) {
@@ -89,14 +96,14 @@ class OrreryLiveTest {
     }
 
     /**
-     * An event moved to a different time. What the ship was told about
-     * the time it used to be at has to come back off, or the fold keeps
-     * it: the ship takes the latest `at` of the rows it holds, and a
-     * meeting moved earlier would go on reading as the old time for
-     * ever.
+     * An event people edit, twice over. A new place at the same time
+     * rests on the ship preferring the row it saw last when the two tie
+     * on `at`. A new time rests on the opposite: what was said about the
+     * time it used to be at has to come back off, or a meeting moved
+     * earlier goes on reading as the old time for ever.
      */
     @Test
-    fun `an event that moves takes its old time back off the ship`() = live { owner, db, scope, url, ship ->
+    fun `an event that is edited is said again, and its old time comes off`() = live { owner, db, scope, url, ship ->
         val cal = CalendarApi(owner, url)
         val ball = runCatching { cal.config().ball }.getOrNull()?.takeIf { it.isNotBlank() }
         if (ball == null) {
@@ -106,7 +113,7 @@ class OrreryLiveTest {
         val title = "Talon live move check"
         val today = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(TimeZone.currentSystemDefault()).date
         val yesterday = today.minus(1, DateTimeUnit.DAY)
-        val draft = EventDraft(name = title, date = yesterday, minuteOfDay = 13 * 60, durMin = 30)
+        val draft = EventDraft(name = title, date = yesterday, minuteOfDay = 13 * 60, durMin = 30, location = "the flat")
         assertTrue(cal.poke(ball, eventBody(draft)), "the calendar took the event")
         var uid: String? = null
         try {
@@ -127,10 +134,21 @@ class OrreryLiveTest {
                 api.observationsOf(bodyId, row.token).any { it.attr == "started" && it.atMs == was && it.stands },
                 "the ship holds the event at the time it was made",
             )
+            assertEquals("the flat", folded(owner, url, bodyId, "location"))
+
+            // A different place at the same time. The new row ties with
+            // the old one on `at`, so it wins only because the ship saw
+            // it later, which is what every edit but a move rests on.
+            assertTrue(cal.poke(ball, eventBody(draft.copy(location = "the shop"), id = uid)), "the calendar took the place")
+            repo.push()
+            assertEquals("the shop", folded(owner, url, bodyId, "location"), "the edited place did not take")
 
             // Three hours earlier, which is the case that matters: the
             // old row's `at` is the later one.
-            assertTrue(cal.poke(ball, eventBody(draft.copy(minuteOfDay = 10 * 60), id = uid)), "the calendar moved it")
+            assertTrue(
+                cal.poke(ball, eventBody(draft.copy(minuteOfDay = 10 * 60, location = "the shop"), id = uid)),
+                "the calendar moved it",
+            )
             val moved = cal.window(now - 3 * 86_400_000L, now + 86_400_000L).rows.first { it.id == uid }
             assertTrue(moved.l < was, "the calendar really moved it: ${moved.l} vs $was")
             repo.push()
