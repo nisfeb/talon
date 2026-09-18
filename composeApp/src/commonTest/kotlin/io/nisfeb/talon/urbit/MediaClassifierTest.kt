@@ -32,6 +32,17 @@ class MediaClassifierTest {
     }
 
     @Test
+    fun `a video sent as an image block is filed as a video`() {
+        // Tlon uploads a video and sends it as an image block, so the
+        // extension decides, not the block's name. Filed as a Photo it
+        // sat in the photo grid and the Videos filter never found it.
+        assertEquals("Video", MediaClassifier.extractMedia(textMessage(imageVerse("https://x.com/clip.mp4"))).single().category)
+        assertEquals("Video", MediaClassifier.extractMedia(textMessage(imageVerse("https://x.com/clip.MOV?v=2"))).single().category)
+        assertEquals("Audio", MediaClassifier.extractMedia(textMessage(imageVerse("https://x.com/note.m4a"))).single().category)
+        assertEquals("Photo", MediaClassifier.extractMedia(textMessage(imageVerse("https://x.com/a.png"))).single().category)
+    }
+
+    @Test
     fun `gif extension lands as Gif regardless of context`() {
         val rows = MediaClassifier.extractMedia(textMessage(linkVerse("party", "https://x.com/cat.gif")))
         assertEquals("Gif", rows.single().category)

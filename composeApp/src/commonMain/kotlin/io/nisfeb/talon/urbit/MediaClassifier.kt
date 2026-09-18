@@ -66,14 +66,18 @@ object MediaClassifier {
     }
 
     /**
-     * `StoryPart.Image` is always Photo OR Gif. `.gif` files don't get
-     * the inline-image treatment in StoryRenderer (they fall through),
-     * but a hosted gif uploaded as an image attachment still arrives
-     * as `StoryPart.Image`. Treat `.gif` as Gif regardless.
+     * An image block is not always an image. Tlon sends a video as an
+     * image block with the `.mp4` in its `src`, so the extension
+     * decides and the block only says "here is a file". Calling one of
+     * those a Photo filed every shared video under photos and left the
+     * Videos filter empty.
      */
-    private fun categoryForImage(url: String): String =
-        if (canonicalExt(url) == ".gif") MediaCategory.Gif.name
-        else MediaCategory.Photo.name
+    private fun categoryForImage(url: String): String = when (canonicalExt(url)) {
+        ".gif" -> MediaCategory.Gif.name
+        in VIDEO_EXTS -> MediaCategory.Video.name
+        in AUDIO_EXTS -> MediaCategory.Audio.name
+        else -> MediaCategory.Photo.name
+    }
 
     private fun categoryForUrl(url: String, displayText: String?): String {
         val ext = canonicalExt(url)

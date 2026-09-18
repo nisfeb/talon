@@ -154,18 +154,35 @@ fun classifyMediaUrl(url: String): MediaKind? {
     }
 }
 
-/** All (url, kind) media references in a parsed story, in order. */
+/**
+ * All (url, kind) media references in a parsed story, in order.
+ *
+ * Image parts count. Tlon sends a video as an image block with the
+ * `.mp4` in its `src`, and this walked only the text parts, so a
+ * shared video never reached a player: it went to the image loader,
+ * which cannot decode a video, and the message looked empty.
+ */
 fun mediaInStory(parts: List<StoryPart>): List<Pair<String, MediaKind>> {
     val out = mutableListOf<Pair<String, MediaKind>>()
     val seen = mutableSetOf<String>()
     for (p in parts) {
-        if (p !is StoryPart.Text) continue
-        val anns = p.text.getStringAnnotations(URL_TAG, 0, p.text.length)
-        for (a in anns) {
-            if (a.item in seen) continue
-            val kind = classifyMediaUrl(a.item) ?: continue
-            out += a.item to kind
-            seen += a.item
+        when (p) {
+            is StoryPart.Image -> {
+                if (p.src in seen) continue
+                val kind = classifyMediaUrl(p.src) ?: continue
+                out += p.src to kind
+                seen += p.src
+            }
+            is StoryPart.Text -> {
+                val anns = p.text.getStringAnnotations(URL_TAG, 0, p.text.length)
+                for (a in anns) {
+                    if (a.item in seen) continue
+                    val kind = classifyMediaUrl(a.item) ?: continue
+                    out += a.item to kind
+                    seen += a.item
+                }
+            }
+            else -> Unit
         }
     }
     return out
@@ -258,7 +275,9 @@ fun StoryRenderer(
                     }
                 }
 
-                is StoryPart.Image -> {
+                // An image block whose src is a video or a sound is not
+                // an image: it plays below with the rest of the media.
+                is StoryPart.Image -> if (classifyMediaUrl(part.src) == null) {
                     // Both dims must be positive: width comes off the
                     // wire unclamped, and aspectRatio() throws on <= 0
                     // — a remote message with width: 0 would crash the
