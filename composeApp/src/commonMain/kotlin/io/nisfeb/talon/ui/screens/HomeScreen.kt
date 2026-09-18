@@ -70,6 +70,8 @@ import io.nisfeb.talon.calendar.CalendarAvailability
 import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.agenda
+import io.nisfeb.talon.calendar.agendaDay
+import io.nisfeb.talon.calendar.agendaHeading
 import io.nisfeb.talon.calendar.bounds
 import io.nisfeb.talon.calendar.tasksInRange
 import io.nisfeb.talon.calendar.dueDate
@@ -93,6 +95,7 @@ import io.nisfeb.talon.ui.SkyClock
 import io.nisfeb.talon.ui.Solar
 import kotlinx.coroutines.delay
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.plus
@@ -1286,7 +1289,7 @@ private fun CalendarPanel(
         }
     }
     val action = onOpen?.takeIf { availability == CalendarAvailability.PRESENT }?.let { "Calendar" to it }
-    Panel("Today", TalonIcons.CalendarToday, action, scrollable = true) {
+    Panel(agendaHeading(range), TalonIcons.CalendarToday, action, scrollable = true) {
         when {
             calendar == null -> Empty("This host has no calendar.")
 
@@ -1364,12 +1367,25 @@ private fun CalendarPanel(
                             )
                         }
                     }
+                    // A line where the day turns over, so the first
+                    // event of tomorrow reads as tomorrow's at a glance.
+                    // Anything already running counts as today's.
+                    var lastDay: LocalDate? = null
                     shown.forEach { row ->
+                        val starts = row.bounds(zone).first
+                        val day = agendaDay(starts, tick, zone)
+                        if (lastDay != null && day != lastDay) {
+                            HorizontalDivider(
+                                Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            )
+                        }
+                        lastDay = day
                         EventRow(
                             row = row,
                             whenLabel = whenLabel(row, tick, zone, twentyFourHour),
                             colour = calendarHexColor(row.color ?: calColors[row.cal]),
-                            ongoing = row.bounds(zone).first <= tick,
+                            ongoing = starts <= tick,
                             onClick = onOpen ?: {},
                             onLongPress = onLongPress,
                         )
