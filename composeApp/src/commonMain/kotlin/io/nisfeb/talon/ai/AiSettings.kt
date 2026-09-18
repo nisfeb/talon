@@ -80,6 +80,14 @@ object AiSettings {
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
 
+        /**
+         * Whether this device has anything to say about credentials. A
+         * device with none never writes them to the ship, so saving a
+         * preference here cannot wipe the copy another device put there.
+         */
+        fun hasCredentials(): Boolean =
+            apiKey.isNotBlank() || braveApiKey.isNotBlank() || sttApiKey.isNotBlank() || sttApiKeyRemovedAtMs > 0L
+
         /** The unified assistant is on (current flag or the legacy one).
          *  Gates MCP + web access, which are now part of the assistant. */
         fun assistantOn(): Boolean = agentEnabled || askUrbitEnabled

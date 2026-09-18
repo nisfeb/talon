@@ -155,6 +155,17 @@ class SettingsSyncImpl(
         private const val STATUS_SEEN_ENTRY = "me"
         private const val AI_ENTRY = "config"
 
+        /**
+         * Credentials live in their own entry, apart from the
+         * preferences, because a put replaces a whole entry and the
+         * preferences are pushed by every device on every change. With
+         * both in one entry, a device that had no key of its own wiped
+         * the ship's copy the moment anybody toggled anything, and the
+         * ship stopped being the backup that makes a new install work.
+         * Nothing without a key of its own writes this entry.
+         */
+        internal const val AI_KEYS_ENTRY = "credentials"
+
         // Wire schema version for the ai-settings entry. v1 (no
         // marker) is everything written before rc33 — treated as
         // legacy because the rc8-era Android push gap silently
@@ -871,14 +882,14 @@ class SettingsSyncImpl(
      */
     override suspend fun pushAiSettings() {
         val cfg = aiSettings.state.value
-        pokePutEntry(
-            BUCKET_AI_SETTINGS, AI_ENTRY,
-            buildJsonObject {
-                // Stamp v2 so applyAiEntry on a peer device knows
-                // these toggle values are an explicit write, not a
-                // legacy seed from the rc8-era recovery path.
-                put("schemaVersion", AI_SCHEMA_V2)
-                if (cfg.syncEnabled) {
+        // The credentials, in their own entry, and only from a device
+        // that has some. A device with none says nothing about them, so
+        // it cannot wipe the ship's copy by saving a preference.
+        if (cfg.syncEnabled && cfg.hasCredentials()) {
+            pokePutEntry(
+                BUCKET_AI_SETTINGS, AI_KEYS_ENTRY,
+                buildJsonObject {
+                    put("schemaVersion", AI_SCHEMA_V2)
                     put("provider", cfg.provider.name)
                     // Only ship a credential we actually have. Emitting "" would
                     // make the ship's entry authoritatively key-less, and a
@@ -901,7 +912,16 @@ class SettingsSyncImpl(
                     } else if (cfg.sttApiKeyRemovedAtMs > 0L) {
                         put("sttApiKeyRemovedAtMs", cfg.sttApiKeyRemovedAtMs)
                     }
-                }
+                },
+            )
+        }
+        pokePutEntry(
+            BUCKET_AI_SETTINGS, AI_ENTRY,
+            buildJsonObject {
+                // Stamp v2 so applyAiEntry on a peer device knows
+                // these toggle values are an explicit write, not a
+                // legacy seed from the rc8-era recovery path.
+                put("schemaVersion", AI_SCHEMA_V2)
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
                 put("smartFeaturesEnabled", cfg.smartFeaturesEnabled)
                 put("askUrbitEnabled", cfg.askUrbitEnabled)
@@ -1123,7 +1143,16 @@ class SettingsSyncImpl(
             val provider = providerStr?.let {
                 runCatching { AiSettings.Provider.valueOf(it) }.getOrNull()
             }
-            if (provider != null) {
+            // A remote entry that carries no key of its own says
+            // nothing about which provider to use or what to call the
+            // model: an absent field used to read as "set it to null",
+            // so one launch of a key-less profile build turned a working
+            // OpenRouter setup into Anthropic with no model name and a
+            // key that then answered 401.
+            val carries = obj["apiKey"].asStr()?.isNotBlank() == true ||
+                obj["braveApiKey"].asStr()?.isNotBlank() == true ||
+                obj["sttApiKey"].asStr() != null || remoteRemovedAt > 0L
+            if (provider != null && carries) {
                 features.copy(
                     provider = provider,
                     // Only overwrite the key when the entry actually
@@ -1135,8 +1164,10 @@ class SettingsSyncImpl(
                     // ?: guard alone wouldn't catch a ship entry that was
                     // seeded with apiKey:"" by an older client.
                     apiKey = obj["apiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.apiKey,
-                    model = obj["model"].asStr(),
-                    baseUrl = obj["baseUrl"].asStr(),
+                    // Absent keeps what this device has, the way the
+                    // keys do. Only a blank string is a real erasure.
+                    model = obj["model"].asStr() ?: current.model,
+                    baseUrl = obj["baseUrl"].asStr() ?: current.baseUrl,
                     // Same "only overwrite when present and non-empty" guard.
                     braveApiKey = obj["braveApiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.braveApiKey,
                     // Unlike apiKey, present-but-empty here means the user
@@ -1363,100 +1394,158 @@ class SettingsSyncImpl(
     // directly without the full bootstrap+UrbitChannel scaffolding.
     // Kept in lockstep with production app/'s SettingsSync.kt — when
     // that copy is retired in Stage F the visibility can stay internal.
+    /**
+     * A bucket whose entries are rows in a table.
+     *
+     * Most of them are: an entry is one row, keyed by its own id, and
+     * sync does four things with it. Written out longhand that was a
+     * branch in each of four `when`s, so a new bucket meant four edits
+     * and a forgotten one meant a bucket that applied but never
+     * cleared. Here each bucket says how an entry reads and what to do
+     * with it, once.
+     */
+    private class Rows<T>(
+        val decode: (key: String, obj: JsonObject) -> T?,
+        val replaceAll: suspend (List<T>) -> Unit,
+        val upsert: suspend (T) -> Unit,
+        val remove: suspend (key: String) -> Unit,
+        /** True when an entry means there should be no local row at all. */
+        val drop: (JsonObject) -> Boolean = { false },
+    ) {
+        /** The whole bucket, which is the ship's word: anything not in it goes. */
+        suspend fun applyAll(entries: Map<String, JsonObject>) =
+            replaceAll(entries.mapNotNull { (key, obj) -> if (drop(obj)) null else decode(key, obj) })
+
+        suspend fun applyOne(key: String, obj: JsonObject) {
+            if (drop(obj)) remove(key) else decode(key, obj)?.let { upsert(it) }
+        }
+
+        suspend fun clear() = replaceAll(emptyList())
+    }
+
+    /** Every bucket that is just rows, and how each one reads. */
+    private val rowBuckets: Map<String, Rows<*>> by lazy {
+        mapOf(
+            BUCKET_GROUP_ORDERS to Rows(
+                decode = { key, obj -> obj["ordinal"].asInt()?.let { GroupOrderEntity(flag = key, ordinal = it) } },
+                replaceAll = { db.groupOrders().replaceAll(it) },
+                upsert = { db.groupOrders().upsertRaw(it.flag, it.ordinal) },
+                remove = { db.groupOrders().remove(it) },
+            ),
+            BUCKET_FOLDERS to Rows(
+                decode = { key, obj ->
+                    val id = key.toLongOrNull()
+                    val name = obj["name"].asStr()
+                    if (id == null || name == null) null
+                    else FolderEntity(id = id, name = name, sortOrder = obj["sortOrder"].asInt() ?: 0)
+                },
+                replaceAll = { db.folders().replaceAll(it) },
+                upsert = { db.folders().upsert(it) },
+                remove = { key ->
+                    key.toLongOrNull()?.let { id ->
+                        db.folders().deleteMembersOf(id)
+                        db.folders().delete(id)
+                    }
+                },
+            ),
+            BUCKET_FOLDER_MEMBERS to Rows(
+                decode = { key, obj ->
+                    parseFolderMemberKey(key)?.let { (folderId, whom) ->
+                        FolderMemberEntity(
+                            folderId = folderId,
+                            whom = whom,
+                            ordinal = obj["ordinal"].asInt() ?: 0,
+                            kind = obj["kind"].asStr() ?: FolderMemberEntity.KIND_WHOM,
+                        )
+                    }
+                },
+                replaceAll = { db.folders().replaceAllMembers(it) },
+                upsert = { db.folders().addMemberRaw(it.folderId, it.whom, it.ordinal, it.kind) },
+                remove = { key ->
+                    parseFolderMemberKey(key)?.let { (folderId, whom) -> db.folders().removeMember(folderId, whom) }
+                },
+            ),
+            BUCKET_NOTIFY_PREFS to Rows(
+                decode = { key, obj -> obj["level"].asStr()?.let { NotifyPreferenceEntity(whom = key, level = it) } },
+                replaceAll = { db.notifyPrefs().replaceAll(it) },
+                upsert = { db.notifyPrefs().upsert(it) },
+                remove = { db.notifyPrefs().clear(it) },
+            ),
+            BUCKET_RAIL_ITEMS to Rows(
+                // Absence is the default, so a visible item is no row at
+                // all: an explicit `true` would drift the read site.
+                decode = { key, obj ->
+                    if (obj["visible"].asBool() == null) null
+                    else railItemOrNull(key)?.let { RailItemPrefEntity(it.name, visible = false) }
+                },
+                replaceAll = { db.railItemPrefs().replaceAll(it) },
+                upsert = { db.railItemPrefs().upsert(it) },
+                remove = { db.railItemPrefs().delete(it) },
+                drop = { it["visible"].asBool() == true },
+            ),
+            BUCKET_BOOKMARKS to Rows(
+                decode = { key, obj ->
+                    parseBookmarkKey(key)?.let { (whom, postId) ->
+                        BookmarkEntity(whom = whom, postId = postId, bookmarkedMs = obj["ts"].asLong() ?: 0L)
+                    }
+                },
+                replaceAll = { db.bookmarks().replaceAll(it) },
+                upsert = { db.bookmarks().upsert(it) },
+                remove = { key -> parseBookmarkKey(key)?.let { (whom, postId) -> db.bookmarks().remove(whom, postId) } },
+            ),
+            BUCKET_BOOKMARK_FOLDERS to Rows(
+                decode = { key, obj ->
+                    val id = key.toLongOrNull()
+                    val name = obj["name"].asStr()
+                    if (id == null || name == null) null
+                    else BookmarkFolderEntity(id = id, name = name, sortOrder = obj["sortOrder"].asInt() ?: 0)
+                },
+                replaceAll = { db.bookmarkFolders().replaceAll(it) },
+                upsert = { db.bookmarkFolders().upsert(it) },
+                remove = { key ->
+                    key.toLongOrNull()?.let { id ->
+                        db.bookmarkFolders().deleteMembersOf(id)
+                        db.bookmarkFolders().delete(id)
+                    }
+                },
+            ),
+            BUCKET_BOOKMARK_FOLDER_MEMBERS to Rows(
+                decode = { key, obj ->
+                    parseBookmarkFolderMemberKey(key)?.let { (folderId, whom, postId) ->
+                        BookmarkFolderMemberEntity(
+                            folderId = folderId,
+                            whom = whom,
+                            postId = postId,
+                            ordinal = obj["ordinal"].asInt() ?: 0,
+                        )
+                    }
+                },
+                replaceAll = { db.bookmarkFolders().replaceAllMembers(it) },
+                upsert = { db.bookmarkFolders().addMemberRaw(it.folderId, it.whom, it.postId, it.ordinal) },
+                remove = { key ->
+                    parseBookmarkFolderMemberKey(key)?.let { (folderId, whom, postId) ->
+                        db.bookmarkFolders().removeMember(folderId, whom, postId)
+                    }
+                },
+            ),
+        )
+    }
+
+    /** One bucket's entries, unwrapped and kept only where they are objects. */
+    private fun objects(entries: JsonObject?): Map<String, JsonObject> =
+        entries.orEmpty().mapNotNull { (k, v) -> (unwrap(v) as? JsonObject)?.let { k to it } }.toMap()
+
     internal suspend fun applyBucket(bucket: String, entries: JsonObject?) {
         // Replace-on-apply: any local row not in the incoming bucket
         // will be wiped. For bucket reorders this is the right call.
+        rowBuckets[bucket]?.let { return it.applyAll(objects(entries)) }
         when (bucket) {
-            BUCKET_GROUP_ORDERS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val ordinal = (unwrap(v) as? JsonObject)?.get("ordinal")
-                        .asInt() ?: return@mapNotNull null
-                    GroupOrderEntity(flag = k, ordinal = ordinal)
-                }
-                db.groupOrders().replaceAll(list)
-            }
-            BUCKET_FOLDERS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val id = k.toLongOrNull() ?: return@mapNotNull null
-                    val obj = unwrap(v) as? JsonObject ?: return@mapNotNull null
-                    val name = obj["name"].asStr() ?: return@mapNotNull null
-                    val sortOrder = obj["sortOrder"].asInt() ?: 0
-                    FolderEntity(id = id, name = name, sortOrder = sortOrder)
-                }
-                db.folders().replaceAll(list)
-            }
-            BUCKET_FOLDER_MEMBERS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val (folderId, whom) = parseFolderMemberKey(k) ?: return@mapNotNull null
-                    val obj = unwrap(v) as? JsonObject
-                    val ordinal = obj?.get("ordinal").asInt() ?: 0
-                    val kind = obj?.get("kind").asStr()
-                        ?: FolderMemberEntity.KIND_WHOM
-                    FolderMemberEntity(
-                        folderId = folderId,
-                        whom = whom,
-                        ordinal = ordinal,
-                        kind = kind,
-                    )
-                }
-                db.folders().replaceAllMembers(list)
-            }
-            BUCKET_NOTIFY_PREFS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val level = (unwrap(v) as? JsonObject)?.get("level")
-                        .asStr() ?: return@mapNotNull null
-                    NotifyPreferenceEntity(whom = k, level = level)
-                }
-                db.notifyPrefs().replaceAll(list)
-            }
-            BUCKET_RAIL_ITEMS -> {
-                val rows = entries.orEmpty().mapNotNull { (k, v) ->
-                    val item = railItemOrNull(k) ?: return@mapNotNull null
-                    val visible = (unwrap(v) as? JsonObject)?.get("visible").asBool()
-                        ?: return@mapNotNull null
-                    // Skip explicit `true` entries — absence is the default and
-                    // we don't want stale `true` rows to drift the read site.
-                    if (visible) return@mapNotNull null
-                    RailItemPrefEntity(item.name, visible = false)
-                }
-                db.railItemPrefs().replaceAll(rows)
-            }
-            BUCKET_BOOKMARKS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val (whom, postId) = parseBookmarkKey(k) ?: return@mapNotNull null
-                    val ts = (unwrap(v) as? JsonObject)?.get("ts")
-                        .asLong() ?: 0L
-                    BookmarkEntity(whom = whom, postId = postId, bookmarkedMs = ts)
-                }
-                db.bookmarks().replaceAll(list)
-            }
-            BUCKET_BOOKMARK_FOLDERS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val id = k.toLongOrNull() ?: return@mapNotNull null
-                    val obj = unwrap(v) as? JsonObject ?: return@mapNotNull null
-                    val name = obj["name"].asStr() ?: return@mapNotNull null
-                    val sortOrder = obj["sortOrder"].asInt() ?: 0
-                    BookmarkFolderEntity(id = id, name = name, sortOrder = sortOrder)
-                }
-                db.bookmarkFolders().replaceAll(list)
-            }
-            BUCKET_BOOKMARK_FOLDER_MEMBERS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val (folderId, whom, postId) =
-                        parseBookmarkFolderMemberKey(k) ?: return@mapNotNull null
-                    val ordinal = (unwrap(v) as? JsonObject)?.get("ordinal").asInt() ?: 0
-                    BookmarkFolderMemberEntity(
-                        folderId = folderId,
-                        whom = whom,
-                        postId = postId,
-                        ordinal = ordinal,
-                    )
-                }
-                db.bookmarkFolders().replaceAllMembers(list)
-            }
             BUCKET_AI_SETTINGS -> {
-                val entry = unwrap(entries?.get(AI_ENTRY)) as? JsonObject ?: return
-                applyAiEntry(entry)
+                // Preferences first, then the credentials, which are an
+                // entry of their own so that saving one cannot erase the
+                // other. An older ship has only the first.
+                (unwrap(entries?.get(AI_ENTRY)) as? JsonObject)?.let(::applyAiEntry)
+                (unwrap(entries?.get(AI_KEYS_ENTRY)) as? JsonObject)?.let(::applyAiEntry)
             }
             BUCKET_WATCHWORDS -> {
                 // Apply each entry; we don't have a "deleteAllTerms" since
@@ -1584,62 +1673,14 @@ class SettingsSyncImpl(
 
     internal suspend fun applyEntry(bucket: String, entry: String, value: JsonElement) {
         val unwrapped = unwrap(value)
+        val obj = unwrapped as? JsonObject
+        rowBuckets[bucket]?.let { rows ->
+            if (obj != null) rows.applyOne(entry, obj)
+            return
+        }
         when (bucket) {
-            BUCKET_GROUP_ORDERS -> {
-                val ordinal = (unwrapped as? JsonObject)?.get("ordinal")
-                    .asInt() ?: return
-                db.groupOrders().upsertRaw(entry, ordinal)
-            }
-            BUCKET_FOLDERS -> {
-                val id = entry.toLongOrNull() ?: return
-                val obj = unwrapped as? JsonObject ?: return
-                val name = obj["name"].asStr() ?: return
-                val sortOrder = obj["sortOrder"].asInt() ?: 0
-                db.folders().upsert(FolderEntity(id, name, sortOrder))
-            }
-            BUCKET_FOLDER_MEMBERS -> {
-                val (folderId, whom) = parseFolderMemberKey(entry) ?: return
-                val obj = unwrapped as? JsonObject
-                val ordinal = obj?.get("ordinal").asInt() ?: 0
-                val kind = obj?.get("kind").asStr()
-                    ?: FolderMemberEntity.KIND_WHOM
-                db.folders().addMemberRaw(folderId, whom, ordinal, kind)
-            }
-            BUCKET_NOTIFY_PREFS -> {
-                val level = (unwrapped as? JsonObject)?.get("level")
-                    .asStr() ?: return
-                db.notifyPrefs().upsert(NotifyPreferenceEntity(entry, level))
-            }
-            BUCKET_RAIL_ITEMS -> {
-                val item = railItemOrNull(entry) ?: return
-                val visible = (unwrapped as? JsonObject)?.get("visible").asBool() ?: return
-                if (visible) {
-                    db.railItemPrefs().delete(item.name)
-                } else {
-                    db.railItemPrefs().upsert(RailItemPrefEntity(item.name, visible = false))
-                }
-            }
-            BUCKET_BOOKMARKS -> {
-                val (whom, postId) = parseBookmarkKey(entry) ?: return
-                val ts = (unwrapped as? JsonObject)?.get("ts")
-                    .asLong() ?: 0L
-                db.bookmarks().upsert(BookmarkEntity(whom, postId, ts))
-            }
-            BUCKET_BOOKMARK_FOLDERS -> {
-                val id = entry.toLongOrNull() ?: return
-                val obj = unwrapped as? JsonObject ?: return
-                val name = obj["name"].asStr() ?: return
-                val sortOrder = obj["sortOrder"].asInt() ?: 0
-                db.bookmarkFolders().upsert(BookmarkFolderEntity(id, name, sortOrder))
-            }
-            BUCKET_BOOKMARK_FOLDER_MEMBERS -> {
-                val (folderId, whom, postId) =
-                    parseBookmarkFolderMemberKey(entry) ?: return
-                val ordinal = (unwrapped as? JsonObject)?.get("ordinal").asInt() ?: 0
-                db.bookmarkFolders().addMemberRaw(folderId, whom, postId, ordinal)
-            }
             BUCKET_AI_SETTINGS -> {
-                if (entry == AI_ENTRY) {
+                if (entry == AI_ENTRY || entry == AI_KEYS_ENTRY) {
                     (unwrapped as? JsonObject)?.let(::applyAiEntry)
                 }
             }
@@ -1715,6 +1756,7 @@ class SettingsSyncImpl(
     }
 
     internal suspend fun removeEntry(bucket: String, entry: String) {
+        rowBuckets[bucket]?.let { return it.remove(entry) }
         when (bucket) {
             BUCKET_UI_PREFS -> {
                 // Entry deleted on the ship → back to that entry's default.
@@ -1723,37 +1765,17 @@ class SettingsSyncImpl(
                     ENTRY_NON_COMET_NAMES -> io.nisfeb.talon.ui.AzimuthNames.setEnabled(false)
                 }
             }
-            BUCKET_GROUP_ORDERS -> db.groupOrders().remove(entry)
-            BUCKET_FOLDERS -> {
-                val id = entry.toLongOrNull() ?: return
-                db.folders().deleteMembersOf(id)
-                db.folders().delete(id)
-            }
-            BUCKET_FOLDER_MEMBERS -> {
-                val (folderId, whom) = parseFolderMemberKey(entry) ?: return
-                db.folders().removeMember(folderId, whom)
-            }
-            BUCKET_NOTIFY_PREFS -> db.notifyPrefs().clear(entry)
-            BUCKET_RAIL_ITEMS -> db.railItemPrefs().delete(entry)
-            BUCKET_BOOKMARKS -> {
-                val (whom, postId) = parseBookmarkKey(entry) ?: return
-                db.bookmarks().remove(whom, postId)
-            }
-            BUCKET_BOOKMARK_FOLDERS -> {
-                val id = entry.toLongOrNull() ?: return
-                db.bookmarkFolders().deleteMembersOf(id)
-                db.bookmarkFolders().delete(id)
-            }
-            BUCKET_BOOKMARK_FOLDER_MEMBERS -> {
-                val (folderId, whom, postId) =
-                    parseBookmarkFolderMemberKey(entry) ?: return
-                db.bookmarkFolders().removeMember(folderId, whom, postId)
-            }
             BUCKET_AI_SETTINGS -> {
-                // Ship removed config — clear local AI settings
-                // (only if local is in sync mode so we don't wipe a
-                // device that didn't opt in).
-                if (aiSettings.state.value.syncEnabled) aiSettings.clear()
+                // Only the credentials entry going means the credentials
+                // went, and only the credentials go with it. Anything
+                // else vanishing is not a reason to wipe a device's
+                // provider, its prompts and its toggles as well.
+                val cfg = aiSettings.state.value
+                if (entry == AI_KEYS_ENTRY && cfg.syncEnabled) {
+                    aiSettings.applyRemote(
+                        cfg.copy(apiKey = "", braveApiKey = "", sttApiKey = "", sttApiKeyRemovedAtMs = 0L),
+                    )
+                }
             }
             BUCKET_WATCHWORDS -> {
                 // entry-key is sanitized form; delete by matching sanitization.
@@ -1906,19 +1928,12 @@ class SettingsSyncImpl(
     }
 
     internal suspend fun clearBucketLocally(bucket: String) {
+        rowBuckets[bucket]?.let { return it.clear() }
         when (bucket) {
             BUCKET_UI_PREFS -> {
                 io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(false)
                 io.nisfeb.talon.ui.AzimuthNames.setEnabled(false)
             }
-            BUCKET_GROUP_ORDERS -> db.groupOrders().replaceAll(emptyList())
-            BUCKET_FOLDERS -> db.folders().replaceAll(emptyList())
-            BUCKET_FOLDER_MEMBERS -> db.folders().replaceAllMembers(emptyList())
-            BUCKET_NOTIFY_PREFS -> db.notifyPrefs().replaceAll(emptyList())
-            BUCKET_RAIL_ITEMS -> db.railItemPrefs().replaceAll(emptyList())
-            BUCKET_BOOKMARKS -> db.bookmarks().replaceAll(emptyList())
-            BUCKET_BOOKMARK_FOLDERS -> db.bookmarkFolders().replaceAll(emptyList())
-            BUCKET_BOOKMARK_FOLDER_MEMBERS -> db.bookmarkFolders().replaceAllMembers(emptyList())
             BUCKET_WATCHWORDS -> {
                 val existing = db.watchwords().streamTerms().firstOrNull().orEmpty()
                 existing.forEach { db.watchwords().deleteTermById(it.id) }

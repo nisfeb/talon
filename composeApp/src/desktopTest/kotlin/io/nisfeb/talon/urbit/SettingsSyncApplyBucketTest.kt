@@ -356,6 +356,70 @@ class SettingsSyncApplyBucketTest {
             assertEquals("whisper-local", aiSettings.state.value.sttApiKey)
         }
 
+    /**
+     * The bug that made keys vanish. A second install with no key of
+     * its own (a profile build, a fresh phone) writes its preferences
+     * on startup. That used to replace the whole entry, so the ship
+     * lost the key, and the entry it left behind then told every other
+     * device to switch provider and forget its model name. The key was
+     * still there, against the wrong endpoint, answering 401.
+     */
+    @Test
+    fun `a device with no key of its own says nothing about anybody's`() = runBlocking {
+        aiSettings.applyRemote(
+            AiSettings.Config(
+                provider = AiSettings.Provider.OpenRouter,
+                apiKey = "sk-mine",
+                model = "anthropic/claude-sonnet-4",
+                baseUrl = null,
+                syncEnabled = true,
+            ),
+        )
+        // What a key-less peer writes: its preferences, stamped, with
+        // the provider it happens to be defaulted to.
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_AI_SETTINGS,
+            buildJsonObject {
+                put("config", buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "Anthropic")
+                    put("catchMeUpEnabled", false)
+                })
+            },
+        )
+        val after = aiSettings.state.value
+        assertEquals("sk-mine", after.apiKey, "the key stays")
+        assertEquals(AiSettings.Provider.OpenRouter, after.provider, "and so does the provider it belongs to")
+        assertEquals("anthropic/claude-sonnet-4", after.model, "and the model name")
+        assertEquals(false, after.catchMeUpEnabled, "the preference it did have something to say about travels")
+    }
+
+    @Test
+    fun `only a device that has credentials writes the credentials entry`() {
+        // What decides it, since the push itself needs a live channel.
+        val bare = AiSettings.Config(provider = AiSettings.Provider.OpenAi, apiKey = "", model = null)
+        assertEquals(false, bare.hasCredentials())
+        assertEquals(true, bare.copy(apiKey = "sk-mine").hasCredentials())
+        assertEquals(true, bare.copy(braveApiKey = "brave").hasCredentials())
+        assertEquals(true, bare.copy(sttApiKey = "whisper").hasCredentials())
+        // A removal is a thing to say about credentials too, or it
+        // could never reach the other devices.
+        assertEquals(true, bare.copy(sttApiKeyRemovedAtMs = 5_000L).hasCredentials())
+    }
+
+    @Test
+    fun `the preferences entry going away does not take the credentials with it`() = runBlocking {
+        aiSettings.applyRemote(
+            AiSettings.Config(
+                provider = AiSettings.Provider.OpenAi, apiKey = "sk-mine", model = null, syncEnabled = true,
+            ),
+        )
+        sync.removeEntry(SettingsSyncImpl.BUCKET_AI_SETTINGS, "config")
+        assertEquals("sk-mine", aiSettings.state.value.apiKey)
+        sync.removeEntry(SettingsSyncImpl.BUCKET_AI_SETTINGS, SettingsSyncImpl.AI_KEYS_ENTRY)
+        assertEquals("", aiSettings.state.value.apiKey, "the credentials entry going does take them")
+    }
+
     @Test
     fun `applyBucket AI_SETTINGS adopts a transcription key and a newer removal`() =
         runBlocking {
