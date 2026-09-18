@@ -88,6 +88,7 @@ androidx-security-crypto = { group = "androidx.security", name = "security-crypt
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxingCore" }
 zxing-android-embedded = { group = "com.journeyapps", name = "zxing-android-embedded", version.ref = "zxingAndroidEmbedded" }
 mediapipe-tasks-text = { group = "com.google.mediapipe", name = "tasks-text", version.ref = "mediapipeTasksText" }
+vlcj = { group = "uk.co.caprica", name = "vlcj", version = "4.12.1" }
 
 # DJL for desktop on-device sentence embedding (smart search /
 # important-message highlights). The onnxruntime engine bundles

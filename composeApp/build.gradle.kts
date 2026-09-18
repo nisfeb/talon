@@ -213,6 +213,11 @@ kotlin {
         val desktopMain by getting
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
+            // Video in a chat row. Binds to the system's libvlc: the jar
+            // is small and carries no natives, and where VLC is not
+            // installed the player reports itself absent and the row
+            // falls back to the link (VoiceMessages.desktop.kt).
+            implementation(libs.vlcj)
             // Trunkline call engine: libwebrtc via JNI. The base jar is
             // pure API; the natives ship per-platform. Bundle only the
             // host's natives (matches the slimReleaseDistributable
