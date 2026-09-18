@@ -106,6 +106,11 @@ object ModelExtractor {
             if (mentioned != null && subject !in mentioned) continue
             val attr = o["attr"]?.jsonPrimitive?.content?.trim()?.lowercase() ?: continue
             if (!ATTR.matches(attr)) continue
+            // A medical fact is `health` and a money fact is `income`,
+            // both of which the policy keeps from keys, so this client
+            // cannot write either. Under any other name it would write
+            // them in plain sight of every key, so they are dropped.
+            if (attr in SENSITIVE || attr in SENSITIVE_BY_ANOTHER_NAME) continue
             val known = attrs[subject.substringBefore('/')]
             if (known != null && attr !in known && attr !in ALWAYS) continue
             val value: JsonElement = when (val v = o["value"]) {
@@ -154,4 +159,14 @@ object ModelExtractor {
     private val ATTR = Regex("[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?")
     /** Attrs any kind may carry whatever the schema lists. */
     private val ALWAYS = setOf("status", "location")
+
+    /** The two names the ship keeps from keys (orrery's starter policy). */
+    private val SENSITIVE = setOf("health", "income")
+
+    /** What a model reaches for when it means one of those two. */
+    private val SENSITIVE_BY_ANOTHER_NAME = setOf(
+        "medical", "diagnosis", "illness", "sickness", "symptom", "symptoms", "medication",
+        "meds", "prescription", "treatment", "therapy", "surgery", "condition",
+        "salary", "pay", "wage", "wages", "earnings", "debt", "savings", "net-worth", "networth",
+    )
 }

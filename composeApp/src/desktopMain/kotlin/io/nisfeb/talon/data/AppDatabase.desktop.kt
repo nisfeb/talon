@@ -53,6 +53,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun orreryAccounts(): OrreryAccountDao
     actual abstract fun orreryNoticed(): OrreryNoticedDao
     actual abstract fun orreryChannels(): OrreryChannelDao
+    actual abstract fun orrerySent(): OrrerySentDao
 }
 
 /**
@@ -121,7 +122,7 @@ private const val SMOKE_TEST_TIMEOUT_MS = 15_000L
 private fun buildAndPing(dbFile: File): AppDatabase {
     val db = Room.databaseBuilder<AppDatabase>(name = dbFile.absolutePath)
         .setDriver(BundledSQLiteDriver())
-        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION)
+        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION)
         .fallbackToDestructiveMigration(dropAllTables = true)
         .build()
     try {

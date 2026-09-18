@@ -37,8 +37,8 @@ class OrreryFactsTest {
 
     @Test
     fun `two messages on one day are one last-contact claim`() {
-        val a = messageFacts(post("~bus", "~bus", noon), me)!!
-        val b = messageFacts(post("~bus", "~bus", evening, id = "171"), me)!!
+        val a = messageFacts(post("~bus", "~bus", noon), me, "person/bus")!!
+        val b = messageFacts(post("~bus", "~bus", evening, id = "171"), me, "person/bus")!!
         assertEquals("person/bus", a.subject)
         assertEquals(JsonPrimitive("2026-09-17"), a.value)
         assertEquals(a.value, b.value)
@@ -49,8 +49,8 @@ class OrreryFactsTest {
 
     @Test
     fun `our own posts and channel posts are told apart`() {
-        assertNull(messageFacts(post(me, "~bus", noon), me))
-        val chan = messageFacts(post("~bus", "chat/~host/general", noon), me)!!
+        assertNull(messageFacts(post(me, "~bus", noon), me, "person/me"))
+        val chan = messageFacts(post("~bus", "chat/~host/general", noon), me, "person/bus")!!
         assertEquals("talon-chat", chan.sourceKind)
         assertEquals("talon://chat/chat/~host/general?id=170", chan.sourceId)
     }
@@ -58,38 +58,30 @@ class OrreryFactsTest {
     @Test
     fun `mail names everyone on the thread but us and never the future`() {
         val e = InboxEntry(id = "t1", last = evening + 48 * 3_600_000, participants = listOf(me, "~bus", "~nec", "bad"))
-        val obs = mailFacts(e, me, nowMs = evening)
+        val obs = mailFacts(e, me, nowMs = evening) { ship -> personId(ship) }
         assertEquals(listOf("person/bus", "person/nec"), obs.map { it.subject })
         assertEquals(JsonPrimitive("2026-09-17"), obs[0].value, "capped to now: the author's clock is theirs")
         assertEquals("talon://mail/t1", obs[0].sourceId)
     }
 
     @Test
-    fun `a contact is a body with every handle as an alias`() {
+    fun `a contact is a body with every handle as an alias, on the id the pass decided`() {
         val c = ContactEntity(ship = "~bus", nickname = "Bus", bio = null, avatarUrl = null, status = "at the shop", statusUpdatedMs = noon)
-        val f = contactFacts(c, me, handle = "~bus", longHandle = null)
-        assertEquals(OBody("person/bus", "Bus", listOf("Bus", "~bus")), f.bodies.single())
-        val status = f.observations.single()
+        // The ship may already keep them as person/sarah; the pass says
+        // which body this is, and the body just says what it looks like.
+        assertEquals(OBody("person/sarah", "Bus", listOf("Bus", "~bus")), personBody(c, "person/sarah", handle = "~bus", longHandle = null))
+        val status = contactStatus(c, "person/sarah").single()
         assertEquals("status", status.attr)
         assertEquals(JsonPrimitive("at the shop"), status.value)
         assertEquals(noon, status.atMs)
-        assertEquals("person/me", contactFacts(c.copy(ship = me), me, "~zod", null).bodies.single().id)
+        assertTrue(contactStatus(c.copy(status = null), "person/sarah").isEmpty())
     }
 
     @Test
-    fun `an event is a situation under way between its ends, and where we are`() {
-        val row = CalendarRow(id = "E1", cal = "default", meta = buildJsonObject { put("name", JsonPrimitive("Dentist")); put("location", JsonPrimitive("Main St")) }, l = noon, r = evening)
-        val f = eventFacts(row, me)
-        assertEquals("situation/cal-default-e1", f.bodies.single().id)
-        val status = f.observations.first { it.attr == "status" }
-        assertEquals(noon, status.atMs)
-        assertEquals(evening, status.untilMs)
-        val where = f.observations.first { it.subject == "person/me" }
-        assertEquals("location", where.attr)
-        assertEquals(60, where.conf)
-        assertEquals(evening, where.untilMs)
-        assertEquals("default/E1", where.sourceId)
-        assertTrue(eventFacts(row.copy(cat = "todo"), me).observations.isEmpty(), "tasks stay in the calendar")
+    fun `a digest notices a rename and ignores a replay`() {
+        val a = OBody("person/bus", "Bus", listOf("Bus", "~bus"))
+        assertEquals(bodyDigest(a), bodyDigest(OBody("person/bus", "Bus", listOf("~bus", "Bus"))))
+        assertTrue(bodyDigest(a) != bodyDigest(a.copy(name = "Bussy")))
     }
 
     @Test
@@ -102,71 +94,6 @@ class OrreryFactsTest {
         assertEquals("urb://~zod/lattice/calls/1", f.observations.first { it.attr == "transcript" }.value.jsonPrimitive.content)
         assertEquals(2, f.observations.count { it.attr == "last-contact" })
         assertTrue(f.observations.all { it.sourceKind == "talon-call" && it.sourceId == "urb://~zod/lattice/calls/1" })
-    }
-
-    private fun occurrence(idx: Int, startMs: Long, kind: String = "weekly", name: String = "Standup", location: String = "") =
-        CalendarRow(
-            id = "E9", cal = "default", idx = idx, kind = kind,
-            meta = buildJsonObject {
-                put("name", JsonPrimitive(name))
-                if (location.isNotEmpty()) put("location", JsonPrimitive(location))
-            },
-            l = startMs, r = startMs + 1_800_000,
-        )
-
-    @Test
-    fun `a recurring event is one activity with its cadence, last and next`() {
-        val week = 7L * 24 * 3_600_000
-        val rows = (0..3).map { occurrence(it, noon - 2 * week + it * week, location = "the office") }
-        val f = calendarFacts(rows, me, nowMs = noon + 3_600_000)
-        assertEquals(listOf("activity/cal-default-e9"), f.bodies.map { it.id }, "one body for the series, not four")
-        fun value(attr: String) = f.observations.single { it.attr == attr && it.subject.startsWith("activity/") }
-        assertEquals(JsonPrimitive("weekly"), value("cadence").value)
-        assertEquals(JsonPrimitive(isoUtc(noon)), value("last").value, "the most recent one that has started")
-        assertEquals(JsonPrimitive(isoUtc(noon + week)), value("next").value)
-        assertEquals("default/E9", value("last").sourceId, "the series, with no occurrence in the pointer")
-        assertEquals(JsonPrimitive("the office"), value("location").value)
-    }
-
-    @Test
-    fun `the anchors come from the occurrences, so a later pass writes nothing new`() {
-        val week = 7L * 24 * 3_600_000
-        val rows = (0..3).map { occurrence(it, noon - 2 * week + it * week) }
-        val early = activityFacts(rows, me, nowMs = noon + 3_600_000)
-        val later = activityFacts(rows, me, nowMs = noon + 4 * 3_600_000)
-        assertEquals(early.observations.map { it.atMs to it.value }, later.observations.map { it.atMs to it.value })
-        assertEquals(noon, early.observations.single { it.attr == "last" }.atMs, "last is asserted at the occurrence")
-        assertEquals(noon + 1_800_000, early.observations.single { it.attr == "next" }.atMs, "next, at the end of the occurrence before it")
-    }
-
-    @Test
-    fun `an occurrence happening now makes the activity under way, and places us`() {
-        val week = 7L * 24 * 3_600_000
-        val rows = (0..2).map { occurrence(it, noon - week + it * week, location = "the office") }
-        val f = activityFacts(rows, me, nowMs = noon + 600_000)
-        val status = f.observations.single { it.attr == "status" }
-        assertEquals(JsonPrimitive("under way"), status.value)
-        assertEquals(noon + 1_800_000, status.untilMs)
-        val where = f.observations.single { it.subject == "person/me" }
-        assertEquals(60, where.conf)
-        assertTrue(activityFacts(rows, me, nowMs = noon + 3 * 3_600_000).observations.none { it.attr == "status" }, "between occurrences it is not under way")
-    }
-
-    @Test
-    fun `a one-off keeps its situation, and tasks stay out`() {
-        val once = CalendarRow(id = "E1", cal = "default", meta = buildJsonObject { put("name", JsonPrimitive("Dentist")) }, l = noon, r = evening)
-        val series = occurrence(0, noon)
-        val f = calendarFacts(listOf(once, series, once.copy(id = "T1", cat = "todo")), me, nowMs = noon)
-        assertEquals(listOf("situation/cal-default-e1", "activity/cal-default-e9"), f.bodies.map { it.id })
-    }
-
-    @Test
-    fun `a situation slug is bounded and clean`() {
-        val row = CalendarRow(id = "A".repeat(80) + "!!", cal = "Work Cal", meta = buildJsonObject { put("name", JsonPrimitive("x")) }, l = 1, r = 2, idx = 3)
-        val id = situationId(row).removePrefix("situation/")
-        assertTrue(id.length <= 64, id)
-        assertTrue(id.matches(Regex("[a-z0-9-]+")), id)
-        assertTrue(id.startsWith("cal-work-cal-"))
     }
 
     @Test

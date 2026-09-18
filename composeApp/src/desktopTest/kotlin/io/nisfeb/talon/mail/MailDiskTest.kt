@@ -13,6 +13,7 @@ import io.ktor.utils.io.ByteReadChannel
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.CALENDAR_ROWS_MIGRATION
 import io.nisfeb.talon.data.ORRERY_ACCOUNTS_MIGRATION
+import io.nisfeb.talon.data.ORRERY_SENT_MIGRATION
 import io.nisfeb.talon.data.MAIL_ROWS_MIGRATION
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -46,7 +47,7 @@ class MailDiskTest {
     // No destructive fallback: a migration that does not match the entity fails here.
     private fun db() = Room.databaseBuilder<AppDatabase>(name = dbPath)
         .setDriver(BundledSQLiteDriver())
-        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION)
+        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION)
         .build()
 
     @Test

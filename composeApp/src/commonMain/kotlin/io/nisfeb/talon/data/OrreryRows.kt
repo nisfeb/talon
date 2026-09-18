@@ -146,3 +146,53 @@ internal const val ORRERY_NOTICED_SQL =
 
 internal const val ORRERY_CHANNELS_SQL =
     "CREATE TABLE IF NOT EXISTS `orrery_channels` (`whom` TEXT NOT NULL, PRIMARY KEY(`whom`))"
+
+/**
+ * What this install has already told the ship, so it never says it
+ * twice. The ship dedupes an observation by its content, but a body
+ * upsert always makes the body again: without this, every pass
+ * recreated whatever a consolidation had just merged away, and the
+ * calendar's events came back as hollow twins minutes later.
+ *
+ * The key says what kind of thing it is: `cal:<calendar>/<uid>` for an
+ * event the ship already has a body for (the value is that body's id),
+ * `occ:<calendar>/<uid>/<n>` for an occurrence whose rows are written,
+ * `msg:<source id>` for a message that has been read, and
+ * `person:<ship>` for someone who has a body (the value is its id, and
+ * a digest of the name and aliases we sent, so a rename is noticed
+ * while a replay is not).
+ */
+@Entity(tableName = "orrery_sent", primaryKeys = ["ship", "key"])
+data class OrrerySentEntity(
+    val ship: String,
+    val key: String,
+    val value: String,
+    val atMs: Long,
+)
+
+@Dao
+interface OrrerySentDao {
+    @Query("SELECT * FROM orrery_sent WHERE ship = :ship AND key = :key")
+    suspend fun get(ship: String, key: String): OrrerySentEntity?
+
+    @Query("SELECT * FROM orrery_sent WHERE ship = :ship AND key IN (:keys)")
+    suspend fun some(ship: String, keys: List<String>): List<OrrerySentEntity>
+
+    @Upsert
+    suspend fun put(row: OrrerySentEntity)
+
+    @Upsert
+    suspend fun putAll(rows: List<OrrerySentEntity>)
+
+    @Query("DELETE FROM orrery_sent WHERE ship = :ship")
+    suspend fun clear(ship: String)
+}
+
+internal const val ORRERY_SENT_SQL =
+    "CREATE TABLE IF NOT EXISTS `orrery_sent` (`ship` TEXT NOT NULL, `key` TEXT NOT NULL, " +
+        "`value` TEXT NOT NULL, `atMs` INTEGER NOT NULL, PRIMARY KEY(`ship`, `key`))"
+
+/** 44 to 45: what has already been sent. Android runs the same statement its own way. */
+val ORRERY_SENT_MIGRATION = object : Migration(44, 45) {
+    override fun migrate(connection: SQLiteConnection) = connection.execSQL(ORRERY_SENT_SQL)
+}

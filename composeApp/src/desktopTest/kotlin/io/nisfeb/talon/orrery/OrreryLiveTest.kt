@@ -23,6 +23,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -46,6 +47,14 @@ class OrreryLiveTest {
     private val url = System.getenv("TALON_ORRERY_URL")
     private val cookie = System.getenv("TALON_ORRERY_COOKIE")
     private val ship = System.getenv("TALON_ORRERY_SHIP")
+
+    /** Every body the ship shows this session, by id. */
+    private suspend fun bodyIds(http: io.ktor.client.HttpClient, url: String): Set<String> {
+        val text = http.get("$url/apps/orrery/api/state").bodyAsText()
+        return Json.parseToJsonElement(text).jsonObject["bodies"]?.let { arr ->
+            (arr as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.content }
+        }.orEmpty().toSet()
+    }
 
     @Test
     fun `the structural pipe lands on the ship and the key dies with the switch`() {
@@ -89,13 +98,20 @@ class OrreryLiveTest {
                 assertTrue("Sampel" in body, "with the nickname as an alias: $body")
                 println("OrreryLiveTest: ship view keys ${view.keys}")
 
+                // The whole point of the sent-record: a pass that runs
+                // again says nothing new and makes no second body.
+                val before = bodyIds(owner, url)
+                repo.push()
+                val after = bodyIds(owner, url)
+                assertEquals(before, after, "a replay created bodies: ${after - before}")
+
                 val token = row.token
                 repo.disable().getOrThrow()
                 assertEquals(null, db.orreryAccounts().get(ship), "the row is gone")
                 delay(1_500)
                 val dead = assertFailsWith<OrreryError.Refused> {
                     OrreryApi(owner, createAppHttpClient(), url).observe(
-                        batches(Facts(observations = listOf(messageFacts(MessageEntity(whom = peer, id = "1", author = peer, sentMs = nowMs(), contentJson = "[]", kind = "chat"), ship)!!))).single(),
+                        batches(Facts(observations = listOf(messageFacts(MessageEntity(whom = peer, id = "1", author = peer, sentMs = nowMs(), contentJson = "[]", kind = "chat"), ship, personId(peer))!!))).single(),
                         token,
                     )
                 }

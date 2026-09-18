@@ -136,6 +136,8 @@ class OrreryRepo(
 
     /** Mint this install's key and start the walk. */
     suspend fun enable(): Result<Unit> = runCatching {
+        // A key minted now already sees activities.
+        db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(ship ?: "", SCOPE_KEY, "activity", now()))
         val a = api ?: error("Not attached to a ship.")
         val s = ship ?: error("Not attached to a ship.")
         val key = a.mint("Talon on $platform", by())
@@ -151,6 +153,7 @@ class OrreryRepo(
         val s = ship ?: return@runCatching
         loop?.cancel()
         loop = null
+        db.orrerySent().clear(s)
         val row = db.orreryAccounts().get(s)
         if (row != null) {
             // A key the ship has already dropped answers 404; that is
@@ -194,11 +197,21 @@ class OrreryRepo(
         }
     }
 
-    /** One pass over every source from its cursor. Safe to call any time. */
+    /**
+     * One pass over every source from its cursor. Safe to call any
+     * time, and safe to run again from nothing: the ship is asked what
+     * it already has before anything is made, every occurrence and
+     * message this install has handled is remembered, and a body is
+     * created once or never. Replaying used to recreate whatever the
+     * owner's consolidation had just merged away, which is how the
+     * calendar's events came back as hollow twins.
+     */
     suspend fun push() {
         val a = api ?: return
         val s = ship ?: return
         val url = shipUrl ?: return
+        val row0 = db.orreryAccounts().get(s) ?: return
+        ensureScope(s, row0)
         val row = db.orreryAccounts().get(s) ?: return
         if (_pushing.value) return
         _pushing.value = true
@@ -209,17 +222,38 @@ class OrreryRepo(
             val queued = pendingLock.withLock { pending.toList().also { pending.clear() } }
             queued.forEach { facts += it }
             queuedForRetry = queued
+            // What the ship has, which is what a client goes by. It is
+            // never told what this install remembers.
+            val view = runCatching { a.state(row.token) }.getOrNull()
+            val sent = db.orrerySent()
+            val record = mutableListOf<io.nisfeb.talon.data.OrrerySentEntity>()
+            fun remember(key: String, value: String = "") {
+                record += io.nisfeb.talon.data.OrrerySentEntity(s, key, value, nowMs)
+            }
 
             val book = book()
-            db.contacts().all().filter { it.ship == s || it.ship in book }.forEach { c ->
-                facts += contactFacts(c, s, shipHandle(c.ship), shipHandleLong(c.ship))
+            val people = People(a, row.token, sent, s, view?.bodies.orEmpty())
+            for (c in db.contacts().all().filter { it.ship == s || it.ship in book }) {
+                val handle = shipHandle(c.ship)
+                val id = people.idFor(c.ship, c.nickname ?: handle)
+                val body = personBody(c, id, handle, shipHandleLong(c.ship))
+                // The body only when the ship has no such person, or when
+                // what it goes by has actually changed.
+                val digest = bodyDigest(body)
+                val known = sent.get(s, "person:${c.ship}")?.value
+                val fresh = known != "$id|$digest"
+                if (fresh) remember("person:${c.ship}", "$id|$digest")
+                facts += Facts(
+                    bodies = if (fresh && !people.shipHasBody(id)) listOf(body) else emptyList(),
+                    observations = contactStatus(c, id),
+                )
             }
 
             val posts = db.messages().postsAfter(row.messagesCursor, s, MESSAGES_PER_PASS)
             // Contact from a DM is contact with you. In a channel it is only
-            // worth a body when the author is already in your book.
+            // worth recording when the author is already in your book.
             val direct = posts.filter { it.whom.startsWith("~") || it.whom.startsWith("0v") || it.author in book }
-            facts += Facts(observations = direct.mapNotNull { messageFacts(it, s) })
+            facts += Facts(observations = direct.mapNotNull { m -> messageFacts(m, s, people.idFor(m.author, null)) })
             val messagesCursor = posts.maxOfOrNull { it.sentMs } ?: row.messagesCursor
 
             // Mail and the calendar may be absent on this ship; a source
@@ -228,13 +262,34 @@ class OrreryRepo(
             var freshMail: List<io.nisfeb.talon.mail.InboxEntry> = emptyList()
             runCatching { AuspexApi(http, url).inbox(limit = MAIL_PER_PASS) }.onSuccess { page ->
                 freshMail = page.threads.filter { it.last > row.mailCursor }
-                facts += Facts(observations = freshMail.flatMap { mailFacts(it, s, nowMs) })
+                facts += Facts(
+                    observations = freshMail.flatMap { e ->
+                        mailFacts(e, s, nowMs) { ship -> people.idFor(ship, null) }
+                    },
+                )
                 mailCursor = freshMail.maxOfOrNull { it.last } ?: mailCursor
             }.onFailure { Log.i(TAG, "mail skipped: ${it.message}") }
-            facts += triage(a, row, posts, s, nowMs, url, freshMail)
+            facts += triage(a, row, posts, s, nowMs, url, freshMail) { key -> remember(key) }
 
             runCatching { CalendarApi(http, url).window(nowMs - BACKFILL_MS, nowMs + AHEAD_MS) }.onSuccess { w ->
-                facts += calendarFacts(w.rows, s, nowMs)
+                for (subject in calendarSubjects(w.rows)) {
+                    val decided = sent.get(s, subject.key)?.value?.takeIf { it.isNotBlank() }
+                    // Ask the ship before making anything: by the title it
+                    // goes by, then by the calendar's own id, which
+                    // reconcile keeps as an alias of the activity it built.
+                    val hits = if (decided != null) emptyList() else buildList {
+                        addAll(runCatching { a.resolve(subject.title, row.token) }.getOrDefault(emptyList()))
+                        if (none { it.isExact }) {
+                            addAll(runCatching { a.resolve(subject.uid, row.token) }.getOrDefault(emptyList()))
+                        }
+                    }
+                    val written = sent.some(s, subject.occurrences.map { occurrenceKey(subject, it) })
+                        .map { it.key }.toSet()
+                    val write = calendarWrite(subject, decided, hits, written, s, nowMs)
+                    facts += write.facts
+                    if (decided == null) remember(subject.key, write.bodyId)
+                    write.occurrenceKeys.forEach { remember(it) }
+                }
             }.onFailure { Log.i(TAG, "calendar skipped: ${it.message}") }
 
             var refused = 0
@@ -247,6 +302,9 @@ class OrreryRepo(
                     Log.w(TAG, "refused: ${it.error}")
                 }
             }
+            // Only once the ship has taken them: a pass that failed
+            // halfway must be free to say the same things again.
+            if (record.isNotEmpty()) sent.putAll(record)
             db.orreryAccounts().upsert(row.copy(messagesCursor = messagesCursor, mailCursor = mailCursor, calendarCursor = nowMs))
             runCatching { a.actions(row.token) }.onSuccess { _actions.value = it }.onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
             _lastPushMs.value = nowMs
@@ -270,6 +328,55 @@ class OrreryRepo(
         }
     }
 
+    /**
+     * The first keys this install minted were made before orrery had an
+     * activity kind, so they cannot see one: resolve would answer
+     * nothing for a recurring event and the pass would make the twin it
+     * was told not to. A key without it is replaced, once.
+     */
+    private suspend fun ensureScope(s: String, row: OrreryAccountEntity) {
+        val a = api ?: return
+        if (db.orrerySent().get(s, SCOPE_KEY) != null) return
+        val minted = runCatching { a.mint("Talon on $platform", by()) }
+            .onFailure { Log.w(TAG, "could not mint a key that sees activities: ${it.message}") }
+            .getOrNull() ?: return
+        db.orreryAccounts().upsert(row.copy(clientId = minted.id, token = minted.token))
+        runCatching { a.revoke(row.clientId) }
+        db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, SCOPE_KEY, "activity", now()))
+        Log.i(TAG, "replaced this install's key with one that can see activities")
+    }
+
+    /**
+     * Which body a ship's person is, asked of the state view first, then
+     * of resolve, and only then made up. A person the ship keeps under
+     * another name is that person: writing to an id built from the @p
+     * would be the twin all over again.
+     */
+    private class People(
+        private val api: OrreryApi,
+        private val token: String,
+        private val sent: io.nisfeb.talon.data.OrrerySentDao,
+        private val ourShip: String,
+        bodies: List<KnownBody>,
+    ) {
+        private val byShip: Map<String, String> = bodies.mapNotNull { b -> b.ship?.let { it to b.id } }.toMap()
+        private val known: Set<String> = bodies.map { it.id }.toSet()
+        private val names: List<Pair<String, String>> = bodies.filter { it.id.startsWith("person/") }.map { (it.name ?: "") to it.id }
+        private val decided = mutableMapOf<String, String>()
+
+        fun shipHasBody(id: String): Boolean = id in known
+
+        /** Never suspends on the ship more than once per person per pass. */
+        fun idFor(ship: String, name: String?): String {
+            if (ship == ourShip) return "person/me"
+            decided[ship]?.let { return it }
+            val fromState = byShip[ship]
+                ?: names.firstOrNull { (n, _) -> name != null && samePerson(n, name) }?.second
+                ?: personId(ship)
+            decided[ship] = fromState
+            return fromState
+        }
+    }
     /** What one pass reads with: the ship's bodies, the model if any, and the gate. */
     private class Reading(
         val bodies: List<KnownBody>,
@@ -298,7 +405,16 @@ class OrreryRepo(
      * straight up when the person has trusted that kind of claim. A
      * claim already noticed is the same row again.
      */
-    private suspend fun triage(a: OrreryApi, row: OrreryAccountEntity, posts: List<io.nisfeb.talon.data.MessageEntity>, s: String, nowMs: Long, url: String, freshMail: List<io.nisfeb.talon.mail.InboxEntry>): Facts {
+    private suspend fun triage(
+        a: OrreryApi,
+        row: OrreryAccountEntity,
+        posts: List<io.nisfeb.talon.data.MessageEntity>,
+        s: String,
+        nowMs: Long,
+        url: String,
+        freshMail: List<io.nisfeb.talon.mail.InboxEntry>,
+        remember: (String) -> Unit,
+    ): Facts {
         val spoken = pendingLock.withLock { transcripts.toList().also { transcripts.clear() } }
         if (posts.isEmpty() && spoken.isEmpty() && freshMail.isEmpty()) return Facts()
         // A phone with a computer on the job leaves the reading to it. The
@@ -317,8 +433,15 @@ class OrreryRepo(
         val allowed = db.orreryChannels().all().toSet()
         val ourNick = db.contacts().get(s)?.nickname
         var up = Facts()
+        // A message is read once. The ship answers "existing" for an
+        // observation it already holds, but the model costs a second
+        // every time and its answer is not guaranteed to be the same.
+        val handled = db.orrerySent().some(s, posts.map { "msg:${it.whom}/${it.id}" }).map { it.key }.toSet()
         for (m in posts) {
+            val key = "msg:${m.whom}/${m.id}"
+            if (key in handled) continue
             val text = StoryCache.textFor(m.id, m.contentJson)
+            remember(key)
             if (!inScope(m.whom, text, s, ourNick, allowed)) continue
             val kind = if (m.whom.startsWith("~") || m.whom.startsWith("0v")) "talon-dm" else "talon-chat"
             up += triageText(r, s, nowMs, text, m.author, m.sentMs, m.whom, m.id, kind, "talon://chat/${m.whom}?id=${m.id}")
@@ -451,6 +574,7 @@ class OrreryRepo(
         // ponytail: a per-pass cap; a per-day budget when a phone needs one.
         const val MODEL_PER_PASS = 20
         const val GATE_EXAMPLES = 50
+        private const val SCOPE_KEY = "scope:activity"
         const val MAIL_THREADS_PER_PASS = 10
 
         /** A noticed row as the facts it stands for. */

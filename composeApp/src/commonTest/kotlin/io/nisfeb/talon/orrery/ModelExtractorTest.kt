@@ -54,6 +54,21 @@ class ModelExtractorTest {
     }
 
     @Test
+    fun `a medical or money claim is dropped, whatever it is called`() {
+        // The ship keeps health and income from keys, so this client
+        // cannot write them; under another name it would write them
+        // where every key can read them.
+        val answer = """{"claims":[
+            {"subject":"person/sarah","attr":"health","value":"broken ankle","conf":90},
+            {"subject":"person/sarah","attr":"diagnosis","value":"broken ankle","conf":90},
+            {"subject":"person/sarah","attr":"salary","value":"90k","conf":90},
+            {"subject":"person/sarah","attr":"status","value":"on crutches","conf":90}
+        ]}"""
+        val out = ModelExtractor.parse(answer, index, "~bus", 1L, me, text = "sarah is on crutches, broken ankle, 90k")
+        assertEquals(listOf("status"), out.map { it.attr })
+    }
+
+    @Test
     fun `not JSON, or not the shape, is nothing`() {
         assertTrue(ModelExtractor.parse("Sure! Here is", index, "~bus", 1L, me).isEmpty())
         assertTrue(ModelExtractor.parse("""{"result":[]}""", index, "~bus", 1L, me).isEmpty())

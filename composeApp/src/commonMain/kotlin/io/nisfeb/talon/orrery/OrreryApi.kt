@@ -11,6 +11,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
+import io.ktor.http.encodeURLParameter
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
@@ -96,6 +97,29 @@ class OrreryApi(
             k.jsonObject["attrs"]?.jsonArray.orEmpty().mapNotNull { it.jsonPrimitive.content }
         }.orEmpty()
         return StateView(rev = o["rev"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L, bodies = bodies, attrs = attrs)
+    }
+
+    /**
+     * Bodies whose name, alias or ship matches [q], exact first, as the
+     * ship itself judges a match: version 10 and later reads aliases
+     * and name words too. Asking before creating is what stops one
+     * event becoming two bodies.
+     */
+    suspend fun resolve(q: String, token: String): List<ResolvedBody> {
+        if (q.isBlank()) return emptyList()
+        val text = request(bare, HttpMethod.Get, "/api/resolve?q=" + q.encodeURLParameter()) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        val arr = reading { Json.parseToJsonElement(text) } as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+        return arr.mapNotNull { e ->
+            val o = e.jsonObject
+            ResolvedBody(
+                id = o["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                kind = o["kind"]?.jsonPrimitive?.content ?: return@mapNotNull null,
+                name = o["name"]?.jsonPrimitive?.content ?: "",
+                match = o["match"]?.jsonPrimitive?.content ?: "",
+            )
+        }
     }
 
     /**
@@ -207,7 +231,10 @@ class OrreryApi(
         const val APP_PATH = "/apps/orrery"
         private const val NOT_FOUND = 404
         private const val FORBIDDEN = 403
-        val KINDS = listOf("person", "place", "thing", "situation", "org")
+        // activity is in this list because a recurring event is one:
+        // a key without it cannot see an activity, so it would resolve
+        // nothing and make the situation twin all over again.
+        val KINDS = listOf("person", "place", "thing", "situation", "org", "activity")
         val ACTIONS = listOf("task", "note", "message", "calendar")
     }
 }
@@ -224,6 +251,11 @@ enum class OrreryAvailability {
 }
 
 data class MintedKey(val id: String, val token: String)
+
+/** A body the ship matched, and how. */
+data class ResolvedBody(val id: String, val kind: String, val name: String, val match: String) {
+    val isExact: Boolean get() = match == "exact"
+}
 
 /** One of this ship's keys, as the owner lists them. */
 data class ClientKey(val id: String, val by: String, val usedMs: Long?)

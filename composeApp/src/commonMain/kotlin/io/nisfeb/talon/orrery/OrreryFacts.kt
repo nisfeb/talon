@@ -56,128 +56,46 @@ internal fun dayOf(ms: Long): Pair<String, Long> {
     return date.toString() to date.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
 }
 
-private fun lastContact(ship: String, ms: Long, sourceKind: String, sourceId: String): Obs {
+private fun lastContact(subjectId: String, ms: Long, sourceKind: String, sourceId: String): Obs {
     val (date, start) = dayOf(ms)
-    return Obs(personId(ship), "last-contact", JsonPrimitive(date), start, sourceKind = sourceKind, sourceId = sourceId)
+    return Obs(subjectId, "last-contact", JsonPrimitive(date), start, sourceKind = sourceKind, sourceId = sourceId)
 }
 
 /**
- * A contact as a body: the name they go by, every handle a triager may
- * meet in text, and their status line when it carries a time. Our own
- * contact row is `person/me`, which the ship already made.
+ * A contact as a body: the name they go by, and every handle a triager
+ * may meet in text. The id is decided by the pass, which asks the ship
+ * first; this only says what the body would look like.
  */
-fun contactFacts(c: ContactEntity, ourShip: String, handle: String?, longHandle: String?): Facts {
-    val id = if (c.ship == ourShip) "person/me" else personId(c.ship)
+fun personBody(c: ContactEntity, id: String, handle: String?, longHandle: String?): OBody {
     val nick = c.nickname?.trim()?.takeIf { it.isNotEmpty() }
     val aliases = listOfNotNull(nick, c.ship, handle, longHandle).distinct()
-    val body = OBody(id, name = nick ?: handle, aliases = aliases)
-    val status = c.status?.trim()?.takeIf { it.isNotEmpty() }
-    val at = c.statusUpdatedMs
-    val obs = if (status != null && at != null) {
-        listOf(Obs(id, "status", JsonPrimitive(status), at, sourceKind = "contacts", sourceId = c.ship))
-    } else emptyList()
-    return Facts(listOf(body), obs)
+    return OBody(id, name = nick ?: handle, aliases = aliases)
 }
 
+/** What their status line says, when it says anything and says when. */
+fun contactStatus(c: ContactEntity, id: String): List<Obs> {
+    val status = c.status?.trim()?.takeIf { it.isNotEmpty() } ?: return emptyList()
+    val at = c.statusUpdatedMs ?: return emptyList()
+    return listOf(Obs(id, "status", JsonPrimitive(status), at, sourceKind = "contacts", sourceId = c.ship))
+}
+
+/** What a body says about itself, so a rename is noticed and a replay is not. */
+fun bodyDigest(body: OBody): String =
+    (listOf(body.name.orEmpty()) + body.aliases.sorted()).joinToString("|").hashCode().toString(16)
+
 /** Somebody wrote to us, or where we could see it. Our own posts say nothing. */
-fun messageFacts(m: MessageEntity, ourShip: String): Obs? {
+fun messageFacts(m: MessageEntity, ourShip: String, subjectId: String): Obs? {
     if (m.author.isBlank() || m.author == ourShip || !m.author.startsWith("~")) return null
     val kind = if (m.whom.startsWith("~") || m.whom.startsWith("0v")) "talon-dm" else "talon-chat"
-    return lastContact(m.author, m.sentMs, kind, "talon://chat/${m.whom}?id=${m.id}")
+    return lastContact(subjectId, m.sentMs, kind, "talon://chat/${m.whom}?id=${m.id}")
 }
 
 /** Everyone on a mail thread but us, dated by the thread's last message, capped to now. */
-fun mailFacts(e: InboxEntry, ourShip: String, nowMs: Long): List<Obs> {
+fun mailFacts(e: InboxEntry, ourShip: String, nowMs: Long, idFor: (String) -> String): List<Obs> {
     val at = e.last.coerceAtMost(nowMs)
     if (at <= 0) return emptyList()
     return e.participants.filter { it.startsWith("~") && it != ourShip }.distinct()
-        .map { lastContact(it, at, "mail", "talon://mail/${e.id}") }
-}
-
-/**
- * One occurrence as a situation that is under way between its ends, and
- * where it puts us. A recurring event becomes an activity instead;
- * [calendarFacts] is what routes them.
- */
-fun eventFacts(row: CalendarRow, ourShip: String): Facts {
-    if (row.isTask || row.name.isBlank() || row.r <= row.l) return Facts()
-    val id = situationId(row)
-    val source = "${row.cal}/${row.id}" + if (row.idx > 0) "/${row.idx}" else ""
-    val body = OBody(id, name = row.name, aliases = row.tags.filter { it.isNotBlank() })
-    val obs = buildList {
-        fun obs(attr: String, value: JsonElement, untilMs: Long? = null, conf: Int = 100) =
-            add(Obs(id, attr, value, row.l, untilMs, conf, "calendar", source))
-        obs("status", JsonPrimitive("under way"), untilMs = row.r)
-        obs("started", JsonPrimitive(isoUtc(row.l)))
-        obs("ended", JsonPrimitive(isoUtc(row.r)))
-        obs("participants", buildJsonObject { put("ref", "person/me") })
-        if (row.location.isNotBlank()) {
-            obs("location", JsonPrimitive(row.location))
-            add(Obs("person/me", "location", JsonPrimitive(row.location), row.l, row.r, 60, "calendar", source))
-        }
-    }
-    return Facts(listOf(body), obs)
-}
-
-/**
- * A window of the calendar: what happens once is a situation, and what
- * recurs is one activity carrying its cadence and its last and next,
- * not a body per occurrence. A standing weekly meeting is one thing in
- * the world that keeps happening, which is what the kind is for.
- */
-fun calendarFacts(rows: List<CalendarRow>, ourShip: String, nowMs: Long): Facts {
-    val usable = rows.filter { !it.isTask && it.name.isNotBlank() && it.r > it.l }
-    var out = Facts()
-    usable.filterNot { it.repeats }.forEach { out += eventFacts(it, ourShip) }
-    usable.filter { it.repeats }
-        .groupBy { it.cal to it.id }
-        .forEach { (_, occurrences) -> out += activityFacts(occurrences, ourShip, nowMs) }
-    return out
-}
-
-/**
- * One recurring event, from the occurrences of it the window holds.
- *
- * Every `at` here comes from an occurrence rather than from the clock,
- * because an observation's id hashes its `at`: asserting "next is
- * Tuesday" at the moment of each pass would write a new row every ten
- * minutes. Anchored this way, a pass that learns nothing new writes
- * nothing new, and the rows turn over once per occurrence.
- *
- * ponytail: the series' own attributes are re-asserted whenever the
- * last occurrence moves, since the ship is not read back before
- * writing. Reading the body first would cut that to one row per real
- * change; retention culls the superseded ones meanwhile.
- */
-fun activityFacts(occurrences: List<CalendarRow>, ourShip: String, nowMs: Long): Facts {
-    val rows = occurrences.filter { !it.isTask && it.name.isNotBlank() && it.r > it.l }.sortedBy { it.l }
-    val first = rows.firstOrNull() ?: return Facts()
-    val id = activityId(first)
-    val source = "${first.cal}/${first.id}"
-    val body = OBody(id, name = first.name, aliases = first.tags.filter { it.isNotBlank() })
-    val last = rows.lastOrNull { it.l <= nowMs }
-    val next = rows.firstOrNull { it.l > nowMs }
-    val underWay = rows.firstOrNull { it.l <= nowMs && nowMs < it.r }
-    // What the series is, as of the occurrence it was last read from.
-    val asOf = last?.l ?: first.l
-    val obs = buildList {
-        fun obs(attr: String, value: JsonElement, at: Long, untilMs: Long? = null, conf: Int = 100) =
-            add(Obs(id, attr, value, at, untilMs, conf, "calendar", source))
-        obs("cadence", JsonPrimitive(first.kind), asOf)
-        obs("participants", buildJsonObject { put("ref", "person/me") }, asOf)
-        if (first.location.isNotBlank()) obs("location", JsonPrimitive(first.location), asOf)
-        last?.let { obs("last", JsonPrimitive(isoUtc(it.l)), it.l) }
-        // The next one became the next when the previous ended. With no
-        // previous in the window, the day is the steadiest anchor there is.
-        next?.let { obs("next", JsonPrimitive(isoUtc(it.l)), last?.r ?: dayOf(nowMs).second) }
-        underWay?.let {
-            obs("status", JsonPrimitive("under way"), it.l, untilMs = it.r)
-            if (first.location.isNotBlank()) {
-                add(Obs("person/me", "location", JsonPrimitive(first.location), it.l, it.r, 60, "calendar", source))
-            }
-        }
-    }
-    return Facts(listOf(body), obs)
+        .map { lastContact(idFor(it), at, "mail", "talon://mail/${e.id}") }
 }
 
 /**
@@ -207,18 +125,6 @@ fun callFacts(
         others.forEach { add(lastContact(it, nowMs, "talon-call", address)) }
     }
     return Facts(bodies, obs)
-}
-
-/** `situation/cal-<calendar>-<event>[-<instance>]`, within the slug's 64 bytes. */
-internal fun situationId(row: CalendarRow): String = calId("situation", row, withInstance = true)
-
-/** `activity/cal-<calendar>-<event>`: the series, not one of its occurrences. */
-internal fun activityId(row: CalendarRow): String = calId("activity", row, withInstance = false)
-
-private fun calId(kind: String, row: CalendarRow, withInstance: Boolean): String {
-    val raw = "cal-${row.cal}-${row.id}" + if (withInstance && row.idx > 0) "-${row.idx}" else ""
-    val slug = raw.lowercase().replace(Regex("[^a-z0-9-]+"), "-").trim('-').replace(Regex("-{3,}"), "--")
-    return "$kind/" + slug.take(64).trimEnd('-')
 }
 
 // ---- the wire ------------------------------------------------------

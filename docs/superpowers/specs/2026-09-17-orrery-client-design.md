@@ -16,15 +16,28 @@ Two pipes feed orrery from Talon. The structural pipe turns facts Talon already 
 - Text never leaves the device for the ship. An observation's source is a pointer that Talon can open, and its value is a claim.
 - The best model a device can run is the one it uses. The floor exists so that every supported device works, not so that every device gets the floor. A newer system with better on-device model access uses that access, and the experience is never lowered to what the oldest supported version can do.
 
-## 3. The structural pipe
+## 3. Not fighting the ship
+
+The ship is the source of truth and the owner's reconcile pass consolidates what clients get wrong. orrery-utils' `docs/writing-a-client.md` is the rule set every client shares, and Talon follows it:
+
+1. **Nothing is said twice.** Every message read, every occurrence written, every person and event decided is remembered in `orrery_sent`, keyed per ship. The ship answers `existing` for an observation it already holds, but a body upsert makes the body again, so a replay used to recreate whatever reconcile had just merged away. A pass that fails records nothing, so it is free to say the same things again.
+2. **Resolve before creating, and a hit is the thing itself.** `GET /resolve?q=` by the title, then by the calendar's own id, which reconcile keeps as an alias of the activity it built. A hit of kind `activity` makes the event an occurrence of it (`last` at the occurrence's start, `next` for the one after); a hit of kind `situation` gets the facts; a hit of kind `person` is that person, whatever name the message used. Only a miss makes a body: an `activity` for something that repeats, carrying the UID and the title variants as aliases, a `situation` for a one-off.
+3. **No `status: "open"` for an event.** `started` and `ended` only. A situation is open until something says `closed`, and the owner's retire pass closes it at its end; an open row dated after a close reopens it, which is what a late reminder did to a trip that had been over for months.
+4. **Event time in `at`.** `started`, `ended`, `last` and `next` are anchored to the event, never to the reminder or the clock, so a reminder cannot outrank a close.
+5. **Everything through the key.** The owner cookie is used for three things only: asking whether orrery is there, minting this install's key, and revoking it. Every write carries `Authorization: Bearer` and lands in `/tr/log` as `talon/<platform>`.
+6. **No local cache of bodies is pushed.** What exists is read from `GET /state` each pass. A person already on the ship under another name is used by id; `normalizeTitle` and `samePerson` are ported from orrery-utils so sameness is decided the way reconcile decides it.
+7. **Sensitive facts keep their two names.** `health` and `income` are the ship's, kept from keys by policy, so the triage writes neither and drops a claim that reaches for another name for them.
+8. **Replay-safe by construction.** The pipe can be turned off and on, or run again from nothing, and the ship ends up the same.
+
+## 4. The structural pipe
 
 | Talon data | Body | Observations | source kind and id |
 |---|---|---|---|
 | A contact in the person's own book (never a ship merely seen; the profile cache holds thousands) | `person/<ship slug>`. Name is the nickname, else the word name. Aliases: nickname, @p, word names | `status` from the status line, `at` = statusUpdatedMs | `contacts`, `<ship>` |
 | A DM or group DM from anyone; a channel post only from someone in the book | none new | `person/x.last-contact` = the day, `at` = the start of that day | `talon-dm` for a DM, `talon-chat` for a channel post, id `talon://chat/<whom>?id=<post>` |
 | A mail message | `person/<ship>` for from and to | `person/x.last-contact`, `at` = sent capped to now, since the author's clock is untrusted | `mail`, `talon://mail/<thread>` |
-| A timed calendar event that happens once | `situation/cal-<cal>-<id>`, name from the event, aliases from its tags | `status = "under way"` at the start until the end; `started`; `ended`; `location`; `participants` = me | `calendar`, `<cal>/<id>` |
-| A recurring calendar event, from the occurrences the window holds | one `activity/cal-<cal>-<id>` for the series, never a body per occurrence | `cadence` (the rule's kind); `last` and `next` occurrence times; `location`; `participants` = me; `status = "under way"` while one is running. Every `at` comes from an occurrence, never the clock, so a pass that learns nothing writes nothing | `calendar`, `<cal>/<id>` |
+| A calendar event that happens once | `situation/<title>`, made only when the ship resolves nothing, with the UID as an alias | `started`, `ended`, `location`, `participants` = me, and no status | `calendar`, `<cal>/<id>` |
+| A recurring calendar event, from the occurrences the window holds | one `activity/<title>` for the series, made only when the ship resolves nothing, with the UID and title variants as aliases | `cadence`, `schedule`, `location`, `participants` = me, and one `last` per occurrence at its own time, plus `next` | `calendar`, `<cal>/<id>` |
 | A calendar event with a location | none | `person/me.location = <place>` at the start until the end, conf 60 | `calendar`, `<cal>/<id>` |
 | A call whose transcript was published, 1:1 or a party line | `situation/call-<time>`, name from the transcript's title, and a `person/<ship>` for each speaker | `started`, `participants` = me and every speaker, `transcript` = the Lattice address; `person/x.last-contact` for each speaker | `talon-call`, the transcript's `urb://` address |
 
@@ -34,7 +47,7 @@ A body slug for a person is the @p without its sig, with `--` for a comet's sepa
 
 Every observation carries `by = talon/<platform>` (the key's identity, forced by the ship anyway), `conf` 100 for a structural fact, and `at` from the event, never from the clock of submission.
 
-## 4. The triage funnel
+## 5. The triage funnel
 
 Most of what Talon sees is group chatter about nothing in the user's world. The funnel drops it cheaply before the model runs, and the model sees only candidates.
 
@@ -44,7 +57,7 @@ Most of what Talon sees is group chatter about nothing in the user's world. The 
 4. **Extraction.** The candidate and the scoped body list (names, aliases, current attributes; sensitive ones are already stripped by the key) go to the local model with a grammar that admits only the answer shape: observations with subject, attr, value, at, until, conf, and any new bodies. Talon validates before submitting: attr charset and length, refs resolve to known bodies, conf capped at 80 for anything model-asserted. A refused attr is dropped and remembered as sensitive.
 5. **The person.** A Noticed tray in Talon, like the Requests section, shows each proposed observation with its source message: confirm or discard. A per-kind threshold lets confirmed kinds submit on their own once the user trusts them. Retract from the same tray. New places, things and situations are created only through the tray at first; people are created freely, because a ship is identity.
 
-## 5. Local extraction: a ladder, best rung first
+## 6. Local extraction: a ladder, best rung first
 
 Every device runs the best local model it has access to, chosen at runtime, and falls to the next rung only when the one above is absent. The contract is the same on every rung: the same prompt, the same answer shape, the same validation, the same tray. What differs is the model behind it. The bottom rung is a shared runtime that works everywhere, and it is there so that no device is left out, not as the target.
 
@@ -70,7 +83,7 @@ A capability flag, `isLocalTriageSupported`, gates the funnel's model stage per 
 
 Extraction runs in the background: on Android under WorkManager when charging or idle, on desktop and iOS while the app is open, with a per-day budget so a busy channel cannot run a phone flat.
 
-## 6. Auth and transport
+## 7. Auth and transport
 
 - **Key.** At setup Talon mints its own key with the owner cookie: `POST /apps/orrery/api/clients` with name "Talon on <platform>", `by: talon/<platform>`, scope kinds person, place, thing, situation, org, actions task, note, message, calendar, write true. The token is stored beside the session, and every orrery request carries it as a bearer, never the cookie. Revoking it on the ship stops Talon within a second.
 - **Availability.** `OrreryApi` probes like `AuspexApi` and `CalendarApi`: no Grubbery, no orrery, and orrery present are three different states, none an error. The Apps page gets an orrery row.
@@ -78,14 +91,14 @@ Extraction runs in the background: on Android under WorkManager when charging or
 - **Backfill.** Opt-in, over a chosen window, after the switch is turned on. Incremental thereafter from the live feeds Talon already runs: chat facts over the channel, the mail poll, the calendar poll.
 - **Reads.** The scoped state view for the funnel and for showing state in Talon, refetched on the beacon.
 
-## 7. Surfaces in Talon
+## 8. Surfaces in Talon
 
 - Settings: an Orrery section with the switch, the window for backfill, the channel allow-list, the tray thresholds, the local model's download state, and the cloud switch with its warning.
 - The Apps page: an orrery row, install and permits like the others.
 - The Noticed tray, in the chat list above Requests, and the same rows reachable from a message's menu.
 - The New widget: open orrery actions, so a proposal the analyst made shows beside the mentions. Talon executes `message` (a DM) and `calendar` (an event) kinds with a confirm, reports done or failed, and shows `task` and `note` as the ship's list.
 
-## 8. Phases
+## 9. Phases
 
 1. **Plumbing and the structural pipe.** `OrreryApi`, the probe, the Apps row, key minting, the sync table, contacts, chat and mail last-contact, and calendar situations, batched, backfilled over the window. The switch, off by default.
 2. **The funnel and the tray.** Scope, the names gate against the keyed state view, the Noticed tray with its trust rule (a kind of claim confirmed three times and never discarded goes up on its own), a per-channel switch, and a rule-only extractor for the simplest shapes (a status line, "I'm at <place>", a named body's whereabouts) so the tray is useful before the model lands. The embedding pattern gate waits for phase 3: its positive set is the claims the tray has confirmed, and the rules are their own gate until then.
@@ -93,18 +106,18 @@ Extraction runs in the background: on Android under WorkManager when charging or
 4. **Actions back.** Open actions in the New widget, execution of `message` and `calendar`, done and failed.
 5. **The middle rungs and the opt-in.** MediaPipe on Android, GPU offload on desktop, and the cloud extractor behind its switch.
 
-## 9. Gates
+## 10. Gates
 
 - Unit: the structural mappers are pure functions from Talon rows to observation JSON, tested against fixtures, including the id alignment with what the ship-side pushes would produce.
 - The funnel: a labelled set of messages (claims and chatter) with the expected gate outcome, run on every platform's embedder where one exists.
 - Extraction: a fixture set of candidates and expected observations, judged by field match, not by text. It runs in CI against the floor on desktop with a pinned model file, and it is the gate every higher rung must pass, on its platform, before the ladder may select it.
 - Against `~wex`: the phase 1 pipe writes, the state view shows it, a resend answers `existing` on every item, and a revoked key answers 403.
 
-## 10. Not in v1
+## 11. Not in v1
 
 Bodies for groups. Mirroring calendar tasks into orrery actions. Embedding resolve. A second identity on one install. The ship pushing to Talon; the beacon is enough while the app is open.
 
-## 11. Open
+## 12. Open
 
 - Which models, per rung. Floor candidates at 1B to 2B: Gemma 3 1B, Qwen2.5 1.5B, Llama 3.2 1B; middle candidates at 4B to 8B for desktops with the memory. Decided by the fixture set in phase 3, not by reputation.
 - Android's AICore prompt API has been pre-release; if it is not usable when phase 3 starts, MediaPipe with Gemma 3n is Android's top rung until it is.
