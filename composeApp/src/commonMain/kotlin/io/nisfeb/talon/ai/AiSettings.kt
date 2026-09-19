@@ -249,6 +249,6 @@ fun AiSettings.Config.keepingCredentials(of: AiSettings.Config): AiSettings.Conf
         sttApiKey = if (sttApiKey.isNotBlank() || removalWins) sttApiKey else of.sttApiKey,
         sttApiKeySetAtMs = maxOf(sttApiKeySetAtMs, of.sttApiKeySetAtMs),
         // A profile arriving without keys keeps this device's; none arriving keeps this device's profile.
-        savedProfile = savedProfile?.keepingLocal(of.savedProfile) ?: of.savedProfile,
+        savedProfile = savedProfile?.keepingLocal(of.savedProfile ?: migrateProfile(of)) ?: of.savedProfile,
     )
 }

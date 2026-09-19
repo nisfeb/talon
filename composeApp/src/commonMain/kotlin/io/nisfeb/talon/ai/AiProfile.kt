@@ -67,8 +67,12 @@ data class AiProfile(
     val providers: List<AiProvider> = emptyList(),
     val defaultModel: ModelRef? = null,
     val features: Map<AiFeature, FeatureSetting> = emptyMap(),
-    /** The Jev gate, status check and body picks, together. */
-    val jev: Boolean = false,
+    /**
+     * The Jev gate, status check and body picks, together. Null until
+     * the owner flips it here: the decision model was set per install,
+     * and one install's setting must not turn it off on another.
+     */
+    val jev: Boolean? = null,
 ) {
     fun provider(id: String): AiProvider? = providers.firstOrNull { it.id == id }
 
@@ -98,7 +102,7 @@ data class Resolved(val provider: AiProvider, val model: String) {
 /** What the settings alone do not say, for the migration: whether this install feeds orrery, and so on. */
 data class ProfileInputs(
     val orreryFed: Boolean = false,
-    val jevOn: Boolean = false,
+    val jevOn: Boolean? = null,
     /** The ship's generator as it is set: on, and the model it names. */
     val generatorOn: Boolean = false,
     val generatorUrl: String? = null,
@@ -160,7 +164,7 @@ fun migrateProfile(cfg: AiSettings.Config, inputs: ProfileInputs = ProfileInputs
     }
     val default = if (hasMain) ModelRef(MAIN_PROVIDER, cfg.model.orEmpty()) else null
     val generator = inputs.generatorUrl?.let { url ->
-        providers.firstOrNull { p -> p.kind == ProviderKind.OpenRouter && "openrouter.ai" in url }
+        providers.firstOrNull { p -> p.shipBase() == url.trim().trimEnd('/') || (p.kind == ProviderKind.OpenRouter && "openrouter.ai" in url) }
             ?.let { ModelRef(it.id, inputs.generatorModel.orEmpty()) }
     }
     return AiProfile(
@@ -171,7 +175,9 @@ fun migrateProfile(cfg: AiSettings.Config, inputs: ProfileInputs = ProfileInputs
             AiFeature.Assistant to FeatureSetting(cfg.assistantOn()),
             AiFeature.OrreryTriage to FeatureSetting(inputs.orreryFed, if (cfg.frontierReadsMessages && default != null) default else privateRef),
             AiFeature.OrreryGenerator to FeatureSetting(inputs.generatorOn, generator),
-            AiFeature.OrreryBrief to FeatureSetting(inputs.orreryFed),
+            // The brief was never a switch: every install feeding orrery
+            // with a model sent it. On is what it was, on every device.
+            AiFeature.OrreryBrief to FeatureSetting(true),
             AiFeature.Transcription to FeatureSetting(speech != null, speech),
         ),
         jev = inputs.jevOn,
@@ -260,12 +266,16 @@ fun AiProfile.keys(): Map<String, String> = providers.filter { it.apiKey.isNotBl
 fun AiProfile.withKeys(keys: Map<String, String>): AiProfile =
     copy(providers = providers.map { p -> keys[p.id]?.takeIf { it.isNotBlank() }?.let { p.copy(apiKey = it) } ?: p })
 
-/** A profile from elsewhere keeps this device's keys and model lists for the providers they share. */
+/**
+ * A profile from elsewhere keeps this device's keys and model lists for
+ * the providers they share: the same id and the same kind, so an
+ * Anthropic key is never put on another device's OpenRouter provider.
+ */
 fun AiProfile.keepingLocal(local: AiProfile?): AiProfile {
     if (local == null) return this
     return copy(
         providers = providers.map { p ->
-            val mine = local.provider(p.id)
+            val mine = local.provider(p.id)?.takeIf { it.kind == p.kind }
             p.copy(
                 apiKey = p.apiKey.ifBlank { mine?.apiKey.orEmpty() },
                 models = p.models.ifEmpty { mine?.models.orEmpty() },
@@ -354,12 +364,31 @@ private fun kindOfLegacy(p: AiSettings.Provider): ProviderKind = when (p) {
     AiSettings.Provider.Custom -> ProviderKind.OpenAiCompatible
 }
 
+/** The switches that travel whatever the key sync says, as the old toggles did. */
+private val SYNCED_SWITCHES = listOf(AiFeature.CatchUp, AiFeature.Assistant, AiFeature.OrreryBrief, AiFeature.Transcription)
+
+/** The switches as the config entry carries them. Triage is Feed Orrery, per install; the generator is the ship's. */
+fun AiProfile.switches(): kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.buildJsonObject {
+    SYNCED_SWITCHES.forEach { f -> put(f.name, kotlinx.serialization.json.JsonPrimitive(isOn(f))) }
+    jev?.let { put("jev", kotlinx.serialization.json.JsonPrimitive(it)) }
+}
+
+fun AiProfile.withSwitches(s: kotlinx.serialization.json.JsonObject): AiProfile = copy(
+    features = features + SYNCED_SWITCHES.mapNotNull { f ->
+        (s[f.name] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull()
+            ?.let { on -> f to (features[f] ?: FeatureSetting()).copy(on = on) }
+    },
+    jev = (s["jev"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: jev,
+)
+
 /**
  * The profile after one AI settings entry arrives from the ship, [merged]
- * being the old fields as already applied. A new install's entry carries
- * the profile, which keeps this device's keys and model lists; an old
- * install's changes what the old fields describe; provider keys come
- * only with the credentials entry, and only when this device syncs them.
+ * being the old fields as already applied. The terms are the old ones:
+ * switches travel always, in the config entry; providers, models and
+ * keys only in the credentials entry, and only where this device syncs
+ * them. What arrives keeps this device's own keys and model lists, taken
+ * from its old fields where it has saved no profile. An older install's
+ * write changes what the old fields describe.
  */
 fun profileAfterEntry(
     entry: kotlinx.serialization.json.JsonObject,
@@ -368,15 +397,21 @@ fun profileAfterEntry(
 ): AiProfile? {
     val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
     val incoming = (entry["profile"] as? kotlinx.serialization.json.JsonObject)
+        ?.takeIf { current.syncEnabled }
         ?.let { runCatching { json.decodeFromJsonElement(AiProfile.serializer(), it) }.getOrNull() }
+    val switches = entry["switches"] as? kotlinx.serialization.json.JsonObject
     val base = current.savedProfile
-    val fromOld = incoming == null && base != null &&
+    val fromNew = entry.containsKey("profile") || switches != null
+    val fromOld = !fromNew && base != null &&
         (entry.containsKey("catchMeUpEnabled") || (entry.containsKey("apiKey") && !entry.containsKey("providerKeys")))
-    val profile = when {
-        incoming != null -> incoming.keepingLocal(base)
+    var profile = when {
+        incoming != null -> incoming.keepingLocal(base ?: migrateProfile(current))
         fromOld -> base!!.withLegacy(merged)
         else -> base
-    } ?: return null
+    }
+    // Switches with no profile here yet make one from this device's own settings.
+    if (switches != null) profile = (profile ?: migrateProfile(merged)).withSwitches(switches)
+    profile ?: return null
     val keys = (entry["providerKeys"] as? kotlinx.serialization.json.JsonObject)
         ?.mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { k to it } }?.toMap()
     return if (keys != null && current.syncEnabled) profile.withKeys(keys) else profile

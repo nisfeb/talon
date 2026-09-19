@@ -204,13 +204,16 @@ class DecideControl(
 )
 
 /**
- * The settings under the one Jev switch: once the owner has saved a
- * profile, it turns the gate, the status check and the body picks on
- * together, at the thresholds kept here; before, the old switches stand.
+ * The settings under the one Jev switch: once the owner has flipped it,
+ * it turns the gate, the status check and the body picks on together,
+ * at the thresholds kept here; until then this install's own stand.
  */
 fun DecideSettings.under(cfg: io.nisfeb.talon.ai.AiSettings.Config?): DecideSettings {
-    val p = cfg?.savedProfile ?: return this
-    return if (p.jev) copy(on = true, gate = true, relevance = true) else copy(on = false)
+    return when (cfg?.savedProfile?.jev) {
+        null -> this
+        true -> copy(on = true, gate = true, relevance = true)
+        false -> copy(on = false)
+    }
 }
 
 /** The OpenRouter key Talon already has: the frontier model's, or the private model's when it points there. */

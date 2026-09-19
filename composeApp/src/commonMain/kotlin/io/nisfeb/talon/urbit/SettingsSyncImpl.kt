@@ -1,5 +1,6 @@
 package io.nisfeb.talon.urbit
 import io.nisfeb.talon.ai.forSync
+import io.nisfeb.talon.ai.switches
 import io.nisfeb.talon.ai.keys
 import kotlin.concurrent.Volatile
 import io.nisfeb.talon.util.nowMs
@@ -935,6 +936,12 @@ class SettingsSyncImpl(
                     cfg.savedProfile?.keys()?.takeIf { it.isNotEmpty() }?.let { keys ->
                         put("providerKeys", buildJsonObject { keys.forEach { (id, k) -> put(id, k) } })
                     }
+                    // The providers and models, which the frontier and
+                    // private model fields above always kept to this
+                    // entry: without keys or model lists.
+                    cfg.savedProfile?.let {
+                        put("profile", Json.encodeToJsonElement(io.nisfeb.talon.ai.AiProfile.serializer(), it.forSync()))
+                    }
                 },
             )
         }
@@ -955,11 +962,9 @@ class SettingsSyncImpl(
                 put("urbitKnowledgePrompt", cfg.urbitKnowledgePrompt)
                 put("assistantPrompt", cfg.assistantPrompt)
                 put("loopPrompt", cfg.loopPrompt)
-                // The profile, without keys or model lists: the keys ride
-                // the credentials entry, and each device fetches models.
-                cfg.savedProfile?.let {
-                    put("profile", Json.encodeToJsonElement(io.nisfeb.talon.ai.AiProfile.serializer(), it.forSync()))
-                }
+                // The profile's switches, which travel like the toggles
+                // above; its providers and models ride the credentials.
+                cfg.savedProfile?.let { put("switches", it.switches()) }
             },
         )
     }

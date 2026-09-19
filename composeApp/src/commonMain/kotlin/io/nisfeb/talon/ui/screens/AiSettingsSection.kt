@@ -104,7 +104,6 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?) {
         aiSettings.state.value,
         ProfileInputs(
             orreryFed = orrery?.enabled?.value == true,
-            jevOn = orrery?.decide?.settings?.value?.on == true,
             generatorOn = orrery?.generatorSettings?.value?.enabled == true,
             generatorUrl = orrery?.generatorSettings?.value?.url,
             generatorModel = orrery?.generatorSettings?.value?.model,
@@ -194,7 +193,8 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?) {
     // ── Jev ────────────────────────────────────────────────────
     Spacer(Modifier.height(12.dp))
     HorizontalDivider()
-    JevRow(orrery, profile, orreryHere, spend[AiSpend.JEV]) { on -> edit { it.copy(jev = on) } }
+    // Until the owner flips it here, Jev is what this install had.
+    JevRow(orrery, profile, profile.jev ?: decide.on, orreryHere, spend[AiSpend.JEV]) { on -> edit { it.copy(jev = on) } }
 }
 
 private fun AiProfile.without(id: String): AiProfile = copy(
@@ -606,7 +606,7 @@ private fun GeneratorRow(orrery: OrreryRepo, profile: AiProfile, onPick: (ModelR
  * no provider offers it, so the owner knows what they are missing.
  */
 @Composable
-private fun JevRow(orrery: OrreryRepo?, profile: AiProfile, orreryHere: Boolean, spent: Double?, onSwitch: (Boolean) -> Unit) {
+private fun JevRow(orrery: OrreryRepo?, profile: AiProfile, on: Boolean, orreryHere: Boolean, spent: Double?, onSwitch: (Boolean) -> Unit) {
     val jev = profile.jevProvider()
     var advanced by remember { mutableStateOf(false) }
     FeatureRow(
@@ -614,12 +614,12 @@ private fun JevRow(orrery: OrreryRepo?, profile: AiProfile, orreryHere: Boolean,
         "TypeSafe's Jev reads each message before triage does, through OpenRouter with zero data retention, for cents a day. " +
             "It skips messages that say nothing, drops statuses that are feelings rather than circumstances, and picks the people and things triage sees. " +
             "Triage reads less and reads better.",
-        on = profile.jev && jev != null, spent = spent, switchEnabled = jev != null || profile.jev,
+        on = on && jev != null, spent = spent, switchEnabled = jev != null || on,
         onSwitch = onSwitch,
     ) {}
     if (jev == null) Quiet("Needs an OpenRouter provider with a key: OpenRouter is where Jev is offered.")
     val dc = orrery?.decide
-    if (orrery != null && dc != null && orreryHere && profile.jev) {
+    if (orrery != null && dc != null && orreryHere && on) {
         TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Hide advanced" else "Advanced") }
         if (advanced) JevAdvanced(orrery, dc)
     }

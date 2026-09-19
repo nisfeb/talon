@@ -64,9 +64,9 @@ class AiProfileSyncTest {
     fun `a new install's profile arrives and keeps this device's keys and models`() {
         val mine = migrateProfile(base).let { it.copy(providers = it.providers.map { pr -> pr.copy(models = listOf(ModelInfo("m1"))) }) }
         val theirs = mine.copy(jev = true, features = mine.features + (AiFeature.CatchUp to FeatureSetting(false))).forSync()
-        val e = entry("schemaVersion" to "2", "catchMeUpEnabled" to false, "profile" to Json.encodeToJsonElement(AiProfile.serializer(), theirs) as JsonObject)
+        val e = entry("schemaVersion" to "2", "apiKey" to "sk-or", "profile" to Json.encodeToJsonElement(AiProfile.serializer(), theirs) as JsonObject)
         val got = profileAfterEntry(e, base.copy(savedProfile = mine), base)!!
-        assertTrue(got.jev)
+        assertEquals(true, got.jev)
         assertFalse(got.isOn(AiFeature.CatchUp))
         assertEquals("sk-or", got.provider(MAIN_PROVIDER)!!.apiKey, "no key arrived, so this device's stays")
         assertEquals(listOf(ModelInfo("m1")), got.provider(MAIN_PROVIDER)!!.models)
@@ -79,7 +79,7 @@ class AiProfileSyncTest {
         // Its preferences: catch-up off.
         val prefs = profileAfterEntry(entry("schemaVersion" to "2", "catchMeUpEnabled" to false), current, current.copy(catchMeUpEnabled = false))!!
         assertFalse(prefs.isOn(AiFeature.CatchUp))
-        assertTrue(prefs.jev, "a switch it cannot see is left as it was")
+        assertEquals(true, prefs.jev, "a switch it cannot see is left as it was")
         // Its credentials: a new key and model on the frontier provider.
         val creds = profileAfterEntry(
             entry("schemaVersion" to "2", "provider" to "OpenRouter", "apiKey" to "sk-new", "model" to "openai/gpt-5"),
@@ -110,7 +110,7 @@ class AiProfileSyncTest {
         assertEquals(mine, base.copy(savedProfile = null).keepingCredentials(local).savedProfile, "an old install's config keeps ours")
         val blankKeys = mine.forSync().copy(jev = true)
         val kept = base.copy(savedProfile = blankKeys).keepingCredentials(local).savedProfile!!
-        assertTrue(kept.jev)
+        assertEquals(true, kept.jev)
         assertEquals(mine.keys(), kept.keys())
     }
 
@@ -120,9 +120,12 @@ class AiProfileSyncTest {
         assertEquals(ds, ds.under(base))
         val jevOn = base.copy(savedProfile = migrateProfile(base).copy(jev = true))
         assertEquals(ds.copy(gate = true, relevance = true), ds.under(jevOn), "one switch, all three")
-        assertFalse(ds.under(base.copy(savedProfile = migrateProfile(base))).on)
+        assertEquals(ds, ds.under(base.copy(savedProfile = migrateProfile(base))), "never flipped: this install's own")
+        assertFalse(ds.under(base.copy(savedProfile = migrateProfile(base).copy(jev = false))).on)
         assertTrue(base.featureOn(AiFeature.OrreryBrief, before = true))
-        assertFalse(jevOn.featureOn(AiFeature.OrreryBrief, before = true))
+        assertTrue(jevOn.featureOn(AiFeature.OrreryBrief, before = false), "the brief migrates on, as it always sent")
+        val briefOff = migrateProfile(base).let { it.copy(features = it.features + (AiFeature.OrreryBrief to FeatureSetting(false))) }
+        assertFalse(base.copy(savedProfile = briefOff).featureOn(AiFeature.OrreryBrief, before = true))
     }
 
     @Test
@@ -133,5 +136,36 @@ class AiProfileSyncTest {
         assertEquals("http://192.168.1.5:1234/v1", server("http://192.168.1.5:1234/v1/chat/completions"))
         assertEquals("https://openrouter.ai/api/v1", AiProvider("o", ProviderKind.OpenRouter, "o").shipBase())
         assertNull(AiProvider("a", ProviderKind.Anthropic, "a").shipBase())
+    }
+
+    private fun profileEntry(p: AiProfile) = entry("schemaVersion" to "2", "profile" to Json.encodeToJsonElement(AiProfile.serializer(), p.forSync()) as JsonObject)
+
+    @Test
+    fun `a device that saved nothing yet keeps its own keys when a profile arrives, for providers of the same kind`() {
+        val desktop = migrateProfile(base) // OpenRouter main, the private server, this device, OpenAI speech
+        val phone = base.copy(provider = AiSettings.Provider.Anthropic, apiKey = "sk-ant")
+        val got = profileAfterEntry(profileEntry(desktop), phone, phone)!!
+        assertEquals("", got.provider(MAIN_PROVIDER)!!.apiKey, "an Anthropic key is not put on an OpenRouter provider")
+        assertEquals("sk-whisper", got.provider(SPEECH_PROVIDER)!!.apiKey)
+        assertEquals("sk-or", profileAfterEntry(profileEntry(desktop), base, base)!!.provider(MAIN_PROVIDER)!!.apiKey)
+        // The same rule where the store applies what arrived.
+        val applied = base.copy(savedProfile = desktop.forSync()).keepingCredentials(base).savedProfile!!
+        assertEquals("sk-or", applied.provider(MAIN_PROVIDER)!!.apiKey)
+    }
+
+    @Test
+    fun `switches travel whatever the key sync says, providers and models only with it`() {
+        val theirs = migrateProfile(base).let { it.copy(jev = true, features = it.features + (AiFeature.OrreryBrief to FeatureSetting(false))) }
+        val offHere = base.copy(syncEnabled = false)
+        assertNull(profileAfterEntry(profileEntry(theirs), offHere, offHere), "no key sync, no providers from elsewhere")
+        // Switches arriving where no profile is saved make one from this device's own settings.
+        val phone = base.copy(provider = AiSettings.Provider.Anthropic, apiKey = "sk-ant", syncEnabled = false)
+        val got = profileAfterEntry(entry("schemaVersion" to "2", "switches" to theirs.switches()), phone, phone)!!
+        assertEquals(true, got.jev)
+        assertFalse(got.isOn(AiFeature.OrreryBrief))
+        assertEquals(ProviderKind.Anthropic, got.provider(MAIN_PROVIDER)!!.kind)
+        assertEquals("sk-ant", got.provider(MAIN_PROVIDER)!!.apiKey)
+        // A switch never flipped does not travel, so it cannot turn another install's off.
+        assertFalse(migrateProfile(base).switches().containsKey("jev"))
     }
 }
