@@ -346,22 +346,12 @@ fun CalendarScreen(
             posted && mailed
         }
     }
-    // A task shows the moment it is typed, greyed, until the calendar's
-    // own copy arrives with the refresh after the poke.
-    var pendingTasks by remember { mutableStateOf(listOf<CalendarTask>()) }
+    // A task shows the moment it is typed, in flight, until the
+    // calendar's own copy arrives. The write belongs to the repo, so
+    // leaving this screen does not lose it.
+    val pendingTasks by repo.pendingTasks.collectAsState()
     fun addTask(name: String, due: LocalDate?, cal: String?, note: String = "") {
-        val d = EventDraft(name = name, note = note, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = listOfNotNull(tagFilter))
-        val ghost = CalendarTask(
-            id = "pending-${nowMs()}", cal = cal ?: "default", cat = "todo",
-            meta = buildJsonObject { put("name", name); if (tagFilter != null) put("tags", kotlinx.serialization.json.JsonArray(listOf(kotlinx.serialization.json.JsonPrimitive(tagFilter!!)))) },
-            dueMs = due?.atTime(0, 0)?.toInstant(TimeZone.UTC)?.toEpochMilliseconds(),
-        )
-        pendingTasks = pendingTasks + ghost
-        scope.launch {
-            val ok = repo.poke(eventBody(d))
-            pendingTasks = pendingTasks - ghost
-            if (!ok) status = "The ship did not take \"$name\"."
-        }
+        repo.addTask(EventDraft(name = name, note = note, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = listOfNotNull(tagFilter))) { status = it }
     }
 
     // A title and nine controls do not fit a phone. The title was left a
@@ -820,7 +810,13 @@ fun CalendarScreen(
             onChoosePostTo = { pickingPostTo = true },
             onClearPostTo = { postTo = null },
             onDismiss = { editing = null; postTo = null },
-            onSave = { d, editScope ->
+            onSave = onSave@{ d, editScope ->
+                // A new task goes on the list at once and is written behind it.
+                if (id == null && d.cat == EventCat.TODO && postTo == null) {
+                    editing = null
+                    repo.addTask(d) { status = it }
+                    return@onSave
+                }
                 val idx = editingIdx
                 val occurrence = editingStartMs?.let { occurrenceAt(it, editingAllDay, zone) }
                 val ghost = if (id == null) placeholderFor(d) else null
@@ -1564,7 +1560,9 @@ private fun TaskLine(
             if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (pending) {
-            Text("syncing…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // In flight: written, and not yet read back from the ship.
+            androidx.compose.material3.CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+            Text("Saving", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else if (dueDay != null) {
             Text(
                 "${dueDay.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[dueDay.monthNumber - 1]}" + if (late) " · overdue" else "",

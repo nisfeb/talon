@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -55,6 +56,10 @@ class CalendarRepo(
     private val _tasks = MutableStateFlow<List<CalendarTask>?>(null)
     /** Every task, open or done, dated or not; null before the first answer. */
     val tasks: StateFlow<List<CalendarTask>?> = _tasks.asStateFlow()
+    private val _pendingTasks = MutableStateFlow<List<CalendarTask>>(emptyList())
+    /** Tasks written and not yet read back, shown in flight until the calendar's own copy arrives. */
+    val pendingTasks: StateFlow<List<CalendarTask>> = _pendingTasks.asStateFlow()
+    private var ghosts = 0
     /** Every synced calendar's last pull and error, by id: Google, followed, and shared with us. */
     private val _sync = MutableStateFlow<Map<String, SyncRow>>(emptyMap())
     val sync: StateFlow<Map<String, SyncRow>> = _sync.asStateFlow()
@@ -288,6 +293,41 @@ class CalendarRepo(
 
     /** Tick or untick a task. */
     suspend fun setDone(id: String, done: Boolean): Boolean = poke(doneBody(id, done))
+
+    /**
+     * A new task, on the list at once and written behind it. The write
+     * runs here, not in a screen, so leaving the screen does not lose it;
+     * the stand-in stays until the refresh after the write brings the
+     * calendar's own copy. A refusal takes the stand-in away and says so
+     * through [onFailed]. Not retried: a write whose answer was lost may
+     * have landed, and a retry would make it twice.
+     */
+    fun addTask(d: EventDraft, onFailed: (String) -> Unit = {}): CalendarTask {
+        val ghost = CalendarTask(
+            id = "pending-${nowMs()}-${ghosts++}",
+            cal = d.cal ?: writableDefault() ?: "default",
+            cat = "todo",
+            meta = buildJsonObject {
+                put("name", d.name.trim())
+                if (d.note.isNotBlank()) put("note", d.note.trim())
+                if (d.tags.isNotEmpty()) put("tags", kotlinx.serialization.json.JsonArray(d.tags.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+            },
+            // The calendar's own due for a day: midnight UTC.
+            dueMs = d.due?.let { kotlinx.datetime.LocalDateTime(it.year, it.monthNumber, it.dayOfMonth, 0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds() },
+        )
+        _pendingTasks.value = _pendingTasks.value + ghost
+        scope.launch {
+            val ok = poke(eventBody(d))
+            _pendingTasks.value = _pendingTasks.value - ghost
+            if (!ok) onFailed("The ship did not take \"${d.name.trim()}\".")
+        }
+        return ghost
+    }
+
+    /** Any other write, carried on here whatever the screen does. */
+    fun writeInBackground(body: JsonObject, onFailed: () -> Unit = {}) {
+        scope.launch { if (!poke(body)) onFailed() }
+    }
 
     suspend fun eventDetail(id: String): JsonObject? =
         api?.let { a -> runCatching { a.event(id) }.getOrNull() }

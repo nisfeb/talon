@@ -590,9 +590,13 @@ fun DmChatScreen(
                 onDismiss = { calendarTarget = null },
                 onSave = { draft ->
                     calendarTarget = null
-                    scope.launch {
-                        val ok = cal.poke(io.nisfeb.talon.calendar.eventBody(draft))
-                        if (!ok) composerState.sendError = "The calendar did not take it."
+                    // Written by the calendar's repo, not this screen: the
+                    // task is on the list at once, and leaving the chat
+                    // does not lose the write.
+                    if (draft.cat == io.nisfeb.talon.calendar.EventCat.TODO) {
+                        cal.addTask(draft) { composerState.sendError = "The calendar did not take it." }
+                    } else {
+                        cal.writeInBackground(io.nisfeb.talon.calendar.eventBody(draft)) { composerState.sendError = "The calendar did not take it." }
                     }
                 },
             )
