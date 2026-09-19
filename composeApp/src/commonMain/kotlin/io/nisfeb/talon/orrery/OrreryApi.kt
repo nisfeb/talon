@@ -55,18 +55,24 @@ class OrreryApi(
 
     /**
      * A key for this install. The secret comes back once; the ship keeps
-     * a hash. The scope is what the structural pipe and, later, the
-     * triage need and nothing more: it may see and write people, places,
-     * things, situations and orgs, and propose the four action kinds.
+     * a hash. Every kind and action kind the ship has, writing, and
+     * sensitive: write, because the owner's reply to the brief names
+     * health, which the key may then file without ever reading it back.
      */
-    suspend fun mint(name: String, by: String): MintedKey {
+    suspend fun mint(
+        name: String,
+        by: String,
+        kinds: List<String> = KINDS,
+        actions: List<String> = ACTIONS,
+    ): MintedKey {
         val body = buildJsonObject {
             put("name", name)
             put("by", by)
             putJsonObject("scope") {
-                putJsonArray("kinds") { KINDS.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } }
-                putJsonArray("actions") { ACTIONS.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } }
+                putJsonArray("kinds") { kinds.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } }
+                putJsonArray("actions") { actions.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } }
                 put("write", true)
+                put("sensitive", "write")
             }
         }
         val o = reading { Json.parseToJsonElement(request(owner, HttpMethod.Post, "/api/clients", body.toString())).jsonObject }
@@ -80,10 +86,28 @@ class OrreryApi(
         request(owner, HttpMethod.Delete, "/api/clients/$id")
     }
 
-    /** The bodies the key may see, with the rev the view was at. */
-    suspend fun state(token: String): StateView {
+    /** The state view as the key sees it, whole, for readers that need attribute values. */
+    suspend fun stateJson(token: String): JsonObject {
         val text = request(bare, HttpMethod.Get, "/api/state") { header(HttpHeaders.Authorization, "Bearer $token") }
+        return reading { Json.parseToJsonElement(text).jsonObject }
+    }
+
+    /** The whole schema, which only the owner may read: what a key's scope is measured against. */
+    suspend fun schema(): JsonObject = reading { Json.parseToJsonElement(request(owner, HttpMethod.Get, "/api/schema")).jsonObject }
+
+    /** The bodies the key may see, with the rev the view was at. */
+    suspend fun state(token: String): StateView = viewOf(stateJson(token))
+
+    /** Propose an action under the key: its id and the status policy gave it, or the open twin's. */
+    suspend fun act(action: JsonObject, token: String): Pair<String, String> {
+        val text = request(bare, HttpMethod.Post, "/api/act", action.toString()) { header(HttpHeaders.Authorization, "Bearer $token") }
         val o = reading { Json.parseToJsonElement(text).jsonObject }
+        val id = o["id"]?.jsonPrimitive?.content ?: throw OrreryError.Garbled(IllegalStateException("no id"))
+        return id to (o["status"]?.jsonPrimitive?.content ?: "proposed")
+    }
+
+    /** A state view already read, parsed: bodies by name, and the vocabulary the key may use. */
+    fun viewOf(o: JsonObject): StateView {
         val bodies = o["bodies"]?.jsonArray.orEmpty().mapNotNull { e ->
             val b = e.jsonObject
             KnownBody(
@@ -296,8 +320,8 @@ class OrreryApi(
         // activity is in this list because a recurring event is one:
         // a key without it cannot see an activity, so it would resolve
         // nothing and make the situation twin all over again.
-        val KINDS = listOf("person", "place", "thing", "situation", "org", "activity")
-        val ACTIONS = listOf("task", "note", "message", "calendar")
+        val KINDS = listOf("person", "place", "thing", "situation", "org", "activity", "note")
+        val ACTIONS = listOf("task", "note", "message", "calendar", "home")
     }
 }
 
@@ -357,4 +381,27 @@ sealed class OrreryError(message: String, cause: Throwable? = null) : Exception(
     class Refused(val status: Int, val reason: String) : OrreryError("HTTP $status: $reason")
     class Unreachable(cause: Throwable) : OrreryError("no answer from the ship", cause)
     class Garbled(cause: Throwable) : OrreryError("the ship's answer could not be read", cause)
+}
+
+private fun names(a: kotlinx.serialization.json.JsonElement?): List<String> =
+    (a as? kotlinx.serialization.json.JsonArray).orEmpty()
+        .mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }
+
+fun schemaKinds(schema: JsonObject): List<String> = (schema["kinds"] as? JsonObject)?.keys?.toList().orEmpty()
+
+fun schemaActions(schema: JsonObject): List<String> = names(schema["actions"])
+
+/**
+ * Whether a key's schema view carries all of the owner's: every kind,
+ * every attribute of each (a sensitive one shows only to a key that may
+ * write it), and every action kind.
+ */
+fun scopeCovers(mine: JsonObject?, full: JsonObject): Boolean {
+    if (mine == null) return false
+    val theirs = (mine["kinds"] as? JsonObject).orEmpty()
+    val kindsOk = (full["kinds"] as? JsonObject).orEmpty().all { (kind, spec) ->
+        val have = theirs[kind] as? JsonObject ?: return@all false
+        names((spec as? JsonObject)?.get("attrs")).all { it in names(have["attrs"]) }
+    }
+    return kindsOk && schemaActions(full).all { it in schemaActions(mine) }
 }

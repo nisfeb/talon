@@ -10,6 +10,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.Url
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.createAppHttpClient
 import io.nisfeb.talon.util.ioDispatcher
 import kotlinx.coroutines.withContext
@@ -20,6 +21,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 
@@ -42,19 +46,22 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
         systemPrompt: String?,
         userPrompt: String,
         maxOutputTokens: Int = 1024,
+        timeoutMs: Long = 60_000,
     ): String {
         val cfg = settingsProvider()
         return when (cfg.provider) {
-            AiSettings.Provider.Anthropic -> anthropic(cfg, systemPrompt, userPrompt, maxOutputTokens)
+            AiSettings.Provider.Anthropic -> anthropic(cfg, systemPrompt, userPrompt, maxOutputTokens, timeoutMs)
             AiSettings.Provider.OpenRouter -> openaiCompat(
                 cfg, systemPrompt, userPrompt, maxOutputTokens,
                 endpoint = "https://openrouter.ai/api/v1/chat/completions",
                 defaultModel = "anthropic/claude-sonnet-4",
+                timeoutMs = timeoutMs,
             )
             AiSettings.Provider.OpenAi -> openaiCompat(
                 cfg, systemPrompt, userPrompt, maxOutputTokens,
                 endpoint = "https://api.openai.com/v1/chat/completions",
                 defaultModel = "gpt-4o-mini",
+                timeoutMs = timeoutMs,
             )
             AiSettings.Provider.Custom -> {
                 val base = cfg.baseUrl?.trimEnd('/')
@@ -68,6 +75,7 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
                     defaultModel = cfg.model ?: error(
                         "Custom provider requires a model name",
                     ),
+                    timeoutMs = timeoutMs,
                 )
             }
         }
@@ -80,6 +88,7 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
         systemPrompt: String?,
         userPrompt: String,
         maxTokens: Int,
+        timeoutMs: Long,
     ): String {
         val payload = buildJsonObject {
             put("model", cfg.model ?: "claude-sonnet-4-5-20250929")
@@ -99,14 +108,16 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
                 header("x-api-key", cfg.apiKey)
                 header("anthropic-version", "2023-06-01")
             },
+            timeoutMs = timeoutMs,
         ) { body ->
-            // Shape: { content: [{type:"text", text:"..."}], ... }
+            usageLine(cfg.provider, cfg.model ?: "claude-sonnet-4-5-20250929", body)?.let { Log.i("AiClient", it) }
+            // Shape: { content: [{type:"text", text:"..."}], ... }. A model
+            // that thinks puts a thinking block first, so take the text.
             (body["content"] as? JsonArray)
-                ?.firstOrNull()
-                ?.jsonObject
-                ?.get("text")
-                ?.jsonPrimitive
-                ?.content
+                ?.mapNotNull { it as? JsonObject }
+                ?.filter { it["type"]?.jsonPrimitive?.contentOrNull == "text" }
+                ?.joinToString("") { it["text"]?.jsonPrimitive?.content.orEmpty() }
+                ?.takeIf { it.isNotEmpty() }
                 ?: error("no content in response: $body")
         }
     }
@@ -120,10 +131,13 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
         maxTokens: Int,
         endpoint: String,
         defaultModel: String,
+        timeoutMs: Long,
     ): String {
         val payload = buildJsonObject {
             put("model", cfg.model ?: defaultModel)
             put("max_tokens", maxTokens)
+            // OpenRouter says what a call cost only when asked.
+            if (cfg.provider == AiSettings.Provider.OpenRouter) put("usage", buildJsonObject { put("include", true) })
             putJsonArray("messages") {
                 systemPrompt?.let {
                     add(buildJsonObject {
@@ -141,7 +155,9 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
             url = endpoint,
             payload = payload.toString(),
             headers = { header("Authorization", "Bearer ${cfg.apiKey}") },
+            timeoutMs = timeoutMs,
         ) { body ->
+            usageLine(cfg.provider, cfg.model ?: defaultModel, body)?.let { Log.i("AiClient", it) }
             body["choices"]
                 ?.jsonArray?.firstOrNull()
                 ?.jsonObject?.get("message")
@@ -155,13 +171,14 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
         url: String,
         payload: String,
         headers: HttpRequestBuilder.() -> Unit,
+        timeoutMs: Long,
         parse: (JsonObject) -> T,
     ): T = withContext(ioDispatcher) {
         val resp = http.post(url) {
             contentType(ContentType.Application.Json)
             headers()
             setBody(payload)
-            timeout { requestTimeoutMillis = 60_000 }
+            timeout { requestTimeoutMillis = timeoutMs }
         }
         val body = resp.bodyAsText()
         val host = Url(url).host
@@ -178,5 +195,44 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
         val obj = runCatching { json.parseToJsonElement(body).jsonObject }
             .getOrElse { error("$host bad JSON: ${body.take(300)}") }
         parse(obj)
+    }
+}
+
+/**
+ * One call's tokens and cost, for the log. OpenRouter says the cost;
+ * Anthropic says the tokens and the price is Anthropic's list price
+ * (cache reads a tenth of input, cache writes a quarter more). Other
+ * providers give tokens only.
+ * ponytail: a price table in code; add a model's row when it ships.
+ */
+internal fun usageLine(provider: AiSettings.Provider, model: String, body: JsonObject): String? {
+    val u = body["usage"] as? JsonObject ?: return null
+    fun n(k: String) = u[k]?.jsonPrimitive?.longOrNull ?: 0L
+    fun dollars(d: Double) = "$" + (kotlin.math.round(d * 10_000) / 10_000).toString()
+    if (provider == AiSettings.Provider.Anthropic) {
+        val input = n("input_tokens")
+        val output = n("output_tokens")
+        val read = n("cache_read_input_tokens")
+        val wrote = n("cache_creation_input_tokens")
+        val cost = claudePrice(model)?.let { (i, o) -> (input * i + wrote * i * 1.25 + read * i * 0.1 + output * o) / 1_000_000 }
+        return "model $model: $input in, $output out" +
+            (if (read + wrote > 0) ", cache $read read, $wrote written" else "") +
+            ", " + (cost?.let(::dollars) ?: "cost unknown")
+    }
+    val cost = u["cost"]?.jsonPrimitive?.doubleOrNull
+    return "model $model: ${n("prompt_tokens")} in, ${n("completion_tokens")} out, " + (cost?.let(::dollars) ?: "cost not reported")
+}
+
+/** Dollars per million tokens, in and out, by model family. */
+internal fun claudePrice(model: String): Pair<Double, Double>? {
+    val m = model.lowercase()
+    return when {
+        "fable" in m || "mythos" in m -> 10.0 to 50.0
+        "opus-5" in m || Regex("opus-4-[5-9]").containsMatchIn(m) -> 5.0 to 25.0
+        "opus" in m -> 15.0 to 75.0
+        "sonnet-5" in m -> 2.0 to 10.0
+        "sonnet" in m -> 3.0 to 15.0
+        "haiku-4" in m -> 1.0 to 5.0
+        else -> null
     }
 }

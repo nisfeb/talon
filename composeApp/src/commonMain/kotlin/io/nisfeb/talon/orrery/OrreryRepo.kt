@@ -28,6 +28,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import io.nisfeb.talon.util.nowMs
+import kotlinx.datetime.atStartOfDayIn
 
 /**
  * The structural pipe into orrery: what Talon knows for certain about
@@ -129,6 +130,7 @@ class OrreryRepo(
         _availability.value = OrreryAvailability.UNKNOWN
         _enabled.value = false
         _error.value = null
+        scopeChecked = false
     }
 
     suspend fun probe() {
@@ -140,11 +142,16 @@ class OrreryRepo(
 
     /** Mint this install's key and start the walk. */
     suspend fun enable(): Result<Unit> = runCatching {
-        // A key minted now already sees activities.
-        db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(ship ?: "", SCOPE_KEY, "activity", now()))
         val a = api ?: error("Not attached to a ship.")
         val s = ship ?: error("Not attached to a ship.")
-        val key = a.mint("Talon on $platform", by())
+        // Everything the ship has; the lists are only a fallback.
+        val full = runCatching { a.schema() }.getOrNull()
+        val key = a.mint(
+            "Talon on $platform", by(),
+            full?.let(::schemaKinds) ?: OrreryApi.KINDS,
+            full?.let(::schemaActions) ?: OrreryApi.ACTIONS,
+        )
+        scopeChecked = full != null
         val start = now() - BACKFILL_MS
         db.orreryAccounts().upsert(OrreryAccountEntity(s, key.clientId(), key.token, start, start, 0))
         _enabled.value = true
@@ -198,6 +205,143 @@ class OrreryRepo(
             api = null
             this.ship = null
             this.shipUrl = null
+        }
+    }
+
+    /**
+     * The daily brief, and the owner's replies to it. Replies are read
+     * every pass. The brief goes once a day, from seven until noon in
+     * the owner's zone, and only whole: when the ship, the calendar or
+     * the model cannot answer, nothing is sent and the log says why.
+     * The state is read fresh for it, never remembered.
+     */
+    private suspend fun brief(a: OrreryApi, token: String, s: String, url: String, nowMs: Long) {
+        val mail = AuspexApi(http, url)
+        val state = a.stateJson(token)
+        val zone = Brief.zone(state)
+        runCatching { answerReplies(a, token, s, mail, state, zone, nowMs) }
+            .onFailure { Log.w(TAG, "replies to the brief skipped: ${it.message}") }
+        val day = Brief.dueDay(nowMs, zone) ?: return
+        val sent = db.orrerySent()
+        if (sent.get(s, "brief:$day") != null) return
+        // Another install may have sent today's; the ship's mail says so.
+        if (mail.inbox(io.nisfeb.talon.mail.MailView.ALL, limit = 50).threads.any { Brief.dayOf(it.subject) == day }) {
+            sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, "brief:$day", "", nowMs))
+            return
+        }
+        val frontier = cloud?.config?.invoke()?.takeIf { it.apiKey.isNotBlank() }
+            ?: run { Log.i(TAG, "brief not sent: no frontier model is set under AI"); return }
+        val cal = CalendarApi(http, url)
+        val from = day.atStartOfDayIn(zone).toEpochMilliseconds()
+        val events = cal.window(from, from + 26 * 3_600_000L).rows
+        val todos = cal.tasks()
+        val actions = a.actions(token, status = "all")
+        val today = Brief.today(day, zone, events, todos, state)
+        val (waiting, tags) = Brief.waiting(actions, zone, Brief.names(state))
+        val decided = actions.filter { it.status in setOf("done", "dismissed", "failed") }.sortedBy { it.id }
+        val suggestions = io.nisfeb.talon.ai.AiClient { frontier }.complete(
+            Brief.SYSTEM,
+            Brief.statePrompt(state, decided, isoUtc(nowMs), zone, today, waiting),
+            maxOutputTokens = 4000,
+            timeoutMs = 180_000,
+        )
+        mail.send(listOf(s), Brief.subject(day), Brief.render(day, today, waiting, suggestions))
+        // The tags go with the day: only the install that sent a brief
+        // knows which action each one names, so only it answers replies.
+        val tagJson = kotlinx.serialization.json.buildJsonObject { tags.forEach { (t, id) -> put(t, kotlinx.serialization.json.JsonPrimitive(id)) } }
+        sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, "brief:$day", tagJson.toString(), nowMs))
+        Log.i(TAG, "brief for $day sent, ${tags.size} waiting")
+    }
+
+    /**
+     * Each reply to a brief this install sent, once, by its message id.
+     * Directions move the tagged actions; the rest is facts, read by the
+     * model triage uses (this device's, unless the cloud is opted in)
+     * and written as the owner's word. A reply whose facts have no model
+     * to read them waits, whole, for a pass that has one.
+     */
+    private suspend fun answerReplies(
+        a: OrreryApi,
+        token: String,
+        s: String,
+        mail: AuspexApi,
+        state: JsonObject,
+        zone: kotlinx.datetime.TimeZone,
+        nowMs: Long,
+    ) {
+        val sent = db.orrerySent()
+        val threads = mail.inbox(io.nisfeb.talon.mail.MailView.ALL, limit = 50).threads
+            .filter { it.count > 1 && Brief.dayOf(it.subject) != null }
+        for (entry in threads) {
+            val tagsRaw = sent.get(s, "brief:${Brief.dayOf(entry.subject)}")?.value?.takeIf { it.isNotBlank() } ?: continue
+            val tags = Json.parseToJsonElement(tagsRaw).jsonObject.mapValues { it.value.jsonPrimitive.content }
+            val thread = mail.thread(entry.id) ?: continue
+            val brief = Brief.briefOf(thread, s) ?: continue
+            val handled = sent.some(s, thread.messages.map { "reply:${it.id}" }).map { it.key.removePrefix("reply:") }.toSet()
+            for (reply in Brief.pendingReplies(thread, s, handled)) {
+                val at = reply.sent.takeIf { it > 0 } ?: nowMs
+                val (moves, said) = Brief.directions(Brief.ownWords(reply.body, brief.body), tags, nowMs, zone)
+                var facts = Facts()
+                if (said.isNotBlank()) {
+                    val model = cloudModelIfOn() ?: (if (isLocalTriageSupported) LocalModels.best()?.second else null)
+                    if (model == null) {
+                        Log.i(TAG, "reply ${reply.id} waits: no model here to read it")
+                        return
+                    }
+                    val view = a.viewOf(state)
+                    val answer = Brief.parseAnswer(
+                        model.complete(Brief.ANALYST, Brief.analystPrompt(state, view.attrs, view.notes, reply.id, at, said), null, 1500),
+                    ) ?: JsonObject(emptyMap()).also { Log.w(TAG, "reply ${reply.id}: ${model.rung} did not answer in JSON") }
+                    Log.i(TAG, "reply ${reply.id} read by ${model.rung}")
+                    // Rule 2: a body the answer would make is asked for first.
+                    val known = view.bodies.map { it.id }.toSet()
+                    val resolved = mutableMapOf<String, String>()
+                    for (b in (answer["bodies"] as? kotlinx.serialization.json.JsonArray).orEmpty()) {
+                        val o = b as? JsonObject ?: continue
+                        val id = o["id"]?.jsonPrimitive?.content?.lowercase() ?: continue
+                        if (id in known) continue
+                        val q = o["name"]?.jsonPrimitive?.content ?: id.substringAfter('/')
+                        runCatching { a.resolve(q, token) }.getOrDefault(emptyList())
+                            .firstOrNull { it.isExact && it.kind == id.substringBefore('/') }
+                            ?.let { resolved[id] = it.id }
+                    }
+                    facts = Brief.replyFacts(answer, known, view.attrs, resolved, reply.id, at)
+                }
+                if (moves.isNotEmpty()) {
+                    val byId = a.actions(token, status = "all").associateBy { it.id }
+                    for (d in moves) move(a, token, byId[d.actionId] ?: continue, d)
+                }
+                for (batch in batches(facts)) {
+                    a.observe(batch, token).refused.forEach { Log.w(TAG, "reply ${reply.id}: refused ${it.error}") }
+                }
+                // Only once all of it is written: a reply that failed
+                // halfway is read again, and every write above is one the
+                // ship answers as existing or refuses as already done.
+                sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, "reply:${reply.id}", "", nowMs))
+                Log.i(TAG, "reply ${reply.id}: ${moves.size} directions, ${facts.observations.size} facts")
+            }
+        }
+    }
+
+    /** One direction from a reply: a new due or subject replaces the action, then the status moves. */
+    private suspend fun move(a: OrreryApi, token: String, old: OrreryAction, d: Brief.Direction) {
+        val note = "from the owner's reply to the brief"
+        var id = old.id
+        var status = old.status
+        val about = d.about?.let { name ->
+            runCatching { a.resolve(name, token) }.getOrDefault(emptyList()).firstOrNull()?.let { listOf(it.id) }
+                ?: null.also { Log.i(TAG, "no body goes by \"$name\"; ${old.id} keeps its subject") }
+        }
+        if (d.dueMs != null || about != null) {
+            runCatching { a.transition(token, old.id, "dismissed", "replaced, $note") }
+                .onFailure { Log.i(TAG, "${old.id} not dismissed: ${it.message}") }
+            val (newId, newStatus) = a.act(Brief.replacement(old, d.dueMs, about), token)
+            id = newId
+            status = newStatus
+        }
+        for (step in Brief.steps(status, d.status ?: return)) {
+            runCatching { a.transition(token, id, step, note) }
+                .onFailure { Log.i(TAG, "$id not moved to $step: ${it.message}") }
         }
     }
 
@@ -430,6 +574,7 @@ class OrreryRepo(
             db.orreryAccounts().upsert(row.copy(messagesCursor = messagesCursor, mailCursor = mailCursor, calendarCursor = nowMs))
             runCatching { a.actions(row.token) }.onSuccess { _actions.value = it }.onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
             runCatching { mirrorTasks(a, row.token, url) }.onFailure { Log.i(TAG, "tasks skipped: ${it.message}") }
+            runCatching { brief(a, row.token, s, url, nowMs) }.onFailure { Log.w(TAG, "brief not sent: ${it.message}") }
             _lastPushMs.value = nowMs
             _error.value = if (refused == 0) null else "$refused refused: ${firstReason ?: "no reason given"}"
         } catch (e: OrreryError.Refused) {
@@ -451,22 +596,33 @@ class OrreryRepo(
         }
     }
 
+    /** Measured once a run: a key that covered the schema a minute ago still does. */
+    private var scopeChecked = false
+
     /**
-     * The first keys this install minted were made before orrery had an
-     * activity kind, so they cannot see one: resolve would answer
-     * nothing for a recurring event and the pass would make the twin it
-     * was told not to. A key without it is replaced, once.
+     * A key lacking any kind, attribute or action kind the ship has is
+     * replaced with one that has them all, and the old one revoked. Keys
+     * minted before orrery had activities, or before the brief needed
+     * sensitive: write, are what this catches. A key the ship will not
+     * read the state for is left alone: that is the owner revoking it,
+     * and a new key would overrule them.
      */
     private suspend fun ensureScope(s: String, row: OrreryAccountEntity) {
+        if (scopeChecked) return
         val a = api ?: return
-        if (db.orrerySent().get(s, SCOPE_KEY) != null) return
-        val minted = runCatching { a.mint("Talon on $platform", by()) }
-            .onFailure { Log.w(TAG, "could not mint a key that sees activities: ${it.message}") }
+        val full = runCatching { a.schema() }.getOrNull() ?: return
+        val mine = runCatching { a.stateJson(row.token)["schema"] as? JsonObject }.getOrNull() ?: return
+        if (scopeCovers(mine, full)) {
+            scopeChecked = true
+            return
+        }
+        val minted = runCatching { a.mint("Talon on $platform", by(), schemaKinds(full), schemaActions(full)) }
+            .onFailure { Log.w(TAG, "could not mint a key with the whole scope: ${it.message}") }
             .getOrNull() ?: return
         db.orreryAccounts().upsert(row.copy(clientId = minted.id, token = minted.token))
         runCatching { a.revoke(row.clientId) }
-        db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, SCOPE_KEY, "activity", now()))
-        Log.i(TAG, "replaced this install's key with one that can see activities")
+        scopeChecked = true
+        Log.i(TAG, "replaced this install's key with one that has the whole scope")
     }
 
     /**
@@ -762,7 +918,6 @@ class OrreryRepo(
         /** Status lines read in one pass, so a first run does not spend every model run on them. */
         const val STATUS_PER_PASS = 5
         const val GATE_EXAMPLES = 50
-        private const val SCOPE_KEY = "scope:activity"
         const val MAIL_THREADS_PER_PASS = 10
 
         /** A noticed row as the facts it stands for. */
