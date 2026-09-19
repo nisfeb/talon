@@ -29,6 +29,10 @@ abstract class ReactionDao {
     @Query("DELETE FROM reactions WHERE whom = :whom AND postId = :postId AND author = :author")
     abstract suspend fun delete(whom: String, postId: String, author: String)
 
+    /** One author's reaction to a post, to put back when a change of it is refused. */
+    @Query("SELECT * FROM reactions WHERE whom = :whom AND postId = :postId AND author = :author")
+    abstract suspend fun get(whom: String, postId: String, author: String): ReactionEntity?
+
     @Query("DELETE FROM reactions WHERE whom = :whom AND postId = :postId")
     abstract suspend fun clearForPost(whom: String, postId: String)
 

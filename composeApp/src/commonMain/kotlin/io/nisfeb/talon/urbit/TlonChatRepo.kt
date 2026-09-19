@@ -322,6 +322,12 @@ class TlonChatRepo(
      */
     @Volatile var groupInviteListener: ((InviteSummary) -> Unit)? = null
 
+    /** A channel and an identity without the session loop, for tests of what a write does before the ship answers. */
+    internal fun attachForTest(ch: UrbitChannel, us: String) {
+        channel = ch
+        ourPatp = us
+    }
+
     fun start(session: UrbitSession) {
         if (started) return
         started = true
@@ -2251,7 +2257,14 @@ class TlonChatRepo(
                 put("react", glyph)
             })
         }
-        when {
+        // Shown now, and the ship told after: a poke waits for the ship's
+        // ack, up to fifteen seconds, and since pokes began waiting the
+        // reaction waited with it. A refusal puts back what was there.
+        // Rows are keyed on the undotted id (ReactionDao.upsert normalizes); look them up the same way.
+        val rowId = postId.replace(".", "")
+        val before = db.reactions().get(whom, rowId, ourPatp)
+        db.reactions().upsert(ReactionEntity(whom, postId, ourPatp, canonical))
+        try { when {
             whom.startsWith("~") -> ch.poke(
                 app = "chat", mark = "chat-dm-action-2",
                 payload = dmAction(whom, postId, delta),
@@ -2281,8 +2294,10 @@ class TlonChatRepo(
                 }),
             )
             else -> error("unsupported whom: $whom")
+        } } catch (t: Throwable) {
+            if (before != null) db.reactions().upsert(before) else db.reactions().delete(whom, rowId, ourPatp)
+            throw t
         }
-        db.reactions().upsert(ReactionEntity(whom, postId, ourPatp, canonical))
         runCatching { db.reactionUsage().bump(canonical) }
     }
 
@@ -2290,7 +2305,11 @@ class TlonChatRepo(
     suspend fun unreact(whom: String, postId: String) {
         val ch = channel ?: error("not connected")
         val delta = buildJsonObject { put("del-react", ourPatp) }
-        when {
+        // Gone now, as react() shows at once; a refusal brings it back.
+        val rowId = postId.replace(".", "")
+        val before = db.reactions().get(whom, rowId, ourPatp)
+        db.reactions().delete(whom, rowId, ourPatp)
+        try { when {
             whom.startsWith("~") -> ch.poke(
                 app = "chat", mark = "chat-dm-action-2",
                 payload = dmAction(whom, postId, delta),
@@ -2315,8 +2334,10 @@ class TlonChatRepo(
                 }),
             )
             else -> error("unsupported whom: $whom")
+        } } catch (t: Throwable) {
+            before?.let { db.reactions().upsert(it) }
+            throw t
         }
-        db.reactions().delete(whom, postId, ourPatp)
     }
 
     /** Delete a message. Author-only on the server. */
@@ -2443,25 +2464,25 @@ class TlonChatRepo(
         }
 
         when {
-            whom.startsWith("~") -> {
-                ch.poke(
-                    app = "chat", mark = "chat-dm-action-2",
-                    payload = dmAction(whom, parentId, replyDelta(replyId, replyEssay)),
-                )
+            // In the thread now, and the ship told after, the way a
+            // channel reply already was: the poke waits for the ship's
+            // ack, and the reply used to wait with it. A refusal marks
+            // it failed; the echo, which carries the same id, replaces it.
+            whom.startsWith("~") || whom.startsWith("0v") -> {
                 db.messages().upsertWithMedia(
                     db.messageMedia(),
                     toReplyEntity(whom, parentId, replyId, replyEssay),
                 )
-            }
-            whom.startsWith("0v") -> {
-                ch.poke(
-                    app = "chat", mark = "chat-club-action-2",
-                    payload = clubAction(whom, parentId, replyDelta(replyId, replyEssay)),
-                )
-                db.messages().upsertWithMedia(
-                    db.messageMedia(),
-                    toReplyEntity(whom, parentId, replyId, replyEssay),
-                )
+                try {
+                    if (whom.startsWith("~")) {
+                        ch.poke(app = "chat", mark = "chat-dm-action-2", payload = dmAction(whom, parentId, replyDelta(replyId, replyEssay)))
+                    } else {
+                        ch.poke(app = "chat", mark = "chat-club-action-2", payload = clubAction(whom, parentId, replyDelta(replyId, replyEssay)))
+                    }
+                } catch (t: Throwable) {
+                    db.messages().setStatus(whom, replyId, "failed")
+                    throw t
+                }
             }
             whom.startsWith("chat/") ||
                 whom.startsWith("diary/") ||
@@ -2658,14 +2679,20 @@ class TlonChatRepo(
         // matches behavior and dodges a full scry on every pin.
         val next = if (current == postId) return else listOf(postId)
         Log.i(TAG, "pinPost nest=$nest post=$postId")
-        ch.poke(
-            app = "channels", mark = "channel-action-2",
-            payload = channelAction(nest, channelOrderAction(next)),
-        )
+        // Pinned now, the ship told after; a refusal puts back what was pinned.
         ensureChannelGroupRow(nest)
         val affected = db.groups().setPinnedPostId(nest, postId)
         if (affected == 0) {
             Log.w(TAG, "pinPost local UPDATE matched 0 rows for nest=$nest — channel_groups row missing despite ensureChannelGroupRow")
+        }
+        try {
+            ch.poke(
+                app = "channels", mark = "channel-action-2",
+                payload = channelAction(nest, channelOrderAction(next)),
+            )
+        } catch (t: Throwable) {
+            db.groups().setPinnedPostId(nest, current)
+            throw t
         }
     }
 
@@ -2674,14 +2701,20 @@ class TlonChatRepo(
         require(nest.startsWith("chat/")) { "pin only supported on chat channels: $nest" }
         val ch = channel ?: error("not connected")
         Log.i(TAG, "unpinPost nest=$nest")
-        ch.poke(
-            app = "channels", mark = "channel-action-2",
-            payload = channelAction(nest, channelOrderAction(emptyList())),
-        )
+        val current = db.groups().pinnedPostIdFor(nest)
         ensureChannelGroupRow(nest)
         val affected = db.groups().setPinnedPostId(nest, null)
         if (affected == 0) {
             Log.w(TAG, "unpinPost local UPDATE matched 0 rows for nest=$nest — channel_groups row missing despite ensureChannelGroupRow")
+        }
+        try {
+            ch.poke(
+                app = "channels", mark = "channel-action-2",
+                payload = channelAction(nest, channelOrderAction(emptyList())),
+            )
+        } catch (t: Throwable) {
+            db.groups().setPinnedPostId(nest, current)
+            throw t
         }
     }
 
