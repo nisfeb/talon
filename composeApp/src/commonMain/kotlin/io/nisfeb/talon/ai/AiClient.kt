@@ -36,7 +36,11 @@ import kotlinx.serialization.json.putJsonArray
  * Callers provide a system prompt + user prompt (everything the LLM
  * needs, no chat history); we return the text response.
  */
-class AiClient(private val settingsProvider: () -> AiSettings.Config) {
+class AiClient(
+    /** The feature whose month spend a call adds to, or none. */
+    private val feature: AiFeature? = null,
+    private val settingsProvider: () -> AiSettings.Config,
+) {
 
     private val http = createAppHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
@@ -53,7 +57,8 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
         timeoutMs: Long = 60_000,
     ): String {
         val cfg = settingsProvider()
-        return when (cfg.provider) {
+        lastCostUsd = null
+        val text = when (cfg.provider) {
             AiSettings.Provider.Anthropic -> anthropic(cfg, systemPrompt, userPrompt, maxOutputTokens, timeoutMs)
             AiSettings.Provider.OpenRouter -> openaiCompat(
                 cfg, systemPrompt, userPrompt, maxOutputTokens,
@@ -83,6 +88,8 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
                 )
             }
         }
+        feature?.let { AiSpend.add(it.name, lastCostUsd) }
+        return text
     }
 
     // ───────── Anthropic ─────────

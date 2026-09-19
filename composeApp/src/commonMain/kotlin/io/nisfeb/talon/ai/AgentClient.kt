@@ -39,7 +39,11 @@ import kotlinx.serialization.json.putJsonArray
  * (`build*Request` / `parse*Turn`) so the wire translation for both the
  * Anthropic and OpenAI dialects is unit-tested without a live API.
  */
-class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
+class AgentClient(
+    /** The feature whose month spend a call adds to, or none. */
+    private val feature: AiFeature? = null,
+    private val settingsProvider: () -> AiSettings.Config,
+) {
 
     private val http = createAppHttpClient()
 
@@ -57,6 +61,7 @@ class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
                     system, messages, tools, maxOutputTokens,
                 )
                 execute(
+                    cfg, cfg.model ?: "claude-sonnet-4-5-20250929",
                     url = "https://api.anthropic.com/v1/messages",
                     payload = payload.toString(),
                     headers = {
@@ -98,8 +103,11 @@ class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
         endpoint: String,
         model: String,
     ): AgentTurn {
-        val payload = buildOpenAiRequest(model, system, messages, tools, maxTokens)
+        var payload = buildOpenAiRequest(model, system, messages, tools, maxTokens)
+        // OpenRouter says what a call cost only when asked.
+        if (cfg.provider == AiSettings.Provider.OpenRouter) payload = JsonObject(payload + ("usage" to buildJsonObject { put("include", true) }))
         return execute(
+            cfg, model,
             url = endpoint,
             payload = payload.toString(),
             headers = { header("Authorization", "Bearer ${cfg.apiKey}") },
@@ -107,6 +115,8 @@ class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
     }
 
     private suspend fun execute(
+        cfg: AiSettings.Config,
+        model: String,
         url: String,
         payload: String,
         headers: HttpRequestBuilder.() -> Unit,
@@ -129,6 +139,7 @@ class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
         }
         val obj = runCatching { JSON.parseToJsonElement(body).jsonObject }
             .getOrElse { error("$host bad JSON: ${body.take(300)}") }
+        feature?.let { AiSpend.add(it.name, usageCost(cfg.provider, model, obj)) }
         parse(obj)
     }
 

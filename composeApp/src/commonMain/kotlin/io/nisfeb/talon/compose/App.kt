@@ -650,7 +650,7 @@ fun App(
         // ship switch tears the prior pair down and constructs fresh
         // ones bound to the new ship's SQLite file. Without this the
         // home list keeps showing the prior ship's DMs after switch.
-        val db = remember { createDb(shipKey) }
+        val db = remember { createDb(shipKey).also { io.nisfeb.talon.ai.AiSpend.dao = it.orrerySent() } }
         val settingsSync = remember { createSettingsSync?.invoke(db) }
         // Per-ship UiSettings. railVisibility's read-flow is sourced
         // from the active ship's rail_item_prefs Room table, so this
@@ -1046,7 +1046,7 @@ fun App(
         val loopWebOn = aiState.assistantOn()
         val loopBraveOn = loopWebOn && aiState.braveApiKey.isNotBlank()
         val loopRunner = remember(db, repo, searchEmbedderClient, loopWebOn, loopBraveOn, mailRepo, calendarRepo) {
-            val agentClient = io.nisfeb.talon.ai.AgentClient { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Assistant) }
+            val agentClient = io.nisfeb.talon.ai.AgentClient(io.nisfeb.talon.ai.AiFeature.Assistant) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Assistant) }
             io.nisfeb.talon.ai.LoopRunner(
                 loops = db.loops(),
                 runs = db.loopRuns(),

@@ -200,7 +200,7 @@ class TalonApplication : Application() {
         // railVisibility flow from the rail_item_prefs Room table.
         themePreference = io.nisfeb.talon.ui.theme.AndroidThemePreference(this)
         shipProfiles = ShipProfileStore(this)
-        aiClient = AiClient(settingsProvider = { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.CatchUp) })
+        aiClient = AiClient(feature = io.nisfeb.talon.ai.AiFeature.CatchUp, settingsProvider = { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.CatchUp) })
         ai = AiFeatures(aiClient)
         embedder = io.nisfeb.talon.ai.Embedder(this)
         Notifications.ensureChannel(this)
@@ -372,6 +372,7 @@ class TalonApplication : Application() {
         // A quote waiting in a chat belongs to the ship that picked it.
         io.nisfeb.talon.ui.PendingQuotes.clear()
         db = io.nisfeb.talon.data.createAppDatabase(this, io.nisfeb.talon.data.shipDbName(ship))
+        io.nisfeb.talon.ai.AiSpend.dao = db.orrerySent()
         session = UrbitSession(ktorHttp, sessionStore)
         // Re-hydrate the cookie jar + baseUrl from the stored session
         // for this ship (if any). Skips silently for the placeholder

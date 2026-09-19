@@ -234,7 +234,7 @@ fun DmChatScreen(
     val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val aiFeatures = remember(aiSettings) {
-        AiFeatures(AiClient { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.CatchUp) })
+        AiFeatures(AiClient(io.nisfeb.talon.ai.AiFeature.CatchUp) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.CatchUp) })
     }
     var catchUpSummary by remember(whom) { mutableStateOf<String?>(null) }
     var catchingUp by remember(whom) { mutableStateOf(false) }

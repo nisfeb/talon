@@ -189,7 +189,7 @@ fun AssistantScreen(
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
     val scope = rememberCoroutineScope()
 
-    val agentClient = remember(aiSettings) { AgentClient { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Assistant) } }
+    val agentClient = remember(aiSettings) { AgentClient(io.nisfeb.talon.ai.AiFeature.Assistant) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Assistant) } }
 
     // MCP: if the user opted in (and is in Act mode) and the ship exposes
     // an /mcp endpoint, discover its tools and hand them to the agent.

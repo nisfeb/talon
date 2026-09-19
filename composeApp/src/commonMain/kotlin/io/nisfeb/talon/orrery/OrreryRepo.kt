@@ -377,7 +377,7 @@ class OrreryRepo(
         val today = Brief.today(day, zone, events, todos, state)
         val (waiting, tags) = Brief.waiting(actions, zone, Brief.names(state))
         val decided = actions.filter { it.status in setOf("done", "dismissed", "failed") }.sortedBy { it.id }
-        val suggestions = io.nisfeb.talon.ai.AiClient { frontier }.complete(
+        val suggestions = io.nisfeb.talon.ai.AiClient(io.nisfeb.talon.ai.AiFeature.OrreryBrief) { frontier }.complete(
             Brief.SYSTEM,
             Brief.statePrompt(state, decided, isoUtc(nowMs), zone, today, waiting),
             maxOutputTokens = 4000,
@@ -448,7 +448,7 @@ class OrreryRepo(
         // ponytail: an answer that is not JSON throws and the reply is
         // asked again next pass; a model that keeps failing keeps costing.
         val answer = Brief.parseAnswer(
-            io.nisfeb.talon.ai.AiClient { frontier }.complete(
+            io.nisfeb.talon.ai.AiClient(io.nisfeb.talon.ai.AiFeature.OrreryBrief) { frontier }.complete(
                 Brief.REPLY_SYSTEM,
                 Brief.analystPrompt(state, view.attrs, view.notes, reply.id, at, words, tagged, nowMs, zone),
                 maxOutputTokens = 8000,
@@ -1002,6 +1002,8 @@ class OrreryRepo(
             ?.let { runCatching { Json.decodeFromString(DecideDay.serializer(), it) }.getOrNull() } ?: DecideDay()
         val now = was + add
         db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, key, Json.encodeToString(DecideDay.serializer(), now), nowMs))
+        io.nisfeb.talon.ai.AiSpend.add(io.nisfeb.talon.ai.AiFeature.OrreryTriage.name, add.analystUsd, nowMs)
+        io.nisfeb.talon.ai.AiSpend.add(io.nisfeb.talon.ai.AiSpend.JEV, add.gateUsd + add.checkUsd + add.pickUsd, nowMs)
         now.lines(day).forEach { Log.i(TAG, it) }
         _decideToday.value = day to now
     }
