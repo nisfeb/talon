@@ -180,4 +180,11 @@ class OrreryTasksTest {
         assertEquals("#88aa00", meta["color"]!!.jsonPrimitive.content, "what the todo carried rides through")
         assertEquals("the blue one", meta["note"]!!.jsonPrimitive.content)
     }
+
+    @Test
+    fun `an answer takes effect on the list at once`() {
+        val open = listOf(action("a1", "proposed"), action("a2", "proposed"))
+        assertEquals(listOf("approved", "proposed"), settledActions(open, "a1", "approved").map { it.status }, "approved stays, to be done")
+        assertEquals(listOf("a2"), settledActions(open, "a1", "dismissed").map { it.id }, "anything else has left the open list")
+    }
 }

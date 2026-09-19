@@ -42,11 +42,10 @@ fun OrreryActionDialog(
     val event = remember(action) { action.eventToAdd() }
     val executable = message != null || event != null
 
+    // Taken at once: the dialog closes and the ship is told behind it.
     fun move(status: String, why: String = "") {
-        busy = true
-        scope.launch {
-            orrery.setAction(action.id, status, why).fold(onSuccess = { onClose() }, onFailure = { note = it.message; busy = false })
-        }
+        orrery.answer(action.id, status, why)
+        onClose()
     }
 
     // The ship allows a proposal to be approved or dismissed and nothing

@@ -2238,11 +2238,7 @@ fun App(
                         actions = orreryActions,
                         onBack = { showActions = false },
                         onShown = { orreryRepo.refreshWaiting() },
-                        onDecide = { a, status ->
-                            loopScope.launch {
-                                orreryRepo.setAction(a.id, status)
-                            }
-                        },
+                        onDecide = { a, status -> orreryRepo.answer(a.id, status) },
                     ) { a -> openAction = a }
                     showWatchwords -> WatchwordsScreen(
                         db = db,

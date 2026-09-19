@@ -1071,9 +1071,30 @@ class OrreryRepo(
         val s = ship ?: error("Not attached to a ship.")
         // This install's key where it has one, else the owner's own say.
         a.transition(db.orreryAccounts().get(s)?.token, id, status, note)
-        _actions.value = _actions.value.filterNot { it.id == id }
-        refreshActions()
+        _actions.value = settledActions(_actions.value, id, status)
+        // The mirror reads every action and the whole calendar before it
+        // makes the todo: seconds on a busy ship, so it runs behind the
+        // answer, never in its way.
+        scope.launch { refreshActions() }
     }
+
+    /**
+     * The same, taken at once: the lists change now and the ship is told
+     * behind them, so nothing waits on it. A refusal puts the action back
+     * as it was and says why under Orrery in Settings.
+     */
+    fun answer(id: String, status: String, note: String = "") {
+        val was = _actions.value.firstOrNull { it.id == id }
+        _actions.value = settledActions(_actions.value, id, status)
+        scope.launch {
+            setAction(id, status, note).onFailure { e ->
+                if (was != null) _actions.value = listOf(was) + _actions.value.filterNot { it.id == id }
+                _error.value = "Orrery did not take that answer: ${e.message ?: "no reason given"}"
+                Log.w(TAG, "answer $status on $id refused: ${e.message}")
+            }
+        }
+    }
+
 
     /**
      * What is waiting for an answer, read now. Needs nothing but orrery
@@ -1235,3 +1256,8 @@ class OrreryRepo(
 
 /** The key's id is the part of the token before the dot; the ship answers it separately too. */
 private fun MintedKey.clientId(): String = id
+
+/** The open list after an answer: approved stays, to be done; anything else has left it. */
+internal fun settledActions(list: List<OrreryAction>, id: String, status: String): List<OrreryAction> =
+    if (status == "approved" || status == "claimed") list.map { if (it.id == id) it.copy(status = status) else it }
+    else list.filterNot { it.id == id }
