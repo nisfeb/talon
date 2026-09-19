@@ -1,0 +1,151 @@
+package io.nisfeb.talon.ai
+
+import io.nisfeb.talon.orrery.openRouterKey
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/**
+ * The profile derived from today's settings, row by row of the plan's
+ * mapping table, and the resolver giving every feature exactly what it
+ * read before. The old code is kept here as the oracle for the second.
+ */
+class AiProfileTest {
+    private fun cfg(
+        provider: AiSettings.Provider = AiSettings.Provider.OpenRouter,
+        key: String = "sk-or",
+        model: String? = "anthropic/claude-opus-4.8",
+        baseUrl: String? = null,
+        privateUrl: String? = null,
+        privateKey: String = "",
+        privateModel: String? = null,
+        frontierReads: Boolean = false,
+        stt: String = "",
+        catchUp: Boolean = true,
+        agent: Boolean = false,
+    ) = AiSettings.Config(
+        provider = provider, apiKey = key, model = model, baseUrl = baseUrl,
+        privateApiKey = privateKey, privateModel = privateModel, privateBaseUrl = privateUrl,
+        frontierReadsMessages = frontierReads, sttApiKey = stt, catchMeUpEnabled = catchUp, agentEnabled = agent,
+    )
+
+    @Test
+    fun `the frontier model is provider one and the default model`() {
+        val p = migrateProfile(cfg())
+        val main = p.provider(MAIN_PROVIDER)!!
+        assertEquals(ProviderKind.OpenRouter, main.kind)
+        assertEquals("sk-or", main.apiKey)
+        assertEquals(ModelRef(MAIN_PROVIDER, "anthropic/claude-opus-4.8"), p.defaultModel)
+        assertTrue(p.provider(DEVICE_PROVIDER) != null, "this device is always a provider")
+    }
+
+    @Test
+    fun `a private model with a url is a provider triage reads with, and without one this device is`() {
+        val served = migrateProfile(cfg(privateUrl = "http://127.0.0.1:1234/v1", privateModel = "qwen3-8b"), ProfileInputs(orreryFed = true))
+        assertEquals(Resolved(served.provider(PRIVATE_PROVIDER)!!, "qwen3-8b"), served.resolve(AiFeature.OrreryTriage))
+        assertTrue(served.resolve(AiFeature.OrreryTriage)!!.private)
+        assertTrue(served.isOn(AiFeature.OrreryTriage) && served.isOn(AiFeature.OrreryBrief), "feeding orrery turns both on")
+        val device = migrateProfile(cfg())
+        assertEquals(DEVICE_PROVIDER, device.resolve(AiFeature.OrreryTriage)!!.provider.id)
+        assertFalse(device.isOn(AiFeature.OrreryTriage))
+    }
+
+    @Test
+    fun `letting the frontier model read messages assigns triage the default model`() {
+        val p = migrateProfile(cfg(frontierReads = true, privateUrl = "http://127.0.0.1:1234/v1"))
+        assertEquals(MAIN_PROVIDER, p.resolve(AiFeature.OrreryTriage)!!.provider.id)
+    }
+
+    @Test
+    fun `switches, the generator, jev and transcription`() {
+        val p = migrateProfile(
+            cfg(catchUp = false, agent = true, stt = "sk-whisper"),
+            ProfileInputs(jevOn = true, generatorOn = true, generatorUrl = "https://openrouter.ai/api/v1", generatorModel = "moonshotai/kimi-k3"),
+        )
+        assertFalse(p.isOn(AiFeature.CatchUp))
+        assertTrue(p.isOn(AiFeature.Assistant))
+        assertTrue(p.jev)
+        assertEquals(Resolved(p.provider(MAIN_PROVIDER)!!, "moonshotai/kimi-k3"), p.resolve(AiFeature.OrreryGenerator))
+        assertTrue(p.isOn(AiFeature.OrreryGenerator))
+        assertEquals(Resolved(p.provider(SPEECH_PROVIDER)!!, WHISPER), p.resolve(AiFeature.Transcription))
+        // Without a transcription key an OpenAI chat key transcribes, and Anthropic's cannot.
+        assertEquals(MAIN_PROVIDER, migrateProfile(cfg(provider = AiSettings.Provider.OpenAi)).resolve(AiFeature.Transcription)!!.provider.id)
+        assertFalse(migrateProfile(cfg(provider = AiSettings.Provider.Anthropic)).isOn(AiFeature.Transcription))
+    }
+
+    // ---- the resolver gives each feature what it read before ----
+
+    private val combos: List<AiSettings.Config> = buildList {
+        for (provider in AiSettings.Provider.entries) {
+            for (key in listOf("", "sk-x")) {
+                for (privateUrl in listOf(null, "http://127.0.0.1:1234/v1", "https://openrouter.ai/api/v1")) {
+                    for (reads in listOf(false, true)) {
+                        for (stt in listOf("", "sk-stt")) {
+                            add(cfg(provider = provider, key = key, baseUrl = if (provider == AiSettings.Provider.Custom) "https://llm.example/v1" else null,
+                                privateUrl = privateUrl, privateKey = if (privateUrl != null) "sk-p" else "", privateModel = "m", frontierReads = reads, stt = stt))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `catch-up, the assistant and the brief see the frontier model, as before`() {
+        for (c in combos.filter { it.hasKey() }) for (f in listOf(AiFeature.CatchUp, AiFeature.Assistant, AiFeature.OrreryBrief)) {
+            val r = c.forFeature(f)
+            assertEquals(listOf(c.provider, c.apiKey, c.model, c.baseUrl), listOf(r.provider, r.apiKey, r.model, r.baseUrl), "$f on $c")
+        }
+    }
+
+    /** The old openRouterKey, verbatim. */
+    private fun oldOpenRouterKey(cfg: AiSettings.Config): String? = when {
+        cfg.provider == AiSettings.Provider.OpenRouter && cfg.apiKey.isNotBlank() -> cfg.apiKey
+        cfg.privateBaseUrl?.contains("openrouter.ai") == true && cfg.privateApiKey.isNotBlank() -> cfg.privateApiKey
+        else -> null
+    }
+
+    /** The old sttFrom, verbatim, as (endpoint, key). */
+    private fun oldStt(cfg: AiSettings.Config): Pair<String, String>? {
+        cfg.sttApiKey.takeIf { it.isNotBlank() }?.let { return CallRecordingPublisher.OPENAI_STT to it }
+        return when (cfg.provider) {
+            AiSettings.Provider.OpenAi -> cfg.apiKey.takeIf { it.isNotBlank() }?.let { CallRecordingPublisher.OPENAI_STT to it }
+            AiSettings.Provider.Custom -> cfg.baseUrl?.takeIf { it.isNotBlank() && cfg.apiKey.isNotBlank() }?.let { CallRecordingPublisher.audioEndpoint(it) to cfg.apiKey }
+            else -> null
+        }
+    }
+
+    @Test
+    fun `jev's key, transcription, triage's switch and its private model are what they were`() {
+        for (c in combos) {
+            assertEquals(oldOpenRouterKey(c), openRouterKey(c), "jev key on $c")
+            assertEquals(oldStt(c), CallRecordingPublisher.sttFrom(c)?.let { it.endpoint to it.key }, "stt on $c")
+            // The cloud rung was on exactly when the frontier model could
+            // read messages, with one difference on purpose: a "private"
+            // model at a cloud address (OpenRouter) was read through the
+            // server rung with the switch off, and is now called what it
+            // is, triage in the cloud. Same endpoint, key and model.
+            val mainReads = c.frontierReadsMessages && c.hasKey()
+            val privateInCloud = !mainReads && c.privateBaseUrl != null && !isPrivateUrl(c.privateBaseUrl)
+            if (c.provider != AiSettings.Provider.Custom) assertEquals(mainReads || privateInCloud, c.triageInCloud(), "triage switch on $c")
+            val slot = c.triagePrivateSlot()
+            assertEquals(c.private.baseUrl, slot.baseUrl, "private url on $c")
+            assertEquals(c.private.model, slot.model, "private model on $c")
+            if (c.privateBaseUrl != null) assertEquals(c.private.apiKey, slot.apiKey, "private key on $c")
+        }
+    }
+
+    @Test
+    fun `a private url is this machine or the owner's own network`() {
+        for (u in listOf("http://localhost:1234/v1", "http://127.0.0.1:11434", "http://192.168.9.197:8081", "http://10.0.0.5/v1",
+            "http://172.20.1.1", "http://100.100.206.8:8081", "http://box.local:1234", "https://llm.tail1234.ts.net/v1")) {
+            assertTrue(isPrivateUrl(u), u)
+        }
+        for (u in listOf("https://openrouter.ai/api/v1", "https://api.openai.com/v1", "http://172.40.1.1", "http://100.200.1.1", null, "")) {
+            assertFalse(isPrivateUrl(u), u.toString())
+        }
+        assertNull(migrateProfile(cfg(key = "")).defaultModel, "no key, no default model")
+    }
+}

@@ -1,5 +1,6 @@
 package io.nisfeb.talon
 
+import io.nisfeb.talon.ai.forFeature
 import android.app.Application
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiFeatures
@@ -199,7 +200,7 @@ class TalonApplication : Application() {
         // railVisibility flow from the rail_item_prefs Room table.
         themePreference = io.nisfeb.talon.ui.theme.AndroidThemePreference(this)
         shipProfiles = ShipProfileStore(this)
-        aiClient = AiClient(settingsProvider = { aiSettings.state.value })
+        aiClient = AiClient(settingsProvider = { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.CatchUp) })
         ai = AiFeatures(aiClient)
         embedder = io.nisfeb.talon.ai.Embedder(this)
         Notifications.ensureChannel(this)

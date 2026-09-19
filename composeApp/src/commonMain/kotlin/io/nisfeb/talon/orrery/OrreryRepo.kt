@@ -1,5 +1,6 @@
 package io.nisfeb.talon.orrery
 
+import io.nisfeb.talon.ai.forFeature
 import io.ktor.client.HttpClient
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.readUTF8Line
@@ -358,7 +359,7 @@ class OrreryRepo(
             return there
         }
         if (sentElsewhere()) return
-        val frontier = cloud?.config?.invoke()?.takeIf { it.apiKey.isNotBlank() }
+        val frontier = cloud?.config?.invoke()?.forFeature(io.nisfeb.talon.ai.AiFeature.OrreryBrief)?.takeIf { it.apiKey.isNotBlank() }
             ?: run { Log.i(TAG, "brief not sent: no frontier model is set under AI"); return }
         // One install writes the brief, and it holds the day's lease
         // before anything costs money. A holder that goes quiet for
@@ -438,7 +439,7 @@ class OrreryRepo(
         words: String,
         tags: Map<String, String>,
     ) {
-        val frontier = cloud?.config?.invoke()?.takeIf { it.apiKey.isNotBlank() }
+        val frontier = cloud?.config?.invoke()?.forFeature(io.nisfeb.talon.ai.AiFeature.OrreryBrief)?.takeIf { it.apiKey.isNotBlank() }
             ?: error("no frontier model is set under AI")
         val at = reply.sent.takeIf { it > 0 } ?: nowMs
         val byId = a.actions(token, status = "all").associateBy { it.id }

@@ -28,24 +28,18 @@ object CallRecordingPublisher {
      * that a Whisper-capable key is needed.
      */
     fun sttFrom(cfg: AiSettings.Config): Stt? {
-        // A dedicated Whisper key wins, whatever the chat provider is —
-        // this is how an Anthropic/OpenRouter user gets transcripts.
-        cfg.sttApiKey.takeIf { it.isNotBlank() }?.let {
-            return Stt(OPENAI_STT, it, WHISPER_MODEL)
-        }
-        return when (cfg.provider) {
-            AiSettings.Provider.OpenAi ->
-                cfg.apiKey.takeIf { it.isNotBlank() }?.let {
-                    Stt(OPENAI_STT, it, WHISPER_MODEL)
-                }
-            AiSettings.Provider.Custom ->
-                cfg.baseUrl?.takeIf { it.isNotBlank() && cfg.apiKey.isNotBlank() }?.let {
-                    // The chat model is not a speech model — posting it
-                    // here (what this used to do) fails on every host.
-                    // And the saved base URL is often a full chat URL,
-                    // which produced ".../chat/completions/audio/…".
-                    Stt(audioEndpoint(it), cfg.apiKey, WHISPER_MODEL)
-                }
+        // The transcription row: a dedicated Whisper key where there is
+        // one, whatever the chat provider is, else an OpenAI or custom
+        // chat key. Anthropic and OpenRouter have no audio endpoint.
+        val r = cfg.profile().resolve(AiFeature.Transcription)?.takeIf { cfg.profile().isOn(AiFeature.Transcription) } ?: return null
+        val key = r.provider.apiKey.takeIf { it.isNotBlank() } ?: return null
+        val model = WHISPER_MODEL
+        return when (r.provider.kind) {
+            ProviderKind.OpenAi -> Stt(OPENAI_STT, key, model)
+            // The chat model is not a speech model, and the saved base URL
+            // is often a full chat URL, which produced
+            // ".../chat/completions/audio/…".
+            ProviderKind.OpenAiCompatible -> r.provider.baseUrl?.takeIf { it.isNotBlank() }?.let { Stt(audioEndpoint(it), key, model) }
             else -> null
         }
     }
@@ -230,7 +224,7 @@ object CallRecordingPublisher {
     }
 
     private const val TAG = "CallRecording"
-    private const val OPENAI_STT = "https://api.openai.com/v1/audio/transcriptions"
+    internal const val OPENAI_STT = "https://api.openai.com/v1/audio/transcriptions"
     private const val WHISPER_MODEL = "whisper-1"
 
     /** What Whisper works at internally; sending more is wasted upload. */

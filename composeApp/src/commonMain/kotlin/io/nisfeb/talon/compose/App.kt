@@ -1,6 +1,8 @@
 @file:OptIn(DelicateCoroutinesApi::class)
 
 package io.nisfeb.talon.compose
+import io.nisfeb.talon.ai.forFeature
+import io.nisfeb.talon.ai.triagePrivateSlot
 import io.nisfeb.talon.util.ioDispatcher
 import io.nisfeb.talon.util.isMacOsHost
 import io.nisfeb.talon.util.nowMs
@@ -1021,7 +1023,7 @@ fun App(
         // The private model, from Settings, into the ladder.
         LaunchedEffect(aiSettings, uiSettings) {
             io.nisfeb.talon.orrery.movePrivateModelIn(aiSettings, uiSettings)
-            aiSettings.state.collect { io.nisfeb.talon.orrery.LocalModels.usePrivate(it.private) }
+            aiSettings.state.collect { io.nisfeb.talon.orrery.LocalModels.usePrivate(it.triagePrivateSlot()) }
         }
         var openAction by remember { mutableStateOf<io.nisfeb.talon.orrery.OrreryAction?>(null) }
         openAction?.let { action ->
@@ -1044,7 +1046,7 @@ fun App(
         val loopWebOn = aiState.assistantOn()
         val loopBraveOn = loopWebOn && aiState.braveApiKey.isNotBlank()
         val loopRunner = remember(db, repo, searchEmbedderClient, loopWebOn, loopBraveOn, mailRepo, calendarRepo) {
-            val agentClient = io.nisfeb.talon.ai.AgentClient { aiSettings.state.value }
+            val agentClient = io.nisfeb.talon.ai.AgentClient { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Assistant) }
             io.nisfeb.talon.ai.LoopRunner(
                 loops = db.loops(),
                 runs = db.loopRuns(),

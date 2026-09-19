@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.util.formatMonthDay
 import io.nisfeb.talon.util.ConcurrentMap
 import io.nisfeb.talon.util.formatMonthDayTime
@@ -233,7 +234,7 @@ fun DmChatScreen(
     val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val aiFeatures = remember(aiSettings) {
-        AiFeatures(AiClient { aiSettings.state.value })
+        AiFeatures(AiClient { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.CatchUp) })
     }
     var catchUpSummary by remember(whom) { mutableStateOf<String?>(null) }
     var catchingUp by remember(whom) { mutableStateOf(false) }

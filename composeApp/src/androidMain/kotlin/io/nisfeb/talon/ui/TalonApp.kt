@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import io.nisfeb.talon.ai.triagePrivateSlot
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.WindowInsets
@@ -446,7 +447,7 @@ fun TalonApp(
     val orreryActions by orreryRepo.actions.collectAsState()
     LaunchedEffect(app.aiSettings) {
         io.nisfeb.talon.orrery.movePrivateModelIn(app.aiSettings, app.uiSettings)
-        app.aiSettings.state.collect { io.nisfeb.talon.orrery.LocalModels.usePrivate(it.private) }
+        app.aiSettings.state.collect { io.nisfeb.talon.orrery.LocalModels.usePrivate(it.triagePrivateSlot()) }
     }
     var openAction by remember { mutableStateOf<io.nisfeb.talon.orrery.OrreryAction?>(null) }
     // Whether the pipe is on at all: the actions section is its.

@@ -1,5 +1,7 @@
 package io.nisfeb.talon.orrery
 
+import io.nisfeb.talon.ai.forFeature
+import io.nisfeb.talon.ai.triageInCloud
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiSettings
 import kotlinx.coroutines.flow.StateFlow
@@ -21,11 +23,14 @@ class CloudTriage(
 }
 
 class CloudRung(private val config: () -> AiSettings.Config) : Rung() {
-    override val name: String get() = "Your ${config().provider.label} key, in the cloud"
-    private val ai by lazy { AiClient(config) }
+    // The model triage is assigned, which is the frontier model's unless
+    // the owner named another.
+    private fun triage() = config().forFeature(io.nisfeb.talon.ai.AiFeature.OrreryTriage)
+    override val name: String get() = "Your ${triage().provider.label} key, in the cloud"
+    private val ai by lazy { AiClient { triage() } }
 
     override suspend fun status(): RungStatus =
-        if (config().apiKey.isBlank()) RungStatus.Unavailable("No API key is set under AI.") else RungStatus.Ready
+        if (triage().apiKey.isBlank()) RungStatus.Unavailable("No API key is set under AI.") else RungStatus.Ready
 
     override suspend fun open(): LocalModel = object : LocalModel {
         override val rung: String get() = name
@@ -46,7 +51,7 @@ class StandDown(val on: StateFlow<Boolean>, val set: (Boolean) -> Unit)
  */
 fun frontierReadsMessages(
     settings: io.nisfeb.talon.ai.AiSettingsRepository,
-): kotlinx.coroutines.flow.StateFlow<Boolean> = io.nisfeb.talon.util.mapState(settings.state) { it.frontierReadsMessages }
+): kotlinx.coroutines.flow.StateFlow<Boolean> = io.nisfeb.talon.util.mapState(settings.state) { it.triageInCloud() }
 
 /**
  * Carry the private model's address across from where it used to be

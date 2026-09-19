@@ -1,5 +1,6 @@
 package io.nisfeb.talon.orrery
 
+import io.nisfeb.talon.ai.profile
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
@@ -203,11 +204,7 @@ class DecideControl(
 )
 
 /** The OpenRouter key Talon already has: the frontier model's, or the private model's when it points there. */
-fun openRouterKey(cfg: io.nisfeb.talon.ai.AiSettings.Config): String? = when {
-    cfg.provider == io.nisfeb.talon.ai.AiSettings.Provider.OpenRouter && cfg.apiKey.isNotBlank() -> cfg.apiKey
-    cfg.privateBaseUrl?.contains("openrouter.ai") == true && cfg.privateApiKey.isNotBlank() -> cfg.privateApiKey
-    else -> null
-}
+fun openRouterKey(cfg: io.nisfeb.talon.ai.AiSettings.Config): String? = cfg.profile().jevProvider()?.apiKey
 
 /** Dollars to the millionth, never in exponent form: these calls cost fractions of a cent. */
 internal fun dollars(d: Double): String {

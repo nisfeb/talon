@@ -136,7 +136,7 @@ class Loops(
     // settings through a lambda, so one instance for the process lifetime
     // never goes stale on a key change — and every wake-up reuses the pool
     // instead of leaving a fresh one behind.
-    private val agentClient by lazy { AgentClient { aiSettings.state.value } }
+    private val agentClient by lazy { AgentClient { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Assistant) } }
     private val braveClient by lazy { BraveSearchClient { aiSettings.state.value } }
     private val urlFetcher by lazy { UrlFetcher { aiSettings.state.value } }
 
