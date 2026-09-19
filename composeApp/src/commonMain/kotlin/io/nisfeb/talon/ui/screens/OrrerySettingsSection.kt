@@ -151,6 +151,7 @@ private fun DecideRows(orrery: OrreryRepo, dc: DecideControl) {
     val run by orrery.gateCheck.collectAsState()
     val checking = run != null && run?.result == null
     var threshold by remember(d.threshold) { mutableStateOf(d.threshold.toString()) }
+    var keep by remember(d.keep) { mutableStateOf(d.keep.toString()) }
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
 
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -193,6 +194,31 @@ private fun DecideRows(orrery: OrreryRepo, dc: DecideControl) {
         if (checking) TextButton(onClick = { orrery.stopGateCheck() }) { Text("Stop") }
         else TextButton(onClick = { orrery.startGateCheck() }) { Text("Check the gate") }
     }
+    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Choose what the reader sees", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                if (d.relevance) "For each message it reads, Jev picks the bodies it is about, and the reader sees those above ${d.keep}, with the sender and you. A pick that fails shows the reader the usual list."
+                else "Jev picks the bodies each message is about, so the reader sees a few that matter instead of the first sixty. Run Check body picks first, then choose where to cut.",
+                style = MaterialTheme.typography.labelSmall,
+                color = quiet,
+            )
+        }
+        Switch(checked = d.relevance, onCheckedChange = { dc.set(d.copy(relevance = it)) })
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = keep,
+            onValueChange = { t ->
+                keep = t
+                t.toDoubleOrNull()?.takeIf { it in 0.05..0.95 }?.let { dc.set(d.copy(keep = it)) }
+            },
+            label = { Text("Keep bodies at or above") },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+        )
+        if (!checking) TextButton(onClick = { orrery.startGateCheck(limit = 50, picks = true) }) { Text("Check body picks") }
+    }
     // The route is alpha and may move: it and the model are settings, not code.
     OutlinedTextField(value = d.url, onValueChange = { dc.set(d.copy(url = it.trim())) }, label = { Text("Decisions route") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     OutlinedTextField(value = d.model, onValueChange = { dc.set(d.copy(model = it.trim())) }, label = { Text("Decision model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -211,7 +237,8 @@ private fun DecideRows(orrery: OrreryRepo, dc: DecideControl) {
                 "${c.total} messages already read. " +
                     c.readAt.joinToString("; ") { (t, n) -> "at $t, $n read and ${c.total - n} skipped" } +
                     ". The check cost ${"$"}${(kotlin.math.round(c.costUsd * 10_000) / 10_000)}" +
-                    (if (c.failed > 0) "; ${c.failed} could not be asked and count as read." else "."),
+                    (if (c.failed > 0) "; ${c.failed} could not be asked and count as read." else ".") +
+                    (if (c.keptAt.isEmpty()) "" else " Bodies the reader would see: " + c.keptAt.joinToString("; ") { (t, n) -> "at $t, ${(kotlin.math.round(n * 10) / 10)} on average" } + "."),
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(top = 6.dp),
             )

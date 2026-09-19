@@ -211,4 +211,61 @@ class DeciderTest {
         assertTrue(most in 2..6, "at most six at once, and more than one: $most")
         assertEquals(40, seen.last())
     }
+
+    private fun many(n: Int): List<KnownBody> =
+        listOf(KnownBody("person/rose", "Rose", listOf("daughter"), null), KnownBody("thing/subaru", "Subaru", listOf("the car"), null)) +
+            (0 until n - 2).map { KnownBody("thing/t$it", "Thing $it", emptyList(), null) }
+
+    @Test
+    fun `the gate is sent every body, not the first eighty`() {
+        val state = Gate.state("x", "person/sam", emptyList(), many(200))
+        assertEquals(200, (state["known_bodies"] as JsonArray).size)
+    }
+
+    @Test
+    fun `bodies are ranked named first, then people, then the rest`() {
+        val bodies = listOf(
+            KnownBody("thing/boat", "Boat", emptyList(), null),
+            KnownBody("situation/fair", "Fair", emptyList(), null),
+            KnownBody("activity/swim", "Swim lessons", emptyList(), null),
+            KnownBody("person/ada", "Ada", emptyList(), null),
+            KnownBody("thing/subaru", "Subaru", emptyList(), null),
+        )
+        val ranked = rankBodies(bodies, NameIndex(bodies), "the Subaru is back", listOf("Ada said so"))
+        assertEquals(listOf("person/ada", "thing/subaru", "activity/swim", "situation/fair", "thing/boat"), ranked.map { it.id })
+    }
+
+    /** Answers each body question by whether its instructions name [about]. */
+    private fun picks(vararg about: String) = FakeDecider { q ->
+        buildJsonObject {
+            q.forEach { (k, v) ->
+                val asks = v.jsonObject["instructions"]!!.jsonPrimitive.content
+                putJsonObject(k) { put("type", "noul"); put("noul", if (about.any { "$it " in asks }) 0.9 else 0.04) }
+            }
+        }
+    }
+
+    @Test
+    fun `Jev picks the bodies in groups of forty, each with the whole list`() = runTest {
+        val d = picks("person/rose", "thing/subaru")
+        val bodies = many(90)
+        val p = Relevance.pick(d, "my daughter took the car", "person/sam", emptyList(), bodies)
+        assertEquals(3, d.asked.size, "40, 40 and 10")
+        assertEquals(listOf(40, 40, 10), d.asked.map { it.second.size })
+        d.asked.forEach { (state, _) -> assertEquals(90, (state["known_bodies"] as JsonArray).size, "every call carries the whole list") }
+        assertEquals(listOf("person/rose", "thing/subaru"), p.above(0.5).map { it.first })
+        val sam = KnownBody("person/sam", "Sam", emptyList(), null)
+        val me = KnownBody("person/me", "Me", emptyList(), null)
+        val seen = Relevance.chosen(listOf(me, sam) + bodies, p, 0.5, "person/sam").map { it.id }
+        assertEquals(listOf("person/me", "person/sam", "person/rose", "thing/subaru"), seen, "the picks, and always the sender and the owner")
+    }
+
+    @Test
+    fun `a pick that fails leaves the reader's list as it was`() = runTest {
+        val bodies = many(90)
+        val p = Relevance.pick(DownDecider(), "x", "person/sam", emptyList(), bodies)
+        assertTrue(p.failed)
+        assertTrue(p.note.startsWith("body picks unavailable"), p.note)
+        assertEquals(bodies, Relevance.chosen(bodies, p, 0.5, "person/sam"))
+    }
 }

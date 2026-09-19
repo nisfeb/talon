@@ -776,6 +776,8 @@ class OrreryRepo(
         val decider: Decider? = null,
         /** The gate's threshold when the gate is on, else null. */
         val threshold: Double? = null,
+        /** The score a body needs for the reader to see it, when Jev chooses them, else null. */
+        val keep: Double? = null,
         var day: DecideDay = DecideDay(),
     )
 
@@ -801,6 +803,7 @@ class OrreryRepo(
         return Reading(
             view.bodies, NameIndex(view.bodies), view.attrs, view.notes, model, gate,
             decider = dec?.first, threshold = dec?.second?.takeIf { it.gate }?.threshold,
+            keep = dec?.second?.takeIf { it.relevance }?.keep,
         )
     }
 
@@ -921,6 +924,8 @@ class OrreryRepo(
         val readAt: List<Pair<Double, Int>>,
         val costUsd: Double,
         val failed: Int,
+        /** With body picks: for each cut-off, how many bodies the reader would see on average. */
+        val keptAt: List<Pair<Double, Double>> = emptyList(),
     ) {
         val total: Int get() = lines.size
     }
@@ -940,11 +945,11 @@ class OrreryRepo(
     val gateCheck: StateFlow<GateCheckRun?> = _gateCheck.asStateFlow()
     private var gateCheckJob: Job? = null
 
-    fun startGateCheck(limit: Int = 300) {
+    fun startGateCheck(limit: Int = 300, picks: Boolean = false) {
         if (gateCheckJob?.isActive == true) return
         _gateCheck.value = GateCheckRun(0, 0)
         gateCheckJob = scope.launch {
-            val r = checkGate(limit) { done, total -> _gateCheck.value = GateCheckRun(done, total) }
+            val r = checkGate(limit, picks) { done, total -> _gateCheck.value = GateCheckRun(done, total) }
             _gateCheck.value = GateCheckRun(_gateCheck.value?.total ?: 0, _gateCheck.value?.total ?: 0, r)
         }
     }
@@ -955,7 +960,7 @@ class OrreryRepo(
         _gateCheck.value = null
     }
 
-    suspend fun checkGate(limit: Int = 300, progress: (done: Int, total: Int) -> Unit = { _, _ -> }): Result<GateCheck> = runCatching {
+    suspend fun checkGate(limit: Int = 300, picks: Boolean = false, progress: (done: Int, total: Int) -> Unit = { _, _ -> }): Result<GateCheck> = runCatching {
         val a = api ?: error("Not attached to a ship.")
         val s = ship ?: error("Not attached to a ship.")
         val row = db.orreryAccounts().get(s) ?: error("Turn on Feed Orrery first.")
@@ -972,11 +977,17 @@ class OrreryRepo(
             .filter { (m, t) -> t.length >= 8 && !t.trimEnd().endsWith("?") && !t.trimStart().startsWith("/") && inScope(m.whom, t, s, ourNick, allowed) }
             .take(limit).toList().reversed()
         progress(0, picked.size)
+        // With picks, what Jev chose for each message the gate lets through.
+        val chose = arrayOfNulls<Relevance.Picked>(picked.size)
         suspend fun ask(i: Int): Gate.Result {
             val (m, text) = picked[i]
             val earlier = db.messages().before(m.whom, m.sentMs, ModelExtractor.CONTEXT_MESSAGES).reversed()
                 .map { StoryCache.textFor(it.id, it.contentJson) }.filter { it.isNotBlank() }
-            return Gate.decide(dec, settings.threshold, text, index.authorId(m.author, s), earlier, view.bodies)
+            val from = index.authorId(m.author, s)
+            val ranked = rankBodies(view.bodies, index, text, earlier)
+            val g = Gate.decide(dec, settings.threshold, text, from, earlier, ranked)
+            if (picks && g.read && g.p != null) chose[i] = Relevance.pick(dec, text, from, earlier, ranked)
+            return g
         }
         val results = Gate.askAll(picked.size, GATE_CHECK_AT_ONCE, ::ask, progress)
         val probs = mutableListOf<Double>()
@@ -990,9 +1001,17 @@ class OrreryRepo(
             if (p == null) failed++ else probs += p
             val shown = p?.let { (kotlin.math.round(it * 100) / 100).toString().padEnd(4, '0') } ?: " -- "
             lines += "$shown ${if (g.read) "read" else "skip"} | ${m.author}: ${text.take(90).replace('\n', ' ')}"
+            chose[i]?.let { c ->
+                cost += c.costUsd
+                lines += if (c.failed) "      bodies: ${c.note}"
+                else "      bodies: " + c.above(0.1).take(8).joinToString(", ") { (id, sc) -> "$id ${(kotlin.math.round(sc * 100) / 100)}" }.ifBlank { "none above 0.1" }
+            }
         }
         val band = listOf(0.2, 0.25, 0.3, 0.35, 0.4).map { t -> t to (probs.count { it >= t } + failed) }
-        GateCheck(lines, settings.threshold, band, cost, failed).also {
+        val answered = chose.filterNotNull().filter { !it.failed }
+        val keptAt = if (answered.isEmpty()) emptyList()
+        else listOf(0.3, 0.5, 0.7).map { t -> t to answered.sumOf { it.above(t).size }.toDouble() / answered.size }
+        GateCheck(lines, settings.threshold, band, cost, failed, keptAt).also {
             Log.i(TAG, "gate check: ${it.total} messages, ${band.joinToString { (t, n) -> "$n read at $t" }}, cost ${dollars(cost)}")
         }
     }
@@ -1026,16 +1045,30 @@ class OrreryRepo(
         // neither does the gate.
         if (r.model != null && worth && r.modelRuns < MODEL_PER_PASS && text.length >= 8 && !text.trimEnd().endsWith("?")) {
             val model = r.model
-            val analyst: suspend () -> List<Noticed> = {
-                r.modelRuns++
-                ModelExtractor.extract(model, r.index, r.bodies, text, author, atMs, s, r.attrs, r.notes, context)
-                    .also { r.day = r.day.copy(analystUsd = r.day.analystUsd + (model.lastCostUsd ?: 0.0)) }
-            }
             val dec = r.decider
             val from = r.index.authorId(author, s)
             val say: (String) -> Unit = { Log.i(TAG, "$sourceId $it") }
+            val earlier = context.map { it.second }
+            // What the message names first, then people: wherever a list
+            // is cut, this decides what is cut.
+            val ranked = rankBodies(r.bodies, r.index, text, earlier)
+            val analyst: suspend () -> List<Noticed> = {
+                r.modelRuns++
+                // Jev chooses what the reader sees, when asked to: the few
+                // bodies the message is about rather than the first sixty.
+                val keep = r.keep
+                val seen = if (dec != null && keep != null) {
+                    val p = Relevance.pick(dec, text, from, earlier, ranked)
+                    say(p.note)
+                    val chosen = Relevance.chosen(ranked, p, keep, from)
+                    r.day = r.day.copy(picked = r.day.picked + 1, pickedBodies = r.day.pickedBodies + chosen.size, pickUsd = r.day.pickUsd + p.costUsd)
+                    chosen
+                } else ranked
+                ModelExtractor.extract(model, r.index, seen, text, author, atMs, s, r.attrs, r.notes, context)
+                    .also { r.day = r.day.copy(analystUsd = r.day.analystUsd + (model.lastCostUsd ?: 0.0)) }
+            }
             byModel = if (dec != null && r.threshold != null && !text.trimStart().startsWith("/")) {
-                val (g, rows) = Gate.around(dec, r.threshold, text, from, context.map { it.second }, r.bodies, say, analyst)
+                val (g, rows) = Gate.around(dec, r.threshold, text, from, earlier, ranked, say, analyst)
                 r.day = r.day.copy(
                     read = r.day.read + (if (g.read) 1 else 0),
                     skipped = r.day.skipped + (if (g.read) 0 else 1),

@@ -9,6 +9,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -56,6 +57,9 @@ data class DecideSettings(
     val url: String = DECISIONS_URL,
     val model: String = "typesafe/jev-1.13",
     val timeoutMs: Long = 30_000,
+    /** Jev chooses the bodies the reader sees, from those it scores at or above [keep]. Off until the owner has run the check. */
+    val relevance: Boolean = false,
+    val keep: Double = 0.5,
 ) {
     companion object {
         const val DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
@@ -96,6 +100,100 @@ class OpenRouterDecider(
             (usage?.get("cost") as? JsonPrimitive)?.doubleOrNull,
         )
     }
+}
+
+/** How many bodies go to the decision model at most: a guard, not a budget. */
+const val MAX_KNOWN = 1000
+
+/** One body as the decision model reads it: `id | name | aliases`. */
+fun knownLine(b: KnownBody): String =
+    b.id + " | " + b.name.orEmpty() + if (b.aliases.isNotEmpty()) " | " + b.aliases.joinToString(", ") else ""
+
+/**
+ * The ship's bodies in the order a reader should meet them: those named
+ * in the message or the ones before it first, then people, then
+ * activities, places and orgs, then situations, then things. Where a
+ * list has to be cut, this is what decides what is cut.
+ */
+fun rankBodies(bodies: List<KnownBody>, index: NameIndex, text: String, earlier: List<String>): List<KnownBody> {
+    val named = (listOf(text) + earlier).flatMap { t -> index.find(t).map { it.first.id } }.toSet()
+    val rank = mapOf("person" to 1, "activity" to 2, "place" to 2, "org" to 2, "situation" to 3, "thing" to 4)
+    return bodies.sortedBy { if (it.id in named) 0 else rank[it.id.substringBefore('/')] ?: 5 }
+}
+
+/**
+ * Which bodies a message is about, asked of the decision model: one noul
+ * question per body, in groups of [GROUP] sent together, each call
+ * carrying the whole list of bodies. The list is what makes it work:
+ * without it the bodies a message was plainly about scored with the
+ * noise, around 0.3; with it they scored 0.8 to 0.96 and the rest 0.06
+ * or less (measured 2026-09-19 on 173 bodies).
+ */
+object Relevance {
+    const val GROUP = 40
+
+    private fun about(b: KnownBody): String = (listOfNotNull(b.name) + b.aliases).distinct().joinToString(", ").ifBlank { b.id }
+
+    fun questions(group: List<KnownBody>): JsonObject = buildJsonObject {
+        group.forEachIndexed { j, b ->
+            putJsonObject("b$j") {
+                put("type", "noul")
+                put("instructions", "Is the new message about ${b.id} (${about(b)})?")
+                putJsonObject("criteria") {
+                    put("true", "the message names it or plainly refers to it")
+                    put("false", "it does not")
+                }
+            }
+        }
+    }
+
+    fun state(text: String, from: String, earlier: List<String>, listing: List<String>): JsonObject = buildJsonObject {
+        put("message", text)
+        put("from", from)
+        putJsonArray("earlier") { earlier.forEach { add(it) } }
+        putJsonArray("known_bodies") { listing.forEach { add(it) } }
+    }
+
+    /** Each body's score, what the calls cost, and whether every group answered. */
+    data class Picked(val scores: Map<String, Double>, val costUsd: Double, val failed: Boolean, val note: String) {
+        fun above(keep: Double): List<Pair<String, Double>> = scores.filter { it.value >= keep }.toList().sortedByDescending { it.second }
+    }
+
+    suspend fun pick(decider: Decider, text: String, from: String, earlier: List<String>, bodies: List<KnownBody>, atOnce: Int = 6): Picked {
+        val all = bodies.take(MAX_KNOWN)
+        val st = state(text, from, earlier, all.map(::knownLine))
+        val groups = all.chunked(GROUP)
+        val permits = kotlinx.coroutines.sync.Semaphore(atOnce)
+        val answers = kotlinx.coroutines.coroutineScope {
+            groups.map { g ->
+                async {
+                    permits.acquire()
+                    try { runCatching { g to decider.ask(st, questions(g)) } } finally { permits.release() }
+                }
+            }.map { it.await() }
+        }
+        val cost = answers.sumOf { r -> r.getOrNull()?.second?.costUsd ?: 0.0 }
+        answers.firstOrNull { it.isFailure }?.exceptionOrNull()?.let { e ->
+            return Picked(emptyMap(), cost, true, "body picks unavailable, the reader sees the bodies in order: ${e.message?.take(160)}")
+        }
+        val scores = buildMap {
+            for (r in answers) {
+                val (g, d) = r.getOrThrow()
+                g.forEachIndexed { j, b -> put(b.id, ((d.answers["b$j"] as? JsonObject)?.get("noul") as? JsonPrimitive)?.doubleOrNull ?: 0.0) }
+            }
+        }
+        val tokens = answers.sumOf { r -> r.getOrNull()?.second?.inputTokens ?: 0L }
+        return Picked(scores, cost, false, "body picks: ${groups.size} calls, $tokens tokens in, ${dollars(cost)}")
+    }
+
+    /**
+     * What the reader sees: the bodies scored at or above [keep], and
+     * always the sender and the owner, in [ranked] order. When the picks
+     * failed, [ranked] as it is: a failed call never narrows the reader.
+     */
+    fun chosen(ranked: List<KnownBody>, p: Picked, keep: Double, from: String): List<KnownBody> =
+        if (p.failed) ranked
+        else ranked.filter { (p.scores[it.id] ?: 0.0) >= keep || it.id == from || it.id == "person/me" }
 }
 
 /** The decider's switches as the settings screen holds them. */
@@ -139,15 +237,17 @@ object Gate {
 
     const val RULE = "a status is a circumstance, never a feeling; only facts about people, things, places and plans are recorded"
 
+    /**
+     * Every body the key sees goes, in [rankBodies] order: sending all of
+     * them measured the same answer time as eighty, at about eight cents
+     * more per thousand messages, and a cut at eighty could drop the one
+     * person a message is about. [MAX_KNOWN] is only a guard.
+     */
     fun state(text: String, from: String, earlier: List<String>, bodies: List<KnownBody>): JsonObject = buildJsonObject {
         put("message", text)
         put("from", from)
         putJsonArray("earlier") { earlier.forEach { add(it) } }
-        putJsonArray("known_bodies") {
-            bodies.take(80).forEach { b ->
-                add(b.id + " | " + b.name.orEmpty() + if (b.aliases.isNotEmpty()) " | " + b.aliases.joinToString(", ") else "")
-            }
-        }
+        putJsonArray("known_bodies") { bodies.take(MAX_KNOWN).forEach { add(knownLine(it)) } }
         put("rule", RULE)
     }
 
@@ -326,10 +426,15 @@ data class DecideDay(
     val neither: Int = 0,
     val uncertain: Int = 0,
     val checkUsd: Double = 0.0,
+    /** Messages whose bodies Jev chose, the bodies the reader saw across them, and what choosing cost. */
+    val picked: Int = 0,
+    val pickedBodies: Int = 0,
+    val pickUsd: Double = 0.0,
 ) {
     operator fun plus(o: DecideDay) = DecideDay(
         read + o.read, skipped + o.skipped, gateUsd + o.gateUsd, analystUsd + o.analystUsd,
         checked + o.checked, kept + o.kept, feeling + o.feeling, neither + o.neither, uncertain + o.uncertain, checkUsd + o.checkUsd,
+        picked + o.picked, pickedBodies + o.pickedBodies, pickUsd + o.pickUsd,
     )
 
     operator fun plus(t: StatusCheck.Tally) = copy(
@@ -340,5 +445,7 @@ data class DecideDay(
     fun lines(day: String): List<String> = listOf(
         "gate $day: $read read, $skipped skipped, the gate cost ${dollars(gateUsd)}, the analyst ${dollars(analystUsd)}",
         "status check $day: $checked checked, $kept kept, $feeling dropped as feeling, $neither dropped as neither, $uncertain uncertain, ${dollars(checkUsd)}",
+    ) + if (picked == 0) emptyList() else listOf(
+        "body picks $day: $picked messages, ${pickedBodies / picked} bodies each on average, ${dollars(pickUsd)}",
     )
 }
