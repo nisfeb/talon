@@ -144,9 +144,17 @@ class CalendarRepo(
 
     suspend fun loadRange(fromMs: Long, toMs: Long) {
         range = fromMs to toMs
+        // The month is on screen from the last answer while this one is
+        // asked for: the screen reads these rows, not the window's.
+        if (_rangeRows.value == null) restore()
         val a = api ?: return
         runCatching { a.window(fromMs, toMs) }
-            .onSuccess { w -> _rangeRows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r })) }
+            .onSuccess { w ->
+                _rangeRows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
+                // Kept as it lands, not at the next refresh: a phone closed
+                // on a month it has just read opens on that month again.
+                keep()
+            }
             .onFailure { if (it !is AuspexError) throw it; _error.value = it.message }
     }
 
@@ -214,13 +222,22 @@ class CalendarRepo(
      */
     private suspend fun restore() {
         val c = cache ?: return
-        if (_rows.value != null) return
+        if (_rows.value != null && _rangeRows.value != null) return
         val json = AuspexApi.json
         suspend fun read(kind: String) = runCatching { c.read(kind) }.getOrNull().orEmpty()
         val window = read("window").mapNotNull { r ->
             runCatching { json.decodeFromString(CalendarRow.serializer(), r.json) }.getOrNull()
         }
         if (_rows.value == null && window.isNotEmpty()) _rows.value = window
+        // The screen's own month, kept beside the window: without it the
+        // grid was empty on every cold start until the ship answered,
+        // though the last answer was in the database all along.
+        if (_rangeRows.value == null) {
+            val month = read("range").mapNotNull { r ->
+                runCatching { json.decodeFromString(CalendarRow.serializer(), r.json) }.getOrNull()
+            }.ifEmpty { window }
+            if (month.isNotEmpty()) _rangeRows.value = month
+        }
         if (_calendars.value.isEmpty()) {
             _calendars.value = read("calendars").mapNotNull { r ->
                 runCatching { json.decodeFromString(CalendarInfo.serializer(), r.json) }.getOrNull()
@@ -253,6 +270,7 @@ class CalendarRepo(
         val snapTasks = _tasks.value
         val snapTags = _tags.value
         val snapZone = _zone.value
+        val snapRange = _rangeRows.value
         runCatching {
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
             c.replaceAll(
@@ -262,6 +280,7 @@ class CalendarRepo(
                     "tasks" to rows("tasks", snapTasks.orEmpty().map { json.encodeToString(CalendarTask.serializer(), it) }),
                     "tags" to rows("tags", snapTags),
                     "zone" to rows("zone", listOfNotNull(snapZone)),
+                    "range" to rows("range", snapRange.orEmpty().map { json.encodeToString(CalendarRow.serializer(), it) }),
                 ),
             )
             }

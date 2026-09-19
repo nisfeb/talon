@@ -96,11 +96,44 @@ class CalendarCacheTest {
         }
     }
 
-    private suspend fun waitFor(done: suspend () -> Boolean) {
+    private val month = """{"rows":[{"id":"0v2","cal":"home","meta":{"name":"Sports day"},"l":300,"r":400}]}"""
+
+    @Test
+    fun `a cold start shows the month the screen last read, not an empty grid`() = runBlocking {
+        val db = db()
+        val scope = CoroutineScope(SupervisorJob())
+        try {
+            // The widget's window is asked for first, the screen's month after.
+            var windows = 0
+            val warm = repo(scope, db) { path ->
+                when {
+                    "/window" in path -> 200 to (if (windows++ == 0) window else month)
+                    "/calendars" in path -> 200 to calendars
+                    else -> 404 to """{"error":"none"}"""
+                }
+            }
+            warm.attach("https://ship.example")
+            waitFor("the warm window") { warm.rows.value?.isNotEmpty() == true }
+            warm.loadRange(250, 500)
+            assertEquals(listOf("Sports day"), warm.rangeRows.value?.map { it.name })
+            waitFor("the range in the cache") { db.calendarCache().read("range").isNotEmpty() }
+            warm.detach()
+
+            val cold = repo(scope, db) { 503 to """{"error":"down"}""" }
+            cold.attach("https://ship.example")
+            waitFor("the cold month") { cold.rangeRows.value?.isNotEmpty() == true }
+            assertEquals(listOf("Sports day"), cold.rangeRows.value?.map { it.name }, "the screen's own month, from the cache")
+        } finally {
+            scope.cancel()
+            db.close()
+        }
+    }
+
+    private suspend fun waitFor(what: String = "", done: suspend () -> Boolean) {
         repeat(250) {
             if (done()) return
             delay(20)
         }
-        error("timed out")
+        error("timed out waiting for $what")
     }
 }
