@@ -1018,6 +1018,15 @@ fun App(
             val ship = loggedInShip
             if (mailShipUrl != null && ship != null) orreryRepo.attach(mailShipUrl, ship) else orreryRepo.detach()
         }
+        // Armillary rides the same surface again: the owner's cookie,
+        // and the AI settings, where the provider row it keeps lives.
+        val armillaryRepo = remember(session, aiSettings) {
+            io.nisfeb.talon.armillary.ArmillaryRepo(session.http, loopScope, aiSettings)
+        }
+        LaunchedEffect(armillaryRepo, mailShipUrl, loggedInShip) {
+            val ship = loggedInShip
+            if (mailShipUrl != null && ship != null) armillaryRepo.attach(mailShipUrl, ship) else armillaryRepo.detach()
+        }
         val orreryActions by orreryRepo.actions.collectAsState()
         val orreryOn = orreryRepo.availability.collectAsState().value ==
         io.nisfeb.talon.orrery.OrreryAvailability.PRESENT

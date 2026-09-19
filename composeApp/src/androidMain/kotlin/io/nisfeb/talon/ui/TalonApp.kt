@@ -445,6 +445,18 @@ fun TalonApp(
         if (mailShipUrl != null && loggedInShip != null) orreryRepo.attach(mailShipUrl, loggedInShip)
         else orreryRepo.detach()
     }
+    // Armillary rides the same surface again: the owner's cookie, and
+    // the AI settings, where the provider row it keeps lives.
+    val armillaryRepo = remember(app.session) {
+        io.nisfeb.talon.armillary.ArmillaryRepo(app.session.http, appScope, app.aiSettings)
+    }
+    DisposableEffect(armillaryRepo) {
+        onDispose { runCatching { armillaryRepo.detach() } }
+    }
+    LaunchedEffect(armillaryRepo, mailShipUrl, loggedInShip) {
+        if (mailShipUrl != null && loggedInShip != null) armillaryRepo.attach(mailShipUrl, loggedInShip)
+        else armillaryRepo.detach()
+    }
     val orreryActions by orreryRepo.actions.collectAsState()
     LaunchedEffect(app.aiSettings) {
         io.nisfeb.talon.orrery.movePrivateModelIn(app.aiSettings, app.uiSettings)
