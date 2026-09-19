@@ -160,6 +160,18 @@ class AndroidUiSettings(
         _orreryStandDown.value = on
     }
 
+    private val _orreryDecide = MutableStateFlow(
+        prefs.getString(KEY_ORRERY_DECIDE, null)
+            ?.let { runCatching { kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString(io.nisfeb.talon.orrery.DecideSettings.serializer(), it) }.getOrNull() }
+            ?: io.nisfeb.talon.orrery.DecideSettings(),
+    )
+    override val orreryDecide: StateFlow<io.nisfeb.talon.orrery.DecideSettings> = _orreryDecide.asStateFlow()
+    override fun setOrreryDecide(d: io.nisfeb.talon.orrery.DecideSettings) {
+        if (_orreryDecide.value == d) return
+        prefs.edit().putString(KEY_ORRERY_DECIDE, kotlinx.serialization.json.Json.encodeToString(io.nisfeb.talon.orrery.DecideSettings.serializer(), d)).apply()
+        _orreryDecide.value = d
+    }
+
     private val _orreryServerUrl = MutableStateFlow(prefs.getString(KEY_ORRERY_SERVER_URL, "") ?: "")
     override val orreryServerUrl: StateFlow<String> = _orreryServerUrl.asStateFlow()
     override fun setOrreryServerUrl(url: String) {
@@ -416,6 +428,7 @@ class AndroidUiSettings(
         private const val KEY_CALENDAR_WEEK_VIEW = "calendar_week_view"
         private const val KEY_ORRERY_CLOUD_TRIAGE = "orrery_cloud_triage"
         private const val KEY_ORRERY_STAND_DOWN = "orrery_stand_down"
+        private const val KEY_ORRERY_DECIDE = "orrery_decide"
         private const val KEY_ORRERY_SERVER_URL = "orrery_server_url"
         private const val KEY_ORRERY_SERVER_MODEL = "orrery_server_model"
         private const val KEY_HOME_FAHRENHEIT = HomePrefs.FAHRENHEIT

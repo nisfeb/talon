@@ -26,6 +26,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.font.FontFamily
+import io.nisfeb.talon.orrery.DecideControl
 import io.nisfeb.talon.orrery.LocalModels
 import io.nisfeb.talon.orrery.OrreryAvailability
 import io.nisfeb.talon.orrery.OrreryRepo
@@ -127,6 +132,89 @@ fun OrrerySettingsSection(orrery: OrreryRepo) {
         }
     }
 
+    if (on) orrery.decide?.let { DecideRows(orrery, it) }
+
     // The ladder's answer is asked for once the section is on screen.
     LaunchedEffect(orrery) { orrery.refreshModel() }
+}
+
+/**
+ * The decision model: a switch, then the gate and its threshold, which
+ * the owner picks after running the check over messages already read.
+ */
+@Composable
+private fun DecideRows(orrery: OrreryRepo, dc: DecideControl) {
+    val d by dc.settings.collectAsState()
+    val scope = rememberCoroutineScope()
+    val hasKey = remember(d) { orrery.decideHasKey() }
+    var checking by remember { mutableStateOf(false) }
+    var check by remember { mutableStateOf<Result<OrreryRepo.GateCheck>?>(null) }
+    var threshold by remember(d.threshold) { mutableStateOf(d.threshold.toString()) }
+    val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Decision model", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Each message the reader reads also goes to TypeSafe's Jev through OpenRouter, with zero data retention, on your OpenRouter key. It drops a status that is a feeling rather than a circumstance, and it can keep the reader away from messages that say nothing. Answers are free; reading costs about four cents a million tokens.",
+                style = MaterialTheme.typography.labelSmall,
+                color = quiet,
+            )
+            if (!hasKey) Text("Needs OpenRouter as the AI provider, with its key.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+        }
+        Switch(checked = d.on, enabled = hasKey || d.on, onCheckedChange = { dc.set(d.copy(on = it)) })
+    }
+    if (!d.on) return
+
+    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Gate the reader", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                if (d.gate) "Below ${d.threshold} the reader is not asked. A gate that cannot answer lets the message through."
+                else "Run the check first, then pick a threshold from 0.2 to 0.4.",
+                style = MaterialTheme.typography.labelSmall,
+                color = quiet,
+            )
+        }
+        Switch(checked = d.gate, onCheckedChange = { dc.set(d.copy(gate = it)) })
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = threshold,
+            onValueChange = { t ->
+                threshold = t
+                t.toDoubleOrNull()?.takeIf { it in 0.05..0.95 }?.let { dc.set(d.copy(threshold = it)) }
+            },
+            label = { Text("Threshold") },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(enabled = !checking, onClick = {
+            scope.launch {
+                checking = true
+                check = orrery.checkGate()
+                checking = false
+            }
+        }) { Text(if (checking) "Checking" else "Check the gate") }
+    }
+    // The route is alpha and may move: it and the model are settings, not code.
+    OutlinedTextField(value = d.url, onValueChange = { dc.set(d.copy(url = it.trim())) }, label = { Text("Decisions route") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(value = d.model, onValueChange = { dc.set(d.copy(model = it.trim())) }, label = { Text("Decision model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+
+    check?.fold(
+        onSuccess = { c ->
+            Text(
+                "${c.total} messages already read. " +
+                    c.readAt.joinToString("; ") { (t, n) -> "at $t, $n read and ${c.total - n} skipped" } +
+                    ". The check cost ${"$"}${(kotlin.math.round(c.costUsd * 10_000) / 10_000)}" +
+                    (if (c.failed > 0) "; ${c.failed} could not be asked and count as read." else "."),
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Column(Modifier.fillMaxWidth().heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
+                c.lines.forEach { Text(it, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace), color = quiet) }
+            }
+        },
+        onFailure = { Text(it.message ?: "The check failed.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) },
+    )
 }

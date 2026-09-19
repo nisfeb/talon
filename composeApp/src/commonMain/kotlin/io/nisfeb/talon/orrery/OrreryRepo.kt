@@ -29,6 +29,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import io.nisfeb.talon.util.nowMs
 import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * The structural pipe into orrery: what Talon knows for certain about
@@ -67,6 +68,8 @@ class OrreryRepo(
      * is no brief: two installs must never both pay for one.
      */
     private val claim: (suspend (key: String, staleMs: Long, settleMs: Long) -> Boolean)? = null,
+    /** The decision model's switches: the gate before the reader and the status check after it. */
+    val decide: DecideControl? = null,
 ) {
     private var cloudModel: LocalModel? = null
 
@@ -712,7 +715,23 @@ class OrreryRepo(
         val model: LocalModel?,
         val gate: PatternGate?,
         var modelRuns: Int = 0,
+        /** The decision model, when it is on and there is a key for it. */
+        val decider: Decider? = null,
+        /** The gate's threshold when the gate is on, else null. */
+        val threshold: Double? = null,
+        var day: DecideDay = DecideDay(),
     )
+
+    /** The decision model, when the owner has turned it on and an OpenRouter key is set. */
+    private fun decider(): Pair<Decider, DecideSettings>? {
+        val d = decide?.settings?.value?.takeIf { it.on } ?: return null
+        val key = cloud?.config?.invoke()?.let(::openRouterKey) ?: return null
+        // The bare client: the ship's cookie has no business at OpenRouter.
+        return OpenRouterDecider(bare, key, d) to d
+    }
+
+    /** Whether the decision model could run here: an OpenRouter key is set. */
+    fun decideHasKey(): Boolean = cloud?.config?.invoke()?.let(::openRouterKey) != null
 
     private suspend fun reading(a: OrreryApi, row: OrreryAccountEntity, s: String): Reading? {
         val view = runCatching { a.state(row.token) }.getOrElse { Log.i(TAG, "state view skipped: ${it.message}"); return null }
@@ -721,7 +740,11 @@ class OrreryRepo(
         val gate = if (model != null && emb != null) runCatching {
             PatternGate.build(emb, db.orreryNoticed().snippets(s, "confirmed", GATE_EXAMPLES), db.orreryNoticed().snippets(s, "discarded", GATE_EXAMPLES))
         }.getOrNull() else null
-        return Reading(view.bodies, NameIndex(view.bodies), view.attrs, view.notes, model, gate)
+        val dec = if (model != null) decider() else null
+        return Reading(
+            view.bodies, NameIndex(view.bodies), view.attrs, view.notes, model, gate,
+            decider = dec?.first, threshold = dec?.second?.takeIf { it.gate }?.threshold,
+        )
     }
 
     /**
@@ -811,7 +834,81 @@ class OrreryRepo(
                 up += triageText(r, s, nowMs, msg.body, msg.from, msg.sent.coerceAtMost(nowMs), "mail:${e.id}", msg.id, "mail", "talon://mail/${e.id}")
             }
         }
+        tally(s, r.day, nowMs)
         return up
+    }
+
+    /**
+     * The day's count of what the decision model did, kept with the rest
+     * of this install's orrery record and logged as two lines: what the
+     * gate read and skipped against what both models cost, and what the
+     * status check kept and dropped. Those lines are the case for both.
+     */
+    private suspend fun tally(s: String, add: DecideDay, nowMs: Long) {
+        if (add == DecideDay()) return
+        val day = kotlinx.datetime.Instant.fromEpochMilliseconds(nowMs)
+            .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).date.toString()
+        val key = "decide:$day"
+        val was = db.orrerySent().get(s, key)?.value
+            ?.let { runCatching { Json.decodeFromString(DecideDay.serializer(), it) }.getOrNull() } ?: DecideDay()
+        val now = was + add
+        db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, key, Json.encodeToString(DecideDay.serializer(), now), nowMs))
+        now.lines(day).forEach { Log.i(TAG, it) }
+    }
+
+    /** What the gate would have done over messages already read, for choosing its threshold. */
+    data class GateCheck(
+        val lines: List<String>,
+        val threshold: Double,
+        /** How many of the messages each threshold in the band would have let through. */
+        val readAt: List<Pair<Double, Int>>,
+        val costUsd: Double,
+        val failed: Int,
+    ) {
+        val total: Int get() = lines.size
+    }
+
+    /**
+     * The gate over the last [limit] messages Talon already holds that the
+     * reader would read, not a new read of the chats: one line per
+     * message with the probability and read or skip, and what each
+     * threshold from 0.2 to 0.4 would have let through. Nothing is
+     * written; only the decision model is asked.
+     */
+    suspend fun checkGate(limit: Int = 300): Result<GateCheck> = runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        val s = ship ?: error("Not attached to a ship.")
+        val row = db.orreryAccounts().get(s) ?: error("Turn on Feed Orrery first.")
+        val (dec, settings) = decider() ?: error(if (decideHasKey()) "Turn the decision model on first." else "Set OpenRouter as the AI provider, with its key, first.")
+        val view = a.state(row.token)
+        val index = NameIndex(view.bodies)
+        val allowed = db.orreryChannels().all().toSet()
+        val ourNick = db.contacts().get(s)?.nickname
+        // What Talon already holds and the funnel would read: in scope,
+        // free text, not a question. Not a new read of the chats.
+        val walked = db.messages().postsBefore(now(), s, limit * 6)
+        val picked = walked.asSequence()
+            .map { it to StoryCache.textFor(it.id, it.contentJson) }
+            .filter { (m, t) -> t.length >= 8 && !t.trimEnd().endsWith("?") && !t.trimStart().startsWith("/") && inScope(m.whom, t, s, ourNick, allowed) }
+            .take(limit).toList().reversed()
+        val probs = mutableListOf<Double>()
+        val lines = mutableListOf<String>()
+        var cost = 0.0
+        var failed = 0
+        for ((m, text) in picked) {
+            val earlier = db.messages().before(m.whom, m.sentMs, ModelExtractor.CONTEXT_MESSAGES).reversed()
+                .map { StoryCache.textFor(it.id, it.contentJson) }.filter { it.isNotBlank() }
+            val g = Gate.decide(dec, settings.threshold, text, index.authorId(m.author, s), earlier, view.bodies)
+            cost += g.costUsd
+            val p = g.p
+            if (p == null) failed++ else probs += p
+            val shown = p?.let { (kotlin.math.round(it * 100) / 100).toString().padEnd(4, '0') } ?: " -- "
+            lines += "$shown ${if (g.read) "read" else "skip"} | ${m.author}: ${text.take(90).replace('\n', ' ')}"
+        }
+        val band = listOf(0.2, 0.25, 0.3, 0.35, 0.4).map { t -> t to (probs.count { it >= t } + failed) }
+        GateCheck(lines, settings.threshold, band, cost, failed).also {
+            Log.i(TAG, "gate check: ${it.total} messages, ${band.joinToString { (t, n) -> "$n read at $t" }}, cost ${dollars(cost)}")
+        }
     }
 
     /** One text through the rules and the model; what it claims goes to the tray or up. */
@@ -838,10 +935,36 @@ class OrreryRepo(
         // like what they discard does not spend a model run.
         val worth = r.gate == null || emb == null ||
             (runCatching { emb.embed(text) }.getOrNull()?.let { r.gate.worthAModel(it) } ?: true)
-        val byModel = if (r.model != null && worth && r.modelRuns < MODEL_PER_PASS && text.length >= 8) {
-            r.modelRuns++
-            ModelExtractor.extract(r.model, r.index, r.bodies, text, author, atMs, s, r.attrs, r.notes, context)
-        } else emptyList()
+        var byModel: List<Noticed> = emptyList()
+        // A question states nothing, and the analyst never reads one, so
+        // neither does the gate.
+        if (r.model != null && worth && r.modelRuns < MODEL_PER_PASS && text.length >= 8 && !text.trimEnd().endsWith("?")) {
+            val model = r.model
+            val analyst: suspend () -> List<Noticed> = {
+                r.modelRuns++
+                ModelExtractor.extract(model, r.index, r.bodies, text, author, atMs, s, r.attrs, r.notes, context)
+                    .also { r.day = r.day.copy(analystUsd = r.day.analystUsd + (model.lastCostUsd ?: 0.0)) }
+            }
+            val dec = r.decider
+            val from = r.index.authorId(author, s)
+            val say: (String) -> Unit = { Log.i(TAG, "$sourceId $it") }
+            byModel = if (dec != null && r.threshold != null && !text.trimStart().startsWith("/")) {
+                val (g, rows) = Gate.around(dec, r.threshold, text, from, context.map { it.second }, r.bodies, say, analyst)
+                r.day = r.day.copy(
+                    read = r.day.read + (if (g.read) 1 else 0),
+                    skipped = r.day.skipped + (if (g.read) 0 else 1),
+                    gateUsd = r.day.gateUsd + g.costUsd,
+                )
+                rows
+            } else analyst()
+            // Rule 8, held by a model that cannot answer outside the set:
+            // a status that is a feeling never reaches the tray or the ship.
+            if (dec != null && byModel.isNotEmpty()) {
+                val (kept, t) = StatusCheck.filter(dec, text, from, byModel, say)
+                byModel = kept
+                r.day += t
+            }
+        }
         for (n in byRules + byModel) {
             val trusted = trusted(s, n.attr)
             val entity = OrreryNoticedEntity(

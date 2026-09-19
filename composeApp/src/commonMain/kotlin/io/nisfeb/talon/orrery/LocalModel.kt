@@ -13,6 +13,9 @@ interface LocalModel : AutoCloseable {
     val rung: String
 
     suspend fun complete(system: String, user: String, grammar: String?, maxTokens: Int): String
+
+    /** What the last answer cost, where someone charges for it; nothing on this device. */
+    val lastCostUsd: Double? get() = null
 }
 
 sealed interface RungStatus {

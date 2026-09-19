@@ -42,6 +42,7 @@ class OrreryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             ) { app.aiSettings.state.value },
             book = { app.repo.bookContacts.value },
             standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),
+            decide = io.nisfeb.talon.orrery.DecideControl(app.uiSettings.orreryDecide, app.uiSettings::setOrreryDecide),
         )
         try {
             repo.pass(session.shipUrl, session.ship)

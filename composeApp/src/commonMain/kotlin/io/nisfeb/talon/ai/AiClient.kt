@@ -41,6 +41,10 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
     private val http = createAppHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** What the last call cost, where the provider says or the price is known. */
+    var lastCostUsd: Double? = null
+        private set
+
     /** One-shot completion. Throws on transport / HTTP error. */
     suspend fun complete(
         systemPrompt: String?,
@@ -111,6 +115,7 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
             timeoutMs = timeoutMs,
         ) { body ->
             usageLine(cfg.provider, cfg.model ?: "claude-sonnet-4-5-20250929", body)?.let { Log.i("AiClient", it) }
+            lastCostUsd = usageCost(cfg.provider, cfg.model ?: "claude-sonnet-4-5-20250929", body)
             // Shape: { content: [{type:"text", text:"..."}], ... }. A model
             // that thinks puts a thinking block first, so take the text.
             (body["content"] as? JsonArray)
@@ -158,6 +163,7 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
             timeoutMs = timeoutMs,
         ) { body ->
             usageLine(cfg.provider, cfg.model ?: defaultModel, body)?.let { Log.i("AiClient", it) }
+            lastCostUsd = usageCost(cfg.provider, cfg.model ?: defaultModel, body)
             body["choices"]
                 ?.jsonArray?.firstOrNull()
                 ?.jsonObject?.get("message")
@@ -205,6 +211,19 @@ class AiClient(private val settingsProvider: () -> AiSettings.Config) {
  * providers give tokens only.
  * ponytail: a price table in code; add a model's row when it ships.
  */
+/** One call's cost in dollars, by [usageLine]'s rules, or null where it cannot be known. */
+internal fun usageCost(provider: AiSettings.Provider, model: String, body: JsonObject): Double? {
+    val u = body["usage"] as? JsonObject ?: return null
+    fun n(k: String) = u[k]?.jsonPrimitive?.longOrNull ?: 0L
+    return if (provider == AiSettings.Provider.Anthropic) {
+        claudePrice(model)?.let { (i, o) ->
+            (n("input_tokens") * i + n("cache_creation_input_tokens") * i * 1.25 + n("cache_read_input_tokens") * i * 0.1 + n("output_tokens") * o) / 1_000_000
+        }
+    } else {
+        u["cost"]?.jsonPrimitive?.doubleOrNull
+    }
+}
+
 internal fun usageLine(provider: AiSettings.Provider, model: String, body: JsonObject): String? {
     val u = body["usage"] as? JsonObject ?: return null
     fun n(k: String) = u[k]?.jsonPrimitive?.longOrNull ?: 0L

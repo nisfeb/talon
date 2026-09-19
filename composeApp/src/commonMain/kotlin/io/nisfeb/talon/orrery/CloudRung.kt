@@ -31,6 +31,7 @@ class CloudRung(private val config: () -> AiSettings.Config) : Rung() {
         override val rung: String get() = name
         override suspend fun complete(system: String, user: String, grammar: String?, maxTokens: Int): String =
             ai.complete(system, user, maxTokens)
+        override val lastCostUsd: Double? get() = ai.lastCostUsd
         override fun close() = Unit
     }
 }

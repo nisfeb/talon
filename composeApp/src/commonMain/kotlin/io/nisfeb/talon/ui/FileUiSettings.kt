@@ -64,6 +64,7 @@ class FileUiSettings(
         val calendarWeekView: Boolean = false,
         val orreryCloudTriage: Boolean = false,
         val orreryStandDown: Boolean = true,
+        val orreryDecide: io.nisfeb.talon.orrery.DecideSettings = io.nisfeb.talon.orrery.DecideSettings(),
         val orreryServerUrl: String = "",
         val orreryServerModel: String = "",
         val homeFahrenheit: Boolean = true,
@@ -204,6 +205,14 @@ class FileUiSettings(
     override fun setOrreryStandDown(on: Boolean) {
         if (_orreryStandDown.value == on) return
         _orreryStandDown.value = on
+        persistCurrent()
+    }
+
+    private val _orreryDecide = MutableStateFlow(initial.orreryDecide)
+    override val orreryDecide: StateFlow<io.nisfeb.talon.orrery.DecideSettings> = _orreryDecide.asStateFlow()
+    override fun setOrreryDecide(d: io.nisfeb.talon.orrery.DecideSettings) {
+        if (_orreryDecide.value == d) return
+        _orreryDecide.value = d
         persistCurrent()
     }
 
@@ -385,6 +394,7 @@ class FileUiSettings(
                 calendarWeekView = _calendarWeekView.value,
                 orreryCloudTriage = _orreryCloudTriage.value,
                 orreryStandDown = _orreryStandDown.value,
+                orreryDecide = _orreryDecide.value,
                 orreryServerUrl = _orreryServerUrl.value,
                 orreryServerModel = _orreryServerModel.value,
                 homeFahrenheit = _homeFahrenheit.value,

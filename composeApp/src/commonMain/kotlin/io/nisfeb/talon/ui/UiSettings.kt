@@ -146,6 +146,14 @@ interface UiSettings {
     fun setOrreryStandDown(on: Boolean)
 
     /**
+     * The decision model in front of the orrery reader and behind it:
+     * the gate and the status check. Per device, off by default, since
+     * every message it reads goes to OpenRouter.
+     */
+    val orreryDecide: StateFlow<io.nisfeb.talon.orrery.DecideSettings>
+    fun setOrreryDecide(d: io.nisfeb.talon.orrery.DecideSettings)
+
+    /**
      * The local model server the orrery triage reads with, its own
      * configuration and nothing to do with the AI provider used for
      * summaries and actions: a base URL such as http://localhost:1234
@@ -390,6 +398,9 @@ class InMemoryUiSettings(
     private val _orreryStandDown = MutableStateFlow(true)
     override val orreryStandDown: StateFlow<Boolean> = _orreryStandDown.asStateFlow()
     override fun setOrreryStandDown(on: Boolean) { _orreryStandDown.value = on }
+    private val _orreryDecide = MutableStateFlow(io.nisfeb.talon.orrery.DecideSettings())
+    override val orreryDecide: StateFlow<io.nisfeb.talon.orrery.DecideSettings> = _orreryDecide.asStateFlow()
+    override fun setOrreryDecide(d: io.nisfeb.talon.orrery.DecideSettings) { _orreryDecide.value = d }
     private val _orreryServerUrl = MutableStateFlow("")
     override val orreryServerUrl: StateFlow<String> = _orreryServerUrl.asStateFlow()
     override fun setOrreryServerUrl(url: String) { _orreryServerUrl.value = url }

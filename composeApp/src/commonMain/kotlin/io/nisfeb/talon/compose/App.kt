@@ -1008,6 +1008,7 @@ fun App(
                 book = { repo.bookContacts.value },
                 standDown = io.nisfeb.talon.orrery.StandDown(uiSettings.orreryStandDown, uiSettings::setOrreryStandDown),
                 claim = settingsSync?.let { sync -> { key, stale, settle -> sync.claimKey(key, stale, settle) } },
+                decide = io.nisfeb.talon.orrery.DecideControl(uiSettings.orreryDecide, uiSettings::setOrreryDecide),
             )
         }
         LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip) {

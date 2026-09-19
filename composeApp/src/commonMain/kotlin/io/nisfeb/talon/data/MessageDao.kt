@@ -143,6 +143,14 @@ abstract class MessageDao {
     """)
     abstract suspend fun postsAfter(sinceMs: Long, notAuthor: String, limit: Int): List<MessageEntity>
 
+    /** Other people's posts before [beforeMs], newest first: what a cursor has already walked. */
+    @Query("""
+        SELECT * FROM messages
+        WHERE isDeleted = 0 AND parentId IS NULL AND sentMs < :beforeMs AND author != :notAuthor
+        ORDER BY sentMs DESC LIMIT :limit
+    """)
+    abstract suspend fun postsBefore(beforeMs: Long, notAuthor: String, limit: Int): List<MessageEntity>
+
     /**
      * Remove stale optimistic-insert rows for a channel where id still
      * starts with "~". Channel post ids from the ship are raw @ud; any
