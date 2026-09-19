@@ -14,6 +14,7 @@ import io.ktor.http.contentType
 import io.ktor.http.encodeURLParameter
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
@@ -94,6 +95,17 @@ class OrreryApi(
 
     /** The whole schema, which only the owner may read: what a key's scope is measured against. */
     suspend fun schema(): JsonObject = reading { Json.parseToJsonElement(request(owner, HttpMethod.Get, "/api/schema")).jsonObject }
+
+    /**
+     * What the on-ship generator's last pass did. The owner's route, so
+     * the owner's session reads it; a ship whose orrery has no generator
+     * yet answers nothing, and so does this.
+     */
+    suspend fun generatorLast(): GeneratorRun? {
+        val text = runCatching { request(owner, HttpMethod.Get, "/api/generator/last") }.getOrNull() ?: return null
+        val o = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
+        return generatorRunOf(o)
+    }
 
     /** The bodies the key may see, with the rev the view was at. */
     suspend fun state(token: String): StateView = viewOf(stateJson(token))
@@ -414,4 +426,65 @@ fun clipBytes(s: String, max: Int): String {
     // Never leave half of a surrogate pair.
     if (end > 0 && s[end - 1].isHighSurrogate()) end--
     return s.substring(0, end)
+}
+
+/** What the ship's generator last did, as much of it as a line needs. */
+data class GeneratorRun(
+    val atMs: Long?,
+    val filed: Int?,
+    val dropped: Int?,
+    val skipped: Boolean,
+    val notes: List<String>,
+    val costUsd: Double?,
+    val error: String?,
+    val callsToday: Int?,
+)
+
+/** The ship's `generator-last` document, read loosely: a pass that only called writes less. */
+fun generatorRunOf(o: JsonObject): GeneratorRun {
+    fun str(k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() && it != "null" }
+    fun int(k: String) = str(k)?.toDoubleOrNull()?.toInt()
+    val at = (str("at") ?: str("called"))?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+    val usage = o["usage"] as? JsonObject
+    return GeneratorRun(
+        atMs = at,
+        filed = int("filed"),
+        dropped = int("dropped"),
+        skipped = str("skipped") == "true",
+        notes = (o["notes"] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull },
+        costUsd = (usage?.get("cost") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.toDoubleOrNull(),
+        error = str("error"),
+        callsToday = int("calls_today"),
+    )
+}
+
+/** One line for the top of Actions: when, what it did, what it cost, and what stopped it. */
+fun generatorLine(r: GeneratorRun, nowMs: Long, zone: kotlinx.datetime.TimeZone): String {
+    val parts = mutableListOf<String>()
+    r.atMs?.let { at ->
+        val day = kotlinx.datetime.Instant.fromEpochMilliseconds(at).toLocalDateTime(zone).date
+        val today = kotlinx.datetime.Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
+        val clock = Brief.clock(at, zone)
+        parts += if (day == today) "ran $clock" else "ran ${day.dayOfMonth} ${day.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)} $clock"
+    }
+    when {
+        r.error != null -> parts += "failed: ${r.error.take(80)}"
+        r.skipped -> {
+            val held = r.notes.firstOrNull { "held by the limits" in it }
+            val until = held?.substringAfter(" until ", "")?.trim()
+                ?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+            parts += when {
+                until != null -> "held by the limits until ${Brief.clock(until, zone)}"
+                held != null -> "held by the limits"
+                else -> "nothing new to ask about"
+            }
+        }
+        else -> {
+            r.filed?.let { parts += "filed $it" }
+            r.dropped?.takeIf { it > 0 }?.let { parts += "dropped $it" }
+        }
+    }
+    r.costUsd?.let { parts += "$" + (kotlin.math.round(it * 1000) / 1000).toString() }
+    r.callsToday?.let { parts += if (it == 1) "1 call today" else "$it calls today" }
+    return "Generator: " + parts.joinToString(", ").ifEmpty { "no run yet" }
 }

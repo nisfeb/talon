@@ -127,6 +127,24 @@ class OrreryRepo(
     var onActions: ((raise: List<ActionNotification>, clear: Set<String>) -> Unit)? = null
     private var seenProposals: Set<String>? = null
 
+    private val _generator = MutableStateFlow<GeneratorRun?>(null)
+    /** What the ship's generator last did, read with the open list. */
+    val generator: StateFlow<GeneratorRun?> = _generator.asStateFlow()
+
+    private val _decideToday = MutableStateFlow<Pair<String, DecideDay>?>(null)
+    /** Today's tally of the decision model on this install, as the log has it. */
+    val decideToday: StateFlow<Pair<String, DecideDay>?> = _decideToday.asStateFlow()
+
+    /** Today's tally as kept, for the settings screen before a pass has added to it. */
+    suspend fun loadDecideToday() {
+        val s = ship ?: return
+        val day = kotlinx.datetime.Instant.fromEpochMilliseconds(now())
+            .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).date.toString()
+        val kept = db.orrerySent().get(s, "decide:$day")?.value
+            ?.let { runCatching { Json.decodeFromString(DecideDay.serializer(), it) }.getOrNull() }
+        _decideToday.value = day to (kept ?: DecideDay())
+    }
+
     /** The open list as the ship just said it, and what that means for notifications. */
     private fun published(list: List<OrreryAction>) {
         _actions.value = list
@@ -214,6 +232,8 @@ class OrreryRepo(
         runCatching { a.actions(db.orreryAccounts().get(s)?.token) }
             .onSuccess { published(it) }
             .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
+        // A pass files proposals and moves the beacon: its record comes with them.
+        a.generatorLast()?.let { _generator.value = it }
     }
 
     fun detach() {
@@ -982,6 +1002,7 @@ class OrreryRepo(
         val now = was + add
         db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, key, Json.encodeToString(DecideDay.serializer(), now), nowMs))
         now.lines(day).forEach { Log.i(TAG, it) }
+        _decideToday.value = day to now
     }
 
     /** What the gate would have done over messages already read, for choosing its threshold. */
@@ -1212,6 +1233,7 @@ class OrreryRepo(
         runCatching { a.actions(token) }
             .onSuccess { published(it) }
             .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
+        a.generatorLast()?.let { _generator.value = it }
         // An approved task becomes a todo wherever it can be approved,
         // not only on the install that runs the pipe.
         runCatching { mirrorTasks(a, token, url) }.onFailure { Log.i(TAG, "tasks skipped: ${it.message}") }

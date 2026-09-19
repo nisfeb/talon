@@ -48,6 +48,8 @@ fun OrreryActionsScreen(
     modifier: Modifier = Modifier,
     /** Read what is waiting now, rather than whatever the last pass saw. */
     onShown: suspend () -> Unit = {},
+    /** What the ship's generator last did, as one line; null when the ship has no generator. */
+    generator: String? = null,
     /** Answer one on the spot: approved or dismissed, with the owner's reason when they give one. */
     onDecide: (OrreryAction, String, String) -> Unit = { _, _, _ -> },
     onOpen: (OrreryAction) -> Unit,
@@ -84,6 +86,14 @@ fun OrreryActionsScreen(
                     )
                 }
             }
+        }
+        generator?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+            )
         }
         HorizontalDivider()
         Body(actions, onOpen, onDecide)

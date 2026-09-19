@@ -167,6 +167,19 @@ private fun DecideRows(orrery: OrreryRepo, dc: DecideControl) {
         Switch(checked = d.on, enabled = hasKey || d.on, onCheckedChange = { dc.set(d.copy(on = it)) })
     }
     if (!d.on) return
+    // Today on this install: what the gate read and skipped, what the
+    // statuses and the picks came to, and what each of them cost.
+    val today by orrery.decideToday.collectAsState()
+    LaunchedEffect(orrery) { orrery.loadDecideToday() }
+    today?.let { (day, tally) ->
+        Column(Modifier.padding(top = 4.dp)) {
+            if (tally == io.nisfeb.talon.orrery.DecideDay()) {
+                Text("Nothing read with it yet today.", style = MaterialTheme.typography.labelSmall, color = quiet)
+            } else {
+                tally.lines(day).forEach { Text(it, style = MaterialTheme.typography.labelSmall, color = quiet) }
+            }
+        }
+    }
 
     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {

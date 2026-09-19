@@ -2247,6 +2247,9 @@ fun App(
                         onBack = { showActions = false },
                         onShown = { orreryRepo.refreshWaiting() },
                         onDecide = { a, status, why -> orreryRepo.answer(a.id, status, why) },
+                        generator = orreryRepo.generator.collectAsState().value?.let {
+                            io.nisfeb.talon.orrery.generatorLine(it, io.nisfeb.talon.util.nowMs(), kotlinx.datetime.TimeZone.currentSystemDefault())
+                        },
                     ) { a -> openAction = a }
                     showWatchwords -> WatchwordsScreen(
                         db = db,
