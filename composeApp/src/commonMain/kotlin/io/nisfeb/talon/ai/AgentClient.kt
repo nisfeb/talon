@@ -104,8 +104,12 @@ class AgentClient(
         model: String,
     ): AgentTurn {
         var payload = buildOpenAiRequest(model, system, messages, tools, maxTokens)
-        // OpenRouter says what a call cost only when asked.
-        if (cfg.provider == AiSettings.Provider.OpenRouter) payload = JsonObject(payload + ("usage" to buildJsonObject { put("include", true) }))
+        // OpenRouter says what a call cost only when asked, and so does
+        // an Armillary base, which is OpenRouter under a lease and the
+        // vendor's own proxy otherwise.
+        if (cfg.provider == AiSettings.Provider.OpenRouter || cfg.usageInclude) {
+            payload = JsonObject(payload + ("usage" to buildJsonObject { put("include", true) }))
+        }
         return execute(
             cfg, model,
             url = endpoint,

@@ -148,8 +148,12 @@ class AiClient(
         val payload = buildJsonObject {
             put("model", cfg.model ?: defaultModel)
             put("max_tokens", maxTokens)
-            // OpenRouter says what a call cost only when asked.
-            if (cfg.provider == AiSettings.Provider.OpenRouter) put("usage", buildJsonObject { put("include", true) })
+            // OpenRouter says what a call cost only when asked, and so
+            // does an Armillary base, which is OpenRouter under a lease
+            // and the vendor's own proxy otherwise.
+            if (cfg.provider == AiSettings.Provider.OpenRouter || cfg.usageInclude) {
+                put("usage", buildJsonObject { put("include", true) })
+            }
             putJsonArray("messages") {
                 systemPrompt?.let {
                     add(buildJsonObject {

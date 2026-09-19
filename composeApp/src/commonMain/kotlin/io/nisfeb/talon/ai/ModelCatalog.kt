@@ -38,6 +38,9 @@ class ModelCatalog(private val http: HttpClient = createAppHttpClient()) {
         ProviderKind.Anthropic -> Catalog(anthropicModels(get("https://api.anthropic.com/v1/models?limit=1000") { anthropic(p) }))
         ProviderKind.OpenAi -> Catalog(openAiModels(get("https://api.openai.com/v1/models") { bearer(p) }))
         ProviderKind.OpenAiCompatible -> Catalog(openAiModels(get("${base(p)}/models") { bearer(p) }))
+        // The ship says what the vendor sells, and has already written
+        // it onto the row: there is no /models call to make.
+        ProviderKind.Armillary -> Catalog(p.models)
         ProviderKind.ThisDevice -> Catalog(listOf(ModelInfo("", "This device's own model")))
     }
 
@@ -48,6 +51,14 @@ class ModelCatalog(private val http: HttpClient = createAppHttpClient()) {
         return runCatching {
             when (p.kind) {
                 ProviderKind.OpenRouter -> get("$OPENROUTER/key") { bearer(p) }
+                // The ship is what answers, not the vendor: a read of
+                // everything is the test, and it says what went wrong.
+                ProviderKind.Armillary -> {
+                    val repo = io.nisfeb.talon.armillary.ArmillaryRepo.attached()
+                        ?: return ProviderCheck(false, ms(), "No ship is signed in.")
+                    repo.refresh(fresh = true).onFailure { return ProviderCheck(false, ms(), it.message ?: "The ship did not answer.") }
+                    return ProviderCheck(true, ms(), "Answers in ${ms()} ms.")
+                }
                 ProviderKind.ThisDevice -> {
                     val ready = localModelRungs().firstOrNull { it.status() == RungStatus.Ready }
                         ?: return ProviderCheck(false, ms(), "No model on this device is ready.")

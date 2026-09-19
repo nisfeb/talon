@@ -30,7 +30,9 @@ object CallRecordingPublisher {
     fun sttFrom(cfg: AiSettings.Config): Stt? {
         // The transcription row: a dedicated Whisper key where there is
         // one, whatever the chat provider is, else an OpenAI or custom
-        // chat key. Anthropic and OpenRouter have no audio endpoint.
+        // chat key. Anthropic and OpenRouter have no audio endpoint,
+        // and neither has an Armillary base: the vendor's proxy sells
+        // chat and embeddings and nothing else.
         val r = cfg.profile().resolve(AiFeature.Transcription)?.takeIf { cfg.profile().isOn(AiFeature.Transcription) } ?: return null
         val key = r.provider.apiKey.takeIf { it.isNotBlank() } ?: return null
         // The row's own speech model; one that follows the default is a chat model, so whisper-1.

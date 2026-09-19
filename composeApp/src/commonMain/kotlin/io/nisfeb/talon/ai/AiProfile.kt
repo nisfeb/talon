@@ -20,6 +20,14 @@ enum class ProviderKind(val label: String) {
     OpenAi("OpenAI"),
     OpenAiCompatible("A server of your own"),
     ThisDevice("On this device"),
+
+    /**
+     * Inference bought through the owner's own ship, from a vendor ship
+     * they chose. Last in the list on purpose: an older build decoding
+     * an unknown name drops the whole profile, so nothing that travels
+     * ever carries this one (see [forSync]).
+     */
+    Armillary("Armillary"),
 }
 
 @Serializable
@@ -80,7 +88,11 @@ data class AiProfile(
     fun resolve(f: AiFeature): Resolved? {
         val ref = features[f]?.model ?: defaultModel ?: return null
         val p = provider(ref.provider) ?: return null
-        return Resolved(p, ref.model)
+        // Armillary has no default model of its own: the ship's list is
+        // all there is, so a blank ref takes the first of it rather than
+        // reaching the OpenAI-shaped client with no model at all.
+        val model = if (ref.model.isBlank() && p.kind == ProviderKind.Armillary) p.models.firstOrNull()?.id.orEmpty() else ref.model
+        return Resolved(p, model)
     }
 
     fun isOn(f: AiFeature): Boolean = features[f]?.on == true
@@ -113,6 +125,9 @@ const val MAIN_PROVIDER = "main"
 const val PRIVATE_PROVIDER = "private"
 const val DEVICE_PROVIDER = "device"
 const val SPEECH_PROVIDER = "speech"
+
+/** The one Armillary row: a device buys from one ship, its own. */
+const val ARMILLARY_PROVIDER = "armillary"
 const val WHISPER = "whisper-1"
 
 private fun kindOf(p: AiSettings.Provider): ProviderKind = when (p) {
@@ -127,6 +142,9 @@ internal fun providerOf(k: ProviderKind): AiSettings.Provider? = when (k) {
     ProviderKind.Anthropic -> AiSettings.Provider.Anthropic
     ProviderKind.OpenAi -> AiSettings.Provider.OpenAi
     ProviderKind.OpenAiCompatible -> AiSettings.Provider.Custom
+    // Armillary answers the OpenAI shape, whether the base is the
+    // vendor's proxy or the model provider a lease points straight at.
+    ProviderKind.Armillary -> AiSettings.Provider.Custom
     ProviderKind.ThisDevice -> null
 }
 
@@ -204,6 +222,10 @@ fun AiProvider.shipBase(): String? = when (kind) {
     ProviderKind.OpenAi -> "https://api.openai.com/v1"
     ProviderKind.OpenAiCompatible -> baseUrl?.trim()?.trimEnd('/')?.removeSuffix("/chat/completions")
         ?.takeUnless { u -> u.substringAfter("://").substringBefore('/').substringBefore(':').let { it == "localhost" || it.startsWith("127.") } }
+    // Whatever the ship handed us: OpenRouter's base under a lease, the
+    // vendor's proxy otherwise. Both are OpenAI-shaped and both take
+    // the key on the row, which is what the generator needs.
+    ProviderKind.Armillary -> baseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
     else -> null
 }
 
@@ -216,7 +238,16 @@ fun AiProvider.shipBase(): String? = when (kind) {
 fun AiSettings.Config.forFeature(f: AiFeature): AiSettings.Config {
     val r = profile().resolve(f) ?: return this
     val provider = providerOf(r.provider.kind) ?: return this
-    return copy(provider = provider, apiKey = r.provider.apiKey, model = r.model.ifBlank { null }, baseUrl = r.provider.baseUrl)
+    return copy(
+        provider = provider,
+        apiKey = r.provider.apiKey,
+        model = r.model.ifBlank { null },
+        baseUrl = r.provider.baseUrl,
+        // OpenRouter says what a call cost only when asked, and so does
+        // an Armillary base, which is OpenRouter under a lease and the
+        // vendor's own proxy otherwise.
+        usageInclude = r.provider.kind == ProviderKind.OpenRouter || r.provider.kind == ProviderKind.Armillary,
+    )
 }
 
 /** Whether triage reads with a model off this device and the owner's own network. */
@@ -256,12 +287,24 @@ fun isPrivateUrl(url: String?): Boolean {
 
 // ---- storage and sync ------------------------------------------------------
 
-/** The profile as it travels between devices: no keys, and no model lists, which each device fetches. */
-fun AiProfile.forSync(): AiProfile =
-    // The model list and what it says about Jev are both this device's
-    // own reading: sending the flag without the list told the device
-    // that had fetched one that its provider no longer offers Jev.
-    copy(providers = providers.map { it.copy(apiKey = "", models = emptyList(), offersJev = false) })
+/**
+ * The profile as it travels between devices: no keys, and no model
+ * lists, which each device fetches.
+ *
+ * Armillary rows do not travel at all. The key is minted per ship and
+ * per device, so another device's is no use here; and an older build
+ * that cannot decode the kind drops the whole profile on arrival, which
+ * a blob carrying none can never make it do.
+ *
+ * The model list and what it says about Jev are both this device's own
+ * reading: sending the flag without the list told the device that had
+ * fetched one that its provider no longer offers Jev.
+ */
+fun AiProfile.forSync(): AiProfile = copy(
+    providers = providers
+        .filterNot { it.kind == ProviderKind.Armillary }
+        .map { it.copy(apiKey = "", models = emptyList(), offersJev = false) },
+)
 
 /** Each provider's key, where it has one. */
 fun AiProfile.keys(): Map<String, String> = providers.filter { it.apiKey.isNotBlank() }.associate { it.id to it.apiKey }
@@ -285,16 +328,18 @@ fun AiProfile.withKeys(keys: Map<String, String>, from: AiProfile? = null): AiPr
  */
 fun AiProfile.keepingLocal(local: AiProfile?): AiProfile {
     if (local == null) return this
-    return copy(
-        providers = providers.map { p ->
-            val mine = local.provider(p.id)?.takeIf { it.kind == p.kind }
-            p.copy(
-                apiKey = p.apiKey.ifBlank { mine?.apiKey.orEmpty() },
-                models = p.models.ifEmpty { mine?.models.orEmpty() },
-                offersJev = p.offersJev || (p.models.isEmpty() && mine?.offersJev == true),
-            )
-        },
-    )
+    val arrived = providers.map { p ->
+        val mine = local.provider(p.id)?.takeIf { it.kind == p.kind }
+        p.copy(
+            apiKey = p.apiKey.ifBlank { mine?.apiKey.orEmpty() },
+            models = p.models.ifEmpty { mine?.models.orEmpty() },
+            offersJev = p.offersJev || (p.models.isEmpty() && mine?.offersJev == true),
+        )
+    }
+    // Nothing from elsewhere carries an Armillary row, so this device's
+    // own is put back rather than dropped by a profile that arrives.
+    val ours = local.providers.filter { it.kind == ProviderKind.Armillary && provider(it.id) == null }
+    return copy(providers = arrived + ours)
 }
 
 /**

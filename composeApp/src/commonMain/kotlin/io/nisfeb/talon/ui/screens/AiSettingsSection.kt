@@ -455,16 +455,31 @@ private fun FeatureModel(
     providers: List<AiProvider>,
     reads: Boolean,
     flag: (ModelInfo) -> String? = { null },
+    /** How an Armillary model is reached, where one is chosen: `lease` or `proxy`. */
+    armillaryMode: String? = null,
     onPick: (ModelRef?) -> Unit,
 ) {
     ModelPicker(profile, profile.features[f]?.model, allowDefault = true, providers = providers, flag = flag, onPick = onPick)
-    if (reads) readingWarning(profile, f)?.let { Quiet(it, error = true) }
+    if (reads) readingWarning(profile, f, armillaryMode)?.let { Quiet(it, error = true) }
 }
 
-/** Why this row's model may keep your messages, or null when it is Private or ZDR. */
-private fun readingWarning(profile: AiProfile, f: AiFeature): String? {
+/**
+ * Why this row's model may keep your messages, or null when it is
+ * Private or ZDR. Armillary is two answers: under a lease the request
+ * goes straight to the model provider, so a ZDR model is as safe there
+ * as anywhere; through the proxy it passes the vendor's ship, which is
+ * worth saying even of a ZDR model.
+ */
+internal fun readingWarning(profile: AiProfile, f: AiFeature, armillaryMode: String? = null): String? {
     val r = profile.resolve(f) ?: return null
-    if (r.private || r.provider.models.firstOrNull { it.id == r.model }?.zdr == true) return null
+    val zdr = r.provider.models.firstOrNull { it.id == r.model }?.zdr == true
+    if (r.provider.kind == ProviderKind.Armillary) {
+        if (armillaryMode == "proxy") {
+            return "Your messages go through the vendor's ship to the model. A ZDR model does not keep them, the ship does not store them."
+        }
+        if (armillaryMode == "lease" && zdr) return null
+    }
+    if (r.private || zdr) return null
     return when (r.provider.kind) {
         ProviderKind.Anthropic, ProviderKind.OpenAi -> "Your messages go to ${r.provider.label}, kept as your account's agreement says. A Private or ZDR model does not keep them."
         else -> "Your messages go to a model that is neither Private nor ZDR, and may be kept."

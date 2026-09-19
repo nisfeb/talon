@@ -127,6 +127,13 @@ object AiSettings {
          * derived from it (legacyInto), for older installs.
          */
         val savedProfile: AiProfile? = null,
+        /**
+         * Whether the chat clients should ask this call to report its
+         * cost. Derived by [forFeature] from the resolved provider, not
+         * a setting: it is never stored and never synced.
+         */
+        @kotlinx.serialization.Transient
+        val usageInclude: Boolean = false,
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
 
