@@ -112,6 +112,7 @@ class OrreryRepo(
     private var shipUrl: String? = null
     private var ship: String? = null
     private var loop: Job? = null
+    private var watching: Job? = null
 
     fun attach(shipUrl: String, ship: String) {
         if (this.shipUrl == shipUrl && this.ship == ship) return
@@ -127,12 +128,32 @@ class OrreryRepo(
             if (_availability.value == OrreryAvailability.PRESENT) refreshActions()
             runCatching { refreshModel() }
         }
+        // An action answered anywhere else, on the page, in a reply to
+        // the brief or by ticking its todo, leaves here within a minute,
+        // whether or not this install feeds the pipe.
+        watching = scope.launch {
+            while (isActive) {
+                delay(ACTIONS_EVERY_MS)
+                if (_availability.value == OrreryAvailability.PRESENT) refreshWaiting()
+            }
+        }
+    }
+
+    /** What is open on the ship, read again: one small request, no calendar. */
+    private suspend fun refreshWaiting() {
+        val a = api ?: return
+        val s = ship ?: return
+        runCatching { a.actions(db.orreryAccounts().get(s)?.token) }
+            .onSuccess { _actions.value = it }
+            .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
     }
 
     fun detach() {
         if (current === this) current = null
         loop?.cancel()
         loop = null
+        watching?.cancel()
+        watching = null
         api = null
         shipUrl = null
         ship = null
@@ -1105,6 +1126,8 @@ class OrreryRepo(
         const val BACKFILL_MS = 30L * 24 * 60 * 60 * 1000
         const val AHEAD_MS = 90L * 24 * 60 * 60 * 1000
         const val PUSH_EVERY_MS = 10L * 60 * 1000
+        /** How often what is waiting is read again while attached: one small request. */
+        const val ACTIONS_EVERY_MS = 60L * 1000
         private const val BRIEF_LEASE = "orrery-brief"
         const val MESSAGES_PER_PASS = 2000
         const val MAIL_PER_PASS = 200

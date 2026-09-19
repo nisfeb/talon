@@ -3204,7 +3204,7 @@ fun App(
                                         statuses = homeStatuses,
                                         invites = homeInvites,
                                         onOpenInvites = { showInvites = true },
-                                        actions = orreryActions.map { io.nisfeb.talon.ui.NewAction(it.id, it.kind, it.title, it.by, it.due?.let { d -> runCatching { kotlinx.datetime.Instant.parse(d).toEpochMilliseconds() }.getOrNull() }) },
+                                        actions = io.nisfeb.talon.ui.newActions(orreryActions),
                                         onOpenAction = { id -> openAction = orreryActions.firstOrNull { it.id == id } },
                                         onOpenContact = { other -> profileSheetShip = other },
                                         // The same rule the kebab menu uses: a rail

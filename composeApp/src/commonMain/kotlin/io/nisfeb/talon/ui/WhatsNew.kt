@@ -47,6 +47,16 @@ data class NewItem(
 /** One open orrery action, as much of it as this needs. */
 data class NewAction(val id: String, val kind: String, val title: String, val by: String, val dueMs: Long?)
 
+/**
+ * The actions that wait on the owner: proposals, and only those. One
+ * approved, done or dismissed has been answered, wherever that was, and
+ * showing it here would ask for the same answer twice.
+ */
+fun newActions(actions: List<io.nisfeb.talon.orrery.OrreryAction>): List<NewAction> =
+    actions.filter { it.status == "proposed" }.map {
+        NewAction(it.id, it.kind, it.title, it.by, it.due?.let { d -> runCatching { kotlinx.datetime.Instant.parse(d).toEpochMilliseconds() }.getOrNull() })
+    }
+
 /** One unread mail thread, as much of it as this needs. */
 data class NewMail(val id: String, val from: String, val subject: String, val atMs: Long)
 

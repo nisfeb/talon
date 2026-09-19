@@ -142,4 +142,14 @@ class WhatsNewTest {
         assertTrue(run(emptyList(), emptyMap()).isEmpty())
         assertTrue(run(emptyList(), emptyMap(), limit = 0).isEmpty())
     }
+
+    @Test
+    fun `only a proposal is new, and an action answered anywhere is not`() {
+        fun a(id: String, status: String) = io.nisfeb.talon.orrery.OrreryAction(
+            id, "task", "Call the shop", kotlinx.serialization.json.JsonObject(emptyMap()), emptyList(), "2026-09-20T13:00:00Z", status, "generator",
+        )
+        val new = newActions(listOf(a("p", "proposed"), a("ap", "approved"), a("c", "claimed"), a("d", "done"), a("x", "dismissed")))
+        assertEquals(listOf("p"), new.map { it.id })
+        assertEquals(1789909200000L, new.single().dueMs)
+    }
 }

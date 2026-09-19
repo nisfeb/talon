@@ -1990,7 +1990,7 @@ fun TalonApp(
                     invites = app.repo.invitesFlow.collectAsState().value
                         ?.map { it.flag }.orEmpty(),
                     onOpenInvites = { homeOpen = false; invitesOpen = true },
-                    actions = orreryActions.map { io.nisfeb.talon.ui.NewAction(it.id, it.kind, it.title, it.by, it.due?.let { d -> runCatching { kotlinx.datetime.Instant.parse(d).toEpochMilliseconds() }.getOrNull() }) },
+                    actions = io.nisfeb.talon.ui.newActions(orreryActions),
                     onOpenAction = { id -> openAction = orreryActions.firstOrNull { it.id == id } },
                     onOpenContact = { other -> profileSheetShip = other },
                     onOpenStatuses = { homeOpen = false; statusFeedOpen = true },
