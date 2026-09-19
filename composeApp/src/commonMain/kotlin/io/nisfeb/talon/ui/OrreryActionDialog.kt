@@ -12,7 +12,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -20,32 +19,27 @@ import io.nisfeb.talon.orrery.OrreryAction
 import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.orrery.eventToAdd
 import io.nisfeb.talon.orrery.messageToSend
-import kotlinx.coroutines.launch
 import kotlinx.datetime.toLocalDateTime
 
 /**
- * One of the analyst's proposals, and what to do with it. A task or a
- * note is the ship's to hold: Done or Dismiss. A message is Talon's to
- * send, behind this one confirm, after which the ship hears done or
- * failed with why. An event is approved here and put on the calendar
- * by the mirror, the one place that makes it, linked back to the action.
+ * One of the analyst's proposals, and what to do with it: approve,
+ * dismiss with the owner's reason, or mark done. What Talon carries out
+ * it carries out once approved, wherever it was approved: an event is
+ * put on the calendar and a message on chat or mail is sent by the
+ * executor, which claims it first so no other install sends it too.
  */
 @Composable
 fun OrreryActionDialog(
     action: OrreryAction,
     orrery: OrreryRepo,
-    send: suspend (whom: String, text: String) -> Unit,
     onClose: () -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
-    var busy by remember { mutableStateOf(false) }
-    var note by remember { mutableStateOf<String?>(null) }
     // Why not, in the owner's words, only if they give it: it teaches
     // the generator what they do not want.
     var reason by remember { mutableStateOf("") }
     val message = remember(action) { action.messageToSend() }
     val event = remember(action) { action.eventToAdd() }
-    val executable = message != null
+    val ours = message?.via in io.nisfeb.talon.orrery.TALON_CHANNELS
 
     // Taken at once: the dialog closes and the ship is told behind it.
     fun move(status: String, why: String = "") {
@@ -58,20 +52,8 @@ fun OrreryActionDialog(
     // buttons follow that, instead of offering a Done the ship refuses.
     val proposed = action.status == "proposed"
 
-    fun carryOut() {
-        busy = true
-        scope.launch {
-            // A proposal is approved on the way: doing it is saying yes.
-            if (proposed) {
-                orrery.setAction(action.id, "approved").onFailure { note = it.message; busy = false; return@launch }
-            }
-            val failed = runCatching { message?.let { send(it.whom, it.text) } }.exceptionOrNull()
-            if (failed == null) move("done") else move("failed", failed.message ?: "did not go through")
-        }
-    }
-
     AlertDialog(
-        onDismissRequest = { if (!busy) onClose() },
+        onDismissRequest = onClose,
         title = { Text(action.title.ifBlank { action.kind }) },
         text = {
             Column {
@@ -82,7 +64,7 @@ fun OrreryActionDialog(
                 )
                 message?.let {
                     Spacer(Modifier.height(8.dp))
-                    Text("To ${it.whom}:", style = MaterialTheme.typography.labelMedium)
+                    Text("To ${it.to}, by ${if (it.via == "chat") "DM" else it.via}:", style = MaterialTheme.typography.labelMedium)
                     Text(it.text, style = MaterialTheme.typography.bodyMedium)
                 }
                 event?.let {
@@ -96,12 +78,14 @@ fun OrreryActionDialog(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     when {
-                        proposed && executable -> "Waiting for you. Sending it approves it too."
                         proposed && action.kind == "task" -> "Waiting for you. Approved, it goes on your calendar's task list."
                         proposed && event != null -> "Waiting for you. Approved, it goes on your calendar."
-                        event != null -> "Approved. It goes on your calendar on the next pass."
+                        proposed && ours -> "Waiting for you. Approved, Talon sends it."
+                        proposed && message != null -> "Waiting for you. Approved, the ${message.via} executor sends it."
                         proposed -> "Waiting for you."
-                        executable -> "Approved, not yet done."
+                        event != null -> "Approved. It goes on your calendar on the next pass."
+                        ours -> "Approved. Talon sends it on the next pass."
+                        message != null -> "Approved. The ${message.via} executor sends it."
                         action.kind == "task" -> "Approved, and on your task list. Mark it done here or tick it there."
                         else -> "Approved. Talon cannot carry this kind out; mark it done once you have."
                     },
@@ -127,30 +111,21 @@ fun OrreryActionDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                note?.let {
-                    Spacer(Modifier.height(8.dp))
-                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                }
             }
         },
         confirmButton = {
             androidx.compose.foundation.layout.FlowRow(
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
             ) {
-                TextButton(enabled = !busy, onClick = onClose) { Text("Close", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                TextButton(enabled = !busy, onClick = { move("dismissed", reason) }) {
+                TextButton(onClick = onClose) { Text("Close", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                TextButton(onClick = { move("dismissed", reason) }) {
                     Text("Dismiss", color = MaterialTheme.colorScheme.error)
                 }
                 when {
-                    // Doing it, where Talon can: that approves a proposal too.
-                    executable -> {
-                        if (proposed) TextButton(enabled = !busy, onClick = { move("approved") }) { Text("Approve only") }
-                        androidx.compose.material3.Button(enabled = !busy, onClick = { carryOut() }) {
-                            Text("Send it")
-                        }
-                    }
-                    proposed -> androidx.compose.material3.Button(enabled = !busy, onClick = { move("approved") }) { Text("Approve") }
-                    else -> androidx.compose.material3.Button(enabled = !busy, onClick = { move("done") }) { Text("Mark done") }
+                    proposed -> androidx.compose.material3.Button(onClick = { move("approved") }) { Text(if (ours) "Approve and send" else "Approve") }
+                    // What Talon carries out it reports itself; marking it done here would skip it.
+                    event != null || ours -> Unit
+                    else -> androidx.compose.material3.Button(onClick = { move("done") }) { Text("Mark done") }
                 }
             }
         },

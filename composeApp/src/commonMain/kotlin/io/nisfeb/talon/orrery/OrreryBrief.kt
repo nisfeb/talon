@@ -360,25 +360,40 @@ object Brief {
         return out.values.toList()
     }
 
+    /** The kinds a reader may propose that the schema lists, rule 14, in the order analyze.py gives them. */
+    fun readerKinds(schema: JsonObject?): List<String> {
+        val listed = schema?.let(::schemaActions).orEmpty()
+        return READER_ACTIONS.filter { it in listed }
+    }
+
     /**
-     * What the owner asked to have done, as /act bodies, checked the way
-     * generator/run.py checks a proposal: a kind the schema lists, a
-     * title, bodies that exist, and every payload key the schema marks
-     * required.
+     * What the owner asked to have done, as /act bodies, held the way
+     * rule 14 holds a reader's proposals: a kind a reader may propose
+     * that the schema lists, a title, bodies that exist, and a payload
+     * its shape accepts (required keys, listed values, a `to` the ship
+     * has, times as UTC). What fails goes to [dropped], never to the ship.
      */
-    fun replyActions(answer: JsonObject, schema: JsonObject?, known: Set<String>): List<JsonObject> {
-        val kinds = schema?.let(::schemaActions).orEmpty().toSet()
+    fun replyActions(answer: JsonObject, schema: JsonObject?, known: Set<String>, dropped: (String) -> Unit = {}): List<JsonObject> {
+        val kinds = readerKinds(schema).toSet()
         val payloads = (schema?.get("payloads") as? JsonObject).orEmpty()
         return (answer["actions"] as? JsonArray).orEmpty().mapNotNull { e ->
             val a = e as? JsonObject ?: return@mapNotNull null
-            val kind = a.str("kind")?.lowercase()?.takeIf { it in kinds } ?: return@mapNotNull null
-            val title = a.str("title")?.trim()?.take(200)?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            val title = a.str("title")?.trim()?.take(200)?.takeIf { it.isNotEmpty() }
+            val kind = a.str("kind")?.lowercase()
+            if (kind == null || kind !in kinds || title == null) {
+                dropped("action ${title ?: "(no title)"}: ${if (title == null) "no title" else "a $kind is not a reader's to propose"}")
+                return@mapNotNull null
+            }
             val about = (a["about"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.lowercase() }
-            if (!about.all { it in known }) return@mapNotNull null
-            val payload = a["payload"] as? JsonObject ?: JsonObject(emptyMap())
-            val required = (payloads[kind] as? JsonObject).orEmpty()
-                .filter { (_, v) -> (v as? JsonPrimitive)?.contentOrNull?.startsWith("required") == true }.keys
-            if (!required.all { it in payload }) return@mapNotNull null
+            if (!about.all { it in known }) {
+                dropped("action $title: it is about a body the ship does not have")
+                return@mapNotNull null
+            }
+            val (payload, why) = checkPayload(a["payload"] as? JsonObject ?: JsonObject(emptyMap()), payloads[kind] as? JsonObject ?: JsonObject(emptyMap()), known)
+            if (payload == null) {
+                dropped("action $title: the payload $why")
+                return@mapNotNull null
+            }
             buildJsonObject {
                 put("kind", kind)
                 put("title", title)
@@ -420,15 +435,16 @@ object Brief {
     /**
      * common/analyst-prompt.md from orrery-utils, word for word: the
      * owner's words are triaged as any message is. Copied at orrery-utils
-     * 729ae5a, that file's last change; when it changes there, copy it
-     * again here, since the two must not drift.
+     * 61c2715, that file's last change; when it changes there, copy it
+     * again here, since the two must not drift. BriefTest holds the copy
+     * to the file where orrery-utils sits beside this repo.
      */
     val ANALYST: String = """
         You turn messages into facts for orrery, a model of one person's world.
         Three shapes exist.
         A body is something that exists: a person, place, thing, org, situation, activity or note. Its id is kind/slug, lowercase letters, digits and hyphens, for example person/sarah, place/johns-machine-shop, thing/subaru, situation/2026-09-16-breakdown.
         An observation is one claim about one body: subject.attr = value, with when it became true. Values are a short string, a number, true or false, null (which clears the attribute), or {"ref": "kind/slug"} pointing at another body.
-        An action is something to do: a task with a title, the bodies it is about, and an optional due time.
+        An action is something to do: a task with a title, the bodies it is about, and an optional due time; or, when a message fixes a plan in time ("dinner Friday at 8", "dentist on the 3rd at 2:30"), a calendar event, kind "calendar", with a payload of title, starts and, when the message says, ends and location, the times ISO 8601 with the message's offset. The situation body records the plan as a fact; the calendar action asks the owner to put it on the calendar; when a message fixes a time, write both, and when it does not, write neither. Or a message to send, kind "message", when the conversation asks the owner something they would answer, or someone should be told what the messages just settled: payload via (the channel the conversation is on, one of the values the schema lists, unless the message says to use another), to (the person's body id) and text, short, in the owner's own voice. Never a message telling someone what they just said, and never one the owner already sent. Propose only the action kinds listed for you, with the payload shape given.
         Rules.
         Only state what the messages say or clearly imply. Never invent. When unsure, leave it out or lower the confidence.
         Use the existing bodies by id whenever a message refers to one of them, by name or alias. When a message calls an existing body by a name the list does not have ("next door" for place/neighbors, "the Hendersons"), repeat that body in "bodies" with the new name under "aliases", so the ship learns the word. Create a new body only for a named person, place, thing or org, or for a situation (an event with participants) the messages describe.
@@ -446,7 +462,9 @@ object Brief {
         Answer with one JSON object and nothing else:
         {"bodies": [{"id": "kind/slug", "name": "...", "aliases": ["..."]}],
          "observations": [{"subject": "kind/slug", "attr": "...", "value": ..., "at": "...", "until": "...", "conf": 90, "message": "..."}],
-         "actions": [{"kind": "task", "title": "...", "about": ["kind/slug"], "due": "...", "message": "..."}]}
+         "actions": [{"kind": "task", "title": "...", "about": ["kind/slug"], "due": "...", "message": "..."},
+                     {"kind": "calendar", "title": "...", "about": ["kind/slug"], "payload": {"title": "...", "starts": "...", "ends": "...", "location": "..."}, "message": "..."},
+                     {"kind": "message", "title": "...", "about": ["person/slug"], "payload": {"via": "...", "to": "person/slug", "text": "..."}, "message": "..."}]}
         Empty lists are fine. Small talk, greetings and things already known produce nothing.
     """.trimIndent()
 
@@ -486,6 +504,17 @@ object Brief {
         if (notes.isNotEmpty()) {
             appendLine("What the attributes mean:")
             notes.forEach { (k, byAttr) -> byAttr.forEach { (a, n) -> appendLine("  $k.$a: $n") } }
+        }
+        // Rule 14: the kinds a reader may propose, as the schema lists
+        // them, and each one's shape, the way analyze.prompt writes them.
+        val schema = state["schema"] as? JsonObject
+        val kinds = readerKinds(schema)
+        if (kinds.isNotEmpty()) {
+            appendLine("Action kinds you may propose: ${kinds.joinToString(", ")}")
+            (schema?.get("payloads") as? JsonObject).orEmpty().filterKeys { it in kinds }.forEach { (k, shape) ->
+                val o = shape as? JsonObject ?: return@forEach
+                appendLine("  $k payload: " + o.entries.joinToString(", ", "{", "}") { (key, v) -> JsonPrimitive(key).toString() + ": " + v })
+            }
         }
         appendLine("Existing bodies (id | name | aliases):")
         val all = bodies(state).take(MAX_BODIES)

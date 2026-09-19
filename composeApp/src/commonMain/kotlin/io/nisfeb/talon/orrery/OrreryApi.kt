@@ -158,7 +158,7 @@ class OrreryApi(
                 .mapNotNull { (attr, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.let { attr to it } }
                 .toMap()
         }.filterValues { it.isNotEmpty() }
-        return StateView(o["rev"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L, bodies, attrs, notes)
+        return StateView(o["rev"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L, bodies, attrs, notes, o["schema"] as? JsonObject ?: JsonObject(emptyMap()))
     }
 
     /**
@@ -280,6 +280,33 @@ class OrreryApi(
         }
     }
 
+    /**
+     * Claim [id] for this install, rule 14: null when the claim held,
+     * else why not. The ship answers a claim before its writer applies
+     * it, so the claim is read back a few times, the way the Telegram
+     * bot does, and it is ours only when the last claimed step in the
+     * action's history names the key the ship said claimed it.
+     */
+    suspend fun claim(token: String, id: String): String? {
+        val auth: HttpRequestBuilder.() -> Unit = { header(HttpHeaders.Authorization, "Bearer $token") }
+        val said = request(bare, HttpMethod.Post, "/api/actions/$id", """{"status":"claimed"}""", auth)
+        val mine = runCatching { Json.parseToJsonElement(said).jsonObject["by"]?.jsonPrimitive?.contentOrNull }.getOrNull()
+            ?.takeIf { it.isNotBlank() } ?: return "the claim answered no by"
+        repeat(CLAIM_READS) { n ->
+            if (n > 0) kotlinx.coroutines.delay(CLAIM_PAUSE_MS)
+            val text = request(bare, HttpMethod.Get, "/api/actions?status=claimed", extra = auth)
+            val arr = reading { Json.parseToJsonElement(text) }.let { it as? kotlinx.serialization.json.JsonArray ?: it.jsonObject["actions"]?.jsonArray }.orEmpty()
+            val a = arr.firstOrNull { (it as? JsonObject)?.get("id")?.jsonPrimitive?.contentOrNull == id } as? JsonObject
+            if (a != null) {
+                val who = a["history"]?.jsonArray.orEmpty().mapNotNull { it as? JsonObject }
+                    .lastOrNull { it["status"]?.jsonPrimitive?.contentOrNull == "claimed" }
+                    ?.get("by")?.jsonPrimitive?.contentOrNull.orEmpty()
+                return if (who == mine) null else "claimed by $who"
+            }
+        }
+        return "the claim did not land in $CLAIM_READS reads"
+    }
+
     /** One observe batch under the key. Per-item answers, in order. */
     suspend fun observe(batch: JsonObject, token: String): ObserveAnswer {
         val text = request(bare, HttpMethod.Post, "/api/observe", batch.toString()) {
@@ -341,6 +368,9 @@ class OrreryApi(
             ?: text.take(160).ifBlank { "no reason given" }
 
     companion object {
+        const val CLAIM_READS = 5
+        const val CLAIM_PAUSE_MS = 200L
+
         const val APP_PATH = "/apps/orrery"
         /** The ship refuses a longer note on a retraction. */
         private const val MAX_NOTE = 500
@@ -398,6 +428,8 @@ data class StateView(
     val attrs: Map<String, List<String>> = emptyMap(),
     /** What the ship says each attribute means, by kind then attr. */
     val notes: Map<String, Map<String, String>> = emptyMap(),
+    /** The schema as the key sees it: the action kinds it may use and their payload shapes. */
+    val schema: JsonObject = JsonObject(emptyMap()),
 )
 
 data class ItemAnswer(val id: String?, val ok: Boolean, val existing: Boolean, val error: String?)
@@ -419,6 +451,46 @@ private fun names(a: kotlinx.serialization.json.JsonElement?): List<String> =
 fun schemaKinds(schema: JsonObject): List<String> = (schema["kinds"] as? JsonObject)?.keys?.toList().orEmpty()
 
 fun schemaActions(schema: JsonObject): List<String> = names(schema["actions"])
+
+/** What a reader may propose, rule 14; note and home are the generator's. */
+val READER_ACTIONS = listOf("task", "calendar", "message")
+
+/**
+ * A payload held to the schema's shape for its kind, rule 14: every
+ * `required` key present, a `one of` key holding a listed value, `to`
+ * naming a body the ship has, and a time that parses, sent as UTC.
+ * The payload as it should be sent, or why it is dropped.
+ */
+fun checkPayload(payload: JsonObject, shape: JsonObject, known: Set<String>): Pair<JsonObject?, String?> {
+    val out = payload.toMutableMap()
+    for ((k, spec) in shape) {
+        val line = (spec as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: continue
+        val said = (payload[k] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.trim()
+        if (said.isNullOrEmpty()) {
+            if (line.startsWith("required") && payload[k] !is JsonObject) return null to "lacks $k"
+            continue
+        }
+        ONE_OF.find(line)?.let { m ->
+            val allowed = m.groupValues[1].split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+            if (said.lowercase() !in allowed) return null to "$k is not one of ${allowed.joinToString(", ")}"
+            out[k] = kotlinx.serialization.json.JsonPrimitive(said.lowercase())
+        }
+        if ("ISO 8601" in line) {
+            val utc = runCatching { kotlinx.datetime.Instant.parse(said).toString() }.getOrNull()
+                ?: said.takeIf { runCatching { kotlinx.datetime.LocalDate.parse(it) }.isSuccess }
+                ?: return null to "$k is not a time"
+            out[k] = kotlinx.serialization.json.JsonPrimitive(utc)
+        }
+    }
+    val to = (payload["to"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.trim()?.lowercase()
+    if (to != null) {
+        if (to !in known) return null to "to names no body the ship has: $to"
+        out["to"] = kotlinx.serialization.json.JsonPrimitive(to)
+    }
+    return JsonObject(out) to null
+}
+
+private val ONE_OF = Regex("one of ([^;]+)")
 
 /**
  * Whether a key's schema view carries all of the owner's: every kind,

@@ -435,6 +435,7 @@ fun TalonApp(
             standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),
             claim = { key, stale, settle -> app.settingsSync.claimKey(key, stale, settle) },
             decide = io.nisfeb.talon.orrery.DecideControl(app.uiSettings.orreryDecide, app.uiSettings::setOrreryDecide),
+            sendDm = { whom, text -> app.repo.send(whom, text) },
         )
     }
     DisposableEffect(orreryRepo) {
@@ -457,7 +458,6 @@ fun TalonApp(
         io.nisfeb.talon.ui.OrreryActionDialog(
             action = action,
             orrery = orreryRepo,
-            send = { whom, text -> app.repo.send(whom, text) },
             onClose = { openAction = null },
         )
     }

@@ -6,22 +6,46 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * What a client-executed action asks for, read out of its payload.
- * The spec fixes little beyond "recipient and text" for a message, so
- * these take the obvious names and give up rather than guess.
+ * A message action's payload as the schema shapes it: the channel it
+ * goes out on, the person's body, and the words. Where it goes is never
+ * read off the body id: [addressOf] asks the person's own attributes.
  */
-data class MessageToSend(val whom: String, val text: String)
+data class MessageToSend(val via: String, val to: String, val text: String)
+
+/** The channels Talon sends on, rule 11: an Urbit DM, and mail through auspex. Telegram is the bot's. */
+val TALON_CHANNELS = setOf("chat", "mail")
 
 /** A calendar action's event: [endMs] and [location] only where the payload says; [bareDate] when it gave a day and no time. */
 data class EventToAdd(val title: String, val startMs: Long, val endMs: Long?, val location: String? = null, val bareDate: Boolean = false)
 
 fun OrreryAction.messageToSend(): MessageToSend? {
     if (kind != "message") return null
-    val whom = str("recipient") ?: str("to") ?: str("whom") ?: about.firstOrNull { it.startsWith("person/") && it != "person/me" }?.let { "~" + it.removePrefix("person/") }
-    val text = str("text") ?: str("body") ?: return null
-    if (whom == null || !whom.startsWith("~") || text.isBlank()) return null
-    return MessageToSend(whom, text)
+    val via = str("via")?.lowercase() ?: return null
+    val to = str("to")?.lowercase() ?: return null
+    val text = str("text")?.trim() ?: return null
+    return MessageToSend(via, to, text)
 }
+
+/** The attribute that holds a person's address on [via]. */
+fun addressAttr(via: String): String = if (via == "mail") "email" else "ship"
+
+/**
+ * Where [to] is reached on [via], from the person's own attribute in
+ * the state view: `ship` for chat, `email` for mail. Null when the body
+ * has none, which the executor reports rather than guesses around.
+ */
+fun addressOf(state: kotlinx.serialization.json.JsonObject, to: String, via: String): String? {
+    val body = Brief.bodies(state).firstOrNull { (it["id"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull == to } ?: return null
+    val said = Brief.text(body, addressAttr(via))?.trim()?.takeIf { it.isNotEmpty() }
+        ?: if (via == "chat") (body["ship"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.trim() else null
+    return when (via) {
+        "mail" -> said?.takeIf { '@' in it && ' ' !in it }
+        "chat" -> said?.let { if (it.startsWith("~")) it else "~$it" }?.takeIf { PATP.matches(it) }
+        else -> null
+    }
+}
+
+private val PATP = Regex("~[a-z]{3}(-{0,2}[a-z]{3,6})*")
 
 /**
  * The event a calendar action asks for, in the schema's payload shape:

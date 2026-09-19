@@ -14,6 +14,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -257,6 +258,49 @@ class OrreryBriefTest {
         assertEquals(1, filed.size)
         assertEquals(setOf("kind", "title", "about", "due", "payload"), filed[0].keys)
         assertEquals(JsonPrimitive("Buy tissues"), filed[0]["title"])
+    }
+
+    private val shapes = Json.parseToJsonElement(
+        """{"actions": ["task", "note", "message", "home", "calendar"], "payloads": {
+            "task": {"notes": "optional: what to do, in a sentence"},
+            "calendar": {"title": "required", "starts": "required: ISO 8601 UTC", "ends": "optional: ISO 8601 UTC", "location": "optional"},
+            "home": {"entity_id": "required: the entity"},
+            "message": {"via": "required: one of telegram, mail, chat; the channel the conversation is on", "to": "required: the body id of the person, e.g. person/andrea", "text": "required: the message, short, in the owner's own voice"}}}""",
+    ).jsonObject
+
+    @Test
+    fun `a reply's proposals are held to the schema's shapes, rule 14`() {
+        val answer = Json.parseToJsonElement(
+            """
+            {"actions": [
+               {"kind": "message", "title": "Tell Rose", "about": ["person/rose"], "payload": {"via": "Chat", "to": "person/rose", "text": "running late"}},
+               {"kind": "message", "title": "Text Rose", "payload": {"via": "sms", "to": "person/rose", "text": "hi"}},
+               {"kind": "message", "title": "Tell a ghost", "payload": {"via": "mail", "to": "person/ghost", "text": "boo"}},
+               {"kind": "calendar", "title": "Swim meet", "payload": {"title": "Swim meet", "starts": "2026-09-20T19:00:00-04:00"}},
+               {"kind": "calendar", "title": "Someday", "payload": {"title": "Someday", "starts": "Friday"}},
+               {"kind": "home", "title": "Porch light", "payload": {"entity_id": "light.porch"}}]}
+            """.trimIndent(),
+        ).jsonObject
+        val dropped = mutableListOf<String>()
+        val filed = Brief.replyActions(answer, shapes, known) { dropped += it }
+        assertEquals(listOf("Tell Rose", "Swim meet"), filed.map { it["title"]!!.jsonPrimitive.content })
+        assertEquals(JsonPrimitive("chat"), filed[0]["payload"]!!.jsonObject["via"], "a listed value, as the list writes it")
+        assertEquals(JsonPrimitive("2026-09-20T23:00:00Z"), filed[1]["payload"]!!.jsonObject["starts"], "sent as UTC")
+        assertEquals(4, dropped.size, dropped.toString())
+        assertTrue(dropped.any { "not one of telegram, mail, chat" in it }, dropped.toString())
+        assertTrue(dropped.any { "person/ghost" in it }, dropped.toString())
+        assertTrue(dropped.any { "home is not a reader's" in it }, dropped.toString())
+    }
+
+    @Test
+    fun `the reply's context lists the kinds it may propose and their shapes`() {
+        val prompt = Brief.analystPrompt(JsonObject(state + ("schema" to shapes)), emptyMap(), emptyMap(), "m-reply", now, "hi")
+        assertTrue("Action kinds you may propose: task, calendar, message\n" in prompt, prompt)
+        assertTrue(
+            """  calendar payload: {"title": "required", "starts": "required: ISO 8601 UTC", "ends": "optional: ISO 8601 UTC", "location": "optional"}""" in prompt,
+            prompt,
+        )
+        assertTrue("home payload" !in prompt && "Channel: mail" in prompt, prompt)
     }
 
     @Test

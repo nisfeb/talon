@@ -43,6 +43,7 @@ class OrreryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             book = { app.repo.bookContacts.value },
             standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),
             decide = io.nisfeb.talon.orrery.DecideControl(app.uiSettings.orreryDecide, app.uiSettings::setOrreryDecide),
+            sendDm = { whom, text -> app.repo.send(whom, text) },
         )
         try {
             repo.pass(session.shipUrl, session.ship)

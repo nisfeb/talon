@@ -90,11 +90,11 @@ class OrreryApiTest {
 
     @Test
     fun `open actions read out, and a transition goes up with its note`() = runTest {
-        val list = api(body = """[{"id":"1758-a","kind":"message","title":"Tell Sarah","payload":{"recipient":"~sampel-palnet","text":"on my way"},"about":["person/sarah"],"due":null,"by":"claude-code","proposed":"2026-09-17T00:00:00Z","status":"approved","note":"","history":[]}]""")
+        val list = api(body = """[{"id":"1758-a","kind":"message","title":"Tell Sarah","payload":{"via":"chat","to":"person/sarah","text":"on my way"},"about":["person/sarah"],"due":null,"by":"claude-code","proposed":"2026-09-17T00:00:00Z","status":"approved","note":"","history":[]}]""")
             .actions("k1.secret")
         val a = list.single()
         assertEquals("message", a.kind)
-        assertEquals(MessageToSend("~sampel-palnet", "on my way"), a.messageToSend())
+        assertEquals(MessageToSend("chat", "person/sarah", "on my way"), a.messageToSend())
         assertEquals(listOf("person/sarah"), a.about)
         assertEquals("Bearer k1.secret", seen!!.headers[HttpHeaders.Authorization])
         api().transition("k1.secret", "1758-a", "failed", "the ship was down")

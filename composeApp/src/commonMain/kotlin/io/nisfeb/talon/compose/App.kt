@@ -1011,6 +1011,7 @@ fun App(
                 standDown = io.nisfeb.talon.orrery.StandDown(uiSettings.orreryStandDown, uiSettings::setOrreryStandDown),
                 claim = settingsSync?.let { sync -> { key, stale, settle -> sync.claimKey(key, stale, settle) } },
                 decide = io.nisfeb.talon.orrery.DecideControl(uiSettings.orreryDecide, uiSettings::setOrreryDecide),
+                sendDm = { whom, text -> repo.send(whom, text) },
             )
         }
         LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip) {
@@ -1030,7 +1031,6 @@ fun App(
             io.nisfeb.talon.ui.OrreryActionDialog(
                 action = action,
                 orrery = orreryRepo,
-                send = { whom, text -> repo.send(whom, text) },
                 onClose = { openAction = null },
             )
         }

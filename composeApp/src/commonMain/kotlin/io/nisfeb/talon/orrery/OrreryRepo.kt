@@ -77,6 +77,8 @@ class OrreryRepo(
     private val claim: (suspend (key: String, staleMs: Long, settleMs: Long) -> Boolean)? = null,
     /** The decision model's switches: the gate before the reader and the status check after it. */
     val decide: DecideControl? = null,
+    /** An Urbit DM, for approved message actions on the chat channel; without it Talon sends none. */
+    private val sendDm: (suspend (whom: String, text: String) -> Unit)? = null,
 ) {
     private var cloudModel: LocalModel? = null
 
@@ -491,7 +493,7 @@ class OrreryRepo(
         }
         val facts = Brief.replyFacts(answer, known, view.attrs, resolved, reply.id, at)
         val moves = Brief.movesOf(answer, tags, known)
-        val asked = Brief.replyActions(answer, state["schema"] as? JsonObject, known)
+        val asked = Brief.replyActions(answer, state["schema"] as? JsonObject, known) { Log.i(TAG, "reply ${reply.id}: dropped $it") }
         for (d in moves) move(a, token, byId[d.actionId] ?: continue, d)
         for (body in asked) {
             runCatching { a.act(body, token) }.onFailure { Log.i(TAG, "reply ${reply.id}: an action was refused: ${it.message}") }
@@ -535,6 +537,7 @@ class OrreryRepo(
         val cal = CalendarApi(http, url)
         val events = cal.events()
         val moves = taskMoves(actions, events.filter { it.cat == "todo" }) + calendarMoves(actions, events)
+        if (token != null) runCatching { sendApproved(a, token, url, actions) }.onFailure { Log.i(TAG, "messages skipped: ${it.message}") }
         if (moves.isEmpty()) return@withLock
         val ball = cal.config().ball.takeIf { it.isNotBlank() } ?: return@withLock
         for (m in moves) runCatching {
@@ -570,6 +573,55 @@ class OrreryRepo(
                 is TaskMove.Unplaceable -> a.transition(token, m.actionId, "failed", "no start time to put on the calendar")
             }
         }.onFailure { Log.i(TAG, "task move ${m::class.simpleName} skipped: ${it.message}") }
+    }
+
+    /**
+     * The executor, rules 11 and 14: every approved message action on a
+     * channel Talon serves is claimed, confirmed as ours, sent to the
+     * address the person's own attribute gives, and reported with a note
+     * the owner reads. Telegram's are the bot's and are left alone; a
+     * claim another executor holds is left to it. What was sent is
+     * remembered before it is reported, so a pass that dies between the
+     * two reports it next time instead of sending it again.
+     */
+    private suspend fun sendApproved(a: OrreryApi, token: String, url: String, actions: List<OrreryAction>) {
+        val s = ship ?: return
+        val out = actions.filter { it.status == "approved" || it.status == "claimed" }
+            .mapNotNull { act -> act.messageToSend()?.takeIf { it.via in TALON_CHANNELS }?.let { act to it } }
+            .filter { (_, m) -> m.via != "chat" || sendDm != null }
+        if (out.isEmpty()) return
+        val state = a.stateJson(token)
+        for ((act, m) in out) {
+            val key = "sent:${act.id}"
+            val was = db.orrerySent().get(s, key)
+            if (was != null) {
+                runCatching { a.transition(token, act.id, "done", was.value) }
+                continue
+            }
+            val why = runCatching { a.claim(token, act.id) }.getOrElse { it.message ?: "the claim was refused" }
+            if (why != null) {
+                Log.i(TAG, "message ${act.id} not ours: $why")
+                continue
+            }
+            val address = addressOf(state, m.to, m.via)
+            if (address == null) {
+                a.transition(token, act.id, "failed", "${m.to} has no ${addressAttr(m.via)} attribute")
+                continue
+            }
+            val sent = runCatching {
+                when (m.via) {
+                    "chat" -> { sendDm!!(address, m.text); "sent as a DM to $address" }
+                    else -> { io.nisfeb.talon.mail.AuspexApi(http, url).send(listOf(address), act.title.ifBlank { "A note" }, m.text); "sent by mail to $address" }
+                }
+            }
+            val note = sent.getOrNull()
+            if (note == null) {
+                a.transition(token, act.id, "failed", "not sent: ${sent.exceptionOrNull()?.message ?: "no answer"}")
+                continue
+            }
+            db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, key, note, now()))
+            a.transition(token, act.id, "done", note)
+        }
     }
 
     /**
@@ -890,6 +942,8 @@ class OrreryRepo(
         val index: NameIndex,
         val attrs: Map<String, List<String>>,
         val notes: Map<String, Map<String, String>>,
+        /** The action kinds the key may propose and their payload shapes. */
+        val schema: JsonObject,
         val model: LocalModel?,
         val gate: PatternGate?,
         var modelRuns: Int = 0,
@@ -922,7 +976,7 @@ class OrreryRepo(
         }.getOrNull() else null
         val dec = if (model != null) decider() else null
         return Reading(
-            view.bodies, NameIndex(view.bodies), view.attrs, view.notes, model, gate,
+            view.bodies, NameIndex(view.bodies), view.attrs, view.notes, view.schema, model, gate,
             decider = dec?.first, threshold = dec?.second?.takeIf { it.gate }?.threshold,
             keep = dec?.second?.takeIf { it.relevance }?.keep,
         )
@@ -1213,7 +1267,7 @@ class OrreryRepo(
         // proposal on the ship, about the author and whom it names.
         plan?.let { p ->
             val about = (listOf(r.index.authorId(author, s)) + r.index.find(text).map { it.first.id }).filter { r.index.has(it) }.distinct().take(5)
-            proposePlan(s, sourceId, p, about)
+            proposePlan(s, sourceId, p, about, r.schema, r.bodies.map { it.id }.toSet())
         }
         for (n in byRules + byModel) {
             val trusted = trusted(s, n.attr)
@@ -1235,12 +1289,19 @@ class OrreryRepo(
      * of an open one with that one, and this install remembers the
      * message, so a replayed pass files nothing new.
      */
-    private suspend fun proposePlan(s: String, sourceId: String, p: ModelExtractor.Plan, about: List<String>) {
+    private suspend fun proposePlan(s: String, sourceId: String, p: ModelExtractor.Plan, about: List<String>, schema: JsonObject, known: Set<String>) {
         val a = api ?: return
         val token = db.orreryAccounts().get(s)?.token ?: return
         val key = "plan:$sourceId"
         if (db.orrerySent().get(s, key) != null) return
-        runCatching { a.act(ModelExtractor.planAction(p, about), token) }
+        // The ship's shapes, not ours, rule 14: a kind it does not list,
+        // or a payload its shape refuses, is a note in the log.
+        val body = ModelExtractor.planAction(p, about)
+        if ("calendar" !in schemaActions(schema)) return Log.i(TAG, "$sourceId plan dropped: the schema lists no calendar action")
+        val shape = (schema["payloads"] as? JsonObject)?.get("calendar") as? JsonObject ?: JsonObject(emptyMap())
+        val (payload, why) = checkPayload(body["payload"] as JsonObject, shape, known)
+        if (payload == null) return Log.i(TAG, "$sourceId plan dropped: $why")
+        runCatching { a.act(JsonObject(body + ("payload" to payload)), token) }
             .onSuccess { (id, _) ->
                 db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, key, id, now()))
                 Log.i(TAG, "$sourceId proposed ${p.title} at ${isoUtc(p.startMs)}")
