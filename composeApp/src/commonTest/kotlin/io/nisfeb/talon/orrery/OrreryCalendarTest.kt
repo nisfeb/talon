@@ -85,7 +85,7 @@ class OrreryCalendarTest {
         val s = subject(row(noon, title = "Bed delivery", uid = "UID-1"))
         val soon = noon - 3_600_000 // an hour before it is due
         val w = calendarWrite(s, null, emptyList(), emptySet(), me, soon)
-        assertEquals("situation/bed-delivery", w.facts.bodies.single().id)
+        assertEquals("situation/2026-09-17-bed-delivery", w.facts.bodies.single().id)
         assertTrue("UID-1" in w.facts.bodies.single().aliases)
         assertEquals(listOf("ends", "participants", "starts"), w.facts.observations.map { it.attr }.sorted())
         // Dated when we learned it: a row dated ahead is hidden until then.
@@ -249,6 +249,51 @@ class OrreryCalendarTest {
         val s = subject(row(noon, title = "Sailing", uid = "S4", note = "bring Linus's helmet"))
         val w = calendarWrite(s, null, emptyList(), emptySet(), me, noon, people = cast)
         assertEquals(listOf("person/me", "person/linus"), refs(w))
+    }
+
+    @Test
+    fun `a name in a description is written with a capital`() {
+        val lower = subject(row(noon, title = "Sailing", uid = "S5", note = "linus can pick up the grace period forms"))
+        assertEquals(listOf("person/me"), refs(calendarWrite(lower, null, emptyList(), emptySet(), me, noon, people = cast)))
+        val upper = subject(row(noon, title = "Sailing", uid = "S6", note = "Linus can pick up the forms"))
+        assertEquals(listOf("person/me", "person/linus"), refs(calendarWrite(upper, null, emptyList(), emptySet(), me, noon, people = cast)))
+    }
+
+    private fun hit(id: String, match: String = "exact") = ResolvedBody(id, id.substringBefore('/'), "Nutcracker Mandatory Parent Meeting", match)
+
+    @Test
+    fun `two occasions that share a title are two situations`() {
+        val oct = subject(row(noon, title = "Nutcracker Mandatory Parent Meeting", uid = "N1"))
+        val dec = subject(row(noon + 9 * week, title = "Nutcracker Mandatory Parent Meeting", uid = "N2"))
+        assertEquals("situation/2026-09-17-nutcracker-mandatory-parent-meeting", situationIdFor(oct))
+        assertTrue(situationIdFor(oct) != situationIdFor(dec))
+        // The earlier one, found by title, is not the later one.
+        val earlier = hit(situationIdFor(oct))
+        val open = { _: String -> BodyTimes(null, noon) }
+        assertEquals(null, sameEvent(dec, emptyList(), listOf(earlier), open))
+    }
+
+    @Test
+    fun `a title hit is this event only when it is open and on the day`() {
+        val s = subject(row(noon, title = "Nutcracker Mandatory Parent Meeting", uid = "N1"))
+        val h = hit("situation/2026-09-17-nutcracker-mandatory-parent-meeting")
+        assertEquals(h, sameEvent(s, emptyList(), listOf(h)) { BodyTimes(null, noon + 3_600_000) })
+        assertEquals(null, sameEvent(s, emptyList(), listOf(h)) { BodyTimes("closed", noon) }, "a closed one is a past occasion")
+        assertEquals(null, sameEvent(s, emptyList(), listOf(h)) { BodyTimes("cancelled", noon) })
+        assertEquals(null, sameEvent(s, emptyList(), listOf(h)) { BodyTimes(null, null) }, "no date to judge by")
+        assertEquals(null, sameEvent(s, emptyList(), listOf(hit(h.id, "contains"))) { BodyTimes(null, noon) }, "a word match is not a name")
+    }
+
+    @Test
+    fun `the calendar's own id is the event, whatever else is true of the body`() {
+        val s = subject(row(noon, title = "Nutcracker Mandatory Parent Meeting", uid = "N1"))
+        val byUid = hit("situation/2026-09-17-nutcracker-mandatory-parent-meeting")
+        assertEquals(byUid, sameEvent(s, listOf(byUid), emptyList()) { BodyTimes("closed", noon - 9 * week) })
+        // A series takes an activity by its title, never a situation.
+        val series = subject(row(noon, "weekly", title = "Standup", uid = "E9"))
+        assertEquals(null, sameEvent(series, emptyList(), listOf(ResolvedBody("situation/standup", "situation", "Standup", "exact"))) { BodyTimes(null, noon) })
+        val act = ResolvedBody("activity/standup", "activity", "Standup", "exact")
+        assertEquals(act, sameEvent(series, emptyList(), listOf(act)) { null })
     }
 
     @Test

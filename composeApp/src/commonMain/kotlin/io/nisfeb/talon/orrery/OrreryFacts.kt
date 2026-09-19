@@ -132,18 +132,23 @@ fun callFacts(
     ourShip: String,
     nowMs: Long,
     nameFor: (String) -> String,
+    /** The body each speaker is on the ship: asked of the pass's resolver, never made up from the @p. */
+    idFor: (String) -> String = ::personId,
 ): Facts {
     val id = "situation/call-" + (nowMs / 1000)
     val others = speakers.filter { it.startsWith("~") && it != ourShip }.distinct()
+    val people = others.associateWith(idFor)
+    // An upsert of aliases alone unions them: a speaker the ship keeps
+    // under another name is taught this one and nothing else.
     val bodies = listOf(OBody(id, name = title.ifBlank { "Call" })) +
-        others.map { OBody(personId(it), aliases = listOf(it, nameFor(it)).distinct()) }
+        others.map { OBody(people.getValue(it), aliases = listOf(it, nameFor(it)).distinct()) }
     val obs = buildList {
         fun obs(attr: String, value: JsonElement) = add(Obs(id, attr, value, nowMs, sourceKind = "talon-call", sourceId = address))
         obs("started", JsonPrimitive(isoUtc(nowMs)))
         obs("transcript", JsonPrimitive(address))
         obs("participants", buildJsonObject { put("ref", "person/me") })
-        others.forEach { obs("participants", buildJsonObject { put("ref", personId(it)) }) }
-        others.forEach { add(lastContact(it, nowMs, "talon-call", address)) }
+        others.forEach { obs("participants", buildJsonObject { put("ref", people.getValue(it)) }) }
+        others.forEach { add(lastContact(people.getValue(it), nowMs, "talon-call", address)) }
     }
     return Facts(bodies, obs)
 }

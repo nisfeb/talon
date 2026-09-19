@@ -95,14 +95,29 @@ class OrreryFactsTest {
 
     @Test
     fun `a published call is a situation with its speakers and a pointer to the words`() {
-        val f = callFacts("urb://~zod/lattice/calls/1", "Standup", setOf(me, "~bus", "~nec"), me, noon) { if (it == "~bus") "Bus" else it }
+        val f = callFacts("urb://~zod/lattice/calls/1", "Standup", setOf(me, "~bus", "~nec"), me, noon, nameFor = { if (it == "~bus") "Bus" else it })
         assertEquals(listOf("situation/call-1789646400", "person/bus", "person/nec"), f.bodies.map { it.id })
         assertEquals(listOf("~bus", "Bus"), f.bodies[1].aliases)
         val refs = f.observations.filter { it.attr == "participants" }.map { it.value.jsonObject["ref"]!!.jsonPrimitive.content }
         assertEquals(listOf("person/me", "person/bus", "person/nec"), refs)
         assertEquals("urb://~zod/lattice/calls/1", f.observations.first { it.attr == "transcript" }.value.jsonPrimitive.content)
-        assertEquals(2, f.observations.count { it.attr == "last-contact" })
+        // On the people, never on a bare @p the ship has no body for.
+        assertEquals(listOf("person/bus", "person/nec"), f.observations.filter { it.attr == "last-contact" }.map { it.subject })
         assertTrue(f.observations.all { it.sourceKind == "talon-call" && it.sourceId == "urb://~zod/lattice/calls/1" })
+    }
+
+    @Test
+    fun `a speaker the ship keeps under another name is that body, taught the handle`() {
+        val f = callFacts("urb://~zod/lattice/calls/1", "Standup", setOf("~bus"), me, noon, nameFor = { "Bus" }) { ship ->
+            if (ship == "~bus") "person/buster" else personId(ship)
+        }
+        assertEquals(listOf("situation/call-1789646400", "person/buster"), f.bodies.map { it.id })
+        assertEquals(null, f.bodies[1].name, "aliases alone: the ship keeps its own name")
+        assertEquals(listOf("person/buster"), f.observations.filter { it.attr == "last-contact" }.map { it.subject })
+        assertEquals(
+            listOf("person/me", "person/buster"),
+            f.observations.filter { it.attr == "participants" }.map { it.value.jsonObject["ref"]!!.jsonPrimitive.content },
+        )
     }
 
     @Test

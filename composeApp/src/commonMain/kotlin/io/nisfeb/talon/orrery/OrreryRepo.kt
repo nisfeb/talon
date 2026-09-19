@@ -103,6 +103,7 @@ class OrreryRepo(
     // Coroutines only touch this, so a mutex is the whole of the guard
     // (commonMain has no synchronized: iOS is native).
     private val pending = mutableListOf<Facts>()
+    private val calls = mutableListOf<((String, String?) -> String) -> Facts>()
     private val transcripts = mutableListOf<Pair<String, List<Spoken>>>()
     private val pendingLock = Mutex()
     // The pass and an answer can both reach the mirror; one at a time,
@@ -471,7 +472,8 @@ class OrreryRepo(
             queuedForRetry = queued
             // What the ship has, which is what a client goes by. It is
             // never told what this install remembers.
-            val view = runCatching { a.state(row.token) }.getOrNull()
+            val raw = runCatching { a.stateJson(row.token) }.getOrNull()
+            val view = raw?.let(a::viewOf)
             val sent = db.orrerySent()
             val record = mutableListOf<io.nisfeb.talon.data.OrrerySentEntity>()
             val forgets = mutableListOf<String>()
@@ -481,6 +483,10 @@ class OrreryRepo(
 
             val book = book()
             val people = People(a, row.token, sent, s, view?.bodies.orEmpty())
+            // Calls made since the last pass, their speakers resolved now.
+            val called = pendingLock.withLock { calls.toList().also { calls.clear() } }.map { it(people::idFor) }
+            called.forEach { facts += it }
+            queuedForRetry = queuedForRetry + called
             for (c in db.contacts().all().filter { it.ship == s || it.ship in book }) {
                 val handle = shipHandle(c.ship)
                 val id = people.idFor(c.ship, c.nickname ?: handle)
@@ -546,14 +552,15 @@ class OrreryRepo(
                     // ship was told no longer describes the event.
                     val changed = mark != null &&
                         (mark.substringAfter('|', "") != digest || dropped.isNotEmpty() || due)
-                    // Ask the ship before making anything: by the title it
-                    // goes by, then by the calendar's own id, which
-                    // reconcile keeps as an alias of the activity it built.
-                    val hits = if (decided != null) emptyList() else buildList {
-                        addAll(runCatching { a.resolve(subject.title, row.token) }.getOrDefault(emptyList()))
-                        if (none { it.isExact }) {
-                            addAll(runCatching { a.resolve(subject.uid, row.token) }.getOrDefault(emptyList()))
-                        }
+                    // Ask the ship before making anything: by the calendar's
+                    // own id first, which reconcile keeps as an alias of what
+                    // it built, then by the title, which only a body that is
+                    // plainly this occasion may answer.
+                    val hits = if (decided != null) emptyList() else {
+                        val byUid = runCatching { a.resolve(subject.uid, row.token) }.getOrDefault(emptyList())
+                        val byTitle = if (byUid.any { it.isExact }) emptyList()
+                        else runCatching { a.resolve(subject.title, row.token) }.getOrDefault(emptyList())
+                        listOfNotNull(sameEvent(subject, byUid, byTitle) { id -> raw?.let { bodyTimes(it, id) } })
                     }
                     val write = calendarWrite(
                         subject, decided, hits, seen.keys - dropped, s, nowMs, changed,
@@ -596,6 +603,16 @@ class OrreryRepo(
                 }.onFailure { Log.i(TAG, "vanished events skipped: ${it.message}") }
             }.onFailure { Log.i(TAG, "calendar skipped: ${it.message}") }
 
+            // Only what the ship's schema lists for a kind it keeps: a row
+            // on an attribute the owner has not named sits outside their
+            // vocabulary, and the ship's readers never see it.
+            view?.attrs?.takeIf { it.isNotEmpty() }?.let { attrs ->
+                val (listed, not) = facts.observations.partition { o -> attrs[o.subject.substringBefore('/')]?.contains(o.attr) != false }
+                if (not.isNotEmpty()) {
+                    Log.i(TAG, "${not.size} rows not written, the schema lacks " + not.map { "${it.subject.substringBefore('/')}.${it.attr}" }.distinct().joinToString())
+                    facts = facts.copy(observations = listed)
+                }
+            }
             var refused = 0
             var firstReason: String? = null
             for (batch in batches(facts)) {
@@ -1067,6 +1084,20 @@ class OrreryRepo(
             if (!repo._enabled.value) return
             repo.scope.launch {
                 repo.pendingLock.withLock { repo.pending += facts }
+                repo.push()
+            }
+        }
+
+        /**
+         * A call, whose facts are made inside the next pass: that is where
+         * the ship is asked who each speaker is, so a person it keeps under
+         * another id is that person and not a twin named from the @p.
+         */
+        fun noteCall(make: (idFor: (ship: String, name: String?) -> String) -> Facts) {
+            val repo = current ?: return
+            if (!repo._enabled.value) return
+            repo.scope.launch {
+                repo.pendingLock.withLock { repo.calls += make }
                 repo.push()
             }
         }

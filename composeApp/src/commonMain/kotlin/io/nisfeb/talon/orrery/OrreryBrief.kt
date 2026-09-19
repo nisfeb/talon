@@ -411,7 +411,12 @@ object Brief {
 
     // ---- the reply's facts -------------------------------------------------------
 
-    /** common/analyst-prompt.md from orrery-utils, word for word: the owner's words are triaged as any message is. */
+    /**
+     * common/analyst-prompt.md from orrery-utils, word for word: the
+     * owner's words are triaged as any message is. Copied at orrery-utils
+     * 729ae5a, that file's last change; when it changes there, copy it
+     * again here, since the two must not drift.
+     */
     val ANALYST: String = """
         You turn messages into facts for orrery, a model of one person's world.
         Three shapes exist.

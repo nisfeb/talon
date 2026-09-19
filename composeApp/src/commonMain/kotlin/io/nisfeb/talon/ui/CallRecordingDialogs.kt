@@ -159,11 +159,12 @@ fun RecordingResultDialog(
                             // it, where its transcript is, and what was said,
                             // which the triage reads here and now.
                             val speakers = rec.clips.keys
-                            io.nisfeb.talon.orrery.OrreryRepo.note(
-                                io.nisfeb.talon.orrery.callFacts(
-                                    published.address, title, speakers, ourShip, io.nisfeb.talon.util.nowMs(), nameFor,
-                                ),
-                            )
+                            val at = io.nisfeb.talon.util.nowMs()
+                            io.nisfeb.talon.orrery.OrreryRepo.noteCall { idFor ->
+                                io.nisfeb.talon.orrery.callFacts(published.address, title, speakers, ourShip, at, nameFor) { ship ->
+                                    idFor(ship, nameFor(ship))
+                                }
+                            }
                             val shipOf = speakers.associateBy { nameFor(it) }
                             io.nisfeb.talon.orrery.OrreryRepo.noteTranscript(
                                 published.address,

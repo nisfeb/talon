@@ -1,6 +1,9 @@
 package io.nisfeb.talon.orrery
 
 import io.nisfeb.talon.calendar.CalendarRow
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -33,13 +36,27 @@ class EventPeople(
 ) {
     fun idFor(name: String): String? = byFirstName[name.trim().lowercase()]
 
-    /** The people named in [text] whom the ship already keeps. */
+    /**
+     * The people named in [text] whom the ship already keeps. A name is
+     * written with a capital: "bring Linus's helmet" names Linus, and
+     * "rose garden", "grace period" and "will call" name nobody.
+     */
     fun named(text: String?): List<String> =
-        WORDS.split((text ?: "").lowercase()).filter { it.length >= 2 }.mapNotNull { byFirstName[it] }.distinct()
+        wordsOf(text.orEmpty()).filter { it.length >= 2 && it.first().isUpperCase() }
+            .mapNotNull { byFirstName[it.lowercase()] }.distinct()
+
+    // By letters, not a pattern: common code has no Unicode classes, and
+    // a name like Zoë is a word.
+    private fun wordsOf(text: String): List<String> = buildList {
+        val w = StringBuilder()
+        for (c in text) {
+            if (c.isLetterOrDigit()) w.append(c) else if (w.isNotEmpty()) { add(w.toString()); w.clear() }
+        }
+        if (w.isNotEmpty()) add(w.toString())
+    }
 
     companion object {
         val NONE = EventPeople(emptyMap(), known = false)
-        private val WORDS = Regex("[^a-z0-9]+")
 
         /** By the name and every alias a person body carries, a ship's @p aside. */
         fun of(bodies: List<KnownBody>): EventPeople {
@@ -476,14 +493,58 @@ internal fun occurrenceKey(subject: CalendarSubject, row: CalendarRow): String =
 
 private fun source(subject: CalendarSubject): String = "${subject.cal}/${subject.uid}"
 
-internal fun activityIdFor(subject: CalendarSubject): String = calBodyId("activity", subject)
+internal fun activityIdFor(subject: CalendarSubject): String = "activity/" + titleSlug(subject)
 
-internal fun situationIdFor(subject: CalendarSubject): String = calBodyId("situation", subject)
+/**
+ * A one-off is named for its day and its title, the way the ship names
+ * its own (situation/2026-10-03-nutcracker-mandatory-parent-meeting):
+ * two dentist visits are two situations, never one.
+ */
+internal fun situationIdFor(subject: CalendarSubject, zone: TimeZone = TimeZone.currentSystemDefault()): String =
+    "situation/" + Instant.fromEpochMilliseconds(subject.occurrences.first().l).toLocalDateTime(zone).date + "-" + titleSlug(subject)
 
-private fun calBodyId(kind: String, subject: CalendarSubject): String {
+private fun titleSlug(subject: CalendarSubject): String {
     // The title, not the UID: a body people read in a list. The UID is
     // an alias, which is what the next client resolves against.
     val base = normalizeTitle(subject.title).ifBlank { subject.title }
     val slug = base.lowercase().replace(Regex("[^a-z0-9-]+"), "-").trim('-').replace(Regex("-{2,}"), "-")
-    return "$kind/" + slug.take(60).trimEnd('-').ifBlank { "event" }
+    return slug.take(60).trimEnd('-').ifBlank { "event" }
+}
+
+/** What the ship says about a body when judging whether a title hit is this event: its status and its start. */
+data class BodyTimes(val status: String?, val startMs: Long?)
+
+/** A body's status and start in the raw state view. */
+fun bodyTimes(state: kotlinx.serialization.json.JsonObject, id: String): BodyTimes? {
+    val b = Brief.bodies(state).firstOrNull { (it["id"] as? JsonPrimitive)?.content == id } ?: return null
+    val start = (Brief.text(b, "starts") ?: Brief.text(b, "started"))
+        ?.let { runCatching { Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+    return BodyTimes(Brief.text(b, "status"), start)
+}
+
+private const val DAY_MS = 24L * 60 * 60 * 1000
+
+/**
+ * The body the ship already keeps for this event, or null to make one.
+ * The calendar's UID is the event itself: reconcile keeps it as an alias
+ * of what it built, and a body made for this UID carries it. A title
+ * alone is weaker. A series takes an activity by that name. A one-off
+ * takes a situation by that name only when it is still open and starts
+ * within a day of this occurrence; a closed one is a past occasion, and
+ * one on another date is another occasion that shares a title.
+ */
+fun sameEvent(
+    subject: CalendarSubject,
+    byUid: List<ResolvedBody>,
+    byTitle: List<ResolvedBody>,
+    times: (String) -> BodyTimes?,
+): ResolvedBody? {
+    byUid.firstOrNull { it.isExact && (it.kind == "activity" || it.kind == "situation") }?.let { return it }
+    if (subject.repeats) return byTitle.firstOrNull { it.isExact && it.kind == "activity" }
+    val start = subject.occurrences.first().l
+    return byTitle.firstOrNull { h ->
+        h.isExact && h.kind == "situation" && times(h.id)?.let { t ->
+            t.status != "closed" && t.status != "cancelled" && t.startMs != null && kotlin.math.abs(t.startMs - start) <= DAY_MS
+        } == true
+    }
 }
