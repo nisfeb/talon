@@ -26,6 +26,7 @@ object Notifications {
 
     const val CHANNEL_MESSAGES = "messages"
     const val CHANNEL_MAIL = "mail"
+    const val CHANNEL_ORRERY = "orrery"
     const val CHANNEL_SYNC = "sync"
     const val CHANNEL_WATCHWORDS = "watchwords"
     const val CHANNEL_LOOPS = "loops"
@@ -72,6 +73,8 @@ object Notifications {
     /** Tap on a mail notification: open Mail. The thread is not named
      *  because the listing is re-read on the way in anyway. */
     const val EXTRA_OPEN_MAIL = "open_mail"
+    /** Set by a tapped orrery notification: the app opens Actions. */
+    const val EXTRA_OPEN_ACTIONS = "open_actions"
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -140,6 +143,15 @@ object Notifications {
                     "Mail",
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ).apply { description = "New signed mail" },
+            )
+        }
+        if (mgr.getNotificationChannel(CHANNEL_ORRERY) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ORRERY,
+                    "Orrery actions",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply { description = "Proposals waiting for your answer" },
             )
         }
         if (mgr.getNotificationChannel(CHANNEL_WATCHWORDS) == null) {
@@ -541,6 +553,44 @@ object Notifications {
         mgr.notify("mail:" + threadId.ifBlank { "more" }, NOTIFICATION_ID, notification)
     }
 
+
+    /**
+     * An orrery proposal waiting for an answer. Tagged by the action, so
+     * one answered anywhere can be taken back with [clearAction]; a tap
+     * opens Actions.
+     */
+    fun showAction(context: Context, actionId: String, title: String, body: String) {
+        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?: return
+        ensureChannel(context)
+        val tag = "action:" + actionId.ifBlank { "more" }
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_OPEN_ACTIONS, true)
+        }
+        val pending = PendingIntent.getActivity(
+            context,
+            tag.hashCode(),
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ORRERY)
+            .setSmallIcon(R.drawable.ic_stat_talon)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .build()
+        mgr.notify(tag, NOTIFICATION_ID, notification)
+    }
+
+    /** Take back the notification for an action answered here or anywhere. */
+    fun clearAction(context: Context, actionId: String) {
+        ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?.cancel("action:" + actionId.ifBlank { "more" }, NOTIFICATION_ID)
+    }
 
     /**
      * Loop-result notification. One channel for all loops; tag =

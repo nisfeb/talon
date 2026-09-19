@@ -38,6 +38,8 @@ class MainActivity : ComponentActivity() {
      *  opens Mail on arrival. Routed like the other deep links — see
      *  consumeIntent. */
     private val deepLinkOpenMail = mutableStateOf(false)
+    /** Set by a tapped orrery notification (EXTRA_OPEN_ACTIONS): TalonApp opens Actions. */
+    private val deepLinkOpenActions = mutableStateOf(false)
     /** Set when the user hit Answer on the incoming-call notification.
      *  The action can only open the activity — accepting needs the
      *  running CallController — so TalonApp does the accept. */
@@ -97,6 +99,7 @@ class MainActivity : ComponentActivity() {
             val threadParent by deepLinkThreadParent
             val threadAnchor by deepLinkThreadAnchor
             val openMail by deepLinkOpenMail
+            val openActions by deepLinkOpenActions
             val share by pendingShare
             val shareTarget by pendingShareTarget
             val answerFrom by pendingAnswerFrom
@@ -168,6 +171,7 @@ class MainActivity : ComponentActivity() {
                         initialOpenThread = threadParent,
                         initialThreadAnchor = threadAnchor,
                         initialOpenMail = openMail,
+                        initialOpenActions = openActions,
                         pendingShare = share,
                         pendingShareTarget = shareTarget,
                         onShareConsumed = {
@@ -186,6 +190,7 @@ class MainActivity : ComponentActivity() {
                             deepLinkThreadParent.value = null
                             deepLinkThreadAnchor.value = null
                             deepLinkOpenMail.value = false
+                            deepLinkOpenActions.value = false
                         },
                         initialAnswerFrom = answerFrom,
                         initialAnswerCallId = answerCallId,
@@ -253,6 +258,10 @@ class MainActivity : ComponentActivity() {
             deepLinkOpenMail.value = true
             consumedDeepLink = true
         }
+        if (intent.getBooleanExtra(Notifications.EXTRA_OPEN_ACTIONS, false)) {
+            deepLinkOpenActions.value = true
+            consumedDeepLink = true
+        }
         intent.getStringExtra(Notifications.EXTRA_ANSWER_FROM)?.let {
             pendingAnswerFrom.value = it
             pendingAnswerCallId.value =
@@ -294,6 +303,7 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra(Notifications.EXTRA_OPEN_THREAD)
             intent.removeExtra(Notifications.EXTRA_THREAD_ANCHOR)
             intent.removeExtra(Notifications.EXTRA_OPEN_MAIL)
+            intent.removeExtra(Notifications.EXTRA_OPEN_ACTIONS)
             setIntent(intent)
         }
         ShareIntent.from(intent)?.let {

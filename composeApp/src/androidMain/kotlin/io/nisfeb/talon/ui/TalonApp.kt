@@ -143,6 +143,7 @@ fun TalonApp(
     initialThreadAnchor: String? = null,
     /** A tapped mail notification: open Mail on arrival. */
     initialOpenMail: Boolean = false,
+    initialOpenActions: Boolean = false,
     pendingShare: ShareIntent? = null,
     /** When non-null, the user already picked the share target in
      *  the system share sheet (Sharing Shortcut). Skip the in-app
@@ -712,6 +713,23 @@ fun TalonApp(
             closeSections()
             mailOpen = true
             onDeepLinkConsumed()
+        }
+    }
+    // A tapped orrery notification: straight to what is waiting.
+    LaunchedEffect(initialOpenActions) {
+        if (initialOpenActions) {
+            closeSections()
+            actionsOpen = true
+            onDeepLinkConsumed()
+        }
+    }
+    // New proposals notify; one answered anywhere takes its notification
+    // back. Not while Actions is on screen: the list is the news.
+    val actionContext = LocalContext.current
+    LaunchedEffect(orreryRepo) {
+        orreryRepo.onActions = { raise, clear ->
+            clear.forEach { io.nisfeb.talon.Notifications.clearAction(actionContext, it) }
+            if (!actionsOpen) raise.forEach { io.nisfeb.talon.Notifications.showAction(actionContext, it.id, it.title, it.body) }
         }
     }
 

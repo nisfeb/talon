@@ -1,6 +1,11 @@
 package io.nisfeb.talon.orrery
 
 import io.ktor.client.HttpClient
+import io.ktor.http.isSuccess
+import io.ktor.utils.io.readUTF8Line
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.client.request.header
+import io.ktor.client.request.prepareGet
 import io.nisfeb.talon.calendar.CalendarApi
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.OrreryAccountEntity
@@ -113,6 +118,22 @@ class OrreryRepo(
     private var ship: String? = null
     private var loop: Job? = null
     private var watching: Job? = null
+    private var beacon: Job? = null
+
+    /**
+     * New proposals to raise and answered ones to take back, for the
+     * host to deliver as notifications. The decision is [diffActionNotifications].
+     */
+    var onActions: ((raise: List<ActionNotification>, clear: Set<String>) -> Unit)? = null
+    private var seenProposals: Set<String>? = null
+
+    /** The open list as the ship just said it, and what that means for notifications. */
+    private fun published(list: List<OrreryAction>) {
+        _actions.value = list
+        val news = diffActionNotifications(list, seenProposals)
+        seenProposals = news.seen
+        if (news.raise.isNotEmpty() || news.clear.isNotEmpty()) onActions?.invoke(news.raise, news.clear)
+    }
 
     fun attach(shipUrl: String, ship: String) {
         if (this.shipUrl == shipUrl && this.ship == ship) return
@@ -125,18 +146,58 @@ class OrreryRepo(
             probe()
             _enabled.value = db.orreryAccounts().get(ship) != null
             if (_enabled.value) startLoop()
-            if (_availability.value == OrreryAvailability.PRESENT) refreshActions()
+            if (_availability.value == OrreryAvailability.PRESENT) {
+                refreshActions()
+                // Orrery's beacon moves once for every write that changed
+                // something: a new proposal, or an answer given anywhere.
+                // It is what makes a notification prompt and an answered
+                // action leave at once. The slow read below is only a net
+                // for a stream that went quiet without closing.
+                watchBeacon(shipUrl)
+            }
             runCatching { refreshModel() }
         }
-        // An action answered anywhere else, on the page, in a reply to
-        // the brief or by ticking its todo, leaves here within a few
-        // minutes, whether or not this install feeds the pipe.
-        // ponytail: a poll of the open list; orrery's beacon would say
-        // when to read, once Talon speaks grubbery's keep stream.
         watching = scope.launch {
             while (isActive) {
                 delay(ACTIONS_EVERY_MS)
                 if (_availability.value == OrreryAvailability.PRESENT) refreshWaiting()
+            }
+        }
+    }
+
+    /**
+     * One stream of orrery's change beacon while attached, and a read of
+     * what is waiting whenever the revision moves. A stream that ends is
+     * opened again after a pause that grows, with jitter; a quiet one is
+     * left alone, since quiet is not dead.
+     */
+    private fun watchBeacon(shipUrl: String) {
+        beacon?.cancel()
+        beacon = scope.launch {
+            var pause = 3_000L
+            var last: String? = null
+            while (isActive) {
+                runCatching {
+                    http.prepareGet(shipUrl.trimEnd('/') + BEACON_PATH) {
+                        header(io.ktor.http.HttpHeaders.Accept, "text/event-stream")
+                    }.execute { resp ->
+                        if (!resp.status.isSuccess()) error("the beacon answered ${resp.status.value}")
+                        pause = 3_000L
+                        val body = resp.bodyAsChannel()
+                        val reader = BeaconReader()
+                        while (isActive) {
+                            val line = body.readUTF8Line() ?: break
+                            val rev = reader.feed(line) ?: continue
+                            // The first revision on a connection is where
+                            // things stand: a read only if it moved while
+                            // nobody was listening.
+                            if (last != null && rev != last) refreshWaiting()
+                            last = rev
+                        }
+                    }
+                }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; Log.i(TAG, "beacon: ${it.message}") }
+                delay(pause + kotlin.random.Random.nextLong(0, 2_000))
+                pause = (pause * 2).coerceAtMost(5 * 60_000L)
             }
         }
     }
@@ -151,7 +212,7 @@ class OrreryRepo(
         val a = api ?: return
         val s = ship ?: return
         runCatching { a.actions(db.orreryAccounts().get(s)?.token) }
-            .onSuccess { _actions.value = it }
+            .onSuccess { published(it) }
             .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
     }
 
@@ -161,6 +222,9 @@ class OrreryRepo(
         loop = null
         watching?.cancel()
         watching = null
+        beacon?.cancel()
+        beacon = null
+        seenProposals = null
         api = null
         shipUrl = null
         ship = null
@@ -668,7 +732,7 @@ class OrreryRepo(
             if (record.isNotEmpty()) sent.putAll(record)
             forgets.forEach { sent.forget(s, it) }
             db.orreryAccounts().upsert(row.copy(messagesCursor = messagesCursor, mailCursor = mailCursor, calendarCursor = nowMs))
-            runCatching { a.actions(row.token) }.onSuccess { _actions.value = it }.onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
+            runCatching { a.actions(row.token) }.onSuccess { published(it) }.onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
             runCatching { mirrorTasks(a, row.token, url) }.onFailure { Log.i(TAG, "tasks skipped: ${it.message}") }
             runCatching { brief(a, row.token, s, url, nowMs) }.onFailure { Log.w(TAG, "brief not sent: ${it.message}") }
             _lastPushMs.value = nowMs
@@ -1119,6 +1183,8 @@ class OrreryRepo(
     fun answer(id: String, status: String, note: String = "") {
         val was = _actions.value.firstOrNull { it.id == id }
         _actions.value = settledActions(_actions.value, id, status)
+        // Answered here: its notification goes now, not on the next read.
+        onActions?.invoke(emptyList(), setOf(id))
         scope.launch {
             setAction(id, status, note).onFailure { e ->
                 if (was != null) _actions.value = listOf(was) + _actions.value.filterNot { it.id == id }
@@ -1140,7 +1206,7 @@ class OrreryRepo(
         val url = shipUrl ?: return
         val token = db.orreryAccounts().get(s)?.token
         runCatching { a.actions(token) }
-            .onSuccess { _actions.value = it }
+            .onSuccess { published(it) }
             .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
         // An approved task becomes a todo wherever it can be approved,
         // not only on the install that runs the pipe.
@@ -1228,8 +1294,9 @@ class OrreryRepo(
         const val BACKFILL_MS = 30L * 24 * 60 * 60 * 1000
         const val AHEAD_MS = 90L * 24 * 60 * 60 * 1000
         const val PUSH_EVERY_MS = 10L * 60 * 1000
-        /** How often what is waiting is read again while attached: one small request. */
-        const val ACTIONS_EVERY_MS = 5L * 60 * 1000
+        /** How often what is waiting is read again while attached, as a net under the beacon: one small request. */
+        const val ACTIONS_EVERY_MS = 15L * 60 * 1000
+        private const val BEACON_PATH = "/grubbery/api/keep/apps/shell.shell/desks/orrery.desk/desk/data/orrery.orrery_app/beacon/rev"
         /** Decision calls the gate check has in flight at once. */
         const val GATE_CHECK_AT_ONCE = 6
         private const val BRIEF_LEASE = "orrery-brief"

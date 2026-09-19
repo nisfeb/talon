@@ -1128,6 +1128,14 @@ fun App(
                 news.forEach { notifier.notify(it.title, it.body, "mail:" + it.threadId.ifBlank { "more" }) }
             }
         }
+        // New orrery proposals notify; one answered anywhere is taken back.
+        // Not while Actions is on screen: the list is the news.
+        LaunchedEffect(orreryRepo, notifier) {
+            orreryRepo.onActions = { raise, clear ->
+                clear.forEach { notifier.clear("action:$it") }
+                if (!showActions) raise.forEach { notifier.notify(it.title, it.body, "action:" + it.id.ifBlank { "more" }) }
+            }
+        }
         // "Run now", from both the Loops screen and the assistant's jobs pane.
         val runLoopNow: (Long) -> Unit = { loopId ->
             loopScope.launch { db.loops().get(loopId)?.let { loopRunner.runLoop(it) } }
