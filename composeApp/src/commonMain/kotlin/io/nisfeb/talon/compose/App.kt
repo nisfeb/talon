@@ -2237,7 +2237,7 @@ fun App(
                     showActions -> io.nisfeb.talon.ui.screens.OrreryActionsScreen(
                         actions = orreryActions,
                         onBack = { showActions = false },
-                        onShown = { orreryRepo.refreshActions() },
+                        onShown = { orreryRepo.refreshWaiting() },
                         onDecide = { a, status ->
                             loopScope.launch {
                                 orreryRepo.setAction(a.id, status)

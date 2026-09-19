@@ -2029,7 +2029,7 @@ fun TalonApp(
                 actions = orreryActions,
                 onBack = { actionsOpen = false },
                 modifier = mod,
-                onShown = { orreryRepo.refreshActions() },
+                onShown = { orreryRepo.refreshWaiting() },
                 onDecide = { a, status ->
                     appScope.launch {
                         orreryRepo.setAction(a.id, status)

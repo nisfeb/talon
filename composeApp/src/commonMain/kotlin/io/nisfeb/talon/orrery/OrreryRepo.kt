@@ -129,8 +129,10 @@ class OrreryRepo(
             runCatching { refreshModel() }
         }
         // An action answered anywhere else, on the page, in a reply to
-        // the brief or by ticking its todo, leaves here within a minute,
-        // whether or not this install feeds the pipe.
+        // the brief or by ticking its todo, leaves here within a few
+        // minutes, whether or not this install feeds the pipe.
+        // ponytail: a poll of the open list; orrery's beacon would say
+        // when to read, once Talon speaks grubbery's keep stream.
         watching = scope.launch {
             while (isActive) {
                 delay(ACTIONS_EVERY_MS)
@@ -139,8 +141,13 @@ class OrreryRepo(
         }
     }
 
-    /** What is open on the ship, read again: one small request, no calendar. */
-    private suspend fun refreshWaiting() {
+    /**
+     * What is open on the ship, read again: one small request, no
+     * calendar. What opening Actions asks for; the mirror, which reads
+     * every action ever filed and the whole calendar, runs on attach,
+     * after an answer and in the pipe's pass, not on every look.
+     */
+    suspend fun refreshWaiting() {
         val a = api ?: return
         val s = ship ?: return
         runCatching { a.actions(db.orreryAccounts().get(s)?.token) }
@@ -1139,7 +1146,7 @@ class OrreryRepo(
         const val AHEAD_MS = 90L * 24 * 60 * 60 * 1000
         const val PUSH_EVERY_MS = 10L * 60 * 1000
         /** How often what is waiting is read again while attached: one small request. */
-        const val ACTIONS_EVERY_MS = 60L * 1000
+        const val ACTIONS_EVERY_MS = 5L * 60 * 1000
         private const val BRIEF_LEASE = "orrery-brief"
         const val MESSAGES_PER_PASS = 2000
         const val MAIL_PER_PASS = 200
