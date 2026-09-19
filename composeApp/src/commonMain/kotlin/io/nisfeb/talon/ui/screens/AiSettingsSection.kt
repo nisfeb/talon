@@ -547,8 +547,34 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
                 Switch(checked = standing, onCheckedChange = { sd.set(it) })
             }
         }
+        if (io.nisfeb.talon.ui.isLocationSharingSupported) LocationRow()
     }
     (note ?: error)?.let { Quiet(it, error = true) }
+}
+
+/** Where the owner is, from this phone, when they move. See [io.nisfeb.talon.ui.LocationSharing]. */
+@Composable
+private fun LocationRow() {
+    val sharing = io.nisfeb.talon.ui.rememberLocationSharing() ?: return
+    val scope = rememberCoroutineScope()
+    val on by sharing.on.collectAsState()
+    var note by remember { mutableStateOf<String?>(null) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Send where I am", style = MaterialTheme.typography.bodyMedium)
+            Quiet("When this phone moves a few hundred metres, orrery hears where you are: a place it knows, or the neighbourhood or town. Never the coordinates.")
+            if (on && !sharing.allowed()) Quiet("Location access for Talon is off, or not all the time, so nothing is sent.", error = true)
+            if (on && !sharing.names) Quiet("This phone cannot look place names up, so only places orrery knows are sent.")
+        }
+        Switch(checked = on, onCheckedChange = { want ->
+            note = null
+            scope.launch {
+                if (!want) sharing.stop()
+                else if (!sharing.start()) note = "Talon needs location access all the time to hear a move with the app closed."
+            }
+        })
+    }
+    note?.let { Quiet(it, error = true) }
 }
 
 /**

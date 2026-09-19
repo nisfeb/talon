@@ -31,6 +31,7 @@ package io.nisfeb.talon.ui
  *  - isImmersiveCallSupported — A, i (full-screen call view); D: the inline roster toggles in place.
  *  - isUrbWebViewSupported — A, i (in-app webview popover); D: hands off to the system browser.
  *  - isLocalTriageSupported — D (llama.cpp on the JVM, or a local Ollama), A (MediaPipe LLM Inference), i (Apple's system model on iOS 26, else llama.cpp).
+ *  - isLocationSharingSupported — A (LocationManager wakes a receiver on a significant move). D: a computer does not move with you. i: port pending (CLLocationManager significant-change monitoring, Always authorization, Info.plist strings).
  *
  * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
  * below too — a display name and a per-feature predicate, not flags.
@@ -318,3 +319,11 @@ expect val isImmersiveCallSupported: Boolean
  * ship's web session already lives.
  */
 expect val isUrbWebViewSupported: Boolean
+
+/**
+ * Whether this device can tell orrery where the owner is when they
+ * move: the phone in their pocket, woken by the platform on a move of
+ * a few hundred metres, with the app closed. Gates the switch under
+ * the orrery triage row. See [LocationSharing].
+ */
+expect val isLocationSharingSupported: Boolean

@@ -281,6 +281,9 @@ class TalonApplication : Application() {
         CatchUpWorker.schedule(this)
         // The orrery pass while charging and idle; a no-op until the pipe is on.
         OrreryWorker.schedule(this)
+        // Where the owner is, on a move: a registration a reboot or an
+        // update ended is made again here. A no-op while the switch is off.
+        runCatching { io.nisfeb.talon.orrery.LocationWatch.resume(this) }
 
 
         // User loops — headless scheduled agent runs. Ship-scoped deps

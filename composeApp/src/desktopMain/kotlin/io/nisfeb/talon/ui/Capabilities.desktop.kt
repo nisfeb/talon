@@ -83,3 +83,6 @@ actual val isUrbWebViewSupported: Boolean = false
 /** The rail is already there, and there is no swipe to replace a back button with. */
 actual val isDrawerNavigation: Boolean = false
 actual val isTouchPrimary: Boolean = false
+
+// A computer does not move with you.
+actual val isLocationSharingSupported: Boolean = false
