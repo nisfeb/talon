@@ -461,11 +461,15 @@ class OrreryRepo(
 
     /** One move from a reply: a new due or subject replaces the action, then the status moves. */
     private suspend fun move(a: OrreryApi, token: String, old: OrreryAction, d: Brief.Direction) {
-        val note = "from the owner's reply to the brief"
+        // The owner's reason, or none: a note on a dismissal is read by the
+        // generator as the owner's taste, so Talon never writes its own.
+        val note = d.reason.orEmpty()
         var id = old.id
         var status = old.status
         if (d.dueMs != null || d.about != null) {
-            runCatching { a.transition(token, old.id, "dismissed", "replaced, $note") }
+            // Replaced, not refused: no reason, since the owner gave none
+            // and still wants the thing.
+            runCatching { a.transition(token, old.id, "dismissed", "") }
                 .onFailure { Log.i(TAG, "${old.id} not dismissed: ${it.message}") }
             val (newId, newStatus) = a.act(Brief.replacement(old, d.dueMs, d.about), token)
             id = newId

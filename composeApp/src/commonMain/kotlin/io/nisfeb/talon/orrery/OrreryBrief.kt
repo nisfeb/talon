@@ -328,8 +328,13 @@ object Brief {
         return out.joinToString("\n").trim()
     }
 
-    /** What the owner said to do about one action: its new status, due or subject, by body id. */
-    data class Direction(val actionId: String, val status: String? = null, val dueMs: Long? = null, val about: List<String>? = null)
+    /**
+     * What the owner said to do about one action: its new status, due or
+     * subject, by body id, and [reason], the owner's own words for why,
+     * only when they gave some. A dismissal's reason reaches the
+     * generator, which learns the owner's taste from it.
+     */
+    data class Direction(val actionId: String, val status: String? = null, val dueMs: Long? = null, val about: List<String>? = null, val reason: String? = null)
 
     private val MOVES = setOf("approved", "dismissed", "done")
 
@@ -348,8 +353,9 @@ object Brief {
             val about = (m["about"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.lowercase() }
                 ?.takeIf { it.isNotEmpty() && it.all { b -> b in known } }
             if (status == null && due == null && about == null) continue
+            val reason = m.str("reason")?.trim()?.takeIf { it.isNotEmpty() }?.let { clipBytes(it, 500) }
             val d = out[id] ?: Direction(id)
-            out[id] = d.copy(status = status ?: d.status, dueMs = due ?: d.dueMs, about = about ?: d.about)
+            out[id] = d.copy(status = status ?: d.status, dueMs = due ?: d.dueMs, about = about ?: d.about, reason = reason ?: d.reason)
         }
         return out.values.toList()
     }
@@ -453,7 +459,7 @@ object Brief {
 
     private val REPLY_RULES = """
         This message is the owner's reply to their daily brief. It is the owner speaking about their own world, so a plain statement in it is conf 100.
-        The brief listed actions waiting for the owner's answer, each under a tag such as A1; they are given below with what each one is. A sentence about a tagged action is a move on it, not a fact: answer it under "moves", one per action, with only what the owner changed: {"tag": "A1", "status": "approved", "due": "...", "about": ["kind/slug"]}. The status is "approved" (approve, yes, go ahead), "dismissed" (dismiss, no, skip) or "done" (done, did it). A new due is ISO 8601 UTC, read in the owner's timezone from the time now. A new subject names existing bodies by id. Write no fact from a sentence that only moves an action.
+        The brief listed actions waiting for the owner's answer, each under a tag such as A1; they are given below with what each one is. A sentence about a tagged action is a move on it, not a fact: answer it under "moves", one per action, with only what the owner changed: {"tag": "A1", "status": "dismissed", "due": "...", "about": ["kind/slug"], "reason": "..."}. The status is "approved" (approve, yes, go ahead), "dismissed" (dismiss, no, skip) or "done" (done, did it). A new due is ISO 8601 UTC, read in the owner's timezone from the time now. A new subject names existing bodies by id. When the owner says why ("dismiss A3, it's just the event"), put their own words under "reason"; when they give no reason, give none, and never make one up. Write no fact from a sentence that only moves an action.
         Everything else in the reply is facts, by the rules above. Something the owner asks to have done is an action.
         Answer with one JSON object and nothing else:
         {"moves": [...], "bodies": [...], "observations": [...], "actions": [...]}

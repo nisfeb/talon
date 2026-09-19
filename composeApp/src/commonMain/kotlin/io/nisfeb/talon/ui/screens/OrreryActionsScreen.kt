@@ -48,8 +48,8 @@ fun OrreryActionsScreen(
     modifier: Modifier = Modifier,
     /** Read what is waiting now, rather than whatever the last pass saw. */
     onShown: suspend () -> Unit = {},
-    /** Answer one on the spot: approved or dismissed. */
-    onDecide: (OrreryAction, String) -> Unit = { _, _ -> },
+    /** Answer one on the spot: approved or dismissed, with the owner's reason when they give one. */
+    onDecide: (OrreryAction, String, String) -> Unit = { _, _, _ -> },
     onOpen: (OrreryAction) -> Unit,
 ) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -94,7 +94,7 @@ fun OrreryActionsScreen(
 private fun Body(
     actions: List<OrreryAction>,
     onOpen: (OrreryAction) -> Unit,
-    onDecide: (OrreryAction, String) -> Unit,
+    onDecide: (OrreryAction, String, String) -> Unit,
 ) {
     val waiting = actions.filter { it.status == "proposed" }
     val settled = actions.filter { it.status != "proposed" }
@@ -140,8 +140,20 @@ private fun Body(
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
                     )
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { onDecide(a, "approved") }) { Text("Approve") }
-                        OutlinedButton(onClick = { onDecide(a, "dismissed") }) { Text("Dismiss") }
+                        Button(onClick = { onDecide(a, "approved", "") }) { Text("Approve") }
+                        // Dismiss asks why, in a tap: a reason teaches the
+                        // generator, and none is ever made up.
+                        var asking by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+                        androidx.compose.foundation.layout.Box {
+                            OutlinedButton(onClick = { asking = true }) { Text("Dismiss") }
+                            androidx.compose.material3.DropdownMenu(expanded = asking, onDismissRequest = { asking = false }) {
+                                androidx.compose.material3.DropdownMenuItem(text = { Text("No reason") }, onClick = { asking = false; onDecide(a, "dismissed", "") })
+                                io.nisfeb.talon.ui.DISMISS_REASONS.forEach { r ->
+                                    androidx.compose.material3.DropdownMenuItem(text = { Text(r) }, onClick = { asking = false; onDecide(a, "dismissed", r) })
+                                }
+                                androidx.compose.material3.DropdownMenuItem(text = { Text("Say why…") }, onClick = { asking = false; onOpen(a) })
+                            }
+                        }
                     }
                 }
             }

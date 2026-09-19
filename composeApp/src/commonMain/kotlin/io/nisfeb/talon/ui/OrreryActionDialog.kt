@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +39,9 @@ fun OrreryActionDialog(
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
+    // Why not, in the owner's words, only if they give it: it teaches
+    // the generator what they do not want.
+    var reason by remember { mutableStateOf("") }
     val message = remember(action) { action.messageToSend() }
     val event = remember(action) { action.eventToAdd() }
     val executable = message != null || event != null
@@ -105,6 +109,26 @@ fun OrreryActionDialog(
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
+                if (proposed || action.status == "approved") {
+                    Spacer(Modifier.height(8.dp))
+                    androidx.compose.material3.OutlinedTextField(
+                        value = reason,
+                        onValueChange = { reason = it },
+                        label = { Text("Why not? (optional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)) {
+                        DISMISS_REASONS.forEach { r ->
+                            androidx.compose.material3.AssistChip(onClick = { reason = r }, label = { Text(r) })
+                        }
+                    }
+                    Text(
+                        "A reason goes to the generator with the dismissal, so it stops proposing things like this one.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 note?.let {
                     Spacer(Modifier.height(8.dp))
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -116,7 +140,7 @@ fun OrreryActionDialog(
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
             ) {
                 TextButton(enabled = !busy, onClick = onClose) { Text("Close", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                TextButton(enabled = !busy, onClick = { move("dismissed") }) {
+                TextButton(enabled = !busy, onClick = { move("dismissed", reason) }) {
                     Text("Dismiss", color = MaterialTheme.colorScheme.error)
                 }
                 when {
@@ -134,3 +158,6 @@ fun OrreryActionDialog(
         },
     )
 }
+
+/** The reasons the client guide gives as examples, one tap each; the owner's own words go in the field. */
+val DISMISS_REASONS = listOf("just the event", "I always do this")

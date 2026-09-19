@@ -375,4 +375,27 @@ class OrreryBriefTest {
         val routed = Json.parseToJsonElement("""{"usage": {"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.0012}}""").jsonObject
         assertEquals("model anthropic/claude-opus-5: 100 in, 20 out, $0.0012", usageLine(AiSettings.Provider.OpenRouter, "anthropic/claude-opus-5", routed))
     }
+
+    @Test
+    fun `a dismissal carries the owner's reason, and only when they gave one`() {
+        val answer = Json.parseToJsonElement(
+            """{"moves": [{"tag": "A1", "status": "dismissed", "reason": " just the event "}, {"tag": "A2", "status": "dismissed"}]}""",
+        ).jsonObject
+        assertEquals(
+            listOf(Brief.Direction("1789-aaa", "dismissed", reason = "just the event"), Brief.Direction("1789-bbb", "dismissed")),
+            Brief.movesOf(answer, tags, known),
+        )
+        assertTrue("never make one up" in Brief.REPLY_SYSTEM)
+    }
+
+    @Test
+    fun `a reason is cut at five hundred bytes, never inside a character`() {
+        assertEquals("short", clipBytes("short", 500))
+        val cut = clipBytes("é".repeat(400), 500) // two bytes each
+        assertEquals(250, cut.length)
+        val emoji = clipBytes("🦐".repeat(200), 500) // four bytes, two chars each
+        assertTrue(emoji.encodeToByteArray().size <= 500)
+        assertTrue(!emoji.last().isHighSurrogate(), "no half of a pair left at the end")
+        assertEquals(125, emoji.length / 2)
+    }
 }

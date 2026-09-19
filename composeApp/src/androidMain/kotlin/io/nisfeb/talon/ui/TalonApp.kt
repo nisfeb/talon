@@ -2048,7 +2048,7 @@ fun TalonApp(
                 onBack = { actionsOpen = false },
                 modifier = mod,
                 onShown = { orreryRepo.refreshWaiting() },
-                onDecide = { a, status -> orreryRepo.answer(a.id, status) },
+                onDecide = { a, status, why -> orreryRepo.answer(a.id, status, why) },
             ) { a -> openAction = a }
 
             openGroupFlag != null -> GroupHomeScreen(

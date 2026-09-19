@@ -243,7 +243,7 @@ class OrreryApi(
 
     /** Move an action: approved, done, dismissed or failed, with a note where one is due. */
     suspend fun transition(token: String?, id: String, status: String, note: String = "") {
-        val body = buildJsonObject { put("status", status); if (note.isNotBlank()) put("note", note.take(500)) }
+        val body = buildJsonObject { put("status", status); if (note.isNotBlank()) put("note", clipBytes(note.trim(), 500)) }
         if (token != null) {
             request(bare, HttpMethod.Post, "/api/actions/$id", body.toString()) { header(HttpHeaders.Authorization, "Bearer $token") }
         } else {
@@ -404,4 +404,14 @@ fun scopeCovers(mine: JsonObject?, full: JsonObject): Boolean {
         names((spec as? JsonObject)?.get("attrs")).all { it in names(have["attrs"]) }
     }
     return kindsOk && schemaActions(full).all { it in schemaActions(mine) }
+}
+
+/** [s] cut to at most [max] bytes of UTF-8, never inside a character: the ship counts bytes. */
+fun clipBytes(s: String, max: Int): String {
+    if (s.encodeToByteArray().size <= max) return s
+    var end = s.length
+    while (end > 0 && s.substring(0, end).encodeToByteArray().size > max) end--
+    // Never leave half of a surrogate pair.
+    if (end > 0 && s[end - 1].isHighSurrogate()) end--
+    return s.substring(0, end)
 }
