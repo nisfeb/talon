@@ -177,25 +177,9 @@ fun SettingsScreen(
     // feature switch, and keying on all of it re-bunted these fields
     // whenever any switch flipped. Accepted edge: an unsaved edit is
     // replaced when a remote sync changes that same field mid-edit.
-    var provider by remember(aiState.provider) { mutableStateOf(aiState.provider) }
-    var apiKey by remember(aiState.apiKey) { mutableStateOf(aiState.apiKey) }
-    var model by remember(aiState.model) { mutableStateOf(aiState.model.orEmpty()) }
-    var baseUrl by remember(aiState.baseUrl) { mutableStateOf(aiState.baseUrl.orEmpty()) }
-    var revealKey by remember { mutableStateOf(false) }
-    var providerMenuOpen by remember { mutableStateOf(false) }
     var braveKey by remember(aiState.braveApiKey) { mutableStateOf(aiState.braveApiKey) }
     var revealBrave by remember { mutableStateOf(false) }
-    var sttKey by remember(aiState.sttApiKey) { mutableStateOf(aiState.sttApiKey) }
-    var revealStt by remember { mutableStateOf(false) }
     var promptEditorKind by remember { mutableStateOf<AiSettings.PromptKind?>(null) }
-
-    // Compare on the same normalization Save persists (trim + blank→null)
-    // so e.g. a pasted key's trailing newline doesn't leave Save enabled
-    // forever after a successful save.
-    val dirty = provider != aiState.provider ||
-        apiKey.trim() != aiState.apiKey ||
-        (model.trim().ifBlank { null } != aiState.model) ||
-        (baseUrl.trim().ifBlank { null } != aiState.baseUrl)
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -741,300 +725,104 @@ fun SettingsScreen(
 
             }
             if (safeTab == SettingsTab.Ai) {
-            Text(
-                "Frontier model",
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-            )
-            Text(
-                "Writes summaries, answers in the assistant, and carries out what the analyst proposes. " +
-                    "It can be a service or a server of your own. Features are hidden until it is set.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            // Provider picker
-            Box {
-                OutlinedButton(
-                    onClick = { providerMenuOpen = true },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(provider.label, modifier = Modifier.weight(1f))
-                    Icon(TalonIcons.ExpandMore, contentDescription = null)
-                }
-                DropdownMenu(
-                    expanded = providerMenuOpen,
-                    onDismissRequest = { providerMenuOpen = false },
-                ) {
-                    AiSettings.Provider.values().forEach { p ->
-                        DropdownMenuItem(
-                            text = { Text(p.label) },
-                            onClick = {
-                                provider = p
-                                providerMenuOpen = false
-                            },
-                        )
-                    }
-                }
-            }
-
-            OutlinedTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it },
-                label = { Text("API key") },
-                singleLine = true,
-                visualTransformation = if (revealKey) VisualTransformation.None
-                else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { revealKey = !revealKey }) {
-                        Icon(
-                            imageVector = if (revealKey) TalonIcons.VisibilityOff
-                            else TalonIcons.Visibility,
-                            contentDescription = if (revealKey) "Hide key" else "Show key",
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = model,
-                onValueChange = { model = it },
-                label = {
-                    Text(
-                        if (provider == AiSettings.Provider.Custom) "Model"
-                        else "Model (optional)"
-                    )
-                },
-                placeholder = {
-                    Text(
-                        when (provider) {
-                            AiSettings.Provider.Anthropic -> "claude-sonnet-4-5-20250929"
-                            AiSettings.Provider.OpenRouter -> "anthropic/claude-sonnet-4"
-                            AiSettings.Provider.OpenAi -> "gpt-4o-mini"
-                            AiSettings.Provider.Custom -> "e.g. llama-3.1-70b"
-                        }
-                    )
-                },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (provider == AiSettings.Provider.Custom) {
+            // Providers, the default model, a row per feature, and Jev.
+            AiSettingsSection(aiSettings, orrery)
+            // The assistant subsumes MCP (ship tools) and web access —
+            // no separate toggles. When it's on, offer the optional
+            // Brave key that powers its web search (it can open URLs
+            // without one).
+            if (isAssistantSupported && aiFeatureEnabled(aiState, AiSettings.Feature.Agent)) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Assistant web search",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                )
                 OutlinedTextField(
-                    value = baseUrl,
-                    onValueChange = { baseUrl = it },
-                    label = { Text("Base URL") },
-                    placeholder = { Text("https://api.example.com/v1") },
+                    value = braveKey,
+                    onValueChange = { braveKey = it },
+                    label = { Text("Brave Search API key (optional)") },
                     singleLine = true,
+                    visualTransformation = if (revealBrave) VisualTransformation.None
+                    else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { revealBrave = !revealBrave }) {
+                            Icon(
+                                imageVector = if (revealBrave) TalonIcons.VisibilityOff
+                                else TalonIcons.Visibility,
+                                contentDescription = if (revealBrave) "Hide key" else "Show key",
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { aiSettings.setBraveApiKey(braveKey.trim()) },
+                        enabled = braveKey.trim() != aiState.braveApiKey,
+                    ) { Text("Save key") }
+                }
                 Text(
-                    "OpenAI-compatible endpoint. Accepts a base URL ending " +
-                        "in `/v1` or a full `/v1/chat/completions` URL.",
+                    "Optional — a Brave Search API key lets the assistant search " +
+                        "the web (it can already open URLs without one). " +
+                        "Get a free key at search.brave.com/help/api.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "System prompts",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                )
+                Text(
+                    "The instructions the AI follows. Urbit knowledge is shared by " +
+                        "the assistant and scheduled jobs; each also has its own. " +
+                        "Customizing changes behavior; edits sync across your devices.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                PROMPT_PARTS.forEach { part ->
+                    OutlinedButton(onClick = { promptEditorKind = part.kind }) {
+                        Text(
+                            if (aiState.prompt(part.kind).isBlank()) "Edit ${part.label}"
+                            else "Edit ${part.label} (customized)",
+                        )
+                    }
+                }
+                promptEditorKind?.let { kind ->
+                    val part = PROMPT_PARTS.first { it.kind == kind }
+                    SystemPromptEditorDialog(
+                        title = part.label,
+                        current = aiState.prompt(kind),
+                        default = part.default,
+                        onSave = {
+                            aiSettings.setPrompt(kind, it)
+                            promptEditorKind = null
+                        },
+                        onDismiss = { promptEditorKind = null },
+                    )
+                }
             }
 
-            Spacer(Modifier.height(4.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        aiSettings.update(
-                            provider,
-                            apiKey.trim(),
-                            model.trim().ifBlank { null },
-                            baseUrl.trim().ifBlank { null },
-                        )
-                    },
-                    enabled = dirty,
-                ) { Text("Save") }
-                TextButton(
-                    onClick = {
-                        // The chat credential only. clear() also wiped
-                        // the Whisper key, the Brave key, every custom
-                        // system prompt and every feature toggle — none
-                        // of which this button names.
-                        aiSettings.update(AiSettings.Provider.Anthropic, "", null, null)
-                        provider = AiSettings.Provider.Anthropic
-                        apiKey = ""
-                        model = ""
-                        baseUrl = ""
-                    },
-                    enabled = aiState.hasKey(),
-                ) { Text("Remove key") }
-            }
             // Any stored credential is enough to want this switch: it
             // used to live under hasKey(), so someone who set only a
             // Whisper key had it pushed to %settings (syncEnabled
             // defaults on) with no way to opt out short of pasting a
             // chat key first.
-            if (aiState.hasKey() || aiState.sttApiKey.isNotBlank() ||
-                aiState.braveApiKey.isNotBlank()
-            ) {
+            if (aiState.hasCredentials()) {
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
                 FeatureToggleRow(
                     label = "Sync AI settings across devices",
-                    description = "Stores your provider, model, toggles, and all three " +
-                        "API keys — chat, Whisper transcription, and Brave Search — in " +
-                        "%settings on the ship. The keys will be on the ship — only " +
-                        "enable if you trust the ship.",
+                    description = "Stores your providers, models and switches, with every " +
+                        "provider's key and the Brave Search key, in %settings on the " +
+                        "ship. The keys will be on the ship, so only enable it if you " +
+                        "trust the ship.",
                     enabled = aiState.syncEnabled,
                     onChange = { aiSettings.setSyncEnabled(it) },
                 )
             }
-            if (aiState.hasKey()) {
-                Text(
-                    "✓ AI is enabled",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Cloud features",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                )
-                AiSettings.Feature.values()
-                    .filter { it.requiresCloudKey }
-                    // The Assistant needs the embedder host (isAssistantSupported);
-                    // the other cloud features run anywhere a key is set.
-                    .filter { isAssistantSupported || it != AiSettings.Feature.Agent }
-                    .forEach { feature ->
-                        FeatureToggleRow(
-                            label = feature.label,
-                            description = feature.description,
-                            enabled = aiFeatureEnabled(aiState, feature),
-                            onChange = { aiSettings.setFeature(feature, it) },
-                        )
-                    }
-
-                // The assistant subsumes MCP (ship tools) and web access —
-                // no separate toggles. When it's on, offer the optional
-                // Brave key that powers its web search (it can open URLs
-                // without one).
-                if (isAssistantSupported && aiFeatureEnabled(aiState, AiSettings.Feature.Agent)) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Assistant web search",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    )
-                    OutlinedTextField(
-                        value = braveKey,
-                        onValueChange = { braveKey = it },
-                        label = { Text("Brave Search API key (optional)") },
-                        singleLine = true,
-                        visualTransformation = if (revealBrave) VisualTransformation.None
-                        else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            IconButton(onClick = { revealBrave = !revealBrave }) {
-                                Icon(
-                                    imageVector = if (revealBrave) TalonIcons.VisibilityOff
-                                    else TalonIcons.Visibility,
-                                    contentDescription = if (revealBrave) "Hide key" else "Show key",
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = { aiSettings.setBraveApiKey(braveKey.trim()) },
-                            enabled = braveKey.trim() != aiState.braveApiKey,
-                        ) { Text("Save key") }
-                    }
-                    Text(
-                        "Optional — a Brave Search API key lets the assistant search " +
-                            "the web (it can already open URLs without one). " +
-                            "Get a free key at search.brave.com/help/api.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "System prompts",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    )
-                    Text(
-                        "The instructions the AI follows. Urbit knowledge is shared by " +
-                            "the assistant and scheduled jobs; each also has its own. " +
-                            "Customizing changes behavior; edits sync across your devices.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    PROMPT_PARTS.forEach { part ->
-                        OutlinedButton(onClick = { promptEditorKind = part.kind }) {
-                            Text(
-                                if (aiState.prompt(part.kind).isBlank()) "Edit ${part.label}"
-                                else "Edit ${part.label} (customized)",
-                            )
-                        }
-                    }
-                    promptEditorKind?.let { kind ->
-                        val part = PROMPT_PARTS.first { it.kind == kind }
-                        SystemPromptEditorDialog(
-                            title = part.label,
-                            current = aiState.prompt(kind),
-                            default = part.default,
-                            onSave = {
-                                aiSettings.setPrompt(kind, it)
-                                promptEditorKind = null
-                            },
-                            onDismiss = { promptEditorKind = null },
-                        )
-                    }
-                }
-            }
-
-            // ── Call transcription (Whisper) ───────────────────────
-            Spacer(Modifier.height(8.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Call transcription",
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-            )
-            Text(
-                "Transcribing a recorded party line uses OpenAI Whisper. If your " +
-                    "chat provider above is OpenAI (or a compatible Custom endpoint) " +
-                    "that key is used automatically \u2014 otherwise paste a " +
-                    "Whisper-capable key here.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedTextField(
-                value = sttKey,
-                onValueChange = { sttKey = it },
-                label = { Text("Whisper (OpenAI) API key") },
-                singleLine = true,
-                visualTransformation = if (revealStt) VisualTransformation.None
-                else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { revealStt = !revealStt }) {
-                        Icon(
-                            imageVector = if (revealStt) TalonIcons.VisibilityOff
-                            else TalonIcons.Visibility,
-                            contentDescription = if (revealStt) "Hide key" else "Show key",
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { aiSettings.setSttApiKey(sttKey.trim()) },
-                    enabled = sttKey.trim() != aiState.sttApiKey,
-                ) { Text("Save key") }
-                if (aiState.sttApiKey.isNotBlank()) {
-                    TextButton(onClick = {
-                        aiSettings.setSttApiKey("")
-                        sttKey = ""
-                    }) { Text("Remove") }
-                }
-            }
-
             // On-device features — gated behind isOnDeviceAiSupported.
             // True on Android (ML Kit + on-device embedder available);
             // false on desktop until / unless an equivalent stack lands.
@@ -1125,9 +913,6 @@ fun SettingsScreen(
 
             }
             if (safeTab == SettingsTab.Ai) {
-            // The other model, and then what Talon feeds orrery with it.
-            PrivateModelSection(orrery, aiSettings)
-            orrery?.let { OrrerySettingsSection(it) }
             // Loops — scheduled agent prompts. Needs a cloud key (it runs
             // the agent) and a platform that can fire it, so it's gated on
             // isLoopsSupported (Android via AlarmManager; desktop via the

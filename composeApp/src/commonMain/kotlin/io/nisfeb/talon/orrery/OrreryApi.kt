@@ -107,6 +107,23 @@ class OrreryApi(
         return generatorRunOf(o)
     }
 
+    /** The generator's settings, the owner's route; its key is only ever said to be set. */
+    suspend fun generatorSettings(): GeneratorSettings? {
+        val text = runCatching { request(owner, HttpMethod.Get, "/api/generator") }.getOrNull() ?: return null
+        return runCatching { generatorSettingsOf(Json.parseToJsonElement(text).jsonObject) }.getOrNull()
+    }
+
+    /** Merge into the generator's settings. A blank or absent key keeps the one the ship has. */
+    suspend fun setGenerator(enabled: Boolean, url: String?, model: String?, apiKey: String?) {
+        val body = buildJsonObject {
+            put("enabled", enabled)
+            url?.let { put("url", it) }
+            model?.let { put("model", it) }
+            apiKey?.takeIf { it.isNotBlank() }?.let { put("api_key", it) }
+        }
+        request(owner, HttpMethod.Put, "/api/generator", body.toString())
+    }
+
     /** The bodies the key may see, with the rev the view was at. */
     suspend fun state(token: String): StateView = viewOf(stateJson(token))
 
@@ -429,6 +446,16 @@ fun clipBytes(s: String, max: Int): String {
 }
 
 /** What the ship's generator last did, as much of it as a line needs. */
+/** The on-ship generator's settings, as far as Talon shows them. */
+data class GeneratorSettings(val enabled: Boolean, val url: String?, val model: String?, val keySet: Boolean)
+
+fun generatorSettingsOf(o: JsonObject) = GeneratorSettings(
+    enabled = o["enabled"]?.jsonPrimitive?.booleanOrNull == true,
+    url = o["url"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() },
+    model = o["model"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() },
+    keySet = o["api_key_set"]?.jsonPrimitive?.booleanOrNull == true,
+)
+
 data class GeneratorRun(
     val atMs: Long?,
     val filed: Int?,

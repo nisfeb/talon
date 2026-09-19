@@ -14,7 +14,13 @@ import kotlinx.serialization.Serializable
  * exactly what it used before.
  */
 @Serializable
-enum class ProviderKind { OpenRouter, Anthropic, OpenAi, OpenAiCompatible, ThisDevice }
+enum class ProviderKind(val label: String) {
+    OpenRouter("OpenRouter"),
+    Anthropic("Anthropic"),
+    OpenAi("OpenAI"),
+    OpenAiCompatible("A server of your own"),
+    ThisDevice("On this device"),
+}
 
 @Serializable
 data class ModelInfo(
@@ -132,7 +138,7 @@ fun migrateProfile(cfg: AiSettings.Config, inputs: ProfileInputs = ProfileInputs
     val providers = mutableListOf<AiProvider>()
     val hasMain = cfg.apiKey.isNotBlank() || (cfg.provider == AiSettings.Provider.Custom && !cfg.baseUrl.isNullOrBlank())
     if (hasMain) {
-        providers += AiProvider(MAIN_PROVIDER, kindOf(cfg.provider), cfg.provider.label, cfg.baseUrl, cfg.apiKey)
+        providers += AiProvider(MAIN_PROVIDER, kindOf(cfg.provider), kindOf(cfg.provider).label, cfg.baseUrl, cfg.apiKey)
     }
     val privateUrl = cfg.privateBaseUrl?.takeIf { it.isNotBlank() }
     val privateRef = if (privateUrl != null) {
@@ -174,6 +180,26 @@ fun migrateProfile(cfg: AiSettings.Config, inputs: ProfileInputs = ProfileInputs
 
 /** The profile these settings stand for: the one the owner saved, else the one today's fields make. */
 fun AiSettings.Config.profile(): AiProfile = savedProfile ?: migrateProfile(this)
+
+/**
+ * Whether the owner switched [f] on. Before a profile is saved the old
+ * settings decide, which for a switch the migration cannot see (the
+ * brief, which followed Feed Orrery) is [before].
+ */
+fun AiSettings.Config.featureOn(f: AiFeature, before: Boolean): Boolean = savedProfile?.isOn(f) ?: before
+
+/**
+ * The OpenAI-shaped base the ship's generator can call on this
+ * provider: none for Anthropic's own shape, this device, or a server
+ * on this machine's loopback, which the ship cannot reach.
+ */
+fun AiProvider.shipBase(): String? = when (kind) {
+    ProviderKind.OpenRouter -> "https://openrouter.ai/api/v1"
+    ProviderKind.OpenAi -> "https://api.openai.com/v1"
+    ProviderKind.OpenAiCompatible -> baseUrl?.trim()?.trimEnd('/')?.removeSuffix("/chat/completions")
+        ?.takeUnless { u -> u.substringAfter("://").substringBefore('/').substringBefore(':').let { it == "localhost" || it.startsWith("127.") } }
+    else -> null
+}
 
 /**
  * The settings a feature's chat client should see: its resolved provider
@@ -302,11 +328,16 @@ fun AiProfile.withLegacy(cfg: AiSettings.Config): AiProfile {
     val dp = def?.let { provider(it.provider) }
     if (dp != null && providerOf(dp.kind) != null) {
         providers = providers.map {
-            if (it.id == dp.id) it.copy(kind = kindOfLegacy(cfg.provider), apiKey = cfg.apiKey.ifBlank { it.apiKey }, baseUrl = cfg.baseUrl) else it
+            if (it.id != dp.id) it else it.copy(
+                kind = kindOfLegacy(cfg.provider),
+                label = if (it.label == it.kind.label) kindOfLegacy(cfg.provider).label else it.label,
+                apiKey = cfg.apiKey.ifBlank { it.apiKey },
+                baseUrl = cfg.baseUrl,
+            )
         }
         def = def.copy(model = cfg.model.orEmpty())
     } else if (dp == null && cfg.apiKey.isNotBlank()) {
-        providers = listOf(AiProvider(MAIN_PROVIDER, kindOfLegacy(cfg.provider), cfg.provider.label, cfg.baseUrl, cfg.apiKey)) +
+        providers = listOf(AiProvider(MAIN_PROVIDER, kindOfLegacy(cfg.provider), kindOfLegacy(cfg.provider).label, cfg.baseUrl, cfg.apiKey)) +
             providers.filterNot { it.id == MAIN_PROVIDER }
         def = ModelRef(MAIN_PROVIDER, cfg.model.orEmpty())
     }

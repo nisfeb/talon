@@ -33,7 +33,8 @@ object CallRecordingPublisher {
         // chat key. Anthropic and OpenRouter have no audio endpoint.
         val r = cfg.profile().resolve(AiFeature.Transcription)?.takeIf { cfg.profile().isOn(AiFeature.Transcription) } ?: return null
         val key = r.provider.apiKey.takeIf { it.isNotBlank() } ?: return null
-        val model = WHISPER_MODEL
+        // The row's own speech model; one that follows the default is a chat model, so whisper-1.
+        val model = cfg.profile().features[AiFeature.Transcription]?.model?.model?.ifBlank { null } ?: WHISPER_MODEL
         return when (r.provider.kind) {
             ProviderKind.OpenAi -> Stt(OPENAI_STT, key, model)
             // The chat model is not a speech model, and the saved base URL

@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ai
 
+import io.nisfeb.talon.orrery.DecideSettings
+import io.nisfeb.talon.orrery.under
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -110,5 +112,26 @@ class AiProfileSyncTest {
         val kept = base.copy(savedProfile = blankKeys).keepingCredentials(local).savedProfile!!
         assertTrue(kept.jev)
         assertEquals(mine.keys(), kept.keys())
+    }
+
+    @Test
+    fun `once a profile is saved its switches decide jev and the brief, before it the old ones do`() {
+        val ds = DecideSettings(on = true, gate = false, relevance = false)
+        assertEquals(ds, ds.under(base))
+        val jevOn = base.copy(savedProfile = migrateProfile(base).copy(jev = true))
+        assertEquals(ds.copy(gate = true, relevance = true), ds.under(jevOn), "one switch, all three")
+        assertFalse(ds.under(base.copy(savedProfile = migrateProfile(base))).on)
+        assertTrue(base.featureOn(AiFeature.OrreryBrief, before = true))
+        assertFalse(jevOn.featureOn(AiFeature.OrreryBrief, before = true))
+    }
+
+    @Test
+    fun `the ship's generator is offered what the ship can reach`() {
+        fun server(url: String) = AiProvider("s", ProviderKind.OpenAiCompatible, "s", url).shipBase()
+        assertNull(server("http://localhost:1234/v1"))
+        assertNull(server("http://127.0.0.1:1234/v1"))
+        assertEquals("http://192.168.1.5:1234/v1", server("http://192.168.1.5:1234/v1/chat/completions"))
+        assertEquals("https://openrouter.ai/api/v1", AiProvider("o", ProviderKind.OpenRouter, "o").shipBase())
+        assertNull(AiProvider("a", ProviderKind.Anthropic, "a").shipBase())
     }
 }

@@ -1,6 +1,7 @@
 package io.nisfeb.talon.orrery
 
 import io.nisfeb.talon.ai.forFeature
+import io.nisfeb.talon.ai.featureOn
 import io.ktor.client.HttpClient
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.readUTF8Line
@@ -131,6 +132,26 @@ class OrreryRepo(
     private val _generator = MutableStateFlow<GeneratorRun?>(null)
     /** What the ship's generator last did, read with the open list. */
     val generator: StateFlow<GeneratorRun?> = _generator.asStateFlow()
+    private val _generatorSettings = MutableStateFlow<GeneratorSettings?>(null)
+    /** The ship's generator settings, as the owner reads them; null until read, or where there is no generator. */
+    val generatorSettings: StateFlow<GeneratorSettings?> = _generatorSettings.asStateFlow()
+
+    suspend fun loadGenerator() {
+        val a = api ?: return
+        a.generatorSettings()?.let { _generatorSettings.value = it }
+        a.generatorLast()?.let { _generator.value = it }
+    }
+
+    /**
+     * Point the ship's generator: on or off, and at a base, model and
+     * key where given. The key goes to the ship, which keeps it and
+     * never gives it back. Anything not given is left as the ship has it.
+     */
+    suspend fun setGenerator(enabled: Boolean, url: String? = null, model: String? = null, key: String? = null): Result<Unit> = runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        a.setGenerator(enabled, url, model, key)
+        a.generatorSettings()?.let { _generatorSettings.value = it }
+    }
 
     private val _decideToday = MutableStateFlow<Pair<String, DecideDay>?>(null)
     /** Today's tally of the decision model on this install, as the log has it. */
@@ -347,6 +368,7 @@ class OrreryRepo(
         briefZone = zone
         runCatching { answerReplies(a, token, s, mail, state, zone, nowMs) }
             .onFailure { Log.w(TAG, "replies to the brief skipped: ${it.message}") }
+        if (cloud?.config?.invoke()?.featureOn(io.nisfeb.talon.ai.AiFeature.OrreryBrief, before = true) == false) return
         val day = Brief.dueDay(nowMs, zone, briefGrace) ?: return
         val sent = db.orrerySent()
         if (sent.get(s, "brief:$day") != null) return
@@ -872,7 +894,7 @@ class OrreryRepo(
 
     /** The decision model, when the owner has turned it on and an OpenRouter key is set. */
     private fun decider(): Pair<Decider, DecideSettings>? {
-        val d = decide?.settings?.value?.takeIf { it.on } ?: return null
+        val d = decide?.settings?.value?.under(cloud?.config?.invoke())?.takeIf { it.on } ?: return null
         val key = cloud?.config?.invoke()?.let(::openRouterKey) ?: return null
         // The bare client: the ship's cookie has no business at OpenRouter.
         return OpenRouterDecider(bare, key, d) to d
