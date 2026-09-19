@@ -2,6 +2,7 @@ package io.nisfeb.talon.orrery
 
 import io.nisfeb.talon.calendar.CalendarTask
 import io.nisfeb.talon.calendar.metaStr
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
@@ -38,7 +39,23 @@ sealed interface TaskMove {
 
     /** Tell the ship the action is done: the owner ticked its todo. */
     data class Report(val actionId: String) : TaskMove
+
+    /** File a todo the owner typed as an approved task, then link it. */
+    data class Adopt(val todo: CalendarTask) : TaskMove
+
+    /** Link a todo the owner typed to the open task it already is, approving it if it was only proposed. */
+    data class Link(val todo: CalendarTask, val actionId: String, val approve: Boolean) : TaskMove
+
+    /** Dismiss a task the owner typed and has since deleted from the calendar. */
+    data class Withdraw(val actionId: String) : TaskMove
 }
+
+/** What a task filed from a todo says about itself: the owner wrote it in the calendar. */
+const val TYPED_IN_CALENDAR = "typed in the calendar"
+
+/** Whether an action was filed from a todo the owner typed. */
+fun OrreryAction.typedInCalendar(): Boolean =
+    (payload["why"] as? JsonPrimitive)?.contentOrNull == TYPED_IN_CALENDAR
 
 /** The action a todo was made for, when it was made for one. */
 fun CalendarTask.orreryAction(): String? = meta.metaStr("orrery").takeIf { it.isNotBlank() }
@@ -53,7 +70,16 @@ fun CalendarTask.isOrrerys(): Boolean =
  * waits in the tray rather than the task list.
  */
 private val LIVE = setOf("approved", "claimed")
+private val OPEN = LIVE + "proposed"
 private val REFUSED = setOf("dismissed", "failed")
+
+/** A todo's due and an action's due fall on one day, or neither has one. */
+private fun sameDue(due: String?, dueMs: Long?): Boolean {
+    if (due == null || dueMs == null) return due == null && dueMs == null
+    val a = runCatching { kotlinx.datetime.Instant.parse(due) }.getOrNull() ?: return false
+    val utc = kotlinx.datetime.TimeZone.UTC
+    return a.toLocalDateTime(utc).date == kotlinx.datetime.Instant.fromEpochMilliseconds(dueMs).toLocalDateTime(utc).date
+}
 
 /**
  * What to do so that the ship and the calendar agree.
@@ -72,9 +98,28 @@ fun taskMoves(actions: List<OrreryAction>, todos: List<CalendarTask>): List<Task
     val byAction = linked.mapValues { it.value.first() }
     val out = mutableListOf<TaskMove>()
     linked.values.forEach { ts -> ts.drop(1).forEach { out += TaskMove.Drop(it.id) } }
+    // A todo the owner typed is a task the owner approved. One whose name
+    // and due match an open task nobody's todo carries is that task, filed
+    // by a pass that died before it could link: link it, do not file a
+    // twin. A ticked one is history and is left alone.
+    val free = tasks.filter { it.status in OPEN && it.id !in byAction }.toMutableList()
+    val adopted = mutableSetOf<String>()
+    for (t in todos.filter { it.cat == "todo" && !it.done && !it.isOrrerys() && it.name.isNotBlank() }) {
+        val match = free.firstOrNull { it.title.trim() == t.name.trim() && sameDue(it.due, t.dueMs) }
+        if (match != null) {
+            free.remove(match)
+            adopted += match.id
+            out += TaskMove.Link(t, match.id, approve = match.status == "proposed")
+        } else {
+            out += TaskMove.Adopt(t)
+        }
+    }
     for (a in tasks) {
         val todo = byAction[a.id]
         when {
+            a.id in adopted -> Unit
+            // The owner wrote it and has since taken it off the calendar.
+            a.status in LIVE && todo == null && a.typedInCalendar() -> out += TaskMove.Withdraw(a.id)
             a.status in LIVE && todo == null -> out += TaskMove.Make(a)
             a.status == "done" && todo != null && !todo.done -> out += TaskMove.Tick(todo.id)
             a.status in REFUSED && todo != null -> out += TaskMove.Drop(todo.id)
@@ -111,4 +156,29 @@ fun todoBody(a: OrreryAction): kotlinx.serialization.json.JsonObject = buildJson
         runCatching { kotlinx.datetime.Instant.parse(due).toEpochMilliseconds() }
             .getOrNull()?.let { put("due_ms", it) }
     }
+}
+
+/** The action a todo the owner typed becomes: its name, its due, its note, and where it came from. */
+fun adoptBody(t: CalendarTask): kotlinx.serialization.json.JsonObject = buildJsonObject {
+    put("kind", "task")
+    put("title", t.name.trim().take(200))
+    putJsonArray("about") {}
+    t.dueMs?.let { put("due", isoUtc(it)) }
+    putJsonObject("payload") {
+        if (t.note.isNotBlank()) put("notes", t.note.trim())
+        put("why", TYPED_IN_CALENDAR)
+    }
+}
+
+/**
+ * The edit that links a todo to its action: the whole todo as it is,
+ * with `meta.orrery` added. From then on it is a mirrored todo.
+ */
+fun linkBody(t: CalendarTask, actionId: String): kotlinx.serialization.json.JsonObject = buildJsonObject {
+    put("action", "edit-event")
+    put("id", t.id)
+    put("cat", "todo")
+    put("meta", kotlinx.serialization.json.JsonObject(t.meta + ("orrery" to JsonPrimitive(actionId))))
+    put("cal", t.cal)
+    t.dueMs?.let { put("due_ms", it) }
 }

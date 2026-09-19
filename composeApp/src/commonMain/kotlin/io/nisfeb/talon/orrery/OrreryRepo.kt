@@ -414,12 +414,11 @@ class OrreryRepo(
      */
     private suspend fun mirrorTasks(a: OrreryApi, token: String?, url: String) = mirrorLock.withLock {
         val actions = a.actions(token, status = "all")
-        if (actions.none { it.kind == "task" }) return@withLock
         val cal = CalendarApi(http, url)
         val moves = taskMoves(actions, cal.tasks())
         if (moves.isEmpty()) return@withLock
         val ball = cal.config().ball.takeIf { it.isNotBlank() } ?: return@withLock
-        for (m in moves) {
+        for (m in moves) runCatching {
             when (m) {
                 is TaskMove.Make -> cal.poke(ball, todoBody(m.action))
                 is TaskMove.Tick -> cal.poke(ball, io.nisfeb.talon.calendar.doneBody(m.todoId, true))
@@ -428,8 +427,21 @@ class OrreryRepo(
                 // holds the claim the ship refuses, and the next pass
                 // finds it still ticked and says so again.
                 is TaskMove.Report -> a.transition(token, m.actionId, "done", "ticked in the calendar")
+                // A todo the owner typed: filed under this install's key,
+                // approved because the owner wrote it, then linked. A pass
+                // that dies between filing and linking links it next time.
+                is TaskMove.Adopt -> if (token != null) {
+                    val (id, status) = a.act(adoptBody(m.todo), token)
+                    if (status == "proposed") a.transition(token, id, "approved", TYPED_IN_CALENDAR)
+                    cal.poke(ball, linkBody(m.todo, id))
+                }
+                is TaskMove.Link -> {
+                    if (m.approve) a.transition(token, m.actionId, "approved", TYPED_IN_CALENDAR)
+                    cal.poke(ball, linkBody(m.todo, m.actionId))
+                }
+                is TaskMove.Withdraw -> a.transition(token, m.actionId, "dismissed", "removed from the calendar by the owner")
             }
-        }
+        }.onFailure { Log.i(TAG, "task move ${m::class.simpleName} skipped: ${it.message}") }
     }
 
     /**

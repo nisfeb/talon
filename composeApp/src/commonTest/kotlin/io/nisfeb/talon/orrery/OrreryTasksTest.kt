@@ -4,6 +4,9 @@ import io.nisfeb.talon.calendar.CalendarTask
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -105,5 +108,76 @@ class OrreryTasksTest {
             }).isOrrerys(),
         )
         assertTrue(!todo("t3", null).isOrrerys(), "one the owner typed is theirs")
+    }
+
+    private fun typed(name: String, due: Long? = null, done: Boolean = false, note: String = "") = CalendarTask(
+        id = "hand-" + name.lowercase().replace(' ', '-'),
+        cal = "home",
+        cat = "todo",
+        done = done,
+        dueMs = due,
+        meta = buildJsonObject {
+            put("name", JsonPrimitive(name))
+            if (note.isNotEmpty()) put("note", JsonPrimitive(note))
+            put("color", JsonPrimitive("#88aa00"))
+        },
+    )
+
+    private val friday = 1_790_294_400_000L // 2026-09-25T00:00:00Z, the calendar's due for that day
+
+    private fun owned(id: String, title: String, status: String, due: String? = null, typedHere: Boolean = true) = OrreryAction(
+        id, "task", title,
+        if (typedHere) buildJsonObject { put("why", JsonPrimitive(TYPED_IN_CALENDAR)) } else JsonObject(emptyMap()),
+        emptyList(), due, status, "talon/desktop",
+    )
+
+    @Test
+    fun `a todo the owner typed is filed as a task, and a ticked one is left alone`() {
+        val gift = typed("Buy Magnus's gift", due = friday, note = "the blue one")
+        assertEquals(listOf(TaskMove.Adopt(gift)), taskMoves(emptyList(), listOf(gift, typed("Paid the gas bill", done = true))))
+        // Orrery's own are never filed again, however they are marked.
+        val tagged = CalendarTask(id = "t9", cat = "todo", meta = buildJsonObject { put("name", JsonPrimitive("x")); put("tags", kotlinx.serialization.json.buildJsonArray { add(JsonPrimitive("orrery")) }) })
+        assertTrue(taskMoves(emptyList(), listOf(todo("t1", "a1"), tagged)).none { it is TaskMove.Adopt })
+    }
+
+    @Test
+    fun `one filed by a pass that died before linking is linked, not filed twice`() {
+        val gift = typed("Buy Magnus's gift", due = friday)
+        val filed = owned("a7", "Buy Magnus's gift", "approved", due = "2026-09-25T00:00:00Z")
+        assertEquals(listOf(TaskMove.Link(gift, "a7", approve = false)), taskMoves(listOf(filed), listOf(gift)))
+        // Still only proposed: the owner wrote it, so it is approved on the way.
+        assertEquals(listOf(TaskMove.Link(gift, "a7", approve = true)), taskMoves(listOf(filed.copy(status = "proposed")), listOf(gift)))
+        // Another day is another task.
+        assertEquals(listOf(TaskMove.Adopt(gift), TaskMove.Withdraw("a7")), taskMoves(listOf(filed.copy(due = "2026-10-02T00:00:00Z")), listOf(gift)))
+    }
+
+    @Test
+    fun `a typed task whose todo was deleted is withdrawn, while orrery's own gets its todo back`() {
+        val moves = taskMoves(
+            listOf(owned("a7", "Buy Magnus's gift", "approved"), owned("a8", "Book the ferry", "approved", typedHere = false)),
+            emptyList(),
+        )
+        assertEquals(listOf(TaskMove.Withdraw("a7")), moves.filterIsInstance<TaskMove.Withdraw>())
+        assertEquals(listOf("a8"), moves.filterIsInstance<TaskMove.Make>().map { it.action.id })
+    }
+
+    @Test
+    fun `filing takes the todo's name, due and note, and linking keeps the whole todo`() {
+        val gift = typed("Buy Magnus's gift", due = friday, note = "the blue one")
+        val act = adoptBody(gift)
+        assertEquals("task", act["kind"]!!.jsonPrimitive.content)
+        assertEquals("Buy Magnus's gift", act["title"]!!.jsonPrimitive.content)
+        assertEquals("2026-09-25T00:00:00Z", act["due"]!!.jsonPrimitive.content)
+        assertEquals("the blue one", act["payload"]!!.jsonObject["notes"]!!.jsonPrimitive.content)
+        assertEquals(TYPED_IN_CALENDAR, act["payload"]!!.jsonObject["why"]!!.jsonPrimitive.content)
+        val link = linkBody(gift, "a7")
+        assertEquals("edit-event", link["action"]!!.jsonPrimitive.content)
+        assertEquals(gift.id, link["id"]!!.jsonPrimitive.content)
+        assertEquals("home", link["cal"]!!.jsonPrimitive.content)
+        assertEquals(friday, link["due_ms"]!!.jsonPrimitive.content.toLong())
+        val meta = link["meta"]!!.jsonObject
+        assertEquals("a7", meta["orrery"]!!.jsonPrimitive.content)
+        assertEquals("#88aa00", meta["color"]!!.jsonPrimitive.content, "what the todo carried rides through")
+        assertEquals("the blue one", meta["note"]!!.jsonPrimitive.content)
     }
 }
