@@ -11,6 +11,8 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.datetime.offsetAt
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * One message in, claims out, through whatever model the ladder gave.
@@ -29,7 +31,8 @@ object ModelExtractor {
 
     /** JSON, and only the answer's shape of it, in llama.cpp's GBNF. */
     val GRAMMAR: String = """
-        root ::= "{" ws "\"claims\"" ws ":" ws "[" ws (claim (ws "," ws claim)*)? ws "]" ws "}"
+        root ::= "{" ws "\"claims\"" ws ":" ws "[" ws (claim (ws "," ws claim)*)? ws "]" ws ("," ws "\"plan\"" ws ":" ws (plan | "null") ws)? "}"
+        plan ::= "{" ws "\"title\"" ws ":" ws string ws "," ws "\"starts\"" ws ":" ws string ws ("," ws "\"ends\"" ws ":" ws string ws)? ("," ws "\"location\"" ws ":" ws string ws)? "}"
         claim ::= "{" ws "\"subject\"" ws ":" ws string ws "," ws "\"attr\"" ws ":" ws string ws "," ws "\"value\"" ws ":" ws value ws "," ws "\"conf\"" ws ":" ws number ws ("," ws "\"until_hours\"" ws ":" ws number ws)? "}"
         value ::= string | "null" | "{" ws "\"ref\"" ws ":" ws string ws "}"
         string ::= "\"" ([^"\\] | "\\" (["\\/bfnrt] | "u" hex hex hex hex))* "\""
@@ -39,12 +42,13 @@ object ModelExtractor {
     """.trimIndent()
 
     val SYSTEM: String = """
-        You read one chat message and write down what it states is true now about the listed bodies. Answer with JSON only, in this shape: {"claims":[{"subject":"<id>","attr":"<word>","value":<value>,"conf":<0-100>,"until_hours":<number, optional>}]}
+        You read one chat message and write down what it states is true now about the listed bodies. Answer with JSON only, in this shape: {"claims":[{"subject":"<id>","attr":"<word>","value":<value>,"conf":<0-100>,"until_hours":<number, optional>}],"plan":<optional, see below>}
         subject is copied exactly from the listed ids, or is the author's id. Only the author and the bodies the message names can be subjects. attr is one short lowercase word: status, location, phone, email. value is a short string; or {"ref":"<listed id>"} when it names a listed body; or null when something has stopped being true. conf is how sure you are. until_hours is how long a temporary claim holds, such as being somewhere. At most three claims.
         Claim only what the message states as fact about now. A question, a joke, a wish, a plan, or the past is nothing: {"claims":[]}.
         conf is 90 for a plain statement, 60 for something you are reading into it, 40 for a guess. A medical or a money fact is not yours to write: leave it out.
         A status is what someone is doing or dealing with right now, in plain words, as an onlooker would put it: "on jury duty", "stranded, waiting for a tow", "travelling", "sick". It is never a feeling, a quote or a wish. A feeling goes under mood, which is thrown away, so that it never lands on status.
         Earlier messages are there so the new one reads right: a reply, a pronoun, a mood that carries over. Claim nothing from them.
+        A plan the message fixes in time, a day and usually an hour ("dinner Friday at 8", "dentist on the 3rd at 2:30"), is not a claim. Put it beside the claims as "plan":{"title":"<a few words>","starts":"<ISO 8601 with the offset in When>","ends":"<only if said>","location":"<only if said>"}, working the date out from When. A plan with no day, one only hoped for, or one fixed only in the earlier messages is no plan: leave "plan" out.
 
         Example. Author: ~bus (person/bus). Message: lol did you see the game last night
         {"claims":[]}
@@ -57,6 +61,9 @@ object ModelExtractor {
 
         Example. Author: ~bus (person/bus). Message: ugh, Mondays
         {"claims":[]}
+
+        Example. Author: ~bus (person/bus). When: 2026-09-16T14:00-04:00, a Wednesday. Message: dinner at Luigi's Friday at 8 then
+        {"claims":[],"plan":{"title":"Dinner at Luigi's","starts":"2026-09-18T20:00:00-04:00","location":"Luigi's"}}
     """.trimIndent()
 
     fun user(
@@ -96,7 +103,7 @@ object ModelExtractor {
         append("Message: ").append(text.take(1200)).append('\n')
     }
 
-    /** Ask [model] about one message. Empty on any failure to answer in shape. */
+    /** Ask [model] about one message. Empty on any failure to answer in shape; a plan that stands goes to [onPlan]. */
     suspend fun extract(
         model: LocalModel,
         index: NameIndex,
@@ -108,17 +115,73 @@ object ModelExtractor {
         attrs: Map<String, List<String>> = emptyMap(),
         notes: Map<String, Map<String, String>> = emptyMap(),
         context: List<Pair<String, String>> = emptyList(),
+        onPlan: (Plan) -> Unit = {},
+        zone: kotlinx.datetime.TimeZone = kotlinx.datetime.TimeZone.currentSystemDefault(),
     ): List<Noticed> {
         if (text.isBlank() || text.trimEnd().endsWith("?")) return emptyList()
         val authorId = index.authorId(author, ourShip)
-        val prompt = user(bodies, author, authorId, isoUtc(atMs), text, notes, context)
+        val prompt = user(bodies, author, authorId, whenLine(atMs, zone), text, notes, context)
         val answer = runCatching { model.complete(SYSTEM, prompt, GRAMMAR, MAX_TOKENS) }
             .getOrElse { io.nisfeb.talon.util.Log.w("ModelExtractor", "${model.rung} did not answer: ${it.message}", it); return emptyList() }
         // Only the author and what the message names may be claimed about: a
         // small model otherwise writes what it remembers, not what it read.
         val mentioned = index.find(text).map { it.first.id }.toSet() + authorId + (if (author == ourShip) setOf("person/me") else emptySet())
+        planOf(answer, text, atMs)?.let(onPlan)
         return parse(answer, index, author, atMs, ourShip, mentioned, attrs, text, context.map { it.second })
     }
+
+    /** A plan the message fixed in time: a calendar event for the owner to approve. */
+    data class Plan(val title: String, val startMs: Long, val endMs: Long?, val location: String?)
+
+    /**
+     * The plan in [answer], where it stands: the message names a day or
+     * an hour, the title is in its words, the start is ahead of it (a
+     * few hours' grace for "tonight") and within the year, an end after
+     * the start and within a fortnight of it, and a place only where
+     * the message says it. What fails is dropped, never repaired.
+     */
+    fun planOf(answer: String, text: String, atMs: Long): Plan? {
+        val root = runCatching { Json.parseToJsonElement(answer.trim()).jsonObject }.getOrNull() ?: return null
+        val p = root["plan"] as? JsonObject ?: return null
+        fun str(k: String) = (p[k] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()?.takeIf { it.isNotEmpty() }
+        fun ms(k: String) = str(k)?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+        val title = str("title")?.take(120) ?: return null
+        if (!FIXES_A_TIME.containsMatchIn(text.lowercase())) return null
+        if (!sharesAWord(JsonPrimitive(title), text, min = 3)) return null
+        val start = ms("starts") ?: return null
+        if (start < atMs - 6 * HOUR_MS || start > atMs + 366L * 24 * HOUR_MS) return null
+        val end = ms("ends")?.takeIf { it > start && it <= start + 14L * 24 * HOUR_MS }
+        val place = str("location")?.take(200)?.takeIf { text.contains(it, ignoreCase = true) }
+        return Plan(title, start, end, place)
+    }
+
+    /** The calendar action a plan is filed as, in the schema's payload shape (times ISO 8601 UTC). */
+    fun planAction(p: Plan, about: List<String>): JsonObject = buildJsonObject {
+        put("kind", "calendar")
+        put("title", p.title)
+        put("about", kotlinx.serialization.json.JsonArray(about.map { JsonPrimitive(it) }))
+        put("payload", buildJsonObject {
+            put("title", p.title)
+            put("starts", isoUtc(p.startMs))
+            p.endMs?.let { put("ends", isoUtc(it)) }
+            p.location?.let { put("location", it) }
+        })
+    }
+
+    /** When, as the model needs it to work a date out: local, with its offset, and the weekday. */
+    fun whenLine(atMs: Long, zone: kotlinx.datetime.TimeZone): String {
+        val at = kotlinx.datetime.Instant.fromEpochMilliseconds(atMs)
+        val local = at.toLocalDateTime(zone)
+        val day = local.dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }
+        return "${local.date}T${local.time}${zone.offsetAt(at)}, a $day"
+    }
+
+    /** A day, a date or an hour in the words: what a plan fixed in time has. */
+    private val FIXES_A_TIME = Regex(
+        "\\b(\\d{1,2}(:\\d{2})? ?(am|pm)|\\d{1,2}:\\d{2}|at \\d{1,2}|noon|midnight|tonight|tomorrow|today|" +
+            "(mon|tues?|wed(nes)?|thu(rs)?|fri|sat(ur)?|sun)(day)?|" +
+            "(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.? \\d{1,2}|\\d{1,2}(st|nd|rd|th)|\\d{1,2}/\\d{1,2})\\b",
+    )
 
     /** The claims in [answer] that pass, each with the body a stranger's claim needs. */
     fun parse(
@@ -209,12 +272,12 @@ object ModelExtractor {
         return out.distinctBy { it.subject to it.attr }
     }
 
-    /** Whether a paraphrase could be of this text: one word of four letters or more in common. */
-    private fun sharesAWord(value: JsonElement, text: String): Boolean {
+    /** Whether a paraphrase could be of this text: one word of [min] letters or more in common. */
+    private fun sharesAWord(value: JsonElement, text: String, min: Int = 4): Boolean {
         val said = (value as? JsonPrimitive)?.content?.lowercase() ?: return true
-        val words = WORD.findAll(text.lowercase()).map { it.value }.filter { it.length >= 4 }.toSet()
+        val words = WORD.findAll(text.lowercase()).map { it.value }.filter { it.length >= min }.toSet()
         if (words.isEmpty()) return false
-        return WORD.findAll(said).any { it.value.length >= 4 && it.value in words }
+        return WORD.findAll(said).any { it.value.length >= min && it.value in words }
     }
 
     private val WORD = Regex("[a-z0-9']+")

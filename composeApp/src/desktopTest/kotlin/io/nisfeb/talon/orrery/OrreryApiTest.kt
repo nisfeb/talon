@@ -105,11 +105,11 @@ class OrreryApiTest {
     }
 
     @Test
-    fun `a calendar action becomes an event with an hour by default`() {
+    fun `a calendar action becomes an event, with no end unless it says one`() {
         val a = OrreryAction("x", "calendar", "Dentist", kotlinx.serialization.json.buildJsonObject { put("start", kotlinx.serialization.json.JsonPrimitive("2026-09-18T09:00:00Z")) }, emptyList(), null, "approved", "claude-code")
         val e = a.eventToAdd()!!
         assertEquals("Dentist", e.title)
-        assertEquals(e.startMs + 3_600_000, e.endMs)
+        assertEquals(null, e.endMs, "placing it gives it the hour")
         assertEquals(null, a.copy(kind = "task").eventToAdd())
     }
 

@@ -120,8 +120,8 @@ internal class OpenAiShapeModel(private val http: HttpClient, private val server
     override fun close() = Unit
 
     companion object {
-        /** The answer's shape as JSON Schema, the same one the grammar bounds on the floor. */
-        const val CLAIMS_SCHEMA = """{"type":"object","properties":{"claims":{"type":"array","items":{"type":"object","properties":{"subject":{"type":"string"},"attr":{"type":"string"},"value":{"anyOf":[{"type":"string"},{"type":"null"},{"type":"object","properties":{"ref":{"type":"string"}},"required":["ref"],"additionalProperties":false}]},"conf":{"type":"number"},"until_hours":{"type":"number"}},"required":["subject","attr","value","conf"],"additionalProperties":false}}},"required":["claims"],"additionalProperties":false}"""
+        /** The answer's shape as JSON Schema, the same one the grammar bounds on the floor; a strict schema wants every key, so no plan is null. */
+        const val CLAIMS_SCHEMA = """{"type":"object","properties":{"claims":{"type":"array","items":{"type":"object","properties":{"subject":{"type":"string"},"attr":{"type":"string"},"value":{"anyOf":[{"type":"string"},{"type":"null"},{"type":"object","properties":{"ref":{"type":"string"}},"required":["ref"],"additionalProperties":false}]},"conf":{"type":"number"},"until_hours":{"type":"number"}},"required":["subject","attr","value","conf"],"additionalProperties":false}},"plan":{"anyOf":[{"type":"null"},{"type":"object","properties":{"title":{"type":"string"},"starts":{"type":"string"},"ends":{"type":["string","null"]},"location":{"type":["string","null"]}},"required":["title","starts","ends","location"],"additionalProperties":false}]}},"required":["claims","plan"],"additionalProperties":false}"""
     }
 }
 

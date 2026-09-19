@@ -2,6 +2,7 @@ package io.nisfeb.talon.orrery
 
 import io.nisfeb.talon.calendar.CalendarTask
 import io.nisfeb.talon.calendar.metaStr
+import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -48,6 +49,15 @@ sealed interface TaskMove {
 
     /** Dismiss a task the owner typed and has since deleted from the calendar. */
     data class Withdraw(val actionId: String) : TaskMove
+
+    /** Put an approved calendar action on the calendar, then tell the ship it is done. */
+    data class Place(val action: OrreryAction) : TaskMove
+
+    /** Its event is on the calendar already: a pass died before telling the ship. */
+    data class Placed(val actionId: String) : TaskMove
+
+    /** Approved, with no time to put on a calendar. */
+    data class Unplaceable(val actionId: String) : TaskMove
 }
 
 /** What a task filed from a todo says about itself: the owner wrote it in the calendar. */
@@ -181,4 +191,66 @@ fun linkBody(t: CalendarTask, actionId: String): kotlinx.serialization.json.Json
     put("meta", kotlinx.serialization.json.JsonObject(t.meta + ("orrery" to JsonPrimitive(actionId))))
     put("cal", t.cal)
     t.dueMs?.let { put("due_ms", it) }
+}
+
+/** What a calendar action placed on the calendar says when it is done. */
+const val ON_THE_CALENDAR = "on the calendar"
+
+/**
+ * An approved calendar action is an event on the calendar: rule 11 of
+ * orrery-utils' client guide. The event carries the action's id under
+ * `meta.orrery`, which is how a pass that died between making it and
+ * saying so finds it, and two installs placing at once keep one. A
+ * dismissed action makes nothing, and a claimed one is an executor's.
+ */
+fun calendarMoves(actions: List<OrreryAction>, events: List<CalendarTask>): List<TaskMove> {
+    val linked = events.filter { it.cat != "todo" && it.orreryAction() != null }
+        .groupBy { it.orreryAction()!! }
+        .mapValues { (_, es) -> es.sortedBy { it.id } }
+    val out = mutableListOf<TaskMove>()
+    linked.values.forEach { es -> es.drop(1).forEach { out += TaskMove.Drop(it.id) } }
+    for (a in actions.filter { it.kind == "calendar" && it.status == "approved" }) {
+        out += when {
+            a.id in linked -> TaskMove.Placed(a.id)
+            a.eventToAdd() == null -> TaskMove.Unplaceable(a.id)
+            else -> TaskMove.Place(a)
+        }
+    }
+    return out
+}
+
+/**
+ * The add-event for an approved calendar action: its title and times,
+ * all day when both ends fall on midnight here, or it gave a bare date,
+ * else at its time in [zone]; `meta.orrery` the action, and the
+ * orrery tag. Without an end a timed event is an hour.
+ */
+fun placeBody(a: OrreryAction, zone: kotlinx.datetime.TimeZone): kotlinx.serialization.json.JsonObject? {
+    val e = a.eventToAdd() ?: return null
+    val start = kotlinx.datetime.Instant.fromEpochMilliseconds(e.startMs)
+    val end = e.endMs?.let { kotlinx.datetime.Instant.fromEpochMilliseconds(it) }
+    fun midnight(i: kotlinx.datetime.Instant, z: kotlinx.datetime.TimeZone) = i.toLocalDateTime(z).time == kotlinx.datetime.LocalTime(0, 0)
+    val dayZone = when {
+        midnight(start, zone) && (end == null || midnight(end, zone)) -> zone
+        e.bareDate -> kotlinx.datetime.TimeZone.UTC
+        else -> null
+    }
+    val link = kotlinx.serialization.json.JsonObject(mapOf("orrery" to JsonPrimitive(a.id)))
+    val draft = if (dayZone != null) {
+        val from = start.toLocalDateTime(dayZone).date
+        io.nisfeb.talon.calendar.EventDraft(
+            name = e.title, location = e.location.orEmpty(), cat = io.nisfeb.talon.calendar.EventCat.ALLDAY, date = from,
+            spanDays = end?.let { from.daysUntil(it.toLocalDateTime(dayZone).date) }?.coerceAtLeast(1) ?: 1,
+            tags = listOf("orrery"), otherMeta = link,
+        )
+    } else {
+        val local = start.toLocalDateTime(zone)
+        val minutes = ((e.endMs ?: (e.startMs + 3_600_000L)) - e.startMs) / 60_000
+        io.nisfeb.talon.calendar.EventDraft(
+            name = e.title, location = e.location.orEmpty(), cat = io.nisfeb.talon.calendar.EventCat.TIMED, date = local.date,
+            minuteOfDay = local.hour * 60 + local.minute, durMin = minutes.toInt().coerceIn(1, 14 * 24 * 60),
+            zone = zone.id, tags = listOf("orrery"), otherMeta = link,
+        )
+    }
+    return io.nisfeb.talon.calendar.eventBody(draft)
 }

@@ -458,7 +458,6 @@ fun TalonApp(
             action = action,
             orrery = orreryRepo,
             send = { whom, text -> app.repo.send(whom, text) },
-            addEvent = { title, start, end -> calendarRepo.addShared(null, title, start, end) },
             onClose = { openAction = null },
         )
     }

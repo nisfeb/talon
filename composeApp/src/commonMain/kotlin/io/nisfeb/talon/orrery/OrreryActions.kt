@@ -1,6 +1,7 @@
 package io.nisfeb.talon.orrery
 
 import kotlinx.datetime.Instant
+import kotlinx.datetime.atStartOfDayIn
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -11,7 +12,8 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 data class MessageToSend(val whom: String, val text: String)
 
-data class EventToAdd(val title: String, val startMs: Long, val endMs: Long)
+/** A calendar action's event: [endMs] and [location] only where the payload says; [bareDate] when it gave a day and no time. */
+data class EventToAdd(val title: String, val startMs: Long, val endMs: Long?, val location: String? = null, val bareDate: Boolean = false)
 
 fun OrreryAction.messageToSend(): MessageToSend? {
     if (kind != "message") return null
@@ -21,14 +23,24 @@ fun OrreryAction.messageToSend(): MessageToSend? {
     return MessageToSend(whom, text)
 }
 
+/**
+ * The event a calendar action asks for, in the schema's payload shape:
+ * title, starts and, when known, ends and location. The older names an
+ * earlier analyst wrote (start, end, when) are still read.
+ */
 fun OrreryAction.eventToAdd(): EventToAdd? {
     if (kind != "calendar") return null
-    val start = (str("start") ?: str("when") ?: due)?.let { runCatching { Instant.parse(it).toEpochMilliseconds() }.getOrNull() } ?: return null
-    val end = str("end")?.let { runCatching { Instant.parse(it).toEpochMilliseconds() }.getOrNull() }?.takeIf { it > start } ?: (start + 60L * 60 * 1000)
+    val said = str("starts") ?: str("start") ?: str("when") ?: due ?: return null
+    val start = instantMs(said) ?: return null
+    val end = (str("ends") ?: str("end"))?.let(::instantMs)?.takeIf { it > start }
     val name = (str("title") ?: title).trim()
     if (name.isEmpty()) return null
-    return EventToAdd(name, start, end)
+    return EventToAdd(name, start, end, str("location")?.trim(), bareDate = 'T' !in said)
 }
+
+/** An ISO 8601 instant, or a bare date read as that day at midnight UTC. */
+private fun instantMs(s: String): Long? = runCatching { Instant.parse(s).toEpochMilliseconds() }.getOrNull()
+    ?: runCatching { kotlinx.datetime.LocalDate.parse(s).atStartOfDayIn(kotlinx.datetime.TimeZone.UTC).toEpochMilliseconds() }.getOrNull()
 
 private fun OrreryAction.str(k: String): String? =
     payload[k]?.let { v -> runCatching { v.jsonPrimitive.content }.getOrNull() }?.takeIf { it.isNotBlank() }

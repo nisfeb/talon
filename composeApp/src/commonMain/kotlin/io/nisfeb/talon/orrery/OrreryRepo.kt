@@ -533,7 +533,8 @@ class OrreryRepo(
     private suspend fun mirrorTasks(a: OrreryApi, token: String?, url: String) = mirrorLock.withLock {
         val actions = a.actions(token, status = "all")
         val cal = CalendarApi(http, url)
-        val moves = taskMoves(actions, cal.tasks())
+        val events = cal.events()
+        val moves = taskMoves(actions, events.filter { it.cat == "todo" }) + calendarMoves(actions, events)
         if (moves.isEmpty()) return@withLock
         val ball = cal.config().ball.takeIf { it.isNotBlank() } ?: return@withLock
         for (m in moves) runCatching {
@@ -558,6 +559,15 @@ class OrreryRepo(
                     cal.poke(ball, linkBody(m.todo, m.actionId))
                 }
                 is TaskMove.Withdraw -> a.transition(token, m.actionId, "dismissed", "removed from the calendar by the owner")
+                // Made, then said: a pass that dies between the two finds
+                // the event by its link next time and only says it.
+                is TaskMove.Place -> {
+                    val body = placeBody(m.action, kotlinx.datetime.TimeZone.currentSystemDefault()) ?: error("no event in the action")
+                    if (!cal.poke(ball, body)) error("the calendar refused the event")
+                    a.transition(token, m.action.id, "done", ON_THE_CALENDAR)
+                }
+                is TaskMove.Placed -> a.transition(token, m.actionId, "done", ON_THE_CALENDAR)
+                is TaskMove.Unplaceable -> a.transition(token, m.actionId, "failed", "no start time to put on the calendar")
             }
         }.onFailure { Log.i(TAG, "task move ${m::class.simpleName} skipped: ${it.message}") }
     }
@@ -1155,6 +1165,7 @@ class OrreryRepo(
         val worth = r.gate == null || emb == null ||
             (runCatching { emb.embed(text) }.getOrNull()?.let { r.gate.worthAModel(it) } ?: true)
         var byModel: List<Noticed> = emptyList()
+        var plan: ModelExtractor.Plan? = null
         // A question states nothing, and the analyst never reads one, so
         // neither does the gate.
         if (r.model != null && worth && r.modelRuns < MODEL_PER_PASS && text.length >= 8 && !text.trimEnd().endsWith("?")) {
@@ -1178,7 +1189,7 @@ class OrreryRepo(
                     r.day = r.day.copy(picked = r.day.picked + 1, pickedBodies = r.day.pickedBodies + chosen.size, pickUsd = r.day.pickUsd + p.costUsd)
                     chosen
                 } else ranked
-                ModelExtractor.extract(model, r.index, seen, text, author, atMs, s, r.attrs, r.notes, context)
+                ModelExtractor.extract(model, r.index, seen, text, author, atMs, s, r.attrs, r.notes, context, onPlan = { plan = it })
                     .also { r.day = r.day.copy(analystUsd = r.day.analystUsd + (model.lastCostUsd ?: 0.0)) }
             }
             byModel = if (dec != null && r.threshold != null && !text.trimStart().startsWith("/")) {
@@ -1198,6 +1209,12 @@ class OrreryRepo(
                 r.day += t
             }
         }
+        // A plan fixed in time is the owner's to put on the calendar: a
+        // proposal on the ship, about the author and whom it names.
+        plan?.let { p ->
+            val about = (listOf(r.index.authorId(author, s)) + r.index.find(text).map { it.first.id }).filter { r.index.has(it) }.distinct().take(5)
+            proposePlan(s, sourceId, p, about)
+        }
         for (n in byRules + byModel) {
             val trusted = trusted(s, n.attr)
             val entity = OrreryNoticedEntity(
@@ -1210,6 +1227,25 @@ class OrreryRepo(
             if (db.orreryNoticed().insertIfNew(entity) != -1L && trusted) up += factsOf(entity)
         }
         return up
+    }
+
+    /**
+     * A plan a message fixed in time, filed once per message as a
+     * calendar action for the owner to approve. The ship answers a twin
+     * of an open one with that one, and this install remembers the
+     * message, so a replayed pass files nothing new.
+     */
+    private suspend fun proposePlan(s: String, sourceId: String, p: ModelExtractor.Plan, about: List<String>) {
+        val a = api ?: return
+        val token = db.orreryAccounts().get(s)?.token ?: return
+        val key = "plan:$sourceId"
+        if (db.orrerySent().get(s, key) != null) return
+        runCatching { a.act(ModelExtractor.planAction(p, about), token) }
+            .onSuccess { (id, _) ->
+                db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, key, id, now()))
+                Log.i(TAG, "$sourceId proposed ${p.title} at ${isoUtc(p.startMs)}")
+            }
+            .onFailure { Log.i(TAG, "$sourceId plan not proposed: ${it.message}") }
     }
 
     /** The person's word on an action: done, dismissed, or failed with why. */

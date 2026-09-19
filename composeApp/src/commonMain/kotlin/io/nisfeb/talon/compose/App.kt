@@ -1031,7 +1031,6 @@ fun App(
                 action = action,
                 orrery = orreryRepo,
                 send = { whom, text -> repo.send(whom, text) },
-                addEvent = { title, start, end -> calendarRepo.addShared(null, title, start, end) },
                 onClose = { openAction = null },
             )
         }

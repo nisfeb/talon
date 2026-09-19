@@ -21,19 +21,20 @@ import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.orrery.eventToAdd
 import io.nisfeb.talon.orrery.messageToSend
 import kotlinx.coroutines.launch
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * One of the analyst's proposals, and what to do with it. A task or a
- * note is the ship's to hold: Done or Dismiss. A message or an event
- * is Talon's to carry out, behind this one confirm, after which the
- * ship hears done or failed with why.
+ * note is the ship's to hold: Done or Dismiss. A message is Talon's to
+ * send, behind this one confirm, after which the ship hears done or
+ * failed with why. An event is approved here and put on the calendar
+ * by the mirror, the one place that makes it, linked back to the action.
  */
 @Composable
 fun OrreryActionDialog(
     action: OrreryAction,
     orrery: OrreryRepo,
     send: suspend (whom: String, text: String) -> Unit,
-    addEvent: suspend (title: String, startMs: Long, endMs: Long) -> Boolean,
     onClose: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -44,7 +45,7 @@ fun OrreryActionDialog(
     var reason by remember { mutableStateOf("") }
     val message = remember(action) { action.messageToSend() }
     val event = remember(action) { action.eventToAdd() }
-    val executable = message != null || event != null
+    val executable = message != null
 
     // Taken at once: the dialog closes and the ship is told behind it.
     fun move(status: String, why: String = "") {
@@ -64,12 +65,7 @@ fun OrreryActionDialog(
             if (proposed) {
                 orrery.setAction(action.id, "approved").onFailure { note = it.message; busy = false; return@launch }
             }
-            val failed = runCatching {
-                when {
-                    message != null -> send(message.whom, message.text)
-                    event != null -> if (!addEvent(event.title, event.startMs, event.endMs)) error("the calendar refused the event")
-                }
-            }.exceptionOrNull()
+            val failed = runCatching { message?.let { send(it.whom, it.text) } }.exceptionOrNull()
             if (failed == null) move("done") else move("failed", failed.message ?: "did not go through")
         }
     }
@@ -91,7 +87,7 @@ fun OrreryActionDialog(
                 }
                 event?.let {
                     Spacer(Modifier.height(8.dp))
-                    Text("${it.title}, ${io.nisfeb.talon.orrery.isoUtc(it.startMs)} to ${io.nisfeb.talon.orrery.isoUtc(it.endMs)}", style = MaterialTheme.typography.bodyMedium)
+                    Text(whenLine(it), style = MaterialTheme.typography.bodyMedium)
                 }
                 if (action.about.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
@@ -100,8 +96,10 @@ fun OrreryActionDialog(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     when {
-                        proposed && executable -> "Waiting for you. Sending or adding it approves it too."
+                        proposed && executable -> "Waiting for you. Sending it approves it too."
                         proposed && action.kind == "task" -> "Waiting for you. Approved, it goes on your calendar's task list."
+                        proposed && event != null -> "Waiting for you. Approved, it goes on your calendar."
+                        event != null -> "Approved. It goes on your calendar on the next pass."
                         proposed -> "Waiting for you."
                         executable -> "Approved, not yet done."
                         action.kind == "task" -> "Approved, and on your task list. Mark it done here or tick it there."
@@ -148,7 +146,7 @@ fun OrreryActionDialog(
                     executable -> {
                         if (proposed) TextButton(enabled = !busy, onClick = { move("approved") }) { Text("Approve only") }
                         androidx.compose.material3.Button(enabled = !busy, onClick = { carryOut() }) {
-                            Text(if (message != null) "Send it" else "Add it")
+                            Text("Send it")
                         }
                     }
                     proposed -> androidx.compose.material3.Button(enabled = !busy, onClick = { move("approved") }) { Text("Approve") }
@@ -161,3 +159,13 @@ fun OrreryActionDialog(
 
 /** The reasons the client guide gives as examples, one tap each; the owner's own words go in the field. */
 val DISMISS_REASONS = listOf("just the event", "I always do this")
+
+/** The event as the owner reads it: local times, and the place where there is one. */
+private fun whenLine(e: io.nisfeb.talon.orrery.EventToAdd): String {
+    val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
+    fun at(ms: Long) = kotlinx.datetime.Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone)
+    val start = at(e.startMs)
+    val end = e.endMs?.let(::at)
+    val span = "${start.date} ${start.time}" + (end?.let { if (it.date == start.date) " to ${it.time}" else " to ${it.date} ${it.time}" } ?: "")
+    return "${e.title}, $span" + (e.location?.takeIf { it.isNotBlank() }?.let { ", $it" } ?: "")
+}
