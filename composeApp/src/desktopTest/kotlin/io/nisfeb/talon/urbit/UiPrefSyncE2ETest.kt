@@ -65,6 +65,7 @@ class UiPrefSyncE2ETest {
         override fun setBraveApiKey(key: String) {}
         override fun setSttApiKey(key: String) {}
         override fun setPrompt(kind: AiSettings.PromptKind, value: String) {}
+        override fun setProfile(profile: io.nisfeb.talon.ai.AiProfile) {}
         override fun applyRemote(config: AiSettings.Config) {}
         override fun clear() {}
     }

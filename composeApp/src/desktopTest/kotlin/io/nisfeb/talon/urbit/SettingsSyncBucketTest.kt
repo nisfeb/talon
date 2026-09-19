@@ -249,6 +249,7 @@ private class FakeAiSettingsRepository : AiSettingsRepository {
         _state.value = _state.value.withPrompt(kind, value)
     }
     override fun setSyncEnabled(enabled: Boolean) {}
+    override fun setProfile(profile: io.nisfeb.talon.ai.AiProfile) {}
     override fun applyRemote(config: AiSettings.Config) {
         _state.value = config
     }

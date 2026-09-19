@@ -191,6 +191,7 @@ private class NoopAiSettings : AiSettingsRepository {
     override fun setSttApiKey(key: String) {}
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {}
     override fun setSyncEnabled(enabled: Boolean) {}
+    override fun setProfile(profile: io.nisfeb.talon.ai.AiProfile) {}
     override fun applyRemote(config: AiSettings.Config) { _state.value = config }
     override fun clear() {}
 }

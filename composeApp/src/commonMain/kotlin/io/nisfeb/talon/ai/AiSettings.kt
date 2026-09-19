@@ -119,6 +119,14 @@ object AiSettings {
         // SettingsSyncImpl push/apply). Identifies this device when it
         // contests the cross-device write-loop lease (LoopWriteCoordinator).
         val deviceId: String = "",
+        /**
+         * The AI settings as the owner set them on the new screen:
+         * providers, the default model, each feature's switch and model.
+         * Null until then, and the fields above are what [profile]
+         * derives one from. While it is set the fields above are kept
+         * derived from it (legacyInto), for older installs.
+         */
+        val savedProfile: AiProfile? = null,
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
 
@@ -136,7 +144,7 @@ object AiSettings {
         fun hasCredentials(): Boolean =
             apiKey.isNotBlank() || braveApiKey.isNotBlank() || sttApiKey.isNotBlank() ||
                 privateApiKey.isNotBlank() || privateBaseUrl?.isNotBlank() == true ||
-                sttApiKeyRemovedAtMs > 0L
+                sttApiKeyRemovedAtMs > 0L || savedProfile?.keys()?.isNotEmpty() == true
 
         /** The unified assistant is on (current flag or the legacy one).
          *  Gates MCP + web access, which are now part of the assistant. */
@@ -240,5 +248,7 @@ fun AiSettings.Config.keepingCredentials(of: AiSettings.Config): AiSettings.Conf
         baseUrl = baseUrl ?: of.baseUrl,
         sttApiKey = if (sttApiKey.isNotBlank() || removalWins) sttApiKey else of.sttApiKey,
         sttApiKeySetAtMs = maxOf(sttApiKeySetAtMs, of.sttApiKeySetAtMs),
+        // A profile arriving without keys keeps this device's; none arriving keeps this device's profile.
+        savedProfile = savedProfile?.keepingLocal(of.savedProfile) ?: of.savedProfile,
     )
 }

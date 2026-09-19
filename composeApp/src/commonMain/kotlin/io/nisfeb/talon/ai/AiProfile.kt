@@ -163,8 +163,8 @@ fun migrateProfile(cfg: AiSettings.Config, inputs: ProfileInputs = ProfileInputs
     )
 }
 
-/** The profile these settings stand for. */
-fun AiSettings.Config.profile(): AiProfile = migrateProfile(this)
+/** The profile these settings stand for: the one the owner saved, else the one today's fields make. */
+fun AiSettings.Config.profile(): AiProfile = savedProfile ?: migrateProfile(this)
 
 /**
  * The settings a feature's chat client should see: its resolved provider
@@ -211,4 +211,133 @@ fun isPrivateUrl(url: String?): Boolean {
     if (o.size != 4) return false
     return o[0] == 127 || o[0] == 10 || (o[0] == 192 && o[1] == 168) || (o[0] == 172 && o[1] in 16..31) ||
         (o[0] == 100 && o[1] in 64..127)
+}
+
+// ---- storage and sync ------------------------------------------------------
+
+/** The profile as it travels between devices: no keys, and no model lists, which each device fetches. */
+fun AiProfile.forSync(): AiProfile = copy(providers = providers.map { it.copy(apiKey = "", models = emptyList()) })
+
+/** Each provider's key, where it has one. */
+fun AiProfile.keys(): Map<String, String> = providers.filter { it.apiKey.isNotBlank() }.associate { it.id to it.apiKey }
+
+/** Keys arriving for providers, by id. A blank never erases one. */
+fun AiProfile.withKeys(keys: Map<String, String>): AiProfile =
+    copy(providers = providers.map { p -> keys[p.id]?.takeIf { it.isNotBlank() }?.let { p.copy(apiKey = it) } ?: p })
+
+/** A profile from elsewhere keeps this device's keys and model lists for the providers they share. */
+fun AiProfile.keepingLocal(local: AiProfile?): AiProfile {
+    if (local == null) return this
+    return copy(
+        providers = providers.map { p ->
+            val mine = local.provider(p.id)
+            p.copy(
+                apiKey = p.apiKey.ifBlank { mine?.apiKey.orEmpty() },
+                models = p.models.ifEmpty { mine?.models.orEmpty() },
+            )
+        },
+    )
+}
+
+/**
+ * The old fields, derived from the profile, for the features that still
+ * read them and for older installs, which know nothing else: the default
+ * model is the frontier slot, triage's model the private one or the
+ * frontier reading messages, the switches the old switches. A blank key
+ * never overwrites a real one.
+ */
+fun AiProfile.legacyInto(cfg: AiSettings.Config): AiSettings.Config {
+    var c = cfg
+    val def = defaultModel?.let { ref -> provider(ref.provider)?.let { it to ref } }
+    def?.let { (p, ref) ->
+        providerOf(p.kind)?.let { kind ->
+            c = c.copy(provider = kind, apiKey = p.apiKey.ifBlank { c.apiKey }, model = ref.model.ifBlank { null }, baseUrl = p.baseUrl)
+        }
+    }
+    resolve(AiFeature.OrreryTriage)?.let { r ->
+        val readsWithDefault = def != null && r.provider.id == def.first.id && r.provider.kind != ProviderKind.ThisDevice
+        c = when {
+            readsWithDefault -> c.copy(frontierReadsMessages = true)
+            r.provider.kind == ProviderKind.ThisDevice -> c.copy(frontierReadsMessages = false, privateBaseUrl = null, privateModel = r.model.ifBlank { null })
+            else -> c.copy(
+                frontierReadsMessages = false,
+                privateBaseUrl = r.provider.baseUrl,
+                privateApiKey = r.provider.apiKey.ifBlank { c.privateApiKey },
+                privateModel = r.model.ifBlank { null },
+            )
+        }
+    }
+    resolve(AiFeature.Transcription)?.takeIf { isOn(AiFeature.Transcription) }?.let { r ->
+        if (r.provider.kind == ProviderKind.OpenAi && r.provider.id != def?.first?.id && r.provider.apiKey.isNotBlank()) {
+            c = c.copy(sttApiKey = r.provider.apiKey)
+        }
+    }
+    return c.copy(
+        catchMeUpEnabled = isOn(AiFeature.CatchUp),
+        agentEnabled = isOn(AiFeature.Assistant),
+        askUrbitEnabled = isOn(AiFeature.Assistant),
+    )
+}
+
+/**
+ * What an older install's write means for the profile: it changed what
+ * the old fields describe, the default model's provider, key and model,
+ * and the catch-up and assistant switches, and nothing else it cannot
+ * see.
+ * ponytail: an old install's private-model or transcription edits are
+ * not carried into a profile; they are rare, and the old fields keep them.
+ */
+fun AiProfile.withLegacy(cfg: AiSettings.Config): AiProfile {
+    var providers = providers
+    var def = defaultModel
+    val dp = def?.let { provider(it.provider) }
+    if (dp != null && providerOf(dp.kind) != null) {
+        providers = providers.map {
+            if (it.id == dp.id) it.copy(kind = kindOfLegacy(cfg.provider), apiKey = cfg.apiKey.ifBlank { it.apiKey }, baseUrl = cfg.baseUrl) else it
+        }
+        def = def.copy(model = cfg.model.orEmpty())
+    } else if (dp == null && cfg.apiKey.isNotBlank()) {
+        providers = listOf(AiProvider(MAIN_PROVIDER, kindOfLegacy(cfg.provider), cfg.provider.label, cfg.baseUrl, cfg.apiKey)) +
+            providers.filterNot { it.id == MAIN_PROVIDER }
+        def = ModelRef(MAIN_PROVIDER, cfg.model.orEmpty())
+    }
+    val f = features.toMutableMap()
+    f[AiFeature.CatchUp] = (f[AiFeature.CatchUp] ?: FeatureSetting()).copy(on = cfg.catchMeUpEnabled)
+    f[AiFeature.Assistant] = (f[AiFeature.Assistant] ?: FeatureSetting()).copy(on = cfg.assistantOn())
+    return copy(providers = providers, defaultModel = def, features = f)
+}
+
+private fun kindOfLegacy(p: AiSettings.Provider): ProviderKind = when (p) {
+    AiSettings.Provider.OpenRouter -> ProviderKind.OpenRouter
+    AiSettings.Provider.Anthropic -> ProviderKind.Anthropic
+    AiSettings.Provider.OpenAi -> ProviderKind.OpenAi
+    AiSettings.Provider.Custom -> ProviderKind.OpenAiCompatible
+}
+
+/**
+ * The profile after one AI settings entry arrives from the ship, [merged]
+ * being the old fields as already applied. A new install's entry carries
+ * the profile, which keeps this device's keys and model lists; an old
+ * install's changes what the old fields describe; provider keys come
+ * only with the credentials entry, and only when this device syncs them.
+ */
+fun profileAfterEntry(
+    entry: kotlinx.serialization.json.JsonObject,
+    current: AiSettings.Config,
+    merged: AiSettings.Config,
+): AiProfile? {
+    val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    val incoming = (entry["profile"] as? kotlinx.serialization.json.JsonObject)
+        ?.let { runCatching { json.decodeFromJsonElement(AiProfile.serializer(), it) }.getOrNull() }
+    val base = current.savedProfile
+    val fromOld = incoming == null && base != null &&
+        (entry.containsKey("catchMeUpEnabled") || (entry.containsKey("apiKey") && !entry.containsKey("providerKeys")))
+    val profile = when {
+        incoming != null -> incoming.keepingLocal(base)
+        fromOld -> base!!.withLegacy(merged)
+        else -> base
+    } ?: return null
+    val keys = (entry["providerKeys"] as? kotlinx.serialization.json.JsonObject)
+        ?.mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { k to it } }?.toMap()
+    return if (keys != null && current.syncEnabled) profile.withKeys(keys) else profile
 }

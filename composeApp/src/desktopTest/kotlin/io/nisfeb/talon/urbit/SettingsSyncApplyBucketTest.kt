@@ -1,5 +1,6 @@
 package io.nisfeb.talon.urbit
 
+import io.nisfeb.talon.ai.legacyInto
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.ai.AiSettings
@@ -1340,6 +1341,9 @@ internal class FakeAiSettings : AiSettingsRepository {
     }
     override fun setFrontierReadsMessages(on: Boolean) {
         _state.value = _state.value.copy(frontierReadsMessages = on)
+    }
+    override fun setProfile(profile: io.nisfeb.talon.ai.AiProfile) {
+        _state.value = profile.legacyInto(_state.value).copy(savedProfile = profile)
     }
     override fun setBraveApiKey(key: String) {
         _state.value = _state.value.copy(braveApiKey = key)

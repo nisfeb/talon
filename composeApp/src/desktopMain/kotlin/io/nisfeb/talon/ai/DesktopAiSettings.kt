@@ -180,6 +180,12 @@ class DesktopAiSettings : AiSettingsRepository {
         onStateChange?.invoke(cfg, false)
     }
 
+    override fun setProfile(profile: AiProfile) {
+        val cfg = profile.legacyInto(_state.value).copy(savedProfile = profile)
+        persist(cfg)
+        onStateChange?.invoke(cfg, false)
+    }
+
     override fun setFrontierReadsMessages(on: Boolean) {
         val cfg = _state.value.copy(frontierReadsMessages = on)
         persist(cfg)

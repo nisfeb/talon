@@ -1,4 +1,6 @@
 package io.nisfeb.talon.urbit
+import io.nisfeb.talon.ai.forSync
+import io.nisfeb.talon.ai.keys
 import kotlin.concurrent.Volatile
 import io.nisfeb.talon.util.nowMs
 
@@ -928,6 +930,11 @@ class SettingsSyncImpl(
                     cfg.privateBaseUrl?.let { put("privateBaseUrl", it) }
                     cfg.privateModel?.let { put("privateModel", it) }
                     if (cfg.privateApiKey.isNotBlank()) put("privateApiKey", cfg.privateApiKey)
+                    // The profile's keys, by provider, on the same terms:
+                    // only those a provider here actually has.
+                    cfg.savedProfile?.keys()?.takeIf { it.isNotEmpty() }?.let { keys ->
+                        put("providerKeys", buildJsonObject { keys.forEach { (id, k) -> put(id, k) } })
+                    }
                 },
             )
         }
@@ -948,6 +955,11 @@ class SettingsSyncImpl(
                 put("urbitKnowledgePrompt", cfg.urbitKnowledgePrompt)
                 put("assistantPrompt", cfg.assistantPrompt)
                 put("loopPrompt", cfg.loopPrompt)
+                // The profile, without keys or model lists: the keys ride
+                // the credentials entry, and each device fetches models.
+                cfg.savedProfile?.let {
+                    put("profile", Json.encodeToJsonElement(io.nisfeb.talon.ai.AiProfile.serializer(), it.forSync()))
+                }
             },
         )
     }
@@ -1127,7 +1139,7 @@ class SettingsSyncImpl(
         // store) isn't encrypted.
         val redacted = JsonObject(
             obj.mapValues { (k, v) ->
-                if (k == "apiKey" || k == "braveApiKey" || k == "sttApiKey") JsonPrimitive("***") else v
+                if (k == "apiKey" || k == "braveApiKey" || k == "sttApiKey" || k == "privateApiKey" || k == "providerKeys") JsonPrimitive("***") else v
             },
         )
         Log.i(TAG, "applyAiEntry schemaVersion=$schemaVersion obj=$redacted")
@@ -1207,7 +1219,11 @@ class SettingsSyncImpl(
             } else features
         } else features
 
-        aiSettings.applyRemote(merged)
+        // The profile: a new install's arrives whole, an old install's
+        // write changes what its fields describe, keys come with the
+        // credentials. applyRemote's keepingCredentials holds the rest.
+        val withProfile = merged.copy(savedProfile = io.nisfeb.talon.ai.profileAfterEntry(obj, current, merged))
+        aiSettings.applyRemote(withProfile)
         // applyRemote deliberately bypasses onStateChange (anti-pingpong),
         // which is also the only rearm-on-key-change hook — so a key or
         // feature toggle arriving via sync must re-arm the loop scheduler

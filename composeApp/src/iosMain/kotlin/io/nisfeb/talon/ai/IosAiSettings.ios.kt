@@ -132,6 +132,10 @@ class IosAiSettings : AiSettingsRepository {
         commit(_state.value.withPrompt(kind, value), fireChange = true)
     }
 
+    override fun setProfile(profile: AiProfile) {
+        commit(profile.legacyInto(_state.value).copy(savedProfile = profile), fireChange = true)
+    }
+
     override fun applyRemote(config: AiSettings.Config) {
         // Remote config shouldn't clobber our stable device id, and this
         // path never re-fires onStateChange (mirrors desktop).

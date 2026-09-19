@@ -133,7 +133,15 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         // A credential this device holds is never dropped by arriving
         // state. See keepingCredentials: the rule lives here so that no
         // future caller can lose a key by accident.
-        val config = remote.keepingCredentials(_state.value)
+        persistAll(remote.keepingCredentials(_state.value))
+    }
+
+    override fun setProfile(profile: AiProfile) {
+        persistAll(profile.legacyInto(_state.value).copy(savedProfile = profile))
+        onStateChange?.invoke(_state.value, false)
+    }
+
+    private fun persistAll(config: AiSettings.Config) {
         prefs.edit()
             .putString(KEY_PROVIDER, config.provider.name)
             .putString(KEY_API_KEY, config.apiKey)
@@ -162,12 +170,14 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             // so applyRemote preserves this device's stable identity.
             .putString(KEY_DEVICE_ID, config.deviceId)
             .putBoolean(KEY_SYNC, config.syncEnabled)
+            .putString(KEY_PROFILE, config.savedProfile?.let { PROFILE_JSON.encodeToString(AiProfile.serializer(), it) })
             .apply()
         _state.value = config
     }
 
     override fun clear() {
         val editor = prefs.edit()
+            .remove(KEY_PROFILE)
             .remove(KEY_PROVIDER)
             .remove(KEY_API_KEY)
             .remove(KEY_MODEL)
@@ -233,6 +243,8 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             assistantPrompt = prefs.getString(KEY_ASSISTANT_PROMPT, "").orEmpty(),
             loopPrompt = prefs.getString(KEY_LOOP_PROMPT, "").orEmpty(),
             deviceId = deviceId(),
+            savedProfile = prefs.getString(KEY_PROFILE, null)
+                ?.let { runCatching { PROFILE_JSON.decodeFromString(AiProfile.serializer(), it) }.getOrNull() },
         )
     }
 
@@ -288,6 +300,8 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         private const val KEY_ASSISTANT_PROMPT = "assistant_prompt"
         private const val KEY_LOOP_PROMPT = "loop_prompt"
         private const val KEY_DEVICE_ID = "device_id"
+        private const val KEY_PROFILE = "ai_profile"
+        private val PROFILE_JSON = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         private const val KEY_SYNC = "sync_enabled"
         // Legacy "Ask your Urbit" key, folded into the unified assistant
         // (feat_agent). Read for migration + written in lockstep.
