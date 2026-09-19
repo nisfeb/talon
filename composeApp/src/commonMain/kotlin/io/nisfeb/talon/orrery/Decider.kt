@@ -9,6 +9,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -168,6 +169,38 @@ object Gate {
             p, read, d.costUsd ?: 0.0,
             (if (read) "gate: $pp, read" else "gate: $pp that this carries a fact, below $threshold: not read") + " (" + d.usage() + ")",
         )
+    }
+
+    /**
+     * The gate over [n] messages for the check: the first alone, so a
+     * model that does not answer is said at once rather than after a
+     * run of thirty-second waits, then the rest [atOnce] at a time,
+     * since one after another was minutes on a phone. The answers come
+     * back in the order asked.
+     */
+    suspend fun askAll(n: Int, atOnce: Int, ask: suspend (Int) -> Result, progress: (done: Int, total: Int) -> Unit): List<Result> {
+        if (n == 0) return emptyList()
+        val first = ask(0)
+        if (first.p == null) error(first.note.substringAfter("analyst asked: ").ifBlank { "The decision model did not answer." })
+        val out = arrayOfNulls<Result>(n)
+        out[0] = first
+        progress(1, n)
+        val lock = kotlinx.coroutines.sync.Mutex()
+        val permits = kotlinx.coroutines.sync.Semaphore(atOnce)
+        var done = 1
+        kotlinx.coroutines.coroutineScope {
+            for (i in 1 until n) launch {
+                permits.acquire()
+                try {
+                    val r = ask(i)
+                    lock.lock()
+                    try { out[i] = r; done++; progress(done, n) } finally { lock.unlock() }
+                } finally {
+                    permits.release()
+                }
+            }
+        }
+        return out.map { it!! }
     }
 
     /** The gate, then the analyst only when it says read. */

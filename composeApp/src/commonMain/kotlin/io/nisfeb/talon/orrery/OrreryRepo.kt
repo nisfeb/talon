@@ -932,7 +932,30 @@ class OrreryRepo(
      * threshold from 0.2 to 0.4 would have let through. Nothing is
      * written; only the decision model is asked.
      */
-    suspend fun checkGate(limit: Int = 300): Result<GateCheck> = runCatching {
+    /** A check under way, or done: how far it has got, and the result once there is one. */
+    data class GateCheckRun(val done: Int, val total: Int, val result: Result<GateCheck>? = null)
+
+    private val _gateCheck = MutableStateFlow<GateCheckRun?>(null)
+    /** The gate check, run by the repo so that leaving Settings does not stop it. */
+    val gateCheck: StateFlow<GateCheckRun?> = _gateCheck.asStateFlow()
+    private var gateCheckJob: Job? = null
+
+    fun startGateCheck(limit: Int = 300) {
+        if (gateCheckJob?.isActive == true) return
+        _gateCheck.value = GateCheckRun(0, 0)
+        gateCheckJob = scope.launch {
+            val r = checkGate(limit) { done, total -> _gateCheck.value = GateCheckRun(done, total) }
+            _gateCheck.value = GateCheckRun(_gateCheck.value?.total ?: 0, _gateCheck.value?.total ?: 0, r)
+        }
+    }
+
+    fun stopGateCheck() {
+        gateCheckJob?.cancel()
+        gateCheckJob = null
+        _gateCheck.value = null
+    }
+
+    suspend fun checkGate(limit: Int = 300, progress: (done: Int, total: Int) -> Unit = { _, _ -> }): Result<GateCheck> = runCatching {
         val a = api ?: error("Not attached to a ship.")
         val s = ship ?: error("Not attached to a ship.")
         val row = db.orreryAccounts().get(s) ?: error("Turn on Feed Orrery first.")
@@ -948,14 +971,20 @@ class OrreryRepo(
             .map { it to StoryCache.textFor(it.id, it.contentJson) }
             .filter { (m, t) -> t.length >= 8 && !t.trimEnd().endsWith("?") && !t.trimStart().startsWith("/") && inScope(m.whom, t, s, ourNick, allowed) }
             .take(limit).toList().reversed()
+        progress(0, picked.size)
+        suspend fun ask(i: Int): Gate.Result {
+            val (m, text) = picked[i]
+            val earlier = db.messages().before(m.whom, m.sentMs, ModelExtractor.CONTEXT_MESSAGES).reversed()
+                .map { StoryCache.textFor(it.id, it.contentJson) }.filter { it.isNotBlank() }
+            return Gate.decide(dec, settings.threshold, text, index.authorId(m.author, s), earlier, view.bodies)
+        }
+        val results = Gate.askAll(picked.size, GATE_CHECK_AT_ONCE, ::ask, progress)
         val probs = mutableListOf<Double>()
         val lines = mutableListOf<String>()
         var cost = 0.0
         var failed = 0
-        for ((m, text) in picked) {
-            val earlier = db.messages().before(m.whom, m.sentMs, ModelExtractor.CONTEXT_MESSAGES).reversed()
-                .map { StoryCache.textFor(it.id, it.contentJson) }.filter { it.isNotBlank() }
-            val g = Gate.decide(dec, settings.threshold, text, index.authorId(m.author, s), earlier, view.bodies)
+        picked.forEachIndexed { i, (m, text) ->
+            val g = results[i]
             cost += g.costUsd
             val p = g.p
             if (p == null) failed++ else probs += p
@@ -1147,6 +1176,8 @@ class OrreryRepo(
         const val PUSH_EVERY_MS = 10L * 60 * 1000
         /** How often what is waiting is read again while attached: one small request. */
         const val ACTIONS_EVERY_MS = 5L * 60 * 1000
+        /** Decision calls the gate check has in flight at once. */
+        const val GATE_CHECK_AT_ONCE = 6
         private const val BRIEF_LEASE = "orrery-brief"
         const val MESSAGES_PER_PASS = 2000
         const val MAIL_PER_PASS = 200

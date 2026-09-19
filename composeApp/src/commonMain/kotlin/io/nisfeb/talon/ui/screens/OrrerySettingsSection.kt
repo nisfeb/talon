@@ -145,10 +145,11 @@ fun OrrerySettingsSection(orrery: OrreryRepo) {
 @Composable
 private fun DecideRows(orrery: OrreryRepo, dc: DecideControl) {
     val d by dc.settings.collectAsState()
-    val scope = rememberCoroutineScope()
     val hasKey = remember(d) { orrery.decideHasKey() }
-    var checking by remember { mutableStateOf(false) }
-    var check by remember { mutableStateOf<Result<OrreryRepo.GateCheck>?>(null) }
+    // The check belongs to the repo: leaving Settings does not stop it,
+    // and coming back shows how far it has got.
+    val run by orrery.gateCheck.collectAsState()
+    val checking = run != null && run?.result == null
     var threshold by remember(d.threshold) { mutableStateOf(d.threshold.toString()) }
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -189,19 +190,22 @@ private fun DecideRows(orrery: OrreryRepo, dc: DecideControl) {
             singleLine = true,
             modifier = Modifier.weight(1f),
         )
-        TextButton(enabled = !checking, onClick = {
-            scope.launch {
-                checking = true
-                check = orrery.checkGate()
-                checking = false
-            }
-        }) { Text(if (checking) "Checking" else "Check the gate") }
+        if (checking) TextButton(onClick = { orrery.stopGateCheck() }) { Text("Stop") }
+        else TextButton(onClick = { orrery.startGateCheck() }) { Text("Check the gate") }
     }
     // The route is alpha and may move: it and the model are settings, not code.
     OutlinedTextField(value = d.url, onValueChange = { dc.set(d.copy(url = it.trim())) }, label = { Text("Decisions route") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     OutlinedTextField(value = d.model, onValueChange = { dc.set(d.copy(model = it.trim())) }, label = { Text("Decision model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
 
-    check?.fold(
+    run?.takeIf { it.result == null }?.let { r ->
+        Text(
+            if (r.total == 0) "Choosing the messages to check." else "Checked ${r.done} of ${r.total}.",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+        if (r.total > 0) LinearProgressIndicator(progress = { r.done.toFloat() / r.total }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+    }
+    run?.result?.fold(
         onSuccess = { c ->
             Text(
                 "${c.total} messages already read. " +

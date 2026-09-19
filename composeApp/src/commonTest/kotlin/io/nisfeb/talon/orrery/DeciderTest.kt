@@ -184,4 +184,31 @@ class DeciderTest {
             day.lines("2026-09-19"),
         )
     }
+
+    @Test
+    fun `the check stops at once when the model does not answer`() = runTest {
+        var asked = 0
+        val e = runCatching {
+            Gate.askAll(300, 6, { asked++; Gate.decide(DownDecider(), 0.3, "x", "person/sam", emptyList(), emptyList()) }) { _, _ -> }
+        }.exceptionOrNull()
+        assertEquals(1, asked, "one call, not three hundred")
+        assertTrue(e?.message.orEmpty().startsWith("decision model unreachable"), e?.message)
+    }
+
+    @Test
+    fun `the check asks a few at a time and answers in order`() = runTest {
+        var inFlight = 0
+        var most = 0
+        val seen = mutableListOf<Int>()
+        val out = Gate.askAll(40, 6, { i ->
+            inFlight++
+            most = maxOf(most, inFlight)
+            kotlinx.coroutines.delay(10)
+            inFlight--
+            Gate.Result(i / 100.0, true, 0.0, "n$i")
+        }) { done, total -> seen += done; assertEquals(40, total) }
+        assertEquals((0 until 40).map { "n$it" }, out.map { it.note })
+        assertTrue(most in 2..6, "at most six at once, and more than one: $most")
+        assertEquals(40, seen.last())
+    }
 }
