@@ -181,6 +181,16 @@ class OrreryBriefTest {
         assertEquals(ms("2026-09-20T11:00:00Z") - ms("2026-09-19T11:05:00Z"), Brief.untilNext(ms("2026-09-19T11:05:00Z"), zone))
     }
 
+    @Test
+    fun `a phone gives a computer the first quarter hour`() {
+        val grace = Brief.PHONE_GRACE_MS
+        assertNull(Brief.dueDay(ms("2026-09-19T11:00:00Z"), zone, grace))
+        assertNull(Brief.dueDay(ms("2026-09-19T11:14:00Z"), zone, grace))
+        assertEquals(day, Brief.dueDay(ms("2026-09-19T11:15:00Z"), zone, grace))
+        assertNull(Brief.dueDay(ms("2026-09-19T12:00:00Z"), zone, grace))
+        assertEquals(15 * 60_000L, Brief.untilNext(ms("2026-09-19T11:00:00Z"), zone, grace))
+    }
+
     private val briefText = Brief.render(day, listOf("10:00  Dentist"), listOf("[A1] Buy swim goggles"), "Nothing to add.")
 
     private val replyText = """

@@ -47,6 +47,12 @@ object Brief {
     const val HOUR = 7
     /** A device asleep at seven sends on waking, within the hour; later than that, no brief that day. */
     const val LATE_MS = 60 * 60_000L
+    /**
+     * How long a phone waits past seven. A computer sends at seven, and
+     * a phone that finds the brief in the mail by then sends nothing, so
+     * the two never both write; a phone alone is a quarter hour late.
+     */
+    const val PHONE_GRACE_MS = 15 * 60_000L
     const val DEFAULT_ZONE = "America/New_York"
     const val MAX_UNDATED = 10
     private const val PREFIX = "Daily brief "
@@ -58,18 +64,18 @@ object Brief {
         Regex("""Daily brief (\d{4}-\d{2}-\d{2})""").find(subject)?.groupValues?.get(1)
             ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
 
-    /** The day a brief is due for, when it is due now: seven in the owner's zone, or within the hour after. */
-    fun dueDay(nowMs: Long, zone: TimeZone): LocalDate? {
+    /** The day a brief is due for, when it is due now: seven in the owner's zone (plus [graceMs]), or within the hour after. */
+    fun dueDay(nowMs: Long, zone: TimeZone, graceMs: Long = 0): LocalDate? {
         val date = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
         val at = sevenOn(date, zone)
-        return if (nowMs in at until at + LATE_MS) date else null
+        return if (nowMs in at + graceMs until at + LATE_MS) date else null
     }
 
-    /** How long until the next seven o'clock in the owner's zone, so the loop can wake for it. */
-    fun untilNext(nowMs: Long, zone: TimeZone): Long {
+    /** How long until the next seven o'clock (plus [graceMs]) in the owner's zone, so the loop can wake for it. */
+    fun untilNext(nowMs: Long, zone: TimeZone, graceMs: Long = 0): Long {
         val date = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
-        val today = sevenOn(date, zone)
-        return (if (nowMs < today) today else sevenOn(date.plus(1, DateTimeUnit.DAY), zone)) - nowMs
+        val today = sevenOn(date, zone) + graceMs
+        return (if (nowMs < today) today else sevenOn(date.plus(1, DateTimeUnit.DAY), zone) + graceMs) - nowMs
     }
 
     private fun sevenOn(date: LocalDate, zone: TimeZone): Long =

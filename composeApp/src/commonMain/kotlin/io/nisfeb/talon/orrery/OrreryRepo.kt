@@ -184,7 +184,7 @@ class OrreryRepo(
                 push()
                 // Wake for seven in the owner's zone, so the brief is not
                 // up to a pass late.
-                val wait = briefZone?.let { Brief.untilNext(now(), it) + 1_000 } ?: PUSH_EVERY_MS
+                val wait = briefZone?.let { Brief.untilNext(now(), it, briefGrace) + 1_000 } ?: PUSH_EVERY_MS
                 delay(minOf(PUSH_EVERY_MS, wait))
             }
         }
@@ -225,14 +225,18 @@ class OrreryRepo(
         briefZone = zone
         runCatching { answerReplies(a, token, s, mail, state, zone, nowMs) }
             .onFailure { Log.w(TAG, "replies to the brief skipped: ${it.message}") }
-        val day = Brief.dueDay(nowMs, zone) ?: return
+        val day = Brief.dueDay(nowMs, zone, briefGrace) ?: return
         val sent = db.orrerySent()
         if (sent.get(s, "brief:$day") != null) return
         // Another install may have sent today's; the ship's mail says so.
-        if (mail.inbox(io.nisfeb.talon.mail.MailView.ALL, limit = 50).threads.any { Brief.dayOf(it.subject) == day }) {
-            sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, "brief:$day", "", nowMs))
-            return
+        // ponytail: two computers waking at seven can still both send;
+        // the check again below narrows it to the seconds of one send.
+        suspend fun sentElsewhere(): Boolean {
+            val there = mail.inbox(io.nisfeb.talon.mail.MailView.ALL, limit = 50).threads.any { Brief.dayOf(it.subject) == day }
+            if (there) sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, "brief:$day", "", nowMs))
+            return there
         }
+        if (sentElsewhere()) return
         val frontier = cloud?.config?.invoke()?.takeIf { it.apiKey.isNotBlank() }
             ?: run { Log.i(TAG, "brief not sent: no frontier model is set under AI"); return }
         val cal = CalendarApi(http, url)
@@ -249,6 +253,8 @@ class OrreryRepo(
             maxOutputTokens = 4000,
             timeoutMs = 180_000,
         )
+        // Again: the model took its time, and another install may have finished first.
+        if (sentElsewhere()) return
         mail.send(listOf(s), Brief.subject(day), Brief.render(day, today, waiting, suggestions))
         // The tags go with the day: only the install that sent a brief
         // knows which action each one names, so only it answers replies.
@@ -615,6 +621,9 @@ class OrreryRepo(
 
     /** The owner's zone as the last brief pass read it, for the loop's wake at seven. */
     private var briefZone: kotlinx.datetime.TimeZone? = null
+
+    /** A phone gives a computer the first quarter hour to send the brief. */
+    private val briefGrace: Long get() = if (io.nisfeb.talon.ui.isTouchPrimary) Brief.PHONE_GRACE_MS else 0L
 
     /** Measured once a run: a key that covered the schema a minute ago still does. */
     private var scopeChecked = false
