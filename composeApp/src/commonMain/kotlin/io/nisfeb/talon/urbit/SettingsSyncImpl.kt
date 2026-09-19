@@ -126,8 +126,8 @@ class SettingsSyncImpl(
         // Loop definitions, keyed by gid. lastRunAt + run history are
         // device-local and never sync — only the definition travels.
         const val BUCKET_LOOPS = "loops"
-        // Cross-device write-loop lease, keyed by loop gid:
-        // { holder: <deviceId>, claimedAt: <ms> }. Pure coordination state,
+        // Cross-device leases, keyed by loop gid or by the job's own key
+        // (orrery-brief): { holder: <deviceId>, claimedAt: <ms> }. Pure coordination state,
         // not a user pref — it rides the desk scry but no applyBucket /
         // applyEntry branch maps it, so it never touches Room. See claim().
         const val BUCKET_AUTOMATION_CLAIMS = "automation-claims"
@@ -1054,24 +1054,28 @@ class SettingsSyncImpl(
     override fun canCoordinate(): Boolean = channel != null
 
     override suspend fun claim(loop: io.nisfeb.talon.data.LoopEntity): Boolean {
-        val ch = channel ?: return false
+        if (channel == null) return false
         if (loop.gid.isBlank()) return true // unsynced loop: single-device, nothing to race
-        val me = aiSettings.state.value.deviceId
-        if (me.isBlank()) return true       // no id (not a real platform store) — don't block
-        val now = nowMs()
+        if (aiSettings.state.value.deviceId.isBlank()) return true // no id (not a real platform store) — don't block
         // Stale after ~2 missed fires, clamped so sub-hour loops still fail
         // over reasonably and long loops don't pin a dead holder for days.
-        val staleMs = (loop.intervalMinutes.toLong() * 2).coerceIn(30, 720) * 60_000L
+        return claimKey(loop.gid, (loop.intervalMinutes.toLong() * 2).coerceIn(30, 720) * 60_000L, CLAIM_SETTLE_MS)
+    }
 
-        return when (io.nisfeb.talon.ai.decideClaim(readClaim(ch, loop.gid), me, now, staleMs)) {
-            io.nisfeb.talon.ai.ClaimDecision.RUN -> { writeClaim(loop.gid, me, now); true }
+    override suspend fun claimKey(key: String, staleMs: Long, settleMs: Long): Boolean {
+        val ch = channel ?: return false
+        val me = aiSettings.state.value.deviceId
+        if (me.isBlank()) return false
+        val now = nowMs()
+        return when (io.nisfeb.talon.ai.decideClaim(readClaim(ch, key), me, now, staleMs)) {
+            io.nisfeb.talon.ai.ClaimDecision.RUN -> { writeClaim(key, me, now); true }
             io.nisfeb.talon.ai.ClaimDecision.SKIP -> false
             io.nisfeb.talon.ai.ClaimDecision.CONTEST -> {
                 // Stake a claim, let concurrent claimants settle on the ship,
                 // then run only if I'm still the holder.
-                writeClaim(loop.gid, me, now)
-                kotlinx.coroutines.delay(CLAIM_SETTLE_MS)
-                readClaim(ch, loop.gid)?.first == me
+                writeClaim(key, me, now)
+                kotlinx.coroutines.delay(settleMs)
+                readClaim(ch, key)?.first == me
             }
         }
     }

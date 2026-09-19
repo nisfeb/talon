@@ -23,6 +23,13 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
     fun attach(channel: UrbitChannel)
 
     /**
+     * A lease on [key] in the ship's %settings: true on the one device
+     * that holds it, false on every other and whenever the ship cannot
+     * be asked. A holder silent for [staleMs] can be taken over.
+     */
+    suspend fun claimKey(key: String, staleMs: Long, settleMs: Long = 3_000L): Boolean = false
+
+    /**
      * Hand over the device's UI settings store so preferences that
      * belong to the *user* (naming, ordering, accent) can ride
      * %settings to their other devices. Screen-shaped settings — font

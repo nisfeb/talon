@@ -53,6 +53,10 @@ object Brief {
      * the two never both write; a phone alone is a quarter hour late.
      */
     const val PHONE_GRACE_MS = 15 * 60_000L
+    /** Longer than a model call and a send: a holder quiet this long has failed. */
+    const val LEASE_STALE_MS = 20 * 60_000L
+    /** How long rival claims get to land before the holder is read back. The brief can wait. */
+    const val LEASE_SETTLE_MS = 15_000L
     const val DEFAULT_ZONE = "America/New_York"
     const val MAX_UNDATED = 10
     private const val PREFIX = "Daily brief "

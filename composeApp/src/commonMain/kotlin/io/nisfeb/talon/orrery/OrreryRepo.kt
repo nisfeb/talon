@@ -62,6 +62,11 @@ class OrreryRepo(
     private val book: () -> Set<String> = { emptySet() },
     /** On a phone, whether to leave the reading to a computer that has read lately. */
     val standDown: StandDown? = null,
+    /**
+     * The cross-device lease in the ship's %settings. Without it there
+     * is no brief: two installs must never both pay for one.
+     */
+    private val claim: (suspend (key: String, staleMs: Long, settleMs: Long) -> Boolean)? = null,
 ) {
     private var cloudModel: LocalModel? = null
 
@@ -239,6 +244,14 @@ class OrreryRepo(
         if (sentElsewhere()) return
         val frontier = cloud?.config?.invoke()?.takeIf { it.apiKey.isNotBlank() }
             ?: run { Log.i(TAG, "brief not sent: no frontier model is set under AI"); return }
+        // One install writes the brief, and it holds the day's lease
+        // before anything costs money. A holder that goes quiet for
+        // twenty minutes, longer than a model call, can be taken over.
+        val lease = claim ?: run { Log.i(TAG, "brief not sent: no way to coordinate with other installs here"); return }
+        if (!lease(BRIEF_LEASE, Brief.LEASE_STALE_MS, Brief.LEASE_SETTLE_MS)) {
+            Log.i(TAG, "brief left to the install holding today's lease")
+            return
+        }
         val cal = CalendarApi(http, url)
         val from = day.atStartOfDayIn(zone).toEpochMilliseconds()
         val events = cal.window(from, from + 26 * 3_600_000L).rows
@@ -938,6 +951,7 @@ class OrreryRepo(
         const val BACKFILL_MS = 30L * 24 * 60 * 60 * 1000
         const val AHEAD_MS = 90L * 24 * 60 * 60 * 1000
         const val PUSH_EVERY_MS = 10L * 60 * 1000
+        private const val BRIEF_LEASE = "orrery-brief"
         const val MESSAGES_PER_PASS = 2000
         const val MAIL_PER_PASS = 200
         const val TRUST_AFTER = 3
