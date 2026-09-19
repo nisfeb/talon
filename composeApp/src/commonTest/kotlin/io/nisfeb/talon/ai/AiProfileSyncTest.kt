@@ -225,7 +225,9 @@ class AiProfileSyncTest {
         assertEquals("https://wex.example/apps/armillary/v1", cfg.baseUrl)
         assertEquals("k1.secret", cfg.apiKey)
         assertTrue(cfg.usageInclude)
-        assertFalse(base.forFeature(AiFeature.CatchUp).usageInclude || base.copy(provider = AiSettings.Provider.Anthropic).usageInclude)
+        assertTrue(base.forFeature(AiFeature.CatchUp).usageInclude, "OpenRouter, as it always did")
+        val anthropic = base.copy(provider = AiSettings.Provider.Anthropic, apiKey = "sk-ant")
+        assertFalse(anthropic.forFeature(AiFeature.CatchUp).usageInclude, "nobody else is asked to report a cost")
     }
 
     @Test

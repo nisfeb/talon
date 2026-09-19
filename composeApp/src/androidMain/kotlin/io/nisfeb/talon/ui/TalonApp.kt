@@ -2099,6 +2099,7 @@ fun TalonApp(
                 mail = mailRepo,
                 calendar = calendarRepo,
                 orrery = orreryRepo,
+                armillary = armillaryRepo,
                 latticeInstalled = app.sessionStore.active()?.shipUrl?.let { url ->
                     { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(app.ktorHttp, url) }
                 },
@@ -2184,6 +2185,7 @@ fun TalonApp(
                 }
                 SettingsScreen(
                     orrery = orreryRepo,
+                    armillary = armillaryRepo,
                     aiSettings = app.aiSettings,
                     themePreference = app.themePreference,
                     uiSettings = app.uiSettings,

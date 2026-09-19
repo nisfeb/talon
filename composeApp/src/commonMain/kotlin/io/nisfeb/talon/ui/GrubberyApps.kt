@@ -111,6 +111,18 @@ fun orreryRow(availability: io.nisfeb.talon.orrery.OrreryAvailability, error: St
 }
 
 /**
+ * Armillary is its own desk app from the same publisher, installed from
+ * the ship's Grubbery shell rather than by kiln, so there is no install
+ * to offer here either: the row says where to go.
+ */
+fun armillaryRow(availability: io.nisfeb.talon.armillary.ArmillaryAvailability, error: String? = null): AppRow = when (availability) {
+    io.nisfeb.talon.armillary.ArmillaryAvailability.PRESENT -> AppRow("Armillary", AppState.WORKING, "Answering on this ship.", null, error)
+    io.nisfeb.talon.armillary.ArmillaryAvailability.MISSING -> AppRow("Armillary", AppState.MISSING, "Not on this ship. Install it from the Grubbery shell on your ship.", null, error)
+    io.nisfeb.talon.armillary.ArmillaryAvailability.SIGNED_OUT -> AppRow("Armillary", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
+    io.nisfeb.talon.armillary.ArmillaryAvailability.UNKNOWN -> AppRow("Armillary", AppState.UNKNOWN, "Not asked yet.", null, error)
+}
+
+/**
  * Where a ship's Grubbery keeps the permissions its apps ask for.
  * Under /apps like any installed app's own pages, not under /grubbery,
  * which is the framework's internal nexuses.

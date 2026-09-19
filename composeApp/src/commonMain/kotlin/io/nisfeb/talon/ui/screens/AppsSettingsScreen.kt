@@ -59,6 +59,8 @@ fun AppsSettingsScreen(
     calendar: CalendarRepo?,
     /** The pipe into orrery on the ship; null where no ship is known. */
     orrery: io.nisfeb.talon.orrery.OrreryRepo? = null,
+    /** Armillary on the ship, where the AI features buy their inference; null where no ship is known. */
+    armillary: io.nisfeb.talon.armillary.ArmillaryRepo? = null,
     /** Probes whether Grubbery is on the ship; null where no ship is known. */
     latticeInstalled: (suspend () -> Boolean)?,
     /** Probes whether %groups is on the ship, which chat itself runs on. */
@@ -84,6 +86,8 @@ fun AppsSettingsScreen(
     val orreryAvailability = orrery?.availability?.collectAsState()?.value
     val orreryError by (orrery?.error ?: noError).collectAsState()
     val orreryOn = orrery?.enabled?.collectAsState()?.value ?: false
+    val armillaryAvailability = armillary?.availability?.collectAsState()?.value
+    val armillaryError by (armillary?.error ?: noError).collectAsState()
 
     var lattice by remember { mutableStateOf<Boolean?>(null) }
     var groups by remember { mutableStateOf<Boolean?>(null) }
@@ -107,6 +111,7 @@ fun AppsSettingsScreen(
         add(latticeRow(lattice))
         add(groupsRow(groups))
         if (orreryAvailability != null) add(io.nisfeb.talon.ui.orreryRow(orreryAvailability, orreryError))
+        if (armillaryAvailability != null) add(io.nisfeb.talon.ui.armillaryRow(armillaryAvailability, armillaryError))
     }
 
     /**
@@ -135,6 +140,7 @@ fun AppsSettingsScreen(
             runCatching { mail?.refresh() }
             runCatching { calendar?.refreshAll() }
             runCatching { orrery?.probe() }
+            runCatching { armillary?.refresh() }
             busy = null
         }
     }
@@ -160,7 +166,8 @@ fun AppsSettingsScreen(
                         probeGroups()
                         runCatching { mail?.refresh() }
                         runCatching { calendar?.refreshAll() }
-            runCatching { orrery?.probe() }
+                        runCatching { orrery?.probe() }
+                        runCatching { armillary?.refresh() }
                         busy = null
                     }
                 },
@@ -225,6 +232,16 @@ fun AppsSettingsScreen(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     if (orreryOn) "Talon is feeding Orrery. Its settings are under AI." else "Feed Orrery from Settings, under AI.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // Buying inference is an AI setting, not an app setting, so
+            // this says where it lives rather than putting it here.
+            if (armillaryAvailability == io.nisfeb.talon.armillary.ArmillaryAvailability.PRESENT) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Armillary is a provider under AI.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

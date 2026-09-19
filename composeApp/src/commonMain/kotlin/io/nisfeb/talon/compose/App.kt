@@ -2030,6 +2030,7 @@ fun App(
                         mail = mailRepo,
                         calendar = calendarRepo,
                         orrery = orreryRepo,
+                        armillary = armillaryRepo,
                         latticeInstalled = sessionStore.active()?.shipUrl?.let { url ->
                             { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(http, url) }
                         },
@@ -2075,6 +2076,7 @@ fun App(
                         }
                         SettingsScreen(
                             orrery = orreryRepo,
+                            armillary = armillaryRepo,
                             // Anyone who has ever posted a status, plus
                             // whoever is already pinned so a pin can be
                             // taken off again when they go quiet.

@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -36,6 +38,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -45,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.ai.AiFeature
 import io.nisfeb.talon.ai.AiProfile
 import io.nisfeb.talon.ai.AiProvider
+import io.nisfeb.talon.ai.ARMILLARY_PROVIDER
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.AiSpend
 import io.nisfeb.talon.ai.FeatureSetting
@@ -55,6 +59,12 @@ import io.nisfeb.talon.ai.ProfileInputs
 import io.nisfeb.talon.ai.ProviderKind
 import io.nisfeb.talon.ai.migrateProfile
 import io.nisfeb.talon.ai.shipBase
+import io.nisfeb.talon.armillary.Account
+import io.nisfeb.talon.armillary.ArmillaryAvailability
+import io.nisfeb.talon.armillary.ArmillaryRepo
+import io.nisfeb.talon.armillary.Inference
+import io.nisfeb.talon.armillary.Plan
+import io.nisfeb.talon.armillary.money
 import io.nisfeb.talon.orrery.DecideControl
 import io.nisfeb.talon.orrery.DecideDay
 import io.nisfeb.talon.orrery.DecideSettings
@@ -83,7 +93,7 @@ import kotlinx.coroutines.launch
  * first change saves it.
  */
 @Composable
-fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?) {
+fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?, armillary: ArmillaryRepo? = null) {
     val scope = rememberCoroutineScope()
     val cfg by aiSettings.state.collectAsState()
     val catalog = remember { ModelCatalog() }
@@ -96,6 +106,10 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?) {
     val decide by (orrery?.decide?.settings ?: noDecide).collectAsState()
     val gen by (orrery?.generatorSettings ?: noGen).collectAsState()
     val availability by (orrery?.availability ?: noShip).collectAsState()
+    val noInference = remember { MutableStateFlow<Inference?>(null) }
+    // How an Armillary model is reached, which decides what the rows
+    // that read messages warn about.
+    val armillaryMode by (armillary?.inference ?: noInference).collectAsState()
     val spend by AiSpend.month.collectAsState()
     LaunchedEffect(Unit) { AiSpend.load() }
     if (orrery != null) LaunchedEffect(orrery) { orrery.loadGenerator() }
@@ -126,15 +140,25 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?) {
             p = p,
             catalog = catalog,
             orrery = orrery,
+            armillary = armillary,
             onSave = { next -> edit { it.copy(providers = it.providers.map { q -> if (q.id == next.id) next else q }) } },
             onRemove = if (p.kind == ProviderKind.ThisDevice) null else ({
                 edit { it.without(p.id) }
             }),
         )
     }
-    AddProvider { kind ->
-        val p = AiProvider("p" + nowMs().toString(36), kind, kind.label, baseUrl = if (kind == ProviderKind.OpenAiCompatible && !isTouchPrimary) "http://localhost:1234/v1" else null)
+    AddProvider(hasArmillary = profile.provider(ARMILLARY_PROVIDER) != null) { kind ->
+        // One Armillary row, on the stable id the repo writes to: this
+        // device buys from one ship, its own.
+        val p = if (kind == ProviderKind.Armillary) {
+            AiProvider(ARMILLARY_PROVIDER, kind, kind.label)
+        } else {
+            AiProvider("p" + nowMs().toString(36), kind, kind.label, baseUrl = if (kind == ProviderKind.OpenAiCompatible && !isTouchPrimary) "http://localhost:1234/v1" else null)
+        }
         edit { it.copy(providers = it.providers + p) }
+        if (kind == ProviderKind.Armillary && armillary != null) {
+            scope.launch { armillary.ensureKey(io.nisfeb.talon.ui.platformLabel) }
+        }
     }
 
     // ── Default model ──────────────────────────────────────────
@@ -156,14 +180,14 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?) {
         on = profile.isOn(AiFeature.CatchUp), spent = spend[AiFeature.CatchUp.name],
         onSwitch = { on -> setFeature(AiFeature.CatchUp) { it.copy(on = on) } },
     ) {
-        FeatureModel(profile, AiFeature.CatchUp, chat, reads = true) { ref -> setFeature(AiFeature.CatchUp) { it.copy(model = ref) } }
+        FeatureModel(profile, AiFeature.CatchUp, chat, reads = true, armillaryMode = armillaryMode?.mode) { ref -> setFeature(AiFeature.CatchUp) { it.copy(model = ref) } }
     }
     if (isAssistantSupported) FeatureRow(
         "Assistant", "Answers from your messages and does what you ask, confirming anything that changes data. Loops run on it. Reads messages when asked.",
         on = profile.isOn(AiFeature.Assistant), spent = spend[AiFeature.Assistant.name],
         onSwitch = { on -> setFeature(AiFeature.Assistant) { it.copy(on = on) } },
     ) {
-        FeatureModel(profile, AiFeature.Assistant, chat, reads = true, flag = { if (it.tools == false) "no tool use" else null }) { ref ->
+        FeatureModel(profile, AiFeature.Assistant, chat, reads = true, flag = { if (it.tools == false) "no tool use" else null }, armillaryMode = armillaryMode?.mode) { ref ->
             setFeature(AiFeature.Assistant) { it.copy(model = ref) }
         }
     }
@@ -229,7 +253,14 @@ private fun money(usd: Double): String {
 // ── Providers ──────────────────────────────────────────────────────
 
 @Composable
-private fun ProviderCard(p: AiProvider, catalog: ModelCatalog, orrery: OrreryRepo?, onSave: (AiProvider) -> Unit, onRemove: (() -> Unit)?) {
+private fun ProviderCard(
+    p: AiProvider,
+    catalog: ModelCatalog,
+    orrery: OrreryRepo?,
+    armillary: ArmillaryRepo?,
+    onSave: (AiProvider) -> Unit,
+    onRemove: (() -> Unit)?,
+) {
     val scope = rememberCoroutineScope()
     var key by remember(p.apiKey) { mutableStateOf(p.apiKey) }
     var url by remember(p.baseUrl) { mutableStateOf(p.baseUrl.orEmpty()) }
@@ -261,10 +292,28 @@ private fun ProviderCard(p: AiProvider, catalog: ModelCatalog, orrery: OrreryRep
                     if (p.label != p.kind.label) Quiet(p.kind.label)
                 }
                 if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                onRemove?.let { TextButton(onClick = it) { Text("Remove") } }
+                onRemove?.let { remove ->
+                    TextButton(onClick = {
+                        // A lease is the vendor's key on loan. Give it
+                        // back before the row goes, or it sits out there
+                        // held by a device that has forgotten it.
+                        if (p.kind == ProviderKind.Armillary && armillary != null) {
+                            scope.launch {
+                                armillary.dropLease()
+                                remove()
+                            }
+                        } else {
+                            remove()
+                        }
+                    }) { Text("Remove") }
+                }
             }
             if (p.kind == ProviderKind.ThisDevice) {
                 DeviceModelLine(orrery)
+                return@Column
+            }
+            if (p.kind == ProviderKind.Armillary) {
+                ArmillaryLines(p, armillary)
                 return@Column
             }
             if (p.kind == ProviderKind.OpenAiCompatible) {
@@ -308,8 +357,12 @@ private fun providerSummary(p: AiProvider): String {
     val retention = when (p.kind) {
         ProviderKind.Anthropic, ProviderKind.OpenAi -> " Retention is as your account's agreement says."
         ProviderKind.OpenAiCompatible -> if (p.isPrivate) " Private: on your own machine or network." else " Not on your own network, so treat it as a cloud service."
+        ProviderKind.Armillary -> " Paid through your ship."
         else -> ""
     }
+    // Armillary's models come from the ship, not from a fetch here, so
+    // an empty list means the ship has not answered yet.
+    if (p.models.isEmpty() && p.kind == ProviderKind.Armillary) return "No models yet." + retention
     if (p.models.isEmpty()) return "Models not fetched yet." + retention
     val zdr = p.models.count { it.zdr }
     return "${p.models.size} models" +
@@ -345,13 +398,182 @@ private fun DeviceModelLine(orrery: OrreryRepo?) {
     if (orrery != null) LaunchedEffect(orrery) { orrery.refreshModel() }
 }
 
+/**
+ * Armillary's card: no address, no key, because the ship holds both.
+ * What it has instead is a balance, what the plans cost, and the two
+ * buttons that turn money into credit on the vendor's ledger.
+ */
 @Composable
-private fun AddProvider(onAdd: (ProviderKind) -> Unit) {
+private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
+    val scope = rememberCoroutineScope()
+    val uri = LocalUriHandler.current
+    val noWhere = remember { MutableStateFlow(ArmillaryAvailability.UNKNOWN) }
+    val noAccount = remember { MutableStateFlow<Account?>(null) }
+    val noPlans = remember { MutableStateFlow<List<Plan>>(emptyList()) }
+    val noInference = remember { MutableStateFlow<Inference?>(null) }
+    val noBusy = remember { MutableStateFlow(false) }
+    val where by (repo?.availability ?: noWhere).collectAsState()
+    val account by (repo?.account ?: noAccount).collectAsState()
+    val plans by (repo?.plans ?: noPlans).collectAsState()
+    val inference by (repo?.inference ?: noInference).collectAsState()
+    val refreshing by (repo?.refreshing ?: noBusy).collectAsState()
+    var note by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    var buying by remember { mutableStateOf(false) }
+    var confirmCancel by remember { mutableStateOf(false) }
+
+    /** Open a checkout and send the person to it. */
+    fun buy(rail: String, plan: String?, amountMicro: Long?) {
+        val r = repo ?: return
+        note = null
+        scope.launch {
+            r.topUp(rail, plan, amountMicro)
+                .onSuccess { url -> uri.openUri(url); note = "Finish paying in your browser. The balance follows." to false }
+                .onFailure { note = (it.message ?: "The vendor did not answer.") to true }
+        }
+    }
+
+    Quiet(
+        when (where) {
+            ArmillaryAvailability.PRESENT -> "Answering on this ship."
+            ArmillaryAvailability.MISSING -> "Not on this ship. Install it from the Grubbery shell on your ship."
+            ArmillaryAvailability.SIGNED_OUT -> "Signed out of the ship."
+            ArmillaryAvailability.UNKNOWN -> "Not asked yet whether this ship has Armillary."
+        },
+    )
+    account?.let { a ->
+        Text(money(a.balanceMicro) + " on your account.", style = MaterialTheme.typography.bodyMedium)
+        Quiet(planLine(a))
+    }
+    Quiet(armillaryModeLine(inference?.mode, account))
+    Quiet(providerSummary(p))
+    note?.let { (text, bad) -> Quiet(text, error = bad) }
+
+    val subscription = plans.firstOrNull { it.kind == "subscription" }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(enabled = repo != null && where == ArmillaryAvailability.PRESENT, onClick = { buying = true }) { Text("Top up") }
+        if (subscription != null && account?.subscriptionActive != true) {
+            TextButton(enabled = repo != null, onClick = { buy("stripe", subscription.id, null) }) { Text("Subscribe") }
+        }
+        if (account?.subscriptionActive == true) {
+            TextButton(onClick = { confirmCancel = true }) { Text("Cancel subscription") }
+        }
+        if (refreshing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+        else TextButton(enabled = repo != null, onClick = {
+            note = null
+            scope.launch { repo?.refresh(fresh = true)?.onFailure { note = (it.message ?: "The ship did not answer.") to true } }
+        }) { Text("Refresh") }
+    }
+
+    if (buying) TopUpSheet(
+        plans = plans,
+        onDismiss = { buying = false },
+        onBuy = { rail, plan, amountMicro -> buying = false; buy(rail, plan, amountMicro) },
+    )
+    if (confirmCancel) AlertDialog(
+        onDismissRequest = { confirmCancel = false },
+        title = { Text("Cancel the subscription?") },
+        text = { Text("It keeps running until the end of the period you have paid for. Your balance stays as it is.") },
+        confirmButton = {
+            TextButton(onClick = {
+                confirmCancel = false
+                note = null
+                scope.launch {
+                    repo?.cancelSubscription()
+                        ?.onSuccess { note = "Asked your ship to stop it renewing. The account says so once the vendor confirms." to false }
+                        ?.onFailure { note = (it.message ?: "The ship did not answer.") to true }
+                }
+            }) { Text("Cancel it") }
+        },
+        dismissButton = { TextButton(onClick = { confirmCancel = false }) { Text("Keep it") } },
+    )
+}
+
+/**
+ * The top-up sheet: the vendor's own top-up plans as buttons, any other
+ * amount in dollars, and the rail. Bitcoin is the vendor's BTCPay
+ * Server, card is their Stripe account; neither is ours.
+ */
+@Composable
+private fun TopUpSheet(plans: List<Plan>, onDismiss: () -> Unit, onBuy: (rail: String, plan: String?, amountMicro: Long?) -> Unit) {
+    val topUps = plans.filter { it.kind == "topup" }
+    val minMicro = topUps.minOfOrNull { it.priceMicro }?.takeIf { it > 0 } ?: DEFAULT_MIN_TOPUP
+    var rail by remember { mutableStateOf("stripe") }
+    var amount by remember { mutableStateOf("") }
+    val custom = dollarsToMicro(amount)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Top up") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("stripe" to "Card", "btcpay" to "Bitcoin").forEach { (id, label) ->
+                        if (rail == id) Button(onClick = { rail = id }) { Text(label) }
+                        else OutlinedButton(onClick = { rail = id }) { Text(label) }
+                    }
+                }
+                topUps.forEach { plan ->
+                    OutlinedButton(onClick = { onBuy(rail, plan.id, null) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(plan.name + ": " + money(plan.priceMicro) + " for " + money(plan.creditMicro) + " of credit")
+                    }
+                }
+                OutlinedTextField(
+                    value = amount, onValueChange = { amount = it },
+                    label = { Text("Any other amount, in dollars") },
+                    placeholder = { Text(money(minMicro).removePrefix("$")) },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                )
+                Quiet("The smallest the vendor takes is " + money(minMicro) + ".")
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = custom != null && custom >= minMicro, onClick = { onBuy(rail, null, custom) }) { Text("Continue") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Not now") } },
+    )
+}
+
+/** Five dollars, which is armillary's own default smallest top-up. */
+private const val DEFAULT_MIN_TOPUP = 5_000_000L
+
+/** Dollars as typed to microdollars, or null when that is not a number. */
+internal fun dollarsToMicro(typed: String): Long? {
+    val t = typed.trim().removePrefix("$").trim()
+    if (t.isEmpty()) return null
+    val d = t.toDoubleOrNull() ?: return null
+    if (d <= 0.0) return null
+    return kotlin.math.round(d * 1_000_000.0).toLong()
+}
+
+/** What the account's plan line says, subscribed or not. */
+internal fun planLine(a: Account): String = when {
+    a.subscriptionActive -> a.plan.ifBlank { "Subscribed" } + (a.renews?.let { ", renews $it" } ?: "") + "."
+    a.plan.isNotBlank() -> a.plan + "."
+    else -> "No plan: you pay as you go."
+}
+
+/** How Talon reaches the model, in the owner's terms. */
+internal fun armillaryModeLine(mode: String?, account: Account?): String = when {
+    account?.leaseDisabled == true -> "Balance is empty: requests go through the vendor's ship until you top up."
+    mode == "lease" -> "Talon talks to the model provider directly with a key your ship holds."
+    mode == "proxy" -> "Requests go through the vendor's ship."
+    else -> "Your ship has not said yet how it reaches the model."
+}
+
+@Composable
+private fun AddProvider(hasArmillary: Boolean, onAdd: (ProviderKind) -> Unit) {
     var open by remember { mutableStateOf(false) }
     androidx.compose.foundation.layout.Box {
         OutlinedButton(onClick = { open = true }) { Text("Add a provider") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            listOf(ProviderKind.OpenRouter, ProviderKind.Anthropic, ProviderKind.OpenAi, ProviderKind.OpenAiCompatible).forEach { k ->
+            val kinds = buildList {
+                add(ProviderKind.OpenRouter)
+                add(ProviderKind.Anthropic)
+                add(ProviderKind.OpenAi)
+                add(ProviderKind.OpenAiCompatible)
+                // One at most: a device buys from one ship, its own.
+                if (!hasArmillary) add(ProviderKind.Armillary)
+            }
+            kinds.forEach { k ->
                 DropdownMenuItem(text = { Text(k.label) }, onClick = { open = false; onAdd(k) })
             }
         }
