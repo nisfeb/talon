@@ -35,7 +35,11 @@ data class AiProvider(
     val baseUrl: String? = null,
     val apiKey: String = "",
     val models: List<ModelInfo> = emptyList(),
+    /** Jev is on this provider's ZDR list, as of the last fetch. */
+    val offersJev: Boolean = false,
 ) {
+    fun withCatalog(c: Catalog): AiProvider = copy(models = c.models, offersJev = c.jev)
+
     /** On this device, or on a server on this machine or the owner's own network. */
     val isPrivate: Boolean
         get() = kind == ProviderKind.ThisDevice || (kind == ProviderKind.OpenAiCompatible && isPrivateUrl(baseUrl))
@@ -71,8 +75,13 @@ data class AiProfile(
 
     fun isOn(f: AiFeature): Boolean = features[f]?.on == true
 
-    /** The provider Jev is reached through: an OpenRouter one with a key. */
-    fun jevProvider(): AiProvider? = providers.firstOrNull { it.kind == ProviderKind.OpenRouter && it.apiKey.isNotBlank() }
+    /**
+     * The provider Jev is reached through: an OpenRouter one with a key,
+     * whose ZDR list names Jev, or whose models were never fetched.
+     */
+    fun jevProvider(): AiProvider? = providers.firstOrNull {
+        it.kind == ProviderKind.OpenRouter && it.apiKey.isNotBlank() && (it.models.isEmpty() || it.offersJev)
+    }
 }
 
 /** A feature's provider and model. */
