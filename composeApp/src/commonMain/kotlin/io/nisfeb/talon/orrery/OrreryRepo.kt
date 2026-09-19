@@ -182,7 +182,10 @@ class OrreryRepo(
         loop = scope.launch {
             while (isActive) {
                 push()
-                delay(PUSH_EVERY_MS)
+                // Wake for seven in the owner's zone, so the brief is not
+                // up to a pass late.
+                val wait = briefZone?.let { Brief.untilNext(now(), it) + 1_000 } ?: PUSH_EVERY_MS
+                delay(minOf(PUSH_EVERY_MS, wait))
             }
         }
     }
@@ -219,6 +222,7 @@ class OrreryRepo(
         val mail = AuspexApi(http, url)
         val state = a.stateJson(token)
         val zone = Brief.zone(state)
+        briefZone = zone
         runCatching { answerReplies(a, token, s, mail, state, zone, nowMs) }
             .onFailure { Log.w(TAG, "replies to the brief skipped: ${it.message}") }
         val day = Brief.dueDay(nowMs, zone) ?: return
@@ -254,11 +258,11 @@ class OrreryRepo(
     }
 
     /**
-     * Each reply to a brief this install sent, once, by its message id.
-     * Directions move the tagged actions; the rest is facts, read by the
-     * model triage uses (this device's, unless the cloud is opted in)
-     * and written as the owner's word. A reply whose facts have no model
-     * to read them waits, whole, for a pass that has one.
+     * Each reply to a brief this install sent, once, by its message id,
+     * read by the frontier model that wrote the brief: it moves the
+     * tagged actions, files what the owner asked for, and writes the
+     * rest as facts in the owner's word. Every piece is held to the ship
+     * before it is written. A reply with no model to read it waits.
      */
     private suspend fun answerReplies(
         a: OrreryApi,
@@ -279,63 +283,76 @@ class OrreryRepo(
             val brief = Brief.briefOf(thread, s) ?: continue
             val handled = sent.some(s, thread.messages.map { "reply:${it.id}" }).map { it.key.removePrefix("reply:") }.toSet()
             for (reply in Brief.pendingReplies(thread, s, handled)) {
-                val at = reply.sent.takeIf { it > 0 } ?: nowMs
-                val (moves, said) = Brief.directions(Brief.ownWords(reply.body, brief.body), tags, nowMs, zone)
-                var facts = Facts()
-                if (said.isNotBlank()) {
-                    val model = cloudModelIfOn() ?: (if (isLocalTriageSupported) LocalModels.best()?.second else null)
-                    if (model == null) {
-                        Log.i(TAG, "reply ${reply.id} waits: no model here to read it")
-                        return
-                    }
-                    val view = a.viewOf(state)
-                    val answer = Brief.parseAnswer(
-                        model.complete(Brief.ANALYST, Brief.analystPrompt(state, view.attrs, view.notes, reply.id, at, said), null, 1500),
-                    ) ?: JsonObject(emptyMap()).also { Log.w(TAG, "reply ${reply.id}: ${model.rung} did not answer in JSON") }
-                    Log.i(TAG, "reply ${reply.id} read by ${model.rung}")
-                    // Rule 2: a body the answer would make is asked for first.
-                    val known = view.bodies.map { it.id }.toSet()
-                    val resolved = mutableMapOf<String, String>()
-                    for (b in (answer["bodies"] as? kotlinx.serialization.json.JsonArray).orEmpty()) {
-                        val o = b as? JsonObject ?: continue
-                        val id = o["id"]?.jsonPrimitive?.content?.lowercase() ?: continue
-                        if (id in known) continue
-                        val q = o["name"]?.jsonPrimitive?.content ?: id.substringAfter('/')
-                        runCatching { a.resolve(q, token) }.getOrDefault(emptyList())
-                            .firstOrNull { it.isExact && it.kind == id.substringBefore('/') }
-                            ?.let { resolved[id] = it.id }
-                    }
-                    facts = Brief.replyFacts(answer, known, view.attrs, resolved, reply.id, at)
-                }
-                if (moves.isNotEmpty()) {
-                    val byId = a.actions(token, status = "all").associateBy { it.id }
-                    for (d in moves) move(a, token, byId[d.actionId] ?: continue, d)
-                }
-                for (batch in batches(facts)) {
-                    a.observe(batch, token).refused.forEach { Log.w(TAG, "reply ${reply.id}: refused ${it.error}") }
-                }
+                val words = Brief.ownWords(reply.body, brief.body)
+                if (words.isNotBlank()) answer(a, token, state, zone, nowMs, reply, words, tags)
                 // Only once all of it is written: a reply that failed
-                // halfway is read again, and every write above is one the
-                // ship answers as existing or refuses as already done.
+                // halfway is read again, and every write is one the ship
+                // answers as existing or refuses as already done.
                 sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, "reply:${reply.id}", "", nowMs))
-                Log.i(TAG, "reply ${reply.id}: ${moves.size} directions, ${facts.observations.size} facts")
             }
         }
     }
 
-    /** One direction from a reply: a new due or subject replaces the action, then the status moves. */
+    private suspend fun answer(
+        a: OrreryApi,
+        token: String,
+        state: JsonObject,
+        zone: kotlinx.datetime.TimeZone,
+        nowMs: Long,
+        reply: io.nisfeb.talon.mail.MailMessage,
+        words: String,
+        tags: Map<String, String>,
+    ) {
+        val frontier = cloud?.config?.invoke()?.takeIf { it.apiKey.isNotBlank() }
+            ?: error("no frontier model is set under AI")
+        val at = reply.sent.takeIf { it > 0 } ?: nowMs
+        val byId = a.actions(token, status = "all").associateBy { it.id }
+        val tagged = tags.mapNotNull { (t, id) -> byId[id]?.let { t to it } }.toMap()
+        val view = a.viewOf(state)
+        // ponytail: an answer that is not JSON throws and the reply is
+        // asked again next pass; a model that keeps failing keeps costing.
+        val answer = Brief.parseAnswer(
+            io.nisfeb.talon.ai.AiClient { frontier }.complete(
+                Brief.REPLY_SYSTEM,
+                Brief.analystPrompt(state, view.attrs, view.notes, reply.id, at, words, tagged, nowMs, zone),
+                maxOutputTokens = 8000,
+                timeoutMs = 180_000,
+            ),
+        ) ?: error("the answer to reply ${reply.id} was not JSON")
+        // Rule 2: a body the answer would make is asked for first.
+        val known = view.bodies.map { it.id }.toSet()
+        val resolved = mutableMapOf<String, String>()
+        for (b in (answer["bodies"] as? kotlinx.serialization.json.JsonArray).orEmpty()) {
+            val o = b as? JsonObject ?: continue
+            val id = o["id"]?.jsonPrimitive?.content?.lowercase() ?: continue
+            if (id in known) continue
+            val q = o["name"]?.jsonPrimitive?.content ?: id.substringAfter('/')
+            runCatching { a.resolve(q, token) }.getOrDefault(emptyList())
+                .firstOrNull { it.isExact && it.kind == id.substringBefore('/') }
+                ?.let { resolved[id] = it.id }
+        }
+        val facts = Brief.replyFacts(answer, known, view.attrs, resolved, reply.id, at)
+        val moves = Brief.movesOf(answer, tags, known)
+        val asked = Brief.replyActions(answer, state["schema"] as? JsonObject, known)
+        for (d in moves) move(a, token, byId[d.actionId] ?: continue, d)
+        for (body in asked) {
+            runCatching { a.act(body, token) }.onFailure { Log.i(TAG, "reply ${reply.id}: an action was refused: ${it.message}") }
+        }
+        for (batch in batches(facts)) {
+            a.observe(batch, token).refused.forEach { Log.w(TAG, "reply ${reply.id}: refused ${it.error}") }
+        }
+        Log.i(TAG, "reply ${reply.id}: ${moves.size} moves, ${asked.size} actions, ${facts.observations.size} facts")
+    }
+
+    /** One move from a reply: a new due or subject replaces the action, then the status moves. */
     private suspend fun move(a: OrreryApi, token: String, old: OrreryAction, d: Brief.Direction) {
         val note = "from the owner's reply to the brief"
         var id = old.id
         var status = old.status
-        val about = d.about?.let { name ->
-            runCatching { a.resolve(name, token) }.getOrDefault(emptyList()).firstOrNull()?.let { listOf(it.id) }
-                ?: null.also { Log.i(TAG, "no body goes by \"$name\"; ${old.id} keeps its subject") }
-        }
-        if (d.dueMs != null || about != null) {
+        if (d.dueMs != null || d.about != null) {
             runCatching { a.transition(token, old.id, "dismissed", "replaced, $note") }
                 .onFailure { Log.i(TAG, "${old.id} not dismissed: ${it.message}") }
-            val (newId, newStatus) = a.act(Brief.replacement(old, d.dueMs, about), token)
+            val (newId, newStatus) = a.act(Brief.replacement(old, d.dueMs, d.about), token)
             id = newId
             status = newStatus
         }
@@ -595,6 +612,9 @@ class OrreryRepo(
             _pushing.value = false
         }
     }
+
+    /** The owner's zone as the last brief pass read it, for the loop's wake at seven. */
+    private var briefZone: kotlinx.datetime.TimeZone? = null
 
     /** Measured once a run: a key that covered the schema a minute ago still does. */
     private var scopeChecked = false

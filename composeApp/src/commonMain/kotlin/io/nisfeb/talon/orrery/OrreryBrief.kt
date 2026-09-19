@@ -5,7 +5,6 @@ import io.nisfeb.talon.calendar.CalendarTask
 import io.nisfeb.talon.mail.MailMessage
 import io.nisfeb.talon.mail.MailThread
 import kotlinx.datetime.DateTimeUnit
-import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -46,8 +45,8 @@ import kotlinx.serialization.json.putJsonArray
  */
 object Brief {
     const val HOUR = 7
-    /** Past noon a brief is about a day half gone, so none goes out. */
-    const val LAST_HOUR = 12
+    /** A device asleep at seven sends on waking, within the hour; later than that, no brief that day. */
+    const val LATE_MS = 60 * 60_000L
     const val DEFAULT_ZONE = "America/New_York"
     const val MAX_UNDATED = 10
     private const val PREFIX = "Daily brief "
@@ -59,11 +58,22 @@ object Brief {
         Regex("""Daily brief (\d{4}-\d{2}-\d{2})""").find(subject)?.groupValues?.get(1)
             ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
 
-    /** The day a brief is due for, when it is due now: from seven until noon in the owner's zone. */
+    /** The day a brief is due for, when it is due now: seven in the owner's zone, or within the hour after. */
     fun dueDay(nowMs: Long, zone: TimeZone): LocalDate? {
-        val t = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone)
-        return if (t.hour in HOUR until LAST_HOUR) t.date else null
+        val date = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
+        val at = sevenOn(date, zone)
+        return if (nowMs in at until at + LATE_MS) date else null
     }
+
+    /** How long until the next seven o'clock in the owner's zone, so the loop can wake for it. */
+    fun untilNext(nowMs: Long, zone: TimeZone): Long {
+        val date = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
+        val today = sevenOn(date, zone)
+        return (if (nowMs < today) today else sevenOn(date.plus(1, DateTimeUnit.DAY), zone)) - nowMs
+    }
+
+    private fun sevenOn(date: LocalDate, zone: TimeZone): Long =
+        LocalDateTime(date.year, date.monthNumber, date.dayOfMonth, HOUR, 0).toInstant(zone).toEpochMilliseconds()
 
     // ---- the raw state view -----------------------------------------------
 
@@ -308,96 +318,59 @@ object Brief {
         return out.joinToString("\n").trim()
     }
 
-    /** What the owner said to do about one action. [about] is a name still to be resolved. */
-    data class Direction(val actionId: String, val status: String? = null, val dueMs: Long? = null, val about: String? = null)
+    /** What the owner said to do about one action: its new status, due or subject, by body id. */
+    data class Direction(val actionId: String, val status: String? = null, val dueMs: Long? = null, val about: List<String>? = null)
 
-    private val TAG = Regex("""\b[Aa](\d{1,3})\b""")
-    private val DONE = Regex("""\b(done|did it|finished|completed?)\b""")
-    private val DISMISS = Regex("""\b(dismiss(ed)?|no|nope|skip|drop|reject(ed)?)\b""")
-    private val APPROVE = Regex("""\b(approve[d]?|yes|ok|okay|go ahead)\b""")
-    private val DUE = Regex("""\bdue\s+(.+)$""", RegexOption.IGNORE_CASE)
-    private val ABOUT = Regex("""\babout\s+(.+)$""", RegexOption.IGNORE_CASE)
+    private val MOVES = setOf("approved", "dismissed", "done")
 
     /**
-     * The reply split in two: what it says to do with the tagged
-     * actions, and everything else, which is facts. A sentence naming a
-     * tag is a direction, whatever else it says. Within one, a comma or
-     * "and" starts a new part; a part with a tag and no verb takes the
-     * last verb ("dismiss A1, A4"), and one with a verb and no tag
-     * applies to the last tags ("approve A3, due friday").
+     * The model's moves, held to the brief: a tag it gave, a status the
+     * owner may give, a due that parses, and a subject of bodies that
+     * exist. What fails is dropped, never guessed at.
      */
-    fun directions(words: String, tags: Map<String, String>, nowMs: Long, zone: TimeZone): Pair<List<Direction>, String> {
+    fun movesOf(answer: JsonObject, tags: Map<String, String>, known: Set<String>): List<Direction> {
         val out = linkedMapOf<String, Direction>()
-        val facts = mutableListOf<String>()
-        for (sentence in words.split(Regex("""\n|;|(?<=[.!?])\s+""")).map { it.trim() }.filter { it.isNotEmpty() }) {
-            fun tagsIn(s: String) = TAG.findAll(s).map { "A" + it.groupValues[1] }.filter { it in tags }.toList()
-            if (tagsIn(sentence).isEmpty()) { facts += sentence; continue }
-            var lastVerb: String? = null
-            var lastTags = emptyList<String>()
-            for (part in sentence.split(Regex(""",|\band\b|&"""))) {
-                val p = part.trim().lowercase()
-                if (p.isEmpty()) continue
-                val due = DUE.find(part)?.groupValues?.get(1)?.let { whenOf(it, nowMs, zone) }
-                val about = ABOUT.find(part)?.groupValues?.get(1)?.trim()?.trimEnd('.', '!', '?')?.takeIf { it.isNotEmpty() }
-                val bare = p.replace(DUE, "").replace(ABOUT, "")
-                val verb = when {
-                    DONE.containsMatchIn(bare) -> "done"
-                    DISMISS.containsMatchIn(bare) -> "dismissed"
-                    APPROVE.containsMatchIn(bare) -> "approved"
-                    else -> null
-                }
-                val named = tagsIn(part)
-                val targets = named.ifEmpty { lastTags }
-                val status = verb ?: if (named.isNotEmpty() && due == null && about == null) lastVerb else null
-                for (t in targets) {
-                    val id = tags.getValue(t)
-                    val d = out[id] ?: Direction(id)
-                    out[id] = d.copy(status = status ?: d.status, dueMs = due ?: d.dueMs, about = about ?: d.about)
-                }
-                if (named.isNotEmpty()) lastTags = named
-                if (verb != null) lastVerb = verb
-            }
+        for (e in (answer["moves"] as? JsonArray).orEmpty()) {
+            val m = e as? JsonObject ?: continue
+            val id = m.str("tag")?.uppercase()?.trim('[', ']', ' ')?.let { tags[it] } ?: continue
+            val status = m.str("status")?.lowercase()?.takeIf { it in MOVES }
+            val due = m.str("due")?.let { runCatching { Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+            val about = (m["about"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.lowercase() }
+                ?.takeIf { it.isNotEmpty() && it.all { b -> b in known } }
+            if (status == null && due == null && about == null) continue
+            val d = out[id] ?: Direction(id)
+            out[id] = d.copy(status = status ?: d.status, dueMs = due ?: d.dueMs, about = about ?: d.about)
         }
-        return out.values.filter { it.status != null || it.dueMs != null || it.about != null } to facts.joinToString("\n")
+        return out.values.toList()
     }
 
     /**
-     * A day, and optionally a time, in the owner's zone: today, tomorrow,
-     * a weekday (today counts), 2026-09-25 or 9/25, then 3pm or 15:00.
-     * No time means nine in the morning.
+     * What the owner asked to have done, as /act bodies, checked the way
+     * generator/run.py checks a proposal: a kind the schema lists, a
+     * title, bodies that exist, and every payload key the schema marks
+     * required.
      */
-    fun whenOf(text: String, nowMs: Long, zone: TimeZone): Long? {
-        val t = text.lowercase().trim().trimEnd('.', '!', '?')
-        val today = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
-        val iso = Regex("""\b(\d{4})-(\d{2})-(\d{2})\b""").find(t)
-        val md = Regex("""\b(\d{1,2})/(\d{1,2})\b""").find(t)
-        val day: LocalDate = when {
-            iso != null -> runCatching { LocalDate.parse(iso.value) }.getOrNull() ?: return null
-            md != null -> runCatching {
-                val d = LocalDate(today.year, md.groupValues[1].toInt(), md.groupValues[2].toInt())
-                if (d < today) LocalDate(today.year + 1, d.monthNumber, d.dayOfMonth) else d
-            }.getOrNull() ?: return null
-            Regex("""\btoday\b""").containsMatchIn(t) -> today
-            Regex("""\btomorrow\b""").containsMatchIn(t) -> today.plus(1, DateTimeUnit.DAY)
-            else -> DayOfWeek.entries.firstOrNull { Regex("\\b" + it.name.lowercase().take(3)).containsMatchIn(t) }
-                ?.let { wd -> today.plus(((wd.ordinal - today.dayOfWeek.ordinal) + 7) % 7, DateTimeUnit.DAY) }
-                ?: return null
-        }
-        val clock = Regex("""\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b|\b(\d{1,2}):(\d{2})\b""").find(t.replace(iso?.value ?: "\u0000", ""))
-        var hour = 9
-        var minute = 0
-        if (clock != null) {
-            val g = clock.groupValues
-            if (g[3].isNotEmpty()) {
-                hour = g[1].toInt() % 12 + if (g[3] == "pm") 12 else 0
-                minute = g[2].toIntOrNull() ?: 0
-            } else {
-                hour = g[4].toInt()
-                minute = g[5].toInt()
+    fun replyActions(answer: JsonObject, schema: JsonObject?, known: Set<String>): List<JsonObject> {
+        val kinds = schema?.let(::schemaActions).orEmpty().toSet()
+        val payloads = (schema?.get("payloads") as? JsonObject).orEmpty()
+        return (answer["actions"] as? JsonArray).orEmpty().mapNotNull { e ->
+            val a = e as? JsonObject ?: return@mapNotNull null
+            val kind = a.str("kind")?.lowercase()?.takeIf { it in kinds } ?: return@mapNotNull null
+            val title = a.str("title")?.trim()?.take(200)?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            val about = (a["about"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.lowercase() }
+            if (!about.all { it in known }) return@mapNotNull null
+            val payload = a["payload"] as? JsonObject ?: JsonObject(emptyMap())
+            val required = (payloads[kind] as? JsonObject).orEmpty()
+                .filter { (_, v) -> (v as? JsonPrimitive)?.contentOrNull?.startsWith("required") == true }.keys
+            if (!required.all { it in payload }) return@mapNotNull null
+            buildJsonObject {
+                put("kind", kind)
+                put("title", title)
+                putJsonArray("about") { about.take(20).forEach { add(it) } }
+                a.str("due")?.let { d -> runCatching { Instant.parse(d) }.getOrNull()?.let { put("due", it.toString()) } }
+                put("payload", payload)
             }
         }
-        if (hour !in 0..23 || minute !in 0..59) return null
-        return LocalDateTime(day.year, day.monthNumber, day.dayOfMonth, hour, minute).toInstant(zone).toEpochMilliseconds()
     }
 
     /**
@@ -456,8 +429,33 @@ object Brief {
         Empty lists are fine. Small talk, greetings and things already known produce nothing.
     """.trimIndent()
 
-    /** The context block common/analyze.py's prompt builds, for one message from the owner. */
-    fun analystPrompt(state: JsonObject, attrs: Map<String, List<String>>, notes: Map<String, Map<String, String>>, replyId: String, atMs: Long, text: String): String = buildString {
+    /**
+     * The analyst prompt, then what a reply to the brief adds: it is the
+     * owner speaking, and a sentence about a tagged action is a move on
+     * it rather than a fact.
+     */
+    val REPLY_SYSTEM: String get() = ANALYST + "\n\n" + REPLY_RULES
+
+    private val REPLY_RULES = """
+        This message is the owner's reply to their daily brief. It is the owner speaking about their own world, so a plain statement in it is conf 100.
+        The brief listed actions waiting for the owner's answer, each under a tag such as A1; they are given below with what each one is. A sentence about a tagged action is a move on it, not a fact: answer it under "moves", one per action, with only what the owner changed: {"tag": "A1", "status": "approved", "due": "...", "about": ["kind/slug"]}. The status is "approved" (approve, yes, go ahead), "dismissed" (dismiss, no, skip) or "done" (done, did it). A new due is ISO 8601 UTC, read in the owner's timezone from the time now. A new subject names existing bodies by id. Write no fact from a sentence that only moves an action.
+        Everything else in the reply is facts, by the rules above. Something the owner asks to have done is an action.
+        Answer with one JSON object and nothing else:
+        {"moves": [...], "bodies": [...], "observations": [...], "actions": [...]}
+    """.trimIndent()
+
+    /** The context block common/analyze.py's prompt builds, for one message from the owner, with the brief's tags and the clock. */
+    fun analystPrompt(
+        state: JsonObject,
+        attrs: Map<String, List<String>>,
+        notes: Map<String, Map<String, String>>,
+        replyId: String,
+        atMs: Long,
+        text: String,
+        tagged: Map<String, OrreryAction> = emptyMap(),
+        nowMs: Long = atMs,
+        zone: TimeZone = TimeZone.UTC,
+    ): String = buildString {
         appendLine("Channel: mail")
         appendLine("The owner is ${state.str("me") ?: "person/me"}.")
         if (attrs.isNotEmpty()) {
@@ -475,6 +473,13 @@ object Brief {
             val aliases = (b["aliases"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
             appendLine("  ${b.str("id")} | ${b.str("name").orEmpty()} | ${aliases.joinToString(", ")}")
         }
+        if (tagged.isNotEmpty()) {
+            appendLine("Actions in the brief, by tag (tag | kind | title | about | due | status):")
+            tagged.forEach { (t, a) ->
+                appendLine("  $t | ${a.kind} | ${a.title} | ${a.about.joinToString(", ")} | ${a.due ?: "no due"} | ${a.status}")
+            }
+        }
+        appendLine("Now: ${isoUtc(nowMs)}, timezone ${zone.id}.")
         appendLine()
         appendLine("Messages, oldest first:")
         appendLine("--- message $replyId | ${isoUtc(atMs)} | from ${state.str("me") ?: "person/me"}")
@@ -501,8 +506,8 @@ object Brief {
      * made. Each observation is on a body that exists or is made here,
      * under an attribute the schema gives that kind, pointing only at
      * bodies that exist. The owner is speaking, so conf is 100, and the
-     * source is the reply. Actions are the generator's to file and are
-     * dropped.
+     * source is the reply. What the owner asked to have done is
+     * [replyActions]'s.
      */
     fun replyFacts(
         answer: JsonObject,

@@ -169,11 +169,16 @@ class OrreryBriefTest {
     }
 
     @Test
-    fun `seven until noon in the owner's zone`() {
+    fun `seven in the owner's zone, or within the hour for a device that slept`() {
         assertEquals("America/New_York", Brief.zone(state).id)
         assertNull(Brief.dueDay(ms("2026-09-19T10:59:00Z"), zone))
         assertEquals(day, Brief.dueDay(ms("2026-09-19T11:00:00Z"), zone))
-        assertNull(Brief.dueDay(ms("2026-09-19T16:00:00Z"), zone))
+        assertEquals(day, Brief.dueDay(ms("2026-09-19T11:59:00Z"), zone))
+        assertNull(Brief.dueDay(ms("2026-09-19T12:00:00Z"), zone))
+        // The loop wakes for it: at 06:50 that is ten minutes off, and
+        // just after seven it is tomorrow's.
+        assertEquals(10 * 60_000L, Brief.untilNext(ms("2026-09-19T10:50:00Z"), zone))
+        assertEquals(ms("2026-09-20T11:00:00Z") - ms("2026-09-19T11:05:00Z"), Brief.untilNext(ms("2026-09-19T11:05:00Z"), zone))
     }
 
     private val briefText = Brief.render(day, listOf("10:00  Dentist"), listOf("[A1] Buy swim goggles"), "Nothing to add.")
@@ -198,44 +203,62 @@ class OrreryBriefTest {
         )
     }
 
+    private val tags = mapOf("A1" to "1789-aaa", "A2" to "1789-bbb")
+    private val known = setOf("person/me", "person/rose", "thing/subaru", "activity/swim-lessons", "situation/dentist", "situation/grandmas")
+
     @Test
-    fun `a reply splits into moves on the tags and facts in the owner's words`() {
-        val tags = mapOf("A1" to "1789-aaa", "A2" to "1789-bbb")
-        val (moves, facts) = Brief.directions(Brief.ownWords(replyText, briefText), tags, now, zone)
+    fun `the model's moves are held to the brief's tags, the statuses and the bodies that exist`() {
+        val answer = Json.parseToJsonElement(
+            """
+            {"moves": [
+               {"tag": "A1", "status": "approved"},
+               {"tag": "[A2]", "due": "2026-09-25T19:00:00Z"},
+               {"tag": "A9", "status": "approved"},
+               {"tag": "A2", "status": "reopened"},
+               {"tag": "A1", "about": ["person/ghost"]},
+               {"tag": "A2", "about": ["person/rose", "thing/subaru"]}]}
+            """.trimIndent(),
+        ).jsonObject
         assertEquals(
             listOf(
                 Brief.Direction("1789-aaa", status = "approved"),
-                // Friday the 25th, three in the afternoon in New York.
-                Brief.Direction("1789-bbb", dueMs = ms("2026-09-25T19:00:00Z")),
+                Brief.Direction("1789-bbb", dueMs = ms("2026-09-25T19:00:00Z"), about = listOf("person/rose", "thing/subaru")),
             ),
-            moves,
+            Brief.movesOf(answer, tags, known),
         )
-        assertEquals("Rose has a cold.\nAdd Magnus to swim lessons.", facts)
     }
 
     @Test
-    fun `lists of tags share a verb, and a verb with no tag takes the last ones`() {
-        val tags = mapOf("A1" to "a", "A2" to "b", "A3" to "c")
-        fun d(words: String) = Brief.directions(words, tags, now, zone).first
-        assertEquals(listOf(Brief.Direction("a", "dismissed"), Brief.Direction("b", "dismissed")), d("dismiss A1, A2"))
-        assertEquals(listOf(Brief.Direction("b", "done")), d("A2 done"))
-        assertEquals(
-            listOf(Brief.Direction("c", "approved", dueMs = ms("2026-09-20T13:00:00Z"))),
-            d("approve A3, due tomorrow"),
-        )
-        assertEquals(listOf(Brief.Direction("c", about = "Linus")), d("A3 make it about Linus"))
-        assertEquals(listOf(Brief.Direction("a", "approved"), Brief.Direction("b", "dismissed")), d("approve A1 and dismiss A2"))
-        // A tag the brief did not give is just words.
-        assertEquals(emptyList(), d("the A9 steak sauce is gone"))
+    fun `what the owner asks for is filed only as act takes it`() {
+        val schema = Json.parseToJsonElement(
+            """{"actions": ["task", "message"], "payloads": {"message": {"to": "required: the body id", "text": "required: the message"}}}""",
+        ).jsonObject
+        val answer = Json.parseToJsonElement(
+            """
+            {"actions": [
+               {"kind": "task", "title": "Buy tissues", "about": ["person/rose"], "due": "2026-09-20T13:00:00Z"},
+               {"kind": "home", "title": "Turn on the porch light"},
+               {"kind": "task", "title": "Visit", "about": ["person/ghost"]},
+               {"kind": "message", "title": "Tell Rose", "payload": {"to": "person/rose"}},
+               {"kind": "task", "title": "  "}]}
+            """.trimIndent(),
+        ).jsonObject
+        val filed = Brief.replyActions(answer, schema, known)
+        assertEquals(1, filed.size)
+        assertEquals(setOf("kind", "title", "about", "due", "payload"), filed[0].keys)
+        assertEquals(JsonPrimitive("Buy tissues"), filed[0]["title"])
     }
 
     @Test
-    fun `a day and a time in the owner's zone`() {
-        assertEquals(ms("2026-09-19T19:00:00Z"), Brief.whenOf("today 3pm", now, zone))
-        assertEquals(ms("2026-09-26T13:00:00Z"), Brief.whenOf("saturday", ms("2026-09-20T11:00:00Z"), zone))
-        assertEquals(ms("2026-10-01T19:30:00Z"), Brief.whenOf("2026-10-01 15:30", now, zone))
-        assertEquals(ms("2026-09-25T13:00:00Z"), Brief.whenOf("9/25", now, zone))
-        assertNull(Brief.whenOf("whenever", now, zone))
+    fun `the reply is read with the analyst prompt, the tags and the clock`() {
+        assertTrue(Brief.REPLY_SYSTEM.startsWith(Brief.ANALYST + "\n\n"))
+        val prompt = Brief.analystPrompt(
+            state, mapOf("person" to listOf("status", "health")), emptyMap(), "m-reply", now, "Rose has a cold.",
+            tagged = mapOf("A1" to actions[0]), nowMs = now, zone = zone,
+        )
+        assertTrue("  A1 | task | Buy swim goggles | person/rose | 2026-09-20T13:00:00Z | proposed" in prompt, prompt)
+        assertTrue("Now: 2026-09-19T11:00:00Z, timezone America/New_York." in prompt, prompt)
+        assertTrue(prompt.endsWith("--- message m-reply | 2026-09-19T11:00:00Z | from person/me\nRose has a cold.\n---\nAnswer with the JSON object."), prompt)
     }
 
     @Test
