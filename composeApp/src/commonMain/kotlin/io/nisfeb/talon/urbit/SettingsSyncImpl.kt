@@ -37,6 +37,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -882,6 +883,57 @@ class SettingsSyncImpl(
     }
 
     /**
+     * The credentials as they go on the wire. They are written to their
+     * own entry, and mirrored into the preferences entry for builds
+     * before 1.8 that read only that one: a key-less device's preference
+     * push drops the mirror, which is the old wipe, but the entry beside
+     * it still holds them and nothing this side of 1.8 reads the mirror.
+     */
+    private fun JsonObjectBuilder.aiCredentials(cfg: AiSettings.Config) {
+        put("provider", cfg.provider.name)
+        // Only ship a credential we actually have. Emitting "" would
+        // make the ship's entry authoritatively key-less, and a
+        // later pull (here or on a peer) then blanks a real local
+        // key — the "keys not persisted" data loss. Absent ≠ empty.
+        if (cfg.apiKey.isNotBlank()) put("apiKey", cfg.apiKey)
+        cfg.model?.let { put("model", it) }
+        cfg.baseUrl?.let { put("baseUrl", it) }
+        // Brave key rides the same opt-in gate as the LLM key —
+        // both are service credentials; same don't-ship-empty rule.
+        if (cfg.braveApiKey.isNotBlank()) put("braveApiKey", cfg.braveApiKey)
+        // STT key: same don't-ship-empty rule as the other
+        // credentials. Shipping "" whenever it was blank let a
+        // device that never had the key blank everyone's on its
+        // next push of any AI setting. A removal travels as an
+        // explicit stamp instead, so peers can tell "removed"
+        // from "this device just doesn't have it".
+        if (cfg.sttApiKey.isNotBlank()) {
+            put("sttApiKey", cfg.sttApiKey)
+        } else if (cfg.sttApiKeyRemovedAtMs > 0L) {
+            put("sttApiKeyRemovedAtMs", cfg.sttApiKeyRemovedAtMs)
+        }
+        // The private model. Its address is not a secret but
+        // it travels with the key that opens it.
+        cfg.privateBaseUrl?.let { put("privateBaseUrl", it) }
+        cfg.privateModel?.let { put("privateModel", it) }
+        if (cfg.privateApiKey.isNotBlank()) put("privateApiKey", cfg.privateApiKey)
+        // The profile's keys, by provider, on the same terms:
+        // only those a provider here actually has.
+        cfg.savedProfile?.keys()?.takeIf { it.isNotEmpty() }?.let { keys ->
+            put("providerKeys", buildJsonObject { keys.forEach { (id, k) -> put(id, k) } })
+        }
+        // The providers and models, which the frontier and
+        // private model fields above always kept to this
+        // entry: without keys or model lists.
+        cfg.savedProfile?.let {
+            put("profile", Json.encodeToJsonElement(io.nisfeb.talon.ai.AiProfile.serializer(), it.forSync()))
+        }
+        // Which model reads your messages: a fact about the frontier
+        // provider, and meaningless without one, so it travels here.
+        put("frontierReadsMessages", cfg.frontierReadsMessages)
+    }
+
+    /**
      * Push the current AI settings to %settings. Per-feature toggles
      * (catchMeUp, smartFeatures, ask-Urbit, the agent) ALWAYS push —
      * they are user preferences with no security cost and should follow
@@ -894,6 +946,8 @@ class SettingsSyncImpl(
      * ship's entry with a feature-only blob, dropping the cloud-key
      * fields without needing a separate clear path.
      */
+
+
     override suspend fun pushAiSettings() {
         val cfg = aiSettings.state.value
         // The credentials, in their own entry, and only from a device
@@ -904,44 +958,7 @@ class SettingsSyncImpl(
                 BUCKET_AI_SETTINGS, AI_KEYS_ENTRY,
                 buildJsonObject {
                     put("schemaVersion", AI_SCHEMA_V2)
-                    put("provider", cfg.provider.name)
-                    // Only ship a credential we actually have. Emitting "" would
-                    // make the ship's entry authoritatively key-less, and a
-                    // later pull (here or on a peer) then blanks a real local
-                    // key — the "keys not persisted" data loss. Absent ≠ empty.
-                    if (cfg.apiKey.isNotBlank()) put("apiKey", cfg.apiKey)
-                    cfg.model?.let { put("model", it) }
-                    cfg.baseUrl?.let { put("baseUrl", it) }
-                    // Brave key rides the same opt-in gate as the LLM key —
-                    // both are service credentials; same don't-ship-empty rule.
-                    if (cfg.braveApiKey.isNotBlank()) put("braveApiKey", cfg.braveApiKey)
-                    // STT key: same don't-ship-empty rule as the other
-                    // credentials. Shipping "" whenever it was blank let a
-                    // device that never had the key blank everyone's on its
-                    // next push of any AI setting. A removal travels as an
-                    // explicit stamp instead, so peers can tell "removed"
-                    // from "this device just doesn't have it".
-                    if (cfg.sttApiKey.isNotBlank()) {
-                        put("sttApiKey", cfg.sttApiKey)
-                    } else if (cfg.sttApiKeyRemovedAtMs > 0L) {
-                        put("sttApiKeyRemovedAtMs", cfg.sttApiKeyRemovedAtMs)
-                    }
-                    // The private model. Its address is not a secret but
-                    // it travels with the key that opens it.
-                    cfg.privateBaseUrl?.let { put("privateBaseUrl", it) }
-                    cfg.privateModel?.let { put("privateModel", it) }
-                    if (cfg.privateApiKey.isNotBlank()) put("privateApiKey", cfg.privateApiKey)
-                    // The profile's keys, by provider, on the same terms:
-                    // only those a provider here actually has.
-                    cfg.savedProfile?.keys()?.takeIf { it.isNotEmpty() }?.let { keys ->
-                        put("providerKeys", buildJsonObject { keys.forEach { (id, k) -> put(id, k) } })
-                    }
-                    // The providers and models, which the frontier and
-                    // private model fields above always kept to this
-                    // entry: without keys or model lists.
-                    cfg.savedProfile?.let {
-                        put("profile", Json.encodeToJsonElement(io.nisfeb.talon.ai.AiProfile.serializer(), it.forSync()))
-                    }
+                    aiCredentials(cfg)
                 },
             )
         }
@@ -953,7 +970,6 @@ class SettingsSyncImpl(
                 // legacy seed from the rc8-era recovery path.
                 put("schemaVersion", AI_SCHEMA_V2)
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
-                put("frontierReadsMessages", cfg.frontierReadsMessages)
                 put("smartFeaturesEnabled", cfg.smartFeaturesEnabled)
                 put("askUrbitEnabled", cfg.askUrbitEnabled)
                 put("agentEnabled", cfg.agentEnabled)
@@ -965,6 +981,7 @@ class SettingsSyncImpl(
                 // The profile's switches, which travel like the toggles
                 // above; its providers and models ride the credentials.
                 cfg.savedProfile?.let { put("switches", it.switches()) }
+                if (cfg.syncEnabled && cfg.hasCredentials()) aiCredentials(cfg)
             },
         )
     }
@@ -1152,7 +1169,6 @@ class SettingsSyncImpl(
         val features = if (schemaVersion >= AI_SCHEMA_V2) {
             current.copy(
                 catchMeUpEnabled = bool("catchMeUpEnabled", current.catchMeUpEnabled),
-                frontierReadsMessages = bool("frontierReadsMessages", current.frontierReadsMessages),
                 smartFeaturesEnabled = bool("smartFeaturesEnabled", current.smartFeaturesEnabled),
                 askUrbitEnabled = bool("askUrbitEnabled", current.askUrbitEnabled),
                 agentEnabled = bool("agentEnabled", current.agentEnabled),
@@ -1224,10 +1240,18 @@ class SettingsSyncImpl(
             } else features
         } else features
 
+        // Which model reads your messages rides the credentials: the
+        // model it names is only here on a device that syncs them, and a
+        // device that keeps its messages off the cloud is not told
+        // otherwise by a peer.
+        val gated =
+            if (current.syncEnabled) merged.copy(frontierReadsMessages = bool("frontierReadsMessages", merged.frontierReadsMessages))
+            else merged
+
         // The profile: a new install's arrives whole, an old install's
         // write changes what its fields describe, keys come with the
         // credentials. applyRemote's keepingCredentials holds the rest.
-        val withProfile = merged.copy(savedProfile = io.nisfeb.talon.ai.profileAfterEntry(obj, current, merged))
+        val withProfile = gated.copy(savedProfile = io.nisfeb.talon.ai.profileAfterEntry(obj, current, gated))
         aiSettings.applyRemote(withProfile)
         // applyRemote deliberately bypasses onStateChange (anti-pingpong),
         // which is also the only rearm-on-key-change hook — so a key or

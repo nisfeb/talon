@@ -16,9 +16,6 @@ private const val AI_FILE = "ai_settings.json"
 
 class IosAiSettings : AiSettingsRepository {
     private val json = Json { ignoreUnknownKeys = true }
-    private val _state = MutableStateFlow(loadOrDefault())
-    override val state: StateFlow<AiSettings.Config> = _state.asStateFlow()
-    override var onStateChange: ((AiSettings.Config, Boolean) -> Unit)? = null
 
     /**
      * Whether the file was read. It is written with complete
@@ -27,8 +24,15 @@ class IosAiSettings : AiSettingsRepository {
      * become defaults, and minting a device id then wrote those
      * defaults straight over the keys. Nothing is written until a read
      * has succeeded or the file has been found to be absent.
+     *
+     * Declared before the state it guards: Kotlin runs initialisers in
+     * order, and below the state this was set back to false the moment
+     * after the read set it, so nothing was ever written again.
      */
     private var readTheFile = false
+    private val _state = MutableStateFlow(loadOrDefault())
+    override val state: StateFlow<AiSettings.Config> = _state.asStateFlow()
+    override var onStateChange: ((AiSettings.Config, Boolean) -> Unit)? = null
 
     private fun loadOrDefault(): AiSettings.Config {
         val raw = IosFiles.read(AI_FILE)

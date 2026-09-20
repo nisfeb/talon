@@ -257,14 +257,26 @@ fun isPrivateUrl(url: String?): Boolean {
 // ---- storage and sync ------------------------------------------------------
 
 /** The profile as it travels between devices: no keys, and no model lists, which each device fetches. */
-fun AiProfile.forSync(): AiProfile = copy(providers = providers.map { it.copy(apiKey = "", models = emptyList()) })
+fun AiProfile.forSync(): AiProfile =
+    // The model list and what it says about Jev are both this device's
+    // own reading: sending the flag without the list told the device
+    // that had fetched one that its provider no longer offers Jev.
+    copy(providers = providers.map { it.copy(apiKey = "", models = emptyList(), offersJev = false) })
 
 /** Each provider's key, where it has one. */
 fun AiProfile.keys(): Map<String, String> = providers.filter { it.apiKey.isNotBlank() }.associate { it.id to it.apiKey }
 
 /** Keys arriving for providers, by id. A blank never erases one. */
-fun AiProfile.withKeys(keys: Map<String, String>): AiProfile =
-    copy(providers = providers.map { p -> keys[p.id]?.takeIf { it.isNotBlank() }?.let { p.copy(apiKey = it) } ?: p })
+fun AiProfile.withKeys(keys: Map<String, String>, from: AiProfile? = null): AiProfile =
+    copy(
+        providers = providers.map { p ->
+            // The same id means the same provider only where the kind
+            // agrees: ids are shared constants, so an Anthropic key
+            // could otherwise be sent to OpenRouter.
+            val sameKind = from == null || from.provider(p.id)?.kind == p.kind
+            keys[p.id]?.takeIf { it.isNotBlank() && sameKind }?.let { p.copy(apiKey = it) } ?: p
+        },
+    )
 
 /**
  * A profile from elsewhere keeps this device's keys and model lists for
@@ -279,6 +291,7 @@ fun AiProfile.keepingLocal(local: AiProfile?): AiProfile {
             p.copy(
                 apiKey = p.apiKey.ifBlank { mine?.apiKey.orEmpty() },
                 models = p.models.ifEmpty { mine?.models.orEmpty() },
+                offersJev = p.offersJev || (p.models.isEmpty() && mine?.offersJev == true),
             )
         },
     )
@@ -346,7 +359,10 @@ fun AiProfile.withLegacy(cfg: AiSettings.Config): AiProfile {
             )
         }
         def = def.copy(model = cfg.model.orEmpty())
-    } else if (dp == null && cfg.apiKey.isNotBlank()) {
+    } else if (dp == null && providers.isEmpty() && cfg.apiKey.isNotBlank()) {
+        // Only where there is nothing here to speak of. A profile with
+        // providers in it is one somebody curated, and an old install's
+        // key used to put back the provider they had just deleted.
         providers = listOf(AiProvider(MAIN_PROVIDER, kindOfLegacy(cfg.provider), kindOfLegacy(cfg.provider).label, cfg.baseUrl, cfg.apiKey)) +
             providers.filterNot { it.id == MAIN_PROVIDER }
         def = ModelRef(MAIN_PROVIDER, cfg.model.orEmpty())
@@ -365,7 +381,10 @@ private fun kindOfLegacy(p: AiSettings.Provider): ProviderKind = when (p) {
 }
 
 /** The switches that travel whatever the key sync says, as the old toggles did. */
-private val SYNCED_SWITCHES = listOf(AiFeature.CatchUp, AiFeature.Assistant, AiFeature.OrreryBrief, AiFeature.Transcription)
+// Transcription is not here: it is migrated from what the device
+// itself can do (a speech key, or an OpenAI chat key), so syncing it
+// let a phone with neither turn transcription off on the computer.
+private val SYNCED_SWITCHES = listOf(AiFeature.CatchUp, AiFeature.Assistant, AiFeature.OrreryBrief)
 
 /** The switches as the config entry carries them. Triage is Feed Orrery, per install; the generator is the ship's. */
 fun AiProfile.switches(): kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.buildJsonObject {
@@ -414,5 +433,8 @@ fun profileAfterEntry(
     profile ?: return null
     val keys = (entry["providerKeys"] as? kotlinx.serialization.json.JsonObject)
         ?.mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { k to it } }?.toMap()
-    return if (keys != null && current.syncEnabled) profile.withKeys(keys) else profile
+    // The keys are matched against the profile they came with, so a
+    // shared id (they are constants) cannot put an Anthropic key on this
+    // device's OpenRouter provider.
+    return if (keys != null && current.syncEnabled) profile.withKeys(keys, from = incoming) else profile
 }

@@ -187,6 +187,12 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .remove(KEY_PRIVATE_BASE_URL)
             .remove(KEY_PRIVATE_MODEL)
             .remove(KEY_PRIVATE_API_KEY)
+            // A privacy choice, and one the profile is rebuilt from: left
+            // behind, sign-out kept "the cloud reads my messages" on for
+            // whoever signed in next.
+            .remove(KEY_FRONTIER_READS)
+            .remove(KEY_STT_SET_AT)
+            .remove(KEY_STT_REMOVED_AT)
             .remove(KEY_URBIT_KNOWLEDGE_PROMPT)
             .remove(KEY_ASSISTANT_PROMPT)
             .remove(KEY_LOOP_PROMPT)

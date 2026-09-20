@@ -239,12 +239,18 @@ private fun ProviderCard(p: AiProvider, catalog: ModelCatalog, orrery: OrreryRep
     val edited = p.copy(apiKey = key.trim(), baseUrl = url.trim().ifBlank { null })
     val dirty = edited.apiKey != p.apiKey || edited.baseUrl != p.baseUrl
 
-    fun load(of: AiProvider) = scope.launch {
-        busy = true
-        runCatching { catalog.fetch(of) }
-            .onSuccess { onSave(of.withCatalog(it)); note = null }
-            .onFailure { onSave(of); note = (it.message ?: "No answer.") to true }
-        busy = false
+    // Saved first, then the models fetched: a fetch that hangs used to
+    // hold the key in the screen, and backing out of Settings took the
+    // key with it.
+    fun load(of: AiProvider) {
+        onSave(of)
+        scope.launch {
+            busy = true
+            runCatching { catalog.fetch(of) }
+                .onSuccess { onSave(of.withCatalog(it)); note = null }
+                .onFailure { note = (it.message ?: "No answer.") to true }
+            busy = false
+        }
     }
 
     OutlinedCard(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
@@ -640,10 +646,18 @@ private fun JevRow(orrery: OrreryRepo?, profile: AiProfile, on: Boolean, orreryH
         "TypeSafe's Jev reads each message before triage does, through OpenRouter with zero data retention, for cents a day. " +
             "It skips messages that say nothing, drops statuses that are feelings rather than circumstances, and picks the people and things triage sees. " +
             "Triage reads less and reads better.",
-        on = on && jev != null, spent = spent, switchEnabled = jev != null || on,
+        // On is on, whoever offers it: a switch that reads off because
+        // the provider went could only ever send "on", so it did nothing.
+        on = on, spent = spent, switchEnabled = jev != null || on,
         onSwitch = onSwitch,
     ) {}
-    if (jev == null) Quiet("Needs an OpenRouter provider with a key: OpenRouter is where Jev is offered.")
+    if (jev == null) {
+        Quiet(
+            if (on) "No provider offers Jev any more, so nothing is being gated. Turn it off, or add an OpenRouter provider with a key."
+            else "Needs an OpenRouter provider with a key: OpenRouter is where Jev is offered.",
+            error = on,
+        )
+    }
     val dc = orrery?.decide
     if (orrery != null && dc != null && orreryHere && on) {
         TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Hide advanced" else "Advanced") }
