@@ -711,11 +711,14 @@ class OrreryRepo(
      * this pass may take is read.
      */
     internal suspend fun mailSince(mail: AuspexApi, cursor: Long): List<io.nisfeb.talon.mail.InboxEntry> {
-        if (cursor <= 0L) return mail.inbox(io.nisfeb.talon.mail.MailView.ALL, limit = MAIL_PER_PASS).threads.filter { it.last > cursor }
+        // The inbox, as the pipe has always read: the whole of the mail
+        // would hand it the owner's own sent copies as facts.
+        val view = io.nisfeb.talon.mail.MailView.INBOX
+        if (cursor <= 0L) return mail.inbox(view, limit = MAIL_PER_PASS).threads.filter { it.last > cursor }
         val out = mutableListOf<io.nisfeb.talon.mail.InboxEntry>()
         var offset = 0
         while (offset < MAIL_PER_PASS) {
-            val page = mail.inbox(io.nisfeb.talon.mail.MailView.ALL, offset = offset, limit = MAIL_PAGE).threads
+            val page = mail.inbox(view, offset = offset, limit = MAIL_PAGE).threads
             if (page.isEmpty()) break
             val fresh = page.filter { it.last > cursor }
             out += fresh
