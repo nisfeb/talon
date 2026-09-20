@@ -49,6 +49,48 @@ class AiProfileSyncTest {
         assertTrue(base.copy(apiKey = "", sttApiKey = "", privateBaseUrl = null, savedProfile = p).hasCredentials(), "profile keys are credentials")
     }
 
+    @Test
+    fun `what one device read about itself stays on it`() {
+        val p = migrateProfile(base).let {
+            it.copy(providers = it.providers.map { pr -> pr.copy(models = listOf(ModelInfo("m1")), offersJev = true) })
+        }
+        // The Jev flag is read off the model list, so it travels with it:
+        // sent alone it told a device that had fetched a list that its own
+        // provider no longer offers Jev.
+        assertTrue(p.forSync().providers.none { it.offersJev }, "the flag stays with the list it was read from")
+        val here = p.keepingLocal(p)
+        assertTrue(here.providers.all { it.offersJev }, "and the device that has the list keeps its own answer")
+
+        // Transcription is migrated from what this device can do, so a
+        // phone with no speech key must not turn it off on the computer.
+        assertFalse(AiFeature.Transcription.name in p.switches().keys, "transcription is the device's own")
+        val off = p.withSwitches(buildJsonObject { put(AiFeature.Transcription.name, false) })
+        assertEquals(p.isOn(AiFeature.Transcription), off.isOn(AiFeature.Transcription))
+    }
+
+    @Test
+    fun `a key lands only on a provider of the same kind`() {
+        val mine = migrateProfile(base.copy(provider = AiSettings.Provider.Anthropic, apiKey = "sk-ant"))
+        val theirs = migrateProfile(base) // the same id, OpenRouter's kind
+        assertEquals(
+            "sk-ant",
+            mine.withKeys(mapOf(MAIN_PROVIDER to "sk-or"), from = theirs).provider(MAIN_PROVIDER)?.apiKey,
+            "an OpenRouter key does not land on an Anthropic provider that shares the id",
+        )
+        assertEquals("sk-or", mine.withKeys(mapOf(MAIN_PROVIDER to "sk-or"), from = mine).provider(MAIN_PROVIDER)?.apiKey)
+    }
+
+    @Test
+    fun `an old install's write cannot put back a provider that was deleted`() {
+        val kept = migrateProfile(base).let { p ->
+            p.copy(providers = p.providers.filterNot { it.id == MAIN_PROVIDER })
+        }
+        assertNull(kept.withLegacy(base).provider(MAIN_PROVIDER), "the one they deleted stays deleted")
+        // With nothing here at all, the old fields are still all there is.
+        val empty = kept.copy(providers = emptyList(), defaultModel = null)
+        assertEquals("sk-or", empty.withLegacy(base).provider(MAIN_PROVIDER)?.apiKey)
+    }
+
     private fun entry(vararg kv: Pair<String, Any>) = buildJsonObject {
         kv.forEach { (k, v) ->
             when (v) {

@@ -22,18 +22,24 @@ class AiSpendTest {
     fun `each feature's spend adds up within a month and starts again in the next`() = runTest {
         val sept = 1_789_000_000_000L // mid-September 2026
         val oct = sept + 30L * 86_400_000
+        val was = AiSpend.dao
         AiSpend.dao = Rows()
-        AiSpend.add(AiFeature.CatchUp.name, 0.01, sept)
-        AiSpend.add(AiFeature.CatchUp.name, 0.02, sept)
-        AiSpend.add(AiSpend.JEV, 0.004, sept)
-        AiSpend.add(AiFeature.Assistant.name, null, sept)
-        AiSpend.add(AiFeature.Assistant.name, 0.0, sept)
-        assertEquals(setOf(AiFeature.CatchUp.name, AiSpend.JEV), AiSpend.month.value.keys, "nothing reported, nothing kept")
-        assertEquals(0.03, AiSpend.month.value.getValue(AiFeature.CatchUp.name), 1e-9)
-        AiSpend.load(oct)
-        assertEquals(emptyMap(), AiSpend.month.value)
-        AiSpend.load(sept)
-        assertEquals(0.004, AiSpend.month.value.getValue(AiSpend.JEV), 1e-9)
-        AiSpend.dao = null
+        try {
+            AiSpend.add(AiFeature.CatchUp.name, 0.01, sept)
+            AiSpend.add(AiFeature.CatchUp.name, 0.02, sept)
+            AiSpend.add(AiSpend.JEV, 0.004, sept)
+            AiSpend.add(AiFeature.Assistant.name, null, sept)
+            AiSpend.add(AiFeature.Assistant.name, 0.0, sept)
+            assertEquals(setOf(AiFeature.CatchUp.name, AiSpend.JEV), AiSpend.month.value.keys, "nothing reported, nothing kept")
+            assertEquals(0.03, AiSpend.month.value.getValue(AiFeature.CatchUp.name), 1e-9)
+            AiSpend.load(oct)
+            assertEquals(emptyMap(), AiSpend.month.value)
+            AiSpend.load(sept)
+            assertEquals(0.004, AiSpend.month.value.getValue(AiSpend.JEV), 1e-9)
+        } finally {
+            // A global the whole process shares: left as the fake, every
+            // test after this one wrote its spend into it.
+            AiSpend.dao = was
+        }
     }
 }

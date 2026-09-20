@@ -28,9 +28,18 @@ class SectionFlagsGuardTest {
         "notebookComposeOpen", // a composer inside a notebook, with its own back
         "galleryComposeOpen", // a composer inside a gallery, with its own back
         "showNewDmRequest", // a one-shot request, not a screen
+        "localShipSetupOpen", // only while signed out, where there is no drawer to leave it by
+        "meetingOpen", // an overlay over a live party line, closed with the line and by its own close
     )
 
-    private fun offenders(path: String, name: Regex): List<String> =
+    /**
+     * Both shapes a section flag is named, in both shells: the guard
+     * read only `.*Open` in one and only `show[A-Z].*` in the other, so
+     * a section named the other way in either went unseen.
+     */
+    private val sectionName = Regex("(show[A-Z].*|.*Open)")
+
+    private fun offenders(path: String, name: Regex = sectionName): List<String> =
         Regex("""var (\w+) by remember \{ mutableStateOf\(false\) \}""")
             .findAll(File(root, path).readText())
             .map { it.groupValues[1] }
@@ -39,7 +48,7 @@ class SectionFlagsGuardTest {
 
     @Test
     fun `every android section is made by the registry`() {
-        val bad = offenders("composeApp/src/androidMain/kotlin/io/nisfeb/talon/ui/TalonApp.kt", Regex(".*Open"))
+        val bad = offenders("composeApp/src/androidMain/kotlin/io/nisfeb/talon/ui/TalonApp.kt")
         assertTrue(
             bad.isEmpty(),
             "Section flags made the old way: $bad. Declare a section with `sections.flag()` so the drawer's " +
@@ -49,7 +58,7 @@ class SectionFlagsGuardTest {
 
     @Test
     fun `every desktop section is made by the registry`() {
-        val bad = offenders("composeApp/src/commonMain/kotlin/io/nisfeb/talon/compose/App.kt", Regex("show[A-Z].*"))
+        val bad = offenders("composeApp/src/commonMain/kotlin/io/nisfeb/talon/compose/App.kt")
         assertTrue(
             bad.isEmpty(),
             "Section flags made the old way: $bad. Declare a section with `sections.flag()` so the drawer's " +

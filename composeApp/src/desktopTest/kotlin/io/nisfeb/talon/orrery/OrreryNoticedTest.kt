@@ -42,8 +42,8 @@ class OrreryNoticedTest {
         OrreryRepo.discard(db, "a")
         assertEquals(emptyList(), db.orreryNoticed().pending("~zod").first())
         assertEquals(1, db.orreryNoticed().countByState("~zod", "location", "discarded"))
-        assertFalse(OrreryRepo.confirm(db, "a"), "with no pipe attached, a confirm has nowhere to go and says so")
-        assertEquals("discarded", db.orreryNoticed().get("a")?.state, "and changes nothing")
+        assertFalse(OrreryRepo.confirm(db, "a"), "with no pipe attached there is nowhere to send it, and it says so")
+        assertEquals("confirmed", db.orreryNoticed().get("a")?.state, "but the word is taken here, so the tray clears and the gate learns")
     }
 
     @Test

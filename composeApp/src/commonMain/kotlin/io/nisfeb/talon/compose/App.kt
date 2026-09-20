@@ -1836,7 +1836,7 @@ fun App(
                 // render at full width without entering ChatPaneScaffold.
                 // Only DmList + chat-detail screens (chat, thread, notebook,
                 // gallery) participate in the list/detail split.
-                io.nisfeb.talon.ui.DrawerOverlay.open = drawerState.isOpen
+                io.nisfeb.talon.ui.DrawerOverlay.Follow(drawerState.isOpen)
                 androidx.compose.material3.ModalNavigationDrawer(
                     drawerState = drawerState,
                     // Desktop opens the ship switcher only via the Talon
@@ -2249,6 +2249,7 @@ fun App(
                         onBack = { showActions = false },
                         onShown = { orreryRepo.refreshWaiting() },
                         onDecide = { a, status, why -> orreryRepo.answer(a.id, status, why) },
+                        problem = orreryRepo.error.collectAsState().value,
                         generator = orreryRepo.generator.collectAsState().value?.let {
                             io.nisfeb.talon.orrery.generatorLine(it, io.nisfeb.talon.util.nowMs(), kotlinx.datetime.TimeZone.currentSystemDefault())
                         },
@@ -3224,7 +3225,13 @@ fun App(
                                         invites = homeInvites,
                                         onOpenInvites = { showInvites = true },
                                         actions = io.nisfeb.talon.ui.newActions(orreryActions),
-                                        onOpenAction = { id -> openAction = orreryActions.firstOrNull { it.id == id } },
+                                        // The chip was drawn from a listing that may
+                                        // have moved on. A tap that found nothing used
+                                        // to do nothing; it opens the list instead.
+                                        onOpenAction = { id ->
+                                            orreryActions.firstOrNull { it.id == id }
+                                                ?.let { openAction = it } ?: run { showActions = true }
+                                        },
                                         onOpenContact = { other -> profileSheetShip = other },
                                         // The same rule the kebab menu uses: a rail
                                         // to switch only where one is on screen.

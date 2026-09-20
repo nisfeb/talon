@@ -2009,7 +2009,11 @@ fun TalonApp(
                         ?.map { it.flag }.orEmpty(),
                     onOpenInvites = { homeOpen = false; invitesOpen = true },
                     actions = io.nisfeb.talon.ui.newActions(orreryActions),
-                    onOpenAction = { id -> openAction = orreryActions.firstOrNull { it.id == id } },
+                    // The chip was drawn from a listing that may have moved
+                    // on. A tap that found nothing used to do nothing.
+                    onOpenAction = { id ->
+                        orreryActions.firstOrNull { it.id == id }?.let { openAction = it } ?: run { homeOpen = false; actionsOpen = true }
+                    },
                     onOpenContact = { other -> profileSheetShip = other },
                     onOpenStatuses = { homeOpen = false; statusFeedOpen = true },
                     onOpenConversation = { whom -> homeOpen = false; openWhom = whom },
@@ -2049,6 +2053,7 @@ fun TalonApp(
                 modifier = mod,
                 onShown = { orreryRepo.refreshWaiting() },
                 onDecide = { a, status, why -> orreryRepo.answer(a.id, status, why) },
+                problem = orreryRepo.error.collectAsState().value,
                         generator = orreryRepo.generator.collectAsState().value?.let {
                             io.nisfeb.talon.orrery.generatorLine(it, io.nisfeb.talon.util.nowMs(), kotlinx.datetime.TimeZone.currentSystemDefault())
                         },

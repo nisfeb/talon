@@ -581,7 +581,8 @@ class OrreryRepo(
         token: String?,
         url: String,
         read: List<OrreryAction>? = null,
-        listed: List<io.nisfeb.talon.calendar.CalendarTask>? = null,
+        /** The whole listing, where the pass has already read it. Asked for only if there is anything to mirror. */
+        listed: (suspend () -> List<io.nisfeb.talon.calendar.CalendarTask>?)? = null,
     ): Map<String, String> = mirrorLock.withLock {
         // What the pass already read, where it read it: two more
         // listings cost the ship two more seconds for the same answer.
@@ -596,7 +597,10 @@ class OrreryRepo(
             settled[id] = status
         }
         val cal = CalendarApi(http, url)
-        val events = listed ?: cal.events()
+        // Nothing to mirror, nothing to list: the whole of the calendar
+        // was read on every pass for a set of actions that was empty.
+        if (actions.isEmpty()) return@withLock settled
+        val events = (if (listed != null) listed() else cal.events()) ?: return@withLock settled
         val moves = taskMoves(actions, events.filter { it.cat == "todo" }) + calendarMoves(actions, events)
         if (token != null) runCatching { sendApproved(a, token, url, actions, settled) }.onFailure { Log.i(TAG, "messages skipped: ${it.message}") }
         if (moves.isEmpty()) return@withLock settled
@@ -984,7 +988,7 @@ class OrreryRepo(
             // want them: what is open, the mirror, and the brief.
             val actions = runCatching { a.actions(row.token, status = "all") }
                 .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }.getOrNull()
-            val settled = runCatching { mirrorTasks(a, row.token, url, actions, events()) }
+            val settled = runCatching { mirrorTasks(a, row.token, url, actions) { events() } }
                 .onFailure { Log.i(TAG, "tasks skipped: ${it.message}") }.getOrDefault(emptyMap())
             // The listing as the mirror left it: what it finished is
             // neither shown as waiting nor told to the owner as waiting.
@@ -1727,9 +1731,13 @@ class OrreryRepo(
          */
         suspend fun confirm(db: AppDatabase, id: String): Boolean {
             val n = db.orreryNoticed().get(id) ?: return false
+            // The word is taken whether or not a pipe is attached: the
+            // row leaves the tray and teaches the gate either way. With
+            // no pipe the button did nothing at all, and a tray left
+            // over from a pipe since turned off could not be cleared.
+            db.orreryNoticed().setState(id, "confirmed")
             val repo = current ?: return false
             if (!repo._enabled.value) return false
-            db.orreryNoticed().setState(id, "confirmed")
             note(factsOf(n))
             return true
         }

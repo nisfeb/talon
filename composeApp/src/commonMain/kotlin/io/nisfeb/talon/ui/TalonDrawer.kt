@@ -42,8 +42,24 @@ val LocalDrawerOpener = staticCompositionLocalOf<(() -> Unit)?> { null }
  * heard nothing. The section simply did not open, which is how it read.
  */
 object DrawerOverlay {
-    var open by mutableStateOf(false)
-        internal set
+    private var opens by mutableStateOf(0)
+
+    /** Whether any drawer is open. */
+    val open: Boolean get() = opens > 0
+
+    /**
+     * Follows one drawer for as long as it is on screen. Both shells
+     * used to assign the flag, so whichever composed last decided it:
+     * with an open drawer read as closed, the back gesture went to the
+     * screen underneath it.
+     */
+    @Composable
+    fun Follow(isOpen: Boolean) {
+        DisposableEffect(isOpen) {
+            if (isOpen) opens++
+            onDispose { if (isOpen) opens-- }
+        }
+    }
 }
 
 /**
@@ -65,8 +81,7 @@ fun TalonDrawer(
     }
     val state = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    DrawerOverlay.open = state.isOpen
-    DisposableEffect(Unit) { onDispose { DrawerOverlay.open = false } }
+    DrawerOverlay.Follow(state.isOpen)
     ModalNavigationDrawer(
         drawerState = state,
         drawerContent = {

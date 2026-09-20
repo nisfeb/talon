@@ -28,7 +28,7 @@ import kotlin.test.assertTrue
  * times is a ship that feels slow to the owner. Measured on
  * ~ricsul-bilwyt on 2026-09-20: the pass read the state three times and
  * listed two hundred mail threads on every wake. Twelve requests an
- * idle pass, against five now.
+ * idle pass, against four now.
  */
 class IdlePassCostTest {
     private val state = """{"me":"person/me","rev":1,"bodies":[],"schema":{"kinds":{},"actions":[]}}"""
@@ -74,9 +74,10 @@ class IdlePassCostTest {
             assertTrue(asked.any { "limit=20" in it }, "the cursor's page is a small one")
             assertEquals(1, count("/apps/orrery/api/actions"), "one actions listing for the open list, the mirror and the brief")
             assertEquals(0, count("/apps/calendar/calendars.json"), "the calendar list is read only where the pass writes")
+            assertEquals(0, count("/apps/calendar/events.json"), "and the whole listing only where there is something to mirror")
             assertEquals(0, count("/apps/orrery/api/schema"), "the scope was measured lately")
-            // Measured with this harness: twelve requests before, five now.
-            assertTrue(asked.size <= 5, "an idle pass asks the ship ${asked.size} times:\n" + asked.joinToString("\n"))
+            // Measured with this harness: twelve requests before, four now.
+            assertTrue(asked.size <= 4, "an idle pass asks the ship ${asked.size} times:\n" + asked.joinToString("\n"))
         } finally {
             scope.cancel()
             db.close()

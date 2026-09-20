@@ -79,7 +79,7 @@ fun OrreryActionDialog(
                 Text(
                     when {
                         proposed && action.kind == "task" -> "Waiting for you. Approved, it goes on your calendar's task list."
-                        proposed && event != null -> "Waiting for you. Approved, it goes on your calendar."
+                        proposed && event != null -> "Waiting for you. Approved, it goes on your calendar at that time; move it there if it is wrong."
                         proposed && ours -> "Waiting for you. Approved, Talon sends it."
                         proposed && message != null -> "Waiting for you. Approved, the ${message.via} executor sends it."
                         proposed -> "Waiting for you."

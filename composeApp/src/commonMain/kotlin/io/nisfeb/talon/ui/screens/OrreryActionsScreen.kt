@@ -52,6 +52,12 @@ fun OrreryActionsScreen(
     generator: String? = null,
     /** Answer one on the spot: approved or dismissed, with the owner's reason when they give one. */
     onDecide: (OrreryAction, String, String) -> Unit = { _, _, _ -> },
+    /**
+     * What the pipe last could not do, shown here. A refused answer put
+     * the row back and said why under Orrery in Settings, which is not
+     * where the person who tapped Approve is looking.
+     */
+    problem: String? = null,
     onOpen: (OrreryAction) -> Unit,
 ) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -93,6 +99,14 @@ fun OrreryActionsScreen(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+            )
+        }
+        problem?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
         HorizontalDivider()

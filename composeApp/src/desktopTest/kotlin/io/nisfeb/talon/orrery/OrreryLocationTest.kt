@@ -26,7 +26,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** Where the owner is, from the phone: a place orrery knows, else a name, never the coordinates. */
+/** A fix sent under this install's key: once, and not twice for the same place. */
 class OrreryLocationTest {
     private val state = Json.parseToJsonElement(
         """{"me": "person/me", "bodies": [
@@ -38,24 +38,8 @@ class OrreryLocationTest {
 
     private fun fix(lat: Double, lon: Double, acc: Double = 20.0) = LocationFix(lat, lon, acc, 1_789_000_000_000L)
 
-    @Test
-    fun `places with a position the ship has, in either shape`() {
-        assertEquals(listOf("place/home", "place/office"), geoPlaces(state).map { it.id })
-        val d = metresBetween(40.6782, -73.9442, 40.7536, -73.9832)
-        assertTrue(d in 9_000.0..9_300.0, "Brooklyn to midtown is about 9 km, not $d")
-    }
-
-    @Test
-    fun `a known place, else a name, else leaving is said once`() {
-        val places = geoPlaces(state)
-        assertEquals(buildJsonObject { put("ref", "place/home") }, locationValue(fix(40.6790, -73.9442), places, "Crown Heights, New York", null))
-        assertEquals(JsonPrimitive("Crown Heights, New York"), locationValue(fix(40.6700, -73.9442), places, "Crown Heights, New York", null), "900 m off is not home")
-        assertEquals(buildJsonObject { put("ref", "place/home") }, locationValue(fix(40.6810, -73.9442, acc = 400.0), places, null, null), "a loose fix reaches as far as it is loose")
-        assertEquals(JsonNull, locationValue(fix(10.0, 10.0), places, null, buildJsonObject { put("ref", "place/home") }), "left, and nowhere known")
-        assertNull(locationValue(fix(10.0, 10.0), places, null, JsonNull), "said already")
-        assertNull(locationValue(fix(10.0, 10.0), places, null, null))
-    }
-
+    // The pure half is in LocationValueTest, in commonTest, so every
+    // target runs it. What is left needs a database.
     @Test
     fun `a fix goes up once, as one observation on the owner, and the same place twice is said once`() = runTest {
         val dir = createTempDirectory(prefix = "talon-location-test-").toFile()
