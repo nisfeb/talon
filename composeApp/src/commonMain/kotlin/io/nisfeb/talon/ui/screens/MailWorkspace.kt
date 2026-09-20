@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -38,7 +41,7 @@ fun MailWorkspace(
     modifier: Modifier = Modifier,
 ) {
     io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:more")
-    BoxWithConstraints(modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         // Enough for a mailbox column, a listing that can still show a
         // subject, and a message worth reading.
         val threeColumns = maxWidth >= 900.dp

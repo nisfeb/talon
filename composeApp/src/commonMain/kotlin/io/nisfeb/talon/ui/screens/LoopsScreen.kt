@@ -2,6 +2,9 @@ package io.nisfeb.talon.ui.screens
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -100,7 +103,7 @@ fun LoopsScreen(
     var openJob by remember { mutableStateOf<LoopEntity?>(null) }
     val job = openJob
     Scaffold(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
         topBar = {
             TopAppBar(
                 title = {

@@ -8,6 +8,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -223,7 +226,10 @@ fun HomeScreen(
         onLayoutChanged(layout.with(w))
     }
 
-    BoxWithConstraints(modifier.fillMaxSize()) {
+    // Every screen pads for the safe area itself, and this one did not:
+    // on a phone with a notch it ran up under the clock. A parent that
+    // has already padded consumes the inset, so this adds nothing there.
+    BoxWithConstraints(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         val placedWidgets = remember(layout) {
             layout.shown.sortedWith(compareBy({ it.row }, { it.col }))
         }
