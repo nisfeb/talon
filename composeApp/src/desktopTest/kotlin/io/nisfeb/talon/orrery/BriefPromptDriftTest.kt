@@ -21,9 +21,9 @@ class BriefPromptDriftTest {
             println("BriefPromptDriftTest: no orrery-utils beside this repo; the clauses are checked instead")
             listOf(
                 "the brief is about today",
-                "ahead later in the week",
-                "yesterday's brief said",
-                "at most six short lines",
+                "ahead in the coming week as titles and starts only",
+                "what yesterday's brief said",
+                "one to three short lines",
                 "nothing to add",
             ).forEach { assertTrue(it in Brief.SYSTEM.lowercase(), "the brief prompt no longer says \"$it\"") }
             return
