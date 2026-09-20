@@ -83,6 +83,13 @@ fun MailComposer(
     intent: MailIntent,
     onSent: () -> Unit,
     onCancel: () -> Unit,
+    /**
+     * Put a file on the ship's own storage and answer with its address:
+     * what an attachment too big for a mail is offered instead. Null
+     * where the host has no storage to offer, and then the offer is not
+     * made. Takes the bytes, the content type and the name.
+     */
+    upload: (suspend (ByteArray, String, String) -> String)? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -111,6 +118,9 @@ fun MailComposer(
     // that the composer going away afterwards does not file a message
     // that has just gone out as a draft.
     var filed by remember(intent) { mutableStateOf(false) }
+    // A file too big to attach, waiting on the owner's answer about
+    // sending it as a link instead.
+    var oversize by remember(intent) { mutableStateOf<PickedImage?>(null) }
 
     /** What is in the composer now, as a draft. */
     fun asDraft() = io.nisfeb.talon.mail.Draft(
@@ -354,8 +364,18 @@ fun MailComposer(
                         // Refused where it is chosen rather than after the
                         // bytes have gone up and come back rejected.
                         if (picked.bytes.size > AuspexApi.MAX_BLOB_BYTES) {
-                            problem = "${picked.displayName} is over " +
-                                "${AuspexApi.MAX_BLOB_BYTES / 1024} KB, which is the ship's limit."
+                            // Too big to travel in the message. The ship's
+                            // own storage will hold it, and the message
+                            // carries its address instead: offered, not
+                            // done, because that address is readable by
+                            // anyone who has it.
+                            if (upload != null) {
+                                oversize = picked
+                                problem = null
+                            } else {
+                                problem = "${picked.displayName} is over " +
+                                    "${AuspexApi.MAX_BLOB_BYTES / 1024} KB, which is the ship's limit."
+                            }
                         } else {
                             files += picked
                             problem = null
@@ -375,6 +395,53 @@ fun MailComposer(
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
         }
+    }
+
+    oversize?.let { big ->
+        val kb = big.bytes.size / 1024
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { oversize = null },
+            title = { Text("Too big to attach") },
+            text = {
+                Text(
+                    "${big.displayName} is ${if (kb >= 1024) "${kb / 1024} MB" else "$kb KB"}, and a mail " +
+                        "carries ${AuspexApi.MAX_BLOB_BYTES / 1024} KB at most. Your ship can hold it instead, " +
+                        "and the message carries a link to it. Anyone who has the link can open it, " +
+                        "including people the message was not sent to.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                Button(
+                    enabled = !sending,
+                    onClick = {
+                        val put = upload ?: return@Button
+                        oversize = null
+                        sending = true
+                        progress = "Storing ${big.displayName}"
+                        scope.launch {
+                            runCatching { put(big.bytes, big.mimeType, storedName(big.displayName, big.mimeType)) }
+                                .onSuccess { url ->
+                                    // On its own line at the end: the
+                                    // thread pane finds an image there and
+                                    // shows it where it stands.
+                                    body = body.trimEnd() + (if (body.isBlank()) "" else "\n\n") + url
+                                    problem = null
+                                }
+                                .onFailure {
+                                    problem = "${big.displayName} was not stored: ${it.message ?: "no reason given"}. " +
+                                        "A ship stores files once storage is set up in Landscape."
+                                }
+                            progress = null
+                            sending = false
+                        }
+                    },
+                ) { Text("Store it and link") }
+            },
+            dismissButton = {
+                TextButton(onClick = { oversize = null }) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -396,4 +463,27 @@ private fun TravelNotice(travels: Int, forwarding: Boolean) {
         color = if (forwarding) MaterialTheme.colorScheme.error
         else MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/**
+ * The name a file is stored under. A picker can answer with a name
+ * that has no extension at all (a content:// id on Android), and an
+ * image whose address does not end in one is not shown where it
+ * stands, only linked. The type the picker reported gives it one.
+ * Only the types that are rendered get this: naming anything else
+ * would claim something about bytes nobody has looked at.
+ */
+internal fun storedName(displayName: String, mime: String): String {
+    val name = displayName.substringAfterLast('/').substringAfterLast('\\').ifBlank { "file" }
+    if (name.substringAfterLast('.', "").isNotBlank()) return name
+    val ext = when (mime.lowercase().substringBefore(';').trim()) {
+        "image/jpeg", "image/jpg" -> "jpg"
+        "image/png" -> "png"
+        "image/gif" -> "gif"
+        "image/webp" -> "webp"
+        "image/avif" -> "avif"
+        "image/bmp" -> "bmp"
+        else -> return name
+    }
+    return "$name.$ext"
 }

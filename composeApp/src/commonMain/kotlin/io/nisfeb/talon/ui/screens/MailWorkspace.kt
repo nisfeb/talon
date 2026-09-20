@@ -39,6 +39,8 @@ fun MailWorkspace(
     composing: MailIntent?,
     onCompose: (MailIntent?) -> Unit,
     modifier: Modifier = Modifier,
+    /** Storage for a file too big to attach; see [MailComposer]. */
+    upload: (suspend (ByteArray, String, String) -> String)? = null,
 ) {
     io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:more")
     BoxWithConstraints(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -53,6 +55,7 @@ fun MailWorkspace(
                     intent = composing,
                     onSent = { onCompose(null) },
                     onCancel = { onCompose(null) },
+                    upload = upload,
                 )
 
                 openThread != null -> MailThreadPane(
@@ -97,6 +100,7 @@ fun MailWorkspace(
                         intent = composing,
                         onSent = { onCompose(null) },
                         onCancel = { onCompose(null) },
+                        upload = upload,
                     )
 
                     openThread != null -> MailThreadPane(

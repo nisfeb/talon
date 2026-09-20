@@ -47,6 +47,8 @@ fun MailScreen(
     initialThread: String? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Storage for a file too big to attach; see [MailComposer]. */
+    upload: (suspend (ByteArray, String, String) -> String)? = null,
 ) {
     io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:more")
     var openThread by remember { mutableStateOf(initialThread) }
@@ -88,6 +90,7 @@ fun MailScreen(
             onOpenThread = { openThread = it },
             composing = composing,
             onCompose = { composing = it },
+            upload = upload,
         )
     }
 }

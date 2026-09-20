@@ -1866,6 +1866,9 @@ fun TalonApp(
                 onComposeToConsumed = { mailTo = null },
                 initialThread = pendingMailThread,
                 onBack = { mailOpen = false; pendingMailThread = null },
+                // What a mail cannot carry, the ship's own storage can:
+                // the same upload chat images take.
+                upload = { bytes, mime, name -> app.repo.uploadImage(bytes, mime, name) },
                 modifier = mod,
             )
 

@@ -3267,6 +3267,10 @@ fun App(
                                         onOpenThread = { openMailThread = it },
                                         composing = mailComposing,
                                         onCompose = { mailComposing = it },
+                                        // What a mail cannot carry, the
+                                        // ship's own storage can: the same
+                                        // upload chat images take.
+                                        upload = { bytes, mime, name -> repo.uploadImage(bytes, mime, name) },
                                     )
                                 }
                             } else if (activeRailTab == RailTab.Calendar && !showAssistant) {
