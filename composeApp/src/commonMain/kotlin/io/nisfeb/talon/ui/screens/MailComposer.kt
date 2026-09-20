@@ -56,6 +56,39 @@ import kotlinx.coroutines.launch
  * forward is a reply addressed to somebody new, which is exactly why
  * [travels] matters more there than anywhere else.
  */
+/**
+ * What has been typed, kept apart from the screen showing it.
+ *
+ * A composer is taken out of composition by more than leaving it: a
+ * window crossing a layout width, a rail tab, a section switch. Every
+ * `remember` in it dies there, and the text went back to what the
+ * intent said, which is nothing for a new message and, for a draft,
+ * whatever it held when it was opened, written back over the newer
+ * save on the way out. The intent carries this instead, so the edits
+ * live exactly as long as the thing being written does.
+ */
+@androidx.compose.runtime.Stable
+class MailEdits {
+    var subject by mutableStateOf("")
+    var body by mutableStateOf("")
+    var recipientDraft by mutableStateOf("")
+    val recipients = mutableStateListOf<String>()
+    val files = mutableStateListOf<PickedImage>()
+    var draftId: String = ""
+        private set
+    private var seeded = false
+
+    /** Fill from [intent] the first time a composer opens on it. */
+    fun seed(intent: MailIntent) {
+        if (seeded) return
+        seeded = true
+        subject = intent.subject
+        body = intent.body
+        recipients.addAll(intent.to)
+        draftId = intent.draftId ?: io.nisfeb.talon.mail.newDraftId()
+    }
+}
+
 data class MailIntent(
     val prev: String? = null,
     /** The thread [prev] is in, so a reply can show what it answers. */
@@ -70,6 +103,11 @@ data class MailIntent(
      *  overwrites rather than piling up a new draft per keystroke. */
     val draftId: String? = null,
     val body: String = "",
+    /**
+     * The live edits, which outlive any one composer. Made with the
+     * intent, so each thing being written has its own.
+     */
+    val edits: MailEdits = MailEdits(),
 )
 
 /**
@@ -103,7 +141,11 @@ fun MailComposer(
     val lists by repo.lists.collectAsState()
     androidx.compose.runtime.LaunchedEffect(repo) { repo.refreshLists() }
 
-    val recipients = remember(intent) { mutableStateListOf(*intent.to.toTypedArray()) }
+    // Seeded once per thing being written, and kept across every
+    // remount of the screen that shows it.
+    val edits = intent.edits
+    remember(intent) { edits.seed(intent) }
+    val recipients = edits.recipients
     // A fresh mail starts at To; a reply already has one, so it starts
     // at the message.
     val toFocus = remember { FocusRequester() }
@@ -111,12 +153,7 @@ fun MailComposer(
     LaunchedEffect(intent) {
         runCatching { (if (intent.to.isEmpty()) toFocus else bodyFocus).requestFocus() }
     }
-    var recipientDraft by remember(intent) { mutableStateOf("") }
-    var subject by remember(intent) { mutableStateOf(intent.subject) }
-    var body by remember(intent) { mutableStateOf(intent.body) }
-    // Minted once per composer, and reused, so saving twice overwrites.
-    val draftId = remember(intent) { intent.draftId ?: io.nisfeb.talon.mail.newDraftId() }
-    val files = remember(intent) { mutableStateListOf<PickedImage>() }
+    val files = edits.files
     var sending by remember(intent) { mutableStateOf(false) }
     var progress by remember(intent) { mutableStateOf<String?>(null) }
     var problem by remember(intent) { mutableStateOf<String?>(null) }
@@ -124,16 +161,30 @@ fun MailComposer(
     // that the composer going away afterwards does not file a message
     // that has just gone out as a draft.
     var filed by remember(intent) { mutableStateOf(false) }
+    // The thread being answered, read once here: the disclosure counts
+    // off it, and the quoted conversation below is it.
+    var thread by remember(intent.threadId) {
+        mutableStateOf(intent.threadId?.let(repo::cachedThread))
+    }
+    LaunchedEffect(intent.threadId, intent.prev) {
+        // A draft says which message it answers and not which thread
+        // that is in, since auspex keeps neither with it, so the thread
+        // is looked for among the ones this install has read.
+        val id = intent.threadId ?: intent.prev?.let { repo.threadFor(it) } ?: return@LaunchedEffect
+        if (thread == null) thread = repo.storedThread(id)
+        repo.loadThread(id)?.let { thread = it }
+    }
+
     // A file too big to attach, waiting on the owner's answer about
     // sending it as a link instead.
     var oversize by remember(intent) { mutableStateOf<PickedImage?>(null) }
 
     /** What is in the composer now, as a draft. */
     fun asDraft() = io.nisfeb.talon.mail.Draft(
-        id = draftId,
+        id = edits.draftId,
         to = recipients.toList(),
-        subject = subject,
-        body = body,
+        subject = edits.subject,
+        body = edits.body,
         prev = intent.prev,
     )
 
@@ -146,16 +197,16 @@ fun MailComposer(
     // composable's scope is cancelled with it, so the repo's does it.
     DisposableEffect(intent) {
         onDispose {
-            if (!filed && (body.isNotBlank() || subject.isNotBlank() || recipients.isNotEmpty())) {
+            if (!filed && (edits.body.isNotBlank() || edits.subject.isNotBlank() || recipients.isNotEmpty())) {
                 repo.keepDraft(asDraft())
             }
         }
     }
 
     fun commitRecipients(): List<String> {
-        val (good, bad) = parseRecipients(recipientDraft)
+        val (good, bad) = parseRecipients(edits.recipientDraft)
         good.forEach { if (it !in recipients) recipients += it }
-        recipientDraft = bad.joinToString(" ")
+        edits.recipientDraft = bad.joinToString(" ")
         problem = if (bad.isEmpty()) null else "Not a ship: ${bad.joinToString(", ")}"
         return recipients.toList()
     }
@@ -172,7 +223,7 @@ fun MailComposer(
                     // the save and the re-read that follows it meant the
                     // back button sat through two requests to the ship
                     // before the screen would move.
-                    if (body.isBlank() && subject.isBlank() && recipients.isEmpty() && intent.draftId != null) {
+                    if (edits.body.isBlank() && edits.subject.isBlank() && recipients.isEmpty() && intent.draftId != null) {
                         // Opened from a draft and emptied out: keeping
                         // the husk would say there is still something
                         // to send.
@@ -200,24 +251,37 @@ fun MailComposer(
                         // commitRecipients leaves what it could not
                         // parse in the draft and says so in `problem`.
                         // Sending anyway dropped those people silently.
-                        recipientDraft.isNotBlank() -> Unit
+                        edits.recipientDraft.isNotBlank() -> Unit
                         to.isEmpty() -> problem = "Say who this is going to."
-                        body.isBlank() -> problem = "Nothing to send."
+                        edits.body.isBlank() -> problem = "Nothing to send."
                         else -> {
                             sending = true
                             problem = null
                             val errorBefore = repo.error.value
+                            fun why(fallback: String) =
+                                repo.error.value?.takeIf { it != errorBefore } ?: fallback
                             scope.launch {
+                                // The text reaches the ship before anything
+                                // else is tried. A send cut short by leaving
+                                // the screen has then left it somewhere, and
+                                // the dispose need not file it a second time.
+                                if (!repo.saveDraft(asDraft())) {
+                                    problem = why("The message did not reach the ship; nothing was sent.")
+                                    progress = null
+                                    sending = false
+                                    return@launch
+                                }
+                                filed = true
                                 val refs = mutableListOf<io.nisfeb.talon.mail.AttachRef>()
                                 var failed: String? = null
-                                // One at a time, and named in the progress,
-                                // because "uploading 2 of 5" is only true if
-                                // there is one in flight.
                                 // A copy: the list is the screen's own, and
                                 // removing a file while an upload waits threw
                                 // out of the iterator and left the composer
                                 // stuck on "Uploading 2 of 5" for good.
                                 val outgoing = files.toList()
+                                // One at a time, and named in the progress,
+                                // because "uploading 2 of 5" is only true if
+                                // there is one in flight.
                                 outgoing.forEachIndexed { i, f ->
                                     if (failed != null) return@forEachIndexed
                                     progress = "Uploading ${i + 1} of ${outgoing.size}"
@@ -234,59 +298,42 @@ fun MailComposer(
                                 if (failed != null) {
                                     problem = failed
                                     progress = null
+                                    filed = false
                                     sending = false
                                     return@launch
                                 }
                                 progress = "Sending"
-                                // A draft goes out AS a draft: save the
-                                // edits, then sendDraft, which the ship
-                                // deletes only when the send landed. A
-                                // send() + deleteDraft() drops it on an
-                                // accepted poke — and an accepted poke is
-                                // not an applied one. With files attached
-                                // there is no draft route that carries
-                                // them, so that send goes direct.
-                                val ok = if (intent.draftId != null && refs.isEmpty()) {
-                                    // The save has to land before the
-                                    // ship is asked to send by id: a
-                                    // transient failure here would
-                                    // otherwise send the STALE stored
-                                    // draft to the stale recipients,
-                                    // report success, and delete it.
-                                    if (!repo.saveDraft(
-                                            io.nisfeb.talon.mail.Draft(
-                                                id = draftId,
-                                                to = to,
-                                                subject = subject,
-                                                body = body,
-                                                prev = intent.prev,
-                                            ),
-                                        )
-                                    ) {
-                                        problem = repo.error.value?.takeIf { it != errorBefore }
-                                            ?: "The edits did not reach the ship; nothing was sent."
-                                        progress = null
-                                        sending = false
-                                        return@launch
+                                // Every send without files goes out AS the
+                                // draft just saved. The ship deletes a draft
+                                // only once the send has landed, so a draft
+                                // still standing afterwards is a poke that was
+                                // taken and never applied: the one failure a
+                                // poke cannot report, and the reason this
+                                // route exists. A message with files goes
+                                // direct, since no draft carries them, and its
+                                // text is what the draft holds until it lands.
+                                val ok = if (refs.isEmpty()) {
+                                    repo.sendDraft(edits.draftId)
+                                } else {
+                                    repo.send(to, edits.subject, edits.body, intent.prev, refs).also {
+                                        // The message carries the text now.
+                                        // Dropped on the repo's scope, so
+                                        // leaving cannot leave the husk.
+                                        if (it) repo.dropDraft(edits.draftId)
                                     }
-                                    repo.sendDraft(draftId)
-                                } else {
-                                    repo.send(to, subject, body, intent.prev, refs)
                                 }
+                                val landed = ok && (refs.isNotEmpty() || repo.drafts.value.none { d -> d.id == edits.draftId })
                                 progress = null
-                                if (ok) {
-                                    filed = true
-                                    // The draft, if this was one, is done
-                                    // — unless the ship already dropped
-                                    // it for a landed sendDraft.
-                                    if (intent.draftId != null && refs.isNotEmpty()) repo.deleteDraft(intent.draftId)
-                                    onSent()
-                                } else {
-                                    // The repo's error is session-long and may
-                                    // be about something else entirely, so it
-                                    // speaks only if this send changed it.
-                                    problem = repo.error.value?.takeIf { it != errorBefore }
-                                        ?: "The ship did not take the message."
+                                when {
+                                    landed -> onSent()
+                                    ok -> {
+                                        filed = false
+                                        problem = "The ship took the message but has not sent it. It is in Drafts."
+                                    }
+                                    else -> {
+                                        filed = false
+                                        problem = why("The ship did not take the message.")
+                                    }
                                 }
                                 // Last, so that the button cannot be pressed
                                 // again while the draft is still being dropped.
@@ -304,7 +351,35 @@ fun MailComposer(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (intent.prev != null) {
-                TravelNotice(intent.travels, intent.forwarding)
+                // Counted off the thread rather than remembered from the
+                // intent: a draft comes back from the ship with neither
+                // the count nor the forward flag, since auspex keeps
+                // neither, and the notice then said "this message alone
+                // travels with this reply" over a send that still
+                // carried the whole chain. Who has not seen it is read
+                // off the recipients as they are chosen, so adding a
+                // stranger to a plain reply says so too.
+                val path = remember(thread, intent.prev) {
+                    val id = intent.prev
+                    if (thread == null || id == null) emptyList()
+                    else io.nisfeb.talon.mail.pathTo(io.nisfeb.talon.mail.threadTree(thread!!.messages), id)
+                }
+                val seenIt = thread?.participants.orEmpty().toSet()
+                val strangers = recipients.count { it !in seenIt }
+                when {
+                    path.isNotEmpty() -> TravelNotice(path.size, intent.forwarding || strangers > 0)
+                    intent.travels > 0 -> TravelNotice(intent.travels, intent.forwarding || strangers > 0)
+                    // Neither the thread nor a count in hand, which is a
+                    // draft whose thread this install no longer holds.
+                    // What travels is unknown, so it is not called small:
+                    // the reassuring sentence is the one thing that must
+                    // never be said without knowing.
+                    else -> Text(
+                        "This reply carries the conversation it answers to whoever you name.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
 
             if (recipients.isNotEmpty()) {
@@ -315,8 +390,8 @@ fun MailComposer(
                 }
             }
             OutlinedTextField(
-                value = recipientDraft,
-                onValueChange = { recipientDraft = it },
+                value = edits.recipientDraft,
+                onValueChange = { edits.recipientDraft = it },
                 label = { Text("To") },
                 placeholder = { Text("~sampel-palnet") },
                 singleLine = true,
@@ -338,15 +413,15 @@ fun MailComposer(
             }
 
             OutlinedTextField(
-                value = subject,
-                onValueChange = { subject = it },
+                value = edits.subject,
+                onValueChange = { edits.subject = it },
                 label = { Text("Subject") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
-                value = body,
-                onValueChange = { body = it },
+                value = edits.body,
+                onValueChange = { edits.body = it },
                 label = { Text("Message") },
                 minLines = 8,
                 modifier = Modifier.fillMaxWidth().focusRequester(bodyFocus),
@@ -356,9 +431,7 @@ fun MailComposer(
             // is read: shown, because writing a reply to something you
             // cannot see is guesswork, and foldable, because a long
             // thread would otherwise push the composer off the screen.
-            if (intent.threadId != null) {
-                Answering(repo, intent.threadId, intent.prev, nameFor)
-            }
+            thread?.let { Answering(it, intent.prev, nameFor) }
 
             if (files.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -444,7 +517,7 @@ fun MailComposer(
                                     // On its own line at the end: the
                                     // thread pane finds an image there and
                                     // shows it where it stands.
-                                    body = body.trimEnd() + (if (body.isBlank()) "" else "\n\n") + url
+                                    edits.body = edits.body.trimEnd() + (if (edits.body.isBlank()) "" else "\n\n") + url
                                     problem = null
                                 }
                                 .onFailure {
@@ -510,24 +583,16 @@ internal fun storedName(displayName: String, mime: String): String {
 
 /**
  * The conversation a reply answers, under the message being written.
- * Open to start with: the point of it is to be read while writing. The
- * thread is whatever this install already holds, then whatever the ship
- * says, so it is there at once and right a moment later.
+ * Open to start with: the point of it is to be read while writing.
  */
 @Composable
 private fun Answering(
-    repo: MailRepo,
-    threadId: String,
+    thread: io.nisfeb.talon.mail.MailThread,
     answering: String?,
     nameFor: (String) -> String,
 ) {
-    var thread by remember(threadId) { mutableStateOf(repo.cachedThread(threadId)) }
-    var open by remember(threadId) { mutableStateOf(true) }
-    LaunchedEffect(threadId) {
-        if (thread == null) thread = repo.storedThread(threadId)
-        repo.loadThread(threadId)?.let { thread = it }
-    }
-    val messages = thread?.messages.orEmpty()
+    var open by remember(thread.id) { mutableStateOf(true) }
+    val messages = thread.messages
     if (messages.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         HorizontalDivider()

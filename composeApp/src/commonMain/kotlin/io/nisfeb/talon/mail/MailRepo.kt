@@ -162,6 +162,16 @@ class MailRepo(
     /** The last copy of a thread this session read, to show while it is read again. */
     fun cachedThread(id: String): MailThread? = threadCache.value[id]
 
+    /**
+     * The thread a message is in, for a draft that says what it answers
+     * and not where. What is in hand first, then what is on disk: a
+     * reply's thread is always one of those, since it had to be open to
+     * be replied to.
+     */
+    suspend fun threadFor(msgId: String): String? =
+        threadCache.value.values.firstOrNull { t -> t.messages.any { it.id == msgId } }?.id
+            ?: withContext(ioDispatcher) { files?.holding(msgId)?.also(::keepThread)?.id }
+
     /** [cachedThread], or else the copy an earlier session left on disk. */
     suspend fun storedThread(id: String): MailThread? =
         cachedThread(id) ?: files?.let { f -> withContext(ioDispatcher) { f.read(id) } }?.also { keepThread(it) }

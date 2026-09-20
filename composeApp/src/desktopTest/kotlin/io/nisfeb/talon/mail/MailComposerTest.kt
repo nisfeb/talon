@@ -52,6 +52,11 @@ class MailComposerTest {
             .also { it.attach("https://ship.example") }
     }
 
+    /** The last draft saved, which is what a send without files goes out as. */
+    private fun draftBody() = Json.parseToJsonElement(
+        (seen.last { it.url.encodedPath.endsWith("/api/draft") }.body as TextContent).text,
+    ).jsonObject
+
     private fun sentBody() = Json.parseToJsonElement(
         (seen.last { it.url.encodedPath.endsWith("/api/send") }.body as TextContent).text,
     ).jsonObject
@@ -104,13 +109,23 @@ class MailComposerTest {
         onNodeWithText("Send").performClick()
         waitUntil(timeoutMillis = 5_000) { sent }
 
-        val body = sentBody()
+        // A message with no files goes out as the draft it was saved
+        // as: the ship deletes one only when the send has landed, and
+        // that absence is the only proof a poke can give that it was
+        // applied rather than merely accepted.
+        val body = draftBody()
         assertEquals("0vparent", body["prev"]!!.jsonPrimitive.content)
         assertEquals(
             listOf("~zod"),
             body["to"]!!.jsonArray.map { it.jsonPrimitive.content },
         )
         assertEquals("answering", body["body"]!!.jsonPrimitive.content)
+        val sendReq = seen.last { it.url.encodedPath.endsWith("/api/draft-send") }
+        assertEquals(
+            body["id"]!!.jsonPrimitive.content,
+            Json.parseToJsonElement((sendReq.body as TextContent).text).jsonObject["id"]!!.jsonPrimitive.content,
+            "the draft that was saved is the one the ship is asked to send",
+        )
     }
 
     @OptIn(ExperimentalTestApi::class)
@@ -235,5 +250,55 @@ class MailComposerTest {
         waitForIdle()
         waitUntil(timeoutMillis = 5_000) { savedDraft() != null }
         assertEquals("half a thought", savedDraft()?.get("body")?.jsonPrimitive?.content)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `what was typed survives the screen being rebuilt`() = runComposeUiTest {
+        val r = repo()
+        // One intent, two mountings: a window crossing a layout width,
+        // a rail tab, a section switch all do this, and every remember
+        // in the composer dies in between.
+        val intent = MailIntent(to = listOf("~zod"))
+        val wide = androidx.compose.runtime.mutableStateOf(false)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                if (wide.value) {
+                    androidx.compose.foundation.layout.Box {
+                        MailComposer(repo = r, intent = intent, onSent = {}, onCancel = {})
+                    }
+                } else {
+                    MailComposer(repo = r, intent = intent, onSent = {}, onCancel = {})
+                }
+            }
+        }
+        onNodeWithText("Message").performTextInput("half a thought")
+        onNodeWithText("Subject").performTextInput("Plans")
+        waitForIdle()
+        wide.value = true
+        waitForIdle()
+        onNodeWithText("half a thought").assertIsDisplayed()
+        onNodeWithText("Plans").assertIsDisplayed()
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a reply whose thread is not known says what it carries anyway`() = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailComposer(
+                    repo = repo(),
+                    // A draft, as it comes back from the ship: it says
+                    // what it answers and nothing about how much of the
+                    // conversation goes with it.
+                    intent = MailIntent(prev = "0vparent", draftId = "0vdraft", to = listOf("~bus")),
+                    onSent = {},
+                    onCancel = {},
+                )
+            }
+        }
+        waitForIdle()
+        onNodeWithText("This reply carries the conversation it answers to whoever you name.")
+            .assertIsDisplayed()
     }
 }
