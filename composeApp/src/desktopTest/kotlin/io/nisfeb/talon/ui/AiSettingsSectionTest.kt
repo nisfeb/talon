@@ -26,6 +26,7 @@ import io.nisfeb.talon.ai.ProviderKind
 import io.nisfeb.talon.armillary.Account
 import io.nisfeb.talon.armillary.ArmillaryRepo
 import io.nisfeb.talon.ui.screens.armillaryModeLine
+import io.nisfeb.talon.ui.screens.balanceWarning
 import io.nisfeb.talon.ui.screens.dollarsToMicro
 import io.nisfeb.talon.ui.screens.planLine
 import kotlinx.coroutines.CoroutineScope
@@ -162,6 +163,16 @@ class AiSettingsSectionTest {
     }
 
     // ── the card's own sentences, without a ship ───────────────────
+
+    @Test
+    fun `the balance warns before it runs out and says when it has`() {
+        fun acct(micro: Long) = Account(micro, "", false, null, "~wex", 0, leaseHeld = false, leaseDisabled = false, checkouts = emptyList())
+        assertEquals(null, balanceWarning(acct(5_000_000)))
+        assertEquals(null, balanceWarning(acct(1_000_000)))
+        assertEquals("Almost out: top up before your next request fails.", balanceWarning(acct(999_999)))
+        assertEquals("Empty: requests fail until you top up.", balanceWarning(acct(0)))
+        assertEquals("Empty: requests fail until you top up.", balanceWarning(acct(-137)))
+    }
 
     @Test
     fun `the mode line says where a request actually goes`() {

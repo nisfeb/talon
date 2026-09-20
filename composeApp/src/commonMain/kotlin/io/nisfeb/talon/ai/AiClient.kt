@@ -207,6 +207,7 @@ class AiClient(
                     ?: obj["message"]?.jsonPrimitive?.content
             }.getOrNull()
             val msg = pretty ?: body.take(200)
+            if (resp.status.value == 402) error(outOfCredit(host, msg))
             error("$host ${resp.status.value}: $msg")
         }
         val obj = runCatching { json.parseToJsonElement(body).jsonObject }
@@ -266,3 +267,10 @@ internal fun claudePrice(model: String): Pair<Double, Double>? {
         else -> null
     }
 }
+
+/**
+ * A 402 is the one failure the person can fix themselves: the Armillary
+ * balance ran out. Say so, and where to go, instead of the raw line.
+ */
+internal fun outOfCredit(host: String, msg: String): String =
+    "Your Armillary balance is empty. Top up under Settings, AI. ($host 402: $msg)"

@@ -442,6 +442,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     )
     account?.let { a ->
         Text(money(a.balanceMicro) + " on your account.", style = MaterialTheme.typography.bodyMedium)
+        balanceWarning(a)?.let { Quiet(it, error = true) }
         Quiet(planLine(a))
     }
     Quiet(armillaryModeLine(inference?.mode, account))
@@ -549,6 +550,19 @@ internal fun planLine(a: Account): String = when {
     a.subscriptionActive -> a.plan.ifBlank { "Subscribed" } + (a.renews?.let { ", renews $it" } ?: "") + "."
     a.plan.isNotBlank() -> a.plan + "."
     else -> "No plan: you pay as you go."
+}
+
+/** Below this much credit the card says so in red, before a request fails. */
+internal const val LOW_BALANCE_MICRO = 1_000_000L
+
+/**
+ * A warning under the balance, or null when there is enough. Empty means
+ * the next request fails with a 402; low means it soon will.
+ */
+internal fun balanceWarning(a: Account): String? = when {
+    a.balanceMicro <= 0 -> "Empty: requests fail until you top up."
+    a.balanceMicro < LOW_BALANCE_MICRO -> "Almost out: top up before your next request fails."
+    else -> null
 }
 
 /** How Talon reaches the model, in the owner's terms. */
