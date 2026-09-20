@@ -704,7 +704,11 @@ fun ChatComposer(
                 }
                 quote != null -> false
                 firstWord == "/invite" -> {
-                    when (val p = parseInvite(body, whom.takeIf { inDm }, myGroups)) {
+                    val invite = parseInvite(
+                        body, whom.takeIf { inDm }, myGroups,
+                        known = allShips, nicknameOf = { s -> contactMap.nickname(s) },
+                    )
+                    when (val p = invite) {
                         is InviteParse.Problem -> {
                             state.sendError = p.message
                             return@doSend false

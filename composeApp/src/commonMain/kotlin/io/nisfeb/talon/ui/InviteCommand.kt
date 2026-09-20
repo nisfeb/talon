@@ -8,7 +8,6 @@ import io.nisfeb.talon.data.GroupEntity
  * ship like a mention. In a DM the ship is the other side of it.
  */
 private const val INVITE = "/invite "
-private val PATP = Regex("~[a-z]+(-[a-z]+)*")
 
 /** The argument the caret is in, for its picker. */
 sealed interface InviteArg {
@@ -57,17 +56,32 @@ sealed interface InviteParse {
     data class Problem(val message: String) : InviteParse
 }
 
-/** A finished `/invite`, or what is missing from it. [dmShip] is the other side of a DM. */
-fun parseInvite(text: String, dmShip: String?, groups: List<GroupEntity>): InviteParse {
+/**
+ * A finished `/invite`, or what is missing from it. [dmShip] is the
+ * other side of a DM. The ship is whatever name they typed: a @p, a
+ * comet's twelve-word name, or a short name or nickname of somebody in
+ * [known] -- the same names every other box takes.
+ */
+fun parseInvite(
+    text: String,
+    dmShip: String?,
+    groups: List<GroupEntity>,
+    known: Collection<String> = emptyList(),
+    nicknameOf: (String) -> String? = { null },
+): InviteParse {
     val args = text.trim().split(Regex("\\s+")).drop(1)
     val usage = "/invite <group>" + if (dmShip == null) " ~ship" else ""
     val groupArg = args.getOrNull(0) ?: return InviteParse.Problem("Pick a group: $usage")
     val flag = groups.firstOrNull { it.flag.equals(groupArg, ignoreCase = true) }?.flag
         ?: matchGroups(groupArg, groups, limit = 2).singleOrNull()?.flag
         ?: return InviteParse.Problem("No one group matches \"$groupArg\"; pick it from the list.")
-    val ship = args.getOrNull(1)?.let { "~" + it.removePrefix("@").removePrefix("~").lowercase() }
-        ?: dmShip
-        ?: return InviteParse.Problem("Name who to invite: $usage")
-    if (!PATP.matches(ship)) return InviteParse.Problem("\"$ship\" is not a ship.")
-    return InviteParse.Ok(flag, ship)
+    val typed = args.drop(1).joinToString(" ").trim().removePrefix("@")
+    if (typed.isEmpty()) {
+        val ship = dmShip ?: return InviteParse.Problem("Name who to invite: $usage")
+        return InviteParse.Ok(flag, ship)
+    }
+    return when (val who = io.nisfeb.talon.ui.NameToShip.resolve(typed, known, nicknameOf)) {
+        is NameToShip.Result.One -> InviteParse.Ok(flag, who.ship)
+        else -> InviteParse.Problem(NameToShip.hint(who, typed) ?: "\"$typed\" is not a ship.")
+    }
 }

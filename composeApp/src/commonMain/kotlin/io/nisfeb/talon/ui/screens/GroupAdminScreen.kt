@@ -681,10 +681,11 @@ private fun AdminBody(
                 label = { Text("~ship, or a word name") },
                 modifier = Modifier.weight(1f),
                 // A comet's @p is fifty-six characters and its full
-                // name twelve words; on one line you could not see
-                // what you had pasted.
+                // name twelve words; on one line you could not see what
+                // you had pasted, and in three the rest had to scroll
+                // inside the box, which on a phone it would not do.
                 singleLine = false,
-                maxLines = 3,
+                maxLines = 6,
             )
             Button(
                 enabled = invitePatp != null,

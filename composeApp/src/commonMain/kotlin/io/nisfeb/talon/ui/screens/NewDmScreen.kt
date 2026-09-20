@@ -169,9 +169,11 @@ fun NewDmScreen(
                 // Not single-line: a comet's @p is fifty-six characters
                 // and its full name is twelve words, and either one
                 // scrolled off the end of a single line with no way to
-                // see what you had typed.
+                // see what you had typed. Room for all twelve words, so
+                // nothing has to scroll inside the box: on a phone that
+                // drag belongs to the screen, and the text never moved.
                 singleLine = false,
-                maxLines = 3,
+                maxLines = 6,
                 modifier = Modifier.weight(1f).focusRequester(fieldFocus),
             )
             TextButton(

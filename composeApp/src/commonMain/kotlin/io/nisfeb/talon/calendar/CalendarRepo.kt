@@ -225,35 +225,43 @@ class CalendarRepo(
         if (_rows.value != null && _rangeRows.value != null) return
         val json = AuspexApi.json
         suspend fun read(kind: String) = runCatching { c.read(kind) }.getOrNull().orEmpty()
-        val window = read("window").mapNotNull { r ->
+        fun rows(kind: List<io.nisfeb.talon.data.CalendarCacheEntity>) = kind.mapNotNull { r ->
             runCatching { json.decodeFromString(CalendarRow.serializer(), r.json) }.getOrNull()
         }
+        // Read it all, then put it up in one go: a screen that sees the
+        // month must see the calendars it colours them by, and anything
+        // read between two assignments let it see one without the other.
+        val window = rows(read("window"))
+        val month = rows(read("range")).ifEmpty { window }
+        val calendars = read("calendars").mapNotNull { r ->
+            runCatching { json.decodeFromString(CalendarInfo.serializer(), r.json) }.getOrNull()
+        }
+        val tasks = read("tasks").mapNotNull { r ->
+            runCatching { json.decodeFromString(CalendarTask.serializer(), r.json) }.getOrNull()
+        }
+        val tags = read("tags").map { it.json }
+        val zone = read("zone").firstOrNull()?.json
         if (_rows.value == null && window.isNotEmpty()) _rows.value = window
         // The screen's own month, kept beside the window: without it the
         // grid was empty on every cold start until the ship answered,
         // though the last answer was in the database all along.
-        if (_rangeRows.value == null) {
-            val month = read("range").mapNotNull { r ->
-                runCatching { json.decodeFromString(CalendarRow.serializer(), r.json) }.getOrNull()
-            }.ifEmpty { window }
-            if (month.isNotEmpty()) _rangeRows.value = month
-        }
-        if (_calendars.value.isEmpty()) {
-            _calendars.value = read("calendars").mapNotNull { r ->
-                runCatching { json.decodeFromString(CalendarInfo.serializer(), r.json) }.getOrNull()
-            }
-        }
-        if (_tasks.value == null) {
-            read("tasks").mapNotNull { r ->
-                runCatching { json.decodeFromString(CalendarTask.serializer(), r.json) }.getOrNull()
-            }.takeIf { it.isNotEmpty() }?.let { _tasks.value = it }
-        }
-        if (_tags.value.isEmpty()) _tags.value = read("tags").map { it.json }
-        if (_zone.value == null) _zone.value = read("zone").firstOrNull()?.json
+        if (_rangeRows.value == null && month.isNotEmpty()) _rangeRows.value = month
+        if (_calendars.value.isEmpty() && calendars.isNotEmpty()) _calendars.value = calendars
+        if (_tasks.value == null && tasks.isNotEmpty()) _tasks.value = tasks
+        if (_tags.value.isEmpty() && tags.isNotEmpty()) _tags.value = tags
+        if (_zone.value == null && zone != null) _zone.value = zone
     }
 
-    /** Keep what the ship just said, for the next cold start. */
+    /**
+     * Keep what the ship just said, for the next cold start. One at a
+     * time, and the snapshot taken inside the lock: a refresh that
+     * started before a month was read would otherwise write the state
+     * as it was when it began, over the month just kept.
+     */
+    private val keepLock = Mutex()
+
     private suspend fun keep() {
+        keepLock.withLock {
         val c = cache ?: return
         val json = AuspexApi.json
         fun rows(kind: String, texts: List<String>) =
@@ -285,6 +293,7 @@ class CalendarRepo(
             )
             }
         }.onFailure { Log.w(TAG, "calendar not kept", it) }
+        }
     }
 
     suspend fun windowRows(fromMs: Long, toMs: Long): List<CalendarRow>? =

@@ -128,10 +128,19 @@ fun InviteToGroupDialog(
     )
 }
 
-/** Why an invite did not go out, in words someone can act on. */
-fun inviteFailure(e: Throwable): String =
-    if (e is io.nisfeb.talon.urbit.PokeNacked) "Invites are not permitted for members in this group; ask an admin."
-    else "Could not send the invite: ${e.message ?: "no answer from your ship"}"
+/**
+ * Why an invite did not go out, in words someone can act on. The ship's
+ * own reason, which is the only one that is always true: every refusal
+ * used to be read as "you are not an admin", which said the wrong thing
+ * to the owner of the group when the ship had refused for another reason.
+ */
+fun inviteFailure(e: Throwable): String = when {
+    e !is io.nisfeb.talon.urbit.PokeNacked -> "Could not send the invite: ${e.message ?: "no answer from your ship"}"
+    PERMISSION.containsMatchIn(e.reason) -> "The host refused it: only admins invite to this group. (${e.reason})"
+    else -> "Your ship refused the invite: ${e.reason}"
+}
+
+private val PERMISSION = Regex("permission|not an admin|admin only|unauthor", RegexOption.IGNORE_CASE)
 
 /** The `/invite` group dropdown, shaped like [MentionPicker]. */
 @Composable

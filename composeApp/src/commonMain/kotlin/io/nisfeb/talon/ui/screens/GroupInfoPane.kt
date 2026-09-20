@@ -86,6 +86,20 @@ fun GroupInfoPane(
     var inviteShip by remember(whom) { mutableStateOf("") }
     var inviteBusy by remember(whom) { mutableStateOf(false) }
     var inviteResult by remember(whom) { mutableStateOf<String?>(null) }
+    // Whatever name they were given: a @p, the twelve-word name, or a
+    // short name or nickname of somebody already known. The box used to
+    // put a sig on the front of anything and send that, so a word name
+    // went out as a ship, the host refused it, and Talon blamed the
+    // group's permissions.
+    val inviteContacts by remember { db.contacts().stream() }.collectAsState(initial = emptyList())
+    val inviteNames by io.nisfeb.talon.ui.AzimuthNames.generation.collectAsState()
+    val invited = remember(inviteShip, inviteContacts, inviteNames) {
+        io.nisfeb.talon.ui.NameToShip.resolve(
+            typed = inviteShip.trim(),
+            known = inviteContacts.map { it.ship },
+            nicknameOf = { ship -> inviteContacts.firstOrNull { it.ship == ship }?.nickname },
+        )
+    }
     if (inviteOpen) {
         AlertDialog(
             onDismissRequest = { if (!inviteBusy) { inviteOpen = false; inviteResult = null } },
@@ -102,11 +116,19 @@ fun GroupInfoPane(
                     androidx.compose.material3.OutlinedTextField(
                         value = inviteShip,
                         onValueChange = { inviteShip = it; inviteResult = null },
-                        label = { Text("~ship") },
-                        singleLine = true,
+                        label = { Text("~ship, or a word name") },
+                        // Room for all twelve words of a name: what does
+                        // not fit has to scroll inside the box, which on a
+                        // phone fights the screen and loses.
+                        singleLine = false,
+                        maxLines = 6,
                         enabled = !inviteBusy,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    val landed = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
+                    (io.nisfeb.talon.ui.NameToShip.hint(invited, inviteShip.trim())
+                        ?: landed?.takeIf { it != inviteShip.trim() }?.let { "Invites ${io.nisfeb.talon.ui.shipHandle(it)}." })
+                        ?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     inviteResult?.let {
                         Spacer(Modifier.size(8.dp))
                         Text(it, style = MaterialTheme.typography.bodySmall)
@@ -114,25 +136,17 @@ fun GroupInfoPane(
                 }
             },
             confirmButton = {
-                val ship = inviteShip.trim().let { if (it.isNotEmpty() && !it.startsWith("~")) "~$it" else it }
+                val ship = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
                 TextButton(
-                    enabled = !inviteBusy && ship.length > 1 && groupFlag != null,
+                    enabled = !inviteBusy && ship != null && groupFlag != null,
                     onClick = {
                         val flag = groupFlag ?: return@TextButton
+                        if (ship == null) return@TextButton
                         inviteBusy = true
                         inviteResult = null
                         scope.launch {
                             inviteResult = runCatching { repo.inviteToGroup(flag, ship) }
-                                .fold(
-                                    onSuccess = { "Invited $ship." },
-                                    onFailure = { e ->
-                                        if (e is io.nisfeb.talon.urbit.PokeNacked) {
-                                            "Invites are not permitted for members in this group; ask an admin."
-                                        } else {
-                                            "Could not send the invite: ${e.message ?: "no answer from your ship"}"
-                                        }
-                                    },
-                                )
+                                .fold({ "Invited ${io.nisfeb.talon.ui.shipHandle(ship)}." }, { e -> io.nisfeb.talon.ui.inviteFailure(e) })
                             inviteBusy = false
                         }
                     },

@@ -71,6 +71,13 @@ object NameToShip {
         return Result.None
     }
 
+    /** The one ship [typed] names, or null: for a box that only needs the answer. */
+    fun one(
+        typed: String,
+        known: Collection<String> = emptyList(),
+        nicknameOf: (String) -> String? = { null },
+    ): String? = (resolve(typed, known, nicknameOf) as? Result.One)?.ship
+
     /**
      * What to tell somebody whose input did not land, or null when it
      * did. Written for the person, not about the parser.

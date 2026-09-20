@@ -1277,8 +1277,10 @@ private fun ShipListEditor(
     onRemove: (String) -> Unit,
 ) {
     var draft by remember { mutableStateOf("") }
-    val candidate = draft.trim().let { if (it.startsWith("~")) it else "~$it" }
-    val valid = candidate.length > 3 && candidate.drop(1).all { it.isLetter() || it == '-' }
+    // A @p, or the twelve-word name a comet goes by.
+    val landed = remember(draft) { io.nisfeb.talon.ui.NameToShip.one(draft) }
+    val candidate = landed ?: draft.trim().let { if (it.startsWith("~")) it else "~$it" }
+    val valid = landed != null
 
     Spacer(Modifier.height(12.dp))
     Text(title, style = MaterialTheme.typography.labelLarge)
@@ -1308,8 +1310,9 @@ private fun ShipListEditor(
         OutlinedTextField(
             value = draft,
             onValueChange = { draft = it },
-            singleLine = true,
-            label = { Text("~sampel-palnet") },
+            singleLine = false,
+            maxLines = 6,
+            label = { Text("~sampel-palnet, or a word name") },
             modifier = Modifier.weight(1f),
         )
         Button(

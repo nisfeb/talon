@@ -64,11 +64,18 @@ fun ContactsScreen(
     var newPatp by remember { mutableStateOf("") }
     var newName by remember { mutableStateOf("") }
 
-    val asPatp = run {
-        val t = newPatp.trim()
-        if (t.startsWith("~")) t else "~$t"
+    // Any name a comet answers to: its @p, its twelve-word name, or a
+    // short name or nickname of somebody already in the book.
+    val namesGen by io.nisfeb.talon.ui.AzimuthNames.generation.collectAsState()
+    val landed = remember(newPatp, allContacts, namesGen) {
+        io.nisfeb.talon.ui.NameToShip.one(
+            typed = newPatp,
+            known = allContacts.map { it.ship },
+            nicknameOf = { ship -> allContacts.firstOrNull { it.ship == ship }?.nickname },
+        )
     }
-    val isValidPatp = newPatp.isNotBlank() && PATP_REGEX.matches(asPatp)
+    val asPatp = landed ?: newPatp.trim().let { if (it.startsWith("~")) it else "~$it" }
+    val isValidPatp = landed != null
     val alreadyInBook = asPatp in bookContacts
 
     // Book members, joined to their cached contact rows, filtered by search.
@@ -107,8 +114,10 @@ fun ContactsScreen(
                 OutlinedTextField(
                     value = newPatp,
                     onValueChange = { newPatp = it },
-                    placeholder = { Text("~patp") },
-                    singleLine = true,
+                    placeholder = { Text("~patp, or a word name") },
+                    // A twelve-word name fits without scrolling inside the box.
+                    singleLine = false,
+                    maxLines = 6,
                     modifier = Modifier.weight(1f),
                 )
                 OutlinedTextField(

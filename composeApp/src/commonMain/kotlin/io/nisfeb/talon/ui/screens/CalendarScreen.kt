@@ -778,7 +778,9 @@ fun CalendarScreen(
     }
     mailingRow?.let { r ->
         var to by remember(r.id) { mutableStateOf("") }
-        val ships = to.split(',', ' ').map { it.trim() }.filter { it.isNotEmpty() }.map { if (it.startsWith("~")) it else "~$it" }
+        // A word name stands for its ship here too; what resolves to nobody stays as typed and is refused below.
+        val ships = to.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            .map { io.nisfeb.talon.ui.NameToShip.one(it) ?: if (it.startsWith("~")) it else "~$it" }
         AlertDialog(
             onDismissRequest = { mailingRow = null },
             title = { Text("Mail the event") },
@@ -1311,10 +1313,12 @@ private fun CalendarsDialog(
                                 }
                             }
                             OutlinedTextField(
-                                value = shareShip, onValueChange = { shareShip = it }, label = { Text("Share with a ship") }, placeholder = { Text("~sampel-palnet") }, singleLine = true,
+                                value = shareShip, onValueChange = { shareShip = it }, label = { Text("Share with a ship") },
+                                placeholder = { Text("~sampel-palnet, or a word name") }, singleLine = false, maxLines = 6,
                                 modifier = Modifier.fillMaxWidth(),
                             )
-                            val ship = shareShip.trim().let { if (it.isNotEmpty() && !it.startsWith("~")) "~$it" else it }
+                            val ship = io.nisfeb.talon.ui.NameToShip.one(shareShip)
+                                ?: shareShip.trim().let { if (it.isNotEmpty() && !it.startsWith("~")) "~$it" else it }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 FilterChip(selected = !shareEdit, onClick = { shareEdit = false }, label = { Text("Read only") })
                                 FilterChip(selected = shareEdit, onClick = { shareEdit = true }, label = { Text("Read and edit") })
