@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -106,6 +107,34 @@ fun MailComposer(
     var sending by remember(intent) { mutableStateOf(false) }
     var progress by remember(intent) { mutableStateOf<String?>(null) }
     var problem by remember(intent) { mutableStateOf<String?>(null) }
+    // Set once what is here has been accounted for, sent or saved, so
+    // that the composer going away afterwards does not file a message
+    // that has just gone out as a draft.
+    var filed by remember(intent) { mutableStateOf(false) }
+
+    /** What is in the composer now, as a draft. */
+    fun asDraft() = io.nisfeb.talon.mail.Draft(
+        id = draftId,
+        to = recipients.toList(),
+        subject = subject,
+        body = body,
+        prev = intent.prev,
+    )
+
+    // Leaving by any route keeps what was written. The back button
+    // saves and closes, but a section switch (mail to chat, from the
+    // drawer or the rail) takes this composable out of composition
+    // outright, and on Android the screen holding the intent goes with
+    // it: what was typed was simply gone, which is the one failure a
+    // composer must not have. onDispose cannot wait for a save and this
+    // composable's scope is cancelled with it, so the repo's does it.
+    DisposableEffect(intent) {
+        onDispose {
+            if (!filed && (body.isNotBlank() || subject.isNotBlank() || recipients.isNotEmpty())) {
+                repo.keepDraft(asDraft())
+            }
+        }
+    }
 
     fun commitRecipients(): List<String> {
         val (good, bad) = parseRecipients(recipientDraft)
@@ -127,15 +156,8 @@ fun MailComposer(
                     // failure a composer must not have.
                     if (body.isNotBlank() || subject.isNotBlank() || recipients.isNotEmpty()) {
                         scope.launch {
-                            repo.saveDraft(
-                                io.nisfeb.talon.mail.Draft(
-                                    id = draftId,
-                                    to = recipients.toList(),
-                                    subject = subject,
-                                    body = body,
-                                    prev = intent.prev,
-                                ),
-                            )
+                            repo.saveDraft(asDraft())
+                            filed = true // saved here; onDispose need not save it again
                             onCancel()
                         }
                     } else if (intent.draftId != null) {
@@ -239,6 +261,7 @@ fun MailComposer(
                                 progress = null
                                 sending = false
                                 if (ok) {
+                                    filed = true
                                     // The draft, if this was one, is done
                                     // — unless the ship already dropped
                                     // it for a landed sendDraft.

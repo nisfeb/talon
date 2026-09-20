@@ -706,6 +706,15 @@ class MailRepo(
      *  across saves, so the second save overwrites the first. */
     suspend fun saveDraft(d: Draft): Boolean = mutate(::refreshDrafts) { it.saveDraft(d) }
 
+    /**
+     * Save a draft from somewhere that cannot wait for it: a screen on
+     * its way out of composition, whose own scope dies with it. The
+     * repo's scope outlives every screen, so the save still lands.
+     */
+    fun keepDraft(d: Draft) {
+        scope.launch { runCatching { saveDraft(d) } }
+    }
+
     suspend fun deleteDraft(id: String) = mutate(::refreshDrafts) { it.deleteDraft(id) }
 
     // ---- the timer -----------------------------------------------------

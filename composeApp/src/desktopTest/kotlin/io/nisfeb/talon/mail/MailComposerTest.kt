@@ -196,4 +196,37 @@ class MailComposerTest {
         onNodeWithText("Say who this is going to.").assertIsDisplayed()
         assertTrue(seen.none { it.url.encodedPath.endsWith("/api/send") })
     }
+
+    /** The last save the composer asked the ship for, or null. */
+    private fun savedDraft() = seen.lastOrNull { it.url.encodedPath.endsWith("/api/draft") }
+        ?.let { Json.parseToJsonElement((it.body as TextContent).text).jsonObject }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `leaving the composer by any route keeps what was written`() = runComposeUiTest {
+        val r = repo()
+        // Compose state, so that clearing it really does take the
+        // composer out of composition.
+        val showing = androidx.compose.runtime.mutableStateOf(true)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                if (showing.value) {
+                    MailComposer(
+                        repo = r,
+                        intent = MailIntent(to = listOf("~zod")),
+                        onSent = {},
+                        onCancel = {},
+                    )
+                }
+            }
+        }
+        onNodeWithText("Message").performTextInput("half a thought")
+        waitForIdle()
+        // Switching section takes the composer out of composition: no
+        // back button, no cancel, the way mail to chat does it.
+        showing.value = false
+        waitForIdle()
+        waitUntil(timeoutMillis = 5_000) { savedDraft() != null }
+        assertEquals("half a thought", savedDraft()?.get("body")?.jsonPrimitive?.content)
+    }
 }
