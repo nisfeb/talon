@@ -500,6 +500,12 @@ internal fun activityIdFor(subject: CalendarSubject): String = "activity/" + tit
  * its own (situation/2026-10-03-nutcracker-mandatory-parent-meeting):
  * two dentist visits are two situations, never one.
  */
+// ponytail: the day is this device's. The calendar gives no zone with a
+// row, so two installs in different zones can name the same one-off two
+// days and file it twice; the uid rides along as an alias, so the ship
+// can still see they are one. The install's own record keeps a travelling
+// phone from doing it. Give it the ship's zone when the state view carries
+// one.
 internal fun situationIdFor(subject: CalendarSubject, zone: TimeZone = TimeZone.currentSystemDefault()): String =
     "situation/" + Instant.fromEpochMilliseconds(subject.occurrences.first().l).toLocalDateTime(zone).date + "-" + titleSlug(subject)
 

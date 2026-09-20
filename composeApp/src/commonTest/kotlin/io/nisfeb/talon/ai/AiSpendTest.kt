@@ -10,7 +10,7 @@ class AiSpendTest {
     private class Rows : OrrerySentDao {
         val rows = mutableMapOf<Pair<String, String>, OrrerySentEntity>()
         override suspend fun get(ship: String, key: String) = rows[ship to key]
-        override suspend fun some(ship: String, keys: List<String>) = keys.mapNotNull { rows[ship to it] }
+        override suspend fun someOf(ship: String, keys: List<String>) = keys.mapNotNull { rows[ship to it] }
         override suspend fun under(ship: String, prefix: String) = rows.values.filter { it.ship == ship && it.key.startsWith(prefix) }
         override suspend fun forget(ship: String, key: String) { rows.remove(ship to key) }
         override suspend fun put(row: OrrerySentEntity) { rows[row.ship to row.key] = row }

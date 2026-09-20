@@ -91,7 +91,7 @@ suspend fun sendLocation(
     fix: LocationFix,
     name: String?,
     /** The key's client, which carries no cookie. */
-    bare: HttpClient = createAppHttpClient(),
+    bare: HttpClient = keyClient,
 ): Result<Unit> = runCatching {
     val token = db.orreryAccounts().get(ship)?.token ?: return Result.success(Unit)
     val api = OrreryApi(http, bare, url)
@@ -109,3 +109,9 @@ suspend fun sendLocation(
 }
 
 private const val LAST_KEY = "location:last"
+
+/**
+ * The key's client, made once. It used to be made per fix and never
+ * closed, so every move left a connection pool and its threads behind.
+ */
+private val keyClient: HttpClient by lazy { createAppHttpClient() }

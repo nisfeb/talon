@@ -15,6 +15,7 @@ import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** A message action, rules 11 and 14: the payload read, the address the person's own, the claim confirmed. */
 class MessageActionTest {
@@ -28,10 +29,13 @@ class MessageActionTest {
     @Test
     fun `the address is the person's own attribute, never the body id`() {
         assertEquals("~sampel-palnet", addressOf(state, "person/rose", "chat"))
-        assertEquals("rose@example.com", addressOf(state, "person/rose", "mail"))
+        // Auspex carries mail between ships and does not bridge to
+        // internet email, so mail goes to a ship as a DM does.
+        assertEquals("~sampel-palnet", addressOf(state, "person/rose", "mail"))
         assertEquals("~dozzod-sampel", addressOf(state, "person/sam", "chat"), "the ship the view gives the body")
-        assertNull(addressOf(state, "person/sam", "mail"))
-        assertNull(addressOf(state, "person/andrea", "mail"), "an email that is not one")
+        assertEquals("~dozzod-sampel", addressOf(state, "person/sam", "mail"))
+        assertNull(addressOf(state, "person/andrea", "mail"), "an email address is not a ship")
+        assertTrue("does not bridge to internet email" in noAddress(state, "person/andrea", "mail"), "and the owner is told why")
         assertNull(addressOf(state, "person/andrea", "chat"), "no ship, and none guessed from the id")
         assertNull(addressOf(state, "person/ghost", "chat"))
     }

@@ -20,6 +20,8 @@ import java.util.concurrent.atomic.AtomicReference
  * Android 11 and later require; there the system shows its settings
  * page for it, and the answer arrives when the owner comes back.
  */
+actual fun stopLocationSharing() = LocationWatch.stop()
+
 @Composable
 actual fun rememberLocationSharing(): LocationSharing? {
     val ctx = LocalContext.current.applicationContext

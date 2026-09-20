@@ -26,24 +26,34 @@ fun OrreryAction.messageToSend(): MessageToSend? {
     return MessageToSend(via, to, text)
 }
 
-/** The attribute that holds a person's address on [via]. */
-fun addressAttr(via: String): String = if (via == "mail") "email" else "ship"
-
 /**
- * Where [to] is reached on [via], from the person's own attribute in
- * the state view: `ship` for chat, `email` for mail. Null when the body
- * has none, which the executor reports rather than guesses around.
+ * Where [to] is reached on the channels Talon serves: the person's own
+ * ship, for both of them. A DM goes to it, and so does mail, because
+ * auspex carries mail between ships and does not bridge to internet
+ * email: an address out of the person's `email` could never arrive.
+ * Null when the body has no ship, which the executor reports rather
+ * than guesses around.
  */
 fun addressOf(state: kotlinx.serialization.json.JsonObject, to: String, via: String): String? {
-    val body = Brief.bodies(state).firstOrNull { (it["id"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull == to } ?: return null
-    val said = Brief.text(body, addressAttr(via))?.trim()?.takeIf { it.isNotEmpty() }
-        ?: if (via == "chat") (body["ship"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.trim() else null
-    return when (via) {
-        "mail" -> said?.takeIf { '@' in it && ' ' !in it }
-        "chat" -> said?.let { if (it.startsWith("~")) it else "~$it" }?.takeIf { PATP.matches(it) }
-        else -> null
+    if (via !in TALON_CHANNELS) return null
+    val body = bodyOf(state, to) ?: return null
+    val said = Brief.text(body, "ship")?.trim()?.takeIf { it.isNotEmpty() }
+        ?: (body["ship"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.trim()
+    return said?.let { if (it.startsWith("~")) it else "~$it" }?.takeIf { PATP.matches(it) }
+}
+
+/** Why [to] cannot be reached on [via], for the note the owner reads. */
+fun noAddress(state: kotlinx.serialization.json.JsonObject, to: String, via: String): String {
+    val email = bodyOf(state, to)?.let { Brief.text(it, "email") }?.takeIf { it.isNotBlank() }
+    return when {
+        via == "mail" && email != null ->
+            "$to has an email address and no ship; auspex carries mail between ships and does not bridge to internet email"
+        else -> "$to has no ship on record"
     }
 }
+
+private fun bodyOf(state: kotlinx.serialization.json.JsonObject, id: String) =
+    Brief.bodies(state).firstOrNull { (it["id"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull == id }
 
 private val PATP = Regex("~[a-z]{3}(-{0,2}[a-z]{3,6})*")
 

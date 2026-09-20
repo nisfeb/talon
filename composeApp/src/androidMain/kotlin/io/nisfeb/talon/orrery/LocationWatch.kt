@@ -50,8 +50,21 @@ object LocationWatch {
 
     private var flow: MutableStateFlow<Boolean>? = null
 
+    /**
+     * The application context, kept from the first call. Stopping has to
+     * be reachable from the pipe, which has no context of its own, and
+     * the application's outlives every screen.
+     */
+    private var app: Context? = null
+
     @Synchronized
-    fun on(ctx: Context): StateFlow<Boolean> = flow ?: MutableStateFlow(isOn(ctx)).also { flow = it }
+    fun on(ctx: Context): StateFlow<Boolean> = flow ?: MutableStateFlow(isOn(ctx)).also {
+        app = ctx.applicationContext
+        flow = it
+    }
+
+    /** Off, from wherever: the pipe going off takes this with it. */
+    fun stop() = app?.let { set(it, false) } ?: Unit
 
     private fun isOn(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ON, false)
 
@@ -63,13 +76,15 @@ object LocationWatch {
 
     /** Turn it on or off, and listen or stop listening to match. */
     fun set(ctx: Context, on: Boolean) {
+        app = ctx.applicationContext
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ON, on).apply()
         (on(ctx) as MutableStateFlow).value = on
-        if (on) resume(ctx) else stop(ctx)
+        if (on) resume(ctx) else stopListening(ctx)
     }
 
     /** Listen, where the switch is on and the permission holds. */
     fun resume(ctx: Context) {
+        app = ctx.applicationContext
         if (!isOn(ctx) || !allowed(ctx)) return
         val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
         val providers = lm.getProviders(true)
@@ -83,7 +98,7 @@ object LocationWatch {
         }
     }
 
-    private fun stop(ctx: Context) {
+    private fun stopListening(ctx: Context) {
         (ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager)?.removeUpdates(intent(ctx))
     }
 

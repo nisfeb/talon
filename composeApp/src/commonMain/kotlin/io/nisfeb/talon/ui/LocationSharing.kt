@@ -28,3 +28,12 @@ interface LocationSharing {
 /** The platform's, or null where [isLocationSharingSupported] is false. */
 @Composable
 expect fun rememberLocationSharing(): LocationSharing?
+
+/**
+ * Stop listening, from outside the screen. The switch lives under the
+ * orrery pipe, so turning the pipe off takes the switch off the screen:
+ * left listening, the phone went on waking for moves it had nowhere to
+ * send, and nothing on the screen could stop it. A platform that does
+ * not share location does nothing here.
+ */
+expect fun stopLocationSharing()

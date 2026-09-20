@@ -176,7 +176,16 @@ interface OrrerySentDao {
     suspend fun get(ship: String, key: String): OrrerySentEntity?
 
     @Query("SELECT * FROM orrery_sent WHERE ship = :ship AND key IN (:keys)")
-    suspend fun some(ship: String, keys: List<String>): List<OrrerySentEntity>
+    suspend fun someOf(ship: String, keys: List<String>): List<OrrerySentEntity>
+
+    /**
+     * The rows for these keys, asked in bites. SQLite takes 999 bound
+     * values in a statement before Android 12 and the callers ask about
+     * every contact or every message of a pass, which on a full book is
+     * more than that: the query then throws and the whole pass with it.
+     */
+    suspend fun some(ship: String, keys: List<String>): List<OrrerySentEntity> =
+        if (keys.size <= 900) someOf(ship, keys) else keys.chunked(900).flatMap { someOf(ship, it) }
 
     /** Every key under one prefix: the occurrences of one event, whatever times they were at. */
     @Query("SELECT * FROM orrery_sent WHERE ship = :ship AND key LIKE :prefix || '%'")
