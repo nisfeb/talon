@@ -3,6 +3,8 @@ package io.nisfeb.talon.armillary
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.header
+import io.ktor.client.request.post
+import kotlinx.coroutines.delay
 import io.ktor.http.HttpHeaders
 import io.nisfeb.talon.ai.ARMILLARY_PROVIDER
 import io.nisfeb.talon.ai.AiClient
@@ -80,8 +82,26 @@ class ArmillaryLiveTest {
         // A dollar. A vendor in live mode with a card rail answers a
         // URL; one in stub mode answers its own page; one that refuses
         // says which field was wrong, and that is an answer too.
+        var funded = account.balanceMicro > 0
         when (val answer = api.checkout("stripe", null, 1_000_000L)) {
-            is CheckoutAnswer.Url -> assertTrue(answer.url.isNotBlank(), "a checkout url came back")
+            is CheckoutAnswer.Url -> {
+                assertTrue(answer.url.isNotBlank(), "a checkout url came back")
+                // A vendor in stub mode answers its own pay page, and a
+                // POST to it is the payment. A real rail's URL is for a
+                // person, so the balance stays what it was.
+                if ("/pay/stub" in answer.url) {
+                    owner.post(answer.url)
+                    repeat(15) {
+                        if (!funded) {
+                            delay(2_000)
+                            funded = api.account(fresh = true).balanceMicro > 0
+                        }
+                    }
+                    println("ArmillaryLiveTest: paid the stub, funded=" + funded)
+                } else {
+                    println("ArmillaryLiveTest: checkout url " + answer.url.take(60))
+                }
+            }
             is CheckoutAnswer.Refused -> println("ArmillaryLiveTest: the vendor refused the checkout: ${answer.reason}")
             is CheckoutAnswer.Pending -> println("ArmillaryLiveTest: the checkout is queued as ${answer.nonce}")
         }
@@ -103,6 +123,14 @@ class ArmillaryLiveTest {
         assertEquals(AiSettings.Provider.Custom, cfg.provider)
         assertEquals(inference.models.first(), cfg.model, "a blank ref is the first model, never nothing")
         assertTrue(cfg.usageInclude, "the cost is asked for")
+        if (!funded) {
+            // Nothing paid, so the right answer from the ship is 402.
+            val refused = runCatching { AiClient { cfg }.complete(null, "hello there world", maxOutputTokens = 64) }
+            val why = refused.exceptionOrNull()?.message.orEmpty()
+            println("ArmillaryLiveTest: unfunded, the ship said " + why.take(120))
+            assertTrue("402" in why, "an empty balance is refused with 402")
+            return@live
+        }
         val said = AiClient { cfg }.complete(null, "hello there world", maxOutputTokens = 64)
         println("ArmillaryLiveTest: the model said " + said.take(120))
         assertTrue(said.isNotBlank(), "the model answered")
