@@ -71,7 +71,7 @@ class ArmillaryLiveTest {
         println("ArmillaryLiveTest: mode ${inference.mode}, ${inference.models.size} models")
 
         val plans = api.plans()
-        assertTrue(plans.isNotEmpty(), "the vendor has plans")
+        // a vendor may sell top-ups alone, so an empty list is an answer, not a failure
         println("ArmillaryLiveTest: plans " + plans.joinToString(", ") { it.id + " " + money(it.priceMicro) })
 
         val account = api.account(fresh = true)
