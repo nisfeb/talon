@@ -11,6 +11,10 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.staticCompositionLocalOf
 import kotlinx.coroutines.launch
@@ -27,6 +31,20 @@ import kotlinx.coroutines.launch
  * Null on desktop, which has the rail.
  */
 val LocalDrawerOpener = staticCompositionLocalOf<(() -> Unit)?> { null }
+
+/**
+ * Whether a drawer is open over the app, for a host that draws its own
+ * furniture on top of everything.
+ *
+ * iOS puts a strip down the left edge for the back gesture, and a
+ * pointer input over the sheet's own left edge: a tap on the icon side
+ * of a drawer row went to the strip, which wants drags, and the row
+ * heard nothing. The section simply did not open, which is how it read.
+ */
+object DrawerOverlay {
+    var open by mutableStateOf(false)
+        internal set
+}
 
 /**
  * Wraps the app in its sections drawer, where the platform has one.
@@ -47,6 +65,8 @@ fun TalonDrawer(
     }
     val state = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    DrawerOverlay.open = state.isOpen
+    DisposableEffect(Unit) { onDispose { DrawerOverlay.open = false } }
     ModalNavigationDrawer(
         drawerState = state,
         drawerContent = {

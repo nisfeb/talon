@@ -164,8 +164,11 @@ fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.Na
         // move, and the switcher still opens from the Talon logo.
         // Only present when something has registered a back handler, so
         // at the top of the stack the strip isn't sitting over the
-        // conversation rows' avatars waiting to eat a tap.
-        if (IosBackDispatcher.hasHandler) {
+        // conversation rows' avatars waiting to eat a tap. Gone while a
+        // drawer is open, too: it lay over the left edge of the sheet,
+        // where a row's icon is, and ate the tap that would have opened
+        // the section.
+        if (IosBackDispatcher.hasHandler && !io.nisfeb.talon.ui.DrawerOverlay.open) {
         Box(
             Modifier
                 .align(Alignment.CenterStart)

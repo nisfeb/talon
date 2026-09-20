@@ -1836,6 +1836,7 @@ fun App(
                 // render at full width without entering ChatPaneScaffold.
                 // Only DmList + chat-detail screens (chat, thread, notebook,
                 // gallery) participate in the list/detail split.
+                io.nisfeb.talon.ui.DrawerOverlay.open = drawerState.isOpen
                 androidx.compose.material3.ModalNavigationDrawer(
                     drawerState = drawerState,
                     // Desktop opens the ship switcher only via the Talon
@@ -2962,6 +2963,16 @@ fun App(
                                     }
                                 } else {
                                     uiSettings.setActiveRailTab(tab)
+                                    // With no rail on screen the tab is the
+                                    // whole of the navigation: a chat left
+                                    // open would stay in front of it, and
+                                    // picking Mail or Home did nothing.
+                                    if (!expanded) {
+                                        openChat = null
+                                        openThreadParent = null
+                                        groupInfoOpenFor = null
+                                        groupInfoDrilldown = null
+                                    }
                                 }
                             } ?: when (item) {
                                 RailItem.Assistant -> openAssistantAction()

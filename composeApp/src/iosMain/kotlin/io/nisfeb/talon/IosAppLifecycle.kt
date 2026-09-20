@@ -8,6 +8,8 @@ import platform.UIKit.UIApplication
 import platform.UIKit.UIApplicationDidBecomeActiveNotification
 import platform.UIKit.UIApplicationDidEnterBackgroundNotification
 import platform.UIKit.UIApplicationState
+import platform.UIKit.UIDevice
+import platform.UIKit.UIDeviceOrientationDidChangeNotification
 
 /**
  * Whether the app is in front, from UIKit's own notifications.
@@ -24,6 +26,7 @@ object IosAppLifecycle {
 
     private var observing = false
 
+    @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
     fun observe() {
         if (observing) return
         observing = true
@@ -38,6 +41,21 @@ object IosAppLifecycle {
         }
         centre.addObserverForName(UIApplicationDidEnterBackgroundNotification, null, NSOperationQueue.mainQueue) {
             _foreground.value = false
+        }
+        // A rotation with the keyboard up leaves its inset behind: the
+        // keyboard goes, its hide notification is lost in the turn, and
+        // Compose keeps padding every screen for a keyboard that is not
+        // there any more. That padding is the white band along the
+        // bottom. Putting the keyboard down as the device turns makes
+        // the inset go with it.
+        UIDevice.currentDevice.beginGeneratingDeviceOrientationNotifications()
+        centre.addObserverForName(UIDeviceOrientationDidChangeNotification, null, NSOperationQueue.mainQueue) {
+            UIApplication.sharedApplication.sendAction(
+                platform.Foundation.NSSelectorFromString("resignFirstResponder"),
+                to = null,
+                from = null,
+                forEvent = null,
+            )
         }
     }
 }
