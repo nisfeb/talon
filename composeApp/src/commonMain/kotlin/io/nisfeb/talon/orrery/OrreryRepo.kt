@@ -79,12 +79,14 @@ class OrreryRepo(
     val decide: DecideControl? = null,
     /** An Urbit DM, for approved message actions on the chat channel; without it Talon sends none. */
     private val sendDm: (suspend (whom: String, text: String) -> Unit)? = null,
+    /** The key's client, which carries no cookie. A test hands in its own ship. */
+    bareClient: HttpClient? = null,
 ) {
     private var cloudModel: LocalModel? = null
 
     // Writes under the key ride a client with no cookie: with both on
     // one request the ship would take the cookie and write as the owner.
-    private val bare: HttpClient by lazy { createAppHttpClient() }
+    private val bare: HttpClient by lazy { bareClient ?: createAppHttpClient() }
 
     private val _availability = MutableStateFlow(OrreryAvailability.UNKNOWN)
     val availability: StateFlow<OrreryAvailability> = _availability.asStateFlow()
@@ -363,58 +365,80 @@ class OrreryRepo(
      * the model cannot answer, nothing is sent and the log says why.
      * The state is read fresh for it, never remembered.
      */
-    private suspend fun brief(a: OrreryApi, token: String, s: String, url: String, nowMs: Long) {
+    private suspend fun brief(
+        a: OrreryApi,
+        token: String,
+        s: String,
+        url: String,
+        nowMs: Long,
+        /** The state as the pass read it, before its own writes. */
+        seen: JsonObject?,
+        /** The mail this pass listed, newer than the cursor. */
+        fresh: List<io.nisfeb.talon.mail.InboxEntry>,
+        /** Every action, as the pass read them. */
+        actions: List<OrreryAction>?,
+    ): List<io.nisfeb.talon.mail.InboxEntry> {
         val mail = AuspexApi(http, url)
-        val state = a.stateJson(token)
+        // The zone off the state the pass already read: a brief that is
+        // not due costs the ship nothing at all.
+        val state = seen ?: a.stateJson(token)
         val zone = Brief.zone(state)
         briefZone = zone
-        runCatching { answerReplies(a, token, s, mail, state, zone, nowMs) }
+        val unfinished = runCatching { answerReplies(a, token, s, mail, state, zone, nowMs, fresh) }
             .onFailure { Log.w(TAG, "replies to the brief skipped: ${it.message}") }
-        if (cloud?.config?.invoke()?.featureOn(io.nisfeb.talon.ai.AiFeature.OrreryBrief, before = true) == false) return
-        val day = Brief.dueDay(nowMs, zone, briefGrace) ?: return
+            .getOrDefault(fresh.filter { it.count > 1 && Brief.dayOf(it.subject) != null })
+        if (cloud?.config?.invoke()?.featureOn(io.nisfeb.talon.ai.AiFeature.OrreryBrief, before = true) == false) return unfinished
+        val day = Brief.dueDay(nowMs, zone, briefGrace) ?: return unfinished
         val sent = db.orrerySent()
-        if (sent.get(s, "brief:$day") != null) return
+        if (sent.get(s, "brief:$day") != null) return unfinished
         // Another install may have sent today's; the ship's mail says so.
         // ponytail: two computers waking at seven can still both send;
         // the check again below narrows it to the seconds of one send.
-        suspend fun sentElsewhere(): Boolean {
-            val there = mail.inbox(io.nisfeb.talon.mail.MailView.ALL, limit = 50).threads.any { Brief.dayOf(it.subject) == day }
+        suspend fun sentElsewhere(listed: List<io.nisfeb.talon.mail.InboxEntry>? = null): Boolean {
+            val threads = listed ?: mail.inbox(io.nisfeb.talon.mail.MailView.ALL, limit = 50).threads
+            val there = threads.any { Brief.dayOf(it.subject) == day }
             if (there) sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, "brief:$day", "", nowMs))
             return there
         }
-        if (sentElsewhere()) return
+        // A brief another install sent today is newer than the cursor,
+        // so the mail this pass already listed answers the first check.
+        if (sentElsewhere(fresh)) return unfinished
         val frontier = cloud?.config?.invoke()?.forFeature(io.nisfeb.talon.ai.AiFeature.OrreryBrief)?.takeIf { it.apiKey.isNotBlank() }
-            ?: run { Log.i(TAG, "brief not sent: no frontier model is set under AI"); return }
+            ?: run { Log.i(TAG, "brief not sent: no frontier model is set under AI"); return unfinished }
         // One install writes the brief, and it holds the day's lease
         // before anything costs money. A holder that goes quiet for
         // twenty minutes, longer than a model call, can be taken over.
-        val lease = claim ?: run { Log.i(TAG, "brief not sent: no way to coordinate with other installs here"); return }
+        val lease = claim ?: run { Log.i(TAG, "brief not sent: no way to coordinate with other installs here"); return unfinished }
         if (!lease(BRIEF_LEASE, Brief.LEASE_STALE_MS, Brief.LEASE_SETTLE_MS)) {
             Log.i(TAG, "brief left to the install holding today's lease")
-            return
+            return unfinished
         }
+        // The one read worth making: the brief speaks for the state as
+        // it stands after this pass wrote to it.
+        val fresh = runCatching { a.stateJson(token) }.getOrDefault(state)
         val cal = CalendarApi(http, url)
         val from = day.atStartOfDayIn(zone).toEpochMilliseconds()
         val events = cal.window(from, from + 26 * 3_600_000L).rows
         val todos = cal.tasks()
-        val actions = a.actions(token, status = "all")
-        val today = Brief.today(day, zone, events, todos, state)
-        val (waiting, tags) = Brief.waiting(actions, zone, Brief.names(state))
-        val decided = actions.filter { it.status in setOf("done", "dismissed", "failed") }.sortedBy { it.id }
+        val all = actions ?: a.actions(token, status = "all")
+        val today = Brief.today(day, zone, events, todos, fresh)
+        val (waiting, tags) = Brief.waiting(all, zone, Brief.names(fresh))
+        val decided = all.filter { it.status in setOf("done", "dismissed", "failed") }.sortedBy { it.id }
         val suggestions = io.nisfeb.talon.ai.AiClient(io.nisfeb.talon.ai.AiFeature.OrreryBrief) { frontier }.complete(
             Brief.SYSTEM,
-            Brief.statePrompt(state, decided, isoUtc(nowMs), zone, today, waiting),
+            Brief.statePrompt(fresh, decided, isoUtc(nowMs), zone, today, waiting),
             maxOutputTokens = 4000,
             timeoutMs = 180_000,
         )
         // Again: the model took its time, and another install may have finished first.
-        if (sentElsewhere()) return
+        if (sentElsewhere()) return unfinished
         mail.send(listOf(s), Brief.subject(day), Brief.render(day, today, waiting, suggestions))
         // The tags go with the day: only the install that sent a brief
         // knows which action each one names, so only it answers replies.
         val tagJson = kotlinx.serialization.json.buildJsonObject { tags.forEach { (t, id) -> put(t, kotlinx.serialization.json.JsonPrimitive(id)) } }
         sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, "brief:$day", tagJson.toString(), nowMs))
         Log.i(TAG, "brief for $day sent, ${tags.size} waiting")
+        return unfinished
     }
 
     /**
@@ -432,25 +456,37 @@ class OrreryRepo(
         state: JsonObject,
         zone: kotlinx.datetime.TimeZone,
         nowMs: Long,
-    ) {
+        /** The mail this pass listed: a reply is newer than the cursor, so it is in here. */
+        fresh: List<io.nisfeb.talon.mail.InboxEntry>,
+    ): List<io.nisfeb.talon.mail.InboxEntry> {
         val sent = db.orrerySent()
-        val threads = mail.inbox(io.nisfeb.talon.mail.MailView.ALL, limit = 50).threads
-            .filter { it.count > 1 && Brief.dayOf(it.subject) != null }
+        val threads = fresh.filter { it.count > 1 && Brief.dayOf(it.subject) != null }
+        // What could not be finished holds the mail cursor back, so the
+        // next pass lists it again rather than losing the owner's words.
+        val unfinished = mutableListOf<io.nisfeb.talon.mail.InboxEntry>()
         for (entry in threads) {
             val tagsRaw = sent.get(s, "brief:${Brief.dayOf(entry.subject)}")?.value?.takeIf { it.isNotBlank() } ?: continue
             val tags = Json.parseToJsonElement(tagsRaw).jsonObject.mapValues { it.value.jsonPrimitive.content }
-            val thread = mail.thread(entry.id) ?: continue
+            val thread = runCatching { mail.thread(entry.id) }.getOrElse { unfinished += entry; continue } ?: continue
             val brief = Brief.briefOf(thread, s) ?: continue
             val handled = sent.some(s, thread.messages.map { "reply:${it.id}" }).map { it.key.removePrefix("reply:") }.toSet()
             for (reply in Brief.pendingReplies(thread, s, handled)) {
                 val words = Brief.ownWords(reply.body, brief.body)
-                if (words.isNotBlank()) answer(a, token, state, zone, nowMs, reply, words, tags)
+                if (words.isNotBlank()) {
+                    val read = runCatching { answer(a, token, state, zone, nowMs, reply, words, tags) }
+                    if (read.isFailure) {
+                        Log.w(TAG, "reply ${reply.id} not read: ${read.exceptionOrNull()?.message}")
+                        unfinished += entry
+                        continue
+                    }
+                }
                 // Only once all of it is written: a reply that failed
                 // halfway is read again, and every write is one the ship
                 // answers as existing or refuses as already done.
                 sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, "reply:${reply.id}", "", nowMs))
             }
         }
+        return unfinished.distinctBy { it.id }
     }
 
     private suspend fun answer(
@@ -532,10 +568,18 @@ class OrreryRepo(
      * in the todo, never here, which is what makes a pass that starts
      * from nothing safe.
      */
-    private suspend fun mirrorTasks(a: OrreryApi, token: String?, url: String) = mirrorLock.withLock {
-        val actions = a.actions(token, status = "all")
+    private suspend fun mirrorTasks(
+        a: OrreryApi,
+        token: String?,
+        url: String,
+        read: List<OrreryAction>? = null,
+        listed: List<io.nisfeb.talon.calendar.CalendarTask>? = null,
+    ) = mirrorLock.withLock {
+        // What the pass already read, where it read it: two more
+        // listings cost the ship two more seconds for the same answer.
+        val actions = read ?: a.actions(token, status = "all")
         val cal = CalendarApi(http, url)
-        val events = cal.events()
+        val events = listed ?: cal.events()
         val moves = taskMoves(actions, events.filter { it.cat == "todo" }) + calendarMoves(actions, events)
         if (token != null) runCatching { sendApproved(a, token, url, actions) }.onFailure { Log.i(TAG, "messages skipped: ${it.message}") }
         if (moves.isEmpty()) return@withLock
@@ -659,6 +703,31 @@ class OrreryRepo(
     }
 
     /**
+     * The mail newer than [cursor], a page at a time from the newest.
+     * A quiet inbox costs one small listing rather than two hundred
+     * threads: every request into a grubbery app is about a second of
+     * the ship's single thread, and they queue behind each other. With
+     * no cursor (a first pass, or the record cleared) the whole page
+     * this pass may take is read.
+     */
+    internal suspend fun mailSince(mail: AuspexApi, cursor: Long): List<io.nisfeb.talon.mail.InboxEntry> {
+        if (cursor <= 0L) return mail.inbox(io.nisfeb.talon.mail.MailView.ALL, limit = MAIL_PER_PASS).threads.filter { it.last > cursor }
+        val out = mutableListOf<io.nisfeb.talon.mail.InboxEntry>()
+        var offset = 0
+        while (offset < MAIL_PER_PASS) {
+            val page = mail.inbox(io.nisfeb.talon.mail.MailView.ALL, offset = offset, limit = MAIL_PAGE).threads
+            if (page.isEmpty()) break
+            val fresh = page.filter { it.last > cursor }
+            out += fresh
+            // The listing is newest first, so a page holding anything
+            // this install has already read is the last one worth asking for.
+            if (fresh.size < page.size) break
+            offset += page.size
+        }
+        return out
+    }
+
+    /**
      * One pass over every source from its cursor. Safe to call any
      * time, and safe to run again from nothing: the ship is asked what
      * it already has before anything is made, every occurrence and
@@ -724,8 +793,9 @@ class OrreryRepo(
             // that is not there is skipped, not an error of the pipe.
             var mailCursor = row.mailCursor
             var freshMail: List<io.nisfeb.talon.mail.InboxEntry> = emptyList()
-            runCatching { AuspexApi(http, url).inbox(limit = MAIL_PER_PASS) }.onSuccess { page ->
-                freshMail = page.threads.filter { it.last > row.mailCursor }
+            val mailApi = AuspexApi(http, url)
+            runCatching { mailSince(mailApi, row.mailCursor) }.onSuccess { fresh ->
+                freshMail = fresh
                 facts += Facts(
                     observations = freshMail.flatMap { e ->
                         mailFacts(e, s, nowMs) { ship -> people.idFor(ship, null) }
@@ -733,13 +803,26 @@ class OrreryRepo(
                 )
                 mailCursor = freshMail.maxOfOrNull { it.last } ?: mailCursor
             }.onFailure { Log.i(TAG, "mail skipped: ${it.message}") }
-            facts += triage(a, row, posts, s, nowMs, url, freshMail, book) { key, value -> remember(key, value) }
+            facts += triage(a, row, posts, s, nowMs, url, freshMail, book, view) { key, value -> remember(key, value) }
 
-            runCatching { CalendarApi(http, url).window(nowMs - BACKFILL_MS, nowMs + AHEAD_MS) }.onSuccess { w ->
+            val calApi = CalendarApi(http, url)
+            // The whole listing, read once and shared: the vanished
+            // check reads it, and so does the task mirror below.
+            var allEvents: List<io.nisfeb.talon.calendar.CalendarTask>? = null
+            suspend fun events(): List<io.nisfeb.talon.calendar.CalendarTask>? {
+                allEvents?.let { return it }
+                return runCatching { calApi.events() }.onFailure { Log.i(TAG, "events skipped: ${it.message}") }
+                    .getOrNull()?.also { allEvents = it }
+            }
+            runCatching { calApi.window(nowMs - BACKFILL_MS, nowMs + AHEAD_MS) }.onSuccess { w ->
                 // The calendars this ship keeps itself. An event on one
-                // another ship shares is not ours to name an organizer for.
-                val calendars = runCatching { CalendarApi(http, url).calendars() }.getOrDefault(emptyList())
-                val ourCalendars = calendars.filter { it.kind == "local" }.map { it.id }.toSet()
+                // another ship shares is not ours to name an organizer
+                // for. Asked for only where this pass writes something:
+                // on a pass where nothing moved it is a request the ship
+                // spends a second on for an answer nobody reads.
+                var calendars: List<io.nisfeb.talon.calendar.CalendarInfo>? = null
+                suspend fun calendarsNow(): List<io.nisfeb.talon.calendar.CalendarInfo> =
+                    calendars ?: runCatching { calApi.calendars() }.getOrDefault(emptyList()).also { calendars = it }
                 // Who the ship keeps, so a name in a title lands on the
                 // person it already has.
                 val cast = view?.let { EventPeople.of(it.bodies) } ?: EventPeople.NONE
@@ -775,9 +858,14 @@ class OrreryRepo(
                         else runCatching { a.resolve(subject.title, row.token) }.getOrDefault(emptyList())
                         listOfNotNull(sameEvent(subject, byUid, byTitle) { id -> raw?.let { bodyTimes(it, id) } })
                     }
+                    // Whether anything of this event is going up: a new
+                    // body, a change, or an occurrence never written.
+                    val writes = decided == null || changed ||
+                        subject.occurrences.any { occurrenceKey(subject, it) !in seen.keys }
+                    val ours = writes && subject.cal in calendarsNow().filter { it.kind == "local" }.map { it.id }
                     val write = calendarWrite(
                         subject, decided, hits, seen.keys - dropped, s, nowMs, changed,
-                        subject.cal in ourCalendars, cast,
+                        ours, cast,
                     )
                     facts += write.facts
                     // A renamed event: the ship keeps the name it has and
@@ -800,20 +888,26 @@ class OrreryRepo(
                 // also loses an event moved past its edge.
                 // ponytail: only what this install remembers writing; a
                 // cleared record (pipe off and on) forgets what to cancel.
-                runCatching { CalendarApi(http, url).events() }.onSuccess { all ->
+                // What this install wrote and the calendar no longer
+                // keeps. Nothing written, nothing to lose: the listing
+                // is only worth a request once there is a record.
+                val written = sent.under(s, "cal:").associate { it.key to it.value }
+                if (written.isNotEmpty()) {
+                    val all = events()
                     // An empty listing is likelier a hiccup than every
                     // event deleted at once, and a cancel is not undone.
-                    if (all.isEmpty()) return@onSuccess
-                    val gone = vanishedEvents(
-                        written = sent.under(s, "cal:").associate { it.key to it.value },
-                        occurrences = sent.under(s, "occ:").associate { it.key to it.value },
-                        kept = all.map { "cal:${it.cal}/${it.id}" }.toSet(),
-                        calendars = calendars.map { it.id }.toSet(),
-                        nowMs = nowMs,
-                    )
-                    facts += gone.facts
-                    forgets += gone.forget
-                }.onFailure { Log.i(TAG, "vanished events skipped: ${it.message}") }
+                    if (!all.isNullOrEmpty()) {
+                        val gone = vanishedEvents(
+                            written = written,
+                            occurrences = sent.under(s, "occ:").associate { it.key to it.value },
+                            kept = all.map { "cal:${it.cal}/${it.id}" }.toSet(),
+                            calendars = calendarsNow().map { it.id }.toSet(),
+                            nowMs = nowMs,
+                        )
+                        facts += gone.facts
+                        forgets += gone.forget
+                    }
+                }
             }.onFailure { Log.i(TAG, "calendar skipped: ${it.message}") }
 
             // Only what the ship's schema lists for a kind it keeps: a row
@@ -840,10 +934,24 @@ class OrreryRepo(
             // halfway must be free to say the same things again.
             if (record.isNotEmpty()) sent.putAll(record)
             forgets.forEach { sent.forget(s, it) }
-            db.orreryAccounts().upsert(row.copy(messagesCursor = messagesCursor, mailCursor = mailCursor, calendarCursor = nowMs))
-            runCatching { a.actions(row.token) }.onSuccess { published(it) }.onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
-            runCatching { mirrorTasks(a, row.token, url) }.onFailure { Log.i(TAG, "tasks skipped: ${it.message}") }
-            runCatching { brief(a, row.token, s, url, nowMs) }.onFailure { Log.w(TAG, "brief not sent: ${it.message}") }
+            // One listing of the actions for the three things that
+            // want them: what is open, the mirror, and the brief.
+            val actions = runCatching { a.actions(row.token, status = "all") }
+                .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }.getOrNull()
+            actions?.let { published(it.filter { act -> act.status in OPEN_STATUSES }) }
+            runCatching { mirrorTasks(a, row.token, url, actions, events()) }.onFailure { Log.i(TAG, "tasks skipped: ${it.message}") }
+            // A reply the brief could not finish holds the mail cursor
+            // where it is, so the next pass lists it again.
+            val unfinished = runCatching { brief(a, row.token, s, url, nowMs, raw, freshMail, actions) }
+                .onFailure { Log.w(TAG, "brief not sent: ${it.message}") }.getOrDefault(emptyList())
+            val heldBack = unfinished.minOfOrNull { it.last }?.let { it - 1 } ?: Long.MAX_VALUE
+            db.orreryAccounts().upsert(
+                row.copy(
+                    messagesCursor = messagesCursor,
+                    mailCursor = minOf(mailCursor, heldBack).coerceAtLeast(row.mailCursor),
+                    calendarCursor = nowMs,
+                ),
+            )
             _lastPushMs.value = nowMs
             _error.value = if (refused == 0) null else "$refused refused: ${firstReason ?: "no reason given"}"
         } catch (e: OrreryError.Refused) {
@@ -885,10 +993,24 @@ class OrreryRepo(
     private suspend fun ensureScope(s: String, row: OrreryAccountEntity) {
         if (scopeChecked) return
         val a = api ?: return
+        // Twice a day is enough for a schema the owner changes by hand,
+        // and a background pass builds a new repo every time: without
+        // this it asked the ship for the schema and the state on every
+        // wake, which is two seconds of the ship for an answer that
+        // almost never differs.
+        val checked = db.orrerySent().get(s, SCOPE_KEY)?.value?.toLongOrNull() ?: 0L
+        if (now() - checked < SCOPE_GAP_MS) {
+            scopeChecked = true
+            return
+        }
         val full = runCatching { a.schema() }.getOrNull() ?: return
         val mine = runCatching { a.stateJson(row.token)["schema"] as? JsonObject }.getOrNull() ?: return
-        if (scopeCovers(mine, full)) {
+        suspend fun measured() {
             scopeChecked = true
+            db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, SCOPE_KEY, now().toString(), now()))
+        }
+        if (scopeCovers(mine, full)) {
+            measured()
             return
         }
         val minted = runCatching { a.mint("Talon on $platform", by(), schemaKinds(full), schemaActions(full)) }
@@ -896,7 +1018,7 @@ class OrreryRepo(
             .getOrNull() ?: return
         db.orreryAccounts().upsert(row.copy(clientId = minted.id, token = minted.token))
         runCatching { a.revoke(row.clientId) }
-        scopeChecked = true
+        measured()
         Log.i(TAG, "replaced this install's key with one that has the whole scope")
     }
 
@@ -967,8 +1089,10 @@ class OrreryRepo(
     /** Whether the decision model could run here: an OpenRouter key is set. */
     fun decideHasKey(): Boolean = cloud?.config?.invoke()?.let(::openRouterKey) != null
 
-    private suspend fun reading(a: OrreryApi, row: OrreryAccountEntity, s: String): Reading? {
-        val view = runCatching { a.state(row.token) }.getOrElse { Log.i(TAG, "state view skipped: ${it.message}"); return null }
+    private suspend fun reading(a: OrreryApi, row: OrreryAccountEntity, s: String, seen: StateView?): Reading? {
+        // The pass reads the state once and hands it down: every read
+        // costs the ship a second of its single thread.
+        val view = seen ?: runCatching { a.state(row.token) }.getOrElse { Log.i(TAG, "state view skipped: ${it.message}"); return null }
         val model = cloudModelIfOn() ?: (if (isLocalTriageSupported) LocalModels.best()?.second else null)
         val emb = embedder
         val gate = if (model != null && emb != null) runCatching {
@@ -999,6 +1123,8 @@ class OrreryRepo(
         url: String,
         freshMail: List<io.nisfeb.talon.mail.InboxEntry>,
         book: Set<String>,
+        /** The state as this pass read it, so the triage adds no read of its own. */
+        view: StateView?,
         remember: (String, String) -> Unit,
     ): Facts {
         val spoken = pendingLock.withLock { transcripts.toList().also { transcripts.clear() } }
@@ -1021,7 +1147,7 @@ class OrreryRepo(
         } else {
             _yielding.value = false
         }
-        val r = reading(a, row, s) ?: return Facts()
+        val r = reading(a, row, s, view) ?: return Facts()
         val allowed = db.orreryChannels().all().toSet()
         val ourNick = db.contacts().get(s)?.nickname
         var up = Facts()
@@ -1449,7 +1575,17 @@ class OrreryRepo(
         const val GATE_CHECK_AT_ONCE = 6
         private const val BRIEF_LEASE = "orrery-brief"
         const val MESSAGES_PER_PASS = 2000
+        /** What the ship calls open: the three statuses `?status=open` answers with. */
+        val OPEN_STATUSES = setOf("proposed", "approved", "claimed")
+
+        /** When the key's scope was last measured against the ship's schema. */
+        private const val SCOPE_KEY = "scope:checked"
+        private const val SCOPE_GAP_MS = 12L * 60 * 60 * 1000
+
         const val MAIL_PER_PASS = 200
+
+        /** How many threads a page of the cursor's listing asks for. */
+        const val MAIL_PAGE = 20
         const val TRUST_AFTER = 3
         // ponytail: a per-pass cap; a per-day budget when a phone needs one.
         const val MODEL_PER_PASS = 20
