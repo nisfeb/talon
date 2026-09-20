@@ -766,7 +766,9 @@ class TlonChatRepo(
     fun stop() {
         started = false
         channel?.let { ch ->
-            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+            // Closing the channel is a request to the ship that waits on
+            // it, so it does not go on the pool the screens share.
+            kotlinx.coroutines.CoroutineScope(io.nisfeb.talon.util.ioDispatcher).launch {
                 runCatching { kotlinx.coroutines.withTimeoutOrNull(3_000) { ch.delete() } }
             }
         }

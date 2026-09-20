@@ -265,10 +265,14 @@ class OrreryCalendarTest {
     fun `two occasions that share a title are two situations`() {
         val oct = subject(row(noon, title = "Nutcracker Mandatory Parent Meeting", uid = "N1"))
         val dec = subject(row(noon + 9 * week, title = "Nutcracker Mandatory Parent Meeting", uid = "N2"))
-        assertEquals("situation/2026-09-17-nutcracker-mandatory-parent-meeting", situationIdFor(oct))
-        assertTrue(situationIdFor(oct) != situationIdFor(dec))
+        // The day is named in a zone, so the test says which: noon UTC
+        // is the 17th in London and the 18th in Sydney, and the machine
+        // this runs on is in neither.
+        val utc = kotlinx.datetime.TimeZone.UTC
+        assertEquals("situation/2026-09-17-nutcracker-mandatory-parent-meeting", situationIdFor(oct, utc))
+        assertTrue(situationIdFor(oct, utc) != situationIdFor(dec, utc))
         // The earlier one, found by title, is not the later one.
-        val earlier = hit(situationIdFor(oct))
+        val earlier = hit(situationIdFor(oct, utc))
         val open = { _: String -> BodyTimes(null, noon) }
         assertEquals(null, sameEvent(dec, emptyList(), listOf(earlier), open))
     }

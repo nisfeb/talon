@@ -12,7 +12,6 @@ import io.nisfeb.talon.orrery.CloudTriage
 import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import java.util.concurrent.TimeUnit
@@ -33,7 +32,11 @@ class OrreryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val app = applicationContext as? TalonApplication ?: return Result.success()
         val session = app.sessionStore.active() ?: return Result.success()
         if (app.db.orreryAccounts().get(session.ship) == null) return Result.success()
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        // The pass talks to the ship and to OpenRouter and waits on
+        // both. Dispatchers.Default has one thread per core and the
+        // screens' own list building shares it, so a pass run there
+        // took the pool down with it while the app was open.
+        val scope = CoroutineScope(SupervisorJob() + io.nisfeb.talon.util.ioDispatcher)
         val repo = OrreryRepo(
             app.session.http, scope, app.db, io.nisfeb.talon.ui.platformLabel, app.searchEmbedderClient,
             cloud = CloudTriage(
