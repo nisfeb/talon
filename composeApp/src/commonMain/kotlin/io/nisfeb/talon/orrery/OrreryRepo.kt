@@ -432,9 +432,12 @@ class OrreryRepo(
         val today = Brief.today(day, zone, events, todos, fresh)
         val (waiting, tags) = Brief.waiting(all, zone, Brief.names(fresh))
         val decided = all.filter { it.status in setOf("done", "dismissed", "failed") }.sortedBy { it.id }
+        // What the last brief suggested, kept beside its tags: today's
+        // says what has changed rather than the same thing again.
+        val saidYesterday = sent.under(s, SAID).maxByOrNull { it.key }?.value.orEmpty()
         val suggestions = io.nisfeb.talon.ai.AiClient(io.nisfeb.talon.ai.AiFeature.OrreryBrief) { frontier }.complete(
             Brief.SYSTEM,
-            Brief.statePrompt(fresh, decided, isoUtc(nowMs), zone, today, waiting),
+            Brief.statePrompt(fresh, decided, isoUtc(nowMs), zone, today, waiting, saidYesterday),
             maxOutputTokens = 4000,
             timeoutMs = 180_000,
         )
@@ -445,6 +448,10 @@ class OrreryRepo(
         // knows which action each one names, so only it answers replies.
         val tagJson = kotlinx.serialization.json.buildJsonObject { tags.forEach { (t, id) -> put(t, kotlinx.serialization.json.JsonPrimitive(id)) } }
         sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, "brief:$day", tagJson.toString(), nowMs))
+        // And what it said, which only the next brief reads: one row, so
+        // the older ones go rather than a row a day forever.
+        sent.under(s, SAID).forEach { if (it.key != "$SAID$day") sent.forget(s, it.key) }
+        sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, "$SAID$day", suggestions.trim(), nowMs))
         Log.i(TAG, "brief for $day sent, ${tags.size} waiting")
         return unfinished
     }
@@ -1697,6 +1704,9 @@ class OrreryRepo(
         const val MAIL_PER_PASS = 200
 
         /** How many threads a page of the cursor's listing asks for. */
+        /** What the last brief suggested, by its day, in the table the reply cursor uses. */
+        private const val SAID = "brief-said:"
+
         /** One orrery pass at a time in this process, whoever asked for it. */
         private val passLock = kotlinx.coroutines.sync.Mutex()
 

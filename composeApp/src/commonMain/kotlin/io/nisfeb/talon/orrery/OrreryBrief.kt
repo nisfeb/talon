@@ -202,12 +202,18 @@ object Brief {
 
     // ---- part three: suggestions ------------------------------------------
 
-    /** The frontier model's brief, framed the way common/generator-prompt.md frames the analyst. */
+    /**
+     * The brief's own prompt: orrery-utils' common/brief-prompt.md, word
+     * for word, the way [ANALYST] is analyst-prompt.md. BriefPromptDriftTest
+     * holds the two together.
+     */
     val SYSTEM: String = """
         You are the analyst for orrery, a model of one person's world kept on their own ship. Each morning you write the owner a few lines to read on their phone before the day starts.
-        You are given the state (every body with its current attributes), the day's schedule and todos, the actions waiting for the owner's answer, the recent decisions, and the time now.
-        Point out what the owner would want to know and might not see: two things in the day that overlap or leave no time between them, a fact that looks stale or wrong, something open with nothing being done about it, a decision that is waiting on them.
+        You are given the state (the bodies that bear on the next two days, with their current attributes), today's schedule and todos, what is waiting for the owner's answer, the recent decisions, what is ahead later in the week, what yesterday's brief said, and the time now.
+        The brief is about today. Point out what the owner would want to know today and might not see: two things in the day that overlap or leave no time between them, a fact that looks stale or wrong, something open with nothing being done about it, a decision that is waiting on them.
+        What is ahead later in the week earns a line only when today is the day to act on it: a booking to make, a thing to pack, somebody to ask. It is there for that, not to be read out.
         Do not list the schedule or the waiting actions again; the mail already does. Do not propose actions; another pass does that.
+        Do not say again what yesterday's brief said. Where something about it has changed, say what has changed.
         Respect what the facts say about time: an occurrence in the past is over, and a situation that is upcoming has not happened.
         Do not invent facts, people, places or events. Do not moralise.
         Plain text, no markdown, at most six short lines, one thing each. When there is nothing worth saying, answer exactly: Nothing to add.
@@ -221,16 +227,28 @@ object Brief {
         zone: TimeZone,
         today: List<String>,
         waiting: List<String>,
+        /** What yesterday's brief suggested, so that today's does not say it again. */
+        saidYesterday: String = "",
     ): String = buildString {
         appendLine("The owner is ${state.str("me") ?: "person/me"}.")
         val all = bodies(state).take(MAX_BODIES)
-        val hidden = all.filter { b -> b.str("id").orEmpty().startsWith("situation/") && phase(b, nowIso) in setOf("closed", "cancelled", "over") }
-            .map { it.str("id") }.toSet()
+        // The brief is about today, so the state it reads is what bears on
+        // the next two days. A situation three weeks out, and every
+        // activity's next whenever it falls, used to be in here with all
+        // their attributes, and the brief reached a month ahead to have
+        // something to say. What is further off is a title and a time,
+        // under Ahead, or it is not here at all.
+        val near = addDays(nowIso, NEAR_DAYS)
+        val hidden = all.filter { b ->
+            val id = b.str("id").orEmpty()
+            id.startsWith("situation/") &&
+                (phase(b, nowIso) in setOf("closed", "cancelled", "over") || startsAfter(b, near))
+        }.map { it.str("id") }.toSet()
         for (kind in listOf("thing", "place", "org", "note", "person", "activity", "situation")) {
             val rows = all.filter { it.str("kind") == kind && it.str("id") !in hidden }
             if (rows.isEmpty()) continue
             appendLine(if (kind == "activity") "activities:" else "${kind}s:")
-            rows.forEach { appendLine("  " + line(it, nowIso)) }
+            rows.forEach { appendLine("  " + line(it, nowIso, within = near)) }
         }
         appendLine("Recent decisions:")
         decided.takeLast(RECENT).forEach { appendLine("  ${it.status} | ${it.kind} | ${it.title}") }
@@ -238,11 +256,54 @@ object Brief {
         (today.ifEmpty { listOf("nothing") }).forEach { appendLine("  $it") }
         appendLine("Waiting on the owner:")
         (waiting.ifEmpty { listOf("nothing") }).forEach { appendLine("  $it") }
+        val ahead = ahead(all, nowIso)
+        if (ahead.isNotEmpty()) {
+            appendLine("Ahead this week:")
+            ahead.forEach { appendLine("  $it") }
+        }
+        if (saidYesterday.isNotBlank()) {
+            appendLine("Yesterday's brief said:")
+            saidYesterday.trim().lines().forEach { appendLine("  ${it.trim()}") }
+        }
         append("Now: $nowIso, timezone ${zone.id}. Write the brief.")
     }
 
+    /**
+     * What falls in the days after the ones the state above covers and
+     * before the week is out: a title and a time each, no attributes, so
+     * that today's brief can see a thing worth acting on today without
+     * the whole of next week being in front of it.
+     */
+    internal fun ahead(all: List<JsonObject>, nowIso: String): List<String> {
+        val from = addDays(nowIso, NEAR_DAYS)
+        val to = addDays(nowIso, WEEK_DAYS)
+        fun row(b: JsonObject, at: String) = "${b.str("name").orEmpty().ifBlank { b.str("id").orEmpty() }} | $at"
+        val situations = all.filter { b ->
+            b.str("id").orEmpty().startsWith("situation/") &&
+                phase(b, nowIso) !in setOf("closed", "cancelled", "over")
+        }.mapNotNull { b -> text(b, "starts")?.takeIf { it > from && it <= to }?.let { b to it } }
+        val activities = all.filter { it.str("kind") == "activity" }
+            .mapNotNull { b -> text(b, "next")?.takeIf { it > from && it <= to }?.let { b to it } }
+        return (situations + activities).sortedBy { it.second }.take(AHEAD_LINES).map { (b, at) -> row(b, at) }
+    }
+
+    /** [nowIso] moved on by whole days, for comparing against an ISO time as text. */
+    private fun addDays(nowIso: String, days: Int): String =
+        runCatching { Instant.parse(nowIso).plus(days * 24L * 3_600_000, kotlinx.datetime.DateTimeUnit.MILLISECOND).toString() }
+            .getOrDefault(nowIso)
+
+    private fun startsAfter(b: JsonObject, iso: String): Boolean =
+        (text(b, "started") ?: text(b, "starts"))?.let { it > iso } ?: false
+
     private const val MAX_BODIES = 300
     private const val RECENT = 60
+
+    /** The days the state itself covers: the brief is about today and tomorrow. */
+    internal const val NEAR_DAYS = 2
+
+    /** And the days beyond those that Ahead covers. */
+    internal const val WEEK_DAYS = 7
+    private const val AHEAD_LINES = 10
 
     internal fun phase(b: JsonObject, now: String): String {
         val st = text(b, "status")
@@ -257,11 +318,14 @@ object Brief {
         }
     }
 
-    internal fun line(b: JsonObject, now: String): String {
+    internal fun line(b: JsonObject, now: String, within: String? = null): String {
         val attrs = (b["attrs"] as? JsonObject).orEmpty()
         val bits = attrs.keys.sorted().mapNotNull { k ->
             val v = value(b, k) ?: return@mapNotNull null
             if (v is JsonNull) return@mapNotNull null
+            // An occurrence further off than the brief reaches is under
+            // Ahead instead, where it costs a line rather than a body.
+            if (k == "next" && within != null && (v as? JsonPrimitive)?.contentOrNull?.let { it > within } == true) return@mapNotNull null
             val shown = when (v) {
                 is JsonArray -> v.joinToString(", ") { refOrText(it) }
                 else -> refOrText(v)
