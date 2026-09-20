@@ -56,6 +56,7 @@ fun MailWorkspace(
                     onSent = { onCompose(null) },
                     onCancel = { onCompose(null) },
                     upload = upload,
+                    nameFor = contacts::displayName,
                 )
 
                 openThread != null -> MailThreadPane(
@@ -101,6 +102,7 @@ fun MailWorkspace(
                         onSent = { onCompose(null) },
                         onCancel = { onCompose(null) },
                         upload = upload,
+                        nameFor = contacts::displayName,
                     )
 
                     openThread != null -> MailThreadPane(

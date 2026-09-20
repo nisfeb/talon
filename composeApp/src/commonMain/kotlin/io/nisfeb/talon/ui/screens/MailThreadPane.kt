@@ -162,6 +162,7 @@ fun MailThreadPane(
     fun whenAt(ms: Long) = shortRelativeTime(ms, nowMs())
     fun intent(forwarding: Boolean) = MailIntent(
         prev = answering,
+        threadId = threadId,
         to = if (forwarding) emptyList() else thread?.participants.orEmpty().filter { it != ourShip },
         subject = answerSubject(thread?.messages?.firstOrNull()?.subject.orEmpty(), forwarding),
         travels = travelling.size,

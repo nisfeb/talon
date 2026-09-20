@@ -26,6 +26,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -56,6 +58,8 @@ import kotlinx.coroutines.launch
  */
 data class MailIntent(
     val prev: String? = null,
+    /** The thread [prev] is in, so a reply can show what it answers. */
+    val threadId: String? = null,
     val to: List<String> = emptyList(),
     val subject: String = "",
     /** How many signed messages a send from here carries. Read off the
@@ -90,6 +94,8 @@ fun MailComposer(
      * made. Takes the bytes, the content type and the name.
      */
     upload: (suspend (ByteArray, String, String) -> String)? = null,
+    /** A ship as the owner reads it; the raw name where the host has none. */
+    nameFor: (String) -> String = { it },
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -161,26 +167,18 @@ fun MailComposer(
         ) {
             IconButton(
                 onClick = {
-                    // Leaving with something written keeps it. Losing a
-                    // half-finished message to a back gesture is the one
-                    // failure a composer must not have.
-                    if (body.isNotBlank() || subject.isNotBlank() || recipients.isNotEmpty()) {
-                        scope.launch {
-                            repo.saveDraft(asDraft())
-                            filed = true // saved here; onDispose need not save it again
-                            onCancel()
-                        }
-                    } else if (intent.draftId != null) {
+                    // Closing is instant. What is written is kept by the
+                    // dispose above, on the repo's scope; waiting here for
+                    // the save and the re-read that follows it meant the
+                    // back button sat through two requests to the ship
+                    // before the screen would move.
+                    if (body.isBlank() && subject.isBlank() && recipients.isEmpty() && intent.draftId != null) {
                         // Opened from a draft and emptied out: keeping
                         // the husk would say there is still something
                         // to send.
-                        scope.launch {
-                            repo.deleteDraft(intent.draftId)
-                            onCancel()
-                        }
-                    } else {
-                        onCancel()
+                        repo.dropDraft(intent.draftId)
                     }
+                    onCancel()
                 },
             ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close")
@@ -208,17 +206,23 @@ fun MailComposer(
                         else -> {
                             sending = true
                             problem = null
+                            val errorBefore = repo.error.value
                             scope.launch {
                                 val refs = mutableListOf<io.nisfeb.talon.mail.AttachRef>()
                                 var failed: String? = null
                                 // One at a time, and named in the progress,
                                 // because "uploading 2 of 5" is only true if
                                 // there is one in flight.
-                                files.forEachIndexed { i, f ->
+                                // A copy: the list is the screen's own, and
+                                // removing a file while an upload waits threw
+                                // out of the iterator and left the composer
+                                // stuck on "Uploading 2 of 5" for good.
+                                val outgoing = files.toList()
+                                outgoing.forEachIndexed { i, f ->
                                     if (failed != null) return@forEachIndexed
-                                    progress = "Uploading ${i + 1} of ${files.size}"
+                                    progress = "Uploading ${i + 1} of ${outgoing.size}"
                                     val hash = runCatching { repo.uploadBlob(f.bytes) }
-                                        .getOrElse { failed = "${f.displayName}: ${it.message}"; null }
+                                        .getOrElse { failed = "${f.displayName}: ${it.message ?: "the upload gave no reason"}"; null }
                                     if (hash != null) {
                                         refs += io.nisfeb.talon.mail.AttachRef(
                                             name = f.displayName,
@@ -259,7 +263,8 @@ fun MailComposer(
                                             ),
                                         )
                                     ) {
-                                        problem = repo.error.value ?: "The edits did not reach the ship; nothing was sent."
+                                        problem = repo.error.value?.takeIf { it != errorBefore }
+                                            ?: "The edits did not reach the ship; nothing was sent."
                                         progress = null
                                         sending = false
                                         return@launch
@@ -269,7 +274,6 @@ fun MailComposer(
                                     repo.send(to, subject, body, intent.prev, refs)
                                 }
                                 progress = null
-                                sending = false
                                 if (ok) {
                                     filed = true
                                     // The draft, if this was one, is done
@@ -278,8 +282,15 @@ fun MailComposer(
                                     if (intent.draftId != null && refs.isNotEmpty()) repo.deleteDraft(intent.draftId)
                                     onSent()
                                 } else {
-                                    problem = repo.error.value ?: "Send refused."
+                                    // The repo's error is session-long and may
+                                    // be about something else entirely, so it
+                                    // speaks only if this send changed it.
+                                    problem = repo.error.value?.takeIf { it != errorBefore }
+                                        ?: "The ship did not take the message."
                                 }
+                                // Last, so that the button cannot be pressed
+                                // again while the draft is still being dropped.
+                                sending = false
                             }
                         }
                     }
@@ -341,6 +352,14 @@ fun MailComposer(
                 modifier = Modifier.fillMaxWidth().focusRequester(bodyFocus),
             )
 
+            // What is being answered, under the message the way a reply
+            // is read: shown, because writing a reply to something you
+            // cannot see is guesswork, and foldable, because a long
+            // thread would otherwise push the composer off the screen.
+            if (intent.threadId != null) {
+                Answering(repo, intent.threadId, intent.prev, nameFor)
+            }
+
             if (files.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     files.forEach { f ->
@@ -350,7 +369,7 @@ fun MailComposer(
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.weight(1f),
                             )
-                            TextButton(onClick = { files.remove(f) }) { Text("Remove") }
+                            TextButton(enabled = !sending, onClick = { files.remove(f) }) { Text("Remove") }
                         }
                     }
                 }
@@ -360,7 +379,7 @@ fun MailComposer(
                 onClick = {
                     scope.launch {
                         val picked = runCatching { pickFile() }
-                            .getOrElse { problem = it.message; null } ?: return@launch
+                            .getOrElse { problem = it.message ?: "The file could not be read."; null } ?: return@launch
                         // Refused where it is chosen rather than after the
                         // bytes have gone up and come back rejected.
                         if (picked.bytes.size > AuspexApi.MAX_BLOB_BYTES) {
@@ -486,4 +505,56 @@ internal fun storedName(displayName: String, mime: String): String {
         else -> return name
     }
     return "$name.$ext"
+}
+
+
+/**
+ * The conversation a reply answers, under the message being written.
+ * Open to start with: the point of it is to be read while writing. The
+ * thread is whatever this install already holds, then whatever the ship
+ * says, so it is there at once and right a moment later.
+ */
+@Composable
+private fun Answering(
+    repo: MailRepo,
+    threadId: String,
+    answering: String?,
+    nameFor: (String) -> String,
+) {
+    var thread by remember(threadId) { mutableStateOf(repo.cachedThread(threadId)) }
+    var open by remember(threadId) { mutableStateOf(true) }
+    LaunchedEffect(threadId) {
+        if (thread == null) thread = repo.storedThread(threadId)
+        repo.loadThread(threadId)?.let { thread = it }
+    }
+    val messages = thread?.messages.orEmpty()
+    if (messages.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        HorizontalDivider()
+        TextButton(onClick = { open = !open }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)) {
+            Text(
+                (if (open) "Hide" else "Show") + " the conversation (" + messages.size + ")",
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+        if (open) {
+            messages.sortedBy { it.sent }.forEach { m ->
+                Column(Modifier.fillMaxWidth().padding(start = 8.dp)) {
+                    Text(
+                        nameFor(m.from) + " · " + io.nisfeb.talon.ui.shortRelativeTime(m.sent, io.nisfeb.talon.util.nowMs()) +
+                            (if (m.id == answering) " · the one you are answering" else ""),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (m.id == answering) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    SelectionContainer {
+                        Text(
+                            m.body.trim(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

@@ -137,19 +137,26 @@ class MailComposerTest {
     @Test
     fun `closing with something written keeps it as a draft`() = runComposeUiTest {
         var closed = false
+        // Closing takes the composer off the screen, as both shells do
+        // by clearing what is being composed. The save is the dispose's,
+        // so that the button itself need not wait for the ship.
+        val showing = androidx.compose.runtime.mutableStateOf(true)
         setContent {
             TalonTheme(darkTheme = false) {
-                MailComposer(
-                    repo = repo(),
-                    intent = MailIntent(),
-                    onSent = {},
-                    onCancel = { closed = true },
-                )
+                if (showing.value) {
+                    MailComposer(
+                        repo = repo(),
+                        intent = MailIntent(),
+                        onSent = {},
+                        onCancel = { closed = true; showing.value = false },
+                    )
+                }
             }
         }
         onNodeWithText("Message").performTextInput("half a thought")
         onNodeWithContentDescription("Close").performClick()
         waitUntil(timeoutMillis = 5_000) { closed }
+        waitUntil(timeoutMillis = 5_000) { seen.any { it.url.encodedPath.endsWith("/api/draft") } }
         val saved = seen.last { it.url.encodedPath.endsWith("/api/draft") }
         val body = Json.parseToJsonElement((saved.body as TextContent).text).jsonObject
         assertEquals("half a thought", body["body"]!!.jsonPrimitive.content)

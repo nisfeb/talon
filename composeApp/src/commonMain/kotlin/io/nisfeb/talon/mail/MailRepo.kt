@@ -712,7 +712,17 @@ class MailRepo(
      * repo's scope outlives every screen, so the save still lands.
      */
     fun keepDraft(d: Draft) {
-        scope.launch { runCatching { saveDraft(d) } }
+        scope.launch {
+            // A save that does not land is said so: silence here is a
+            // message the owner believes is kept and is not.
+            val ok = runCatching { saveDraft(d) }.getOrDefault(false)
+            if (!ok) _error.value = "The draft did not reach the ship; what was written is still here until Talon closes."
+        }
+    }
+
+    /** Drop a draft from a screen on its way out, like [keepDraft]. */
+    fun dropDraft(id: String) {
+        scope.launch { runCatching { deleteDraft(id) } }
     }
 
     suspend fun deleteDraft(id: String) = mutate(::refreshDrafts) { it.deleteDraft(id) }
