@@ -265,7 +265,7 @@ class OrreryBriefTest {
             "task": {"notes": "optional: what to do, in a sentence"},
             "calendar": {"title": "required", "starts": "required: ISO 8601 UTC", "ends": "optional: ISO 8601 UTC", "location": "optional"},
             "home": {"entity_id": "required: the entity"},
-            "message": {"via": "required: one of telegram, mail, chat; the channel the conversation is on", "to": "required: the body id of the person, e.g. person/andrea", "text": "required: the message, short, in the owner's own voice"}}}""",
+            "message": {"via": "required: one of telegram, mail, chat; the channel the conversation is on", "to": "required: the body id of the person, e.g. person/andrea", "text": "required: the message, short, in the owner's own voice; no em dashes, no semicolons or colons joining independent clauses, simple direct sentences of varied length"}}}""",
     ).jsonObject
 
     @Test
