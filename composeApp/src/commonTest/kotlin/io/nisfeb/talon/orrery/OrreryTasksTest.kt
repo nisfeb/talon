@@ -213,6 +213,22 @@ class OrreryTasksTest {
     }
 
     @Test
+    fun `a second copy of the owner's own entry is left alone`() {
+        // Orrery's twin, from two installs passing at once, goes.
+        assertEquals(
+            listOf("t2"),
+            taskMoves(listOf(action("a1", "approved")), listOf(todo("t1", "a1"), todo("t2", "a1")))
+                .filterIsInstance<TaskMove.Drop>().map { it.todoId },
+        )
+        // A copy of what the owner wrote stays: a calendar that syncs
+        // from elsewhere makes them, and which one to keep is theirs.
+        assertTrue(
+            taskMoves(listOf(typed("a1", "approved")), listOf(todo("t1", "a1"), todo("t2", "a1")))
+                .filterIsInstance<TaskMove.Drop>().isEmpty(),
+        )
+    }
+
+    @Test
     fun `a listing that cannot be believed withdraws nothing`() {
         val gone = listOf(typed("a1", "approved"))
         // Believed: the owner did take it off the calendar.

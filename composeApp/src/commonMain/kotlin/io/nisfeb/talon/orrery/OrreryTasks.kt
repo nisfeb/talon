@@ -118,7 +118,15 @@ fun taskMoves(
         .mapValues { (_, ts) -> ts.sortedByDescending { it.done } }
     val byAction = linked.mapValues { it.value.first() }
     val out = mutableListOf<TaskMove>()
-    linked.values.forEach { ts -> ts.drop(1).forEach { out += TaskMove.Drop(it.id) } }
+    // Orrery's own twins go. The owner's do not: a calendar syncing
+    // from elsewhere makes copies, and a second copy of something they
+    // wrote is theirs to keep or remove. Nothing here deletes a
+    // calendar entry the owner wrote, by any route.
+    val ownWriting = tasks.filter { it.typedInCalendar() }.map { it.id }.toSet()
+    linked.forEach { (forAction, ts) ->
+        if (forAction in ownWriting) return@forEach
+        ts.drop(1).forEach { out += TaskMove.Drop(it.id) }
+    }
     // A todo the owner typed is a task the owner approved. One whose name
     // and due match an open task nobody's todo carries is that task, filed
     // by a pass that died before it could link: link it, do not file a
