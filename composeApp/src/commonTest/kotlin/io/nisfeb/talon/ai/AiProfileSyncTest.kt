@@ -2,6 +2,7 @@ package io.nisfeb.talon.ai
 
 import io.nisfeb.talon.orrery.DecideSettings
 import io.nisfeb.talon.orrery.under
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -168,6 +169,65 @@ class AiProfileSyncTest {
         assertTrue(jevOn.featureOn(AiFeature.OrreryBrief, before = false), "the brief migrates on, as it always sent")
         val briefOff = migrateProfile(base).let { it.copy(features = it.features + (AiFeature.OrreryBrief to FeatureSetting(false))) }
         assertFalse(base.copy(savedProfile = briefOff).featureOn(AiFeature.OrreryBrief, before = true))
+    }
+
+    // ── Armillary ──────────────────────────────────────────────────
+    //
+    // The row is per ship and per device: each device asks its own ship
+    // for its own key. It must never travel, and an older build that
+    // cannot decode the kind must never meet it, because decoding a
+    // profile with an unknown enum value drops the whole profile.
+
+    private fun armillary() = AiProvider(
+        ARMILLARY_PROVIDER, ProviderKind.Armillary, "Armillary",
+        baseUrl = "https://wex.example/apps/armillary/v1", apiKey = "k1.secret",
+        models = listOf(ModelInfo("stub/alpha", "stub/alpha", zdr = true), ModelInfo("stub/beta")),
+    )
+
+    @Serializable
+    private enum class OldKind { OpenRouter, Anthropic, OpenAi, OpenAiCompatible, ThisDevice }
+
+    @Serializable
+    private data class OldProvider(val id: String, val kind: OldKind, val label: String)
+
+    @Serializable
+    private data class OldProfile(val providers: List<OldProvider> = emptyList())
+
+    @Test
+    fun `an armillary row never travels, so an older build can still read the blob`() {
+        val mine = migrateProfile(base).let { it.copy(providers = it.providers + armillary()) }
+        val sync = mine.forSync()
+        assertTrue(sync.providers.none { it.kind == ProviderKind.Armillary }, "nothing armillary goes up")
+        // The proof that matters: a build whose ProviderKind predates
+        // the value decodes the blob rather than dropping the profile.
+        val blob = Json.encodeToString(AiProfile.serializer(), sync)
+        val old = Json { ignoreUnknownKeys = true }.decodeFromString(OldProfile.serializer(), blob)
+        assertEquals(sync.providers.map { it.id }, old.providers.map { it.id })
+        // And this device's own row survives a profile arriving without one.
+        val kept = sync.copy(jev = true).keepingLocal(mine)
+        assertEquals("k1.secret", kept.provider(ARMILLARY_PROVIDER)!!.apiKey)
+        assertEquals(mine.provider(ARMILLARY_PROVIDER)!!.models, kept.provider(ARMILLARY_PROVIDER)!!.models)
+    }
+
+    @Test
+    fun `an armillary ref with no model resolves to the first the ship listed`() {
+        val p = AiProfile(
+            providers = listOf(armillary()),
+            defaultModel = ModelRef(ARMILLARY_PROVIDER, ""),
+            features = mapOf(AiFeature.CatchUp to FeatureSetting(true)),
+        )
+        val r = p.resolve(AiFeature.CatchUp)!!
+        assertEquals("stub/alpha", r.model, "never blank: the OpenAI-shaped client refuses a call with no model")
+        // Which is what the clients are handed, along with the ask to report the cost.
+        val cfg = base.copy(savedProfile = p).forFeature(AiFeature.CatchUp)
+        assertEquals(AiSettings.Provider.Custom, cfg.provider)
+        assertEquals("stub/alpha", cfg.model)
+        assertEquals("https://wex.example/apps/armillary/v1", cfg.baseUrl)
+        assertEquals("k1.secret", cfg.apiKey)
+        assertTrue(cfg.usageInclude)
+        assertTrue(base.forFeature(AiFeature.CatchUp).usageInclude, "OpenRouter, as it always did")
+        val anthropic = base.copy(provider = AiSettings.Provider.Anthropic, apiKey = "sk-ant")
+        assertFalse(anthropic.forFeature(AiFeature.CatchUp).usageInclude, "nobody else is asked to report a cost")
     }
 
     @Test

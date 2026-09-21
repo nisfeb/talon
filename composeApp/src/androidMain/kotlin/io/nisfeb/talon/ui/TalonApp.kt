@@ -445,6 +445,18 @@ fun TalonApp(
         if (mailShipUrl != null && loggedInShip != null) orreryRepo.attach(mailShipUrl, loggedInShip)
         else orreryRepo.detach()
     }
+    // Armillary rides the same surface again: the owner's cookie, and
+    // the AI settings, where the provider row it keeps lives.
+    val armillaryRepo = remember(app.session) {
+        io.nisfeb.talon.armillary.ArmillaryRepo(app.session.http, appScope, app.aiSettings)
+    }
+    DisposableEffect(armillaryRepo) {
+        onDispose { runCatching { armillaryRepo.detach() } }
+    }
+    LaunchedEffect(armillaryRepo, mailShipUrl, loggedInShip) {
+        if (mailShipUrl != null && loggedInShip != null) armillaryRepo.attach(mailShipUrl, loggedInShip)
+        else armillaryRepo.detach()
+    }
     val orreryActions by orreryRepo.actions.collectAsState()
     LaunchedEffect(app.aiSettings) {
         io.nisfeb.talon.orrery.movePrivateModelIn(app.aiSettings, app.uiSettings)
@@ -644,6 +656,14 @@ fun TalonApp(
     val aiState by app.aiSettings.state.collectAsState()
     var homeOpen by remember { sections.flag() }
     var settingsOpen by remember { sections.flag() }
+    var settingsStartOnAi by remember { mutableStateOf(false) }
+    // The way back to the card from a request the empty balance failed:
+    // Settings on the AI tab, with the top-up sheet already open.
+    val openTopUp: () -> Unit = {
+        io.nisfeb.talon.ai.AiSettings.pendingTopUp.value = true
+        settingsStartOnAi = true
+        settingsOpen = true
+    }
     var assistantOpen by remember { sections.flag() }
     inviteShipFromCode?.let { ship ->
         io.nisfeb.talon.ui.InviteToGroupDialog(
@@ -2087,6 +2107,7 @@ fun TalonApp(
                 mail = mailRepo,
                 calendar = calendarRepo,
                 orrery = orreryRepo,
+                armillary = armillaryRepo,
                 latticeInstalled = app.sessionStore.active()?.shipUrl?.let { url ->
                     { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(app.ktorHttp, url) }
                 },
@@ -2120,6 +2141,7 @@ fun TalonApp(
                 calendar = calendarRepo,
                 calls = callController,
                 listenOnOpen = assistantListen,
+                onTopUp = openTopUp,
                 scheduler = app.loops,
                 onRunLoop = { app.loops.runOneNow(it) },
                 onBack = { assistantOpen = false; assistantListen = false },
@@ -2172,6 +2194,7 @@ fun TalonApp(
                 }
                 SettingsScreen(
                     orrery = orreryRepo,
+                    armillary = armillaryRepo,
                     aiSettings = app.aiSettings,
                     themePreference = app.themePreference,
                     uiSettings = app.uiSettings,
@@ -2196,7 +2219,8 @@ fun TalonApp(
                         activePatp = ourPatp,
                         activeShipUrl = activeShipUrl,
                     ),
-                    onBack = { settingsOpen = false },
+                    onBack = { settingsOpen = false; settingsStartOnAi = false },
+                    startOnAi = settingsStartOnAi,
                     onOpenSidebarSettings = { sidebarSettingsOpen = true },
                     onOpenApps = { appsOpen = true },
                     onOpenShareLoginQr = { shareLoginQrOpen = true },
@@ -2569,6 +2593,7 @@ fun TalonApp(
                     },
                     onOpenImage = { viewerImageUrl = it },
                     onOpenSelfProfile = { editingProfile = true },
+                    onTopUp = openTopUp,
                     onStartCall =
                         if (callController != null && openWhom!!.startsWith("~")) {
                             { callController.placeCall(openWhom!!) }

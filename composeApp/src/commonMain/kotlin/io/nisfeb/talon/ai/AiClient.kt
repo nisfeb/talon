@@ -148,8 +148,12 @@ class AiClient(
         val payload = buildJsonObject {
             put("model", cfg.model ?: defaultModel)
             put("max_tokens", maxTokens)
-            // OpenRouter says what a call cost only when asked.
-            if (cfg.provider == AiSettings.Provider.OpenRouter) put("usage", buildJsonObject { put("include", true) })
+            // OpenRouter says what a call cost only when asked, and so
+            // does an Armillary base, which is OpenRouter under a lease
+            // and the vendor's own proxy otherwise.
+            if (cfg.provider == AiSettings.Provider.OpenRouter || cfg.usageInclude) {
+                put("usage", buildJsonObject { put("include", true) })
+            }
             putJsonArray("messages") {
                 systemPrompt?.let {
                     add(buildJsonObject {
@@ -203,6 +207,7 @@ class AiClient(
                     ?: obj["message"]?.jsonPrimitive?.content
             }.getOrNull()
             val msg = pretty ?: body.take(200)
+            if (resp.status.value == 402) error(outOfCredit(host, msg))
             error("$host ${resp.status.value}: $msg")
         }
         val obj = runCatching { json.parseToJsonElement(body).jsonObject }
@@ -262,3 +267,16 @@ internal fun claudePrice(model: String): Pair<Double, Double>? {
         else -> null
     }
 }
+
+/**
+ * A 402 is the one failure the person can fix themselves: the Armillary
+ * balance ran out. Say so, and where to go, instead of the raw line.
+ */
+internal fun outOfCredit(host: String, msg: String): String =
+    "$OUT_OF_CREDIT ($host 402: $msg)"
+
+/** The words every empty-balance failure starts with, which the error surfaces look for. */
+const val OUT_OF_CREDIT = "Your Armillary balance is empty. Top up under Settings, AI."
+
+/** Whether a failure's message is the empty balance, so a Top up action belongs beside it. */
+fun isOutOfCredit(message: String?): Boolean = message?.contains(OUT_OF_CREDIT) == true

@@ -1,6 +1,6 @@
 # Talon — Privacy Policy
 
-_Last updated: 2026-04-30_
+_Last updated: 2026-09-19_
 
 Talon is a native Android client for the Urbit network. It connects to
 a user-supplied Urbit ship over the network and renders chat / DM
@@ -16,11 +16,8 @@ describes what Talon does (and doesn't) do with user data.
 - **The developer of Talon** does not operate any backend, does not
   collect telemetry, and does not have access to user data of any
   kind.
-- Optional AI features (catch-me-up summary, emoji suggestions) hit a
-  cloud provider (OpenAI / Anthropic / a custom OpenAI-compatible
-  endpoint) **only when the user has configured an API key**. The
-  request body — message text the user is summarizing — is sent to
-  that provider; nothing is sent to the developer of Talon.
+- Optional AI features (catch-me-up summary, emoji suggestions) hit a cloud provider (OpenAI, Anthropic, or a custom OpenAI-compatible endpoint) **only when the user has configured an API key**. The request body, which is the message text the user is summarizing, is sent to that provider. Nothing is sent to the developer of Talon.
+- The optional **Armillary** provider is a second way to reach a model, and it is off until the user adds it. Instead of a key of their own, the user buys model inference through their own Urbit ship, from a vendor ship they choose. The ship holds the account and the balance. The user pays that vendor by card through Stripe or by bitcoin through BTCPay Server, both operated by the vendor. In lease mode the vendor mints a capped key at the model provider and Talon calls that provider directly. In proxy mode the requests pass through the vendor's ship. The vendor sees the ship's name, the balance and the ledger, and in proxy mode the requests as well. Nothing else about the user leaves the device, and nothing reaches the developer of Talon.
 
 ## What Talon stores on your device
 
@@ -31,10 +28,7 @@ describes what Talon does (and doesn't) do with user data.
   metadata, contacts. Cached in a local Room (SQLite) database so the
   app can render offline. Per-ship database file; cleared if the user
   removes the app or signs out.
-- **AI provider settings** (provider, model, API key, base URL).
-  API key is stored encrypted via `EncryptedSharedPreferences`. The
-  key is sent only to the configured provider, only when the user
-  invokes an AI feature.
+- **AI provider settings** (provider, model, API key, base URL). An API key is stored encrypted via `EncryptedSharedPreferences`. The key is sent only to the configured provider, only when the user invokes an AI feature. An Armillary provider stores no key the user typed: the key is minted by the vendor, fetched from the user's own ship, and held for that ship and that device alone. It never travels between devices.
 - **Watchwords** — terms the user wants highlighted in chat. Stored
   locally; never transmitted.
 - **Daily digest history** — the rolling list of past summaries the
@@ -68,10 +62,8 @@ describes what Talon does (and doesn't) do with user data.
 The only third-party servers Talon talks to are:
 
 - **The user's Urbit ship**, at the URL the user enters.
-- **The user's chosen AI provider** (only if AI is configured and a
-  feature is invoked). See the provider's own privacy policy for what
-  they do with submitted prompts: <https://openai.com/policies/privacy-policy>,
-  <https://www.anthropic.com/privacy>.
+- **The user's chosen AI provider** (only if AI is configured and a feature is invoked). See the provider's own privacy policy for what they do with submitted prompts: <https://openai.com/policies/privacy-policy>, <https://www.anthropic.com/privacy>.
+- **The vendor ship the user named in Armillary**, and the payment page that vendor sends the browser to (Stripe, or a BTCPay Server the vendor runs). Only if the user added the Armillary provider. Removing the provider ends it.
 
 ## Children
 

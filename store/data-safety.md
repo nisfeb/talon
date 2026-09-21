@@ -8,11 +8,7 @@ does. Walk through the form with this open as a script.
 
 **No.**
 
-Rationale: Talon is a thin client. It talks only to (a) the user's own
-Urbit ship at a URL the user provides, and (b) the user's chosen AI
-provider (if and only if the user configured an API key and invoked an
-AI feature). The Talon developer operates no backend and receives no
-data.
+Rationale: Talon is a thin client. It talks only to (a) the user's own Urbit ship at a URL the user provides, (b) the user's chosen AI provider, if and only if the user configured an API key and invoked an AI feature, and (c) a vendor Urbit ship and that vendor's payment processors, if and only if the user added the optional Armillary provider. The Talon developer operates no backend and receives no data.
 
 If Play prompts a follow-up because of permissions:
 
@@ -65,6 +61,13 @@ If Play prompts a follow-up because of permissions:
   AND invoked the feature, the message text being summarized is sent
   to that provider.
 
+### Does your app share data with a third party?
+
+**Only the two the user picks, and only when they pick them.**
+- The AI provider whose API key the user entered, which receives the message text a feature summarizes.
+- The vendor ship the user named in the optional Armillary provider, which is off until the user adds it. That vendor sees the user's ship name, balance and ledger, and in proxy mode the model requests themselves. Payment is by card through Stripe or by bitcoin through BTCPay Server, both operated by that vendor. In lease mode the vendor mints a capped key at the model provider and Talon calls that provider directly, so the vendor never sees the requests.
+- Neither is the Talon developer, who receives nothing in either case. Removing the provider ends the sharing.
+
 ### Does your app collect device or other identifiers?
 
 **No.** No advertising ID, no Android ID query, no IMEI, no
@@ -76,8 +79,7 @@ fingerprinting.
 
 ## Security practices
 
-- All data is encrypted in transit (HTTPS to the user's ship; HTTPS to
-  AI providers if configured).
+- All data is encrypted in transit (HTTPS to the user's ship, to AI providers if configured, and to a vendor ship and its payment pages if the Armillary provider is added).
 - Users can request data deletion: yes — by uninstalling the app
   (clears the local DB) and/or removing themselves from groups on
   their ship.

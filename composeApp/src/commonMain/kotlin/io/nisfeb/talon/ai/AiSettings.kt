@@ -13,6 +13,13 @@ import kotlinx.serialization.Serializable
  * reference Config and Provider without pulling in Android APIs.
  */
 object AiSettings {
+    /**
+     * Set by an error surface whose failure was the empty Armillary
+     * balance, when its Top up action opens Settings, AI. The Armillary
+     * card reads it once, opens the top-up sheet, and clears it.
+     */
+    val pendingTopUp = kotlinx.coroutines.flow.MutableStateFlow(false)
+
 
     enum class Provider(val label: String) {
         Anthropic("Anthropic (Claude)"),
@@ -127,6 +134,13 @@ object AiSettings {
          * derived from it (legacyInto), for older installs.
          */
         val savedProfile: AiProfile? = null,
+        /**
+         * Whether the chat clients should ask this call to report its
+         * cost. Derived by [forFeature] from the resolved provider, not
+         * a setting: it is never stored and never synced.
+         */
+        @kotlinx.serialization.Transient
+        val usageInclude: Boolean = false,
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
 

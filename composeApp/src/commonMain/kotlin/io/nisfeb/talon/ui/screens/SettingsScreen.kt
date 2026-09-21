@@ -84,6 +84,8 @@ fun SettingsScreen(
     uiSettings: UiSettings,
     /** The orrery pipe, for its section under AI; null where no ship is known. */
     orrery: io.nisfeb.talon.orrery.OrreryRepo? = null,
+    /** Armillary on the ship, for its provider card under AI; null where no ship is known. */
+    armillary: io.nisfeb.talon.armillary.ArmillaryRepo? = null,
     /** Whether the user is logged into 2+ ships. Drives the
      *  accent-color section's auto-default — multi-ship users land
      *  with the toggle on so they don't lose the per-ship pip / send
@@ -139,6 +141,8 @@ fun SettingsScreen(
     localShip: io.nisfeb.talon.comet.LocalShip = io.nisfeb.talon.comet.LocalShip.Noop,
     /** Open on the Account tab, where the local ship and its dojo live. */
     startOnAccount: Boolean = false,
+    /** Open on the AI tab: the way in from a failure the balance caused. */
+    startOnAi: Boolean = false,
     onAlwaysPatpChanged: (Boolean) -> Unit = {},
     /** Fired after the word-names toggle flips; hosts push the new
      *  value to %settings so the choice follows the user. Local apply
@@ -208,7 +212,13 @@ fun SettingsScreen(
             add(SettingsTab.About)
         }
         var tab by remember {
-            mutableStateOf(if (startOnAccount) SettingsTab.Account else SettingsTab.Appearance)
+            mutableStateOf(
+                when {
+                    startOnAccount -> SettingsTab.Account
+                    startOnAi -> SettingsTab.Ai
+                    else -> SettingsTab.Appearance
+                },
+            )
         }
         val safeTab = if (tab in visibleTabs) tab else visibleTabs.first()
 
@@ -726,7 +736,7 @@ fun SettingsScreen(
             }
             if (safeTab == SettingsTab.Ai) {
             // Providers, the default model, a row per feature, and Jev.
-            AiSettingsSection(aiSettings, orrery)
+            AiSettingsSection(aiSettings, orrery, armillary)
             // The assistant subsumes MCP (ship tools) and web access —
             // no separate toggles. When it's on, offer the optional
             // Brave key that powers its web search (it can open URLs
