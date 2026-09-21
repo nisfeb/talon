@@ -608,7 +608,22 @@ class OrreryRepo(
         // was read on every pass for a set of actions that was empty.
         if (actions.isEmpty()) return@withLock settled
         val events = (if (listed != null) listed() else cal.events()) ?: return@withLock settled
-        val moves = taskMoves(actions, events.filter { it.cat == "todo" }) + calendarMoves(actions, events)
+        val todos = events.filter { it.cat == "todo" }
+        // A listing with no todos at all, where this install has seen
+        // them, is a calendar that is not answering yet rather than one
+        // somebody emptied. Nothing is withdrawn on the strength of it.
+        val s = ship
+        val sent = db.orrerySent()
+        val seenTodos = s != null && sent.get(s, SAW_TODOS) != null
+        if (s != null && todos.isNotEmpty()) {
+            sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, SAW_TODOS, "", now()))
+        }
+        val raw = taskMoves(actions, todos, listingComplete = todos.isNotEmpty() || !seenTodos) +
+            calendarMoves(actions, events)
+        // And one listing without it is not enough either: a todo moved
+        // from one day to another can be missing from the one pass that
+        // catches the move. A withdrawal waits for the absence to last.
+        val moves = if (s == null) raw else holdWithdrawals(s, actions, raw)
         if (token != null) runCatching { sendApproved(a, token, url, actions, settled) }.onFailure { Log.i(TAG, "messages skipped: ${it.message}") }
         if (moves.isEmpty()) return@withLock settled
         val ball = cal.config().ball.takeIf { it.isNotBlank() } ?: return@withLock settled
@@ -646,6 +661,43 @@ class OrreryRepo(
             }
         }.onFailure { Log.i(TAG, "task move ${m::class.simpleName} skipped: ${it.message}") }
         settled
+    }
+
+    /**
+     * Withdrawals held until the todo has been gone a while.
+     *
+     * The first pass that cannot find a todo records the moment and
+     * does nothing. Only an absence that outlives [MISSING_MS] is the
+     * owner having deleted it; anything shorter is a calendar syncing,
+     * and dismissing the action for that deleted the entry on the pass
+     * after, since a dismissed action used to take its todo with it.
+     * Seeing the todo again forgets the whole thing.
+     */
+    private suspend fun holdWithdrawals(
+        s: String,
+        actions: List<OrreryAction>,
+        moves: List<TaskMove>,
+    ): List<TaskMove> {
+        val sent = db.orrerySent()
+        val gone = moves.filterIsInstance<TaskMove.Withdraw>().map { it.actionId }.toSet()
+        // Anything whose todo is there again was never missing.
+        actions.filter { it.kind == "task" && it.id !in gone }
+            .forEach { sent.forget(s, "$MISSING${it.id}") }
+        if (gone.isEmpty()) return moves
+        val nowMs = now()
+        val since = sent.some(s, gone.map { "$MISSING$it" }).associate { it.key to it.value }
+        val ready = mutableSetOf<String>()
+        for (id in gone) {
+            val first = since["$MISSING$id"]?.toLongOrNull()
+            if (first == null) {
+                sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, "$MISSING$id", nowMs.toString(), nowMs))
+                Log.i(TAG, "task $id has no todo; waiting to see whether it comes back")
+            } else if (nowMs - first >= MISSING_MS) {
+                ready += id
+                sent.forget(s, "$MISSING$id")
+            }
+        }
+        return moves.filter { it !is TaskMove.Withdraw || it.actionId in ready }
     }
 
     /**
@@ -1704,6 +1756,15 @@ class OrreryRepo(
         const val MAIL_PER_PASS = 200
 
         /** How many threads a page of the cursor's listing asks for. */
+        /** An action whose todo was missing, and since when. */
+        private const val MISSING = "missing:"
+
+        /** That this install has ever seen a todo, so an empty listing can be judged. */
+        private const val SAW_TODOS = "saw:todos"
+
+        /** How long a todo must stay missing before it counts as deleted: three passes. */
+        internal const val MISSING_MS = 30 * 60 * 1000L
+
         /** What the last brief suggested, by its day, in the table the reply cursor uses. */
         private const val SAID = "brief-said:"
 

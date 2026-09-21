@@ -187,4 +187,59 @@ class OrreryTasksTest {
         assertEquals(listOf("approved", "proposed"), settledActions(open, "a1", "approved").map { it.status }, "approved stays, to be done")
         assertEquals(listOf("a2"), settledActions(open, "a1", "dismissed").map { it.id }, "anything else has left the open list")
     }
+
+    /** A task the owner typed, adopted and linked: why says so. */
+    private fun typed(id: String, status: String) = OrreryAction(
+        id, "task", "Build a fan with Magnus",
+        buildJsonObject { put("why", JsonPrimitive(TYPED_IN_CALENDAR)) },
+        emptyList(), null, status, "talon",
+    )
+
+    @Test
+    fun `refusing a task the owner typed never deletes their entry`() {
+        // Orrery's own todo goes with the action that made it.
+        assertEquals(
+            listOf("t1"),
+            taskMoves(listOf(action("a1", "dismissed")), listOf(todo("t1", "a1")))
+                .filterIsInstance<TaskMove.Drop>().map { it.todoId },
+        )
+        // The owner's does not. Saying no to tracking a thing they
+        // wrote in their own calendar is not saying delete it, and
+        // that deletion took two tasks off a shared calendar for good.
+        assertTrue(
+            taskMoves(listOf(typed("a2", "dismissed")), listOf(todo("t2", "a2")))
+                .filterIsInstance<TaskMove.Drop>().isEmpty(),
+        )
+    }
+
+    @Test
+    fun `a listing that cannot be believed withdraws nothing`() {
+        val gone = listOf(typed("a1", "approved"))
+        // Believed: the owner did take it off the calendar.
+        assertEquals(
+            listOf("a1"),
+            taskMoves(gone, listOf(todo("t9", null)))
+                .filterIsInstance<TaskMove.Withdraw>().map { it.actionId },
+        )
+        // Not believed: a calendar that syncs from elsewhere is empty
+        // while it re-syncs, and a task moved from one day to another
+        // is missing from the pass that catches the move.
+        assertTrue(
+            taskMoves(gone, emptyList(), listingComplete = false)
+                .filterIsInstance<TaskMove.Withdraw>().isEmpty(),
+        )
+        // And orrery's own is not filed again either: a twin made
+        // against an empty listing is a twin the dedupe then deletes,
+        // and which of the two it keeps is not worth finding out.
+        assertTrue(
+            taskMoves(listOf(action("a3", "approved")), emptyList(), listingComplete = false)
+                .filterIsInstance<TaskMove.Make>().isEmpty(),
+        )
+        assertEquals(
+            listOf("a3"),
+            taskMoves(listOf(action("a3", "approved")), emptyList())
+                .filterIsInstance<TaskMove.Make>().map { it.action.id },
+            "a calendar that answers with nothing, on an install that has never seen a todo, is empty",
+        )
+    }
 }

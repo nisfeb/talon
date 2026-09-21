@@ -98,7 +98,18 @@ private fun sameDue(due: String?, dueMs: Long?): Boolean {
  * todo unticked after the action was done says nothing, and once the
  * two sides agree there is nothing to do at all.
  */
-fun taskMoves(actions: List<OrreryAction>, todos: List<CalendarTask>): List<TaskMove> {
+fun taskMoves(
+    actions: List<OrreryAction>,
+    todos: List<CalendarTask>,
+    /**
+     * Whether the listing can be believed about what is NOT in it. A
+     * calendar that syncs from elsewhere is empty or partial while it
+     * re-syncs, and reading that as "the owner deleted it" is how a
+     * task moved from one day to another ended up deleted. False makes
+     * this pass decide nothing from an absence, in either direction.
+     */
+    listingComplete: Boolean = true,
+): List<TaskMove> {
     val tasks = actions.filter { it.kind == "task" }
     // Two installs passing at once can each make the todo. The first
     // ticked one, else the first, is the todo; the rest go.
@@ -128,11 +139,24 @@ fun taskMoves(actions: List<OrreryAction>, todos: List<CalendarTask>): List<Task
         val todo = byAction[a.id]
         when {
             a.id in adopted -> Unit
-            // The owner wrote it and has since taken it off the calendar.
+            // The owner wrote it and has since taken it off the
+            // calendar. Only where the listing is one to go by: an
+            // absence in a calendar that is mid-sync says nothing.
+            // Nothing is decided about a todo that is not in the
+            // listing when the listing is not one to go by: neither
+            // that the owner deleted theirs, nor that ours needs making
+            // again, which would file a twin for the dedupe to delete.
+            a.status in LIVE && todo == null && !listingComplete -> Unit
             a.status in LIVE && todo == null && a.typedInCalendar() -> out += TaskMove.Withdraw(a.id)
             a.status in LIVE && todo == null -> out += TaskMove.Make(a)
             a.status == "done" && todo != null && !todo.done -> out += TaskMove.Tick(todo.id)
-            a.status in REFUSED && todo != null -> out += TaskMove.Drop(todo.id)
+            // A todo orrery made for an action the owner refused goes
+            // with it. One the owner typed does not: it is their entry,
+            // in their calendar, and saying no to tracking it is not
+            // saying delete it. That deletion, reached through a
+            // withdrawal the sync window caused, is what took two tasks
+            // off a shared calendar for good.
+            a.status in REFUSED && todo != null && !a.typedInCalendar() -> out += TaskMove.Drop(todo.id)
             // The owner ticked it where they saw it. A claim is for the
             // executor that does the work; a tick is the owner saying it
             // is done, so it needs no claim of its own.
