@@ -20,6 +20,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -255,19 +256,51 @@ class OrreryApi(
             request(owner, HttpMethod.Get, "/api/actions?status=$status")
         }
         val arr = reading { Json.parseToJsonElement(text) }.let { it as? kotlinx.serialization.json.JsonArray ?: it.jsonObject["actions"]?.jsonArray }.orEmpty()
-        return arr.mapNotNull { e ->
-            val a = e.jsonObject
-            OrreryAction(
-                id = a["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
-                kind = a["kind"]?.jsonPrimitive?.content ?: return@mapNotNull null,
-                title = a["title"]?.jsonPrimitive?.content ?: "",
-                payload = a["payload"] as? JsonObject ?: JsonObject(emptyMap()),
-                about = a["about"]?.jsonArray.orEmpty().mapNotNull { it.jsonPrimitive.content },
-                due = a["due"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it != "null" },
-                status = a["status"]?.jsonPrimitive?.content ?: "proposed",
-                by = a["by"]?.jsonPrimitive?.content ?: "",
-            )
+        return arr.mapNotNull { e -> actionOf(e.jsonObject) }
+    }
+
+    /** One action as the ship gives it, or null where it gives no id or kind. */
+    private fun actionOf(a: JsonObject): OrreryAction? = OrreryAction(
+        id = a["id"]?.jsonPrimitive?.contentOrNull ?: return null,
+        kind = a["kind"]?.jsonPrimitive?.contentOrNull ?: return null,
+        title = a["title"]?.jsonPrimitive?.contentOrNull ?: "",
+        payload = a["payload"] as? JsonObject ?: JsonObject(emptyMap()),
+        about = a["about"]?.jsonArray.orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull },
+        due = a["due"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() && it != "null" },
+        status = a["status"]?.jsonPrimitive?.contentOrNull ?: "proposed",
+        by = a["by"]?.jsonPrimitive?.contentOrNull ?: "",
+    )
+
+    /**
+     * What the owner typed under a proposal, sent to the ship to refine
+     * it (rule 17, orrery 36). The ship reads it against the action,
+     * the schema's shapes and the bodies the words could mean, and
+     * answers with the action revised in place, whatever else the text
+     * asked for as its own proposals, and a note where it would not.
+     *
+     * The action stays proposed: the owner approves what the ship
+     * actually holds, with the same tap as before.
+     */
+    suspend fun refine(token: String?, id: String, text: String): Refined {
+        val body = buildJsonObject { put("text", clipBytes(text.trim(), 500)) }
+        val said = if (token != null) {
+            request(bare, HttpMethod.Post, "/api/actions/$id/refine", body.toString()) {
+                header(HttpHeaders.Authorization, "Bearer $token")
+            }
+        } else {
+            request(owner, HttpMethod.Post, "/api/actions/$id/refine", body.toString())
         }
+        val o = reading { Json.parseToJsonElement(said).jsonObject }
+        val note = o["note"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        if (o["ok"]?.jsonPrimitive?.contentOrNull == "false" || o["ok"]?.toString() == "false") {
+            return Refined(null, emptyList(), note.ifBlank { "The ship would not take that." })
+        }
+        return Refined(
+            action = (o["action"] as? JsonObject)?.let { actionOf(it) },
+            extras = (o["extras"] as? kotlinx.serialization.json.JsonArray).orEmpty()
+                .mapNotNull { (it as? JsonObject)?.let { e -> actionOf(e) } },
+            note = note,
+        )
     }
 
     /** Move an action: approved, done, dismissed or failed, with a note where one is due. */
@@ -305,6 +338,26 @@ class OrreryApi(
             }
         }
         return "the claim did not land in $CLAIM_READS reads"
+    }
+
+    /**
+     * Ask the ship for a pass now, rather than at the top of the next
+     * hour (rule 16). [about] is what the pass looks at first: the
+     * situations the facts were about, at most five, and an empty list
+     * where they were only about the owner. Nothing about urgency is
+     * stored; the pass is earlier, that is all. Counted against the
+     * owner's own cap, so the sixth in a day answers held, which is an
+     * answer and not a failure.
+     */
+    suspend fun generate(token: String, about: List<String>): String {
+        val body = buildJsonObject {
+            putJsonArray("about") { about.forEach { add(JsonPrimitive(it)) } }
+        }
+        val text = request(bare, HttpMethod.Post, "/api/generate", body.toString()) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+        return runCatching { Json.parseToJsonElement(text).jsonObject["status"]?.jsonPrimitive?.contentOrNull }
+            .getOrNull() ?: "asked"
     }
 
     /** One observe batch under the key. Per-item answers, in order. */
@@ -420,6 +473,17 @@ data class OrreryAction(
     val due: String?,
     val status: String,
     val by: String,
+)
+
+/**
+ * What a refinement answered: the action as the ship now holds it, the
+ * proposals the text asked for beyond it, and what it would not do.
+ * A null [action] with a note is a refusal, which changed nothing.
+ */
+data class Refined(
+    val action: OrreryAction?,
+    val extras: List<OrreryAction> = emptyList(),
+    val note: String = "",
 )
 
 data class StateView(

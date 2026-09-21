@@ -61,6 +61,12 @@ data class DecideSettings(
     /** Jev chooses the bodies the reader sees, from those it scores at or above [keep]. Off until the owner has run the check. */
     val relevance: Boolean = false,
     val keep: Double = 0.5,
+    /**
+     * What a message has to score on "needs help within the hour" for
+     * the reader to ask the ship for a pass now rather than at the top
+     * of the next hour (rule 16). 0.6 is orrery-utils' own.
+     */
+    val escalate: Double = 0.6,
 ) {
     companion object {
         const val DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
@@ -458,4 +464,90 @@ data class DecideDay(
     ) + if (picked == 0) emptyList() else listOf(
         "body picks $day: $picked messages, ${pickedBodies / picked} bodies each on average, ${dollars(pickUsd)}",
     )
+}
+
+/**
+ * Whether the newest message is one where somebody needs help within
+ * the hour, asked once the analyst's claims have survived validation.
+ *
+ * The generator on the ship runs after every change but under a
+ * cooldown, so a breakdown at five past ten would wait for eleven. The
+ * reader is the only thing with the words in front of it, so the reader
+ * decides and asks the ship for a pass now (client guide rule 16). The
+ * question and the state are orrery-utils' analyze.escalate, word for
+ * word.
+ */
+object Escalate {
+    val QUESTION: JsonObject = buildJsonObject {
+        putJsonObject("needs_help_now") {
+            put("type", "noul")
+            put(
+                "instructions",
+                "Does the new message describe a situation in which the owner, or someone close to them, needs help within the hour?",
+            )
+            putJsonObject("criteria") {
+                put(
+                    "true",
+                    "a breakdown, an accident, an injury or sudden illness, being stranded, locked out or without power, " +
+                        "a child who must be picked up now, a missed or cancelled flight today, an emergency at home or at work",
+                )
+                put("false", "a plan, news, a routine update, a feeling, a complaint, or anything that can wait until tomorrow")
+            }
+        }
+    }
+
+    const val RULE = "help within the hour means someone must act now; a plan or an update is not that"
+
+    /** The gate's state, and the facts the analyst just kept. */
+    fun state(
+        text: String,
+        from: String,
+        earlier: List<String>,
+        bodies: List<KnownBody>,
+        facts: List<Noticed>,
+    ): JsonObject = buildJsonObject {
+        put("message", text)
+        put("from", from)
+        putJsonArray("earlier") { earlier.forEach { add(it) } }
+        putJsonArray("known_bodies") { bodies.take(MAX_KNOWN).forEach { add(knownLine(it)) } }
+        putJsonArray("facts") {
+            facts.take(MAX_FACTS).forEach { f ->
+                add(
+                    buildJsonObject {
+                        put("subject", f.subject)
+                        put("attr", f.attr)
+                        put("value", (f.value as? JsonPrimitive)?.content ?: f.value.toString())
+                    },
+                )
+            }
+        }
+        put("rule", RULE)
+    }
+
+    /**
+     * How sure it is, or zero. A decider that cannot answer escalates
+     * nothing: an urgent pass costs the owner a model call on the ship,
+     * and a question that failed is not a reason to spend one.
+     */
+    suspend fun sure(
+        decider: Decider,
+        text: String,
+        from: String,
+        earlier: List<String>,
+        bodies: List<KnownBody>,
+        facts: List<Noticed>,
+    ): Double {
+        val d = runCatching { decider.ask(state(text, from, earlier, bodies, facts), QUESTION) }.getOrNull() ?: return 0.0
+        return ((d.answers["needs_help_now"] as? JsonObject)?.get("noul") as? JsonPrimitive)?.doubleOrNull ?: 0.0
+    }
+
+    /** The bodies the pass is asked to look at first: situations, else what else the facts named, at most five. */
+    fun about(facts: List<Noticed>): List<String> {
+        val subjects = facts.map { it.subject }.distinct()
+        val situations = subjects.filter { it.startsWith("situation/") }
+        val others = subjects.filter { !it.startsWith("situation/") && it != "person/me" && !it.startsWith("person/") }
+        return (situations.ifEmpty { others }).take(5)
+    }
+
+    private const val MAX_FACTS = 40
 }

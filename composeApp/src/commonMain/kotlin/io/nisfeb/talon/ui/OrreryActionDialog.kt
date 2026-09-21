@@ -8,6 +8,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,10 +27,9 @@ import kotlinx.datetime.toLocalDateTime
 
 /**
  * One of the analyst's proposals, and what to do with it: approve,
- * dismiss with the owner's reason, or mark done. What Talon carries out
- * it carries out once approved, wherever it was approved: an event is
- * put on the calendar and a message on chat or mail is sent by the
- * executor, which claims it first so no other install sends it too.
+ * dismiss with the owner's reason, say what it should have said, or
+ * mark it done. Carrying it out is the ship's, bar a chat message,
+ * which Talon's executor claims and sends.
  */
 @Composable
 fun OrreryActionDialog(
@@ -37,6 +40,15 @@ fun OrreryActionDialog(
     // Why not, in the owner's words, only if they give it: it teaches
     // the generator what they do not want.
     var reason by remember { mutableStateOf("") }
+    // What the owner would have it say instead, rule 17. The ship reads
+    // it against the action and answers with the action revised; the
+    // window redraws from that answer, never from what was typed.
+    var refinement by remember(action.id) { mutableStateOf("") }
+    var refining by remember(action.id) { mutableStateOf(false) }
+    var refined by remember(action.id) { mutableStateOf<String?>(null) }
+    var shown by remember(action.id) { mutableStateOf(action) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val action = shown
     val message = remember(action) { action.messageToSend() }
     val event = remember(action) { action.eventToAdd() }
     val ours = message?.via in io.nisfeb.talon.orrery.TALON_CHANNELS
@@ -93,6 +105,50 @@ fun OrreryActionDialog(
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
+                if (proposed) {
+                    Spacer(Modifier.height(8.dp))
+                    androidx.compose.material3.OutlinedTextField(
+                        value = refinement,
+                        onValueChange = { refinement = it },
+                        label = { Text("Say what it should be") },
+                        placeholder = { Text("include susan egan in this") },
+                        enabled = !refining,
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(
+                            enabled = !refining && refinement.isNotBlank(),
+                            onClick = {
+                                refining = true
+                                refined = null
+                                val said = refinement
+                                scope.launch {
+                                    orrery.refine(action.id, said).fold(
+                                        onSuccess = { answer ->
+                                            // The ship's word for it, not the owner's:
+                                            // it may have resolved a name loosely
+                                            // spelled, kept a time it could not move,
+                                            // or refused.
+                                            answer.action?.let { shown = it; refinement = "" }
+                                            refined = when {
+                                                answer.action == null -> answer.note.ifBlank { "The ship would not take that." }
+                                                answer.extras.isEmpty() -> answer.note.ifBlank { "Revised." }
+                                                else -> (answer.note.ifBlank { "Revised." }) +
+                                                    " And proposed beside it: " + answer.extras.joinToString { it.title }
+                                            }
+                                        },
+                                        onFailure = { refined = it.message ?: "The ship did not answer." },
+                                    )
+                                    refining = false
+                                }
+                            },
+                        ) { Text(if (refining) "Asking" else "Refine") }
+                        refined?.let {
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
                 if (proposed || action.status == "approved") {
                     Spacer(Modifier.height(8.dp))
                     androidx.compose.material3.OutlinedTextField(

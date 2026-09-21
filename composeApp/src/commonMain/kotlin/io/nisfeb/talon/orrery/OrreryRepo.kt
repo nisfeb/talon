@@ -936,6 +936,17 @@ class OrreryRepo(
                     Log.w(TAG, "refused: ${it.error}")
                 }
             }
+            // Rule 16: once the facts are on the ship, and only then,
+            // ask for a pass now. The generator otherwise waits out the
+            // owner's cooldown, so a breakdown at five past ten would
+            // sit until eleven. The ship stores nothing about urgency
+            // and counts this against the owner's own small daily cap,
+            // so a "held" is an answer rather than a failure.
+            triaged.urgentAbout?.let { about ->
+                runCatching { a.generate(row.token, about) }
+                    .onSuccess { Log.i(TAG, "urgent pass: $it (${about.joinToString().ifBlank { "the owner" }})") }
+                    .onFailure { Log.i(TAG, "urgent pass not asked for: ${it.message}") }
+            }
             // Only once the ship has taken them: a pass that failed
             // halfway must be free to say the same things again.
             if (record.isNotEmpty()) sent.putAll(record)
@@ -1094,6 +1105,14 @@ class OrreryRepo(
         var day: DecideDay = DecideDay(),
         /** What the pass has done, written only once the ship has taken it. */
         var remember: (String, String) -> Unit = { _, _ -> },
+        /** What a message has to score before the ship is asked for a pass now, or null. */
+        val escalate: Double? = null,
+        /**
+         * The bodies an urgent message was about, rule 16. One request a
+         * pass, however many messages say the same thing: the ship's
+         * settle folds them anyway and the owner's daily cap is small.
+         */
+        var urgentAbout: List<String>? = null,
     )
 
     /** The decision model, when the owner has turned it on and an OpenRouter key is set. */
@@ -1120,6 +1139,7 @@ class OrreryRepo(
         return Reading(
             view.bodies, NameIndex(view.bodies), view.attrs, view.notes, view.schema, model, gate,
             decider = dec?.first, threshold = dec?.second?.takeIf { it.gate }?.threshold,
+            escalate = dec?.second?.escalate,
             keep = dec?.second?.takeIf { it.relevance }?.keep,
         )
     }
@@ -1244,7 +1264,7 @@ class OrreryRepo(
             }
         }
         tally(s, r.day, nowMs)
-        return Triaged(up, postFloor, mailFloor)
+        return Triaged(up, postFloor, mailFloor, r.urgentAbout)
     }
 
     /**
@@ -1256,6 +1276,8 @@ class OrreryRepo(
         val facts: Facts = Facts(),
         val postFloor: Long = Long.MAX_VALUE,
         val mailFloor: Long = Long.MAX_VALUE,
+        /** The bodies to ask the ship to look at now, or null for the usual wait. */
+        val urgentAbout: List<String>? = null,
     )
 
     /**
@@ -1454,7 +1476,21 @@ class OrreryRepo(
             val about = (listOf(r.index.authorId(author, s)) + r.index.find(text).map { it.first.id }).filter { r.index.has(it) }.distinct().take(5)
             proposePlan(s, sourceId, p, about, r.schema, r.bodies.map { it.id }.toSet())
         }
-        for (n in byRules + byModel) {
+        // Rule 16: the reader is the only thing with the words in front
+        // of it, so the reader decides whether this is a thing somebody
+        // needs help with inside the hour. Asked once the claims have
+        // survived validation, and at most once a pass.
+        val kept = byRules + byModel
+        val esc = r.escalate
+        if (r.decider != null && esc != null && kept.isNotEmpty() && r.urgentAbout == null) {
+            val earlierText = context.map { it.second }
+            val p = Escalate.sure(r.decider, text, r.index.authorId(author, s), earlierText, rankBodies(r.bodies, r.index, text, earlierText), kept)
+            if (p >= esc) {
+                r.urgentAbout = Escalate.about(kept)
+                Log.i(TAG, "$sourceId reads as help needed within the hour ($p): asking the ship for a pass")
+            }
+        }
+        for (n in kept) {
             val trusted = trusted(s, n.attr)
             val entity = OrreryNoticedEntity(
                 id = noticedId(sourceId, n.subject, n.attr), ship = s, subject = n.subject, attr = n.attr,
@@ -1514,6 +1550,26 @@ class OrreryRepo(
         // makes the todo: seconds on a busy ship, so it runs behind the
         // answer, never in its way.
         scope.launch { refreshActions() }
+    }
+
+    /**
+     * Send what the owner typed under a proposal, rule 17. The ship
+     * revises the action in place and may propose more beside it; the
+     * answer is what the screen redraws from, never what was sent,
+     * since the ship may have resolved a name loosely spelled, kept a
+     * time it could not move, or refused outright.
+     *
+     * It stays proposed either way: approving is the same tap it was.
+     */
+    suspend fun refine(id: String, text: String): Result<io.nisfeb.talon.orrery.Refined> = runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        val s = ship ?: error("Not attached to a ship.")
+        val answer = a.refine(db.orreryAccounts().get(s)?.token, id, text)
+        answer.action?.let { revised ->
+            _actions.value = (_actions.value.map { if (it.id == revised.id) revised else it } + answer.extras)
+                .distinctBy { it.id }
+        }
+        answer
     }
 
     /**
