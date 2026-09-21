@@ -1020,8 +1020,10 @@ fun App(
         }
         // Armillary rides the same surface again: the owner's cookie,
         // and the AI settings, where the provider row it keeps lives.
-        val armillaryRepo = remember(session, aiSettings) {
-            io.nisfeb.talon.armillary.ArmillaryRepo(session.http, loopScope, aiSettings)
+        // The notifier is for a payment landing while the window is
+        // behind the browser.
+        val armillaryRepo = remember(session, aiSettings, notifier) {
+            io.nisfeb.talon.armillary.ArmillaryRepo(session.http, loopScope, aiSettings, notifier)
         }
         LaunchedEffect(armillaryRepo, mailShipUrl, loggedInShip) {
             val ship = loggedInShip

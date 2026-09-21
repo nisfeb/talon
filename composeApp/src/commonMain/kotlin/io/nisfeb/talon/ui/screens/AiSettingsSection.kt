@@ -62,7 +62,9 @@ import io.nisfeb.talon.ai.shipBase
 import io.nisfeb.talon.armillary.Account
 import io.nisfeb.talon.armillary.ArmillaryAvailability
 import io.nisfeb.talon.armillary.ArmillaryRepo
+import io.nisfeb.talon.armillary.Checkout
 import io.nisfeb.talon.armillary.Inference
+import io.nisfeb.talon.armillary.Payment
 import io.nisfeb.talon.armillary.Plan
 import io.nisfeb.talon.armillary.money
 import io.nisfeb.talon.orrery.DecideControl
@@ -418,6 +420,8 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     val plans by (repo?.plans ?: noPlans).collectAsState()
     val inference by (repo?.inference ?: noInference).collectAsState()
     val refreshing by (repo?.refreshing ?: noBusy).collectAsState()
+    val noPayment = remember { MutableStateFlow<Payment?>(null) }
+    val payment by (repo?.payment ?: noPayment).collectAsState()
     var note by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var buying by remember { mutableStateOf(false) }
     var subscribing by remember { mutableStateOf<Plan?>(null) }
@@ -432,7 +436,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         note = null
         scope.launch {
             r.topUp(rail, plan, amountMicro)
-                .onSuccess { url -> uri.openUri(url); note = "Finish paying in your browser. The balance follows." to false }
+                .onSuccess { url -> uri.openUri(url) }
                 .onFailure { note = (it.message ?: "The vendor did not answer.") to true }
         }
     }
@@ -476,6 +480,12 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             Text(money(a.balanceMicro) + " on your account.", style = MaterialTheme.typography.bodyMedium)
             balanceWarning(a)?.let { Quiet(it, error = true) }
             Quiet(planLine(a))
+            paymentLine(payment, a.checkouts.firstOrNull { it.nonce == payment?.nonce })?.let { line ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (payment?.phase == Payment.Phase.WAITING) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Quiet(line, error = payment?.phase == Payment.Phase.ENDED)
+                }
+            }
         } else if (a.vendor.isNotBlank()) {
             IntroducingLine()
         }
@@ -647,6 +657,30 @@ internal fun planLine(a: Account): String = when {
     a.subscriptionActive -> a.plan.ifBlank { "Subscribed" } + (a.renews?.let { ", renews $it" } ?: "") + "."
     a.plan.isNotBlank() -> a.plan + "."
     else -> "No plan: you pay as you go."
+}
+
+/**
+ * What the card says about the checkout this session opened, or null
+ * when there is nothing to say and the plain balance stands. The row's
+ * own status wins once the balance has not moved: the vendor knows
+ * more about a failed or expired checkout than a watch does.
+ */
+internal fun paymentLine(p: Payment?, row: Checkout?): String? {
+    if (p == null) return null
+    if (p.phase == Payment.Phase.PAID) return "Paid: " + money(p.addedMicro) + " added"
+    when (row?.status) {
+        "processing" -> return "Payment seen, waiting for confirmation"
+        "failed" -> return "The payment did not go through"
+        "expired" -> return "The checkout expired before it was paid"
+        "refused" -> return row.note.ifBlank { "The vendor refused the checkout" }
+    }
+    return when (p.phase) {
+        Payment.Phase.WAITING ->
+            if (p.rail == ArmillaryRepo.BTC_RAIL) "Waiting for your bitcoin payment to confirm, usually ten to twenty minutes"
+            else "Waiting for your payment"
+        Payment.Phase.UNSEEN -> "No payment seen yet. If you paid, it arrives within a few minutes; Refresh to check."
+        else -> null
+    }
 }
 
 /** Below this much credit the card says so in red, before a request fails. */

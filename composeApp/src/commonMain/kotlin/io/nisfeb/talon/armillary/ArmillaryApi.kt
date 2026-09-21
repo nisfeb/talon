@@ -107,8 +107,10 @@ class ArmillaryApi(
         return when {
             resp.status.value == ACCEPTED ->
                 CheckoutAnswer.Pending(reading { Json.parseToJsonElement(text).jsonObject }.str("nonce").orEmpty())
-            resp.status.isSuccess() ->
-                CheckoutAnswer.Url(reading { Json.parseToJsonElement(text).jsonObject }.str("url").orEmpty())
+            resp.status.isSuccess() -> {
+                val o = reading { Json.parseToJsonElement(text).jsonObject }
+                CheckoutAnswer.Url(o.str("url").orEmpty(), o.str("nonce").orEmpty())
+            }
             resp.status.value == BAD_GATEWAY -> CheckoutAnswer.Refused(reasonOf(text))
             else -> throw ArmillaryError.Refused(resp.status.value, reasonOf(text))
         }
@@ -248,9 +250,12 @@ sealed class InferenceAnswer {
 data class Checkout(
     val nonce: String,
     val url: String,
+    /** `pending`, `processing`, `paid`, `failed`, `expired` or `refused`. */
     val status: String,
     val rail: String,
     val amountMicro: Long,
+    /** Why the vendor refused it, on a `refused` row; blank otherwise. */
+    val note: String = "",
 )
 
 /** This ship's account with its vendor, as the ship last read it. */
@@ -299,7 +304,8 @@ data class CatalogRow(
 }
 
 sealed class CheckoutAnswer {
-    data class Url(val url: String) : CheckoutAnswer()
+    /** The page to send the person to, and the nonce its row in the view carries. */
+    data class Url(val url: String, val nonce: String = "") : CheckoutAnswer()
 
     /** The vendor had not answered inside the ship's wait. The op is still queued. */
     data class Pending(val nonce: String) : CheckoutAnswer()
@@ -338,6 +344,7 @@ internal fun checkoutOf(o: JsonObject) = Checkout(
     status = o.str("status").orEmpty(),
     rail = o.str("rail").orEmpty(),
     amountMicro = o.num("amount"),
+    note = o.str("note").orEmpty(),
 )
 
 internal fun accountOf(o: JsonObject): Account {

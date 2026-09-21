@@ -149,7 +149,7 @@ class ArmillaryApiTest {
         val pending = api { HttpStatusCode.Accepted to """{"pending":true,"nonce":"n7"}""" }
         assertEquals(CheckoutAnswer.Pending("n7"), pending.checkout("stripe", null, 5_000_000L))
         val open = api { HttpStatusCode.OK to """{"nonce":"n8","url":"https://pay.example/s","status":"pending"}""" }
-        assertEquals(CheckoutAnswer.Url("https://pay.example/s"), open.checkout("stripe", null, 5_000_000L))
+        assertEquals(CheckoutAnswer.Url("https://pay.example/s", "n8"), open.checkout("stripe", null, 5_000_000L))
         val refused = api { HttpStatusCode.BadGateway to """{"error":{"message":"amount: below the minimum"}}""" }
         assertEquals(CheckoutAnswer.Refused("amount: below the minimum"), refused.checkout("stripe", null, 1L))
     }

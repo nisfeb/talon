@@ -5,6 +5,8 @@ import io.nisfeb.talon.ai.ARMILLARY_PROVIDER
 import io.nisfeb.talon.ai.AiProfile
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.ModelInfo
+import io.nisfeb.talon.notify.Notifier
+import io.nisfeb.talon.notify.NoopNotifier
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -33,6 +35,8 @@ class ArmillaryRepo(
     private val scope: CoroutineScope,
     /** Where the provider row lives. Null in a test that only reads. */
     private val aiSettings: AiSettingsRepository? = null,
+    /** Told once when a payment lands, for a window behind the browser. The Noop one says nothing. */
+    private val notifier: Notifier = NoopNotifier,
 ) {
     private val _availability = MutableStateFlow(ArmillaryAvailability.UNKNOWN)
     val availability: StateFlow<ArmillaryAvailability> = _availability.asStateFlow()
@@ -48,6 +52,10 @@ class ArmillaryRepo(
     val inference: StateFlow<Inference?> = _inference.asStateFlow()
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+    private val _payment = MutableStateFlow<Payment?>(null)
+
+    /** The checkout this session opened last, while the card has something to say about it. */
+    val payment: StateFlow<Payment?> = _payment.asStateFlow()
 
     private var api: ArmillaryApi? = null
     private var shipUrl: String? = null
@@ -83,6 +91,7 @@ class ArmillaryRepo(
         _catalog.value = emptyList()
         _inference.value = null
         _refreshing.value = false
+        _payment.value = null
     }
 
     /**
@@ -105,7 +114,7 @@ class ArmillaryRepo(
                 .onSuccess { if (it is InferenceAnswer.Have) _inference.value = it.inference }
                 .onFailure { Log.i(TAG, "inference skipped: ${it.message}") }
             runCatching { a.account(fresh) }
-                .onSuccess { _account.value = it }
+                .onSuccess { _account.value = it; settle(it) }
                 .onFailure { Log.i(TAG, "account skipped: ${it.message}") }
             runCatching { a.plans() }
                 .onSuccess { _plans.value = it }
@@ -175,14 +184,16 @@ class ArmillaryRepo(
 
     /**
      * Open a checkout and answer the URL to send the person to. The
-     * balance is then watched for a couple of minutes, so it appears
-     * once they have paid without anyone having to tap Refresh.
+     * balance is then watched, for a couple of minutes on a card and a
+     * quarter of an hour on bitcoin, which settles after a block, so
+     * the payment shows once made without anyone having to tap Refresh.
      */
     suspend fun topUp(rail: String, plan: String?, amountMicro: Long?): Result<String> = runCatching {
         val a = api ?: error("Not attached to a ship.")
         when (val answer = a.checkout(rail, plan, amountMicro)) {
             is CheckoutAnswer.Url -> {
-                watchBalance()
+                val start = _account.value?.takeIf { it.hasView }?.balanceMicro ?: 0L
+                watchBalance(Payment(answer.nonce, rail, start, Payment.Phase.WAITING))
                 answer.url
             }
             is CheckoutAnswer.Pending ->
@@ -198,7 +209,7 @@ class ArmillaryRepo(
     suspend fun cancelSubscription(): Result<Unit> = runCatching {
         val a = api ?: error("Not attached to a ship.")
         a.cancelSubscription()
-        watchBalance()
+        watchBalance(null)
     }
 
     /** Give a direct provider lease back, before the provider row goes. */
@@ -208,23 +219,57 @@ class ArmillaryRepo(
     }
 
     /**
-     * The balance, read from the vendor every few seconds for a couple
-     * of minutes. A payment lands on the vendor while the person is
-     * still in their browser, so the number here catches up by itself.
+     * The balance, read from the vendor every few seconds. A payment
+     * lands on the vendor while the person is still in their browser,
+     * so the number here catches up by itself. With a [payment] the
+     * watch also says what became of it, and gives up as unseen when
+     * its rail's wait runs out.
      */
-    private fun watchBalance() {
+    private fun watchBalance(payment: Payment?) {
         watching?.cancel()
+        _payment.value = payment
+        val limit = if (payment?.rail == BTC_RAIL) BTC_WATCH_MS else WATCH_MS
         watching = scope.launch {
             var waited = 0L
-            while (isActive && waited < WATCH_MS) {
+            while (isActive && waited < limit) {
                 delay(WATCH_EVERY_MS)
                 waited += WATCH_EVERY_MS
                 val a = api ?: return@launch
-                runCatching { a.account(fresh = true) }
-                    .onSuccess { _account.value = it }
+                val acct = runCatching { a.account(fresh = true) }
                     .onFailure { Log.i(TAG, "balance watch: ${it.message}") }
+                    .getOrNull() ?: continue
+                _account.value = acct
+                if (settle(acct)) return@launch
             }
+            _payment.value = _payment.value?.takeIf { it.phase == Payment.Phase.WAITING }?.copy(phase = Payment.Phase.UNSEEN)
         }
+    }
+
+    /**
+     * What an account just read says about the payment in flight. True
+     * once it has said something final: the balance rose, or the row
+     * says the checkout failed, expired or was refused.
+     */
+    private fun settle(acct: Account): Boolean {
+        val p = _payment.value ?: return false
+        if (p.phase != Payment.Phase.WAITING && p.phase != Payment.Phase.UNSEEN) return false
+        if (acct.hasView && acct.balanceMicro > p.startMicro) {
+            val added = acct.balanceMicro - p.startMicro
+            val paid = p.copy(phase = Payment.Phase.PAID, addedMicro = added)
+            _payment.value = paid
+            notifier.notify("Armillary", money(added) + " added", "armillary")
+            scope.launch {
+                delay(PAID_SHOWN_MS)
+                if (_payment.value === paid) _payment.value = null
+            }
+            return true
+        }
+        val row = acct.checkouts.firstOrNull { it.nonce == p.nonce } ?: return false
+        if (row.status in ENDED_STATUSES) {
+            _payment.value = p.copy(phase = Payment.Phase.ENDED)
+            return true
+        }
+        return false
     }
 
     /** An inference config just read: kept, and written onto the provider row. */
@@ -271,10 +316,50 @@ class ArmillaryRepo(
         const val WATCH_MS = 120_000L
         const val WATCH_EVERY_MS = 5_000L
 
+        /** A bitcoin payment settles after a block, so its watch is longer. */
+        const val BTC_WATCH_MS = 900_000L
+        const val BTC_RAIL = "btcpay"
+
+        /** How long "Paid" stays on the card before the plain balance comes back. */
+        const val PAID_SHOWN_MS = 10_000L
+
+        /** A checkout row in one of these states is over, whatever the balance does. */
+        val ENDED_STATUSES = setOf("failed", "expired", "refused")
+
         /** The attached repo, for the places that hold none: the model catalog's test button. */
         @kotlin.concurrent.Volatile
         private var current: ArmillaryRepo? = null
 
         fun attached(): ArmillaryRepo? = current
+    }
+}
+
+/**
+ * A checkout this session opened, from the moment its URL opened until
+ * the card has nothing more to say about it.
+ */
+data class Payment(
+    /** The row's nonce in the account view, which is how its status is found. */
+    val nonce: String,
+    /** `stripe` or `btcpay`. */
+    val rail: String,
+    /** The balance when the checkout opened; anything above it is the payment. */
+    val startMicro: Long,
+    val phase: Phase,
+    /** How much the balance rose, once it has. */
+    val addedMicro: Long = 0L,
+) {
+    enum class Phase {
+        /** The watch is running and nothing has landed. */
+        WAITING,
+
+        /** The balance rose. Shown for a few seconds. */
+        PAID,
+
+        /** The watch ran out with no change. */
+        UNSEEN,
+
+        /** The row says the checkout failed, expired or was refused. */
+        ENDED,
     }
 }
