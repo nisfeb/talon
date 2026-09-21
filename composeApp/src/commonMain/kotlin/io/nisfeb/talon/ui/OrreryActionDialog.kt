@@ -46,6 +46,7 @@ fun OrreryActionDialog(
     var refinement by remember(action.id) { mutableStateOf("") }
     var refining by remember(action.id) { mutableStateOf(false) }
     var refined by remember(action.id) { mutableStateOf<String?>(null) }
+    var saying by remember(action.id) { mutableStateOf(Saying.NOTHING) }
     var shown by remember(action.id) { mutableStateOf(action) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val action = shown
@@ -105,8 +106,26 @@ fun OrreryActionDialog(
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
-                if (proposed) {
-                    Spacer(Modifier.height(8.dp))
+                // Three things can be done with a proposal and only one
+                // of them is approving, so the other two are a word each
+                // until they are asked for. Everything was on screen at
+                // once before: two fields, a row of chips and two
+                // sentences under the proposal itself, which on a phone
+                // is a window that scrolls before it says anything.
+                if (proposed || action.status == "approved") {
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (proposed) {
+                            TextButton(onClick = { saying = if (saying == Saying.REFINE) Saying.NOTHING else Saying.REFINE }) {
+                                Text("Say what it should be")
+                            }
+                        }
+                        TextButton(onClick = { saying = if (saying == Saying.DISMISS) Saying.NOTHING else Saying.DISMISS }) {
+                            Text("Not this", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+                if (proposed && saying == Saying.REFINE) {
                     androidx.compose.material3.OutlinedTextField(
                         value = refinement,
                         onValueChange = { refinement = it },
@@ -130,7 +149,7 @@ fun OrreryActionDialog(
                                             // it may have resolved a name loosely
                                             // spelled, kept a time it could not move,
                                             // or refused.
-                                            answer.action?.let { shown = it; refinement = "" }
+                                            answer.action?.let { shown = it; refinement = ""; saying = Saying.NOTHING }
                                             refined = when {
                                                 answer.action == null -> answer.note.ifBlank { "The ship would not take that." }
                                                 answer.extras.isEmpty() -> answer.note.ifBlank { "Revised." }
@@ -144,13 +163,9 @@ fun OrreryActionDialog(
                                 }
                             },
                         ) { Text(if (refining) "Asking" else "Refine") }
-                        refined?.let {
-                            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
                     }
                 }
-                if (proposed || action.status == "approved") {
-                    Spacer(Modifier.height(8.dp))
+                if (saying == Saying.DISMISS) {
                     androidx.compose.material3.OutlinedTextField(
                         value = reason,
                         onValueChange = { reason = it },
@@ -158,7 +173,7 @@ fun OrreryActionDialog(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)) {
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         DISMISS_REASONS.forEach { r ->
                             androidx.compose.material3.AssistChip(onClick = { reason = r }, label = { Text(r) })
                         }
@@ -172,6 +187,11 @@ fun OrreryActionDialog(
                         onClick = { move("dismissed", reason) },
                         modifier = Modifier.align(Alignment.End),
                     ) { Text("Dismiss", color = MaterialTheme.colorScheme.error) }
+                }
+                // What the ship said about a refinement outlives the field.
+                refined?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         },
@@ -193,6 +213,9 @@ fun OrreryActionDialog(
         dismissButton = { TextButton(onClick = onClose) { Text("Close") } },
     )
 }
+
+/** Which of the two things that are not approving the owner is doing. */
+private enum class Saying { NOTHING, REFINE, DISMISS }
 
 /** The reasons the client guide gives as examples, one tap each; the owner's own words go in the field. */
 val DISMISS_REASONS = listOf("just the event", "I always do this")

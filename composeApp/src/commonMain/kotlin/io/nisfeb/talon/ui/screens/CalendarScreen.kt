@@ -676,6 +676,7 @@ fun CalendarScreen(
     viewing?.let { r ->
         // Deleting asks once, here in the details, and closes on the tap.
         var confirmDelete by remember(r.id) { mutableStateOf(false) }
+        var moreOpen by remember(r.id) { mutableStateOf(false) }
         val calName = calendars.firstOrNull { it.id == r.cal }?.let { it.name.ifBlank { it.id } }
         val readOnlyHere = r.cal in readOnly
         AlertDialog(
@@ -742,44 +743,87 @@ fun CalendarScreen(
                             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    if (chat != null && db != null) {
-                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            TextButton(onClick = { sharingRow = r; sharingToGroup = false; viewing = null }) { Text("Send to a chat") }
-                            if (mail != null) TextButton(onClick = { mailingRow = r; viewing = null }) { Text("Mail") }
-                            if (mail != null) TextButton(onClick = { sharingRow = r; sharingToGroup = true; viewing = null }) { Text("Share with a group") }
+                    // What a person does with an event, in the order they
+                    // do it: read it, tick it off, edit it. Eight text
+                    // buttons of equal weight were the reason this window
+                    // read as a list of options rather than an event, so
+                    // the ones that are neither frequent nor reversible
+                    // are behind a word.
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (!readOnlyHere && r.isTask) {
+                            TextButton(onClick = { tick(r.id, !r.done); viewing = null }) { Text(if (r.done) "Reopen" else "Done") }
                         }
-                    }
-                    if (!readOnlyHere) {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (r.isTask) TextButton(onClick = { tick(r.id, !r.done); viewing = null }) { Text(if (r.done) "Reopen" else "Done") }
-                            if (r.repeats) TextButton(onClick = {
+                        if (!readOnlyHere && r.repeats) {
+                            TextButton(onClick = {
                                 val idx = r.idx
                                 act("Skipping this one…", "The ship did not skip it.") {
                                     repo.poke(buildJsonObject { put("action", "skip-event"); put("id", r.id); put("idx", idx) })
                                 }
                                 viewing = null
                             }) { Text("Skip this one") }
-                            if (confirmDelete) {
-                                TextButton(onClick = {
-                                    act(if (r.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${r.name}\"; it is still there.") {
-                                        repo.poke(buildJsonObject { put("action", "del-event"); put("id", r.id) })
+                        }
+                        Spacer(Modifier.weight(1f))
+                        val sharable = chat != null && db != null
+                        if (sharable || !readOnlyHere) {
+                            Box {
+                                TextButton(onClick = { moreOpen = true }) { Text("More") }
+                                androidx.compose.material3.DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                                    if (sharable) {
+                                        androidx.compose.material3.DropdownMenuItem(
+                                            text = { Text("Send to a chat") },
+                                            onClick = { moreOpen = false; sharingRow = r; sharingToGroup = false; viewing = null },
+                                        )
+                                        if (mail != null) {
+                                            androidx.compose.material3.DropdownMenuItem(
+                                                text = { Text("Mail") },
+                                                onClick = { moreOpen = false; mailingRow = r; viewing = null },
+                                            )
+                                            androidx.compose.material3.DropdownMenuItem(
+                                                text = { Text("Share with a group") },
+                                                onClick = { moreOpen = false; sharingRow = r; sharingToGroup = true; viewing = null },
+                                            )
+                                        }
                                     }
-                                    viewing = null
-                                }) { Text(if (r.repeats) "Delete the whole series" else "Yes, delete", color = MaterialTheme.colorScheme.error) }
-                                TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
-                            } else {
-                                Spacer(Modifier.weight(1f))
-                                TextButton(onClick = { confirmDelete = true }) {
-                                    Text(
-                                        if (r.repeats) "Delete series" else "Delete",
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
+                                    if (!readOnlyHere) {
+                                        if (sharable) androidx.compose.material3.HorizontalDivider()
+                                        androidx.compose.material3.DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    if (r.repeats) "Delete series" else "Delete",
+                                                    color = MaterialTheme.colorScheme.error,
+                                                )
+                                            },
+                                            onClick = { moreOpen = false; confirmDelete = true },
+                                        )
+                                    }
                                 }
                             }
+                        }
+                    }
+                    // Asked for, and asked again: the second tap is the
+                    // one that deletes, and it says what it will take.
+                    if (confirmDelete && !readOnlyHere) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                if (r.repeats) "Delete every occurrence of \"${r.name}\"?" else "Delete \"${r.name}\"?",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
+                            TextButton(onClick = {
+                                act(if (r.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${r.name}\"; it is still there.") {
+                                    repo.poke(buildJsonObject { put("action", "del-event"); put("id", r.id) })
+                                }
+                                viewing = null
+                            }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
                         }
                     }
                 }

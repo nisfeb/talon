@@ -35,7 +35,9 @@ import kotlin.test.assertTrue
  */
 class MailComposerTest {
 
-    private val seen = mutableListOf<HttpRequestData>()
+    // The repo's own poller asks at the same time the test does, and a
+    // plain list throws when one thread walks it while another adds.
+    private val seen = java.util.concurrent.CopyOnWriteArrayList<HttpRequestData>()
 
     private fun repo(): MailRepo {
         val http = HttpClient(
