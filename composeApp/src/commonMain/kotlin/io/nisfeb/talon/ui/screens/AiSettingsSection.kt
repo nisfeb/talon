@@ -65,6 +65,7 @@ import io.nisfeb.talon.armillary.ArmillaryAvailability
 import io.nisfeb.talon.armillary.ArmillaryRepo
 import io.nisfeb.talon.armillary.Checkout
 import io.nisfeb.talon.armillary.Inference
+import io.nisfeb.talon.armillary.LedgerRow
 import io.nisfeb.talon.armillary.Payment
 import io.nisfeb.talon.armillary.Plan
 import io.nisfeb.talon.armillary.money
@@ -428,6 +429,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     var subscribing by remember { mutableStateOf<Plan?>(null) }
     var confirmCancel by remember { mutableStateOf(false) }
     var changingVendor by remember { mutableStateOf(false) }
+    var history by remember { mutableStateOf(false) }
     var vendorTyped by remember { mutableStateOf("") }
     val here = repo != null && where == ArmillaryAvailability.PRESENT
     // An error surface sent the person here to top up: open the sheet
@@ -517,6 +519,19 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             note = null
             scope.launch { repo?.refresh(fresh = true)?.onFailure { note = (it.message ?: "The ship did not answer.") to true } }
         }) { Text("Refresh") }
+        if (account?.hasView == true) TextButton(onClick = { history = !history }) { Text("History") }
+    }
+    // The only receipt inside the app: Stripe and BTCPay send their
+    // own by email.
+    if (history) account?.let { a ->
+        if (a.ledger.isEmpty()) Quiet("Nothing yet.")
+        a.ledger.take(HISTORY_ROWS).forEach { row ->
+            val (first, second) = historyLines(row)
+            Column {
+                Quiet(first)
+                second?.let { Quiet(it) }
+            }
+        }
     }
 
     if (buying) TopUpSheet(
@@ -690,6 +705,37 @@ internal fun paymentLine(p: Payment?, row: Checkout?): String? {
         Payment.Phase.UNSEEN -> "No payment seen yet. If you paid, it arrives within a few minutes; Refresh to check."
         else -> null
     }
+}
+
+/** How many ledger rows the history shows, which is as many as the view carries. */
+internal const val HISTORY_ROWS = 50
+
+/**
+ * A ledger row as the history shows it: the date, the kind, the
+ * amount, and on a credit its rail; a charge names the model and the
+ * token counts on a second line where the row has them.
+ */
+internal fun historyLines(r: LedgerRow): Pair<String, String?> {
+    val kind = when (r.kind) {
+        "credit" -> "Credit"
+        "debit" -> "Charge"
+        "refund" -> "Refund"
+        else -> r.kind.replaceFirstChar { it.uppercase() }
+    }
+    val rail = when (r.rail) {
+        "stripe" -> "card"
+        "btcpay" -> "bitcoin"
+        else -> r.rail
+    }
+    val stamp = r.at.take(16).replace('T', ' ')
+    val first = listOf(stamp, kind, money(r.amountMicro)).filter { it.isNotBlank() }.joinToString("  ") +
+        (if (r.kind == "credit" && rail.isNotBlank()) ", by $rail" else "")
+    val second = if (r.kind == "debit" && r.model.isNotBlank()) {
+        r.model + ", " + r.tokensIn + " in, " + r.tokensOut + " out"
+    } else {
+        null
+    }
+    return first to second
 }
 
 /** Below this much credit the card says so in red, before a request fails. */

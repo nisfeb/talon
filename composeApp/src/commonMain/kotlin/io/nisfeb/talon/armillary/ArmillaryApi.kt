@@ -278,6 +278,24 @@ data class Account(
     /** The vendor has a lease for us but will not serve it, an empty balance being the usual reason. */
     val leaseDisabled: Boolean,
     val checkouts: List<Checkout>,
+    /** The newest fifty money moves on the account, as the vendor's view carries them. */
+    val ledger: List<LedgerRow> = emptyList(),
+)
+
+/** One money move on the account: a credit, a charge for a request, or a refund. */
+data class LedgerRow(
+    /** `credit`, `debit` or `refund`. */
+    val kind: String,
+    val amountMicro: Long,
+    /** The model a charge was for; blank on a credit. */
+    val model: String,
+    val tokensIn: Long,
+    val tokensOut: Long,
+    /** `stripe`, `btcpay` or blank, on a credit. */
+    val rail: String,
+    val note: String,
+    /** When, as the vendor wrote it: ISO 8601 in UTC. */
+    val at: String,
 )
 
 /** One of the vendor's plans, top-up or subscription. */
@@ -368,8 +386,24 @@ internal fun accountOf(o: JsonObject): Account {
         leaseHeld = lease.bool("held"),
         leaseDisabled = lease.bool("disabled"),
         checkouts = rows.map(::checkoutOf),
+        ledger = ledgerOf(o["ledger"]),
     )
 }
+
+/** The ledger rows in a view, newest first, whatever order the vendor wrote them in. */
+internal fun ledgerOf(e: kotlinx.serialization.json.JsonElement?): List<LedgerRow> =
+    (e as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.map { o ->
+        LedgerRow(
+            kind = o.str("kind").orEmpty(),
+            amountMicro = o.num("amount"),
+            model = o.str("model").orEmpty(),
+            tokensIn = o.num("in"),
+            tokensOut = o.num("out"),
+            rail = o.str("rail").orEmpty(),
+            note = o.str("note").orEmpty(),
+            at = o.str("at").orEmpty(),
+        )
+    }.sortedByDescending { it.at }
 
 internal fun plansOf(e: kotlinx.serialization.json.JsonElement): List<Plan> {
     val rows = when (e) {
