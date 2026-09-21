@@ -449,7 +449,7 @@ private fun Header(status: BridgeRunner.Status, pick: BridgeRunner.LineInfo?, bo
                     BridgeRunner.Status.Idle -> Pill("Not connected", cs.surfaceVariant)
                 }
                 Column(Modifier.weight(1f)) {
-                    Text("X Space", style = MaterialTheme.typography.labelMedium)
+                    Text("Space", style = MaterialTheme.typography.labelMedium)
                     Text(
                         board.spaceApps.firstOrNull()?.let { "in $it" } ?: "not wired",
                         style = MaterialTheme.typography.titleLarge,
@@ -664,7 +664,7 @@ private fun SpaceCard(
     @Suppress("UNUSED_EXPRESSION") tick
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("X Space", style = MaterialTheme.typography.titleMedium)
+            Text("Space", style = MaterialTheme.typography.titleMedium)
             pulseError?.let { Text("PulseAudio: $it", color = MaterialTheme.colorScheme.error) }
             if (!board.hasDevices) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -673,7 +673,8 @@ private fun SpaceCard(
                 }
             }
             Text(
-                "Open your Space in a browser, then mark that browser as the Space app. " +
+                "Open the room in a browser — an X Space, a Gather space, any of them — then mark " +
+                    "that browser as the Space app. " +
                     "Its microphone becomes the party and its sound goes to the party.",
                 style = MaterialTheme.typography.bodySmall,
             )
