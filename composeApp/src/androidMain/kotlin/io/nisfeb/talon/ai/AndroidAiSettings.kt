@@ -2,6 +2,7 @@ package io.nisfeb.talon.ai
 
 import android.content.Context
 import android.content.SharedPreferences
+import io.nisfeb.talon.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,18 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class AndroidAiSettings(context: Context) : AiSettingsRepository {
 
-    private val prefs: SharedPreferences = run {
-        val key = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            "talon_ai",
-            key,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
-    }
+    private val prefs: SharedPreferences = openStore(context)
 
     private val _state = MutableStateFlow(read())
     override val state: StateFlow<AiSettings.Config> = _state.asStateFlow()
@@ -290,6 +280,52 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
     }
 
     companion object {
+        private const val TAG = "AndroidAiSettings"
+        private const val STORE = "talon_ai"
+
+        private fun encrypted(context: Context): SharedPreferences {
+            val key = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            return EncryptedSharedPreferences.create(
+                context,
+                STORE,
+                key,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        }
+
+        /**
+         * The settings store, and what to do when it will not open.
+         *
+         * It is read while the application object is being built, so
+         * throwing here killed the app on every launch, with no screen
+         * ever drawn and nothing the owner could do from inside it. A
+         * store can refuse for reasons that have nothing to do with
+         * this app being wrong: a master key the device no longer has
+         * after a restore onto another phone or a keystore reset, and a
+         * file half written by a kill. Upgrading from an old version is
+         * where people meet it.
+         *
+         * So: open it, and if it will not open, take it away and start
+         * it again. What is lost is what was in it, which is the API
+         * keys, and the ship has those where sync is on.
+         */
+        internal fun openStore(context: Context): SharedPreferences =
+            runCatching { encrypted(context) }.getOrElse { first ->
+                Log.w(TAG, "the AI settings store would not open; starting it again", first)
+                runCatching { context.deleteSharedPreferences(STORE) }
+                runCatching { encrypted(context) }.getOrElse { second ->
+                    // Twice is a device that cannot keep a key at all.
+                    // The rest of the app has no business dying for it,
+                    // and the settings are not written in the clear to
+                    // save them: they last the session, and that is said.
+                    Log.e(TAG, "the AI settings store is unusable on this device; keeping them in memory", second)
+                    MemoryPrefs()
+                }
+            }
+
         private const val KEY_PROVIDER = "provider"
         private const val KEY_API_KEY = "api_key"
         private const val KEY_MODEL = "model"
