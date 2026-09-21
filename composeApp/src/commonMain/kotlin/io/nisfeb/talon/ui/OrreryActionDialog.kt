@@ -168,26 +168,29 @@ fun OrreryActionDialog(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    TextButton(
+                        onClick = { move("dismissed", reason) },
+                        modifier = Modifier.align(Alignment.End),
+                    ) { Text("Dismiss", color = MaterialTheme.colorScheme.error) }
                 }
             }
         },
+        // The app's own order: the way out on the left, the one thing
+        // this window is for on the right, filled, and no third button
+        // between them. Saying no lives in the body, beside the reason
+        // it sends, which is where it was being explained anyway.
         confirmButton = {
-            androidx.compose.foundation.layout.FlowRow(
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
-            ) {
-                TextButton(onClick = onClose) { Text("Close", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                TextButton(onClick = { move("dismissed", reason) }) {
-                    Text("Dismiss", color = MaterialTheme.colorScheme.error)
+            when {
+                proposed -> androidx.compose.material3.Button(onClick = { move("approved") }) {
+                    Text(if (ours) "Approve and send" else "Approve")
                 }
-                when {
-                    proposed -> androidx.compose.material3.Button(onClick = { move("approved") }) { Text(if (ours) "Approve and send" else "Approve") }
-                    // What is carried out reports itself, by the ship or by
-                    // Talon; marking it done here would skip the doing.
-                    event != null || ours || message != null -> Unit
-                    else -> androidx.compose.material3.Button(onClick = { move("done") }) { Text("Mark done") }
-                }
+                // What is carried out reports itself, by the ship or by
+                // Talon; marking it done here would skip the doing.
+                event != null || ours || message != null -> Unit
+                else -> androidx.compose.material3.Button(onClick = { move("done") }) { Text("Mark done") }
             }
         },
+        dismissButton = { TextButton(onClick = onClose) { Text("Close") } },
     )
 }
 

@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui.theme
 
 
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -132,6 +133,26 @@ fun TalonTheme(
     MaterialTheme(
         colorScheme = effective,
         typography = TalonTypography,
+        shapes = TalonShapes,
         content = content,
     )
 }
+
+/**
+ * The app's own corners.
+ *
+ * Material's defaults round a dialog by 28dp and a sheet by 16, which
+ * is nothing like the 8 to 12 every surface in Talon is drawn with, so
+ * a dialog opened over the app read as another app's window sitting on
+ * top of it. Here rather than at each call site: every Material
+ * component takes its shape from this, so the calendar's popup, the
+ * orrery action, the menus and the sheets all move together and a new
+ * one is right without being told.
+ */
+private val TalonShapes = androidx.compose.material3.Shapes(
+    extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+    small = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+    large = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+)

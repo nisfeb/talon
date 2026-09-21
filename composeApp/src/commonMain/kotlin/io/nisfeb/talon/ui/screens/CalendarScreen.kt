@@ -750,7 +750,11 @@ fun CalendarScreen(
                         }
                     }
                     if (!readOnlyHere) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             if (r.isTask) TextButton(onClick = { tick(r.id, !r.done); viewing = null }) { Text(if (r.done) "Reopen" else "Done") }
                             if (r.repeats) TextButton(onClick = {
                                 val idx = r.idx
@@ -768,14 +772,25 @@ fun CalendarScreen(
                                 }) { Text(if (r.repeats) "Delete the whole series" else "Yes, delete", color = MaterialTheme.colorScheme.error) }
                                 TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
                             } else {
-                                TextButton(onClick = { confirmDelete = true }) { Text(if (r.repeats) "Delete series" else "Delete") }
+                                Spacer(Modifier.weight(1f))
+                                TextButton(onClick = { confirmDelete = true }) {
+                                    Text(
+                                        if (r.repeats) "Delete series" else "Delete",
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
                             }
                         }
                     }
                 }
             },
+            // Filled, like Save in the editor: it is the one thing this
+            // window is for, and it read as another of the eight text
+            // buttons above it.
             confirmButton = {
-                if (!readOnlyHere) TextButton(onClick = { viewing = null; openById(r.id, r.idx.takeIf { !r.isTask }, r.l.takeIf { !r.isTask }, r.all) }) { Text("Edit") }
+                if (!readOnlyHere) {
+                    Button(onClick = { viewing = null; openById(r.id, r.idx.takeIf { !r.isTask }, r.l.takeIf { !r.isTask }, r.all) }) { Text("Edit") }
+                }
             },
             dismissButton = { TextButton(onClick = { viewing = null }) { Text("Close") } },
         )
