@@ -256,10 +256,18 @@ fun App(
     var landingProgress by remember { mutableStateOf<io.nisfeb.talon.ui.LandingProgress?>(null) }
     var landingHidden by remember { mutableStateOf(false) }
     var settingsStartOnAccount by remember { mutableStateOf(false) }
+    var settingsStartOnAi by remember { mutableStateOf(false) }
     // Every full-screen section is a flag made here, so the resets and
     // the back gesture cannot miss one. See Sections for the bug this ends.
     val sections = remember { io.nisfeb.talon.ui.Sections() }
     var showSettings by remember { sections.flag() }
+    // The way back to the card from a request the empty balance failed:
+    // Settings on the AI tab, with the top-up sheet already open.
+    val openTopUp: () -> Unit = {
+        io.nisfeb.talon.ai.AiSettings.pendingTopUp.value = true
+        settingsStartOnAi = true
+        showSettings = true
+    }
     var showSidebarSettings by remember { sections.flag() }
     var showApps by remember { sections.flag() }
     var showLoops by remember { sections.flag() }
@@ -2107,6 +2115,7 @@ fun App(
                             onBack = {
                                 showSettings = false
                                 settingsStartOnAccount = false
+                                settingsStartOnAi = false
                             },
                             // wires it to dailyDigest.generateAndNotifyAsync
                             // when the production MainActivity migrates here.
@@ -2116,6 +2125,7 @@ fun App(
                             onOpenLoops = { showLoops = true },
                             localShip = localShip,
                             startOnAccount = settingsStartOnAccount,
+                            startOnAi = settingsStartOnAi,
                             onAlwaysPatpChanged = { on ->
                                 repo.pushScope.launch {
                                     runCatching { settingsSync?.pushAlwaysPatp(on) }
@@ -2667,6 +2677,7 @@ fun App(
                                     },
                                     onOpenImage = { url -> viewerImageUrl = url },
                                     onOpenSelfProfile = { showSelfProfile = true },
+                                    onTopUp = openTopUp,
                                     onStartCall =
                                         if (callController != null && openChat!!.startsWith("~")) {
                                             { callController.placeCall(openChat!!) }
@@ -3312,6 +3323,7 @@ fun App(
                                         calendar = calendarRepo,
                                         calls = callController,
                                         listenOnOpen = assistantListen,
+                                        onTopUp = openTopUp,
                                         scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
                                         onRunLoop = runLoopNow,
                                         onBack = if (expanded) null else ({ showAssistant = false; assistantListen = false }),

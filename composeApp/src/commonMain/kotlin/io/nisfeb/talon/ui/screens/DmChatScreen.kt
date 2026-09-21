@@ -177,6 +177,9 @@ fun DmChatScreen(
     /** The calendar, where this ship has one: what lets a message
      *  become an event or a task without leaving the conversation. */
     calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
+    /** Opens Settings, AI on the top-up sheet, for a failure that was
+     *  the empty Armillary balance. Null where the shell has no way there. */
+    onTopUp: (() -> Unit)? = null,
     /** Inline play/pause control for the voice preview row. Android
      *  wires an ExoPlayer-backed control; desktop passes null and
      *  the preview row hides the play button (still allows send/cancel). */
@@ -1275,6 +1278,9 @@ fun DmChatScreen(
             confirmButton = {
                 TextButton(onClick = { catchUpError = null }) { Text("OK") }
             },
+            dismissButton = if (onTopUp != null && io.nisfeb.talon.ai.isOutOfCredit(err)) ({
+                TextButton(onClick = { catchUpError = null; onTopUp() }) { Text("Top up") }
+            }) else null,
         )
     }
 

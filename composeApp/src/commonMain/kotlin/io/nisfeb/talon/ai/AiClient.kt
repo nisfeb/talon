@@ -273,4 +273,10 @@ internal fun claudePrice(model: String): Pair<Double, Double>? {
  * balance ran out. Say so, and where to go, instead of the raw line.
  */
 internal fun outOfCredit(host: String, msg: String): String =
-    "Your Armillary balance is empty. Top up under Settings, AI. ($host 402: $msg)"
+    "$OUT_OF_CREDIT ($host 402: $msg)"
+
+/** The words every empty-balance failure starts with, which the error surfaces look for. */
+const val OUT_OF_CREDIT = "Your Armillary balance is empty. Top up under Settings, AI."
+
+/** Whether a failure's message is the empty balance, so a Top up action belongs beside it. */
+fun isOutOfCredit(message: String?): Boolean = message?.contains(OUT_OF_CREDIT) == true

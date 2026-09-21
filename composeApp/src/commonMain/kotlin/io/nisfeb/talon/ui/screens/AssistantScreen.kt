@@ -183,6 +183,9 @@ fun AssistantScreen(
     /** Start listening as the screen opens (the home widget's tap);
      *  where nothing can listen, the field takes the cursor instead. */
     listenOnOpen: Boolean = false,
+    /** Opens Settings, AI on the top-up sheet, for a failure that was
+     *  the empty Armillary balance. Null where the shell has no way there. */
+    onTopUp: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
@@ -703,6 +706,9 @@ fun AssistantScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
+                if (onTopUp != null && io.nisfeb.talon.ai.isOutOfCredit(it)) {
+                    TextButton(onClick = { error = null; onTopUp() }) { Text("Top up") }
+                }
             }
 
             // The write-confirmation card — the Phase 2 trust boundary.

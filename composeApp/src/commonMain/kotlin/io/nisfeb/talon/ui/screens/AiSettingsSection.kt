@@ -49,6 +49,7 @@ import io.nisfeb.talon.ai.AiFeature
 import io.nisfeb.talon.ai.AiProfile
 import io.nisfeb.talon.ai.AiProvider
 import io.nisfeb.talon.ai.ARMILLARY_PROVIDER
+import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.AiSpend
 import io.nisfeb.talon.ai.FeatureSetting
@@ -429,6 +430,14 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     var changingVendor by remember { mutableStateOf(false) }
     var vendorTyped by remember { mutableStateOf("") }
     val here = repo != null && where == ArmillaryAvailability.PRESENT
+    // An error surface sent the person here to top up: open the sheet
+    // for them, once, and forget the ask.
+    LaunchedEffect(Unit) {
+        if (AiSettings.pendingTopUp.value) {
+            AiSettings.pendingTopUp.value = false
+            buying = true
+        }
+    }
 
     /** Open a checkout and send the person to it. */
     fun buy(rail: String, plan: String?, amountMicro: Long?) {
