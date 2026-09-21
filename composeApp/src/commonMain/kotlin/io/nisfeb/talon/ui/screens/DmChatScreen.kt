@@ -1278,7 +1278,7 @@ fun DmChatScreen(
             confirmButton = {
                 TextButton(onClick = { catchUpError = null }) { Text("OK") }
             },
-            dismissButton = if (onTopUp != null && io.nisfeb.talon.ai.isOutOfCredit(err)) ({
+            dismissButton = if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(err)) ({
                 TextButton(onClick = { catchUpError = null; onTopUp() }) { Text("Top up") }
             }) else null,
         )

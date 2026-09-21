@@ -64,3 +64,6 @@ actual val isTouchPrimary: Boolean = true
 
 // Port pending: CLLocationManager significant-change monitoring.
 actual val isLocationSharingSupported: Boolean = false
+
+/** Nothing here forbids an outside checkout. */
+actual val isArmillaryPurchaseSupported: Boolean = true

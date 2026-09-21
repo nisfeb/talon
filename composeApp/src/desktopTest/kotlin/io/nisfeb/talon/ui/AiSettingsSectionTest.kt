@@ -348,6 +348,14 @@ class AiSettingsSectionTest {
         assertEquals("Almost out: top up before your next request fails.", balanceWarning(acct(999_999)))
         assertEquals("Empty: requests fail until you top up.", balanceWarning(acct(0)))
         assertEquals("Empty: requests fail until you top up.", balanceWarning(acct(-137)))
+        // A build that cannot take a payment says where to make one
+        // instead of naming a button that is not on the screen.
+        assertEquals(
+            "Empty: requests fail until you top up from another device.",
+            balanceWarning(acct(0), canBuy = false),
+        )
+        assertEquals("Almost out: top up from another device.", balanceWarning(acct(999_999), canBuy = false))
+        assertEquals(null, balanceWarning(acct(5_000_000), canBuy = false), "a full balance warns either way")
     }
 
     @Test
@@ -374,5 +382,39 @@ class AiSettingsSectionTest {
         assertNull(dollarsToMicro(""))
         assertNull(dollarsToMicro("lots"))
         assertNull(dollarsToMicro("-5"))
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `the card shows the balance where credit cannot be bought`() = runComposeUiTest {
+        // The flag is true on every platform today, so what can be
+        // asserted here is the half that does not depend on it: the
+        // balance, the warning and the vendor stand on their own, and
+        // the sheet is only ever reached through Top up.
+        val ai = FakeAiSettings().withProfile(withArmillary())
+        val bought = selling(
+            ai,
+            threeSizes,
+            """{"ship":"~feb","balance":0,"plan":"","subscription":{"active":false},
+                "lease":{},"checkouts":{},"vendor":"~wex","self":"~feb","stale":3}""",
+        )
+        setContent {
+            TalonTheme(darkTheme = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
+            }
+        }
+        waitForIdle()
+        // The half that does not depend on the flag stands either way.
+        onNodeWithText("~wex", substring = true).assertExists()
+        if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) {
+            onNodeWithText("Top up").assertExists()
+            onNodeWithText("Empty: requests fail until you top up.").assertExists()
+        } else {
+            assertTrue(
+                onAllNodesWithText("Top up").fetchSemanticsNodes().isEmpty(),
+                "nothing to press where credit cannot be bought",
+            )
+            onNodeWithText("Empty: requests fail until you top up from another device.").assertExists()
+        }
     }
 }

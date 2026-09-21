@@ -489,7 +489,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         }
         if (a.hasView) {
             Text(money(a.balanceMicro) + " on your account.", style = MaterialTheme.typography.bodyMedium)
-            balanceWarning(a)?.let { Quiet(it, error = true) }
+            balanceWarning(a, io.nisfeb.talon.ui.isArmillaryPurchaseSupported)?.let { Quiet(it, error = true) }
             Quiet(planLine(a))
             paymentLine(payment, a.checkouts.firstOrNull { it.nonce == payment?.nonce })?.let { line ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -507,9 +507,14 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
 
     val subscription = plans.firstOrNull { it.kind == "subscription" }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        OutlinedButton(enabled = repo != null && where == ArmillaryAvailability.PRESENT, onClick = { buying = true }) { Text("Top up") }
-        if (subscription != null && account?.subscriptionActive != true) {
-            TextButton(enabled = here, onClick = { subscribing = subscription; buying = true }) { Text(subscribeLabel(subscription)) }
+        // Buying is the one part of this card that a store may refuse to
+        // carry. The balance, the warning, the history and the vendor
+        // stand without it; see isArmillaryPurchaseSupported.
+        if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) {
+            OutlinedButton(enabled = repo != null && where == ArmillaryAvailability.PRESENT, onClick = { buying = true }) { Text("Top up") }
+            if (subscription != null && account?.subscriptionActive != true) {
+                TextButton(enabled = here, onClick = { subscribing = subscription; buying = true }) { Text(subscribeLabel(subscription)) }
+            }
         }
         if (account?.subscriptionActive == true) {
             TextButton(onClick = { confirmCancel = true }) { Text("Cancel subscription") }
@@ -534,7 +539,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         }
     }
 
-    if (buying) TopUpSheet(
+    if (buying && io.nisfeb.talon.ui.isArmillaryPurchaseSupported) TopUpSheet(
         plans = plans,
         subscribing = subscribing,
         onDismiss = { buying = false; subscribing = null },
@@ -744,10 +749,15 @@ internal const val LOW_BALANCE_MICRO = 1_000_000L
 /**
  * A warning under the balance, or null when there is enough. Empty means
  * the next request fails with a 402; low means it soon will.
+ *
+ * [canBuy] false is a build that cannot take a payment, so the line says
+ * where to do it instead of naming a button that is not on the screen.
  */
-internal fun balanceWarning(a: Account): String? = when {
-    a.balanceMicro <= 0 -> "Empty: requests fail until you top up."
-    a.balanceMicro < LOW_BALANCE_MICRO -> "Almost out: top up before your next request fails."
+internal fun balanceWarning(a: Account, canBuy: Boolean = true): String? = when {
+    a.balanceMicro <= 0 ->
+        if (canBuy) "Empty: requests fail until you top up." else "Empty: requests fail until you top up from another device."
+    a.balanceMicro < LOW_BALANCE_MICRO ->
+        if (canBuy) "Almost out: top up before your next request fails." else "Almost out: top up from another device."
     else -> null
 }
 

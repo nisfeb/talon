@@ -86,3 +86,6 @@ actual val isTouchPrimary: Boolean = false
 
 // A computer does not move with you.
 actual val isLocationSharingSupported: Boolean = false
+
+/** Nothing here forbids an outside checkout. */
+actual val isArmillaryPurchaseSupported: Boolean = true

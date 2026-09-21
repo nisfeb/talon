@@ -706,7 +706,7 @@ fun AssistantScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
-                if (onTopUp != null && io.nisfeb.talon.ai.isOutOfCredit(it)) {
+                if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(it)) {
                     TextButton(onClick = { error = null; onTopUp() }) { Text("Top up") }
                 }
             }
