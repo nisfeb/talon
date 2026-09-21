@@ -77,6 +77,7 @@ import io.nisfeb.talon.ui.isAssistantSupported
 import io.nisfeb.talon.ui.isCallsSupported
 import io.nisfeb.talon.ui.isLocalTriageSupported
 import io.nisfeb.talon.ui.isTouchPrimary
+import io.nisfeb.talon.urbit.isValidPatp
 import io.nisfeb.talon.util.nowMs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -420,6 +421,9 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     var note by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var buying by remember { mutableStateOf(false) }
     var confirmCancel by remember { mutableStateOf(false) }
+    var changingVendor by remember { mutableStateOf(false) }
+    var vendorTyped by remember { mutableStateOf("") }
+    val here = repo != null && where == ArmillaryAvailability.PRESENT
 
     /** Open a checkout and send the person to it. */
     fun buy(rail: String, plan: String?, amountMicro: Long?) {
@@ -440,10 +444,40 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             ArmillaryAvailability.UNKNOWN -> "Not asked yet whether this ship has Armillary."
         },
     )
+    if (where == ArmillaryAvailability.MISSING) Quiet("Armillary is published by ~ricsul-bilwyt, the same as Orrery and the Calendar.")
     account?.let { a ->
-        Text(money(a.balanceMicro) + " on your account.", style = MaterialTheme.typography.bodyMedium)
-        balanceWarning(a)?.let { Quiet(it, error = true) }
-        Quiet(planLine(a))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Quiet("Vendor " + a.vendor.ifBlank { "not set yet" })
+            TextButton(enabled = here, onClick = { changingVendor = !changingVendor; vendorTyped = "" }) { Text("Change") }
+        }
+        if (changingVendor) {
+            OutlinedTextField(
+                value = vendorTyped, onValueChange = { vendorTyped = it },
+                label = { Text("Another vendor") }, placeholder = { Text(ArmillaryRepo.DEFAULT_VENDOR) },
+                singleLine = true, modifier = Modifier.fillMaxWidth(),
+            )
+            Quiet("Any ship running Armillary sells inference, your own included.")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val typed = vendorTyped.trim()
+                TextButton(enabled = here && isValidPatp(typed) && typed != a.vendor, onClick = {
+                    changingVendor = false
+                    note = null
+                    scope.launch {
+                        repo?.setVendor(typed, io.nisfeb.talon.ui.platformLabel)
+                            ?.onSuccess { note = "Buying from $typed now." to false }
+                            ?.onFailure { note = (it.message ?: "The ship did not answer.") to true }
+                    }
+                }) { Text("Use this vendor") }
+                TextButton(onClick = { changingVendor = false }) { Text("Keep it") }
+            }
+        }
+        if (a.hasView) {
+            Text(money(a.balanceMicro) + " on your account.", style = MaterialTheme.typography.bodyMedium)
+            balanceWarning(a)?.let { Quiet(it, error = true) }
+            Quiet(planLine(a))
+        } else if (a.vendor.isNotBlank()) {
+            IntroducingLine()
+        }
     }
     Quiet(armillaryModeLine(inference?.mode, account))
     Quiet(providerSummary(p))
@@ -488,6 +522,24 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         dismissButton = { TextButton(onClick = { confirmCancel = false }) { Text("Keep it") } },
     )
 }
+
+/**
+ * A vendor named and no view read yet: the hello is on its way over
+ * ames. The line waits a minute before saying so, since most hellos
+ * land inside it and a line that flashed would only worry people.
+ */
+@Composable
+private fun IntroducingLine() {
+    var waited by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(INTRODUCING_MS)
+        waited = true
+    }
+    if (waited) Quiet("Your ship is introducing itself to the vendor. Give it a moment and Refresh.")
+}
+
+/** How long a card with a vendor and no view stays quiet before it explains itself. */
+private const val INTRODUCING_MS = 60_000L
 
 /**
  * The top-up sheet: the vendor's own top-up plans as buttons, any other

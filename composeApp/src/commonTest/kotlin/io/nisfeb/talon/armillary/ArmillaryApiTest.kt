@@ -70,6 +70,7 @@ class ArmillaryApiTest {
                     "vendor":"~wex","self":"~feb","stale":12}""",
             ),
         )
+        assertTrue(got.hasView)
         assertEquals(1_234_567L, got.balanceMicro)
         assertEquals("starter", got.plan)
         assertTrue(got.subscriptionActive)
@@ -85,6 +86,7 @@ class ArmillaryApiTest {
     @Test
     fun `an account with nothing in it yet reads as zero, not as a failure`() {
         val got = accountOf(obj("""{"vendor":"","self":"~feb","stale":0}"""))
+        assertFalse(got.hasView, "no balance key means the ship has read no view yet")
         assertEquals(0L, got.balanceMicro)
         assertEquals("", got.plan)
         assertFalse(got.subscriptionActive)

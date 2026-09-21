@@ -166,7 +166,7 @@ class AiSettingsSectionTest {
 
     @Test
     fun `the balance warns before it runs out and says when it has`() {
-        fun acct(micro: Long) = Account(micro, "", false, null, "~wex", 0, leaseHeld = false, leaseDisabled = false, checkouts = emptyList())
+        fun acct(micro: Long) = Account(true, micro, "", false, null, "~wex", 0, leaseHeld = false, leaseDisabled = false, checkouts = emptyList())
         assertEquals(null, balanceWarning(acct(5_000_000)))
         assertEquals(null, balanceWarning(acct(1_000_000)))
         assertEquals("Almost out: top up before your next request fails.", balanceWarning(acct(999_999)))
@@ -176,7 +176,7 @@ class AiSettingsSectionTest {
 
     @Test
     fun `the mode line says where a request actually goes`() {
-        val empty = Account(0, "", false, null, "~wex", 0, leaseHeld = true, leaseDisabled = true, checkouts = emptyList())
+        val empty = Account(true, 0, "", false, null, "~wex", 0, leaseHeld = true, leaseDisabled = true, checkouts = emptyList())
         assertEquals("Balance is empty: requests go through the vendor's ship until you top up.", armillaryModeLine("lease", empty))
         assertEquals("Talon talks to the model provider directly with a key your ship holds.", armillaryModeLine("lease", null))
         assertEquals("Requests go through the vendor's ship.", armillaryModeLine("proxy", null))
@@ -185,7 +185,7 @@ class AiSettingsSectionTest {
 
     @Test
     fun `the plan line names the subscription and when it renews`() {
-        val on = Account(0, "Starter", true, "2026-10-20T00:00:00Z", "~wex", 0, false, false, emptyList())
+        val on = Account(true, 0, "Starter", true, "2026-10-20T00:00:00Z", "~wex", 0, false, false, emptyList())
         assertEquals("Starter, renews 2026-10-20T00:00:00Z.", planLine(on))
         assertEquals("No plan: you pay as you go.", planLine(on.copy(plan = "", subscriptionActive = false, renews = null)))
     }

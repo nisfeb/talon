@@ -124,9 +124,10 @@ class ArmillaryRepo(
 
     /**
      * The inference config, asking the vendor for a key where this ship
-     * holds none. A lease is asked for first, so a vendor that offers
-     * one is taken up on it; a vendor without leases says so and the
-     * proxy key is minted instead.
+     * holds none. A ship with no vendor yet is pointed at the default
+     * first, since a key can only come from a vendor. A lease is asked
+     * for first, so a vendor that offers one is taken up on it; a
+     * vendor without leases says so and the proxy key is minted instead.
      */
     suspend fun ensureKey(deviceName: String): Result<Inference> = runCatching {
         val a = api ?: error("Not attached to a ship.")
@@ -135,6 +136,7 @@ class ArmillaryRepo(
             InferenceAnswer.Missing -> error("Armillary is not on this ship. Install it from the Grubbery shell on your ship.")
             InferenceAnswer.NoKey -> Unit
         }
+        ensureVendor(a)
         runCatching { a.lease() }.onFailure { Log.i(TAG, "lease skipped: ${it.message}") }
         a.mintKey("Talon on $deviceName")
         var waited = 0L
@@ -146,6 +148,29 @@ class ArmillaryRepo(
             waited += KEY_POLL_MS
         }
         error("Your ship has asked the vendor for a key and is still waiting. Try Refresh in a moment.")
+    }
+
+    /** The vendor as the ship has it, set to [DEFAULT_VENDOR] where it had none. */
+    private suspend fun ensureVendor(a: ArmillaryApi) {
+        val acct = a.account()
+        if (acct.vendor.isNotBlank()) {
+            _account.value = acct
+            return
+        }
+        a.setVendor(DEFAULT_VENDOR)
+        runCatching { a.account() }.onSuccess { _account.value = it }
+    }
+
+    /**
+     * Buy from another ship. Any ship running armillary is a vendor,
+     * this ship included. The ship says hello to it, and the key is
+     * asked for again, since a key belongs to one vendor.
+     */
+    suspend fun setVendor(ship: String, deviceName: String): Result<Inference> = runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        a.setVendor(ship.trim())
+        refresh()
+        ensureKey(deviceName).getOrThrow()
     }
 
     /**
@@ -234,6 +259,9 @@ class ArmillaryRepo(
 
     companion object {
         private const val TAG = "ArmillaryRepo"
+
+        /** The vendor a ship buys from until its owner names another. */
+        const val DEFAULT_VENDOR = "~nisfeb"
 
         /** How long to wait for a minted key, and how often to ask. */
         const val KEY_WAIT_MS = 30_000L

@@ -71,6 +71,14 @@ class ArmillaryApi(
     suspend fun account(fresh: Boolean = false): Account =
         accountOf(reading { Json.parseToJsonElement(request(HttpMethod.Get, if (fresh) "/api/account?fresh=1" else "/api/account")).jsonObject })
 
+    /**
+     * Who this ship buys from. The ship says hello to a fresh vendor at
+     * once, which is what opens the account over there.
+     */
+    suspend fun setVendor(ship: String) {
+        request(HttpMethod.Put, "/api/vendor", buildJsonObject { put("ship", ship) }.toString())
+    }
+
     /** The vendor's plans, read live through the ship. */
     suspend fun plans(): List<Plan> =
         plansOf(reading { Json.parseToJsonElement(request(HttpMethod.Get, "/api/plans")) })
@@ -247,6 +255,11 @@ data class Checkout(
 
 /** This ship's account with its vendor, as the ship last read it. */
 data class Account(
+    /**
+     * Whether the ship has read a view from the vendor at all. False
+     * until the hello has landed, when the balance below means nothing.
+     */
+    val hasView: Boolean,
     val balanceMicro: Long,
     val plan: String,
     val subscriptionActive: Boolean,
@@ -338,6 +351,7 @@ internal fun accountOf(o: JsonObject): Account {
         else -> emptyList()
     }
     return Account(
+        hasView = o.containsKey("balance"),
         balanceMicro = o.num("balance"),
         plan = o.str("plan").orEmpty(),
         subscriptionActive = sub.bool("active"),
