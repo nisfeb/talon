@@ -115,7 +115,7 @@ fun OrreryActionDialog(
                 if (proposed || action.status == "approved") {
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (proposed) {
+                        if (proposed && action.kind in REFINABLE) {
                             TextButton(onClick = { saying = if (saying == Saying.REFINE) Saying.NOTHING else Saying.REFINE }) {
                                 Text("Say what it should be")
                             }
@@ -125,7 +125,7 @@ fun OrreryActionDialog(
                         }
                     }
                 }
-                if (proposed && saying == Saying.REFINE) {
+                if (proposed && action.kind in REFINABLE && saying == Saying.REFINE) {
                     androidx.compose.material3.OutlinedTextField(
                         value = refinement,
                         onValueChange = { refinement = it },
@@ -153,8 +153,11 @@ fun OrreryActionDialog(
                                             refined = when {
                                                 answer.action == null -> answer.note.ifBlank { "The ship would not take that." }
                                                 answer.extras.isEmpty() -> answer.note.ifBlank { "Revised." }
+                                                // Filed the way any proposal is: under the
+                                                // owner's auto list a task can land approved,
+                                                // so this does not say which it did.
                                                 else -> (answer.note.ifBlank { "Revised." }) +
-                                                    " And proposed beside it: " + answer.extras.joinToString { it.title }
+                                                    " And filed beside it: " + answer.extras.joinToString { it.title }
                                             }
                                         },
                                         onFailure = { refined = it.message ?: "The ship did not answer." },
@@ -184,6 +187,7 @@ fun OrreryActionDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     TextButton(
+                        enabled = !refining,
                         onClick = { move("dismissed", reason) },
                         modifier = Modifier.align(Alignment.End),
                     ) { Text("Dismiss", color = MaterialTheme.colorScheme.error) }
@@ -201,7 +205,10 @@ fun OrreryActionDialog(
         // it sends, which is where it was being explained anyway.
         confirmButton = {
             when {
-                proposed -> androidx.compose.material3.Button(onClick = { move("approved") }) {
+                // Held while a note is being applied: an approval that
+                // lands mid-refinement is refused by the ship and files
+                // nothing, so the tap would be a tap that did nothing.
+                proposed -> androidx.compose.material3.Button(enabled = !refining, onClick = { move("approved") }) {
                     Text(if (ours) "Approve and send" else "Approve")
                 }
                 // What is carried out reports itself, by the ship or by
@@ -213,6 +220,13 @@ fun OrreryActionDialog(
         dismissButton = { TextButton(onClick = onClose) { Text("Close") } },
     )
 }
+
+/**
+ * The kinds the ship will rewrite. A merge or a home action has no
+ * payload shape a rewrite can be held to, so asking about one answers
+ * 409; the input is not offered for them (rule 17).
+ */
+private val REFINABLE = setOf("task", "calendar", "message")
 
 /** Which of the two things that are not approving the owner is doing. */
 private enum class Saying { NOTHING, REFINE, DISMISS }

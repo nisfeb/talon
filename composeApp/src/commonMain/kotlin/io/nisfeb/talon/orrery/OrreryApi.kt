@@ -2,6 +2,7 @@ package io.nisfeb.talon.orrery
 
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
@@ -283,12 +284,21 @@ class OrreryApi(
      */
     suspend fun refine(token: String?, id: String, text: String): Refined {
         val body = buildJsonObject { put("text", clipBytes(text.trim(), 500)) }
-        val said = if (token != null) {
-            request(bare, HttpMethod.Post, "/api/actions/$id/refine", body.toString()) {
-                header(HttpHeaders.Authorization, "Bearer $token")
+        // A refusal is an answer the owner reads, not a failure of the
+        // call: 409 for an action that has moved or a kind the ship
+        // does not refine, 404 for one this key cannot see, 403 for a
+        // key that may not write. All three carry the note.
+        val said = runCatching {
+            if (token != null) {
+                request(bare, HttpMethod.Post, "/api/actions/$id/refine", body.toString(), refineTimeout) {
+                    header(HttpHeaders.Authorization, "Bearer $token")
+                }
+            } else {
+                request(owner, HttpMethod.Post, "/api/actions/$id/refine", body.toString(), refineTimeout)
             }
-        } else {
-            request(owner, HttpMethod.Post, "/api/actions/$id/refine", body.toString())
+        }.getOrElse { e ->
+            val why = (e as? OrreryError.Refused)?.reason ?: e.message ?: "The ship did not answer."
+            return Refined(null, emptyList(), why)
         }
         val o = reading { Json.parseToJsonElement(said).jsonObject }
         val note = o["note"]?.jsonPrimitive?.contentOrNull.orEmpty()
@@ -322,7 +332,7 @@ class OrreryApi(
      */
     suspend fun claim(token: String, id: String): String? {
         val auth: HttpRequestBuilder.() -> Unit = { header(HttpHeaders.Authorization, "Bearer $token") }
-        val said = request(bare, HttpMethod.Post, "/api/actions/$id", """{"status":"claimed"}""", auth)
+        val said = request(bare, HttpMethod.Post, "/api/actions/$id", """{"status":"claimed"}""", extra = auth)
         val mine = runCatching { Json.parseToJsonElement(said).jsonObject["by"]?.jsonPrimitive?.contentOrNull }.getOrNull()
             ?.takeIf { it.isNotBlank() } ?: return "the claim answered no by"
         repeat(CLAIM_READS) { n ->
@@ -383,6 +393,8 @@ class OrreryApi(
         method: HttpMethod,
         path: String,
         body: String? = null,
+        /** Longer than the usual, for a route that waits on a model call. */
+        timeoutMs: Long? = null,
         extra: HttpRequestBuilder.() -> Unit = {},
     ): String {
         val resp = send(client, path) {
@@ -390,6 +402,12 @@ class OrreryApi(
             if (body != null) {
                 contentType(ContentType.Application.Json)
                 setBody(body)
+            }
+            timeoutMs?.let {
+                timeout {
+                    requestTimeoutMillis = it
+                    socketTimeoutMillis = it
+                }
             }
             extra()
         }
@@ -417,10 +435,24 @@ class OrreryApi(
     }
 
     private fun reasonOf(text: String): String =
-        runCatching { Json.parseToJsonElement(text).jsonObject["error"]?.jsonPrimitive?.content }.getOrNull()
+        runCatching {
+            val o = Json.parseToJsonElement(text).jsonObject
+            // A refusal carries the same words under both names, and
+            // the note is the one written for the owner to read.
+            o["note"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+                ?: o["error"]?.jsonPrimitive?.contentOrNull
+        }.getOrNull()
             ?: text.take(160).ifBlank { "no reason given" }
 
     companion object {
+        /**
+         * A refinement is a model call on the ship, and the route waits
+         * for the writer to land the revision before it reads the
+         * action back: about ten seconds, says rule 17, so the wait
+         * here is not the one every other route gets.
+         */
+        private const val refineTimeout = 45_000L
+
         const val CLAIM_READS = 5
         const val CLAIM_PAUSE_MS = 200L
 

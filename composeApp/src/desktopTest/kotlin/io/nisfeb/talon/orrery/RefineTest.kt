@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
@@ -54,6 +55,33 @@ class RefineTest {
             "include susan egan in this",
             Json.parseToJsonElement(sent!!).jsonObject["text"]!!.jsonPrimitive.content,
         )
+    }
+
+    @Test
+    fun `a refusal the ship sends as an error still says why`() = runTest {
+        // 409 for an action that has moved or a kind it will not
+        // rewrite, 404 for one this key cannot see, 403 for a key that
+        // may not write. All three carry the note beside the error, and
+        // a refusal is an answer the owner reads rather than a failure.
+        for (code in listOf(HttpStatusCode.Conflict, HttpStatusCode.NotFound, HttpStatusCode.Forbidden)) {
+            val api = OrreryApi(
+                HttpClient(MockEngine { respond("{}") }),
+                HttpClient(
+                    MockEngine {
+                        respond(
+                            """{"error": "the action moved while the note was applied",
+                                "note": "the action moved while the note was applied"}""",
+                            code,
+                            headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    },
+                ),
+                "https://ship",
+            )
+            val r = api.refine("k", "a1", "make it 3pm")
+            assertNull(r.action, "$code changes nothing")
+            assertEquals("the action moved while the note was applied", r.note, "$code says why")
+        }
     }
 
     @Test
