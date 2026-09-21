@@ -135,4 +135,48 @@ class ArmillaryLiveTest {
         println("ArmillaryLiveTest: the model said " + said.take(120))
         assertTrue(said.isNotBlank(), "the model answered")
     }
+
+    /**
+     * The purchase flow's own three steps, short of paying: the vendor
+     * is set, the sizes are read, and a bitcoin checkout opens. Nothing
+     * here pays: the URL is for a person, and a real store's invoice
+     * expires on its own.
+     */
+    @Test
+    fun `the vendor is set, the sizes are listed and a bitcoin checkout opens or is refused`() = live { owner, scope, url ->
+        val api = ArmillaryApi(owner, url)
+        assertEquals(ArmillaryAvailability.PRESENT, api.probe(), "armillary answers on this ship")
+        val repo = ArmillaryRepo(owner, scope)
+        repo.attach(url, "live test")
+
+        val before = api.account()
+        if (before.vendor.isBlank()) {
+            // A fresh ship: asking for the key points it at the default
+            // vendor first, since a key can only come from a vendor.
+            repo.ensureKey("live test")
+            assertEquals(ArmillaryRepo.DEFAULT_VENDOR, api.account().vendor, "a fresh ship buys from the default vendor")
+        } else {
+            // The vendor it has, set again: the same route the card's
+            // Change uses, and one more hello that changes nothing.
+            api.setVendor(before.vendor)
+            assertEquals(before.vendor, api.account().vendor, "the vendor reads back")
+        }
+        println("ArmillaryLiveTest: vendor " + api.account().vendor)
+
+        val plans = api.plans()
+        val sizes = plans.filter { it.kind == "topup" }.sortedBy { it.priceMicro }
+        println("ArmillaryLiveTest: sizes " + sizes.joinToString(", ") { money(it.priceMicro) } + "; subscriptions " + plans.count { it.kind == "subscription" })
+
+        when (val answer = api.checkout("btcpay", null, 5_000_000L)) {
+            is CheckoutAnswer.Url -> {
+                assertTrue(answer.url.isNotBlank(), "a bitcoin checkout url came back")
+                println("ArmillaryLiveTest: bitcoin checkout " + answer.url.take(60) + ", nonce " + answer.nonce)
+            }
+            is CheckoutAnswer.Refused -> {
+                assertTrue(answer.reason.isNotBlank(), "a refusal says why")
+                println("ArmillaryLiveTest: the vendor refused the bitcoin checkout: " + answer.reason)
+            }
+            is CheckoutAnswer.Pending -> error("the vendor did not answer the checkout inside the ship's wait: nonce " + answer.nonce)
+        }
+    }
 }

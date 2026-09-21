@@ -84,6 +84,43 @@ class ArmillaryApiTest {
     }
 
     @Test
+    fun `every checkout row carries its status, and a refused one its note`() {
+        val got = accountOf(
+            obj(
+                """{"balance":0,"checkouts":{
+                    "n1":{"nonce":"n1","rail":"stripe","amount":5000000,"url":"https://pay.example/1","status":"processing"},
+                    "n2":{"nonce":"n2","rail":"btcpay","amount":5000000,"url":"","status":"refused","note":"btcpay: not set"},
+                    "n3":{"nonce":"n3","rail":"stripe","amount":1000000,"url":"https://pay.example/3","status":"expired"}}}""",
+            ),
+        )
+        assertEquals(mapOf("n1" to "processing", "n2" to "refused", "n3" to "expired"), got.checkouts.associate { it.nonce to it.status })
+        assertEquals("btcpay: not set", got.checkouts.first { it.nonce == "n2" }.note)
+        assertEquals("", got.checkouts.first { it.nonce == "n1" }.note)
+    }
+
+    @Test
+    fun `the ledger reads every row and puts the newest first`() {
+        val got = ledgerOf(
+            Json.parseToJsonElement(
+                """[{"kind":"credit","amount":5000000,"cost":0,"model":"","in":0,"out":0,"mode":"","rail":"btcpay",
+                     "ref":"inv1","note":"","at":"2026-09-21T12:34:00Z"},
+                    {"kind":"debit","amount":137,"cost":105,"model":"stub/alpha","in":10,"out":5,"mode":"proxy",
+                     "rail":"","ref":"","note":"","at":"2026-09-21T12:35:00Z"},
+                    {"kind":"refund","amount":2500000,"cost":0,"model":"","in":0,"out":0,"mode":"","rail":"stripe",
+                     "ref":"dispute-1","note":"dispute lost","at":"2026-09-20T09:00:00Z"}]""",
+            ),
+        )
+        assertEquals(listOf("debit", "credit", "refund"), got.map { it.kind })
+        assertEquals(LedgerRow("debit", 137L, "stub/alpha", 10L, 5L, "", "", "2026-09-21T12:35:00Z"), got.first())
+        assertEquals("btcpay", got[1].rail)
+        assertEquals("dispute lost", got[2].note)
+        assertTrue(ledgerOf(null).isEmpty())
+        // The account carries it, and an account without one has none.
+        assertEquals(1, accountOf(obj("""{"balance":1,"ledger":[{"kind":"credit","amount":1,"at":"2026-09-21T00:00:00Z"}]}""")).ledger.size)
+        assertTrue(accountOf(obj("""{"balance":1}""")).ledger.isEmpty())
+    }
+
+    @Test
     fun `an account with nothing in it yet reads as zero, not as a failure`() {
         val got = accountOf(obj("""{"vendor":"","self":"~feb","stale":0}"""))
         assertFalse(got.hasView, "no balance key means the ship has read no view yet")
@@ -171,6 +208,20 @@ class ArmillaryApiTest {
         val seen = mutableListOf<String>()
         api(seen) { HttpStatusCode.OK to "{}" }.probe()
         assertEquals(listOf("/apps/armillary/api/account"), seen)
+    }
+
+    @Test
+    fun `the vendor is set with one put on its route`() = runTest {
+        var saw: String? = null
+        val a = ArmillaryApi(
+            HttpClient(MockEngine { req ->
+                saw = req.method.value + " " + req.url.encodedPath + " " + (req.body as io.ktor.http.content.TextContent).text
+                respond("""{"ok":true}""", HttpStatusCode.OK, jsonHeaders)
+            }),
+            "https://ship.example",
+        )
+        a.setVendor("~wex")
+        assertEquals("""PUT /apps/armillary/api/vendor {"ship":"~wex"}""", saw)
     }
 
     @Test
