@@ -267,11 +267,21 @@ fun CalendarScreen(
         editingStartMs = null
         editingAllDay = false
     }
+    /** What the wait says, where there is one long enough to say it. */
+    val OPENING = "Opening the editor..."
+
     fun openById(id: String, idx: Int?, startMs: Long?, allDay: Boolean) {
         scope.launch {
+            // Only where the read is actually slow, and never in front
+            // of it: the tap used to leave the screen exactly as it was
+            // for as long as the ship's queue took, which reads as a
+            // button that did nothing.
+            val slow = launch { kotlinx.coroutines.delay(150); status = OPENING }
             val json = repo.eventDetail(id)
+            slow.cancel()
             val d = json?.let { draftFromEvent(it, selected) }
             if (d == null) { status = "That event could not be read for editing."; return@launch }
+            if (status == OPENING) status = null
             editing = id to d
             editingIdx = idx
             editingStartMs = startMs
@@ -279,7 +289,13 @@ fun CalendarScreen(
         }
     }
     fun openExisting(r: CalendarRow) { if (r.cal in readOnly) status = readOnlyNote else openById(r.id, r.idx, r.l, r.all) }
-    fun view(r: CalendarRow) { viewing = r }
+    fun view(r: CalendarRow) {
+        viewing = r
+        // Edit is a button in this sheet, and it cannot open without
+        // the event's rule breakdown. Read it now, while the owner is
+        // reading the event, rather than after they have asked.
+        if (r.cal !in readOnly) repo.prefetchEvent(r.id)
+    }
     fun tick(id: String, done: Boolean) {
         pendingTicks = pendingTicks + (id to done)
         scope.launch {

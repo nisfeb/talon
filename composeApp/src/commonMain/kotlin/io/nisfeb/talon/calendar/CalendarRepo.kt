@@ -357,8 +357,29 @@ class CalendarRepo(
         scope.launch { if (!poke(body)) onFailed() }
     }
 
+    /**
+     * One event's full rule breakdown, as the editor needs it.
+     *
+     * Kept once read. The editor cannot open without it, and every
+     * request into a grubbery app is about a second of the ship's
+     * single thread and they queue, so tapping Edit sat on a blank
+     * screen for as long as the queue was. A write clears this, since
+     * the ship's answer is then the one that counts.
+     */
     suspend fun eventDetail(id: String): JsonObject? =
-        api?.let { a -> runCatching { a.event(id) }.getOrNull() }
+        details[id] ?: api?.let { a -> runCatching { a.event(id) }.getOrNull() }?.also { details[id] = it }
+
+    /**
+     * Read one ahead of being asked for it: the viewer is the step
+     * before Edit, so the round trip happens while the owner is reading
+     * rather than while they are waiting for a screen.
+     */
+    fun prefetchEvent(id: String) {
+        if (api == null || details[id] != null) return
+        scope.launch { runCatching { eventDetail(id) } }
+    }
+
+    private val details = io.nisfeb.talon.util.ConcurrentMap<String, JsonObject>()
 
     /** A write, then the reads that show it. False when refused. */
     suspend fun poke(body: JsonObject): Boolean {
@@ -366,6 +387,9 @@ class CalendarRepo(
         if (ball.isEmpty()) ball = runCatching { a.config().ball }.getOrDefault("")
         val ok = runCatching { a.poke(ball, body) }.getOrDefault(false)
         if (ok) {
+            // What was read of an event the write may have changed is
+            // no longer what the ship says.
+            details.clear()
             // The nexus applies a poke after it answers; give it a beat.
             delay(400)
             refresh()
@@ -379,6 +403,7 @@ class CalendarRepo(
         shipUrl = baseUrl
         zoneAdopted = false
         zoneNames = null
+        details.clear()
         api = CalendarApi(http, baseUrl)
         clearShipState()
         poller?.cancel()
@@ -422,6 +447,7 @@ class CalendarRepo(
         shipUrl = null
         zoneAdopted = false
         zoneNames = null
+        details.clear()
         clearShipState()
     }
 
