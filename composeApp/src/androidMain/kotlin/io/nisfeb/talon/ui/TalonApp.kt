@@ -462,11 +462,16 @@ fun TalonApp(
         )
     }
     val calendarInstall: suspend () -> Result<Unit> = remember(app, calendarRepo) {
-        val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
+        // The calendar is a grubbery app, not a desk of its own: what
+        // gets installed is Grubbery, and the calendar arrives inside
+        // it. This asked ~ricsul-bilwyt for a desk called "calendar",
+        // which it does not publish, so the poke went nowhere and the
+        // button never finished.
+        val install = io.nisfeb.talon.urbit.LatticeInstall.grubberyApp(
             app.ktorHttp,
             { app.sessionStore.active()?.shipUrl },
-            desk = "calendar",
-            installed = { url ->
+            app = "calendar",
+            answers = { url ->
                 runCatching { io.nisfeb.talon.calendar.CalendarApi(app.session.http, url).config() }.isSuccess
             },
         ) { a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess }

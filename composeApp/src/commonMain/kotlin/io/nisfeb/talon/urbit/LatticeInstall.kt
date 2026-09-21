@@ -56,7 +56,12 @@ object LatticeInstall {
     ): Result<Unit> {
         val (app, mark, body) = installPoke(desk, publisher)
         if (!poke(app, mark, body)) {
-            return Result.failure(IllegalStateException("Your ship refused the install."))
+            // The poke failing is not the ship saying no: it is also a
+            // channel that is not up and a session that has gone. The
+            // old wording blamed the ship for both.
+            return Result.failure(
+                IllegalStateException("Your ship did not take the install. It may be offline, or signed out here."),
+            )
         }
         val deadline = nowMs() + timeoutMs
         while (nowMs() < deadline) {
@@ -86,6 +91,11 @@ object LatticeInstall {
         require(desk == DESK || installed != null) {
             "installing $desk needs an `installed` probe; the default checks the lattice manifest"
         }
+        // A grubbery app is not a desk. Kiln would take the poke and
+        // nothing would arrive, which is what a calendar install did.
+        require(desk == DESK || desk !in GRUBBERY_APPS) {
+            "$desk lives inside the ${DESK} desk; install $DESK and wait for $desk to answer (see grubberyApp)"
+        }
         return {
             val url = shipUrl()
             if (url == null) Result.failure(IllegalStateException("Not signed in to a ship."))
@@ -97,7 +107,57 @@ object LatticeInstall {
         }
     }
 
+    /**
+     * The apps that live INSIDE the grubbery desk rather than beside
+     * it. None of them is a desk, so none of them can be installed with
+     * kiln: asking ~ricsul-bilwyt for a desk it does not publish is a
+     * poke that goes nowhere the owner can see, and a button that never
+     * finishes. Installing any of them installs Grubbery.
+     */
+    val GRUBBERY_APPS = setOf("lattice", "auspex", "mail", "calendar", "orrery")
+
+    /**
+     * Install a grubbery app: fetch the desk it lives in, and wait for
+     * the app itself to answer.
+     *
+     * A timeout where Grubbery is answering and the app is not says
+     * something worth saying: the desk is here and predates the app,
+     * so there is nothing to install and waiting will not help. It
+     * updates itself from its publisher.
+     */
+    fun grubberyApp(
+        http: HttpClient,
+        shipUrl: () -> String?,
+        app: String,
+        answers: suspend (String) -> Boolean,
+        timeoutMs: Long = GRUBBERY_TIMEOUT_MS,
+        poke: suspend (String, String, JsonElement) -> Boolean,
+    ): suspend () -> Result<Unit> = {
+        val url = shipUrl()
+        if (url == null) {
+            Result.failure(IllegalStateException("Not signed in to a ship."))
+        } else {
+            installAndWait(http, url, poke, timeoutMs = timeoutMs, installed = { answers(url) })
+                .recoverCatching { e ->
+                    if (isInstalled(http, url)) {
+                        // What was seen, and the two things it is. Saying
+                        // only the first would tell somebody whose session
+                        // went stale to go and wait for an update.
+                        error(
+                            "Grubbery is on this ship and its $app is not answering. " +
+                                "A Grubbery older than the $app updates itself from its publisher; " +
+                                "otherwise sign in to the ship again.",
+                        )
+                    }
+                    throw e
+                }
+        }
+    }
+
     private const val POLL_MS = 3_000L
+
+    /** A whole desk over ames, on somebody's phone: ninety seconds was not always enough. */
+    const val GRUBBERY_TIMEOUT_MS = 180_000L
     const val DEFAULT_TIMEOUT_MS = 90_000L
 
     /**

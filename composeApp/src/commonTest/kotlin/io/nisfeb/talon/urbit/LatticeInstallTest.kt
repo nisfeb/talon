@@ -7,6 +7,7 @@ import io.ktor.client.engine.mock.respondError
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
@@ -38,12 +39,15 @@ class LatticeInstallTest {
     private val no: suspend (String, String, JsonElement) -> Boolean = { _, _, _ -> false }
 
     @Test
-    fun `a refused poke is a refusal, not a wait`() = runTest {
+    fun `a poke that does not land starts no wait`() = runTest {
         val (c, asks) = http(installedAfter = 0)
         val r = LatticeInstall.installAndWait(c, "https://ship", no, wait = {})
         assertTrue(r.isFailure)
-        assertTrue(r.exceptionOrNull()!!.message!!.contains("refused"))
-        assertEquals(0, asks(), "nothing is asked for after a refusal")
+        // Not "your ship refused it": a poke fails when the channel is
+        // down or the session has gone, and blaming the ship for that
+        // sent people looking in the wrong place.
+        assertTrue(r.exceptionOrNull()!!.message!!.contains("did not take the install"))
+        assertEquals(0, asks(), "nothing is asked for after a poke that did not land")
     }
 
     @Test
@@ -117,5 +121,43 @@ class LatticeInstallTest {
         assertEquals(3, probes, "it kept probing until the desk was there")
         assertEquals(0, httpAsks, "the lattice manifest probe never fired")
         assertEquals("wiki", pokedDesk, "kiln was asked for the right desk")
+    }
+
+    @Test
+    fun `a grubbery app is not installed as a desk of its own`() {
+        // The calendar, mail and lattice live inside the grubbery desk.
+        // Asking kiln for a desk called "calendar" is a poke the ship
+        // takes and nothing arrives from, which is a button that never
+        // finishes and the reason two apps "failed to install".
+        for (app in LatticeInstall.GRUBBERY_APPS - LatticeInstall.DESK) {
+            assertFailsWith<IllegalArgumentException>("installing $app as a desk must not compile past here") {
+                LatticeInstall.installer(
+                    HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }),
+                    { "https://ship" },
+                    desk = app,
+                    installed = { true },
+                ) { _, _, _ -> true }
+            }
+        }
+    }
+
+    @Test
+    fun `installing a grubbery app fetches the desk and waits for the app`() = runTest {
+        var asked: Triple<String, String, JsonElement>? = null
+        var answers = false
+        val install = LatticeInstall.grubberyApp(
+            HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }),
+            { "https://ship" },
+            app = "calendar",
+            answers = { answers },
+        ) { app, mark, body -> asked = Triple(app, mark, body); answers = true; true }
+        assertTrue(install().isSuccess)
+        assertEquals("hood", asked?.first)
+        assertEquals("kiln-install", asked?.second)
+        assertEquals(
+            LatticeInstall.DESK,
+            (asked?.third as JsonObject)["desk"]?.jsonPrimitive?.content,
+            "the desk that is fetched is grubbery, whatever app was asked for",
+        )
     }
 }
