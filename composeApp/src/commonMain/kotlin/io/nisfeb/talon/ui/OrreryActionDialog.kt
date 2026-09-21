@@ -78,15 +78,17 @@ fun OrreryActionDialog(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     when {
-                        proposed && action.kind == "task" -> "Waiting for you. Approved, it goes on your calendar's task list."
-                        proposed && event != null -> "Waiting for you. Approved, it goes on your calendar at that time; move it there if it is wrong."
-                        proposed && ours -> "Waiting for you. Approved, Talon sends it."
-                        proposed && message != null -> "Waiting for you. Approved, the ${message.via} executor sends it."
+                        proposed && action.kind == "task" -> "Waiting for you. Approved, the ship puts it on your calendar's task list."
+                        proposed && event != null -> "Waiting for you. Approved, the ship puts it on your calendar at that time; move it there if it is wrong."
+                        proposed && ours -> "Waiting for you. Approved, Talon sends it as a DM."
+                        proposed && message != null -> "Waiting for you. Approved, the ship sends it by ${message.via}."
                         proposed -> "Waiting for you."
-                        event != null -> "Approved. It goes on your calendar on the next pass."
-                        ours -> "Approved. Talon sends it on the next pass."
-                        message != null -> "Approved. The ${message.via} executor sends it."
-                        action.kind == "task" -> "Approved, and on your task list. Mark it done here or tick it there."
+                        // The ship carries out everything but a DM now, on
+                        // its own executor, the moment the owner approves.
+                        event != null -> "Approved. The ship puts it on your calendar."
+                        ours -> "Approved. Talon sends it as a DM on the next pass."
+                        message != null -> "Approved. The ship sends it by ${message.via}."
+                        action.kind == "task" -> "Approved, and on your task list. Tick it there, or mark it done here."
                         else -> "Approved. Talon cannot carry this kind out; mark it done once you have."
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -123,8 +125,9 @@ fun OrreryActionDialog(
                 }
                 when {
                     proposed -> androidx.compose.material3.Button(onClick = { move("approved") }) { Text(if (ours) "Approve and send" else "Approve") }
-                    // What Talon carries out it reports itself; marking it done here would skip it.
-                    event != null || ours -> Unit
+                    // What is carried out reports itself, by the ship or by
+                    // Talon; marking it done here would skip the doing.
+                    event != null || ours || message != null -> Unit
                     else -> androidx.compose.material3.Button(onClick = { move("done") }) { Text("Mark done") }
                 }
             }

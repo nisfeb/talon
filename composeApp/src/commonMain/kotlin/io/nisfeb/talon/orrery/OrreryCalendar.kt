@@ -1,6 +1,7 @@
 package io.nisfeb.talon.orrery
 
 import io.nisfeb.talon.calendar.CalendarRow
+import io.nisfeb.talon.calendar.metaStr
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -134,11 +135,26 @@ data class Occurrence(val key: String, val endMs: Long, val settled: Boolean) {
 /** What the calendar calls an event. A todo is not one. */
 private val EVENT_CATS = setOf("timed", "allday", "date")
 
+/**
+ * Whether a calendar row is orrery's own, whatever shape the link
+ * takes: the meta field the ship writes, the uid a CalDAV client gives
+ * it, or the tag that rides with both.
+ */
+internal fun CalendarRow.isOrrerys(): Boolean =
+    meta.metaStr("orrery").isNotBlank() ||
+        id.startsWith("orrery-") ||
+        tags.any { it.equals("orrery", ignoreCase = true) }
+
 /** The occurrences of a window, grouped into the events they belong to. */
 fun calendarSubjects(rows: List<CalendarRow>): List<CalendarSubject> =
     // By kind, not by what it is not: a todo is never an event, and
-    // neither is anything else the calendar grows later.
-    rows.filter { it.cat in EVENT_CATS && it.name.isNotBlank() && it.r > it.l }
+    // neither is anything else the calendar grows later. Orrery's own
+    // rows are skipped whatever their kind: as of orrery 34 the ship
+    // writes the event for an approved calendar action and the todo for
+    // a task, both carrying meta.orrery and the orrery tag, and reading
+    // one back would make a second body out of what orrery already
+    // holds as an action (rule 11, last paragraph).
+    rows.filter { it.cat in EVENT_CATS && !it.isOrrerys() && it.name.isNotBlank() && it.r > it.l }
         .groupBy { it.cal to it.id }
         .map { (k, occ) ->
             val sorted = occ.sortedBy { it.l }

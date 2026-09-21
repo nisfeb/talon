@@ -578,141 +578,39 @@ class OrreryRepo(
     }
 
     /**
-     * An orrery task is a todo in the calendar, so the person sees it
-     * where they see the rest of what they have to do. The link is kept
-     * in the todo, never here, which is what makes a pass that starts
-     * from nothing safe.
+     * The executor's one job, on a pass. The mirror that used to live
+     * here is gone: as of orrery 34 the ship keeps the todo list, puts
+     * approved calendar actions on the calendar, and sends Telegram and
+     * mail itself, on its own executor fiber. Two mirrors over one list
+     * place twice and tick twice, so Talon keeps none of it.
      */
-    private suspend fun mirrorTasks(
+    private suspend fun runExecutor(
         a: OrreryApi,
         token: String?,
-        url: String,
         read: List<OrreryAction>? = null,
-        /** The whole listing, where the pass has already read it. Asked for only if there is anything to mirror. */
-        listed: (suspend () -> List<io.nisfeb.talon.calendar.CalendarTask>?)? = null,
     ): Map<String, String> = mirrorLock.withLock {
-        // What the pass already read, where it read it: two more
-        // listings cost the ship two more seconds for the same answer.
-        val actions = read ?: a.actions(token, status = "all")
-        // What this pass moved on, so that what it was handed can be
-        // read the way the ship now has it. The brief used to be given
-        // the listing as it was before the mirror ran, and told the
-        // owner an action was waiting that this pass had just finished.
         val settled = mutableMapOf<String, String>()
-        suspend fun settle(id: String, status: String, note: String) {
-            a.transition(token, id, status, note)
-            settled[id] = status
-        }
-        val cal = CalendarApi(http, url)
-        // Nothing to mirror, nothing to list: the whole of the calendar
-        // was read on every pass for a set of actions that was empty.
+        if (token == null) return@withLock settled
+        val actions = read ?: a.actions(token, status = "all")
         if (actions.isEmpty()) return@withLock settled
-        val events = (if (listed != null) listed() else cal.events()) ?: return@withLock settled
-        val todos = events.filter { it.cat == "todo" }
-        // A listing with no todos at all, where this install has seen
-        // them, is a calendar that is not answering yet rather than one
-        // somebody emptied. Nothing is withdrawn on the strength of it.
-        val s = ship
-        val sent = db.orrerySent()
-        val seenTodos = s != null && sent.get(s, SAW_TODOS) != null
-        if (s != null && todos.isNotEmpty()) {
-            sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, SAW_TODOS, "", now()))
-        }
-        val raw = taskMoves(actions, todos, listingComplete = todos.isNotEmpty() || !seenTodos) +
-            calendarMoves(actions, events)
-        // And one listing without it is not enough either: a todo moved
-        // from one day to another can be missing from the one pass that
-        // catches the move. A withdrawal waits for the absence to last.
-        val moves = if (s == null) raw else holdWithdrawals(s, actions, raw)
-        if (token != null) runCatching { sendApproved(a, token, url, actions, settled) }.onFailure { Log.i(TAG, "messages skipped: ${it.message}") }
-        if (moves.isEmpty()) return@withLock settled
-        val ball = cal.config().ball.takeIf { it.isNotBlank() } ?: return@withLock settled
-        for (m in moves) runCatching {
-            when (m) {
-                is TaskMove.Make -> cal.poke(ball, todoBody(m.action))
-                is TaskMove.Tick -> cal.poke(ball, io.nisfeb.talon.calendar.doneBody(m.todoId, true))
-                is TaskMove.Drop -> cal.poke(ball, io.nisfeb.talon.calendar.deleteBody(m.todoId))
-                // The owner ticked it where they saw it. If an executor
-                // holds the claim the ship refuses, and the next pass
-                // finds it still ticked and says so again.
-                is TaskMove.Report -> settle(m.actionId, "done", "ticked in the calendar")
-                // A todo the owner typed: filed under this install's key,
-                // approved because the owner wrote it, then linked. A pass
-                // that dies between filing and linking links it next time.
-                is TaskMove.Adopt -> if (token != null) {
-                    val (id, status) = a.act(adoptBody(m.todo), token)
-                    if (status == "proposed") settle(id, "approved", TYPED_IN_CALENDAR)
-                    cal.poke(ball, linkBody(m.todo, id))
-                }
-                is TaskMove.Link -> {
-                    if (m.approve) settle(m.actionId, "approved", TYPED_IN_CALENDAR)
-                    cal.poke(ball, linkBody(m.todo, m.actionId))
-                }
-                is TaskMove.Withdraw -> settle(m.actionId, "dismissed", "removed from the calendar by the owner")
-                // Made, then said: a pass that dies between the two finds
-                // the event by its link next time and only says it.
-                is TaskMove.Place -> {
-                    val body = placeBody(m.action, kotlinx.datetime.TimeZone.currentSystemDefault()) ?: error("no event in the action")
-                    if (!cal.poke(ball, body)) error("the calendar refused the event")
-                    settle(m.action.id, "done", ON_THE_CALENDAR)
-                }
-                is TaskMove.Placed -> settle(m.actionId, "done", ON_THE_CALENDAR)
-                is TaskMove.Unplaceable -> settle(m.actionId, "failed", "no start time to put on the calendar")
-            }
-        }.onFailure { Log.i(TAG, "task move ${m::class.simpleName} skipped: ${it.message}") }
+        runCatching { sendApproved(a, token, actions, settled) }
+            .onFailure { Log.i(TAG, "messages skipped: ${it.message}") }
         settled
     }
 
     /**
-     * Withdrawals held until the todo has been gone a while.
-     *
-     * The first pass that cannot find a todo records the moment and
-     * does nothing. Only an absence that outlives [MISSING_MS] is the
-     * owner having deleted it; anything shorter is a calendar syncing,
-     * and dismissing the action for that deleted the entry on the pass
-     * after, since a dismissed action used to take its todo with it.
-     * Seeing the todo again forgets the whole thing.
-     */
-    private suspend fun holdWithdrawals(
-        s: String,
-        actions: List<OrreryAction>,
-        moves: List<TaskMove>,
-    ): List<TaskMove> {
-        val sent = db.orrerySent()
-        val gone = moves.filterIsInstance<TaskMove.Withdraw>().map { it.actionId }.toSet()
-        // Anything whose todo is there again was never missing.
-        actions.filter { it.kind == "task" && it.id !in gone }
-            .forEach { sent.forget(s, "$MISSING${it.id}") }
-        if (gone.isEmpty()) return moves
-        val nowMs = now()
-        val since = sent.some(s, gone.map { "$MISSING$it" }).associate { it.key to it.value }
-        val ready = mutableSetOf<String>()
-        for (id in gone) {
-            val first = since["$MISSING$id"]?.toLongOrNull()
-            if (first == null) {
-                sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, "$MISSING$id", nowMs.toString(), nowMs))
-                Log.i(TAG, "task $id has no todo; waiting to see whether it comes back")
-            } else if (nowMs - first >= MISSING_MS) {
-                ready += id
-                sent.forget(s, "$MISSING$id")
-            }
-        }
-        return moves.filter { it !is TaskMove.Withdraw || it.actionId in ready }
-    }
-
-    /**
-     * The executor, rules 11 and 14: every approved message action on a
-     * channel Talon serves is claimed, confirmed as ours, sent to the
-     * address the person's own attribute gives, and reported with a note
-     * the owner reads. Telegram's are the bot's and are left alone; a
-     * claim another executor holds is left to it. What was sent is
+     * The executor, rule 14: an approved message action whose `via` is
+     * `chat` is claimed, confirmed as ours, sent as an Urbit DM to the
+     * ship the person's own attribute gives, and reported with a note
+     * the owner reads. That is the whole of it. Telegram and mail are
+     * the ship's own, as of orrery 34, and a claim it holds answers
+     * `claimed by ship`, which is left alone. What was sent is
      * remembered before it is reported, so a pass that dies between the
      * two reports it next time instead of sending it again.
      */
     private suspend fun sendApproved(
         a: OrreryApi,
         token: String,
-        url: String,
         actions: List<OrreryAction>,
         /** What this pass moved on, for whoever reads the listing after it. */
         settled: MutableMap<String, String> = mutableMapOf(),
@@ -720,7 +618,7 @@ class OrreryRepo(
         val s = ship ?: return
         val out = actions.filter { it.status == "approved" || it.status == "claimed" }
             .mapNotNull { act -> act.messageToSend()?.takeIf { it.via in TALON_CHANNELS }?.let { act to it } }
-            .filter { (_, m) -> m.via != "chat" || sendDm != null }
+            .filter { sendDm != null }
         if (out.isEmpty()) return
         val state = a.stateJson(token)
         for ((act, m) in out) {
@@ -746,12 +644,11 @@ class OrreryRepo(
             // again on the next one. A send that comes back failed takes
             // it out again, so the owner can approve it a second time.
             db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, key, UNCONFIRMED, now()))
-            val sent = runCatching {
-                when (m.via) {
-                    "chat" -> { sendDm!!(address, m.text); "sent as a DM to $address" }
-                    else -> { io.nisfeb.talon.mail.AuspexApi(http, url).send(listOf(address), act.title.ifBlank { "A note" }, m.text); "sent by mail to $address" }
-                }
-            }
+            // One channel, and it is the only one Talon claims. Mail
+            // goes out from the ship now, through auspex, to the ship
+            // the person's own attribute gives; Telegram from the
+            // ship's bot. Neither was ever Talon's to send twice.
+            val sent = runCatching { sendDm!!(address, m.text); "sent as a DM to $address" }
             val note = sent.getOrNull()
             if (note == null) {
                 db.orrerySent().forget(s, key)
@@ -1047,8 +944,8 @@ class OrreryRepo(
             // want them: what is open, the mirror, and the brief.
             val actions = runCatching { a.actions(row.token, status = "all") }
                 .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }.getOrNull()
-            val settled = runCatching { mirrorTasks(a, row.token, url, actions) { events() } }
-                .onFailure { Log.i(TAG, "tasks skipped: ${it.message}") }.getOrDefault(emptyMap())
+            val settled = runCatching { runExecutor(a, row.token, actions) }
+                .onFailure { Log.i(TAG, "messages skipped: ${it.message}") }.getOrDefault(emptyMap())
             // The listing as the mirror left it: what it finished is
             // neither shown as waiting nor told to the owner as waiting.
             val standing = actions?.map { act -> settled[act.id]?.let { act.copy(status = it) } ?: act }
@@ -1655,7 +1552,7 @@ class OrreryRepo(
         a.generatorLast()?.let { _generator.value = it }
         // An approved task becomes a todo wherever it can be approved,
         // not only on the install that runs the pipe.
-        runCatching { mirrorTasks(a, token, url) }.onFailure { Log.i(TAG, "tasks skipped: ${it.message}") }
+        runCatching { runExecutor(a, token) }.onFailure { Log.i(TAG, "messages skipped: ${it.message}") }
     }
 
     /** The cloud rung, opened once, only while the person has it on and a key is set. */
@@ -1756,15 +1653,6 @@ class OrreryRepo(
         const val MAIL_PER_PASS = 200
 
         /** How many threads a page of the cursor's listing asks for. */
-        /** An action whose todo was missing, and since when. */
-        private const val MISSING = "missing:"
-
-        /** That this install has ever seen a todo, so an empty listing can be judged. */
-        private const val SAW_TODOS = "saw:todos"
-
-        /** How long a todo must stay missing before it counts as deleted: three passes. */
-        internal const val MISSING_MS = 30 * 60 * 1000L
-
         /** What the last brief suggested, by its day, in the table the reply cursor uses. */
         private const val SAID = "brief-said:"
 

@@ -18,7 +18,8 @@ import kotlin.test.assertTrue
 
 /**
  * A calendar action, from the message that fixed a plan in time to the
- * event on the calendar: orrery-utils' reader rule and client rule 11.
+ * proposal Talon files: orrery-utils' reader rule, rule 14. Putting an
+ * approved one on the calendar is the ship's, as of orrery 34.
  */
 class CalendarActionTest {
     private val ny = TimeZone.of("America/New_York")
@@ -27,57 +28,9 @@ class CalendarActionTest {
         id, "calendar", "Dinner", buildJsonObject { payload.forEach { (k, v) -> put(k, v) } }, emptyList(), null, status, "reader",
     )
 
-    private fun event(id: String, actionId: String, cat: String = "timed") =
-        CalendarTask(id, meta = buildJsonObject { put("name", "Dinner"); put("orrery", actionId) }, cat = cat)
-
-    @Test
-    fun `an approved one is placed once, said once, and a twin goes`() {
-        val starts = "starts" to "2026-10-02T00:00:00Z"
-        val moves = calendarMoves(
-            listOf(
-                action("a", "approved", starts),
-                action("b", "approved", starts),
-                action("c", "approved"),
-                action("d", "proposed", starts),
-                action("e", "dismissed", starts),
-            ),
-            listOf(event("ev2", "b"), event("ev1", "b"), event("todo1", "a", cat = "todo")),
-        )
-        assertEquals(
-            setOf(TaskMove.Drop("ev2"), TaskMove.Place(action("a", "approved", starts)), TaskMove.Placed("b"), TaskMove.Unplaceable("c")),
-            moves.toSet(),
-            "a todo is not the event; the proposed and the dismissed make nothing",
-        )
-    }
-
-    private fun body(vararg payload: Pair<String, String>): JsonObject = placeBody(action("a", "approved", *payload), ny)!!
-
-    @Test
-    fun `a timed event is at its hour here, linked and tagged`() {
-        // 00:00 UTC is 20:00 the evening before in New York.
-        val b = body("starts" to "2026-10-02T00:00:00Z", "location" to "Luigi's")
-        assertEquals("add-event", b["action"]!!.jsonPrimitive.content)
-        assertEquals("timed", b["cat"]!!.jsonPrimitive.content)
-        assertEquals("America/New_York", b["zone"]!!.jsonPrimitive.content)
-        assertEquals(Instant.parse("2026-10-01T20:00:00Z").toEpochMilliseconds(), b["start_ms"]!!.jsonPrimitive.long, "wall clock, read in the zone")
-        assertEquals(60L, b["dur_min"]!!.jsonPrimitive.long, "an hour without an end")
-        val meta = b["meta"]!!.jsonObject
-        assertEquals("a", meta["orrery"]!!.jsonPrimitive.content)
-        assertEquals(listOf("orrery"), meta["tags"]!!.jsonArray.map { it.jsonPrimitive.content })
-        assertEquals("Luigi's", meta["location"]!!.jsonPrimitive.content)
-        assertEquals(90L, body("starts" to "2026-10-02T00:00:00Z", "ends" to "2026-10-02T01:30:00Z")["dur_min"]!!.jsonPrimitive.long)
-    }
-
-    @Test
-    fun `whole days are all day, here or as a bare date`() {
-        val here = body("starts" to "2026-10-03T04:00:00Z", "ends" to "2026-10-05T04:00:00Z")
-        assertEquals("allday", here["cat"]!!.jsonPrimitive.content)
-        assertEquals(Instant.parse("2026-10-03T00:00:00Z").toEpochMilliseconds(), here["start_ms"]!!.jsonPrimitive.long)
-        assertEquals(2L, here["span_days"]!!.jsonPrimitive.long)
-        val bare = body("starts" to "2026-10-03")
-        assertEquals("allday", bare["cat"]!!.jsonPrimitive.content)
-        assertEquals(1L, bare["span_days"]!!.jsonPrimitive.long)
-    }
+    // Placing an approved calendar action was Talon's until orrery 34.
+    // The ship does it now, on its own executor fiber, so the tests for
+    // placeBody and calendarMoves went with the code.
 
     // ---- the reader ----
 

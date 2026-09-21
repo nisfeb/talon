@@ -29,15 +29,14 @@ class MessageActionTest {
     @Test
     fun `the address is the person's own attribute, never the body id`() {
         assertEquals("~sampel-palnet", addressOf(state, "person/rose", "chat"))
-        // Auspex carries mail between ships and does not bridge to
-        // internet email, so mail goes to a ship as a DM does.
-        assertEquals("~sampel-palnet", addressOf(state, "person/rose", "mail"))
         assertEquals("~dozzod-sampel", addressOf(state, "person/sam", "chat"), "the ship the view gives the body")
-        assertEquals("~dozzod-sampel", addressOf(state, "person/sam", "mail"))
-        assertNull(addressOf(state, "person/andrea", "mail"), "an email address is not a ship")
-        assertTrue("does not bridge to internet email" in noAddress(state, "person/andrea", "mail"), "and the owner is told why")
         assertNull(addressOf(state, "person/andrea", "chat"), "no ship, and none guessed from the id")
         assertNull(addressOf(state, "person/ghost", "chat"))
+        // Mail and Telegram are the ship's own as of orrery 34: Talon
+        // resolves no address for them, because it sends neither.
+        assertNull(addressOf(state, "person/rose", "mail"))
+        assertNull(addressOf(state, "person/rose", "telegram"))
+        assertTrue("not reachable on mail from here" in noAddress(state, "person/rose", "mail"))
     }
 
     @Test
@@ -46,7 +45,7 @@ class MessageActionTest {
         assertEquals(MessageToSend("chat", "person/rose", "late"), action("via" to "Chat", "to" to "person/rose", "text" to " late ").messageToSend())
         assertNull(action("to" to "person/rose", "text" to "late").messageToSend(), "no channel, no guess")
         assertNull(action("via" to "chat", "text" to "late").messageToSend(), "no one to send it to")
-        assertEquals(setOf("chat", "mail"), TALON_CHANNELS)
+        assertEquals(setOf("chat"), TALON_CHANNELS, "one channel, and the ship has the rest")
     }
 
     private fun api(claimedBy: String?, answerBy: String = "talon-desktop") = OrreryApi(

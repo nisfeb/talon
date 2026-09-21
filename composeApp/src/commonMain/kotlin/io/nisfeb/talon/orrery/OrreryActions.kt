@@ -12,8 +12,14 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 data class MessageToSend(val via: String, val to: String, val text: String)
 
-/** The channels Talon sends on, rule 11: an Urbit DM, and mail through auspex. Telegram is the bot's. */
-val TALON_CHANNELS = setOf("chat", "mail")
+/**
+ * The channels Talon sends on, rule 14: an Urbit DM, and nothing else.
+ * As of orrery 34 the ship sends Telegram through its bot and mail
+ * through auspex, on its own executor fiber, the moment the owner
+ * approves. Talon claiming those too would be a second sender racing
+ * the first.
+ */
+val TALON_CHANNELS = setOf("chat")
 
 /** A calendar action's event: [endMs] and [location] only where the payload says; [bareDate] when it gave a day and no time. */
 data class EventToAdd(val title: String, val startMs: Long, val endMs: Long?, val location: String? = null, val bareDate: Boolean = false)
@@ -43,14 +49,8 @@ fun addressOf(state: kotlinx.serialization.json.JsonObject, to: String, via: Str
 }
 
 /** Why [to] cannot be reached on [via], for the note the owner reads. */
-fun noAddress(state: kotlinx.serialization.json.JsonObject, to: String, via: String): String {
-    val email = bodyOf(state, to)?.let { Brief.text(it, "email") }?.takeIf { it.isNotBlank() }
-    return when {
-        via == "mail" && email != null ->
-            "$to has an email address and no ship; auspex carries mail between ships and does not bridge to internet email"
-        else -> "$to has no ship on record"
-    }
-}
+fun noAddress(state: kotlinx.serialization.json.JsonObject, to: String, via: String): String =
+    if (via in TALON_CHANNELS) "$to has no ship on record" else "$to is not reachable on $via from here"
 
 private fun bodyOf(state: kotlinx.serialization.json.JsonObject, id: String) =
     Brief.bodies(state).firstOrNull { (it["id"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull == id }

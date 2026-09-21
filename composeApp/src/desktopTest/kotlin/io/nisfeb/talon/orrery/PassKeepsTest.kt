@@ -109,7 +109,7 @@ class PassKeepsTest {
         val db = db(dir)
         val scope = CoroutineScope(SupervisorJob())
         val action = """{"id":"a1","kind":"message","title":"Tell Rose","status":"approved","by":"generator",
-            "about":["person/rose"],"payload":{"via":"mail","to":"person/rose","text":"on my way"}}"""
+            "about":["person/rose"],"payload":{"via":"chat","to":"person/rose","text":"on my way"}}"""
         var recordedWhenSent: String? = null
         var sends = 0
         try {
@@ -127,13 +127,6 @@ class PassKeepsTest {
                         }
                         "status=claimed" in url -> """[{"id":"a1","status":"claimed","history":[{"status":"claimed","by":"mine"}]}]"""
                         "/apps/orrery/api/actions" in url -> "[$action]"
-                        "/apps/auspex/api/send" in url -> {
-                            sends++
-                            // What this install had written down at the moment
-                            // the message went out.
-                            recordedWhenSent = db.orrerySent().get("~zod", "sent:a1")?.value
-                            "{}"
-                        }
                         "/apps/calendar/window.json" in url -> """{"rows":[]}"""
                         "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
                         else -> "[]"
@@ -141,7 +134,12 @@ class PassKeepsTest {
                     respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
                 },
             )
-            OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
+            // The DM is the send, and what was written down when it went.
+            val dm: suspend (String, String) -> Unit = { _, _ ->
+                sends++
+                recordedWhenSent = db.orrerySent().get("~zod", "sent:a1")?.value
+            }
+            OrreryRepo(http, scope, db, "test", bareClient = http, sendDm = dm).pass("https://ship.test", "~zod")
             assertEquals(1, sends, "sent once")
             assertEquals(
                 OrreryRepo.UNCONFIRMED,
@@ -151,7 +149,7 @@ class PassKeepsTest {
             assertNotNull(db.orrerySent().get("~zod", "sent:a1"), "and it stands afterwards")
 
             // The same listing again: it is reported, not sent again.
-            OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
+            OrreryRepo(http, scope, db, "test", bareClient = http, sendDm = dm).pass("https://ship.test", "~zod")
             assertEquals(1, sends, "and never twice")
         } finally {
             scope.cancel()
@@ -166,16 +164,14 @@ class PassKeepsTest {
         val db = db(dir)
         val scope = CoroutineScope(SupervisorJob())
         val action = """{"id":"a1","kind":"message","title":"Tell Rose","status":"approved","by":"generator",
-            "about":["person/rose"],"payload":{"via":"mail","to":"person/rose","text":"on my way"}}"""
+            "about":["person/rose"],"payload":{"via":"chat","to":"person/rose","text":"on my way"}}"""
         try {
             db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
             db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
             val http = HttpClient(
                 MockEngine { req ->
                     val url = req.url.toString()
-                    if ("/apps/auspex/api/send" in url) {
-                        respond("no", io.ktor.http.HttpStatusCode.InternalServerError)
-                    } else {
+                    run {
                         val body = when {
                             "/apps/orrery/api/state" in url -> state
                             req.method == HttpMethod.Post && "/apps/orrery/api/actions/a1" in url -> {
@@ -192,8 +188,68 @@ class PassKeepsTest {
                     }
                 },
             )
-            OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
+            OrreryRepo(
+                http, scope, db, "test", bareClient = http,
+                sendDm = { _, _ -> error("the ship would not take the DM") },
+            ).pass("https://ship.test", "~zod")
             assertNull(db.orrerySent().get("~zod", "sent:a1"), "nothing stands for a message that did not go")
+        } finally {
+            scope.cancel()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the executor claims chat and nothing else`() = runBlocking {
+        val dir = createTempDirectory(prefix = "talon-pass-one-channel-").toFile()
+        val db = db(dir)
+        val scope = CoroutineScope(SupervisorJob())
+        // Everything the ship carries out itself as of orrery 34, all
+        // approved and all waiting: a task, a calendar action, and
+        // messages by telegram and by mail. Talon touches none of them.
+        val theirs = listOf(
+            """{"id":"t1","kind":"task","title":"Book the ferry","status":"approved","by":"generator","about":[],"payload":{}}""",
+            """{"id":"c1","kind":"calendar","title":"Dinner","status":"approved","by":"reader","about":[],
+                "payload":{"title":"Dinner","starts":"2026-10-02T00:00:00Z"}}""",
+            """{"id":"m1","kind":"message","title":"Tell Rose","status":"approved","by":"generator","about":["person/rose"],
+                "payload":{"via":"telegram","to":"person/rose","text":"on my way"}}""",
+            """{"id":"m2","kind":"message","title":"Tell Rose","status":"approved","by":"generator","about":["person/rose"],
+                "payload":{"via":"mail","to":"person/rose","text":"on my way"}}""",
+        )
+        val posted = mutableListOf<String>()
+        var dms = 0
+        try {
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
+            db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
+            val http = HttpClient(
+                MockEngine { req ->
+                    val url = req.url.toString()
+                    if (req.method == HttpMethod.Post) posted += url
+                    val body = when {
+                        "/apps/orrery/api/state" in url -> state
+                        "/apps/orrery/api/actions" in url -> "[" + theirs.joinToString(",") + "]"
+                        "/apps/calendar/window.json" in url -> """{"rows":[]}"""
+                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
+                        else -> "[]"
+                    }
+                    respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                },
+            )
+            OrreryRepo(
+                http, scope, db, "test", bareClient = http,
+                sendDm = { _, _ -> dms++ },
+            ).pass("https://ship.test", "~zod")
+
+            assertEquals(0, dms, "nothing was sent: not one of these is a chat message")
+            assertTrue(
+                posted.none { "/apps/orrery/api/actions/" in it },
+                "no action was claimed or moved:\n" + posted.joinToString("\n"),
+            )
+            assertTrue(
+                posted.none { "/apps/calendar" in it },
+                "and nothing was written to the calendar:\n" + posted.joinToString("\n"),
+            )
         } finally {
             scope.cancel()
             db.close()
