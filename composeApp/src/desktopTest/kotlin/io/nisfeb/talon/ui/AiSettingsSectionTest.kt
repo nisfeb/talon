@@ -153,12 +153,12 @@ class AiSettingsSectionTest {
         onNodeWithText("No plan: you pay as you go.").assertExists()
         onNodeWithText("Requests go through the vendor's ship.").assertExists()
         onNodeWithText("1 models. Paid through your ship.").assertExists()
-        onNodeWithText("Subscribe").assertExists()
+        onNodeWithText("Subscribe: Starter, $10.00 a month for $12.00 of credit").assertExists()
         onNodeWithText("Top up").performClick()
         waitForIdle()
-        onNodeWithText("Five dollars: $5.00 for $5.00 of credit").assertExists()
-        onNodeWithText("The smallest the vendor takes is $5.00.").assertExists()
-        // Nothing typed is nothing to continue with.
+        onNodeWithText("$5.00").assertExists()
+        onNodeWithText("In dollars. The smallest the vendor takes is $5.00.").assertExists()
+        // Nothing chosen is nothing to continue with.
         onNodeWithText("Continue").assertIsNotEnabled()
     }
 

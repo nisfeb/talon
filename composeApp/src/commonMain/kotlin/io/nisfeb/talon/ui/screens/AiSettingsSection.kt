@@ -420,6 +420,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     val refreshing by (repo?.refreshing ?: noBusy).collectAsState()
     var note by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var buying by remember { mutableStateOf(false) }
+    var subscribing by remember { mutableStateOf<Plan?>(null) }
     var confirmCancel by remember { mutableStateOf(false) }
     var changingVendor by remember { mutableStateOf(false) }
     var vendorTyped by remember { mutableStateOf("") }
@@ -487,7 +488,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         OutlinedButton(enabled = repo != null && where == ArmillaryAvailability.PRESENT, onClick = { buying = true }) { Text("Top up") }
         if (subscription != null && account?.subscriptionActive != true) {
-            TextButton(enabled = repo != null, onClick = { buy("stripe", subscription.id, null) }) { Text("Subscribe") }
+            TextButton(enabled = here, onClick = { subscribing = subscription; buying = true }) { Text(subscribeLabel(subscription)) }
         }
         if (account?.subscriptionActive == true) {
             TextButton(onClick = { confirmCancel = true }) { Text("Cancel subscription") }
@@ -501,8 +502,9 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
 
     if (buying) TopUpSheet(
         plans = plans,
-        onDismiss = { buying = false },
-        onBuy = { rail, plan, amountMicro -> buying = false; buy(rail, plan, amountMicro) },
+        subscribing = subscribing,
+        onDismiss = { buying = false; subscribing = null },
+        onBuy = { rail, plan, amountMicro -> buying = false; subscribing = null; buy(rail, plan, amountMicro) },
     )
     if (confirmCancel) AlertDialog(
         onDismissRequest = { confirmCancel = false },
@@ -542,48 +544,91 @@ private fun IntroducingLine() {
 private const val INTRODUCING_MS = 60_000L
 
 /**
- * The top-up sheet: the vendor's own top-up plans as buttons, any other
- * amount in dollars, and the rail. Bitcoin is the vendor's BTCPay
- * Server, card is their Stripe account; neither is ours.
+ * The top-up sheet: the vendor's sizes as buttons, any other amount in
+ * dollars, and the rail. Bitcoin is the vendor's BTCPay Server, card is
+ * their Stripe account; neither is ours. A subscription comes through
+ * the same sheet with its plan fixed and the card rail alone, since
+ * subscriptions are card only.
  */
 @Composable
-private fun TopUpSheet(plans: List<Plan>, onDismiss: () -> Unit, onBuy: (rail: String, plan: String?, amountMicro: Long?) -> Unit) {
-    val topUps = plans.filter { it.kind == "topup" }
-    val minMicro = topUps.minOfOrNull { it.priceMicro }?.takeIf { it > 0 } ?: DEFAULT_MIN_TOPUP
+private fun TopUpSheet(
+    plans: List<Plan>,
+    subscribing: Plan?,
+    onDismiss: () -> Unit,
+    onBuy: (rail: String, plan: String?, amountMicro: Long?) -> Unit,
+) {
+    val sizes = topUpSizes(plans)
+    val minMicro = minTopUp(plans)
     var rail by remember { mutableStateOf("stripe") }
+    var size by remember { mutableStateOf<Plan?>(null) }
     var amount by remember { mutableStateOf("") }
     val custom = dollarsToMicro(amount)
+    val chosen = subscribing != null || size != null || (custom != null && custom >= minMicro)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Top up") },
+        title = { Text(if (subscribing != null) "Subscribe" else "Top up") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (subscribing != null) {
+                    Text(subscriptionLine(subscribing), style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    if (sizes.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        sizes.forEach { plan ->
+                            val label = @Composable { Text(money(plan.priceMicro)) }
+                            if (size?.id == plan.id) Button(onClick = { size = null }, modifier = Modifier.weight(1f), content = { label() })
+                            else OutlinedButton(onClick = { size = plan; amount = "" }, modifier = Modifier.weight(1f), content = { label() })
+                        }
+                    }
+                    OutlinedTextField(
+                        value = amount, onValueChange = { amount = it; if (it.isNotBlank()) size = null },
+                        label = { Text("Another amount") },
+                        placeholder = { Text(money(minMicro).removePrefix("$")) },
+                        singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    )
+                    Quiet("In dollars. The smallest the vendor takes is " + money(minMicro) + ".")
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("stripe" to "Card", "btcpay" to "Bitcoin").forEach { (id, label) ->
+                    val rails = if (subscribing != null) listOf("stripe" to "Card") else listOf("stripe" to "Card", "btcpay" to "Bitcoin")
+                    rails.forEach { (id, label) ->
                         if (rail == id) Button(onClick = { rail = id }) { Text(label) }
                         else OutlinedButton(onClick = { rail = id }) { Text(label) }
                     }
                 }
-                topUps.forEach { plan ->
-                    OutlinedButton(onClick = { onBuy(rail, plan.id, null) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(plan.name + ": " + money(plan.priceMicro) + " for " + money(plan.creditMicro) + " of credit")
-                    }
-                }
-                OutlinedTextField(
-                    value = amount, onValueChange = { amount = it },
-                    label = { Text("Any other amount, in dollars") },
-                    placeholder = { Text(money(minMicro).removePrefix("$")) },
-                    singleLine = true, modifier = Modifier.fillMaxWidth(),
-                )
-                Quiet("The smallest the vendor takes is " + money(minMicro) + ".")
             }
         },
         confirmButton = {
-            TextButton(enabled = custom != null && custom >= minMicro, onClick = { onBuy(rail, null, custom) }) { Text("Continue") }
+            TextButton(enabled = chosen, onClick = {
+                when {
+                    subscribing != null -> onBuy("stripe", subscribing.id, null)
+                    size != null -> onBuy(rail, size!!.id, null)
+                    else -> onBuy(rail, null, custom)
+                }
+            }) { Text("Continue") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Not now") } },
     )
 }
+
+/** The vendor's top-up plans as sizes, cheapest first. */
+internal fun topUpSizes(plans: List<Plan>): List<Plan> =
+    plans.filter { it.kind == "topup" }.sortedBy { it.priceMicro }
+
+/** The smallest amount the vendor takes: its cheapest size, else five dollars. */
+internal fun minTopUp(plans: List<Plan>): Long =
+    topUpSizes(plans).firstOrNull()?.priceMicro?.takeIf { it > 0 } ?: DEFAULT_MIN_TOPUP
+
+/** "Talon Pro, $10.00 a month for $12.00 of credit". */
+internal fun subscriptionLine(plan: Plan): String {
+    val every = when (plan.interval) {
+        "year" -> " a year"
+        "month" -> " a month"
+        else -> ""
+    }
+    return plan.name + ", " + money(plan.priceMicro) + every + " for " + money(plan.creditMicro) + " of credit"
+}
+
+/** What the card's Subscribe button says. */
+internal fun subscribeLabel(plan: Plan): String = "Subscribe: " + subscriptionLine(plan)
 
 /** Five dollars, which is armillary's own default smallest top-up. */
 private const val DEFAULT_MIN_TOPUP = 5_000_000L
