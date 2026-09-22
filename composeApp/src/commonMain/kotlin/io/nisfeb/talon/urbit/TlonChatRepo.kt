@@ -1344,12 +1344,22 @@ class TlonChatRepo(
      * Invite one or more ships to a group. Works for all privacy
      * levels — the ship gets an invite token in `admissions.invited`.
      */
+    /**
+     * Invite a ship to a group.
+     *
+     * Confirmed, because the answer goes straight to a person as
+     * "invited". A nack already threw; silence used to read as yes,
+     * and silence is what one wedged ames flow to one peer looks
+     * like, so the person was told it had gone and went looking at
+     * the other ship.
+     */
     suspend fun inviteToGroup(flag: String, ship: String): Boolean {
         val ch = channel ?: error("not connected")
         ch.poke(
             app = "groups",
             mark = "group-action-4",
             payload = groupAction4InviteAdd(flag, ship),
+            confirm = true,
         )
         return true
     }
@@ -1616,6 +1626,10 @@ class TlonChatRepo(
             app = "groups",
             mark = "group-action-4",
             payload = groupAction4(flag, aGroup),
+            // Every one of these is an admin acting on somebody else's
+            // membership and being shown the result: a kick, a ban, an
+            // ask resolved. None of them may report a silence as done.
+            confirm = true,
         )
     }
 

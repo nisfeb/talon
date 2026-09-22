@@ -135,6 +135,12 @@ fun InviteToGroupDialog(
  * to the owner of the group when the ship had refused for another reason.
  */
 fun inviteFailure(e: Throwable): String = when {
+    // Silence is its own answer, and the one worth wording carefully:
+    // the invite may well have gone. Saying it failed would send the
+    // owner to invite again; saying it worked is what left them
+    // asking the other ship why nothing arrived.
+    e is io.nisfeb.talon.urbit.PokeUnacked ->
+        "Your ship did not confirm the invite. It may still have gone: check the group's members before inviting again."
     e !is io.nisfeb.talon.urbit.PokeNacked -> "Could not send the invite: ${e.message ?: "no answer from your ship"}"
     PERMISSION.containsMatchIn(e.reason) -> "The host refused it: only admins invite to this group. (${e.reason})"
     else -> "Your ship refused the invite: ${e.reason}"

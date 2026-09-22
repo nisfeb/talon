@@ -70,4 +70,18 @@ class InviteCommandTest {
         assertTrue("only admins invite" in inviteFailure(refused), inviteFailure(refused))
         assertTrue("no answer from your ship" in inviteFailure(RuntimeException()), inviteFailure(RuntimeException()))
     }
+
+    // Silence is neither a yes nor a no, and used to be read as yes.
+    // What the owner needs is to check before inviting again: an
+    // invite that did go, sent twice, is not the harm, but an owner
+    // told it went and looking at the wrong ship is.
+    @Test
+    fun `an invite the ship never answered is not called sent`() {
+        val quiet = inviteFailure(io.nisfeb.talon.urbit.PokeUnacked("groups", "group-action-4"))
+        assertTrue("did not confirm" in quiet, quiet)
+        assertTrue("may still have gone" in quiet, quiet)
+        assertTrue("check the group's members" in quiet, quiet)
+        // Not worded as a refusal: nothing refused it.
+        assertTrue("refused" !in quiet, quiet)
+    }
 }

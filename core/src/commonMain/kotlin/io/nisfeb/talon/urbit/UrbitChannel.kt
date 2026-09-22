@@ -236,6 +236,22 @@ class UrbitChannel internal constructor(
         mark: String,
         payload: JsonElement,
         onShip: String = ship,
+        /**
+         * Whether the ship going quiet is a failure.
+         *
+         * A poke is answered twice: eyre takes it at once, and the
+         * agent's own yes or no comes back later down the channel. A
+         * no throws either way. Silence is the third answer, and for
+         * most pokes it is not worth stopping for, since the ship is
+         * busy and the write almost certainly landed.
+         *
+         * It is worth stopping for wherever somebody is about to be
+         * told the thing is done. A wedged ames flow to one peer is
+         * silence and nothing else, and "invited" over a message that
+         * never left is the report that sends people looking at the
+         * wrong ship.
+         */
+        confirm: Boolean = false,
     ): Long {
         val id = nextRequestId()
         val msg = buildJsonObject {
@@ -258,6 +274,7 @@ class UrbitChannel internal constructor(
         if (err == null && !ack.isCompleted) {
             pokeLock.withLock { pendingPokes.remove(id) }
             Log.w(TAG, "no ack for poke $id to $app/$mark within ${POKE_ACK_TIMEOUT_MS}ms")
+            if (confirm) throw PokeUnacked(app, mark)
             return id
         }
         if (err != null) throw PokeNacked(app, mark, err)
@@ -409,3 +426,17 @@ class PokeNacked(
     val mark: String,
     val reason: String,
 ) : RuntimeException("$app rejected a $mark poke: $reason")
+
+/**
+ * The ship never said either way within the wait.
+ *
+ * Raised only for a poke that asked to be confirmed. It is not proof
+ * the write failed: it is the absence of proof that it landed, which
+ * is the most that can be said before telling somebody it is done.
+ * A flow wedged to one peer looks exactly like this and like nothing
+ * else.
+ */
+class PokeUnacked(
+    val app: String,
+    val mark: String,
+) : RuntimeException("$app never answered a $mark poke: it may or may not have landed")
