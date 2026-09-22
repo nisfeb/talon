@@ -125,6 +125,7 @@ fun GroupInfoPane(
                         enabled = !inviteBusy,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    io.nisfeb.talon.ui.ShipSuggestions(inviteShip, onPick = { inviteShip = it; inviteResult = null }, Modifier.padding(top = 4.dp))
                     val landed = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
                     (io.nisfeb.talon.ui.NameToShip.hint(invited, inviteShip.trim())
                         ?: landed?.takeIf { it != inviteShip.trim() }?.let { "Invites ${io.nisfeb.talon.ui.shipHandle(it)}." })

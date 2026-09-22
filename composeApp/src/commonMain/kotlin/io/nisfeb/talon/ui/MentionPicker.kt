@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -93,6 +94,49 @@ fun MentionPicker(
             }
         }
     }
+}
+
+/**
+ * The @ mention picker, under any box a ship is typed into: an invite,
+ * a new contact, a To line. It finds a ship by @p, word name, nickname
+ * or pet name, as a mention does; those boxes used to take whichever
+ * of those you knew, and offer none. With [separator] the box takes
+ * several: the name being typed at the end is the one suggested for,
+ * and a pick replaces it and adds the separator for the next.
+ */
+@Composable
+fun ShipSuggestions(
+    text: String,
+    onPick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    separator: String? = null,
+) {
+    val (head, typed) = shipDraft(text, several = separator != null)
+    // The signed-in ship's contacts, as the last screen to read them
+    // left them; the people with a name of yours first, since the
+    // table holds every peer ever seen and the list stops at six.
+    val map = LastContactMap.value
+    val ships = remember(map) { map.contacts.sortedByDescending { it.nickname != null }.map { it.ship } }
+    val suggestions = remember(typed, ships) {
+        if (typed.isEmpty()) emptyList()
+        // Gone once the box holds exactly the one ship it offers.
+        else suggestionsFor(typed, map, ships).takeUnless { it.size == 1 && it[0].ship == "~$typed" }.orEmpty()
+    }
+    MentionPicker(
+        suggestions,
+        onPick = { ship -> onPick(if (separator == null) ship else head + ship + separator) },
+        modifier = modifier,
+    )
+}
+
+/**
+ * A ship box's text as what stays and the name being typed: all of it
+ * for a box of one ship, the last of several otherwise. The name comes
+ * without its sig or @, which [suggestionsFor] matches without.
+ */
+internal fun shipDraft(text: String, several: Boolean): Pair<String, String> {
+    val head = if (several) text.substring(0, text.lastIndexOfAny(charArrayOf(',', ' ', '\n')) + 1) else ""
+    return head to text.substring(head.length).trim().removePrefix("@").removePrefix("~")
 }
 
 data class Suggestion(

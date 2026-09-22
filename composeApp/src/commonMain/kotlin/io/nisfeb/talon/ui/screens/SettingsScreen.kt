@@ -1288,8 +1288,11 @@ private fun ShipListEditor(
     onRemove: (String) -> Unit,
 ) {
     var draft by remember { mutableStateOf("") }
-    // A @p, or the twelve-word name a comet goes by.
-    val landed = remember(draft) { io.nisfeb.talon.ui.NameToShip.one(draft) }
+    // A @p, a comet's word name, or the name of somebody known.
+    val landed = remember(draft) {
+        val map = io.nisfeb.talon.ui.LastContactMap.value
+        io.nisfeb.talon.ui.NameToShip.one(draft, map.contacts.map { it.ship }, map::nickname)
+    }
     val candidate = landed ?: draft.trim().let { if (it.startsWith("~")) it else "~$it" }
     val valid = landed != null
 
@@ -1331,6 +1334,7 @@ private fun ShipListEditor(
             onClick = { onAdd(candidate); draft = "" },
         ) { Text("Add") }
     }
+    io.nisfeb.talon.ui.ShipSuggestions(draft, onPick = { draft = it }, Modifier.padding(top = 4.dp))
 }
 
 @Composable

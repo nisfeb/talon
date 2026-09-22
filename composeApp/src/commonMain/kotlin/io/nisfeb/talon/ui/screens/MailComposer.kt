@@ -431,6 +431,13 @@ fun MailComposer(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().focusRequester(toFocus),
             )
+            // A pick is a recipient at once, as a chip, with whatever
+            // else was typed before it.
+            io.nisfeb.talon.ui.ShipSuggestions(
+                edits.recipientDraft,
+                onPick = { edits.recipientDraft = it; commitRecipients() },
+                separator = " ",
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { commitRecipients() }) { Text("Add recipient") }
                 // A list is a name for a set of ships, and the name never

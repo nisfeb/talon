@@ -171,6 +171,7 @@ private fun NewRule(onSave: (Rule) -> Unit) {
                 modifier = Modifier.weight(1f),
             )
         }
+        io.nisfeb.talon.ui.ShipSuggestions(from, onPick = { from = it })
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = label,
@@ -245,6 +246,7 @@ private fun NewList(onSave: (MailingList) -> Unit) {
                 modifier = Modifier.weight(1f),
             )
         }
+        io.nisfeb.talon.ui.ShipSuggestions(members, onPick = { members = it }, separator = " ")
         problem?.let {
             Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
         }

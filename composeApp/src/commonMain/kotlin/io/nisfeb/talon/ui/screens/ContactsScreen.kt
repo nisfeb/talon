@@ -136,6 +136,7 @@ fun ContactsScreen(
                     },
                 ) { Text("Add") }
             }
+            io.nisfeb.talon.ui.ShipSuggestions(newPatp, onPick = { newPatp = it }, Modifier.padding(top = 4.dp))
             if (isValidPatp && alreadyInBook) {
                 Text(
                     "Already in your contacts.",

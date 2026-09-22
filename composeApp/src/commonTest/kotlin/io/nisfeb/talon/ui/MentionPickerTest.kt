@@ -44,4 +44,15 @@ class MentionPickerTest {
         assertNull(detectMentionQuery("mail@accept", 11))
         assertNull(detectMentionQuery("@acc,ept", 8))
     }
+
+    // Every box a ship is typed into suggests as a mention does. A box
+    // of several suggests for the last name, and keeps the ones before.
+    @Test
+    fun `a ship box suggests for the name being typed`() {
+        assertEquals("" to "sampel", shipDraft("~sampel", several = false))
+        assertEquals("" to "sam", shipDraft(" @sam ", several = false))
+        assertEquals("~zod, " to "samp", shipDraft("~zod, ~samp", several = true))
+        assertEquals("~zod ~bus " to "", shipDraft("~zod ~bus ", several = true))
+        assertEquals("" to "zod", shipDraft("~zod", several = true))
+    }
 }

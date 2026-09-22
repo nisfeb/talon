@@ -902,6 +902,7 @@ fun CalendarScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("The invite goes as text with an .ics file any calendar imports.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(value = to, onValueChange = { to = it }, label = { Text("To, ships separated by commas") }, placeholder = { Text("~sampel-palnet, ~zod") }, modifier = Modifier.fillMaxWidth())
+                    io.nisfeb.talon.ui.ShipSuggestions(to, onPick = { to = it }, separator = ", ")
                 }
             },
             confirmButton = {
@@ -1431,6 +1432,7 @@ private fun CalendarsDialog(
                                 placeholder = { Text("~sampel-palnet, or a word name") }, singleLine = false, maxLines = 6,
                                 modifier = Modifier.fillMaxWidth(),
                             )
+                            io.nisfeb.talon.ui.ShipSuggestions(shareShip, onPick = { shareShip = it })
                             val ship = io.nisfeb.talon.ui.NameToShip.one(shareShip)
                                 ?: shareShip.trim().let { if (it.isNotEmpty() && !it.startsWith("~")) "~$it" else it }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
