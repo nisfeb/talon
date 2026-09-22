@@ -103,6 +103,60 @@ class PassKeepsTest {
         }
     }
 
+    // A claim confirmed in the tray waited in memory for the next pass:
+    // a process killed first lost it, after it had left the tray. And a
+    // failed pass put back whatever it carried, 4xx included, so a claim
+    // the ship refused went first in every pass after and wedged it.
+    @Test
+    fun `a confirmed claim waits in the table until the ship takes it, and a refusal ends it`() = runBlocking {
+        val dir = createTempDirectory(prefix = "talon-pass-confirm-").toFile()
+        val db = db(dir)
+        val scope = CoroutineScope(SupervisorJob())
+        var answer = 503
+        var observed = 0
+        try {
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
+            db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
+            db.orreryNoticed().insertIfNew(
+                io.nisfeb.talon.data.OrreryNoticedEntity(
+                    id = "n1", ship = "~zod", subject = "person/rose", attr = "location", valueJson = "\"the shop\"", atMs = 1,
+                    untilMs = null, conf = 70, sourceKind = "talon-dm", sourceId = "talon://chat/~sampel-palnet?id=1", bodyJson = null,
+                    whom = "~sampel-palnet", postId = "1", snippet = "at the shop", state = OrreryRepo.CONFIRMING, createdMs = 1,
+                ),
+            )
+            val http = HttpClient(
+                MockEngine { req ->
+                    val url = req.url.toString()
+                    if ("/api/observe" in url) {
+                        observed++
+                        return@MockEngine respond("no", io.ktor.http.HttpStatusCode.fromValue(answer))
+                    }
+                    val body = when {
+                        "/apps/orrery/api/state" in url -> state
+                        "/apps/calendar/window.json" in url -> """{"rows":[]}"""
+                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
+                        else -> "[]"
+                    }
+                    respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                },
+            )
+            suspend fun pass() = OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
+            pass()
+            assertEquals(1, observed)
+            assertEquals(listOf("n1"), db.orreryNoticed().confirming("~zod").map { it.id }, "a busy ship's 503 leaves it waiting")
+            answer = 400
+            pass()
+            assertEquals(2, observed, "sent again on the next pass")
+            assertEquals(emptyList(), db.orreryNoticed().confirming("~zod"), "a 400 settles it")
+            pass()
+            assertEquals(2, observed, "and a refused claim is not sent a third time")
+        } finally {
+            scope.cancel()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
+
     @Test
     fun `an approved message is written down before it is sent`() = runBlocking {
         val dir = createTempDirectory(prefix = "talon-pass-send-").toFile()

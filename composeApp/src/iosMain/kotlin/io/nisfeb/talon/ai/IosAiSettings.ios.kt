@@ -101,7 +101,7 @@ class IosAiSettings : AiSettingsRepository {
     }
 
     override fun setBraveApiKey(key: String) {
-        commit(_state.value.copy(braveApiKey = key), fireChange = true)
+        commit(_state.value.withBraveKey(key, io.nisfeb.talon.util.nowMs()), fireChange = true)
     }
 
     override fun setSttApiKey(key: String) {

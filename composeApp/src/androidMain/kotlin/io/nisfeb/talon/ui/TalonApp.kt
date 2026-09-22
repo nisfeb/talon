@@ -471,6 +471,7 @@ fun TalonApp(
             action = action,
             orrery = orreryRepo,
             onClose = { openAction = null },
+            twentyFourHour = app.uiSettings.homeTwentyFourHour.collectAsState().value,
         )
     }
     val calendarInstall: suspend () -> Result<Unit> = remember(app, calendarRepo) {
@@ -2036,7 +2037,7 @@ fun TalonApp(
                     invites = app.repo.invitesFlow.collectAsState().value
                         ?.map { it.flag }.orEmpty(),
                     onOpenInvites = { homeOpen = false; invitesOpen = true },
-                    actions = io.nisfeb.talon.ui.newActions(orreryActions),
+                    actions = io.nisfeb.talon.ui.newActions(orreryActions, app.uiSettings.homeTwentyFourHour.collectAsState().value),
                     // The chip was drawn from a listing that may have moved
                     // on. A tap that found nothing used to do nothing.
                     onOpenAction = { id ->
@@ -2085,6 +2086,7 @@ fun TalonApp(
                         generator = orreryRepo.generator.collectAsState().value?.let {
                             io.nisfeb.talon.orrery.generatorLine(it, io.nisfeb.talon.util.nowMs(), kotlinx.datetime.TimeZone.currentSystemDefault())
                         },
+                twentyFourHour = app.uiSettings.homeTwentyFourHour.collectAsState().value,
             ) { a -> openAction = a }
 
             openGroupFlag != null -> GroupHomeScreen(

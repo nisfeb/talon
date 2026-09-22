@@ -223,7 +223,7 @@ object Brief {
             val bits = listOfNotNull(
                 a.kind,
                 a.about.takeIf { it.isNotEmpty() }?.joinToString(", ", prefix = "about ") { names[it] ?: it },
-                a.due?.let(::parseIsoUtc)?.let { "due " + whenText(it, zone) },
+                a.due?.let { dueText(it, zone) }?.let { "due $it" },
             )
             lines += "     " + bits.joinToString(", ")
             a.payload["why"].asText()?.takeIf { it.isNotBlank() }?.let { lines += "     Why: $it" }
@@ -231,11 +231,24 @@ object Brief {
         return lines to tags
     }
 
-    /** "Thu 24 Sep 22:00" in [zone]: how the brief says when, and so how every screen does. */
-    fun whenText(ms: Long, zone: TimeZone): String {
+    /**
+     * "Thu 24 Sep 22:00" in [zone]: how the brief says when, and so how
+     * every screen does, with the clock as the owner reads it there.
+     */
+    fun whenText(ms: Long, zone: TimeZone, twentyFourHour: Boolean = true): String {
         val t = Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone)
-        return titled(t.dayOfWeek.name).take(3) + " " + t.dayOfMonth + " " + titled(t.month.name).take(3) + " " + clock(ms, zone)
+        return dayText(t.date) + " " + io.nisfeb.talon.ui.SkyClock.clockLabel(t.hour * 60 + t.minute, twentyFourHour)
     }
+
+    private fun dayText(d: LocalDate) = titled(d.dayOfWeek.name).take(3) + " " + d.dayOfMonth + " " + titled(d.month.name).take(3)
+
+    /**
+     * An action's due as [whenText] says it, or "Thu 24 Sep" for a day
+     * with no time, which an instant parse drops; null for neither.
+     */
+    fun dueText(due: String, zone: TimeZone, twentyFourHour: Boolean = true): String? =
+        parseIsoUtc(due)?.let { whenText(it, zone, twentyFourHour) }
+            ?: runCatching { LocalDate.parse(due.trim()) }.getOrNull()?.let(::dayText)
 
     // ---- part three: suggestions ------------------------------------------
 

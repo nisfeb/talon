@@ -36,6 +36,8 @@ fun OrreryActionDialog(
     action: OrreryAction,
     orrery: OrreryRepo,
     onClose: () -> Unit,
+    /** The owner's clock, from the 12 or 24 hour setting. */
+    twentyFourHour: Boolean = false,
 ) {
     // Why not, in the owner's words, only if they give it: it teaches
     // the generator what they do not want.
@@ -74,7 +76,7 @@ fun OrreryActionDialog(
                     // "The analyst", as the notification says: the
                     // assistant is the one you talk to, and did not.
                     action.kind + " proposed by " + action.by.ifBlank { "the analyst" } +
-                        (action.due?.let(::parseIsoUtc)?.let { ", due " + io.nisfeb.talon.orrery.Brief.whenText(it, kotlinx.datetime.TimeZone.currentSystemDefault()) } ?: ""),
+                        (action.due?.let { io.nisfeb.talon.orrery.Brief.dueText(it, kotlinx.datetime.TimeZone.currentSystemDefault(), twentyFourHour) }?.let { ", due $it" } ?: ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

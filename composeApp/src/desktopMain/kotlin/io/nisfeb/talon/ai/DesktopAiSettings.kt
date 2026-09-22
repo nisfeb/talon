@@ -154,7 +154,7 @@ class DesktopAiSettings : AiSettingsRepository {
     }
 
     override fun setBraveApiKey(key: String) {
-        val cfg = _state.value.copy(braveApiKey = key)
+        val cfg = _state.value.withBraveKey(key, io.nisfeb.talon.util.nowMs())
         persist(cfg)
         onStateChange?.invoke(cfg, false)
     }

@@ -66,8 +66,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
     }
 
     override fun setBraveApiKey(key: String) {
-        prefs.edit().putString(KEY_BRAVE_API_KEY, key).apply()
-        _state.value = _state.value.copy(braveApiKey = key)
+        persistAll(_state.value.withBraveKey(key, io.nisfeb.talon.util.nowMs()))
         onStateChange?.invoke(_state.value, false)
     }
 
@@ -149,8 +148,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putString(KEY_STT_API_KEY, config.sttApiKey)
             .putLong(KEY_STT_REMOVED_AT, config.sttApiKeyRemovedAtMs)
             .putLong(KEY_STT_SET_AT, config.sttApiKeySetAtMs)
-            .putLong(KEY_API_REMOVED_AT, config.apiKeyRemovedAtMs)
-            .putLong(KEY_API_SET_AT, config.apiKeySetAtMs)
+            .putString(KEY_REVOKED, PROFILE_JSON.encodeToString(REVOKED, config.revokedKeys))
             .putString(KEY_PRIVATE_BASE_URL, config.privateBaseUrl?.takeIf { it.isNotBlank() })
             .putString(KEY_PRIVATE_MODEL, config.privateModel?.takeIf { it.isNotBlank() })
             .putString(KEY_PRIVATE_API_KEY, config.privateApiKey)
@@ -185,8 +183,7 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .remove(KEY_FRONTIER_READS)
             .remove(KEY_STT_SET_AT)
             .remove(KEY_STT_REMOVED_AT)
-            .remove(KEY_API_SET_AT)
-            .remove(KEY_API_REMOVED_AT)
+            .remove(KEY_REVOKED)
             .remove(KEY_URBIT_KNOWLEDGE_PROMPT)
             .remove(KEY_ASSISTANT_PROMPT)
             .remove(KEY_LOOP_PROMPT)
@@ -235,8 +232,8 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             sttApiKey = prefs.getString(KEY_STT_API_KEY, "").orEmpty(),
             sttApiKeyRemovedAtMs = prefs.getLong(KEY_STT_REMOVED_AT, 0L),
             sttApiKeySetAtMs = prefs.getLong(KEY_STT_SET_AT, 0L),
-            apiKeyRemovedAtMs = prefs.getLong(KEY_API_REMOVED_AT, 0L),
-            apiKeySetAtMs = prefs.getLong(KEY_API_SET_AT, 0L),
+            revokedKeys = prefs.getString(KEY_REVOKED, null)
+                ?.let { runCatching { PROFILE_JSON.decodeFromString(REVOKED, it) }.getOrNull() }.orEmpty(),
             privateBaseUrl = prefs.getString(KEY_PRIVATE_BASE_URL, null)?.takeIf { it.isNotBlank() },
             privateModel = prefs.getString(KEY_PRIVATE_MODEL, null)?.takeIf { it.isNotBlank() },
             privateApiKey = prefs.getString(KEY_PRIVATE_API_KEY, "").orEmpty(),
@@ -339,8 +336,8 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         private const val KEY_BRAVE_API_KEY = "brave_api_key"
         private const val KEY_STT_API_KEY = "stt_api_key"
         private const val KEY_STT_SET_AT = "stt_api_key_set_at"
-        private const val KEY_API_SET_AT = "api_key_set_at"
-        private const val KEY_API_REMOVED_AT = "api_key_removed_at"
+        private const val KEY_REVOKED = "revoked_keys"
+        private val REVOKED = kotlinx.serialization.serializer<Map<String, io.nisfeb.talon.ai.KeyMark>>()
         private const val KEY_PRIVATE_BASE_URL = "private_base_url"
         private const val KEY_PRIVATE_MODEL = "private_model"
         private const val KEY_PRIVATE_API_KEY = "private_api_key"

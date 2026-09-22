@@ -169,6 +169,7 @@ class SettingsSyncImpl(
          * Nothing without a key of its own writes this entry.
          */
         internal const val AI_KEYS_ENTRY = "credentials"
+        private val REVOKED = kotlinx.serialization.serializer<Map<String, io.nisfeb.talon.ai.KeyMark>>()
 
         // Wire schema version for the ai-settings entry. v1 (no
         // marker) is everything written before rc33 — treated as
@@ -895,11 +896,8 @@ class SettingsSyncImpl(
         // make the ship's entry authoritatively key-less, and a
         // later pull (here or on a peer) then blanks a real local
         // key — the "keys not persisted" data loss. Absent ≠ empty.
-        // A removal travels as a stamp, on the transcription key's
-        // terms, so a key taken out because it leaked leaves every
-        // device and not only this one.
+        // A removal travels as a mark in revokedKeys, below.
         if (cfg.apiKey.isNotBlank()) put("apiKey", cfg.apiKey)
-        else if (cfg.apiKeyRemovedAtMs > 0L) put("apiKeyRemovedAtMs", cfg.apiKeyRemovedAtMs)
         cfg.model?.let { put("model", it) }
         cfg.baseUrl?.let { put("baseUrl", it) }
         // Brave key rides the same opt-in gate as the LLM key —
@@ -935,6 +933,9 @@ class SettingsSyncImpl(
         // Which model reads your messages: a fact about the frontier
         // provider, and meaningless without one, so it travels here.
         put("frontierReadsMessages", cfg.frontierReadsMessages)
+        // Every key taken out anywhere, so it leaves every device and
+        // no device's copy brings it back.
+        if (cfg.revokedKeys.isNotEmpty()) put("revokedKeys", Json.encodeToJsonElement(REVOKED, cfg.revokedKeys))
     }
 
     /**
@@ -1139,7 +1140,7 @@ class SettingsSyncImpl(
         )
     }
 
-    private fun applyAiEntry(obj: JsonObject) {
+    private suspend fun applyAiEntry(obj: JsonObject) {
         val current = aiSettings.state.value
         fun bool(key: String, default: Boolean) =
             obj[key].asText()?.toBooleanStrictOrNull() ?: default
@@ -1195,11 +1196,11 @@ class SettingsSyncImpl(
         // The transcription key: a real one wins; an absent one keeps ours;
         // a removal stamp newer than our own last removal clears ours.
         val remoteRemovedAt = obj["sttApiKeyRemovedAtMs"].asLong() ?: 0L
-        // The main key, the same way: a removal newer than this device's
-        // own last set or removal clears the key here.
-        val remoteKey = obj["apiKey"].asStr()?.takeIf { it.isNotBlank() }
-        val keyRemovedAt = obj["apiKeyRemovedAtMs"].asLong() ?: 0L
-        val keyRemoved = remoteKey == null && keyRemovedAt > maxOf(current.apiKeySetAtMs, current.apiKeyRemovedAtMs)
+        // Keys taken out on any device. The store keeps the marks of
+        // both sides and takes every marked key out of what it keeps,
+        // whichever side it came from (keepingCredentials).
+        val marks = (obj["revokedKeys"] as? JsonObject)
+            ?.let { runCatching { Json.decodeFromJsonElement(REVOKED, it) }.getOrNull() }.orEmpty()
         val remoteStt: String? = obj["sttApiKey"].asStr()?.takeIf { it.isNotBlank() }
             ?: if (remoteRemovedAt > current.sttApiKeyRemovedAtMs) "" else null
         val merged = if (current.syncEnabled) {
@@ -1215,7 +1216,7 @@ class SettingsSyncImpl(
             // key that then answered 401.
             val carries = obj["apiKey"].asStr()?.isNotBlank() == true ||
                 obj["braveApiKey"].asStr()?.isNotBlank() == true ||
-                obj["sttApiKey"].asStr() != null || remoteRemovedAt > 0L || keyRemovedAt > 0L
+                obj["sttApiKey"].asStr() != null || remoteRemovedAt > 0L
             if (provider != null && carries) {
                 features.copy(
                     provider = provider,
@@ -1227,8 +1228,7 @@ class SettingsSyncImpl(
                     // returns "" (non-null) for an empty string, so the
                     // ?: guard alone wouldn't catch a ship entry that was
                     // seeded with apiKey:"" by an older client.
-                    apiKey = remoteKey ?: if (keyRemoved) "" else current.apiKey,
-                    apiKeyRemovedAtMs = if (keyRemoved) keyRemovedAt else current.apiKeyRemovedAtMs,
+                    apiKey = obj["apiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.apiKey,
                     // Absent keeps what this device has, the way the
                     // keys do. Only a blank string is a real erasure.
                     model = obj["model"].asStr() ?: current.model,
@@ -1255,7 +1255,7 @@ class SettingsSyncImpl(
         // device that keeps its messages off the cloud is not told
         // otherwise by a peer.
         val gated =
-            if (current.syncEnabled) merged.copy(frontierReadsMessages = bool("frontierReadsMessages", merged.frontierReadsMessages))
+            if (current.syncEnabled) merged.copy(frontierReadsMessages = bool("frontierReadsMessages", merged.frontierReadsMessages), revokedKeys = marks)
             else merged
 
         // The profile: a new install's arrives whole, an old install's
@@ -1263,6 +1263,14 @@ class SettingsSyncImpl(
         // credentials. applyRemote's keepingCredentials holds the rest.
         val withProfile = gated.copy(savedProfile = io.nisfeb.talon.ai.profileAfterEntry(obj, current, gated))
         aiSettings.applyRemote(withProfile)
+        // A peer that had not heard of a removal yet wrote its
+        // credentials over the ones that carried it. Said again, once:
+        // the peer takes the marks from this push, and this device's
+        // next apply of its own entry finds nothing missing.
+        val kept = aiSettings.state.value.revokedKeys
+        if (current.syncEnabled && obj.containsKey("provider") && io.nisfeb.talon.ai.mergedMarks(marks, kept) != marks) {
+            runCatching { pushAiSettings() }.onFailure { Log.w(TAG, "revoked keys push failed", it) }
+        }
         // applyRemote deliberately bypasses onStateChange (anti-pingpong),
         // which is also the only rearm-on-key-change hook — so a key or
         // feature toggle arriving via sync must re-arm the loop scheduler
@@ -1625,8 +1633,8 @@ class SettingsSyncImpl(
                 // Preferences first, then the credentials, which are an
                 // entry of their own so that saving one cannot erase the
                 // other. An older ship has only the first.
-                (unwrap(entries?.get(AI_ENTRY)) as? JsonObject)?.let(::applyAiEntry)
-                (unwrap(entries?.get(AI_KEYS_ENTRY)) as? JsonObject)?.let(::applyAiEntry)
+                (unwrap(entries?.get(AI_ENTRY)) as? JsonObject)?.let { applyAiEntry(it) }
+                (unwrap(entries?.get(AI_KEYS_ENTRY)) as? JsonObject)?.let { applyAiEntry(it) }
             }
             BUCKET_WATCHWORDS -> {
                 // Apply each entry; we don't have a "deleteAllTerms" since
@@ -1762,7 +1770,7 @@ class SettingsSyncImpl(
         when (bucket) {
             BUCKET_AI_SETTINGS -> {
                 if (entry == AI_ENTRY || entry == AI_KEYS_ENTRY) {
-                    (unwrapped as? JsonObject)?.let(::applyAiEntry)
+                    (unwrapped as? JsonObject)?.let { applyAiEntry(it) }
                 }
             }
             BUCKET_WATCHWORDS -> {

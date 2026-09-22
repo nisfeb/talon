@@ -304,25 +304,80 @@ class AiProfileSyncTest {
         val without = saved.copy(providers = saved.providers.filter { it.id != MAIN_PROVIDER }, defaultModel = null)
         val after = had.withProfile(without, now = 1_000L)
         assertEquals("", after.apiKey, "not kept in the old fields")
-        assertEquals(1_000L, after.apiKeyRemovedAtMs, "and stamped, so the peers hear of it")
-        assertTrue(after.hasCredentials(), "the stamp is a thing to push, though no key is left")
+        assertTrue(after.isRevoked("sk-or"), "and marked, so the peers hear of it")
+        assertFalse(after.revokedKeys.keys.any { "sk-or" in it }, "by a fingerprint, never the key")
+        assertTrue(after.hasCredentials(), "the mark is a thing to push, though no key is left")
         assertFalse(only.copy(apiKey = "").hasCredentials(), "where nothing was, there is nothing")
         // Nothing resolves now, so no feature is handed a key at all.
         assertEquals("", after.forFeature(AiFeature.CatchUp).apiKey)
         // A key the profile never held is not a removal: it stays.
         val kept = only.copy(savedProfile = without).withProfile(without, now = 2_000L)
         assertEquals("sk-or", kept.apiKey)
-        assertEquals(0L, kept.apiKeyRemovedAtMs)
+        assertTrue(kept.revokedKeys.isEmpty())
     }
 
-    // The removal is only as good as its hold on a key set after it: a
-    // peer's old stamp must not blank a key typed here since.
+    // A blank never replaces a key, so a removal reached no other device
+    // and the first one still holding the key brought it back to all.
     @Test
-    fun `an older removal does not blank a newer key`() {
-        val arriving = base.copy(apiKey = "", apiKeyRemovedAtMs = 1_000L)
-        val setHereLater = base.copy(apiKey = "sk-new", apiKeySetAtMs = 2_000L)
-        assertEquals("sk-new", arriving.keepingCredentials(setHereLater).apiKey)
-        val setHereEarlier = base.copy(apiKey = "sk-old", apiKeySetAtMs = 500L)
-        assertEquals("", arriving.keepingCredentials(setHereEarlier).apiKey, "a newer removal wins")
+    fun `a removed key is refused from wherever it comes back`() {
+        val saved = migrateProfile(base)
+        val here = base.copy(savedProfile = saved)
+        val removedHere = here.withProfile(saved.copy(providers = saved.providers.filter { it.id != MAIN_PROVIDER }, defaultModel = null), now = 1_000L)
+        // A peer that has not heard of it pushes the key again.
+        val peer = here
+        assertEquals("", peer.keepingCredentials(removedHere).apiKey, "refused on arrival")
+        // And the peer, told, lets go of it in every field.
+        val peerAfter = removedHere.keepingCredentials(peer)
+        assertEquals("", peerAfter.apiKey)
+        assertTrue(peerAfter.savedProfile!!.keys().values.none { it == "sk-or" })
+        // Typed back in on purpose, later: it stays, here and on the peer.
+        val back = removedHere.withProfile(saved, now = 2_000L)
+        assertEquals("sk-or", back.apiKey)
+        assertFalse(back.isRevoked("sk-or"))
+        assertEquals("sk-or", back.keepingCredentials(peerAfter).apiKey, "the later word wins")
+    }
+
+    // Clearing a key without taking the provider out never reached the
+    // peers; the transcription and private keys were never cleared.
+    @Test
+    fun `a cleared key and a removed speech provider go too`() {
+        val saved = migrateProfile(base.copy(privateApiKey = "sk-private"))
+        val here = base.copy(privateApiKey = "sk-private", savedProfile = saved)
+        val cleared = here.withProfile(saved.copy(providers = saved.providers.map { if (it.id == MAIN_PROVIDER) it.copy(apiKey = "") else it }), now = 1_000L)
+        assertTrue(cleared.isRevoked("sk-or"))
+        assertEquals("", cleared.apiKey)
+        val noSpeech = here.withProfile(saved.copy(providers = saved.providers.filter { it.id != SPEECH_PROVIDER && it.id != PRIVATE_PROVIDER }), now = 3_000L)
+        assertEquals("", noSpeech.sttApiKey)
+        assertEquals(3_000L, noSpeech.sttApiKeyRemovedAtMs, "stamped as older installs read it")
+        assertEquals("", noSpeech.privateApiKey)
+    }
+
+    // Armillary's key is minted for one device. Made the default, it was
+    // copied into the old fields, which travel to the ship and every peer.
+    @Test
+    fun `an Armillary default keeps its key off the old fields`() {
+        val minted = AiProvider(ARMILLARY_PROVIDER, ProviderKind.Armillary, "Armillary", baseUrl = "https://openrouter.ai/api/v1", apiKey = "sk-minted")
+        val p = migrateProfile(base).let { it.copy(providers = it.providers + minted, defaultModel = ModelRef(ARMILLARY_PROVIDER, "")) }
+        // As a build before this left it: the minted key in the main field.
+        val after = base.copy(apiKey = "sk-minted", savedProfile = p).withProfile(p, now = 1_000L)
+        assertEquals("", after.apiKey, "taken back out where an older build put it")
+        assertFalse(after.isRevoked("sk-minted"), "and not revoked: it still works here")
+        assertTrue("sk-minted" !in p.keys().values)
+    }
+
+    // Transcription is this device's own, but the whole profile arriving
+    // carried it, so a phone with no speech model turned it off here.
+    @Test
+    fun `transcription stays as this device has it`() {
+        val here = migrateProfile(base)
+        assertTrue(here.isOn(AiFeature.Transcription))
+        val phone = here.copy(features = here.features + (AiFeature.Transcription to FeatureSetting(false))).forSync()
+        val profile = Json.encodeToJsonElement(AiProfile.serializer(), phone) as JsonObject
+        for (e in listOf(
+            entry("schemaVersion" to "2", "apiKey" to "sk-or", "profile" to profile),
+            entry("schemaVersion" to "2", "apiKey" to "sk-or", "profile" to profile, "switches" to here.switches()),
+        )) {
+            assertTrue(profileAfterEntry(e, base.copy(savedProfile = here), base)!!.isOn(AiFeature.Transcription))
+        }
     }
 }

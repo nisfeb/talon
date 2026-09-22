@@ -125,10 +125,11 @@ class OrreryRepo(
     private var api: OrreryApi? = null
     // Coroutines only touch this, so a mutex is the whole of the guard
     // (commonMain has no synchronized: iOS is native).
-    private val pending = mutableListOf<Facts>()
     private val calls = mutableListOf<((String, String?) -> String) -> Facts>()
     private val transcripts = mutableListOf<Pair<String, List<Spoken>>>()
     private val pendingLock = Mutex()
+    /** The ship the queues hold words for. Under [pendingLock]. */
+    private var queuedFor: String? = null
     // The pass and an answer can both reach the mirror; one at a time,
     // or both see no todo and each make one.
     private val mirrorLock = Mutex()
@@ -338,6 +339,22 @@ class OrreryRepo(
         _availability.value = OrreryAvailability.UNKNOWN
         _error.value = null
         scopeChecked = false
+    }
+
+    /**
+     * Whether the queues may give or take words for [s], under
+     * [pendingLock]. They hold one ship's at a time: the repo outlives a
+     * ship switch on Android, and a call on one ship once rode the next
+     * pass to the other. Another ship's leftovers are dropped here.
+     */
+    private fun holding(s: String): Boolean {
+        if (ship != s) return false
+        if (queuedFor != s) {
+            calls.clear()
+            transcripts.clear()
+            queuedFor = s
+        }
+        return true
     }
 
     /** The pipe's loop stops. */
@@ -835,12 +852,16 @@ class OrreryRepo(
         // the lock, so the cursors this pass starts from are the ones
         // the pass before it left.
         var locked = false
-        var queuedForRetry: List<Facts> = emptyList()
+        var callsForRetry: List<((String, String?) -> String) -> Facts> = emptyList()
         var spokenForRetry: List<Pair<String, List<Spoken>>> = emptyList()
-        // Put back what this pass took from the queues, for the next one.
+        var confirmed: List<io.nisfeb.talon.data.OrreryNoticedEntity> = emptyList()
+        // Put back what this pass took from the queues, for the next one,
+        // unless the queues have moved to another ship since.
         suspend fun requeue() = pendingLock.withLock {
-            pending.addAll(0, queuedForRetry)
-            transcripts.addAll(0, spokenForRetry)
+            if (holding(s)) {
+                calls.addAll(0, callsForRetry)
+                transcripts.addAll(0, spokenForRetry)
+            }
         }
         try {
             // Inside the try, so a pass cancelled while it waits for the
@@ -852,12 +873,15 @@ class OrreryRepo(
             val row = db.orreryAccounts().get(s) ?: return
             val nowMs = now()
             var facts = Facts()
-            val queued = pendingLock.withLock { pending.toList().also { pending.clear() } }
-            queued.forEach { facts += it }
-            queuedForRetry = queued
+            // Claims the owner confirmed in the tray. They wait in the
+            // table, not in memory, until a pass has put them on the
+            // ship: a process killed before the pass used to lose them,
+            // after they had already left the tray.
+            confirmed = db.orreryNoticed().confirming(s)
+            confirmed.forEach { facts += factsOf(it) }
             // A call's words, taken here rather than inside the triage, so
             // a pass that fails can put them back: nothing else keeps them.
-            val spoken = pendingLock.withLock { transcripts.toList().also { transcripts.clear() } }
+            val spoken = pendingLock.withLock { if (holding(s)) transcripts.toList().also { transcripts.clear() } else emptyList() }
             spokenForRetry = spoken
             // What the ship has, which is what a client goes by. It is
             // never told what this install remembers.
@@ -873,9 +897,8 @@ class OrreryRepo(
             val book = book()
             val people = People(a, row.token, sent, s, view?.bodies.orEmpty())
             // Calls made since the last pass, their speakers resolved now.
-            val called = pendingLock.withLock { calls.toList().also { calls.clear() } }.map { it(people::idFor) }
-            called.forEach { facts += it }
-            queuedForRetry = queuedForRetry + called
+            callsForRetry = pendingLock.withLock { if (holding(s)) calls.toList().also { calls.clear() } else emptyList() }
+            callsForRetry.forEach { facts += it(people::idFor) }
             // Read once: the table holds every peer ever seen, and the
             // triage below wants the same few.
             val known = db.contacts().all().filter { it.ship == s || it.ship in book }
@@ -896,16 +919,15 @@ class OrreryRepo(
             // The cursor is the author's clock, so a post that syncs after
             // the cursor passed its time sits under it for good: the other
             // channel catching up just after the app opened. The newest
-            // few under the cursor are walked again, and kept only where
-            // no msg: record says a pass already read them. Not on the
-            // first pass, which would reach back past the backfill, and
-            // not while the phone leaves the reading to a computer, when
-            // it writes no records to check against.
-            // ponytail: a catch-up deeper than LATE_POSTS still loses the
-            // rest; a cursor on insertion order (a column and a migration)
-            // is the whole fix.
-            val under = if (_yielding.value || row.calendarCursor == 0L) emptyList()
-            else db.messages().postsBefore(row.messagesCursor + 1, s, LATE_POSTS)
+            // few under the cursor, from the last two days, are walked
+            // again, and kept only where no msg: record says a pass
+            // already read them. Unbounded, the walk reached past the
+            // backfill into months of posts no pass ever read, and spent
+            // the pass's model runs on them ahead of anything new.
+            // ponytail: a catch-up deeper than LATE_POSTS or older than
+            // LATE_WINDOW_MS still loses the rest; a cursor on insertion
+            // order (a column and a migration) is the whole fix.
+            val under = db.messages().postsBetween(nowMs - LATE_WINDOW_MS, row.messagesCursor + 1, s, LATE_POSTS)
             val readAlready = if (under.isEmpty()) emptySet()
             else sent.some(s, under.map { "msg:${it.whom}/${it.id}" }).mapTo(HashSet()) { it.key }
             val posts = under.filter { "msg:${it.whom}/${it.id}" !in readAlready }.reversed() + ahead
@@ -1082,6 +1104,7 @@ class OrreryRepo(
             // halfway must be free to say the same things again.
             if (record.isNotEmpty()) sent.putAll(record)
             forgets.forEach { sent.forget(s, it) }
+            confirmed.forEach { db.orreryNoticed().setState(it.id, "confirmed") }
             // One listing of the actions for the three things that
             // want them: what is open, the mirror, and the brief.
             val actions = runCatching { a.actions(row.token, status = "all") }
@@ -1115,21 +1138,25 @@ class OrreryRepo(
                 _error.value = "The ship no longer accepts this install's key. Turn the pipe on again to mint a new one."
             } else {
                 // A busy ship's 500 is a pass lost, not what it carried:
-                // a claim confirmed in the tray has left the tray, and
-                // this is the only copy of it.
+                // a call's words have no other copy. A 4xx is the ship
+                // refusing what was sent, and sent again it is refused
+                // again, first in every pass, and nothing behind it
+                // ever goes: those are dropped.
                 _error.value = e.message
-                requeue()
+                if (e.status >= 500 || e.status == 408 || e.status == 429) requeue()
+                else confirmed.forEach { db.orreryNoticed().setState(it.id, "confirmed") }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
-            // Detached mid-pass: what was queued waits for the next one.
+            // Detached mid-pass: what was queued waits for the next one,
+            // on this ship; [requeue] drops it if the ship has changed.
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { requeue() }
             throw e
         } catch (e: Exception) {
-            // Unreachable, or a shape the parsing did not expect: either
-            // way the pass is lost and what it carried is not.
             _error.value = e.message ?: e::class.simpleName
             if (e !is OrreryError) Log.w(TAG, "pass failed", e)
-            requeue()
+            // No answer is worth trying again. An answer the parsing did
+            // not expect, or a fault here, would fail the same way.
+            if (e is OrreryError.Unreachable) requeue()
         } finally {
             if (locked) passLock.unlock()
             _pushing.value = false
@@ -1328,7 +1355,13 @@ class OrreryRepo(
         if (io.nisfeb.talon.ui.isTouchPrimary && standDown?.on?.value == true) {
             val yielded = runCatching { computerActive(a.clients(), nowMs) }.getOrDefault(false)
             _yielding.value = yielded
-            if (yielded) return Triaged()
+            if (yielded) {
+                // Marked read, since the computer reads them: with no
+                // record, the late walk read them all again here the
+                // moment the phone took the reading back.
+                posts.forEach { remember("msg:${it.whom}/${it.id}", "") }
+                return Triaged()
+            }
         } else {
             _yielding.value = false
         }
@@ -1504,7 +1537,7 @@ class OrreryRepo(
         val ourNick = db.contacts().get(s)?.nickname
         // What Talon already holds and the funnel would read: in scope,
         // free text, not a question. Not a new read of the chats.
-        val walked = db.messages().postsBefore(now(), s, limit * 6)
+        val walked = db.messages().postsBetween(0L, now(), s, limit * 6)
         val picked = walked.asSequence()
             .map { it to StoryCache.textFor(it.id, it.contentJson) }
             .filter { (m, t) -> forTheGate(t) && inScope(m.whom, t, s, ourNick, allowed) }
@@ -1883,14 +1916,6 @@ class OrreryRepo(
         private var current: OrreryRepo? = null
 
         /**
-         * Facts made somewhere with no repo in hand, such as a transcript
-         * just published. Pushed on the next pass, which is asked for at
-         * once. Dropped when the pipe is off, since nothing would carry
-         * them; a pass that fails keeps them for the next one.
-         */
-        fun note(facts: Facts) = enqueue { pending += facts }
-
-        /**
          * A call, whose facts are made inside the next pass: that is where
          * the ship is asked who each speaker is, so a person it keeps under
          * another id is that person and not a twin named from the @p.
@@ -1909,6 +1934,8 @@ class OrreryRepo(
         const val MESSAGES_PER_PASS = 2000
         /** Posts under the cursor walked again each pass for ones that synced late. */
         const val LATE_POSTS = 500
+        /** How far back a post can have synced late and still be read. */
+        const val LATE_WINDOW_MS = 2L * 24 * 60 * 60 * 1000
         /** What the ship calls open: the three statuses `?status=open` answers with. */
         val OPEN_STATUSES = setOf("proposed", "approved", "claimed")
 
@@ -1924,6 +1951,9 @@ class OrreryRepo(
 
         /** One orrery pass at a time in this process, whoever asked for it. */
         private val passLock = kotlinx.coroutines.sync.Mutex()
+
+        /** A claim confirmed in the tray that the ship has not taken yet. */
+        const val CONFIRMING = "confirming"
 
         /** A send that went out on a pass that ended before it could say so. */
         internal const val UNCONFIRMED = "sent, though the pass ended before it could say so"
@@ -1950,21 +1980,17 @@ class OrreryRepo(
         )
 
         /**
-         * The person's word on a noticed claim. Confirming sends it up
-         * through the attached pipe; false means there is none to send
-         * it through, and the row stays pending for when there is.
+         * The person's word on a noticed claim. The row leaves the tray
+         * at once and waits, as confirming, for a pass to put it on the
+         * ship, which is asked for now where a pipe is on. With no pipe
+         * it waits for one: the button used to do nothing then, and a
+         * tray left over from a pipe since turned off could not be
+         * cleared. It teaches the gate once it is on the ship.
          */
-        suspend fun confirm(db: AppDatabase, id: String): Boolean {
-            val n = db.orreryNoticed().get(id) ?: return false
-            // The word is taken whether or not a pipe is attached: the
-            // row leaves the tray and teaches the gate either way. With
-            // no pipe the button did nothing at all, and a tray left
-            // over from a pipe since turned off could not be cleared.
-            db.orreryNoticed().setState(id, "confirmed")
-            val repo = current ?: return false
-            if (!repo._enabled.value) return false
-            note(factsOf(n))
-            return true
+        suspend fun confirm(db: AppDatabase, id: String) {
+            db.orreryNoticed().setState(id, CONFIRMING)
+            val repo = current?.takeIf { it._enabled.value } ?: return
+            repo.scope.launch { repo.push() }
         }
 
         suspend fun discard(db: AppDatabase, id: String) = db.orreryNoticed().setState(id, "discarded")
@@ -1984,8 +2010,10 @@ class OrreryRepo(
          */
         private fun enqueue(add: OrreryRepo.() -> Unit) {
             val repo = current?.takeIf { it._enabled.value } ?: return
+            // The ship it was said on, and no other.
+            val s = repo.ship ?: return
             repo.scope.launch {
-                repo.pendingLock.withLock { repo.add() }
+                repo.pendingLock.withLock { if (repo.holding(s)) repo.add() }
                 repo.push()
             }
         }

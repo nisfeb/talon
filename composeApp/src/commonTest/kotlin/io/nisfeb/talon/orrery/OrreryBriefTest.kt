@@ -482,5 +482,9 @@ class OrreryBriefTest {
             "Thu 24 Sep 22:00",
             Brief.whenText(io.nisfeb.talon.ui.parseIsoUtc("2026-09-25T02:00:00Z")!!, TimeZone.of("America/New_York")),
         )
+        // The owner's own clock, and a due with no time still said.
+        assertEquals("Thu 24 Sep 10:00 PM", Brief.dueText("2026-09-25T02:00:00Z", TimeZone.of("America/New_York"), twentyFourHour = false))
+        assertEquals("Thu 24 Sep", Brief.dueText("2026-09-24", TimeZone.of("America/New_York")))
+        assertEquals(null, Brief.dueText("soon", TimeZone.UTC))
     }
 }

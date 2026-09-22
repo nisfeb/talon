@@ -1051,6 +1051,7 @@ fun App(
                 action = action,
                 orrery = orreryRepo,
                 onClose = { openAction = null },
+                twentyFourHour = uiSettings.homeTwentyFourHour.collectAsState().value,
             )
         }
         // Desktop loop runner. No AlarmManager on desktop, so loops run
@@ -2310,6 +2311,7 @@ fun App(
                         generator = orreryRepo.generator.collectAsState().value?.let {
                             io.nisfeb.talon.orrery.generatorLine(it, io.nisfeb.talon.util.nowMs(), kotlinx.datetime.TimeZone.currentSystemDefault())
                         },
+                        twentyFourHour = uiSettings.homeTwentyFourHour.collectAsState().value,
                     ) { a -> openAction = a }
                     showWatchwords -> WatchwordsScreen(
                         db = db,
@@ -3282,7 +3284,7 @@ fun App(
                                         statuses = homeStatuses,
                                         invites = homeInvites,
                                         onOpenInvites = { showInvites = true },
-                                        actions = io.nisfeb.talon.ui.newActions(orreryActions),
+                                        actions = io.nisfeb.talon.ui.newActions(orreryActions, uiSettings.homeTwentyFourHour.collectAsState().value),
                                         // The chip was drawn from a listing that may
                                         // have moved on. A tap that found nothing used
                                         // to do nothing; it opens the list instead.

@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ai
 
 import kotlinx.serialization.Serializable
+import okio.ByteString.Companion.encodeUtf8
 
 /**
  * Portable data types for AI provider configuration.
@@ -115,16 +116,16 @@ object AiSettings {
          */
         val sttApiKeySetAtMs: Long = 0L,
         /**
-         * When the main key was last removed, here or on a peer: a
-         * provider taken out because its key leaked. The main key lives
-         * in the old fields every device still stores and pushes, and
-         * a blank never replaces a key, so without a stamp a removal
-         * reached nobody and came back from the ship on the next pull.
-         * The same terms as the transcription key's.
+         * Every key taken out, on any device, by its fingerprint
+         * ([keyPrint]): a provider removed because its key leaked, or a
+         * key cleared. A blank never replaces a key, so a removal used
+         * to reach nobody, and came back from the first peer, older
+         * install or ship copy that still held it. A key marked here is
+         * refused wherever it arrives from and taken out wherever it is
+         * kept ([withoutRevoked]). Typing the same key in again marks
+         * it back; the later mark wins. Travels with the credentials.
          */
-        val apiKeyRemovedAtMs: Long = 0L,
-        /** When this device last set the main key, so an older removal cannot blank a newer key. */
-        val apiKeySetAtMs: Long = 0L,
+        val revokedKeys: Map<String, KeyMark> = emptyMap(),
         // Editable agent system-prompt parts. Each blank = use its built-in
         // default; the effective prompt for a role is the shared knowledge
         // followed by that role's specifics (see AgentPrompt/LoopPrompt).
@@ -169,7 +170,7 @@ object AiSettings {
         fun hasCredentials(): Boolean =
             apiKey.isNotBlank() || braveApiKey.isNotBlank() || sttApiKey.isNotBlank() ||
                 privateApiKey.isNotBlank() || privateBaseUrl?.isNotBlank() == true ||
-                sttApiKeyRemovedAtMs > 0L || apiKeyRemovedAtMs > 0L || savedProfile?.keys()?.isNotEmpty() == true
+                sttApiKeyRemovedAtMs > 0L || revokedKeys.isNotEmpty() || savedProfile?.keys()?.isNotEmpty() == true
 
         /** The unified assistant is on (current flag or the legacy one).
          *  Gates MCP + web access, which are now part of the assistant. */
@@ -247,6 +248,59 @@ object AiSettings {
     }
 }
 
+/** A key taken out at [at], or put back where [revoked] is false. */
+@Serializable
+data class KeyMark(val at: Long, val revoked: Boolean = true)
+
+/** Marks kept, newest first: enough for every key anyone will remove. */
+private const val MAX_MARKS = 64
+
+/** A key's fingerprint: enough to know it again, nothing to use it with. */
+fun keyPrint(key: String): String = key.trim().encodeUtf8().sha256().hex().take(16)
+
+/** Two sets of marks as one: for each key the later word. Ties go to the removal. */
+fun mergedMarks(a: Map<String, KeyMark>, b: Map<String, KeyMark>): Map<String, KeyMark> =
+    (a.keys + b.keys).associateWith { k -> listOfNotNull(a[k], b[k]).maxWith(compareBy({ it.at }, { it.revoked })) }
+        .entries.sortedWith(compareByDescending<Map.Entry<String, KeyMark>> { it.value.at }.thenBy { it.key })
+        .take(MAX_MARKS).associate { it.key to it.value }
+
+fun AiSettings.Config.isRevoked(key: String): Boolean = key.isNotBlank() && revokedKeys[keyPrint(key)]?.revoked == true
+
+/**
+ * These settings with every revoked key taken out, wherever it was
+ * kept. A transcription key taken out is stamped as the older installs
+ * understand, so they drop it too.
+ */
+fun AiSettings.Config.withoutRevoked(): AiSettings.Config {
+    if (revokedKeys.values.none { it.revoked }) return this
+    fun kept(k: String) = if (isRevoked(k)) "" else k
+    val sttGone = revokedKeys[keyPrint(sttApiKey)]?.takeIf { isRevoked(sttApiKey) }
+    return copy(
+        apiKey = kept(apiKey),
+        privateApiKey = kept(privateApiKey),
+        braveApiKey = kept(braveApiKey),
+        sttApiKey = kept(sttApiKey),
+        sttApiKeyRemovedAtMs = sttGone?.let { maxOf(sttApiKeyRemovedAtMs, it.at) } ?: sttApiKeyRemovedAtMs,
+        savedProfile = savedProfile?.let { p -> p.copy(providers = p.providers.map { it.copy(apiKey = kept(it.apiKey)) }) },
+    )
+}
+
+/**
+ * These settings once the owner, on this device at [now], took the keys
+ * [gone] out and put [back] in: the one way a key is revoked, or a
+ * revoked one restored.
+ */
+fun AiSettings.Config.marking(gone: Collection<String>, back: Collection<String>, now: Long): AiSettings.Config {
+    val marks = revokedKeys.toMutableMap()
+    gone.filter { it.isNotBlank() }.forEach { marks[keyPrint(it)] = KeyMark(now) }
+    back.filter { isRevoked(it) }.forEach { marks[keyPrint(it)] = KeyMark(now, revoked = false) }
+    return copy(revokedKeys = mergedMarks(marks, emptyMap())).withoutRevoked()
+}
+
+/** The Brave key set to [key] on this device at [now]: the one it replaces is revoked. */
+fun AiSettings.Config.withBraveKey(key: String, now: Long): AiSettings.Config =
+    copy(braveApiKey = key).marking(gone = listOf(braveApiKey) - key, back = listOf(key) - braveApiKey, now = now)
+
 /**
  * What arriving state may not do: drop a credential this device holds.
  *
@@ -255,18 +309,17 @@ object AiSettings {
  * each time a new path appeared: a peer's push, an entry that replaced
  * a whole blob, a stale removal stamp. A blank is not a value here. It
  * is the absence of one, and absence never wins against something
- * real. A deliberate removal says so with a stamp and is the only way
- * a credential goes.
+ * real. A deliberate removal says so with a mark ([revokedKeys]) and
+ * is the only way a credential goes; the marks of both sides are kept.
  *
  * Enforced in the store rather than in the sync layer, so that a
  * future caller has to break the rule on purpose to lose a key.
  */
 fun AiSettings.Config.keepingCredentials(of: AiSettings.Config): AiSettings.Config {
     val removalWins = sttApiKeyRemovedAtMs > maxOf(of.sttApiKeySetAtMs, of.sttApiKeyRemovedAtMs)
-    val keyRemovalWins = apiKeyRemovedAtMs > maxOf(of.apiKeySetAtMs, of.apiKeyRemovedAtMs)
     return copy(
-        apiKey = if (apiKey.isNotBlank() || keyRemovalWins) apiKey else of.apiKey,
-        apiKeySetAtMs = maxOf(apiKeySetAtMs, of.apiKeySetAtMs),
+        apiKey = apiKey.ifBlank { of.apiKey },
+        revokedKeys = mergedMarks(revokedKeys, of.revokedKeys),
         braveApiKey = braveApiKey.ifBlank { of.braveApiKey },
         privateApiKey = privateApiKey.ifBlank { of.privateApiKey },
         privateBaseUrl = privateBaseUrl ?: of.privateBaseUrl,
@@ -277,5 +330,5 @@ fun AiSettings.Config.keepingCredentials(of: AiSettings.Config): AiSettings.Conf
         sttApiKeySetAtMs = maxOf(sttApiKeySetAtMs, of.sttApiKeySetAtMs),
         // A profile arriving without keys keeps this device's; none arriving keeps this device's profile.
         savedProfile = savedProfile?.keepingLocal(of.savedProfile ?: migrateProfile(of)) ?: of.savedProfile,
-    )
+    ).withoutRevoked()
 }

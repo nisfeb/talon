@@ -49,6 +49,7 @@ import io.nisfeb.talon.ai.AiFeature
 import io.nisfeb.talon.ai.AiProfile
 import io.nisfeb.talon.ai.AiProvider
 import io.nisfeb.talon.ai.ARMILLARY_PROVIDER
+import io.nisfeb.talon.ai.DEVICE_PROVIDER
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.AiSpend
@@ -177,7 +178,10 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?, arm
         } else {
             AiProvider("p" + nowMs().toString(36), kind, kind.label, baseUrl = if (kind == ProviderKind.OpenAiCompatible && !isTouchPrimary) "http://localhost:1234/v1" else null)
         }
-        edit { it.copy(providers = it.providers + p, defaultModel = it.defaultModel ?: ModelRef(p.id, "").takeIf { kind == ProviderKind.Armillary }) }
+        // The first one is the default model too: with none, nothing
+        // resolves, and the features that need a model stayed hidden
+        // with nothing saying why. A blank model is the provider's own.
+        edit { it.copy(providers = it.providers + p, defaultModel = it.defaultModel ?: ModelRef(p.id, "")) }
         if (kind == ProviderKind.Armillary && armillary != null) {
             scope.launch { armillary.ensureKey(io.nisfeb.talon.ui.platformLabel) }
         }
@@ -243,10 +247,22 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?, arm
     JevRow(orrery, profile, profile.jev ?: decide.on, orreryHere, spend[AiSpend.JEV]) { on -> edit { it.copy(jev = on) } }
 }
 
-private fun AiProfile.without(id: String): AiProfile = copy(
+/**
+ * The profile with provider [id] taken out. A feature on it follows the
+ * default model after, except triage, which reads every message and
+ * goes to this device: following the default moved it to whatever
+ * cloud model that was, with no word from the owner.
+ */
+internal fun AiProfile.without(id: String): AiProfile = copy(
     providers = providers.filterNot { it.id == id },
     defaultModel = defaultModel?.takeUnless { it.provider == id },
-    features = features.mapValues { (_, f) -> if (f.model?.provider == id) f.copy(model = null) else f },
+    features = features.mapValues { (feature, f) ->
+        when {
+            f.model?.provider != id -> f
+            feature == AiFeature.OrreryTriage -> f.copy(model = ModelRef(DEVICE_PROVIDER, ""))
+            else -> f.copy(model = null)
+        }
+    },
 )
 
 

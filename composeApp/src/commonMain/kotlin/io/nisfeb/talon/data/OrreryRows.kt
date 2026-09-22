@@ -89,7 +89,7 @@ data class OrreryNoticedEntity(
     val whom: String,
     val postId: String,
     val snippet: String,
-    /** pending, confirmed or discarded. */
+    /** pending, confirming (confirmed here, not yet on the ship), confirmed or discarded. */
     val state: String,
     val createdMs: Long,
 )
@@ -101,6 +101,10 @@ interface OrreryNoticedDao {
 
     @Query("SELECT * FROM orrery_noticed WHERE id = :id")
     suspend fun get(id: String): OrreryNoticedEntity?
+
+    /** Claims confirmed in the tray that no pass has put on the ship yet. */
+    @Query("SELECT * FROM orrery_noticed WHERE ship = :ship AND state = 'confirming'")
+    suspend fun confirming(ship: String): List<OrreryNoticedEntity>
 
     @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.IGNORE)
     suspend fun insertIfNew(row: OrreryNoticedEntity): Long

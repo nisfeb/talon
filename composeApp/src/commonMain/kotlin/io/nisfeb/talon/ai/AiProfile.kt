@@ -88,10 +88,11 @@ data class AiProfile(
     fun resolve(f: AiFeature): Resolved? {
         val ref = features[f]?.model ?: defaultModel ?: return null
         val p = provider(ref.provider) ?: return null
-        // Armillary has no default model of its own: the ship's list is
-        // all there is, so a blank ref takes the first of it rather than
-        // reaching the OpenAI-shaped client with no model at all.
-        val model = if (ref.model.isBlank() && p.kind == ProviderKind.Armillary) p.models.firstOrNull()?.id.orEmpty() else ref.model
+        // Armillary and a server of your own have no default model: the
+        // list is all there is, so a blank ref takes the first of it
+        // rather than reaching the OpenAI-shaped client with no model.
+        val listOnly = p.kind == ProviderKind.Armillary || p.kind == ProviderKind.OpenAiCompatible
+        val model = if (ref.model.isBlank() && listOnly) p.models.firstOrNull()?.id.orEmpty() else ref.model
         return Resolved(p, model)
     }
 
@@ -309,8 +310,12 @@ fun AiProfile.forSync(): AiProfile = copy(
         .map { it.copy(apiKey = "", models = emptyList(), offersJev = false) },
 )
 
-/** Each provider's key, where it has one. */
-fun AiProfile.keys(): Map<String, String> = providers.filter { it.apiKey.isNotBlank() }.associate { it.id to it.apiKey }
+/**
+ * Each provider's key, where it has one. Not Armillary's: it is minted
+ * for this device, and goes nowhere else.
+ */
+fun AiProfile.keys(): Map<String, String> =
+    providers.filter { it.apiKey.isNotBlank() && it.kind != ProviderKind.Armillary }.associate { it.id to it.apiKey }
 
 /** Keys arriving for providers, by id. A blank never erases one. */
 fun AiProfile.withKeys(keys: Map<String, String>, from: AiProfile? = null): AiProfile =
@@ -363,22 +368,19 @@ fun AiSettings.Config.hasModelFor(f: AiFeature): Boolean {
 
 /**
  * The settings once the owner saves [p] on this device, at [now]: the
- * profile, the old fields derived from it, and the main key's stamps.
+ * profile, and the old fields derived from it.
  *
  * One place for all three platforms. A key that was on a provider and
- * is on none now was removed here, and goes, with a stamp that tells
- * the peers. One the profile never held stays: that is the case the
- * "a blank never overwrites" rule in [legacyInto] was written for.
+ * is on none now was removed here, by taking the provider out or by
+ * clearing the key: it is marked revoked, which takes it out of every
+ * field that kept it, the transcription and private ones too, and
+ * tells the peers. One the profile never held stays: that is the case
+ * the "a blank never overwrites" rule in [legacyInto] was written for.
  */
 fun AiSettings.Config.withProfile(p: AiProfile, now: Long): AiSettings.Config {
-    val next = p.legacyInto(this).copy(savedProfile = p)
-    val removed = apiKey.isNotBlank() && next.apiKey == apiKey &&
-        apiKey in profile().keys().values && apiKey !in p.keys().values
-    return when {
-        removed -> next.copy(apiKey = "", apiKeyRemovedAtMs = now)
-        next.apiKey.isNotBlank() && next.apiKey != apiKey -> next.copy(apiKeySetAtMs = now, apiKeyRemovedAtMs = 0L)
-        else -> next
-    }
+    val had = profile().keys().values.toSet()
+    val has = p.keys().values.toSet()
+    return p.legacyInto(this).copy(savedProfile = p).marking(gone = had - has, back = has - had, now = now)
 }
 
 /**
@@ -389,14 +391,21 @@ fun AiSettings.Config.withProfile(p: AiProfile, now: Long): AiSettings.Config {
  * never overwrites a real one.
  */
 fun AiProfile.legacyInto(cfg: AiSettings.Config): AiSettings.Config {
-    var c = cfg
-    val def = defaultModel?.let { ref -> provider(ref.provider)?.let { it to ref } }
+    // Armillary's key is this device's own, and these fields travel: an
+    // Armillary default or triage leaves them as they were, and a key a
+    // build before this copied into them is taken back out.
+    val minted = providers.filter { it.kind == ProviderKind.Armillary && it.apiKey.isNotBlank() }.map { it.apiKey }
+    var c = cfg.copy(
+        apiKey = cfg.apiKey.takeUnless { it in minted }.orEmpty(),
+        privateApiKey = cfg.privateApiKey.takeUnless { it in minted }.orEmpty(),
+    )
+    val def = defaultModel?.let { ref -> provider(ref.provider)?.let { it to ref } }?.takeIf { it.first.kind != ProviderKind.Armillary }
     def?.let { (p, ref) ->
         providerOf(p.kind)?.let { kind ->
             c = c.copy(provider = kind, apiKey = p.apiKey.ifBlank { c.apiKey }, model = ref.model.ifBlank { null }, baseUrl = p.baseUrl)
         }
     }
-    resolve(AiFeature.OrreryTriage)?.let { r ->
+    resolve(AiFeature.OrreryTriage)?.takeIf { it.provider.kind != ProviderKind.Armillary }?.let { r ->
         val readsWithDefault = def != null && r.provider.id == def.first.id && r.provider.kind != ProviderKind.ThisDevice
         c = when {
             readsWithDefault -> c.copy(frontierReadsMessages = true)
@@ -433,7 +442,9 @@ fun AiProfile.withLegacy(cfg: AiSettings.Config): AiProfile {
     var providers = providers
     var def = defaultModel
     val dp = def?.let { provider(it.provider) }
-    if (dp != null && providerOf(dp.kind) != null) {
+    // Not an Armillary default: the old fields no longer describe it
+    // ([legacyInto]), and an old install's key would become its key.
+    if (dp != null && providerOf(dp.kind) != null && dp.kind != ProviderKind.Armillary) {
         providers = providers.map {
             if (it.id != dp.id) it else it.copy(
                 kind = kindOf(cfg.provider),
@@ -506,7 +517,12 @@ fun profileAfterEntry(
         // switches in its profile can be older than the ones in config,
         // which every device writes. Its providers and models are news;
         // its switches are not, unless they came as switches.
-        incoming != null -> incoming.keepingLocal(local).let { if (switches != null) it else it.withSwitches(local.switches()).copy(jev = local.jev) }
+        // Transcription is not news from anywhere: it is this device's
+        // own (see SYNCED_SWITCHES), and the whole profile arriving took
+        // it anyway, so a phone with no speech model turned it off here.
+        incoming != null -> incoming.keepingLocal(local)
+            .let { it.copy(features = it.features.filterKeys { f -> f != AiFeature.Transcription } + local.features.filterKeys { f -> f == AiFeature.Transcription }) }
+            .let { if (switches != null) it else it.withSwitches(local.switches()).copy(jev = local.jev) }
         fromOld -> base!!.withLegacy(merged)
         else -> base
     }

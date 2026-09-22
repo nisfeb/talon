@@ -1,6 +1,7 @@
 package io.nisfeb.talon.orrery
 
 import io.nisfeb.talon.ai.forFeature
+import io.nisfeb.talon.ai.profile
 import io.nisfeb.talon.ai.triageInCloud
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiSettings
@@ -27,11 +28,17 @@ class CloudRung(private val config: () -> AiSettings.Config) : Rung() {
     // The model triage is assigned, which is the frontier model's unless
     // the owner named another.
     private fun triage() = config().forFeature(io.nisfeb.talon.ai.AiFeature.OrreryTriage)
-    override val name: String get() = "Your ${triage().provider.label} key, in the cloud"
+    /** The provider as the owner named it: the old field says Custom for Armillary and every server. */
+    private fun provider() = config().profile().resolve(AiFeature.OrreryTriage)?.provider
+        ?.takeIf { it.kind != io.nisfeb.talon.ai.ProviderKind.ThisDevice }
+    override val name: String get() = "${provider()?.label ?: "A cloud model"}, in the cloud"
     private val ai by lazy { AiClient { triage() } }
 
-    override suspend fun status(): RungStatus =
-        if (!config().hasModelFor(AiFeature.OrreryTriage)) RungStatus.Unavailable("No model is set for reading messages under AI.") else RungStatus.Ready
+    override suspend fun status(): RungStatus = when {
+        config().hasModelFor(AiFeature.OrreryTriage) -> RungStatus.Ready
+        provider() == null -> RungStatus.Unavailable("No model is set for reading messages under AI.")
+        else -> RungStatus.Unavailable("${provider()?.label} has no key. Add one under AI.")
+    }
 
     override suspend fun open(): LocalModel = object : LocalModel {
         override val rung: String get() = name

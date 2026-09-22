@@ -39,10 +39,11 @@ class WhatsNewTest {
             listOf(msg("~dalsyd", "~dalsyd", 100), msg("~nec", "~nec", 200)),
             mapOf("~dalsyd" to unread(1), "~nec" to unread(1, notify = 1)),
             emptyList(), emptyList(), us, 10, { it }, { "said" },
-            actions = listOf(NewAction("a1", "task", "Call the shop", "claude-code", null)),
+            actions = listOf(NewAction("a1", "task", "Call the shop", "claude-code", "Thu 24 Sep")),
         )
         assertEquals(listOf(NewKind.MENTION, NewKind.ACTION, NewKind.UNREAD), rows.map { it.kind })
-        assertEquals("task proposed by claude-code", rows[1].line)
+        assertEquals("task proposed by claude-code, due Thu 24 Sep", rows[1].line)
+        assertEquals(0L, rows[1].atMs, "a due is not when something happened, and shown as one read 'just now'")
     }
 
     @Test
@@ -150,6 +151,6 @@ class WhatsNewTest {
         )
         val new = newActions(listOf(a("p", "proposed"), a("ap", "approved"), a("c", "claimed"), a("d", "done"), a("x", "dismissed")))
         assertEquals(listOf("p"), new.map { it.id })
-        assertEquals(1789909200000L, new.single().dueMs)
+        assertEquals("Sun 20 Sep 13:00", newActions(listOf(a("p", "proposed")), twentyFourHour = true, zone = kotlinx.datetime.TimeZone.UTC).single().due)
     }
 }

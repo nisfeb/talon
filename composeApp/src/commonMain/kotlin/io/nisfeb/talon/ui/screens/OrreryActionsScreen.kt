@@ -31,7 +31,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.filled.Refresh
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
-import io.nisfeb.talon.ui.parseIsoUtc
 import io.nisfeb.talon.orrery.Brief
 import kotlinx.datetime.TimeZone
 
@@ -61,6 +60,8 @@ fun OrreryActionsScreen(
      * where the person who tapped Approve is looking.
      */
     problem: String? = null,
+    /** The owner's clock, from the 12 or 24 hour setting. */
+    twentyFourHour: Boolean = false,
     onOpen: (OrreryAction) -> Unit,
 ) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -113,7 +114,7 @@ fun OrreryActionsScreen(
             )
         }
         HorizontalDivider()
-        Body(actions, onOpen, onDecide)
+        Body(actions, onOpen, onDecide, twentyFourHour)
     }
 }
 
@@ -122,6 +123,7 @@ private fun Body(
     actions: List<OrreryAction>,
     onOpen: (OrreryAction) -> Unit,
     onDecide: (OrreryAction, String, String) -> Unit,
+    twentyFourHour: Boolean,
 ) {
     val waiting = actions.filter { it.status == "proposed" }
     val settled = actions.filter { it.status != "proposed" }
@@ -162,7 +164,7 @@ private fun Body(
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                     Text(
-                        detail(a),
+                        detail(a, twentyFourHour),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
                     )
@@ -199,7 +201,7 @@ private fun Body(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        detail(a),
+                        detail(a, twentyFourHour),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     )
@@ -221,10 +223,10 @@ private fun Heading(text: String, accent: Boolean) {
 }
 
 /** Kind, who proposed it, and when it is due, in one quiet line. */
-private fun detail(a: OrreryAction): String {
+private fun detail(a: OrreryAction, twentyFourHour: Boolean): String {
     // In the owner's own zone, as the brief says it: the UTC date read a
     // day late for anything due in the evening west of Greenwich.
-    val due = a.due?.let(::parseIsoUtc)?.let { Brief.whenText(it, TimeZone.currentSystemDefault()) }
+    val due = a.due?.let { Brief.dueText(it, TimeZone.currentSystemDefault(), twentyFourHour) }
     return listOfNotNull(
         a.kind,
         a.status.takeIf { it != "proposed" },
