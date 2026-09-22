@@ -112,7 +112,7 @@ internal class OpenAiShapeModel(private val http: HttpClient, private val server
             }
             val text = resp.bodyAsText()
             if (resp.status.value == 400 && format < 2) { format++; continue }
-            if (resp.status.value >= 400) error("${server.label} answered ${resp.status.value}: ${text.take(160)}")
+            if (resp.status.value >= 400) throw io.nisfeb.talon.ai.ModelHttpError(resp.status.value, "${server.label} answered ${resp.status.value}: ${text.take(160)}")
             return Json.parseToJsonElement(text).jsonObject["choices"]!!.jsonArray[0].jsonObject["message"]!!.jsonObject["content"]!!.jsonPrimitive.content
         }
     }

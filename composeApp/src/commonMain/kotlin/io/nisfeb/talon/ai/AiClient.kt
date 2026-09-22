@@ -208,8 +208,8 @@ class AiClient(
                     ?: obj["message"]?.jsonPrimitive?.content
             }.getOrNull()
             val msg = pretty ?: body.take(200)
-            if (resp.status.value == 402) error(outOfCredit(host, msg))
-            error("$host ${resp.status.value}: $msg")
+            if (resp.status.value == 402) throw ModelHttpError(402, outOfCredit(host, msg))
+            throw ModelHttpError(resp.status.value, "$host ${resp.status.value}: $msg")
         }
         val obj = runCatching { json.parseToJsonElement(body).jsonObject }
             .getOrElse { error("$host bad JSON: ${body.take(300)}") }
@@ -278,3 +278,19 @@ const val OUT_OF_CREDIT = "Your Armillary balance is empty. Top up under Setting
 
 /** Whether a failure's message is the empty balance, so a Top up action belongs beside it. */
 fun isOutOfCredit(message: String?): Boolean = message?.contains(OUT_OF_CREDIT) == true
+
+/**
+ * A model's answer that was not a success, with its status: what tells
+ * a busy or unpaid provider from a request it will never take. Still an
+ * IllegalStateException, as every such failure was before.
+ */
+class ModelHttpError(val status: Int, message: String) : IllegalStateException(message)
+
+/**
+ * No answer from a model that another try may get: the network, out of
+ * credit, rate limited, the provider's own fault. Anything else, a
+ * prompt too long, a reply that cannot be read, is about the input, and
+ * asking again gets the same.
+ */
+fun isModelUnavailable(e: Throwable): Boolean = io.nisfeb.talon.util.isTransientNetworkError(e) ||
+    (e is ModelHttpError && (e.status == 402 || e.status == 408 || e.status == 429 || e.status >= 500))

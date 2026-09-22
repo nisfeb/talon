@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import java.io.File
@@ -362,7 +363,7 @@ class PassKeepsTest {
             override val rung = "fake"
             override suspend fun complete(system: String, user: String, grammar: String?, maxTokens: Int): String {
                 asked++
-                if (!answering) error("402: out of credit")
+                if (!answering) throw io.nisfeb.talon.ai.ModelHttpError(402, "openrouter.ai: out of credit")
                 return """{"claims":[]}"""
             }
             override fun close() = Unit
@@ -404,6 +405,50 @@ class PassKeepsTest {
             db.close()
             dir.deleteRecursively()
         }
+    }
+
+    // The ship answers a proposal that has an open twin, the same kind
+    // and title, with that twin. A replacement made before the old one was
+    // dismissed came back as the old action, which was then dismissed:
+    // every reply that moved a due lost the action.
+    @Test
+    fun `moving a due makes a new action and leaves no action lost`() = runBlocking<Unit> {
+        val statuses = mutableMapOf("a1" to "proposed")
+        val dues = mutableMapOf("a1" to "2026-09-24T17:00:00Z")
+        var next = 2
+        val http = HttpClient(
+            MockEngine { req ->
+                val url = req.url.toString()
+                val said = (req.body as? TextContent)?.text.orEmpty()
+                val o = runCatching { kotlinx.serialization.json.Json.parseToJsonElement(said).jsonObject }.getOrNull()
+                val json = headersOf(HttpHeaders.ContentType, "application/json")
+                when {
+                    req.method == HttpMethod.Post && url.substringBefore('?').endsWith("/api/act") -> {
+                        val twin = statuses.entries.firstOrNull { it.value in setOf("proposed", "approved", "claimed") }
+                        if (twin != null) respond("""{"id":"${twin.key}","status":"${twin.value}","existing":true}""", headers = json)
+                        else {
+                            val id = "a${next++}"
+                            statuses[id] = "proposed"
+                            dues[id] = o?.get("due")?.jsonPrimitive?.content.orEmpty()
+                            respond("""{"id":"$id","status":"proposed","existing":false}""", headers = json)
+                        }
+                    }
+                    req.method == HttpMethod.Post && "/api/actions/" in url -> {
+                        val id = url.substringAfter("/api/actions/").substringBefore('/').substringBefore('?')
+                        statuses[id] = o?.get("status")?.jsonPrimitive?.content ?: statuses.getValue(id)
+                        respond("""{"id":"$id","status":"${statuses[id]}"}""", headers = json)
+                    }
+                    else -> respond("[]", headers = json)
+                }
+            },
+        )
+        val repo = OrreryRepo(http, CoroutineScope(SupervisorJob()), db(createTempDirectory(prefix = "talon-move-").toFile()), "test", bareClient = http)
+        val old = OrreryAction("a1", "task", "Call the shop", kotlinx.serialization.json.JsonObject(emptyMap()), emptyList(), dues.getValue("a1"), "proposed", "generator")
+        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", old, Brief.Direction("a1", status = "approved", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-25T17:00:00Z")))
+        assertEquals("dismissed", statuses["a1"], "the old one goes")
+        val made = statuses.keys.single { it != "a1" }
+        assertEquals("approved", statuses[made], "a new one stands, and takes the status the owner gave")
+        assertEquals("2026-09-25T17:00:00Z", dues[made])
     }
 
     @Test

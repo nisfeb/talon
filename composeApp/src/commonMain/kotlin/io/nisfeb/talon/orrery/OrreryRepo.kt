@@ -130,7 +130,7 @@ class OrreryRepo(
     // Coroutines only touch this, so a mutex is the whole of the guard
     // (commonMain has no synchronized: iOS is native).
     private val calls = mutableListOf<((String, String?) -> String) -> Facts>()
-    private val transcripts = mutableListOf<Pair<String, List<Spoken>>>()
+    private val transcripts = mutableListOf<Heard>()
     private val pendingLock = Mutex()
     /** The ship the queues hold words for. Under [pendingLock]. */
     private var queuedFor: String? = null
@@ -445,10 +445,12 @@ class OrreryRepo(
                 runCatching { api?.revoke(row.clientId) }
                     .onFailure { if (it !is OrreryError.Refused || it.status != 404) throw it }
             }
+            // Off before the row goes, so nothing between the two sees the
+            // pipe on and keeps words for it.
+            turnOff()
             db.orrerySent().clear(s)
             db.orreryAccounts().delete(s)
         }
-        turnOff()
         _error.value = null
     }
 
@@ -467,12 +469,10 @@ class OrreryRepo(
                     _error.value = e.message ?: e::class.simpleName
                 }
                 // Wake for seven in the owner's zone, so the brief is not
-                // up to a pass late. After a failed pass, later each time:
-                // a ship that is down or chokes on something is not asked
-                // again every ten minutes, and the model runs a pass
-                // repeats are not bought again every ten minutes either.
+                // up to a pass late.
                 val wait = briefZone?.let { Brief.untilNext(now(), it, briefGrace) + 1_000 } ?: PUSH_EVERY_MS
-                // Never past seven, and in steps of ten minutes, so a pass
+                // A failed pass waits longer each time (see the failure rule
+                // in [push]); never past seven, and in steps of ten minutes, so a pass
                 // that succeeds from elsewhere, a push from the screen or a
                 // confirm, ends a long wait at the next step.
                 var left = minOf(wait, if (failuresInARow > 0) backoff(failuresInARow) + kotlin.random.Random.nextLong(0, 60_000) else PUSH_EVERY_MS)
@@ -520,7 +520,7 @@ class OrreryRepo(
         url: String,
         nowMs: Long,
         /** The state as the pass read it, before its own writes. */
-        seen: JsonObject?,
+        state: JsonObject,
         /** The mail this pass listed, newer than the cursor. */
         fresh: List<io.nisfeb.talon.mail.InboxEntry>,
         /** Every action, as the pass read them. */
@@ -529,7 +529,6 @@ class OrreryRepo(
         val mail = AuspexApi(http, url)
         // The zone off the state the pass already read: a brief that is
         // not due costs the ship nothing at all.
-        val state = seen ?: a.stateJson(token)
         val zone = Brief.zone(state)
         briefZone = zone
         val unfinished = runCatching { answerReplies(a, token, s, mail, state, zone, nowMs, fresh) }
@@ -699,28 +698,32 @@ class OrreryRepo(
     }
 
     /** One move from a reply: a new due or subject replaces the action, then the status moves. */
-    private suspend fun move(a: OrreryApi, token: String, old: OrreryAction, d: Brief.Direction) {
+    internal suspend fun move(a: OrreryApi, token: String, old: OrreryAction, d: Brief.Direction) {
         // The owner's reason, or none: a note on a dismissal is read by the
         // generator as the owner's taste, so Talon never writes its own.
         val note = d.reason.orEmpty()
         var id = old.id
         var status = old.status
         if (d.dueMs != null || d.about != null) {
-            // The replacement first, and the old one dismissed only once
-            // it stands: the other way round, a replacement the ship
-            // refused left the owner with neither. One the ship refuses
-            // leaves the old action as it was.
-            val made = try {
-                a.act(Brief.replacement(old, d.dueMs, d.about), token)
-            } catch (e: OrreryError.Refused) {
-                if (e.status != 400 && e.status != 422) throw e
-                Log.i(TAG, "${old.id} not replaced: ${e.message}")
-                return
-            }
+            // The old one dismissed first. The ship answers a proposal that
+            // has an open twin, the same kind and title, with that twin, so
+            // a replacement made first came back as the old action, which
+            // was then dismissed: every move of a due lost the action.
             // Replaced, not refused: no reason, since the owner gave none
             // and still wants the thing.
             runCatching { a.transition(token, old.id, "dismissed", "") }
                 .onFailure { Log.i(TAG, "${old.id} not dismissed: ${it.message}") }
+            val made = try {
+                a.act(Brief.replacement(old, d.dueMs, d.about), token)
+            } catch (e: OrreryError.Refused) {
+                if (e.status != 400 && e.status != 422) throw e
+                // Refused, the old one is put back as it was, rather than
+                // the owner left with neither; the status still moves.
+                Log.i(TAG, "${old.id} not replaced: ${e.message}")
+                runCatching { a.act(Brief.replacement(old, null, null), token) }
+                    .onFailure { Log.w(TAG, "${old.id} could not be put back: ${it.message}") }
+                    .getOrNull() ?: return
+            }
             id = made.first
             status = made.second
         }
@@ -902,7 +905,7 @@ class OrreryRepo(
         // the pass before it left.
         var locked = false
         var callsForRetry: List<((String, String?) -> String) -> Facts> = emptyList()
-        var spokenForRetry: List<Pair<String, List<Spoken>>> = emptyList()
+        var spokenForRetry: List<Heard> = emptyList()
         var confirmed: List<io.nisfeb.talon.data.OrreryNoticedEntity> = emptyList()
         var token: String? = null
         // Model runs the pass has spent: a failure after them buys them
@@ -910,7 +913,7 @@ class OrreryRepo(
         var ran = 0
         // Put back what this pass took from the queues, for the next one,
         // unless the pipe is off or the queues have moved to another ship.
-        suspend fun putBack(c: List<((String, String?) -> String) -> Facts>, t: List<Pair<String, List<Spoken>>>) = pendingLock.withLock {
+        suspend fun putBack(c: List<((String, String?) -> String) -> Facts>, t: List<Heard>) = pendingLock.withLock {
             if (_enabled.value && holding(s)) {
                 calls.addAll(0, c)
                 transcripts.addAll(0, t)
@@ -1026,7 +1029,7 @@ class OrreryRepo(
             // back only if the pass fails.
             if (triaged.unread.isNotEmpty()) {
                 putBack(emptyList(), triaged.unread)
-                spokenForRetry = spoken.filter { it !in triaged.unread }
+                spokenForRetry = spoken.filter { h -> triaged.unread.none { it.lines === h.lines } }
             }
 
             val calApi = CalendarApi(http, url)
@@ -1218,21 +1221,20 @@ class OrreryRepo(
             if (!rowLock.withLock { stillOurs().also { if (it) db.orreryAccounts().upsert(cursors) } }) return
             failuresInARow = 0
             _lastPushMs.value = nowMs
-            _error.value = when {
-                refused > 0 -> "$refused refused: ${firstReason ?: "no reason given"}"
-                triaged.modelDown -> "The model did not answer. What it would have read waits for it."
-                else -> null
-            }
+            _error.value = listOfNotNull(
+                "$refused refused: ${firstReason ?: "no reason given"}".takeIf { refused > 0 },
+                "The model did not answer. What it would have read waits for it.".takeIf { triaged.modelDown },
+            ).joinToString(" ").ifEmpty { null }
         // What a failed pass does with what it carried: one rule. A key
         // the ship refuses turns the pipe off. Anything else, a busy or
-        // updating ship, no answer, one cut off halfway, a fault here, is
-        // tried again: the calls and transcripts go back on the queue and
-        // the claims stay in the table, and the loop waits longer each
-        // time a failure threw away model runs. One that failed before
-        // any, the ship or the network down, cost nothing to repeat and
-        // keeps the usual ten minutes. What one bad item does is not here: a fault in reading it
-        // or a refusal of it costs that item alone ([oneItem] and
-        // [observeSplitting]), so none of this is ever about one item.
+        // updating ship, no answer, one cut off halfway, a batch refused
+        // whole, a fault here, is tried again: the calls and transcripts
+        // go back on the queue and the claims stay in the table. The loop
+        // waits longer each time, unless nothing answered at all and no
+        // model runs were spent. A fault in reading one item, or the
+        // ship refusing a few items, costs those items alone ([oneItem],
+        // [observeSplitting]) and is not here; a model that did not answer
+        // holds what it would have read and is not a failure either.
         } catch (e: OrreryError.Refused) {
             _error.value = e.message
             if (e.status == 403) {
@@ -1251,7 +1253,7 @@ class OrreryRepo(
                     requeue()
                 }
             } else {
-                if (ran > 0) failuresInARow++
+                failuresInARow++
                 requeue()
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1263,13 +1265,20 @@ class OrreryRepo(
         } catch (e: Exception) {
             _error.value = e.message ?: e::class.simpleName
             if (e !is OrreryError) Log.w(TAG, "pass failed", e)
-            if (ran > 0) failuresInARow++
+            // No answer at all, the ship or the network down, cost the
+            // ship nothing and nothing to repeat: the usual ten minutes.
+            // An answer that was an error, or model runs thrown away, waits
+            // longer each time.
+            if (ran > 0 || !(e is OrreryError.Unreachable || io.nisfeb.talon.util.isTransientNetworkError(e))) failuresInARow++
             requeue()
         } finally {
             if (locked) passLock.unlock()
             _pushing.value = false
         }
     }
+
+    /** A call's words on the queue, and the turn to read from: one the model stopped answering in resumes there. */
+    private data class Heard(val address: String, val lines: List<Spoken>, val from: Int = 0)
 
     /** Passes in a row that failed; the loop waits longer after each ([backoff]). */
     private var failuresInARow = 0
@@ -1278,9 +1287,10 @@ class OrreryRepo(
      * One item of a pass, a post, a call, a claim, an event: a fault in
      * reading it costs that item, never the pass. A pass that failed on
      * one bad item failed the same way on every pass after, and nothing
-     * behind it ever moved. No answer, from the ship or a model, is not
-     * the item's fault: that fails the pass, which is tried again with
-     * the item in it.
+     * behind it ever moved. No answer from the ship is not the item's
+     * fault: that fails the pass, which is tried again with the item in
+     * it. A model that does not answer holds the item instead
+     * ([Reading.modelDown]).
      */
     private inline fun <T> oneItem(what: String, block: () -> T): T? = try {
         block()
@@ -1294,30 +1304,34 @@ class OrreryRepo(
 
     /**
      * One batch to the ship, and where it cannot read it, 400 or 422, its
-     * halves, down to the item it cannot read. What it refused, a reason
+     * halves, down to the items it cannot read. What it refused, a reason
      * per item. One bad fact used to cost its whole batch, two hundred
      * facts recorded as sent and never sent again.
      *
-     * Halving finds a bad item or two in a few requests each. Past that
-     * the ship is refusing the batch, not an item in it, say a field
-     * every fact carries that its version does not know: the refusal is
-     * thrown and the pass tried again later, rather than every item
-     * dropped after four hundred requests to the ship's one thread.
+     * Eight facts refused on their own before any part of the batch was
+     * taken is the ship refusing the batch, not items in it, say a field
+     * every fact carries that its version does not know. That is thrown,
+     * and the pass tried again later, rather than every item dropped
+     * after four hundred requests to the ship's one thread. Items that
+     * are bad among good ones are found however many there are.
+     * ponytail: eight bad facts first in a batch read as the batch; a
+     * probe of one fact from the far end, if that ever happens.
      */
     private suspend fun observeSplitting(a: OrreryApi, batch: JsonObject, token: String): List<String> {
         fun items(b: JsonObject) = listOf("bodies", "observations")
             .firstNotNullOfOrNull { k -> (b[k] as? kotlinx.serialization.json.JsonArray)?.takeIf { it.isNotEmpty() }?.let { k to it } }
-        val n = items(batch)?.second?.size ?: 0
-        var requests = 4 * (32 - n.countLeadingZeroBits()) + 2
+        var taken = 0
+        var refusedAlone = 0
         suspend fun send(b: JsonObject): List<String> {
-            requests--
             try {
-                return a.observe(b, token).refused.map { it.error ?: "no reason given" }
+                return a.observe(b, token).refused.map { it.error ?: "no reason given" }.also { taken++ }
             } catch (e: OrreryError.Refused) {
                 if (e.status != 400 && e.status != 422) throw e
                 val (key, list) = items(b) ?: return emptyList()
-                if (list.size == 1) return listOf(e.reason)
-                if (requests < 2) throw e
+                if (list.size == 1) {
+                    if (taken == 0 && ++refusedAlone >= 8) throw e
+                    return listOf(e.reason)
+                }
                 val half = list.size / 2
                 return listOf(list.subList(0, half), list.subList(half, list.size)).flatMap { part ->
                     send(JsonObject(b + (key to kotlinx.serialization.json.JsonArray(part))))
@@ -1473,10 +1487,8 @@ class OrreryRepo(
     /** Whether the decision model could run here: an OpenRouter key is set. */
     fun decideHasKey(): Boolean = cloud?.config?.invoke()?.let(::openRouterKey) != null
 
-    private suspend fun reading(a: OrreryApi, row: OrreryAccountEntity, s: String, seen: StateView?): Reading? {
-        // The pass reads the state once and hands it down: every read
-        // costs the ship a second of its single thread.
-        val view = seen ?: runCatching { a.state(row.token) }.getOrElse { Log.i(TAG, "state view skipped: ${it.message}"); return null }
+    /** The pass reads the state once and hands it down: every read costs the ship a second of its single thread. */
+    private suspend fun reading(s: String, view: StateView): Reading {
         val model = readWith ?: cloudModelIfOn() ?: (if (isLocalTriageSupported) LocalModels.best()?.second else null)
         val emb = embedder
         val gate = if (model != null && emb != null) runCatching {
@@ -1511,7 +1523,7 @@ class OrreryRepo(
         row: OrreryAccountEntity,
         posts: List<io.nisfeb.talon.data.MessageEntity>,
         /** Calls transcribed since the last pass, taken off the queue by the pass. */
-        spoken: List<Pair<String, List<Spoken>>>,
+        spoken: List<Heard>,
         s: String,
         nowMs: Long,
         url: String,
@@ -1519,7 +1531,7 @@ class OrreryRepo(
         /** The people in the owner's book, as this pass already read them. */
         contacts: List<io.nisfeb.talon.data.ContactEntity>,
         /** The state as this pass read it, so the triage adds no read of its own. */
-        view: StateView?,
+        view: StateView,
         remember: (String, String) -> Unit,
     ): Triaged {
         // Status lines change when nothing is said, so they are counted
@@ -1545,12 +1557,7 @@ class OrreryRepo(
             // never has its words, so the phone reads those itself.
             if (spoken.isEmpty()) return Triaged()
         }
-        // No state, no reading, and nothing read: both cursors stay where
-        // they were, and the calls go back, so the next pass reads these.
-        // The defaults move the cursors past everything, which is right
-        // only when the pass did read.
-        val r = reading(a, row, s, view)
-            ?: return Triaged(postFloor = row.messagesCursor, mailFloor = row.mailCursor, unread = spoken)
+        val r = reading(s, view)
         // Yielding, the calls are all this phone reads.
         val readPosts = if (yielded) emptyList() else posts
         val readStatus = if (yielded) emptyList() else fresh
@@ -1575,16 +1582,23 @@ class OrreryRepo(
         // post of a busy day. A long call held to the pass's model runs
         // had its later turns read by the rules alone, and then was gone.
         // A model that stops answering sends the call back, whole.
-        val unread = mutableListOf<Pair<String, List<Spoken>>>()
-        for ((address, lines) in spoken) {
-            if (!r.modelDown) oneItem("call $address") {
-                val said = mergeSpoken(lines)
-                said.forEachIndexed { i, sp ->
+        val unread = mutableListOf<Heard>()
+        for (h in spoken) {
+            val said = mergeSpoken(h.lines)
+            var i = h.from
+            if (!r.modelDown) oneItem("call ${h.address}") {
+                while (i < said.size && !r.modelDown) {
+                    val sp = said[i]
                     val before = said.subList(maxOf(0, i - ModelExtractor.CONTEXT_MESSAGES), i).map { it.ship to it.text }
-                    up += triageText(r, s, nowMs, sp.text, sp.ship, nowMs, address, "$i", "talon-call", "$address#$i", before, budgeted = false)
+                    up += triageText(r, s, nowMs, sp.text, sp.ship, nowMs, h.address, "$i", "talon-call", "${h.address}#$i", before, budgeted = false)
+                    if (!r.modelDown) i++
                 }
             }
-            if (r.modelDown) unread += address to lines
+            // Stopped partway, the call goes back from the turn the model
+            // did not answer: sent back whole, a call longer than the
+            // provider's burst bought its first turns again every pass and
+            // never finished.
+            if (r.modelDown && i < said.size) unread += h.copy(from = i)
         }
         for (m in readPosts) {
             val key = "msg:${m.whom}/${m.id}"
@@ -1681,7 +1695,7 @@ class OrreryRepo(
         /** The bodies to ask the ship to look at now, or null for the usual wait. */
         val urgentAbout: List<String>? = null,
         /** Calls this pass took and did not read, for the next one. */
-        val unread: List<Pair<String, List<Spoken>>> = emptyList(),
+        val unread: List<Heard> = emptyList(),
         /** Model runs the pass spent: what a failure after it would buy again. */
         val ran: Int = 0,
         /** The model gave no answer, and what it would have read waits. */
@@ -1840,7 +1854,9 @@ class OrreryRepo(
         // cut, this decides what is cut. Worked out once, and only if
         // the reader or the escalate question asks for it.
         val ranked by lazy { rankBodies(r.bodies, r.index, text, earlier) }
-        if (r.model != null && worth && (!budgeted || r.modelRuns < MODEL_PER_PASS) && forTheReader(text)) {
+        // Not once it has stopped answering: the rest of a call or a
+        // thread each waited out the model's whole timeout again.
+        if (r.model != null && !r.modelDown && worth && (!budgeted || r.modelRuns < MODEL_PER_PASS) && forTheReader(text)) {
             val model = r.model
             val dec = r.decider
             val from = r.index.authorId(author, s)
@@ -2230,7 +2246,7 @@ class OrreryRepo(
          * speaker. Dropped when the pipe is off, like [noteCall].
          */
         fun noteTranscript(address: String, lines: List<Spoken>) {
-            if (lines.isNotEmpty()) enqueue { transcripts += address to lines }
+            if (lines.isNotEmpty()) enqueue { transcripts += Heard(address, lines) }
         }
 
         /**

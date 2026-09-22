@@ -260,4 +260,27 @@ class ModelExtractorTest {
         val out = ModelExtractor.extract(fake, index, emptyList(), "at the airport, boarding soon", "~bus", 1L, me)
         assertEquals("location", out.single().attr)
     }
+
+    // Any failure read as "the model is down" held the item, and one this
+    // input can never get, too long or unreadable, held every item behind
+    // it forever. Only a failure another try may get holds.
+    @Test
+    fun `only an answer another try may get holds the reading`() = kotlinx.coroutines.test.runTest {
+        fun failing(e: Exception) = object : LocalModel {
+            override val rung = "fake"
+            override suspend fun complete(system: String, user: String, grammar: String?, maxTokens: Int): String = throw e
+            override fun close() = Unit
+        }
+        val index = NameIndex(listOf(KnownBody("person/me", "me", listOf("me"), "~zod")))
+        suspend fun held(e: Exception): Boolean {
+            var down = false
+            ModelExtractor.extract(failing(e), index, emptyList(), "I'm at the shop", "~bus", 0L, "~zod", onNoAnswer = { down = true })
+            return down
+        }
+        kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(429, "rate limited")))
+        kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(402, "out of credit")))
+        kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(503, "busy")))
+        kotlin.test.assertFalse(held(io.nisfeb.talon.ai.ModelHttpError(400, "context length exceeded")))
+        kotlin.test.assertFalse(held(IllegalStateException("input too long")))
+    }
 }

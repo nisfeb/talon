@@ -123,18 +123,24 @@ object ModelExtractor {
         context: List<Pair<String, String>> = emptyList(),
         onPlan: (Plan) -> Unit = {},
         zone: kotlinx.datetime.TimeZone = kotlinx.datetime.TimeZone.currentSystemDefault(),
-        /** The model gave no answer, which is not the same as finding nothing. */
+        /** The model gave no answer another try may get ([io.nisfeb.talon.ai.isModelUnavailable]), which is not finding nothing. */
         onNoAnswer: () -> Unit = {},
     ): List<Noticed> {
         if (text.isBlank() || text.trimEnd().endsWith("?")) return emptyList()
         val authorId = index.authorId(author, ourShip)
         val prompt = user(bodies, author, authorId, whenLine(atMs, zone), text, notes, context)
-        val answer = runCatching { model.complete(SYSTEM, prompt, GRAMMAR, MAX_TOKENS) }
-            .getOrElse {
-                io.nisfeb.talon.util.Log.w("ModelExtractor", "${model.rung} did not answer: ${it.message}", it)
-                onNoAnswer()
-                return emptyList()
-            }
+        val answer = try {
+            model.complete(SYSTEM, prompt, GRAMMAR, MAX_TOKENS)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            io.nisfeb.talon.util.Log.w("ModelExtractor", "${model.rung} did not answer: ${e.message}", e)
+            // Only an answer another try may get holds the reading. One
+            // this input can never get, too long or unreadable, is the
+            // input's, and holding it held everything behind it forever.
+            if (io.nisfeb.talon.ai.isModelUnavailable(e)) onNoAnswer()
+            return emptyList()
+        }
         // Only the author and what the message names may be claimed about: a
         // small model otherwise writes what it remembers, not what it read.
         val mentioned = index.find(text).map { it.first.id }.toSet() + authorId + (if (author == ourShip) setOf("person/me") else emptySet())
