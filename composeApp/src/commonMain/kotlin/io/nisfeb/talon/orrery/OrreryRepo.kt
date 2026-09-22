@@ -134,7 +134,7 @@ class OrreryRepo(
     suspend fun loadShipChats() {
         val a = api ?: return
         val token = keyToken() ?: return
-        runCatching { a.shipReadsChats(token) }.onSuccess { _shipReadsChats.value = it }
+        runCatching { a.shipChats(token) }.onSuccess { _shipReadsChats.value = it?.enabled }
     }
 
     /** Turn the ship's own chat reader on or off: its `chat` document, written as the owner. */
@@ -442,6 +442,7 @@ class OrreryRepo(
             full?.let(::schemaActions) ?: OrreryApi.ACTIONS,
         )
         scopeChecked = full != null
+        a.keyLanded(key.token)
         val start = now() - BACKFILL_MS
         rowLock.withLock { db.orreryAccounts().upsert(OrreryAccountEntity(s, key.id, key.token, start, start, 0)) }
         _enabled.value = true
@@ -644,8 +645,9 @@ class OrreryRepo(
         // next pass lists it again rather than losing the owner's words.
         val unfinished = mutableListOf<io.nisfeb.talon.mail.InboxEntry>()
         for (entry in threads) {
-            val tagsRaw = sent.get(s, "brief:${Brief.dayOf(entry.subject)}")?.value?.takeIf { it.isNotBlank() } ?: continue
-            val tags = Json.parseToJsonElement(tagsRaw).jsonObject.mapValues { it.value.jsonPrimitive.content }
+            val tagsKey = "brief:${Brief.dayOf(entry.subject)}"
+            val tagsRaw = sent.get(s, tagsKey)?.value?.takeIf { it.isNotBlank() } ?: continue
+            var tags = Json.parseToJsonElement(tagsRaw).jsonObject.mapValues { it.value.jsonPrimitive.content }
             val thread = runCatching { mail.thread(entry.id) }.getOrElse { unfinished += entry; continue } ?: continue
             val brief = Brief.briefOf(thread, s) ?: continue
             val handled = sent.some(s, thread.messages.map { "reply:${it.id}" }).map { it.key.removePrefix("reply:") }.toSet()
@@ -657,6 +659,14 @@ class OrreryRepo(
                         Log.w(TAG, "reply ${reply.id} not read: ${read.exceptionOrNull()?.message}")
                         unfinished += entry
                         continue
+                    }
+                    // A tag names the action that replaced the one it named:
+                    // left on the old one, a later reply about it found it
+                    // dismissed and did nothing.
+                    val moved = read.getOrThrow()
+                    if (moved.isNotEmpty()) {
+                        tags = tags.mapValues { (_, id) -> moved[id] ?: id }
+                        sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, tagsKey, buildJsonObject { tags.forEach { (t, id) -> put(t, id) } }.toString(), nowMs))
                     }
                 }
                 // Only once all of it is written: a reply that failed
@@ -677,7 +687,7 @@ class OrreryRepo(
         reply: io.nisfeb.talon.mail.MailMessage,
         words: String,
         tags: Map<String, String>,
-    ) {
+    ): Map<String, String> {
         val frontier = cloud?.config?.invoke()?.takeIf { it.hasModelFor(io.nisfeb.talon.ai.AiFeature.OrreryBrief) }?.forFeature(io.nisfeb.talon.ai.AiFeature.OrreryBrief)
             ?: error("no frontier model is set under AI")
         val at = reply.sent.takeIf { it > 0 } ?: nowMs
@@ -709,7 +719,12 @@ class OrreryRepo(
         val facts = Brief.replyFacts(answer, known, view.attrs, resolved, reply.id, at)
         val moves = Brief.movesOf(answer, tags, known)
         val asked = Brief.replyActions(answer, state["schema"] as? JsonObject, known) { Log.i(TAG, "reply ${reply.id}: dropped $it") }
-        for (d in moves) move(a, token, byId[d.actionId] ?: continue, d, known)
+        // What each move replaced, and with what, for the brief's tags.
+        val moved = mutableMapOf<String, String>()
+        for (d in moves) {
+            val old = byId[d.actionId] ?: continue
+            move(a, token, old, d, known)?.let { moved[old.id] = it }
+        }
         for (body in asked) {
             runCatching { a.act(body, token) }.onFailure { Log.i(TAG, "reply ${reply.id}: an action was refused: ${it.message}") }
         }
@@ -717,23 +732,28 @@ class OrreryRepo(
             a.observe(batch, token).refused.forEach { Log.w(TAG, "reply ${reply.id}: refused ${it.error}") }
         }
         Log.i(TAG, "reply ${reply.id}: ${moves.size} moves, ${asked.size} actions, ${facts.observations.size} facts")
+        return moved
     }
 
     /**
      * One move from a reply: a new due or subject replaces the action,
      * then the status moves. [known] is every body the ship has, which a
-     * replacement's subjects are held to.
+     * replacement's subjects are held to. The id of the replacement, or
+     * null where the action stayed itself.
      */
-    internal suspend fun move(a: OrreryApi, token: String, old: OrreryAction, d: Brief.Direction, known: Set<String> = emptySet()) {
+    internal suspend fun move(a: OrreryApi, token: String, old: OrreryAction, d: Brief.Direction, known: Set<String> = emptySet()): String? {
         // Only an action still open. One the owner has done or dismissed
         // since the brief named it is settled, and a move made it again.
-        if (old.status !in OPEN_STATUSES) return
+        if (old.status !in OPEN_STATUSES) return null
         // The owner's reason, or none: a note on a dismissal is read by the
         // generator as the owner's taste, so Talon never writes its own.
         val note = d.reason.orEmpty()
         var id = old.id
         var status = old.status
-        if (d.dueMs != null || d.about != null) {
+        // Closed with a new due in the same breath is closed: a replacement
+        // made only to be closed was a new proposal, notified, then gone.
+        val replace = (d.dueMs != null || d.about != null) && d.status !in setOf("dismissed", "done", "failed")
+        if (replace) {
             // The old one dismissed first, and seen dismissed. The ship
             // answers a proposal that has an open twin, the same kind and
             // title, with that twin, and answers a change before its
@@ -741,32 +761,37 @@ class OrreryRepo(
             // as the old action. Replaced, not refused: no reason, since
             // the owner gave none and still wants the thing.
             runCatching { a.transition(token, old.id, "dismissed", "") }
-                .onFailure { Log.i(TAG, "${old.id} not dismissed, so not moved: ${it.message}"); return }
+                .onFailure { Log.i(TAG, "${old.id} not dismissed, so not moved: ${it.message}"); return null }
+            // From here nothing throws. The old one is dismissed, so a
+            // reply read again would find it so and move nothing: what is
+            // made has to be made now, or the old one put back now.
             a.landed(token, old.id, "dismissed")
             // Its subjects held to bodies the ship still has: one since
             // merged away got the replacement refused.
             val held = if (known.isEmpty()) old else old.copy(about = old.about.filter { it in known })
-            val made = propose(a, token, Brief.replacement(held, d.dueMs, d.about), old.id)
+            // Each counted only once it is there: the ship answers an id
+            // before its writer applies the proposal, and the writer can
+            // still turn it down.
+            suspend fun laid(body: JsonObject) = propose(a, token, body, old.id)?.takeIf { a.landed(token, it.first, it.second) }
+            val made = laid(Brief.replacement(held, d.dueMs, d.about))
                 // Not taken: the old one put back as it was, rather than
                 // the owner left with neither.
-                ?: propose(a, token, Brief.replacement(held, null, null), old.id)
+                ?: laid(Brief.replacement(held, null, null))
                 ?: run {
                     Log.w(TAG, "${old.id} was dismissed and could be neither replaced nor put back")
-                    return
+                    return null
                 }
             id = made.first
             status = made.second
-            // The new one is stored after its id is answered, too: a status
-            // moved at once found no action there.
-            a.landed(token, id, status)
         }
         // A replacement starts as a proposal; one the owner had approved
         // is approved again unless the reply says otherwise.
-        val want = d.status ?: (if (id != old.id && old.status != "proposed") "approved" else return)
-        for (step in Brief.steps(status, want)) {
+        val want = d.status ?: (if (id != old.id && old.status != "proposed") "approved" else null)
+        if (want != null) for (step in Brief.steps(status, want)) {
             runCatching { a.transition(token, id, step, note) }
                 .onFailure { Log.i(TAG, "$id not moved to $step: ${it.message}") }
         }
+        return id.takeIf { it != old.id }
     }
 
     /**
@@ -786,7 +811,8 @@ class OrreryRepo(
                     return null
                 }
                 continue
-            } catch (e: OrreryError.Unreachable) {
+            } catch (e: OrreryError) {
+                // No answer, or one cut off: asked again.
                 continue
             }
             if (made.first != instead) return made
@@ -1060,26 +1086,26 @@ class OrreryRepo(
             // LATE_WINDOW_MS still loses the rest; a cursor on insertion
             // order (a column and a migration) is the whole fix.
             val underAll = db.messages().postsBetween(nowMs - LATE_WINDOW_MS, row.messagesCursor + 1, s, LATE_POSTS)
-            // The ship reads the owner's chats itself (orrery 39): Talon
-            // steps aside from them, or every message was read twice and
-            // the model paid twice. Calls, status lines, mail, location
-            // and the brief stay Talon's. Asked only when there is a post
-            // to read, so an idle pass costs the ship nothing more.
-            val shipChats = (aheadAll.isNotEmpty() || underAll.isNotEmpty()) &&
-                a.shipReadsChats(row.token).also { _shipReadsChats.value = it } == true
-            val ahead = if (shipChats) emptyList() else aheadAll
-            val under = if (shipChats) emptyList() else underAll
-            val readAlready = if (under.isEmpty()) emptySet()
-            else sent.some(s, under.map { "msg:${it.whom}/${it.id}" }).mapTo(HashSet()) { it.key }
-            val posts = under.filter { "msg:${it.whom}/${it.id}" !in readAlready }.reversed() + ahead
+            val readAlready = if (underAll.isEmpty()) emptySet()
+            else sent.some(s, underAll.map { "msg:${it.whom}/${it.id}" }).mapTo(HashSet()) { it.key }
+            val allPosts = underAll.filter { "msg:${it.whom}/${it.id}" !in readAlready }.reversed() + aheadAll
+            // The ship reads the owner's chats itself (orrery 39), and what
+            // it reads Talon does not, or it was read twice and the model
+            // paid twice. It reads only the DMs and channels picked for it,
+            // and only an author it can name, so Talon reads the rest:
+            // stepping aside from every chat left those read by nobody.
+            // Asked only when there is a post, so an idle pass costs the
+            // ship nothing more. What the ship reads is marked read here.
+            val chats = if (allPosts.isEmpty()) null else a.shipChats(row.token).also { _shipReadsChats.value = it?.enabled }
+            val shipped = view.bodies.mapNotNullTo(HashSet()) { b -> b.ship?.takeIf { b.id.startsWith("person/") } }
+            val (theShips, posts) = allPosts.partition { chats?.reads(it.whom, it.author, shipped) == true }
+            theShips.forEach { remember("msg:${it.whom}/${it.id}") }
             // Contact from a DM is contact with you. In a channel it is only
-            // worth recording when the author is already in your book.
-            val direct = posts.filter { isDirect(it.whom) || it.author in book }
+            // worth recording when the author is already in your book. From
+            // every post, the ship's too: its reader writes no last-contact.
+            val direct = allPosts.filter { isDirect(it.whom) || it.author in book }
             facts += Facts(observations = direct.mapNotNull { m -> oneItem("post ${m.id}") { messageFacts(m, s, people.idFor(m.author, null)) } })
-            // While the ship reads them, the cursor keeps up with the newest
-            // post, so turning its reader off later does not hand Talon
-            // everything the ship already read.
-            var messagesCursor = (if (shipChats) aheadAll else ahead).maxOfOrNull { it.sentMs } ?: row.messagesCursor
+            var messagesCursor = aheadAll.maxOfOrNull { it.sentMs } ?: row.messagesCursor
 
             // Mail and the calendar may be absent on this ship; a source
             // that is not there is skipped, not an error of the pipe.
@@ -1225,6 +1251,21 @@ class OrreryRepo(
             view.attrs.takeIf { it.isNotEmpty() }?.let { attrs ->
                 val (listed, not) = facts.observations.partition { o -> attrs[o.subject.substringBefore('/')]?.contains(o.attr) == true }
                 val (seen, unseen) = facts.bodies.partition { b -> b.id.substringBefore('/') in attrs }
+                // A kind the ship has and this key cannot see is the key
+                // behind the schema, not the owner's vocabulary: measured
+                // again at once, and the pass tried again under a key that
+                // sees it, rather than its records written for facts that
+                // never went.
+                val blind = (not.map { it.subject.substringBefore('/') } + unseen.map { it.id.substringBefore('/') })
+                    .filter { it !in attrs }.toSet()
+                if (blind.isNotEmpty()) {
+                    val full = runCatching { a.schema() }.getOrNull()?.let(::schemaKinds).orEmpty()
+                    if (blind.any { it in full }) {
+                        db.orrerySent().forget(s, SCOPE_KEY)
+                        scopeChecked = false
+                        error("this install's key cannot see ${blind.filter { it in full }.joinToString()}; a key that can is asked for")
+                    }
+                }
                 if (not.isNotEmpty() || unseen.isNotEmpty()) {
                     Log.i(TAG, "${not.size + unseen.size} not written, outside the key's schema: " +
                         (not.map { "${it.subject.substringBefore('/')}.${it.attr}" } + unseen.map { it.id.substringBefore('/') }).distinct().joinToString())
@@ -1249,6 +1290,12 @@ class OrreryRepo(
             // and counts this against the owner's own small daily cap,
             // so a "held" is an answer rather than a failure.
             triaged.urgentAbout?.let { about ->
+                // The ship answers a batch before its writer applies it:
+                // asked at once, the pass read the state without the facts
+                // that called for it, and spent the owner's small cap.
+                // ponytail: a pause, not a read back; the writer lands a
+                // batch in well under a second.
+                delay(2_000)
                 runCatching { a.generate(row.token, about) }
                     .onSuccess { Log.i(TAG, "urgent pass: $it (${about.joinToString().ifBlank { "the owner" }})") }
                     .onFailure { Log.i(TAG, "urgent pass not asked for: ${it.message}") }
@@ -1342,7 +1389,9 @@ class OrreryRepo(
             // drops it instead ([putBack]).
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { requeue() }
             throw e
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // Throwable: an Error here skipped the put back, and the calls
+            // it took exist nowhere else. The loop carries on after it.
             _error.value = e.message ?: e::class.simpleName
             if (e !is OrreryError) Log.w(TAG, "pass failed", e)
             if (ran > 0 || costTheShip(e)) failuresInARow++
@@ -1437,6 +1486,11 @@ class OrreryRepo(
         val minted = runCatching { a.mint("Talon on $platform", by(), schemaKinds(full), schemaActions(full)) }
             .onFailure { Log.w(TAG, "could not mint a key with the whole scope: ${it.message}") }
             .getOrNull() ?: return
+        // Not used before the ship has stored it; see [OrreryApi.keyLanded].
+        if (!a.keyLanded(minted.token)) {
+            runCatching { a.revoke(minted.id) }
+            return
+        }
         // Only over the row it measured: turned off meanwhile, the new
         // key is given back rather than the row made again.
         val replaced = rowLock.withLock {

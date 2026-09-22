@@ -266,13 +266,13 @@ class ModelExtractorTest {
     // it forever. Only a failure another try may get holds.
     @Test
     fun `only an answer another try may get holds the reading`() = kotlinx.coroutines.test.runTest {
-        fun failing(e: Exception) = object : LocalModel {
+        fun failing(e: Throwable) = object : LocalModel {
             override val rung = "fake"
             override suspend fun complete(system: String, user: String, grammar: String?, maxTokens: Int): String = throw e
             override fun close() = Unit
         }
         val index = NameIndex(listOf(KnownBody("person/me", "me", listOf("me"), "~zod")))
-        suspend fun held(e: Exception): Boolean {
+        suspend fun held(e: Throwable): Boolean {
             var down = false
             ModelExtractor.extract(failing(e), index, emptyList(), "I'm at the shop", "~bus", 0L, "~zod", onNoAnswer = { down = true })
             return down
@@ -285,5 +285,8 @@ class ModelExtractorTest {
         kotlin.test.assertFalse(held(io.nisfeb.talon.ai.ModelHttpError(400, "context length exceeded")))
         kotlin.test.assertFalse(held(io.nisfeb.talon.ai.ModelHttpError(413, "too large")))
         kotlin.test.assertFalse(held(IllegalStateException("input too long")))
+        kotlin.test.assertFalse(held(io.nisfeb.talon.ai.ModelHttpError(403, "openrouter.ai 403: input was flagged by moderation")), "flagged is the input's, forever")
+        kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(400, "api.anthropic.com 400: Your credit balance is too low")), "a balance is the account's, whatever the status")
+        kotlin.test.assertTrue(held(NotImplementedError("no runtime here")), "an Error is the runtime's, never the input's")
     }
 }

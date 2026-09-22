@@ -175,24 +175,29 @@ fun Obs.toJson(): JsonObject = buildJsonObject {
 }
 
 /**
- * The batches an observe call takes, within the ship's caps. Bodies
- * go first in batches of their own, so every later observation's
- * subject exists by the time it arrives, whatever batch it lands in.
+ * The batches an observe call takes, within the ship's caps. A body
+ * goes in the same batch as the facts about it, since the ship counts
+ * a batch's own bodies as known: it answers before its writer applies
+ * a batch, so a fact sent in the batch after its body's was refused as
+ * about an unknown subject. What is about a body the ship already has
+ * goes after, in batches of its own.
  */
 fun batches(facts: Facts): List<JsonObject> {
     val bodies = facts.bodies.distinctBy { it.id }
+    val bySubject = facts.observations.indices.groupBy { facts.observations[it].subject }
+    val placed = HashSet<Int>()
     val out = mutableListOf<JsonObject>()
-    bodies.chunked(MAX_BODIES).forEach { chunk ->
-        out += buildJsonObject {
-            put("bodies", buildJsonArray { chunk.forEach { add(it.toJson()) } })
-            put("observations", buildJsonArray { })
-        }
+    fun batch(bs: List<OBody>, os: List<Obs>) = buildJsonObject {
+        put("bodies", buildJsonArray { bs.forEach { add(it.toJson()) } })
+        put("observations", buildJsonArray { os.forEach { add(it.toJson()) } })
     }
-    facts.observations.chunked(MAX_OBS).forEach { chunk ->
-        out += buildJsonObject {
-            put("bodies", buildJsonArray { })
-            put("observations", buildJsonArray { chunk.forEach { add(it.toJson()) } })
-        }
+    bodies.chunked(MAX_BODIES).forEach { chunk ->
+        val with = chunk.flatMap { bySubject[it.id].orEmpty() }.take(MAX_OBS)
+        placed += with
+        out += batch(chunk, with.map { facts.observations[it] })
+    }
+    facts.observations.indices.filter { it !in placed }.chunked(MAX_OBS).forEach { chunk ->
+        out += batch(emptyList(), chunk.map { facts.observations[it] })
     }
     return out
 }

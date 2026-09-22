@@ -290,9 +290,21 @@ class ModelHttpError(val status: Int, message: String) : IllegalStateException(m
  * No answer from a model that another try may get: the network, out of
  * credit, rate limited, a key revoked or a model unloaded, the
  * provider's own fault. Only a request the provider calls bad, 400, 413
- * or 422, or a reply that cannot be read, is about the input, and
- * asking again gets the same. A key or a model gone was read as the
- * input's fault, and every message was marked read unread.
+ * or 422, a message its moderation flags, or a reply that cannot be
+ * read, is about the input, and asking again gets the same. A key or a
+ * model gone was read as the input's fault, and every message was
+ * marked read unread; one flagged message read as the model down held
+ * everything behind it.
+ *
+ * ponytail: providers say which in words only. A balance, billing, a
+ * quota or a model that is not there is the account's, whatever the
+ * status; moderation is the input's, whatever the status.
  */
-fun isModelUnavailable(e: Throwable): Boolean = io.nisfeb.talon.util.isTransientNetworkError(e) ||
-    (e is ModelHttpError && e.status != 400 && e.status != 413 && e.status != 422)
+fun isModelUnavailable(e: Throwable): Boolean {
+    if (io.nisfeb.talon.util.isTransientNetworkError(e)) return true
+    if (e !is ModelHttpError) return false
+    val said = e.message.orEmpty().lowercase()
+    if (listOf("moderation", "flagged").any { it in said }) return false
+    if (listOf("credit", "balance", "billing", "quota", "not a valid model", "model not found", "no such model").any { it in said }) return true
+    return e.status != 400 && e.status != 413 && e.status != 422
+}

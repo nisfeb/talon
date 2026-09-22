@@ -478,15 +478,24 @@ class PassKeepsTest {
         val made = statuses.keys.single { it != "a1" }
         assertEquals("approved", statuses[made], "a new one stands, approved again as the old one was")
         assertEquals("2026-09-25T17:00:00Z", dues[made])
+        // Dismissed with a new due in the same breath is dismissed: no
+        // replacement made only to be closed.
+        statuses["a9"] = "proposed"
+        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", old.copy(id = "a9", status = "proposed"), Brief.Direction("a9", status = "dismissed", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-27T17:00:00Z")))
+        statuses.putAll(landing)
+        assertEquals("dismissed", statuses["a9"])
+        assertEquals(3, statuses.size, "and nothing made for it")
         // One the owner has settled since the brief named it is left be.
         repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", old.copy(status = "done"), Brief.Direction("a1", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-26T17:00:00Z")))
-        assertEquals(2, statuses.size, "nothing made again")
+        assertEquals(3, statuses.size, "nothing made again")
     }
 
-    // Orrery 39 reads the owner's chats on the ship. With that on, Talon
-    // reading them too read every message twice and paid the model twice.
+    // Orrery 39 reads the owner's chats on the ship: Talon reading them
+    // too read every message twice. But it reads only the DMs and
+    // channels picked for it, from authors it can name, and Talon
+    // stepping aside from every chat left the rest read by nobody.
     @Test
-    fun `a ship that reads the chats itself has Talon read none`() = runBlocking<Unit> {
+    fun `Talon reads what the ship's chat reader does not`() = runBlocking<Unit> {
         val dir = createTempDirectory(prefix = "talon-pass-shipchats-").toFile()
         val db = db(dir)
         val scope = CoroutineScope(SupervisorJob())
@@ -504,15 +513,24 @@ class PassKeepsTest {
             db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", messagesCursor = start, mailCursor = 90_000L))
             db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
             db.messages().upsertAll(
-                listOf(io.nisfeb.talon.data.MessageEntity(whom = "~sampel-palnet", id = "1", author = "~sampel-palnet", sentMs = start + 60_000, contentJson = """[{"inline":["I'm at the shop now"]}]""", kind = "chat")),
+                listOf(
+                    // In a DM the ship reads, from Rose, whose body carries her ship.
+                    io.nisfeb.talon.data.MessageEntity(whom = "~sampel-palnet", id = "1", author = "~sampel-palnet", sentMs = start + 60_000, contentJson = """[{"inline":["I'm at the shop now"]}]""", kind = "chat"),
+                    // In a DM nobody picked for the ship.
+                    io.nisfeb.talon.data.MessageEntity(whom = "~bus", id = "2", author = "~bus", sentMs = start + 120_000, contentJson = """[{"inline":["The car is fixed"]}]""", kind = "chat"),
+                ),
             )
+            var observed = ""
             val http = HttpClient(
                 MockEngine { req ->
                     val url = req.url.toString()
+                    if ("/api/observe" in url) observed += (req.body as? TextContent)?.text.orEmpty()
                     val body = when {
-                        url.substringBefore('?').endsWith("/api/chat") -> """{"enabled":true,"dms":["~sampel-palnet"]}"""
+                        url.substringBefore('?').endsWith("/api/chat") -> """{"enabled":true,"dms":["~sampel-palnet"],"channels":[],"people":{}}"""
                         "/api/observe" in url -> """{"bodies":[],"observations":[]}"""
-                        "/apps/orrery/api/state" in url -> state
+                        // Rose's body carries her ship, as orrery keeps it: that
+                        // is how its chat reader names her.
+                        "/apps/orrery/api/state" in url -> state.replace(""""name":"Rose",""", """"name":"Rose","ship":"~sampel-palnet",""")
                         "/apps/calendar/window.json" in url -> """{"rows":[]}"""
                         "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
                         else -> "[]"
@@ -521,9 +539,10 @@ class PassKeepsTest {
                 },
             )
             OrreryRepo(http, scope, db, "test", bareClient = http, readWith = model).pass("https://ship.test", "~zod")
-            assertEquals(0, asked, "no post read here")
-            assertNull(db.orrerySent().get("~zod", "msg:~sampel-palnet/1"))
-            assertEquals(start + 60_000, db.orreryAccounts().get("~zod")!!.messagesCursor, "and the cursor keeps up, so turning the ship's reader off hands Talon nothing it read")
+            assertEquals(1, asked, "the one the ship does not read, read here")
+            assertNotNull(db.orrerySent().get("~zod", "msg:~sampel-palnet/1"), "the ship's is marked read, so turning its reader off hands it to nobody twice")
+            assertNotNull(db.orrerySent().get("~zod", "msg:~bus/2"))
+            assertTrue("person/rose" in observed && "last-contact" in observed, "contact is recorded from the ship's post too: its reader writes none")
         } finally {
             scope.cancel()
             db.close()

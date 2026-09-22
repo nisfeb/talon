@@ -441,9 +441,11 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     var vendorTyped by remember { mutableStateOf("") }
     val here = repo != null && where == ArmillaryAvailability.PRESENT
     // An error surface sent the person here to top up: open the sheet
-    // for them, once, and forget the ask.
-    LaunchedEffect(Unit) {
-        if (AiSettings.pendingTopUp.value) {
+    // for them, once, and forget the ask. Whenever it is asked, not only
+    // on arriving: the Top up under orrery's status asks from this screen.
+    val topUpAsked by AiSettings.pendingTopUp.collectAsState()
+    LaunchedEffect(topUpAsked) {
+        if (topUpAsked) {
             AiSettings.pendingTopUp.value = false
             buying = true
         }

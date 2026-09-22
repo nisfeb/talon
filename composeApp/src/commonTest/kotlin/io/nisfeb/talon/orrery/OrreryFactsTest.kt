@@ -120,17 +120,20 @@ class OrreryFactsTest {
         )
     }
 
+    // The ship answers a batch before its writer applies it and counts a
+    // batch's own bodies as known: a fact sent in the batch after its
+    // body's was refused as about an unknown subject.
     @Test
-    fun `batches send bodies first and stay under the caps`() {
+    fun `a body goes with the facts about it, and batches stay under the caps`() {
         val bodies = (1..120).map { OBody("person/p$it") }
-        val obs = (1..450).map { Obs("person/p1", "a", JsonPrimitive(it), it.toLong(), sourceKind = "t", sourceId = "$it") }
+        val obs = (1..450).map { Obs("person/p1", "a", JsonPrimitive(it), it.toLong(), sourceKind = "t", sourceId = "$it") } +
+            Obs("person/known", "a", JsonPrimitive(0), 1L, sourceKind = "t", sourceId = "k")
         val out = batches(Facts(bodies, obs))
-        assertEquals(3 + 3, out.size)
-        out.take(3).forEach { assertTrue(it.jsonObject["observations"]!!.jsonArray.isEmpty()) }
-        out.drop(3).forEach { assertTrue(it.jsonObject["bodies"]!!.jsonArray.isEmpty()) }
-        assertEquals(listOf(50, 50, 20), out.take(3).map { it.jsonObject["bodies"]!!.jsonArray.size })
-        assertEquals(listOf(200, 200, 50), out.drop(3).map { it.jsonObject["observations"]!!.jsonArray.size })
-        val one: JsonObject = out[3].jsonObject["observations"]!!.jsonArray[0].jsonObject
+        fun sizes(k: String) = out.map { it.jsonObject[k]!!.jsonArray.size }
+        assertEquals(listOf(50, 50, 20, 0, 0), sizes("bodies"))
+        assertEquals(listOf(200, 0, 0, 200, 51), sizes("observations"), "p1's facts ride with p1 as far as the cap allows")
+        assertTrue(out.all { sizes("bodies").max() <= MAX_BODIES && sizes("observations").max() <= MAX_OBS })
+        val one: JsonObject = out[0].jsonObject["observations"]!!.jsonArray[0].jsonObject
         assertEquals("1970-01-01T00:00:00.001Z", one["at"]!!.jsonPrimitive.content)
         assertEquals("t", one["source"]!!.jsonObject["kind"]!!.jsonPrimitive.content)
     }

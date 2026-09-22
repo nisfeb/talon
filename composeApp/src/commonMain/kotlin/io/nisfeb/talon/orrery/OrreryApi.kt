@@ -148,20 +148,40 @@ class OrreryApi(
     }
 
     /**
-     * Whether the ship reads the owner's chats itself (orrery 39), as a
-     * key with write may ask: then Talon must not, or every message is
-     * read twice and paid for twice. Null where the ship cannot say, one
-     * before 39 or a key without write, which is not a refused key.
+     * What the ship's own chat reader reads (orrery 39), as a key with
+     * write may ask: what it reads, Talon must not, or it is read twice
+     * and paid for twice. Null where the ship cannot say, one before 39
+     * or a key without write, which is not a refused key.
      */
-    suspend fun shipReadsChats(token: String): Boolean? {
+    suspend fun shipChats(token: String): ShipChats? {
         val text = try {
             request(bare, HttpMethod.Get, "/api/chat") { header(HttpHeaders.Authorization, "Bearer $token") }
         } catch (e: OrreryError.Refused) {
             if (e.status == 404 || e.status == 403) return null
             throw e
         }
-        return runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull()
-            ?.get("enabled")?.jsonPrimitive?.booleanOrNull
+        val o = runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return null
+        fun strings(k: String) = (o[k] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNullTo(HashSet()) { it.jsonPrimitive.contentOrNull }
+        return ShipChats(
+            enabled = o["enabled"]?.jsonPrimitive?.booleanOrNull == true,
+            dms = strings("dms"),
+            channels = strings("channels"),
+            people = (o["people"] as? JsonObject)?.keys.orEmpty(),
+        )
+    }
+
+    /**
+     * Whether a key minted just now works yet. The ship answers the mint
+     * before its writer stores the key, and a key it has not stored is
+     * forbidden: used at once, that read as revoked and turned the pipe
+     * straight back off.
+     */
+    suspend fun keyLanded(token: String): Boolean {
+        repeat(CLAIM_READS * 2) { n ->
+            if (n > 0) kotlinx.coroutines.delay(CLAIM_PAUSE_MS)
+            if (runCatching { stateJson(token) }.isSuccess) return true
+        }
+        return false
     }
 
     /** Merge [body] into a settings document. Owner's route, owner's client. */
@@ -392,7 +412,9 @@ class OrreryApi(
     suspend fun landed(token: String, id: String, status: String): Boolean {
         repeat(CLAIM_READS) { n ->
             if (n > 0) kotlinx.coroutines.delay(CLAIM_PAUSE_MS)
-            if (actions(token, status).any { it.id == id }) return true
+            // A read that fails is a read that did not see it: this never
+            // throws, since what calls it has already changed something.
+            if (runCatching { actions(token, status) }.getOrNull().orEmpty().any { it.id == id }) return true
         }
         return false
     }
@@ -620,6 +642,18 @@ data class StateView(
     /** The schema as the key sees it: the action kinds it may use and their payload shapes. */
     val schema: JsonObject = JsonObject(emptyMap()),
 )
+
+/**
+ * The ship's own chat reader as a key reads it: whether it is on, the
+ * DMs and channels it reads, and the ships its `people` map names. It
+ * reads a message only in those, and only from an author it can name:
+ * a person body carrying that ship, or one in `people`.
+ */
+data class ShipChats(val enabled: Boolean, val dms: Set<String>, val channels: Set<String>, val people: Set<String>) {
+    /** Whether the ship reads this post, given the ships its person bodies carry. */
+    fun reads(whom: String, author: String, shipped: Set<String>): Boolean =
+        enabled && (whom in dms || whom in channels) && (author in shipped || author in people)
+}
 
 data class ItemAnswer(val id: String?, val ok: Boolean, val existing: Boolean, val error: String?)
 

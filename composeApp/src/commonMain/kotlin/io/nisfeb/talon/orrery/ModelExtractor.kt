@@ -141,7 +141,9 @@ object ModelExtractor {
             // Only an answer another try may get holds the reading. One
             // this input can never get, too long or unreadable, is the
             // input's, and holding it held everything behind it forever.
-            if (io.nisfeb.talon.ai.isModelUnavailable(e)) onNoAnswer(e)
+            // An Error is the runtime's, never the input's: a missing
+            // library fails every message the same way.
+            if (e !is Exception || io.nisfeb.talon.ai.isModelUnavailable(e)) onNoAnswer(e)
             return emptyList()
         }
         // Only the author and what the message names may be claimed about: a
