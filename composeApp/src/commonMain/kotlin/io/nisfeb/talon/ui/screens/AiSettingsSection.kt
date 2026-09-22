@@ -140,6 +140,19 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?, arm
     // ── Providers ──────────────────────────────────────────────
     Heading("Providers")
     Quiet("Where your models come from. Talon fetches each one's models, and marks those with zero data retention (ZDR) and those that stay on your own machines (Private).")
+    // Nothing set up at all is the one moment to say what Armillary is
+    // for. Everywhere else it is a row among rows; here it is the
+    // difference between having AI in Talon and going off to sign up
+    // somewhere for a key first.
+    // Not providers.isEmpty(): this device is always a provider, since
+    // every platform has a local rung, so that is never true. What is
+    // meant is nothing the owner had to go and set up.
+    if (chat.isEmpty()) StartWithArmillary(
+        onStart = {
+            edit { it.copy(providers = it.providers + AiProvider(ARMILLARY_PROVIDER, ProviderKind.Armillary, ProviderKind.Armillary.label)) }
+            armillary?.let { a -> scope.launch { a.ensureKey(io.nisfeb.talon.ui.platformLabel) } }
+        },
+    )
     profile.providers.forEach { p ->
         ProviderCard(
             p = p,
@@ -769,6 +782,37 @@ internal fun armillaryModeLine(mode: String?, account: Account?): String = when 
     else -> "Your ship has not said yet how it reaches the model."
 }
 
+/**
+ * What to do when there is no provider at all.
+ *
+ * Every other provider starts with going somewhere else, making an
+ * account and coming back with a key. This one is the owner's own ship
+ * buying the inference for them, so the pitch is the thing itself:
+ * somebody else deals with the AI, you get the AI.
+ */
+@Composable
+private fun StartWithArmillary(onStart: () -> Unit) {
+    androidx.compose.material3.Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Let your ship handle it", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Armillary buys the models for you, through your own ship. No accounts to make, no API keys to " +
+                    "copy in, no bill to watch on somebody else's dashboard: you top up, your ship spends it, " +
+                    "and the balance is on this screen.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "Already have a key from OpenRouter, Anthropic or OpenAI? Add it below instead, or run a model " +
+                    "on this machine.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = onStart, modifier = Modifier.align(Alignment.End)) { Text("Set up Armillary") }
+        }
+    }
+}
+
 @Composable
 private fun AddProvider(hasArmillary: Boolean, onAdd: (ProviderKind) -> Unit) {
     var open by remember { mutableStateOf(false) }
@@ -776,12 +820,16 @@ private fun AddProvider(hasArmillary: Boolean, onAdd: (ProviderKind) -> Unit) {
         OutlinedButton(onClick = { open = true }) { Text("Add a provider") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             val kinds = buildList {
+                // First, because it is the one that asks nothing of the
+                // owner: the others all begin with going and getting an
+                // API key. One at most, since a device buys from one
+                // ship, its own. (The enum keeps it last, where an old
+                // build that cannot decode the name will not meet it.)
+                if (!hasArmillary) add(ProviderKind.Armillary)
                 add(ProviderKind.OpenRouter)
                 add(ProviderKind.Anthropic)
                 add(ProviderKind.OpenAi)
                 add(ProviderKind.OpenAiCompatible)
-                // One at most: a device buys from one ship, its own.
-                if (!hasArmillary) add(ProviderKind.Armillary)
             }
             kinds.forEach { k ->
                 DropdownMenuItem(text = { Text(k.label) }, onClick = { open = false; onAdd(k) })

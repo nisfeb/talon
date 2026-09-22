@@ -417,4 +417,38 @@ class AiSettingsSectionTest {
             onNodeWithText("Empty: requests fail until you top up from another device.").assertExists()
         }
     }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a profile with nothing set up is pitched armillary first`() = runComposeUiTest {
+        // A fresh install is not an empty list: this device is always a
+        // provider, so the pitch turns on there being nothing the owner
+        // went and set up.
+        val ai = FakeAiSettings()
+        setContent {
+            TalonTheme(darkTheme = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null) }
+            }
+        }
+        waitForIdle()
+        onNodeWithText("Let your ship handle it").assertExists()
+        onNodeWithText("no API keys to copy in", substring = true).assertExists()
+        onNodeWithText("Set up Armillary").assertExists()
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a profile with a provider of its own is not pitched`() = runComposeUiTest {
+        val ai = FakeAiSettings().withProfile(withArmillary())
+        setContent {
+            TalonTheme(darkTheme = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null) }
+            }
+        }
+        waitForIdle()
+        assertTrue(
+            onAllNodesWithText("Let your ship handle it").fetchSemanticsNodes().isEmpty(),
+            "the pitch is for an owner who has nothing, not a reminder for one who has",
+        )
+    }
 }
