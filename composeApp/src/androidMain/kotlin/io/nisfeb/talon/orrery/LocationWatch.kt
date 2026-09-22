@@ -66,6 +66,12 @@ object LocationWatch {
     /** Off, from wherever: the pipe going off takes this with it. */
     fun stop() = app?.let { set(it, false) } ?: Unit
 
+    /** Listening held, or taken up again, with the switch left as saved. */
+    fun pause(paused: Boolean) {
+        val ctx = app ?: return
+        if (paused) stopListening(ctx) else resume(ctx)
+    }
+
     private fun isOn(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ON, false)
 
     /** Location, and on Android 10 and later location all the time, which hearing a move with the app closed needs. */

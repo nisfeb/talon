@@ -16,6 +16,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -203,6 +205,102 @@ class PassKeepsTest {
             OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
             assertNull(db.orreryAccounts().get("~zod"), "the row turning off deleted stays deleted")
         } finally {
+            scope.cancel()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
+
+    private fun claim(id: String, attr: String = "location", value: String = "\"the shop\"") = io.nisfeb.talon.data.OrreryNoticedEntity(
+        id = id, ship = "~zod", subject = "person/rose", attr = attr, valueJson = value, atMs = 1,
+        untilMs = null, conf = 70, sourceKind = "talon-dm", sourceId = "talon://chat/~sampel-palnet?id=$id", bodyJson = null,
+        whom = "~sampel-palnet", postId = id, snippet = "at the shop", state = OrreryRepo.CONFIRMING, createdMs = 1,
+    )
+
+    // One bad fact cost its whole batch, up to two hundred facts recorded
+    // as sent and never sent. And a claim that could not be read threw on
+    // every pass, before anything moved.
+    @Test
+    fun `one bad item costs that item, not its batch or the pass`() = runBlocking {
+        val dir = createTempDirectory(prefix = "talon-pass-split-").toFile()
+        val db = db(dir)
+        val scope = CoroutineScope(SupervisorJob())
+        var took = 0
+        try {
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
+            db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
+            listOf(claim("n1"), claim("n2", attr = "poison"), claim("n3"), claim("n4", value = "{not json"))
+                .forEach { db.orreryNoticed().insertIfNew(it) }
+            val http = HttpClient(
+                MockEngine { req ->
+                    val url = req.url.toString()
+                    if ("/api/observe" in url) {
+                        val said = (req.body as? TextContent)?.text.orEmpty()
+                        if ("poison" in said) return@MockEngine respond("unreadable", io.ktor.http.HttpStatusCode.BadRequest)
+                        val n = kotlinx.serialization.json.Json.parseToJsonElement(said).jsonObject["observations"]!!.jsonArray.size
+                        took += n
+                        return@MockEngine respond(
+                            """{"bodies":[],"observations":[${List(n) { """{"ok":true}""" }.joinToString(",")}]}""",
+                            headers = headersOf(HttpHeaders.ContentType, "application/json"),
+                        )
+                    }
+                    val body = when {
+                        "/apps/orrery/api/state" in url -> state
+                        "/apps/calendar/window.json" in url -> """{"rows":[]}"""
+                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
+                        else -> "[]"
+                    }
+                    respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                },
+            )
+            OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
+            assertEquals(2, took, "the two good claims went up, split away from the one the ship could not read")
+            assertEquals(emptyList(), db.orreryNoticed().confirming("~zod"))
+            assertEquals("unreadable", db.orreryNoticed().get("n4")?.state, "a claim that cannot be read is set aside")
+            assertTrue(db.orreryAccounts().get("~zod")!!.calendarCursor > 0, "and the pass finished")
+        } finally {
+            scope.cancel()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
+
+    // Turning off cancels the loop, which is the job a loop pass runs in,
+    // so the delete after it never ran: the next launch turned the pipe
+    // on again with the key the ship had refused. The tests drove pass(),
+    // which runs outside the loop, and never saw it.
+    @Test
+    fun `a key refused in the loop takes the pipe off for good`() = runBlocking {
+        val dir = createTempDirectory(prefix = "talon-pass-403-").toFile()
+        val db = db(dir)
+        val scope = CoroutineScope(SupervisorJob())
+        val repo = run {
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
+            db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
+            db.orreryNoticed().insertIfNew(claim("n1"))
+            val http = HttpClient(
+                MockEngine { req ->
+                    val url = req.url.toString()
+                    if ("/api/observe" in url) return@MockEngine respond("revoked", io.ktor.http.HttpStatusCode.Forbidden)
+                    val body = when {
+                        "/apps/orrery/api/state" in url -> state
+                        "/apps/calendar/window.json" in url -> """{"rows":[]}"""
+                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
+                        else -> "[]"
+                    }
+                    respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                },
+            )
+            OrreryRepo(http, scope, db, "test", bareClient = http)
+        }
+        try {
+            repo.attach("https://ship.test", "~zod")
+            kotlinx.coroutines.withTimeout(20_000) {
+                while (db.orreryAccounts().get("~zod") != null) kotlinx.coroutines.delay(50)
+            }
+            assertTrue(!repo.enabled.value, "and the switch is off")
+        } finally {
+            repo.detach()
             scope.cancel()
             db.close()
             dir.deleteRecursively()

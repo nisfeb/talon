@@ -185,6 +185,8 @@ class SettingsSyncImpl(
     /** Where a push that an arriving entry calls for runs, off the event stream: the shell's scope. */
     @Volatile private var pushScope: kotlinx.coroutines.CoroutineScope? = null
     private var marksPush: kotlinx.coroutines.Job? = null
+    /** A marks push asked for before there was a scope to run it in; it runs once there is. */
+    @Volatile private var marksOwed = false
     // Bootstrap can beat the host's attachUiSettings call. Hold what
     // the ship said until there's somewhere to put it.
     @Volatile private var pendingUiPrefs: JsonObject? = null
@@ -250,6 +252,7 @@ class SettingsSyncImpl(
         if (ui != null) return
         ui = settings
         pushScope = scope
+        if (marksOwed) pushMarks()
         // Drain anything bootstrap parked before we had a store.
         pendingUiPrefs?.let { parked ->
             pendingUiPrefs = null
@@ -1274,25 +1277,33 @@ class SettingsSyncImpl(
         // event stream, which two pokes waiting on acks held up, and
         // one at a time, since an older build's every write lacks them.
         val kept = aiSettings.state.value.revokedKeys
-        if (current.syncEnabled && obj.containsKey("provider") && io.nisfeb.talon.ai.mergedMarks(marks, kept) != marks &&
-            marksPush?.isActive != true
-        ) {
-            marksPush = pushScope?.launch {
-                try {
-                    pushAiSettings()
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    Log.w(TAG, "revoked keys push failed", e)
-                }
-            }
-        }
+        if (current.syncEnabled && obj.containsKey("provider") && io.nisfeb.talon.ai.mergedMarks(marks, kept) != marks) pushMarks()
         // applyRemote deliberately bypasses onStateChange (anti-pingpong),
         // which is also the only rearm-on-key-change hook — so a key or
         // feature toggle arriving via sync must re-arm the loop scheduler
         // here, or a device whose alarm was disarmed for lack of a key
         // stays disarmed until restart even though loops can now run.
         rearmLoops()
+    }
+
+    /**
+     * The AI settings pushed again for their revoked-key marks, off the
+     * event stream and one at a time. Owed until there is a scope: an
+     * entry applied at bootstrap, before the shell attached, lost it.
+     */
+    private fun pushMarks() {
+        if (marksPush?.isActive == true) return
+        val scope = pushScope ?: run { marksOwed = true; return }
+        marksOwed = false
+        marksPush = scope.launch {
+            try {
+                pushAiSettings()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "revoked keys push failed", e)
+            }
+        }
     }
 
     override suspend fun addBookmark(whom: String, postId: String, ts: Long) {

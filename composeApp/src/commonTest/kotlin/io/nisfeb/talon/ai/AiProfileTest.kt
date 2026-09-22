@@ -176,7 +176,8 @@ class AiProfileTest {
 
     // Taking out the provider a feature read messages with sent it to
     // the default model, which is usually a cloud one, with no word
-    // from the owner. Triage goes to this device wherever it read.
+    // from the owner. Triage goes to this device wherever it read;
+    // catch-up and the assistant, which cannot run here, go off.
     @Test
     fun `removing a private provider keeps message reading off the cloud`() {
         val p = AiProfile(
@@ -196,10 +197,41 @@ class AiProfileTest {
         )
         val noLm = p.without("lm")
         assertEquals(ProviderKind.ThisDevice, noLm.resolve(AiFeature.OrreryTriage)?.provider?.kind)
-        assertEquals(ProviderKind.ThisDevice, noLm.resolve(AiFeature.CatchUp)?.provider?.kind, "it read on a model of the owner's own")
+        assertFalse(noLm.isOn(AiFeature.CatchUp), "it read on a model of the owner's own, and cannot run here: off, where the owner sees it")
         assertEquals("or", noLm.resolve(AiFeature.OrreryBrief)?.provider?.id, "the brief reads no messages, and follows the default")
         assertEquals("or", p.without("an").resolve(AiFeature.Assistant)?.provider?.id, "from one cloud to the default one, as before")
         val cloudTriage = p.copy(features = p.features + (AiFeature.OrreryTriage to FeatureSetting(true, ModelRef("an", ""))))
         assertEquals(ProviderKind.ThisDevice, cloudTriage.without("an").resolve(AiFeature.OrreryTriage)?.provider?.kind)
+    }
+
+    // The old fields came back for a feature on this device, frontier
+    // key and all, so a caller that did not ask hasModelFor first sent
+    // the messages to the cloud.
+    @Test
+    fun `a feature on this device is handed no key`() {
+        val cfg = AiSettings.Config(
+            AiSettings.Provider.OpenRouter, "sk-or", "m",
+            savedProfile = AiProfile(
+                providers = listOf(AiProvider(DEVICE_PROVIDER, ProviderKind.ThisDevice, "On this device")),
+                features = mapOf(AiFeature.CatchUp to FeatureSetting(true, ModelRef(DEVICE_PROVIDER, ""))),
+            ),
+        )
+        assertEquals("", cfg.forFeature(AiFeature.CatchUp).apiKey)
+    }
+
+    // Model lists do not travel, so a blank choice on a server of your
+    // own reached the other devices with nothing to read it by, and the
+    // features on it went there. Saved, it becomes the model it meant.
+    @Test
+    fun `a blank server model is saved as the model it stands for`() {
+        val lm = AiProvider(
+            "lm", ProviderKind.OpenAiCompatible, "LM Studio", baseUrl = "http://10.0.0.2:1234/v1",
+            models = listOf(ModelInfo("text-embedding-nomic"), ModelInfo("qwen3-8b")),
+        )
+        val p = AiProfile(providers = listOf(lm), defaultModel = ModelRef("lm", ""))
+        val saved = AiSettings.Config(AiSettings.Provider.OpenRouter, "", null).withProfile(p, now = 1L).savedProfile!!
+        assertEquals(ModelRef("lm", "qwen3-8b"), saved.defaultModel, "the first that chats, not the embedding model")
+        val none = p.copy(providers = listOf(lm.copy(models = emptyList())))
+        assertEquals(ModelRef("lm", ""), none.pinningModels().defaultModel, "left blank until there is a list")
     }
 }

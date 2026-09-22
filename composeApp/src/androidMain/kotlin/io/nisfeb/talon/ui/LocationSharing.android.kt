@@ -22,6 +22,8 @@ import java.util.concurrent.atomic.AtomicReference
  */
 actual fun stopLocationSharing() = LocationWatch.stop()
 
+actual fun pauseLocationSharing(paused: Boolean) = LocationWatch.pause(paused)
+
 @Composable
 actual fun rememberLocationSharing(): LocationSharing? {
     val ctx = LocalContext.current.applicationContext

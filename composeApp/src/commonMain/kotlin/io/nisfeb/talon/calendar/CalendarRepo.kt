@@ -366,8 +366,10 @@ class CalendarRepo(
                 // the editor offers; one it has is already there.
                 if (d.tags.any { it !in _tags.value }) api?.let { a -> runCatching { a.tags() }.getOrNull()?.let { _tags.value = it.map { t -> t.tag } } }
             }
-            _pendingTasks.value = _pendingTasks.value - ghost
+            // Why first, then the stand-in goes: the other way round, a
+            // screen watching the list saw it leave before it heard why.
             if (!ok) onFailed("The ship did not take \"${d.name.trim()}\".")
+            _pendingTasks.value = _pendingTasks.value - ghost
         }
         return ghost
     }

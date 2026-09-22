@@ -37,3 +37,11 @@ expect fun rememberLocationSharing(): LocationSharing?
  * not share location does nothing here.
  */
 expect fun stopLocationSharing()
+
+/**
+ * Stop listening for now, or listen again, keeping the switch as it is:
+ * for a ship with no pipe, which has nowhere to send a move and no
+ * switch on its screen. Turning the switch off there instead turned it
+ * off for the ship that had a pipe, since there is one switch.
+ */
+expect fun pauseLocationSharing(paused: Boolean)

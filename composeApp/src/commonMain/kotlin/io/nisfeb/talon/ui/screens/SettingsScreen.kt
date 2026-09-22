@@ -1288,10 +1288,22 @@ private fun ShipListEditor(
     onRemove: (String) -> Unit,
 ) {
     var draft by remember { mutableStateOf("") }
-    // A @p, a comet's word name, or the name of somebody known.
-    val landed = remember(draft) {
+    // A @p, a comet's word name, or the name of somebody known; and,
+    // since Add acts on it unseen, which ship that is. "rex" is the
+    // galaxy ~rex even with a contact called Rex, who is in the list
+    // under the box: a nickname is the peer's own, and any peer's
+    // could otherwise stand in for a @p typed here.
+    val (landed, hint) = remember(draft) {
         val map = io.nisfeb.talon.ui.LastContactMap.value
-        io.nisfeb.talon.ui.NameToShip.one(draft, map.contacts.map { it.ship }, map::nickname)
+        val ship = io.nisfeb.talon.ui.NameToShip.one(draft, map.contacts.map { it.ship }, map::nickname)
+        val bare = draft.trim().removePrefix("~")
+        val alsoNamed = ship?.let { s -> map.contacts.firstOrNull { it.ship != s && it.nickname?.equals(bare, ignoreCase = true) == true } }
+        ship to when {
+            ship == null -> null
+            alsoNamed != null -> "Adds ${io.nisfeb.talon.ui.shipHandle(ship)}, not ${alsoNamed.nickname}. For them, pick from the list."
+            bare != ship.removePrefix("~") -> "Adds ${io.nisfeb.talon.ui.shipHandle(ship)}."
+            else -> null
+        }
     }
     val candidate = landed ?: draft.trim().let { if (it.startsWith("~")) it else "~$it" }
     val valid = landed != null
@@ -1333,6 +1345,9 @@ private fun ShipListEditor(
             enabled = valid && candidate !in ships,
             onClick = { onAdd(candidate); draft = "" },
         ) { Text("Add") }
+    }
+    hint?.let {
+        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
     }
     io.nisfeb.talon.ui.ShipSuggestions(draft, onPick = { draft = it }, Modifier.padding(top = 4.dp))
 }

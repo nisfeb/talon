@@ -39,7 +39,17 @@ class EventDetailCacheTest {
             },
         )
         return CalendarRepo(http, CoroutineScope(SupervisorJob()), pollIntervalMs = 60 * 60 * 1000L)
-            .also { it.attach("https://ship.test") }
+            .also {
+                it.attach("https://ship.test")
+                // The first refresh attach() starts drops what was read
+                // of events; landing between two reads here, it made the
+                // second read again and the count flaky.
+                runBlocking {
+                    kotlinx.coroutines.withTimeout(10_000) {
+                        while (it.availability.value == CalendarAvailability.UNKNOWN) delay(10)
+                    }
+                }
+            }
     }
 
     @Test

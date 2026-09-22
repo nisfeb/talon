@@ -46,30 +46,24 @@ object NameToShip {
         // which the ship then refuses along with whatever it was
         // attached to. Its own doc records that bug.
         val asPatp = if (text.startsWith("~")) text else "~$text"
-        val patp = asPatp.takeIf { isValidPatp(it) }
+        if (isValidPatp(asPatp)) return Result.One(asPatp)
 
         // Somebody known, by any name the reader has for them. This
         // comes BEFORE decoding on purpose: a four-bit checksum lets
         // one word in sixteen decode as a near-zero comet, so a contact
         // nicknamed "Alone" typed as "alone" would otherwise start a
-        // conversation with nobody. And before a @p typed without its
-        // sig: "rex" for a contact nicknamed Rex is Rex, not the galaxy
-        // ~rex, which the suggestions under the box did not offer.
-        // "~rex" still means the galaxy.
-        if (patp == null || !text.startsWith("~")) {
-            val needle = text.lowercase()
-            val hits = known.distinct().filter { ship ->
-                shipHandle(ship).equals(needle, ignoreCase = true) ||
-                    shipHandleLong(ship).equals(needle, ignoreCase = true) ||
-                    nicknameOf(ship)?.equals(needle, ignoreCase = true) == true
-            }
-            when (hits.size) {
-                1 -> return Result.One(hits.first())
-                0 -> Unit
-                else -> return Result.Several(hits)
-            }
+        // conversation with nobody.
+        val needle = text.lowercase()
+        val hits = known.distinct().filter { ship ->
+            shipHandle(ship).equals(needle, ignoreCase = true) ||
+                shipHandleLong(ship).equals(needle, ignoreCase = true) ||
+                nicknameOf(ship)?.equals(needle, ignoreCase = true) == true
         }
-        if (patp != null) return Result.One(patp)
+        when (hits.size) {
+            1 -> return Result.One(hits.first())
+            0 -> Unit
+            else -> return Result.Several(hits)
+        }
 
         // Last, a full word name for a comet nobody here has met. It
         // decodes on its own, checksum and all.

@@ -91,14 +91,8 @@ data class AiProfile(
         // Armillary and a server of your own have no default model: the
         // list is all there is, so a blank ref takes the first of it
         // rather than reaching the OpenAI-shaped client with no model.
-        // ponytail: "embed" in the id is how an embedding model is told
-        // from a chat one; LM Studio lists both, and says nothing else.
         val listOnly = p.kind == ProviderKind.Armillary || p.kind == ProviderKind.OpenAiCompatible
-        val model = if (ref.model.isBlank() && listOnly) {
-            p.models.firstOrNull { !it.speech && "embed" !in it.id.lowercase() }?.id.orEmpty()
-        } else {
-            ref.model
-        }
+        val model = if (ref.model.isBlank() && listOnly) p.firstChatModel().orEmpty() else ref.model
         return Resolved(p, model)
     }
 
@@ -113,16 +107,18 @@ data class AiProfile(
     }
 }
 
-/** The features that read the owner's messages. */
-private val READS_MESSAGES = setOf(AiFeature.CatchUp, AiFeature.Assistant, AiFeature.OrreryTriage)
+/** The features besides triage that read the owner's messages. */
+private val READS_MESSAGES = setOf(AiFeature.CatchUp, AiFeature.Assistant)
 
 /**
  * The profile with provider [id] taken out. A feature on it follows
- * the default model after, which is usually a cloud one. Not a feature
- * that reads messages on a model of the owner's own: that goes to this
- * device, and so does triage wherever it read, since it reads every
- * message with no one asking. Following the default sent them to the
- * cloud with no word from the owner.
+ * the default model after, which is usually a cloud one. Not one that
+ * read messages on a model of the owner's own: following the default
+ * sent them to the cloud with no word from the owner. Triage goes to
+ * this device, wherever it read, since it reads every message with no
+ * one asking and this device is its own ladder. Catch-up and the
+ * assistant cannot run here, so they are turned off, which the owner
+ * sees, rather than vanishing.
  */
 fun AiProfile.without(id: String): AiProfile {
     val gone = provider(id)
@@ -130,14 +126,38 @@ fun AiProfile.without(id: String): AiProfile {
         providers = providers.filterNot { it.id == id },
         defaultModel = defaultModel?.takeUnless { it.provider == id },
         features = features.mapValues { (feature, f) ->
-            val staysHere = feature == AiFeature.OrreryTriage || (gone?.isPrivate == true && feature in READS_MESSAGES)
             when {
                 f.model?.provider != id -> f
-                staysHere -> f.copy(model = ModelRef(DEVICE_PROVIDER, ""))
+                feature == AiFeature.OrreryTriage -> f.copy(model = ModelRef(DEVICE_PROVIDER, ""))
+                gone?.isPrivate == true && feature in READS_MESSAGES -> FeatureSetting(on = false, model = null)
                 else -> f.copy(model = null)
             }
         },
     )
+}
+
+/**
+ * The first model on the list that chats: not a speech model, and not
+ * an embedding one. ponytail: "embed" in the id is how an embedding
+ * model is told from a chat one; LM Studio lists both and says nothing
+ * else.
+ */
+fun AiProvider.firstChatModel(): String? = models.firstOrNull { !it.speech && "embed" !in it.id.lowercase() }?.id
+
+/**
+ * A blank choice on a server of your own made the model it stands for,
+ * once the list is here. Lists do not travel, so another device got the
+ * blank with no list to read it by, and every feature on it went.
+ * Armillary's is left blank: its rows do not travel, and its list is
+ * the ship's to change.
+ */
+fun AiProfile.pinningModels(): AiProfile {
+    fun pin(ref: ModelRef?): ModelRef? {
+        if (ref == null || ref.model.isNotBlank()) return ref
+        val p = provider(ref.provider)?.takeIf { it.kind == ProviderKind.OpenAiCompatible } ?: return ref
+        return p.firstChatModel()?.let { ref.copy(model = it) } ?: ref
+    }
+    return copy(defaultModel = pin(defaultModel), features = features.mapValues { (_, f) -> f.copy(model = pin(f.model)) })
 }
 
 /** A feature's provider and model. */
@@ -274,7 +294,10 @@ fun AiSettings.Config.forFeature(f: AiFeature): AiSettings.Config {
     // model gets no key: the old fields could still hold one from a
     // provider the owner took out, and sent it on every request.
     val r = profile().resolve(f) ?: return if (savedProfile != null) copy(apiKey = "") else this
-    val provider = providerOf(r.provider.kind) ?: return this
+    // This device is no chat client's: the old fields it returned held
+    // the frontier key, so a caller that skipped [hasModelFor] sent the
+    // messages to the cloud.
+    val provider = providerOf(r.provider.kind) ?: return copy(apiKey = "")
     return copy(
         provider = provider,
         apiKey = r.provider.apiKey,
@@ -384,14 +407,13 @@ fun AiProfile.keepingLocal(local: AiProfile?): AiProfile {
 }
 
 /**
- * Whether [f] resolves to a model a chat client can call: one with a
- * key, or a server of the owner's own, which may want none.
+ * Whether [f] resolves to a model a chat client can call: see
+ * [modelProblem] for what that takes.
  *
  * What the features gate on. The old check was whether the old key
  * field was set, which a local LM Studio or Ollama server never sets,
  * so those features stayed hidden for it, and which a removed key
- * went on satisfying. With no profile saved yet it answers as the old
- * check did, a keyless server of the owner's own aside.
+ * went on satisfying.
  */
 fun AiSettings.Config.hasModelFor(f: AiFeature): Boolean = modelProblem(f) == null
 
@@ -416,8 +438,9 @@ fun AiSettings.Config.modelProblem(f: AiFeature): String? {
 }
 
 /**
- * The settings once the owner saves [p] on this device, at [now]: the
- * profile, and the old fields derived from it.
+ * The settings once the owner saves [saved] on this device, at [now]:
+ * the profile, with any blank server model made the one it stands for
+ * ([pinningModels]), and the old fields derived from it.
  *
  * One place for all three platforms. A key that was on a provider and
  * is on none now was removed here, by taking the provider out or by
@@ -426,7 +449,8 @@ fun AiSettings.Config.modelProblem(f: AiFeature): String? {
  * tells the peers. One the profile never held stays: that is the case
  * the "a blank never overwrites" rule in [legacyInto] was written for.
  */
-fun AiSettings.Config.withProfile(p: AiProfile, now: Long): AiSettings.Config {
+fun AiSettings.Config.withProfile(saved: AiProfile, now: Long): AiSettings.Config {
+    val p = saved.pinningModels()
     val had = profile().keys().values.toSet()
     val has = p.keys().values.toSet()
     return p.legacyInto(this).copy(savedProfile = p).marking(gone = had - has, back = has - had, now = now)
