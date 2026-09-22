@@ -153,6 +153,21 @@ class OrreryApi(
         return request(owner, HttpMethod.Put, "/api/$name", body.toString())
     }
 
+    /**
+     * Register a settings document with the service it names, and read
+     * back what that service holds. Owner's route, owner's client. The
+     * ship makes the outside call itself; this app never holds the
+     * token. [name] is allow-listed like [settingsDoc], for the same reason.
+     */
+    suspend fun register(name: String): String =
+        request(owner, HttpMethod.Post, registrationPath(name))
+
+    suspend fun registration(name: String): String =
+        request(owner, HttpMethod.Get, registrationPath(name))
+
+    private fun registrationPath(name: String): String =
+        REGISTRATIONS[name] ?: throw IllegalArgumentException("no registration for $name")
+
     /** The bodies the key may see, with the rev the view was at. */
     suspend fun state(token: String): StateView = viewOf(stateJson(token))
 
@@ -490,6 +505,14 @@ class OrreryApi(
          * set is a mistake, and `../` is not a document.
          */
         val SETTINGS = setOf("generator", "telegram", "schema", "policy")
+
+        /**
+         * The documents that register themselves with an outside
+         * service, and the route that does it: POST registers, GET
+         * reads what the service holds. Today only the Telegram
+         * webhook.
+         */
+        val REGISTRATIONS = mapOf("telegram" to "/api/telegram/webhook")
 
         const val APP_PATH = "/apps/orrery"
         /** The ship refuses a longer note on a retraction. */

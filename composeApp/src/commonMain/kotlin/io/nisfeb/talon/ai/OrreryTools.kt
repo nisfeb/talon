@@ -60,9 +60,13 @@ Settings live in documents, read and written whole by name:
   secret is the owner's own invention and must be 16 bytes or longer,
   and `public_url` is where the ship is reachable from the internet,
   because Telegram pushes to it. `chats` is the chat ids it may read,
-  `people` maps a Telegram user id to a body id. Registering the
-  webhook is a separate step the owner takes on the ship's own page
-  once the three are set.
+  `people` maps a Telegram user id to a body id. Once the three are
+  set, orrery_register telegram: the ship asks Telegram to push
+  updates to it and reads back what Telegram holds. A 200 is not
+  delivery: report the url held, pending_update_count and
+  last_error_message. A last_error_message naming TLS or DNS means
+  the public URL is not reachable from the internet, which is the
+  owner's to fix.
 - `schema`, `policy`: what bodies may carry, and what the ship does
   with what it is told.
 
@@ -87,6 +91,8 @@ interface OrreryTap {
     suspend fun observe(batch: JsonObject): Result<List<String>>
     suspend fun settings(name: String): Result<String>
     suspend fun configure(name: String, body: JsonObject): Result<String>
+    suspend fun register(name: String): Result<String>
+    suspend fun registration(name: String): Result<String>
 }
 
 /** The repo as the tools see it. */
@@ -113,6 +119,10 @@ fun OrreryRepo.asTap(): OrreryTap = object : OrreryTap {
     override suspend fun settings(name: String) = readSettings(name)
 
     override suspend fun configure(name: String, body: JsonObject) = writeSettings(name, body)
+
+    override suspend fun register(name: String) = this@asTap.register(name)
+
+    override suspend fun registration(name: String) = readRegistration(name)
 }
 
 /** Orrery's tools, where this install is attached to a ship that has it. */
@@ -231,6 +241,31 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
         orrery.configure(name, obj).fold(
             onSuccess = { "Written to $name. The ship says: " + clip(it) },
             onFailure = { "Could not write $name: ${it.message}" },
+        )
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_register",
+            "Register one of orrery's settings documents with the outside service it names, then read back what that service holds: " +
+                OrreryApi.REGISTRATIONS.keys.sorted().joinToString(", ") +
+                ". The ship makes the call itself with the credentials it already holds. Read orrery_guide first: the ship refuses until the fields it needs are set.",
+            toolSchema("document" to ("string" to "The document name."), required = listOf("document")),
+        ),
+        write = true,
+    ) { args ->
+        val name = args.str("document") ?: return@Tool "Error: document is required."
+        if (name !in OrreryApi.REGISTRATIONS) {
+            return@Tool "There is no orrery registration for \"$name\". It is one of: " +
+                OrreryApi.REGISTRATIONS.keys.sorted().joinToString(", ") + "."
+        }
+        val said = orrery.register(name).fold(
+            onSuccess = { "Registered $name. The ship says: " + clip(it) },
+            onFailure = { return@Tool "Could not register $name: ${it.message}" },
+        )
+        orrery.registration(name).fold(
+            onSuccess = { "$said\nWhat the service holds now: " + clip(it) },
+            onFailure = { "$said\nCould not read back what the service holds: ${it.message}" },
         )
     })
 }

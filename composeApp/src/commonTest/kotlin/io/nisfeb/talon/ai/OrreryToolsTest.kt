@@ -41,6 +41,13 @@ class OrreryToolsTest {
             wroteTo = name; wrote = body
             return Result.success("""{"ok":true}""")
         }
+        var registered: String? = null
+        override suspend fun register(name: String): Result<String> {
+            registered = name
+            return Result.success("""{"ok":true,"description":"Webhook was set"}""")
+        }
+        override suspend fun registration(name: String): Result<String> =
+            Result.success("""{"url":"https://my.ship/apps/orrery/telegram","pending_update_count":0,"last_error_message":null}""")
     }
 
     private fun tools(t: OrreryTap) = orreryTools(t).associateBy { it.spec.name }
@@ -127,11 +134,27 @@ class OrreryToolsTest {
     @Test
     fun `changing the ship asks first, looking does not`() {
         val byWrite = orreryTools(Tap()).groupBy({ it.write }, { it.spec.name })
-        assertEquals(setOf("orrery_observe", "orrery_configure"), byWrite[true]?.toSet())
+        assertEquals(setOf("orrery_observe", "orrery_configure", "orrery_register"), byWrite[true]?.toSet())
         assertEquals(
             setOf("orrery_guide", "orrery_find", "orrery_read", "orrery_settings"),
             byWrite[false]?.toSet(),
         )
+    }
+
+    // Registering is the one step of setting up a reader that is not a
+    // document write, and a 200 from it is not delivery: the tool reads
+    // back what the service holds in the same breath.
+    @Test
+    fun `a registration goes through and is read back, or is refused by name`() = runTest {
+        val t = Tap()
+        val said = run(t, "orrery_register", buildJsonObject { put("document", "telegram") })
+        assertEquals("telegram", t.registered)
+        assertTrue("Webhook was set" in said, said)
+        assertTrue("pending_update_count" in said, said)
+
+        val bad = run(t, "orrery_register", buildJsonObject { put("document", "telegram/../wake") })
+        assertTrue("no orrery registration" in bad, bad)
+        assertEquals("telegram", t.registered, "the bad name never reached the ship")
     }
 
     @Test
