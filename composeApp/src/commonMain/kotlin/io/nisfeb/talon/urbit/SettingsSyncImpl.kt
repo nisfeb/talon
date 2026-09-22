@@ -895,7 +895,11 @@ class SettingsSyncImpl(
         // make the ship's entry authoritatively key-less, and a
         // later pull (here or on a peer) then blanks a real local
         // key — the "keys not persisted" data loss. Absent ≠ empty.
+        // A removal travels as a stamp, on the transcription key's
+        // terms, so a key taken out because it leaked leaves every
+        // device and not only this one.
         if (cfg.apiKey.isNotBlank()) put("apiKey", cfg.apiKey)
+        else if (cfg.apiKeyRemovedAtMs > 0L) put("apiKeyRemovedAtMs", cfg.apiKeyRemovedAtMs)
         cfg.model?.let { put("model", it) }
         cfg.baseUrl?.let { put("baseUrl", it) }
         // Brave key rides the same opt-in gate as the LLM key —
@@ -1191,6 +1195,11 @@ class SettingsSyncImpl(
         // The transcription key: a real one wins; an absent one keeps ours;
         // a removal stamp newer than our own last removal clears ours.
         val remoteRemovedAt = obj["sttApiKeyRemovedAtMs"].asLong() ?: 0L
+        // The main key, the same way: a removal newer than this device's
+        // own last set or removal clears the key here.
+        val remoteKey = obj["apiKey"].asStr()?.takeIf { it.isNotBlank() }
+        val keyRemovedAt = obj["apiKeyRemovedAtMs"].asLong() ?: 0L
+        val keyRemoved = remoteKey == null && keyRemovedAt > maxOf(current.apiKeySetAtMs, current.apiKeyRemovedAtMs)
         val remoteStt: String? = obj["sttApiKey"].asStr()?.takeIf { it.isNotBlank() }
             ?: if (remoteRemovedAt > current.sttApiKeyRemovedAtMs) "" else null
         val merged = if (current.syncEnabled) {
@@ -1206,7 +1215,7 @@ class SettingsSyncImpl(
             // key that then answered 401.
             val carries = obj["apiKey"].asStr()?.isNotBlank() == true ||
                 obj["braveApiKey"].asStr()?.isNotBlank() == true ||
-                obj["sttApiKey"].asStr() != null || remoteRemovedAt > 0L
+                obj["sttApiKey"].asStr() != null || remoteRemovedAt > 0L || keyRemovedAt > 0L
             if (provider != null && carries) {
                 features.copy(
                     provider = provider,
@@ -1218,7 +1227,8 @@ class SettingsSyncImpl(
                     // returns "" (non-null) for an empty string, so the
                     // ?: guard alone wouldn't catch a ship entry that was
                     // seeded with apiKey:"" by an older client.
-                    apiKey = obj["apiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.apiKey,
+                    apiKey = remoteKey ?: if (keyRemoved) "" else current.apiKey,
+                    apiKeyRemovedAtMs = if (keyRemoved) keyRemovedAt else current.apiKeyRemovedAtMs,
                     // Absent keeps what this device has, the way the
                     // keys do. Only a blank string is a real erasure.
                     model = obj["model"].asStr() ?: current.model,

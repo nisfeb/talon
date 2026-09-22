@@ -149,4 +149,28 @@ class AiProfileTest {
         }
         assertNull(migrateProfile(cfg(key = "")).defaultModel, "no key, no default model")
     }
+
+    // Every feature used to gate on the old key field. A server of the
+    // owner's own often wants no key, so everything it could run stayed
+    // hidden, and a removed key went on counting.
+    @Test
+    fun `a model is a model whether or not it has a key`() {
+        val local = AiProvider("p1", ProviderKind.OpenAiCompatible, "Local", baseUrl = "http://localhost:1234/v1")
+        val profile = AiProfile(providers = listOf(local), defaultModel = ModelRef("p1", "qwen3-8b"))
+        val c = AiSettings.Config(provider = AiSettings.Provider.OpenRouter, apiKey = "", model = null, savedProfile = profile)
+        assertFalse(c.hasKey(), "the old check said no")
+        assertTrue(c.hasModelFor(AiFeature.CatchUp))
+        assertTrue(c.hasModelFor(AiFeature.Assistant))
+        // Nothing chosen is still nothing.
+        assertFalse(c.copy(savedProfile = profile.copy(defaultModel = null)).hasModelFor(AiFeature.CatchUp))
+    }
+
+    // An install with no profile saved yet answers exactly as before, a
+    // keyless server of its own aside: nothing else moves under anyone.
+    @Test
+    fun `with no profile saved the old answer stands`() {
+        for (c in combos) {
+            assertEquals(c.hasKey() || c.provider == AiSettings.Provider.Custom, c.hasModelFor(AiFeature.CatchUp), c.toString())
+        }
+    }
 }

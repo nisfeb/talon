@@ -395,7 +395,13 @@ class CalendarRepo(
      * rather than while they are waiting for a screen.
      */
     fun prefetchEvent(id: String) {
-        if (api == null || details[id] != null) return
+        if (api == null) return
+        // Read again at every view, the step before Edit. A copy kept
+        // from earlier opened the editor on the event as it was then,
+        // and saving wrote that back over whatever another device, or
+        // orrery's executor, had changed since. Taken out first, so an
+        // Edit tapped during the read waits for the new copy.
+        details.remove(id)
         scope.launch { runCatching { eventDetail(id) } }
     }
 
@@ -549,6 +555,9 @@ class CalendarRepo(
             val now = nowMs()
             val w = a.window(now - BEHIND_MS, now + AHEAD_MS)
             _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
+            // The ship has just said what is current, so nothing read of
+            // one event before now is: the assistant reads through here too.
+            details.clear()
             _calendars.value = runCatching { a.calendars() }.getOrNull() ?: _calendars.value
             _tasks.value = runCatching { a.tasks() }.getOrNull() ?: _tasks.value
             // Null only when the calendar has no sharing (404); a hiccup

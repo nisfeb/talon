@@ -2,6 +2,7 @@ package io.nisfeb.talon.mail
 
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -39,12 +40,18 @@ class MailComposerTest {
     // plain list throws when one thread walks it while another adds.
     private val seen = java.util.concurrent.CopyOnWriteArrayList<HttpRequestData>()
 
-    private fun repo(): MailRepo {
+    /**
+     * A ship that takes everything. [draftsListed] is what its drafts
+     * list says: empty by default, which is how a send shows it landed,
+     * since the ship drops the draft only once the send is applied.
+     */
+    private fun repo(draftsListed: () -> String = { "[]" }): MailRepo {
         val http = HttpClient(
             MockEngine { req ->
                 seen += req
+                val body = if (req.url.encodedPath.endsWith("/api/drafts")) draftsListed() else """{"ok":true,"threads":[]}"""
                 respond(
-                    ByteReadChannel("""{"ok":true,"threads":[]}"""),
+                    ByteReadChannel(body),
                     HttpStatusCode.OK,
                     headersOf("Content-Type", "application/json"),
                 )
@@ -128,6 +135,49 @@ class MailComposerTest {
             Json.parseToJsonElement((sendReq.body as TextContent).text).jsonObject["id"]!!.jsonPrimitive.content,
             "the draft that was saved is the one the ship is asked to send",
         )
+    }
+
+    // The ship takes a send before it applies it, and its drafts list is
+    // the only proof it went. A list still showing the draft is not proof
+    // it did not: calling it unsent invited a second Send, and closing
+    // filed an already-sent message back into Drafts.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a send not yet seen to land is not called unsent, and is not filed again`() = runComposeUiTest {
+        var sent = false
+        val showing = androidx.compose.runtime.mutableStateOf(true)
+        // The draft stays listed however often it is asked for.
+        val still = {
+            val id = seen.lastOrNull { it.url.encodedPath.endsWith("/api/draft") }
+                ?.let { Json.parseToJsonElement((it.body as TextContent).text).jsonObject["id"]!!.jsonPrimitive.content }
+            if (id == null) "[]" else """[{"id":"$id","to":["~zod"],"body":"answering"}]"""
+        }
+        setContent {
+            TalonTheme(darkTheme = false) {
+                if (showing.value) {
+                    MailComposer(
+                        repo = repo(still),
+                        intent = MailIntent(prev = "0vparent", to = listOf("~zod"), subject = "Plans"),
+                        onSent = { sent = true },
+                        onCancel = { showing.value = false },
+                    )
+                }
+            }
+        }
+        onNodeWithText("Message").performTextInput("answering")
+        onNodeWithText("Send").performClick()
+        waitUntil(timeoutMillis = 10_000) {
+            onAllNodesWithText("has not confirmed it went", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        assertTrue(!sent, "not reported as sent")
+        assertTrue(
+            onAllNodesWithText("has not sent it", substring = true).fetchSemanticsNodes().isEmpty(),
+            "and not reported as unsent either",
+        )
+        val saves = seen.count { it.url.encodedPath.endsWith("/api/draft") }
+        showing.value = false
+        waitForIdle()
+        assertEquals(saves, seen.count { it.url.encodedPath.endsWith("/api/draft") }, "closing files nothing again")
     }
 
     @OptIn(ExperimentalTestApi::class)

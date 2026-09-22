@@ -140,6 +140,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.ui.icons.TalonIcons
+import io.nisfeb.talon.ai.hasModelFor
 
 @OptIn(
     ExperimentalFoundationApi::class,
@@ -575,6 +576,10 @@ fun DmChatScreen(
     var publishTarget by remember { mutableStateOf<MessageEntity?>(null) }
     // What was said, on its way to becoming an event or a task.
     var calendarTarget by remember { mutableStateOf<Pair<FromMessage, MessageEntity>?>(null) }
+    // The repo is always handed in, so whether the ship has a calendar
+    // is its availability, not whether there is a repo: without this
+    // New event was offered on ships with no calendar and failed on Add.
+    val calendarHere = calendar?.availability?.collectAsState()?.value == io.nisfeb.talon.calendar.CalendarAvailability.PRESENT
     calendarTarget?.let { (kind, target) ->
         val cal = calendar
         if (cal == null) {
@@ -814,7 +819,7 @@ fun DmChatScreen(
                     .height(2.dp),
             )
         }
-        val showCatchUp = aiConfigured.hasKey() &&
+        val showCatchUp = aiConfigured.hasModelFor(io.nisfeb.talon.ai.AiFeature.CatchUp) &&
             aiConfigured.catchMeUpEnabled &&
             (unreadSnapshot ?: 0) >= CATCH_UP_MIN_UNREAD &&
             catchUpSummary == null &&
@@ -1007,10 +1012,10 @@ fun DmChatScreen(
                     actionTarget = null
                     publishTarget = target
                 },
-                onMakeEvent = calendar?.let {
+                onMakeEvent = calendar?.takeIf { calendarHere }?.let {
                     { actionTarget = null; calendarTarget = FromMessage.Event to target }
                 },
-                onMakeTask = calendar?.let {
+                onMakeTask = calendar?.takeIf { calendarHere }?.let {
                     { actionTarget = null; calendarTarget = FromMessage.Task to target }
                 },
                 onTogglePin = {

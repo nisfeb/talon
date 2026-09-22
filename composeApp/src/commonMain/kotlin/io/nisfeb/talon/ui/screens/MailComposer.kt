@@ -342,7 +342,7 @@ fun MailComposer(
                                 // route exists. A message with files goes
                                 // direct, since no draft carries them, and its
                                 // text is what the draft holds until it lands.
-                                val ok = if (refs.isEmpty()) {
+                                val sent: Boolean? = if (refs.isEmpty()) {
                                     repo.sendDraft(edits.draftId)
                                 } else {
                                     repo.send(to, edits.subject, edits.body, intent.prev, refs).also {
@@ -352,15 +352,19 @@ fun MailComposer(
                                         if (it) repo.dropDraft(edits.draftId)
                                     }
                                 }
-                                val landed = ok && (refs.isNotEmpty() || repo.drafts.value.none { d -> d.id == edits.draftId })
                                 progress = null
-                                when {
-                                    landed -> onSent()
-                                    ok -> {
-                                        filed = false
-                                        problem = "The ship took the message but has not sent it. It is in Drafts."
+                                when (sent) {
+                                    true -> onSent()
+                                    // Taken and not yet seen to go. The draft
+                                    // is the ship's now: filing it again, or a
+                                    // second Send, could put the message out
+                                    // twice. So it stays filed, and Send stays
+                                    // off, and the owner is told where to look.
+                                    null -> {
+                                        problem = "The ship took the message and has not confirmed it went. If it did not, it is in Drafts."
+                                        return@launch
                                     }
-                                    else -> {
+                                    false -> {
                                         filed = false
                                         problem = why("The ship did not take the message.")
                                     }

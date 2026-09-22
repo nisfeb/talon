@@ -149,7 +149,11 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?, arm
     // meant is nothing the owner had to go and set up.
     if (chat.isEmpty()) StartWithArmillary(
         onStart = {
-            edit { it.copy(providers = it.providers + AiProvider(ARMILLARY_PROVIDER, ProviderKind.Armillary, ProviderKind.Armillary.label)) }
+            // And make it the default, where there is none: the card says
+            // there is nothing more to set up, and with no default model
+            // nothing resolves and no feature runs. A blank model is the
+            // ship's first, which is what resolve reads it as.
+            edit { it.copy(providers = it.providers + AiProvider(ARMILLARY_PROVIDER, ProviderKind.Armillary, ProviderKind.Armillary.label), defaultModel = it.defaultModel ?: ModelRef(ARMILLARY_PROVIDER, "")) }
             armillary?.let { a -> scope.launch { a.ensureKey(io.nisfeb.talon.ui.platformLabel) } }
         },
     )
@@ -173,7 +177,7 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?, arm
         } else {
             AiProvider("p" + nowMs().toString(36), kind, kind.label, baseUrl = if (kind == ProviderKind.OpenAiCompatible && !isTouchPrimary) "http://localhost:1234/v1" else null)
         }
-        edit { it.copy(providers = it.providers + p) }
+        edit { it.copy(providers = it.providers + p, defaultModel = it.defaultModel ?: ModelRef(p.id, "").takeIf { kind == ProviderKind.Armillary }) }
         if (kind == ProviderKind.Armillary && armillary != null) {
             scope.launch { armillary.ensureKey(io.nisfeb.talon.ui.platformLabel) }
         }

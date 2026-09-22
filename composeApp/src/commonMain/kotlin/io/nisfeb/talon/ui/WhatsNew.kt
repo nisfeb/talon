@@ -123,7 +123,7 @@ fun whatsNew(
             kind = NewKind.ACTION,
             target = it.id,
             title = it.title,
-            line = it.kind + " proposed by " + it.by.ifBlank { "the assistant" },
+            line = it.kind + " proposed by " + it.by.ifBlank { "the analyst" },
             atMs = it.dueMs ?: 0L,
         )
     }

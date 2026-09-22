@@ -45,6 +45,7 @@ import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.toLocalDateTime
 import io.nisfeb.talon.ui.parseIsoUtc
 import io.nisfeb.talon.urbit.asText
+import io.nisfeb.talon.ai.hasModelFor
 
 /**
  * The structural pipe into orrery: what Talon knows for certain about
@@ -392,18 +393,19 @@ class OrreryRepo(
     /** Revoke the key on the ship and forget it here. */
     suspend fun disable(): Result<Unit> = runCatching {
         val s = ship ?: return@runCatching
-        loop?.cancel()
-        loop = null
-        db.orrerySent().clear(s)
-        val row = db.orreryAccounts().get(s)
-        if (row != null) {
+        // The one step that can fail goes first. It used to go after the
+        // loop was stopped and the records wiped, so an unreachable ship
+        // left the switch on, the pipe dead and every record gone, and
+        // the next pass would have made twins of what it had merged.
+        db.orreryAccounts().get(s)?.let { row ->
             // A key the ship has already dropped answers 404; that is
             // the state we want, not a failure to report.
             runCatching { api?.revoke(row.clientId) }
                 .onFailure { if (it !is OrreryError.Refused || it.status != 404) throw it }
-            db.orreryAccounts().delete(s)
         }
         turnOff()
+        db.orrerySent().clear(s)
+        db.orreryAccounts().delete(s)
         _error.value = null
     }
 
@@ -495,7 +497,7 @@ class OrreryRepo(
         // A brief another install sent today is newer than the cursor,
         // so the mail this pass already listed answers the first check.
         if (sentElsewhere(fresh)) return unfinished
-        val frontier = cloud?.config?.invoke()?.forFeature(io.nisfeb.talon.ai.AiFeature.OrreryBrief)?.takeIf { it.apiKey.isNotBlank() }
+        val frontier = cloud?.config?.invoke()?.takeIf { it.hasModelFor(io.nisfeb.talon.ai.AiFeature.OrreryBrief) }?.forFeature(io.nisfeb.talon.ai.AiFeature.OrreryBrief)
             ?: run { Log.i(TAG, "brief not sent: no frontier model is set under AI"); return unfinished }
         // One install writes the brief, and it holds the day's lease
         // before anything costs money. A holder that goes quiet for
@@ -598,7 +600,7 @@ class OrreryRepo(
         words: String,
         tags: Map<String, String>,
     ) {
-        val frontier = cloud?.config?.invoke()?.forFeature(io.nisfeb.talon.ai.AiFeature.OrreryBrief)?.takeIf { it.apiKey.isNotBlank() }
+        val frontier = cloud?.config?.invoke()?.takeIf { it.hasModelFor(io.nisfeb.talon.ai.AiFeature.OrreryBrief) }?.forFeature(io.nisfeb.talon.ai.AiFeature.OrreryBrief)
             ?: error("no frontier model is set under AI")
         val at = reply.sent.takeIf { it > 0 } ?: nowMs
         val byId = a.actions(token, status = "all").associateBy { it.id }
@@ -890,12 +892,28 @@ class OrreryRepo(
                 facts += Facts(bodies = teachNames(body, people.goesBy(body.id)))
             }
 
-            val posts = db.messages().postsAfter(row.messagesCursor, s, MESSAGES_PER_PASS)
+            val ahead = db.messages().postsAfter(row.messagesCursor, s, MESSAGES_PER_PASS)
+            // The cursor is the author's clock, so a post that syncs after
+            // the cursor passed its time sits under it for good: the other
+            // channel catching up just after the app opened. The newest
+            // few under the cursor are walked again, and kept only where
+            // no msg: record says a pass already read them. Not on the
+            // first pass, which would reach back past the backfill, and
+            // not while the phone leaves the reading to a computer, when
+            // it writes no records to check against.
+            // ponytail: a catch-up deeper than LATE_POSTS still loses the
+            // rest; a cursor on insertion order (a column and a migration)
+            // is the whole fix.
+            val under = if (_yielding.value || row.calendarCursor == 0L) emptyList()
+            else db.messages().postsBefore(row.messagesCursor + 1, s, LATE_POSTS)
+            val readAlready = if (under.isEmpty()) emptySet()
+            else sent.some(s, under.map { "msg:${it.whom}/${it.id}" }).mapTo(HashSet()) { it.key }
+            val posts = under.filter { "msg:${it.whom}/${it.id}" !in readAlready }.reversed() + ahead
             // Contact from a DM is contact with you. In a channel it is only
             // worth recording when the author is already in your book.
             val direct = posts.filter { isDirect(it.whom) || it.author in book }
             facts += Facts(observations = direct.mapNotNull { m -> messageFacts(m, s, people.idFor(m.author, null)) })
-            var messagesCursor = posts.maxOfOrNull { it.sentMs } ?: row.messagesCursor
+            var messagesCursor = ahead.maxOfOrNull { it.sentMs } ?: row.messagesCursor
 
             // Mail and the calendar may be absent on this ship; a source
             // that is not there is skipped, not an error of the pipe.
@@ -1314,7 +1332,10 @@ class OrreryRepo(
         } else {
             _yielding.value = false
         }
-        val r = reading(a, row, s, view) ?: return Triaged()
+        // No state, no reading, and nothing read: both cursors stay where
+        // they were, so the next pass reads these. The defaults move them
+        // past everything, which is right only when the pass did read.
+        val r = reading(a, row, s, view) ?: return Triaged(postFloor = row.messagesCursor, mailFloor = row.mailCursor)
         r.remember = remember
         val allowed = db.orreryChannels().all().toSet()
         val ourNick = db.contacts().get(s)?.nickname
@@ -1886,6 +1907,8 @@ class OrreryRepo(
         const val GATE_CHECK_AT_ONCE = 6
         private const val BRIEF_LEASE = "orrery-brief"
         const val MESSAGES_PER_PASS = 2000
+        /** Posts under the cursor walked again each pass for ones that synced late. */
+        const val LATE_POSTS = 500
         /** What the ship calls open: the three statuses `?status=open` answers with. */
         val OPEN_STATUSES = setOf("proposed", "approved", "claimed")
 

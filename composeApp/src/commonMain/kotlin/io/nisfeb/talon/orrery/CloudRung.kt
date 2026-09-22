@@ -5,6 +5,8 @@ import io.nisfeb.talon.ai.triageInCloud
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiSettings
 import kotlinx.coroutines.flow.StateFlow
+import io.nisfeb.talon.ai.hasModelFor
+import io.nisfeb.talon.ai.AiFeature
 
 /**
  * The person's own cloud key as a rung, only while they have said so.
@@ -29,7 +31,7 @@ class CloudRung(private val config: () -> AiSettings.Config) : Rung() {
     private val ai by lazy { AiClient { triage() } }
 
     override suspend fun status(): RungStatus =
-        if (triage().apiKey.isBlank()) RungStatus.Unavailable("No API key is set under AI.") else RungStatus.Ready
+        if (!config().hasModelFor(AiFeature.OrreryTriage)) RungStatus.Unavailable("No model is set for reading messages under AI.") else RungStatus.Ready
 
     override suspend fun open(): LocalModel = object : LocalModel {
         override val rung: String get() = name

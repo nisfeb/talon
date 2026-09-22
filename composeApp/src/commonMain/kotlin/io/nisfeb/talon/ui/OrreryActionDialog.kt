@@ -71,7 +71,10 @@ fun OrreryActionDialog(
         text = {
             Column {
                 Text(
-                    action.kind + " proposed by " + action.by.ifBlank { "the assistant" } + (action.due?.let { ", due $it" } ?: ""),
+                    // "The analyst", as the notification says: the
+                    // assistant is the one you talk to, and did not.
+                    action.kind + " proposed by " + action.by.ifBlank { "the analyst" } +
+                        (action.due?.let(::parseIsoUtc)?.let { ", due " + io.nisfeb.talon.orrery.Brief.whenText(it, kotlinx.datetime.TimeZone.currentSystemDefault()) } ?: ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

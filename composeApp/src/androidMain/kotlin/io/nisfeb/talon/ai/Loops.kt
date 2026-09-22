@@ -118,7 +118,7 @@ class Loops(
         // can't execute), or no enabled loops. Otherwise a keyless device
         // with an enabled loop would wake, do nothing, and (since lastRunAt
         // never advances) re-arm in the past — a wasteful no-progress loop.
-        if (sessionStore.activeShip() == null || !aiSettings.state.value.hasKey()) {
+        if (sessionStore.activeShip() == null || !aiSettings.state.value.hasModelFor(AiFeature.Assistant)) {
             alarmManager.cancel(pi); return
         }
         val enabled = getDb().loops().enabled()

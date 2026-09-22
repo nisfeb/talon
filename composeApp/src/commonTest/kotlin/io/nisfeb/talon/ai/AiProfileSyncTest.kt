@@ -107,7 +107,13 @@ class AiProfileSyncTest {
     fun `a new install's profile arrives and keeps this device's keys and models`() {
         val mine = migrateProfile(base).let { it.copy(providers = it.providers.map { pr -> pr.copy(models = listOf(ModelInfo("m1"))) }) }
         val theirs = mine.copy(jev = true, features = mine.features + (AiFeature.CatchUp to FeatureSetting(false))).forSync()
-        val e = entry("schemaVersion" to "2", "apiKey" to "sk-or", "profile" to Json.encodeToJsonElement(AiProfile.serializer(), theirs) as JsonObject)
+        // Its switches as switches, which is how every install that sends
+        // a profile sends them: the config entry beside the credentials.
+        val e = entry(
+            "schemaVersion" to "2", "apiKey" to "sk-or",
+            "profile" to Json.encodeToJsonElement(AiProfile.serializer(), theirs) as JsonObject,
+            "switches" to theirs.switches(),
+        )
         val got = profileAfterEntry(e, base.copy(savedProfile = mine), base)!!
         assertEquals(true, got.jev)
         assertFalse(got.isOn(AiFeature.CatchUp))
@@ -269,5 +275,54 @@ class AiProfileSyncTest {
         assertEquals("sk-ant", got.provider(MAIN_PROVIDER)!!.apiKey)
         // A switch never flipped does not travel, so it cannot turn another install's off.
         assertFalse(migrateProfile(base).switches().containsKey("jev"))
+    }
+
+    // Only a device with keys rewrites the credentials entry, so the
+    // switches inside its profile can be older than the ones in config,
+    // which every device writes. Catch-up turned off on a phone came back
+    // on everywhere on the next connect.
+    @Test
+    fun `an older credentials entry does not turn switches back`() {
+        val here = migrateProfile(base).let { it.copy(jev = false, features = it.features + (AiFeature.CatchUp to FeatureSetting(false))) }
+        val stale = migrateProfile(base).copy(jev = true).forSync()
+        val e = entry("schemaVersion" to "2", "apiKey" to "sk-or", "profile" to Json.encodeToJsonElement(AiProfile.serializer(), stale) as JsonObject)
+        val got = profileAfterEntry(e, base.copy(savedProfile = here), base)!!
+        assertFalse(got.isOn(AiFeature.CatchUp), "turned off here, and still off")
+        assertEquals(false, got.jev)
+    }
+
+    // A provider taken out because its key leaked. The key also sat in
+    // the old fields, which every feature fell back to and every device
+    // pushed, so taking the provider out stopped nothing.
+    @Test
+    fun `a removed provider's key goes, and says so`() {
+        // Only the main key, so nothing else can be why there is
+        // something to push.
+        val only = AiSettings.Config(provider = AiSettings.Provider.OpenRouter, apiKey = "sk-or", model = "m")
+        val saved = migrateProfile(only)
+        val had = only.copy(savedProfile = saved)
+        val without = saved.copy(providers = saved.providers.filter { it.id != MAIN_PROVIDER }, defaultModel = null)
+        val after = had.withProfile(without, now = 1_000L)
+        assertEquals("", after.apiKey, "not kept in the old fields")
+        assertEquals(1_000L, after.apiKeyRemovedAtMs, "and stamped, so the peers hear of it")
+        assertTrue(after.hasCredentials(), "the stamp is a thing to push, though no key is left")
+        assertFalse(only.copy(apiKey = "").hasCredentials(), "where nothing was, there is nothing")
+        // Nothing resolves now, so no feature is handed a key at all.
+        assertEquals("", after.forFeature(AiFeature.CatchUp).apiKey)
+        // A key the profile never held is not a removal: it stays.
+        val kept = only.copy(savedProfile = without).withProfile(without, now = 2_000L)
+        assertEquals("sk-or", kept.apiKey)
+        assertEquals(0L, kept.apiKeyRemovedAtMs)
+    }
+
+    // The removal is only as good as its hold on a key set after it: a
+    // peer's old stamp must not blank a key typed here since.
+    @Test
+    fun `an older removal does not blank a newer key`() {
+        val arriving = base.copy(apiKey = "", apiKeyRemovedAtMs = 1_000L)
+        val setHereLater = base.copy(apiKey = "sk-new", apiKeySetAtMs = 2_000L)
+        assertEquals("sk-new", arriving.keepingCredentials(setHereLater).apiKey)
+        val setHereEarlier = base.copy(apiKey = "sk-old", apiKeySetAtMs = 500L)
+        assertEquals("", arriving.keepingCredentials(setHereEarlier).apiKey, "a newer removal wins")
     }
 }

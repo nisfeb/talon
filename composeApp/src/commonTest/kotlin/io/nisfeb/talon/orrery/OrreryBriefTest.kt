@@ -472,4 +472,15 @@ class OrreryBriefTest {
         assertTrue(!emoji.last().isHighSurrogate(), "no half of a pair left at the end")
         assertEquals(125, emoji.length / 2)
     }
+
+    // Every screen now says when an action is due the way the brief does,
+    // in the owner's zone. The list read the UTC date, a day late for
+    // anything due in the evening west of Greenwich.
+    @Test
+    fun `when is said in the owner's zone`() {
+        assertEquals(
+            "Thu 24 Sep 22:00",
+            Brief.whenText(io.nisfeb.talon.ui.parseIsoUtc("2026-09-25T02:00:00Z")!!, TimeZone.of("America/New_York")),
+        )
+    }
 }

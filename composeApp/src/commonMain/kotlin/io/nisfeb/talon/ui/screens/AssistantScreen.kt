@@ -104,6 +104,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.nisfeb.talon.ui.icons.TalonIcons
+import io.nisfeb.talon.ai.hasModelFor
 
 /**
  * Talon Assistant (docs/assistant.md). One opt-in agent: it answers
@@ -578,7 +579,7 @@ fun AssistantScreen(
         mobileShowSidebar = false
     }
 
-    val jobsEnabled = isLoopsSupported && aiState.hasKey()
+    val jobsEnabled = isLoopsSupported && aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)
     val settingsSync = repo?.settingsSync
 
     BoxWithConstraints(modifier.fillMaxSize()) {

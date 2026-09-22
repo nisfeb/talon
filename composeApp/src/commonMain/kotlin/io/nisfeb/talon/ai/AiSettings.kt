@@ -114,6 +114,17 @@ object AiSettings {
          * pull. That is the "I just typed it and it vanished" loop.
          */
         val sttApiKeySetAtMs: Long = 0L,
+        /**
+         * When the main key was last removed, here or on a peer: a
+         * provider taken out because its key leaked. The main key lives
+         * in the old fields every device still stores and pushes, and
+         * a blank never replaces a key, so without a stamp a removal
+         * reached nobody and came back from the ship on the next pull.
+         * The same terms as the transcription key's.
+         */
+        val apiKeyRemovedAtMs: Long = 0L,
+        /** When this device last set the main key, so an older removal cannot blank a newer key. */
+        val apiKeySetAtMs: Long = 0L,
         // Editable agent system-prompt parts. Each blank = use its built-in
         // default; the effective prompt for a role is the shared knowledge
         // followed by that role's specifics (see AgentPrompt/LoopPrompt).
@@ -158,7 +169,7 @@ object AiSettings {
         fun hasCredentials(): Boolean =
             apiKey.isNotBlank() || braveApiKey.isNotBlank() || sttApiKey.isNotBlank() ||
                 privateApiKey.isNotBlank() || privateBaseUrl?.isNotBlank() == true ||
-                sttApiKeyRemovedAtMs > 0L || savedProfile?.keys()?.isNotEmpty() == true
+                sttApiKeyRemovedAtMs > 0L || apiKeyRemovedAtMs > 0L || savedProfile?.keys()?.isNotEmpty() == true
 
         /** The unified assistant is on (current flag or the legacy one).
          *  Gates MCP + web access, which are now part of the assistant. */
@@ -252,8 +263,10 @@ object AiSettings {
  */
 fun AiSettings.Config.keepingCredentials(of: AiSettings.Config): AiSettings.Config {
     val removalWins = sttApiKeyRemovedAtMs > maxOf(of.sttApiKeySetAtMs, of.sttApiKeyRemovedAtMs)
+    val keyRemovalWins = apiKeyRemovedAtMs > maxOf(of.apiKeySetAtMs, of.apiKeyRemovedAtMs)
     return copy(
-        apiKey = apiKey.ifBlank { of.apiKey },
+        apiKey = if (apiKey.isNotBlank() || keyRemovalWins) apiKey else of.apiKey,
+        apiKeySetAtMs = maxOf(apiKeySetAtMs, of.apiKeySetAtMs),
         braveApiKey = braveApiKey.ifBlank { of.braveApiKey },
         privateApiKey = privateApiKey.ifBlank { of.privateApiKey },
         privateBaseUrl = privateBaseUrl ?: of.privateBaseUrl,

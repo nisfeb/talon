@@ -231,7 +231,8 @@ object Brief {
         return lines to tags
     }
 
-    private fun whenText(ms: Long, zone: TimeZone): String {
+    /** "Thu 24 Sep 22:00" in [zone]: how the brief says when, and so how every screen does. */
+    fun whenText(ms: Long, zone: TimeZone): String {
         val t = Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone)
         return titled(t.dayOfWeek.name).take(3) + " " + t.dayOfMonth + " " + titled(t.month.name).take(3) + " " + clock(ms, zone)
     }

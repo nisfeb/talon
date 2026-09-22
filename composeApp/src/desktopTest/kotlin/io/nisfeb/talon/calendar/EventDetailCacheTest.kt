@@ -59,8 +59,39 @@ class EventDetailCacheTest {
         while (reads() == 0) delay(10)
         assertNotNull(repo.eventDetail("e2"))
         assertEquals(1, reads(), "read once, by the prefetch")
+        // Viewing it again reads it again: a copy from an earlier look
+        // opened the editor on the event as it was then, and saving wrote
+        // that back over a change made elsewhere since.
         repo.prefetchEvent("e2")
-        delay(50)
-        assertEquals(1, reads(), "and a second prefetch asks nothing")
+        while (reads() < 2) delay(10)
+        assertEquals(2, reads(), "each view is a fresh read")
     }
+
+    // Changed on another device, or by orrery's executor, in between:
+    // the editor opens on what the ship says now, not on the first read.
+    @Test
+    fun `a refresh drops what was read of an event`() = runBlocking {
+        var name = "Dinner"
+        val asked = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val http = HttpClient(
+            MockEngine { req ->
+                asked += req.url.toString()
+                val body = if ("/event.json" in req.url.toString()) {
+                    """{"id":"e1","cat":"timed","kind":"once","l":0,"r":3600000,"meta":{"name":"$name"}}"""
+                } else {
+                    """{"rows":[]}"""
+                }
+                respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+            },
+        )
+        val repo = CalendarRepo(http, CoroutineScope(SupervisorJob()), pollIntervalMs = 60 * 60 * 1000L).also { it.attach("https://ship.test") }
+        assertEquals("Dinner", repo.eventDetail("e1")!!.let(::nameOf))
+        name = "Supper"
+        repo.refresh()
+        assertEquals("Supper", repo.eventDetail("e1")!!.let(::nameOf), "read again after the ship said what is current")
+        assertEquals(2, asked.count { "/event.json" in it })
+    }
+
+    private fun nameOf(o: kotlinx.serialization.json.JsonObject): String =
+        (o["meta"] as kotlinx.serialization.json.JsonObject)["name"].toString().trim('"')
 }

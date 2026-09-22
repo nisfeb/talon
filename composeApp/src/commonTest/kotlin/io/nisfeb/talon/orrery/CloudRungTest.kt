@@ -12,7 +12,12 @@ class CloudRungTest {
     fun `no key is not a rung`() = runTest {
         val rung = CloudRung { AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "", model = null) }
         assertTrue(rung.status() is RungStatus.Unavailable)
-        val keyed = CloudRung { AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "sk", model = null) }
+        // A key is not enough: the cloud is a rung only where it reads
+        // messages, which is the owner's opt-in. Without it the on-device
+        // model does, and saying the cloud was ready was not true.
+        val keyedNotAsked = CloudRung { AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "sk", model = null) }
+        assertTrue(keyedNotAsked.status() is RungStatus.Unavailable)
+        val keyed = CloudRung { AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "sk", model = null, frontierReadsMessages = true) }
         assertEquals(RungStatus.Ready, keyed.status())
         assertTrue("Anthropic" in keyed.name)
     }

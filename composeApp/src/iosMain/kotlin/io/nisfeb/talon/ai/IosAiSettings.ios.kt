@@ -137,7 +137,7 @@ class IosAiSettings : AiSettingsRepository {
     }
 
     override fun setProfile(profile: AiProfile) {
-        commit(profile.legacyInto(_state.value).copy(savedProfile = profile), fireChange = true)
+        commit(_state.value.withProfile(profile, io.nisfeb.talon.util.nowMs()), fireChange = true)
     }
 
     override fun applyRemote(config: AiSettings.Config) {

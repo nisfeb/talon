@@ -236,7 +236,10 @@ fun AiProvider.shipBase(): String? = when (kind) {
  * did before rather than in a new way.
  */
 fun AiSettings.Config.forFeature(f: AiFeature): AiSettings.Config {
-    val r = profile().resolve(f) ?: return this
+    // Once a profile is saved it is the truth, and a feature it gives no
+    // model gets no key: the old fields could still hold one from a
+    // provider the owner took out, and sent it on every request.
+    val r = profile().resolve(f) ?: return if (savedProfile != null) copy(apiKey = "") else this
     val provider = providerOf(r.provider.kind) ?: return this
     return copy(
         provider = provider,
@@ -340,6 +343,42 @@ fun AiProfile.keepingLocal(local: AiProfile?): AiProfile {
     // own is put back rather than dropped by a profile that arrives.
     val ours = local.providers.filter { it.kind == ProviderKind.Armillary && provider(it.id) == null }
     return copy(providers = arrived + ours)
+}
+
+/**
+ * Whether [f] resolves to a model a chat client can call: one with a
+ * key, or a server of the owner's own, which may want none.
+ *
+ * What the features gate on. The old check was whether the old key
+ * field was set, which a local LM Studio or Ollama server never sets,
+ * so those features stayed hidden for it, and which a removed key
+ * went on satisfying. With no profile saved yet it answers as the old
+ * check did, a keyless server of the owner's own aside.
+ */
+fun AiSettings.Config.hasModelFor(f: AiFeature): Boolean {
+    val p = profile().resolve(f)?.provider ?: return false
+    if (providerOf(p.kind) == null) return false
+    return p.apiKey.isNotBlank() || (p.kind == ProviderKind.OpenAiCompatible && !p.baseUrl.isNullOrBlank())
+}
+
+/**
+ * The settings once the owner saves [p] on this device, at [now]: the
+ * profile, the old fields derived from it, and the main key's stamps.
+ *
+ * One place for all three platforms. A key that was on a provider and
+ * is on none now was removed here, and goes, with a stamp that tells
+ * the peers. One the profile never held stays: that is the case the
+ * "a blank never overwrites" rule in [legacyInto] was written for.
+ */
+fun AiSettings.Config.withProfile(p: AiProfile, now: Long): AiSettings.Config {
+    val next = p.legacyInto(this).copy(savedProfile = p)
+    val removed = apiKey.isNotBlank() && next.apiKey == apiKey &&
+        apiKey in profile().keys().values && apiKey !in p.keys().values
+    return when {
+        removed -> next.copy(apiKey = "", apiKeyRemovedAtMs = now)
+        next.apiKey.isNotBlank() && next.apiKey != apiKey -> next.copy(apiKeySetAtMs = now, apiKeyRemovedAtMs = 0L)
+        else -> next
+    }
 }
 
 /**
@@ -461,8 +500,13 @@ fun profileAfterEntry(
     val fromNew = entry.containsKey("profile") || switches != null
     val fromOld = !fromNew && base != null &&
         (entry.containsKey("catchMeUpEnabled") || (entry.containsKey("apiKey") && !entry.containsKey("providerKeys")))
+    val local = base ?: migrateProfile(current)
     var profile = when {
-        incoming != null -> incoming.keepingLocal(base ?: migrateProfile(current))
+        // Only a device with keys writes the credentials entry, so the
+        // switches in its profile can be older than the ones in config,
+        // which every device writes. Its providers and models are news;
+        // its switches are not, unless they came as switches.
+        incoming != null -> incoming.keepingLocal(local).let { if (switches != null) it else it.withSwitches(local.switches()).copy(jev = local.jev) }
         fromOld -> base!!.withLegacy(merged)
         else -> base
     }

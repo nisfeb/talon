@@ -181,7 +181,7 @@ class DesktopAiSettings : AiSettingsRepository {
     }
 
     override fun setProfile(profile: AiProfile) {
-        val cfg = profile.legacyInto(_state.value).copy(savedProfile = profile)
+        val cfg = _state.value.withProfile(profile, io.nisfeb.talon.util.nowMs())
         persist(cfg)
         onStateChange?.invoke(cfg, false)
     }

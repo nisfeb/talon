@@ -110,6 +110,7 @@ import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.urbit.UrbitSession
 import io.nisfeb.talon.util.Log
 import io.ktor.client.HttpClient
+import io.nisfeb.talon.ai.hasModelFor
 
 /**
  * Top-level shared app entry point. Both Android's MainActivity and
@@ -2891,7 +2892,7 @@ fun App(
                         // same gate the old star icon used.
                         val assistantEnabled = isAssistantSupported &&
                             aiState.assistantOn() &&
-                            aiState.hasKey()
+                            aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)
                         val enabledItems: List<RailItem> = remember(
                             railVisibility, railItemOrder, assistantEnabled, orreryOn,
                         ) {

@@ -256,4 +256,100 @@ class PassKeepsTest {
             dir.deleteRecursively()
         }
     }
+
+    // No state view, no reading, so nothing was read: the cursors stay
+    // where they were. They used to jump past the whole pass, and those
+    // threads were never read by anything.
+    @Test
+    fun `a pass that cannot read the state reads nothing and moves no cursor`() = runBlocking {
+        val dir = createTempDirectory(prefix = "talon-pass-no-state-").toFile()
+        val db = db(dir)
+        val scope = CoroutineScope(SupervisorJob())
+        val asked = java.util.concurrent.CopyOnWriteArrayList<String>()
+        var stateUp = false
+        val waiting = (12 downTo 1).map(::thread)
+        try {
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 5_000L))
+            db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
+            val http = HttpClient(
+                MockEngine { req ->
+                    val url = req.url.toString()
+                    asked += url
+                    if ("/apps/orrery/api/state" in url && !stateUp) {
+                        return@MockEngine respond("busy", io.ktor.http.HttpStatusCode.InternalServerError)
+                    }
+                    val body = when {
+                        "/apps/orrery/api/state" in url -> state
+                        "/apps/orrery/api/actions" in url -> "[]"
+                        "/apps/auspex/api/thread/" in url -> {
+                            val id = url.substringAfterLast('/')
+                            """{"id":"$id","subject":"Thread","messages":[
+                                {"id":"m-$id","from":"~sampel-palnet","to":["~zod"],"sent":9000,"body":"a note"}]}"""
+                        }
+                        "/apps/auspex/api/inbox" in url ->
+                            if ("offset=0" in url || "offset" !in url) {
+                                """{"total":12,"offset":0,"limit":20,"view":"all","threads":[${waiting.joinToString(",")}]}"""
+                            } else {
+                                """{"total":12,"offset":20,"limit":20,"view":"all","threads":[]}"""
+                            }
+                        "/apps/calendar/window.json" in url -> """{"rows":[]}"""
+                        else -> "[]"
+                    }
+                    respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                },
+            )
+            val repo = { OrreryRepo(http, scope, db, "test", bareClient = http) }
+            repo().pass("https://ship.test", "~zod")
+            val after = db.orreryAccounts().get("~zod")!!
+            assertTrue(after.calendarCursor > 0L, "the pass ran to the end and wrote its cursors")
+            assertEquals(5_000L, after.mailCursor, "and did not move past mail it never read")
+            assertEquals(0, asked.count { "/apps/auspex/api/thread/" in it })
+
+            stateUp = true
+            repo().pass("https://ship.test", "~zod")
+            assertEquals(OrreryRepo.MAIL_THREADS_PER_PASS, asked.count { "/apps/auspex/api/thread/" in it }, "read on the next pass")
+        } finally {
+            scope.cancel()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
+
+    // The revoke is the step that can fail, so it goes first. After it,
+    // an unreachable ship left the switch on, the loop dead and every
+    // record gone.
+    @Test
+    fun `turning the pipe off on an unreachable ship takes nothing apart`() = runBlocking {
+        val dir = createTempDirectory(prefix = "talon-pass-off-").toFile()
+        val db = db(dir)
+        val scope = CoroutineScope(SupervisorJob())
+        try {
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
+            db.orrerySent().put(OrrerySentEntity("~zod", "cal:default/e1", "situation/dinner|d", 1L))
+            val http = HttpClient(
+                MockEngine { req ->
+                    val url = req.url.toString()
+                    if (req.method == HttpMethod.Delete && "/apps/orrery/api/clients/c1" in url) {
+                        return@MockEngine respond("unreachable", io.ktor.http.HttpStatusCode.BadGateway)
+                    }
+                    respond(if ("/api/state" in url) state else "[]", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                },
+            )
+            val repo = OrreryRepo(http, scope, db, "test", bareClient = http)
+            repo.attach("https://ship.test", "~zod")
+            val until = System.currentTimeMillis() + 5_000
+            while (!repo.enabled.value && System.currentTimeMillis() < until) kotlinx.coroutines.delay(20)
+            assertTrue(repo.enabled.value, "on to begin with")
+
+            assertTrue(repo.disable().isFailure, "the revoke failed, and says so")
+            assertTrue(repo.enabled.value, "so the pipe is still on")
+            assertNotNull(db.orreryAccounts().get("~zod"), "its key still here")
+            assertNotNull(db.orrerySent().get("~zod", "cal:default/e1"), "and what it had written, remembered")
+            repo.detach()
+        } finally {
+            scope.cancel()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
 }

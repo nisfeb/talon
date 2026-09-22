@@ -436,6 +436,25 @@ class AiSettingsSectionTest {
         onNodeWithText("Set up Armillary").assertExists()
     }
 
+    // The card says there is nothing more to set up. With no default
+    // model nothing resolves, so on a fresh install no feature ran.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `setting up armillary makes it the default`() = runComposeUiTest {
+        val ai = FakeAiSettings()
+        setContent {
+            TalonTheme(darkTheme = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null) }
+            }
+        }
+        onNodeWithText("Set up Armillary").performClick()
+        waitForIdle()
+        assertEquals(
+            io.nisfeb.talon.ai.ModelRef(io.nisfeb.talon.ai.ARMILLARY_PROVIDER, ""),
+            ai.state.value.savedProfile!!.defaultModel,
+        )
+    }
+
     @OptIn(ExperimentalTestApi::class)
     @Test
     fun `a profile with a provider of its own is not pitched`() = runComposeUiTest {

@@ -22,13 +22,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.calendar.EventCat
 import io.nisfeb.talon.calendar.EventDraft
-import io.nisfeb.talon.ui.SkyClock
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atTime
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
+import androidx.compose.material3.TimeInput
+import androidx.compose.material3.rememberTimePickerState
 
 /** Which of the two a message is being turned into. */
 enum class FromMessage { Event, Task }
@@ -93,7 +94,10 @@ fun MessageToCalendarDialog(
     // The next hour, which is nearly always what somebody means when
     // they make an event out of what was just said.
     var date by remember { mutableStateOf(if (kind == FromMessage.Event && here.hour >= 23) here.date.plusDay() else here.date) }
-    var minute by remember { mutableStateOf(if (here.hour >= 23) 9 * 60 else (here.hour + 1) * 60) }
+    // And a time the owner can change: the label used to promise one
+    // that no picker offered, so every event landed on the next hour.
+    val startMinute = if (here.hour >= 23) 9 * 60 else (here.hour + 1) * 60
+    val time = rememberTimePickerState(initialHour = startMinute / 60, initialMinute = startMinute % 60, is24Hour = twentyFourHour)
     var dated by remember { mutableStateOf(kind == FromMessage.Event) }
     var picking by remember { mutableStateOf(false) }
 
@@ -122,12 +126,13 @@ fun MessageToCalendarDialog(
                             when {
                                 kind == FromMessage.Task && !dated -> "No due date"
                                 kind == FromMessage.Task -> "Due ${date}"
-                                else -> "$date at ${SkyClock.clockLabel(minute, twentyFourHour)}"
+                                else -> "$date"
                             },
                         )
                     }
                 }
                 if (kind == FromMessage.Event) {
+                    TimeInput(state = time, modifier = Modifier.padding(top = 4.dp))
                     Text(
                         "An hour long, on the calendar new events go to. The calendar's own editor has the rest.",
                         style = MaterialTheme.typography.labelSmall,
@@ -142,7 +147,7 @@ fun MessageToCalendarDialog(
                 onClick = {
                     onSave(
                         if (kind == FromMessage.Event) {
-                            EventDraft(name = title.trim(), note = note.trim(), date = date, minuteOfDay = minute, durMin = 60)
+                            EventDraft(name = title.trim(), note = note.trim(), date = date, minuteOfDay = time.hour * 60 + time.minute, durMin = 60)
                         } else {
                             EventDraft(
                                 name = title.trim(),

@@ -557,11 +557,26 @@ class MailRepo(
      * refuses keeps the draft — which is the whole reason to send one
      * this way rather than [send] plus [deleteDraft].
      */
-    suspend fun sendDraft(id: String): Boolean {
+    /**
+     * Send a saved draft. True once the ship has dropped the draft, which
+     * it does only when the send landed; false when it refused; null when
+     * it took the send and has not yet been seen to drop the draft.
+     *
+     * The route answers before the writer applies, so its yes means taken
+     * and nothing more. The drafts list is the proof, and it can lag the
+     * answer or fail to read: taking a single look as final reported a
+     * sent message as unsent, which then invited sending it twice.
+     */
+    suspend fun sendDraft(id: String): Boolean? {
         if (call { it.sendDraft(id) } == null) return false
         refresh()
-        refreshDrafts()
-        return true
+        repeat(4) { i ->
+            if (i > 0) kotlinx.coroutines.delay(1_000)
+            val now = call { it.drafts() } ?: return@repeat
+            _drafts.value = now
+            if (now.none { it.id == id }) return true
+        }
+        return null
     }
 
     /** Distinguishes two phantom replies minted inside one millisecond. */

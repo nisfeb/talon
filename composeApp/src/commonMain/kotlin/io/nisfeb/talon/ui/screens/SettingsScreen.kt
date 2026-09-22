@@ -76,6 +76,7 @@ import io.nisfeb.talon.ui.isLoopsSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
 import io.nisfeb.talon.ui.theme.ThemePreference
 import io.nisfeb.talon.ui.icons.TalonIcons
+import io.nisfeb.talon.ai.hasModelFor
 
 @Composable
 fun SettingsScreen(
@@ -927,7 +928,7 @@ fun SettingsScreen(
             // the agent) and a platform that can fire it, so it's gated on
             // isLoopsSupported (Android via AlarmManager; desktop via the
             // while-open ticker — both true).
-            if (isLoopsSupported && aiState.hasKey()) {
+            if (isLoopsSupported && aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)) {
                 Spacer(Modifier.height(16.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))

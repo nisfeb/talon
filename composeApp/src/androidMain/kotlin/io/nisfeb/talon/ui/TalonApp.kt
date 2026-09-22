@@ -87,6 +87,7 @@ import io.nisfeb.talon.ui.RightPaneState
 import io.nisfeb.talon.ui.RightPaneStateReducer
 import io.nisfeb.talon.urbit.MediaCategory
 import kotlinx.coroutines.launch
+import io.nisfeb.talon.ai.hasModelFor
 
 /** How many times to ask a group's host whether a party line exists
  *  before giving up — same widening backoff App.kt uses. */
@@ -1638,7 +1639,7 @@ fun TalonApp(
                     canOpen = { item ->
                         when (item) {
                             io.nisfeb.talon.ui.RailItem.Assistant ->
-                                isAssistantSupported && aiState.assistantOn() && aiState.hasKey()
+                                isAssistantSupported && aiState.assistantOn() && aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)
                             io.nisfeb.talon.ui.RailItem.Actions -> orreryOn
                             else -> true
                         }
@@ -2010,7 +2011,7 @@ fun TalonApp(
                     mail = mailRepo,
                     calendar = calendarRepo,
                     onOpenCalendar = { homeOpen = false; calendarOpen = true },
-                    onOpenAssistant = if (isAssistantSupported && aiState.assistantOn() && aiState.hasKey()) {
+                    onOpenAssistant = if (isAssistantSupported && aiState.assistantOn() && aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)) {
                         { listen -> homeOpen = false; assistantListen = listen; assistantOpen = true }
                     } else null,
                     onInstallCalendar = calendarInstall,
@@ -2859,7 +2860,7 @@ fun TalonApp(
                 // platforms — the embedder only enhances retrieval.
                 onOpenAssistant = if (isAssistantSupported &&
                     aiState.assistantOn() &&
-                    aiState.hasKey()
+                    aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)
                 ) {
                     { assistantOpen = true }
                 } else null,
