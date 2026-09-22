@@ -339,14 +339,27 @@ class OrreryRepo(
         scopeChecked = false
     }
 
-    /** The pipe is off: its loop stops, and so does the one switch that lives under it. */
+    /** The pipe's loop stops. */
     private fun stopPipe() {
         loop?.cancel()
         loop = null
         _enabled.value = false
-        // The switch for it lives under the pipe, so it goes off the
-        // screen with the pipe: left on, the phone kept waking for moves
-        // with nowhere to send them and no way to say stop.
+    }
+
+    /**
+     * The pipe is off for good: turned off, or its key refused. The
+     * location switch lives under the pipe, so it goes off the screen
+     * with it, and is turned off with it: left on, the phone kept
+     * waking for moves with nowhere to send them and no way to say
+     * stop.
+     *
+     * Only here, not on detach. Detaching is a restart, a ship switch,
+     * an Activity going away: turning the saved switch off there put it
+     * off on every cold start and every time the app was swiped away,
+     * which is exactly when hearing moves with the app closed matters.
+     */
+    private fun turnOff() {
+        stopPipe()
         io.nisfeb.talon.ui.stopLocationSharing()
     }
 
@@ -390,7 +403,7 @@ class OrreryRepo(
                 .onFailure { if (it !is OrreryError.Refused || it.status != 404) throw it }
             db.orreryAccounts().delete(s)
         }
-        stopPipe()
+        turnOff()
         _error.value = null
     }
 
@@ -398,7 +411,16 @@ class OrreryRepo(
         loop?.cancel()
         loop = scope.launch {
             while (isActive) {
-                push()
+                // A pass that throws is a pass lost, never the pipe: the
+                // loop ended there once, and nothing said so.
+                try {
+                    push()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "pass failed before it began", e)
+                    _error.value = e.message ?: e::class.simpleName
+                }
                 // Wake for seven in the owner's zone, so the brief is not
                 // up to a pass late.
                 val wait = briefZone?.let { Brief.untilNext(now(), it, briefGrace) + 1_000 } ?: PUSH_EVERY_MS
@@ -810,15 +832,31 @@ class OrreryRepo(
         // model the other was still reading with. The row is read under
         // the lock, so the cursors this pass starts from are the ones
         // the pass before it left.
-        passLock.lock()
+        var locked = false
         var queuedForRetry: List<Facts> = emptyList()
+        var spokenForRetry: List<Pair<String, List<Spoken>>> = emptyList()
+        // Put back what this pass took from the queues, for the next one.
+        suspend fun requeue() = pendingLock.withLock {
+            pending.addAll(0, queuedForRetry)
+            transcripts.addAll(0, spokenForRetry)
+        }
         try {
+            // Inside the try, so a pass cancelled while it waits for the
+            // lock still clears [_pushing]. Outside it, the flag stayed
+            // set and every later pass returned at once: the pipe went
+            // quiet until the process restarted.
+            passLock.lock()
+            locked = true
             val row = db.orreryAccounts().get(s) ?: return
             val nowMs = now()
             var facts = Facts()
             val queued = pendingLock.withLock { pending.toList().also { pending.clear() } }
             queued.forEach { facts += it }
             queuedForRetry = queued
+            // A call's words, taken here rather than inside the triage, so
+            // a pass that fails can put them back: nothing else keeps them.
+            val spoken = pendingLock.withLock { transcripts.toList().also { transcripts.clear() } }
+            spokenForRetry = spoken
             // What the ship has, which is what a client goes by. It is
             // never told what this install remembers.
             val raw = runCatching { a.stateJson(row.token) }.getOrNull()
@@ -873,7 +911,7 @@ class OrreryRepo(
                 )
                 mailCursor = freshMail.maxOfOrNull { it.last } ?: mailCursor
             }.onFailure { Log.i(TAG, "mail skipped: ${it.message}") }
-            val triaged = triage(a, row, posts, s, nowMs, url, freshMail, known, view) { key, value -> remember(key, value) }
+            val triaged = triage(a, row, posts, spoken, s, nowMs, url, freshMail, known, view) { key, value -> remember(key, value) }
             facts += triaged.facts
 
             val calApi = CalendarApi(http, url)
@@ -1054,17 +1092,28 @@ class OrreryRepo(
         } catch (e: OrreryError.Refused) {
             if (e.status == 403) {
                 // The ship no longer takes this install's key: stop, and say so.
-                stopPipe()
+                turnOff()
                 db.orreryAccounts().delete(s)
                 _error.value = "The ship no longer accepts this install's key. Turn the pipe on again to mint a new one."
             } else {
+                // A busy ship's 500 is a pass lost, not what it carried:
+                // a claim confirmed in the tray has left the tray, and
+                // this is the only copy of it.
                 _error.value = e.message
+                requeue()
             }
-        } catch (e: OrreryError) {
-            _error.value = e.message
-            pendingLock.withLock { pending.addAll(0, queuedForRetry) }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Detached mid-pass: what was queued waits for the next one.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { requeue() }
+            throw e
+        } catch (e: Exception) {
+            // Unreachable, or a shape the parsing did not expect: either
+            // way the pass is lost and what it carried is not.
+            _error.value = e.message ?: e::class.simpleName
+            if (e !is OrreryError) Log.w(TAG, "pass failed", e)
+            requeue()
         } finally {
-            passLock.unlock()
+            if (locked) passLock.unlock()
             _pushing.value = false
         }
     }
@@ -1235,6 +1284,8 @@ class OrreryRepo(
         a: OrreryApi,
         row: OrreryAccountEntity,
         posts: List<io.nisfeb.talon.data.MessageEntity>,
+        /** Calls transcribed since the last pass, taken off the queue by the pass. */
+        spoken: List<Pair<String, List<Spoken>>>,
         s: String,
         nowMs: Long,
         url: String,
@@ -1245,7 +1296,6 @@ class OrreryRepo(
         view: StateView?,
         remember: (String, String) -> Unit,
     ): Triaged {
-        val spoken = pendingLock.withLock { transcripts.toList().also { transcripts.clear() } }
         // Status lines change when nothing is said, so they are counted
         // in before the pass decides it has nothing to do.
         val lines = contacts.mapNotNull { c -> contactStatus(c)?.let { (line, at) -> Triple(c.ship, line, at) } }
