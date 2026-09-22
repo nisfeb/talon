@@ -34,6 +34,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.datetime.Instant
 import io.nisfeb.talon.util.nowMs
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.toLocalDateTime
@@ -273,6 +279,18 @@ class OrreryRepo(
         // anywhere else has to reach them or the card shows the old ones.
         if (name == "generator") runCatching { a.generatorSettings() }.getOrNull()?.let { _generatorSettings.value = it }
         said
+    }
+
+    /** Register a settings document with the service it names; the ship's answer. */
+    suspend fun register(name: String): Result<String> = runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        a.register(name)
+    }
+
+    /** What the outside service holds for a registered document. */
+    suspend fun readRegistration(name: String): Result<String> = runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        a.registration(name)
     }
 
     /** The state view under this install's key: bodies and what is known of them. */
@@ -1525,6 +1543,14 @@ class OrreryRepo(
             val about = (listOf(r.index.authorId(author, s)) + r.index.find(text).map { it.first.id }).filter { r.index.has(it) }.distinct().take(5)
             proposePlan(s, sourceId, p, about, r.schema, r.bodies.map { it.id }.toSet())
         }
+        // A cancelled occurrence is written as a fact whatever else
+        // happens; the calendar still holding it is the owner's to
+        // decide, so it is offered rather than done.
+        for (n in (byRules + byModel)) {
+            if (n.attr != "skipped" || !n.subject.startsWith("activity/")) continue
+            val iso = (n.value as? JsonPrimitive)?.contentOrNull ?: continue
+            proposeCancel(s, sourceId, n.subject, iso, r.schema, r.bodies.map { it.id }.toSet())
+        }
         // Rule 16: the reader is the only thing with the words in front
         // of it, so the reader decides whether this is a thing somebody
         // needs help with inside the hour. Asked once the claims have
@@ -1587,6 +1613,91 @@ class OrreryRepo(
             }
             .onFailure { Log.i(TAG, "$sourceId plan not proposed: ${it.message}") }
     }
+
+    /**
+     * The other half of a cancelled occurrence: the calendar still has
+     * it.
+     *
+     * A `skipped` row says the evening is off, and says nothing to the
+     * calendar, which goes on showing it and reminding about it. Rule
+     * 14: where the client knows the event the occurrence came from,
+     * it may propose taking it off, and this client does know, because
+     * its own pipe wrote the body from that event and kept the tie.
+     *
+     * A proposal, never a write. Taking something off a calendar is a
+     * tap, and `calendar` is not a kind the ship does unasked.
+     */
+    private suspend fun proposeCancel(s: String, sourceId: String, subject: String, skippedIso: String, schema: JsonObject, known: Set<String>) {
+        val a = api ?: return
+        val token = db.orreryAccounts().get(s)?.token ?: return
+        if ("calendar" !in schemaActions(schema)) return
+        // One proposal per occurrence, not per message: two people
+        // saying practice is off should not ask the owner twice.
+        val key = "uncal:$subject/$skippedIso"
+        if (db.orrerySent().get(s, key) != null) return
+        val at = runCatching { Instant.parse(skippedIso) }.getOrNull() ?: return
+        val event = calendarEventFor(s, subject) ?: return Log.i(TAG, "$sourceId cancel not proposed: no calendar event for $subject")
+        // The ship matches the occurrence by the moment it really
+        // starts, so the calendar's own instant for that day beats the
+        // model's reading of "tonight" wherever the pipe has one.
+        val starts = occurrenceOn(s, event, at.toEpochMilliseconds()) ?: at.toEpochMilliseconds()
+        val name = bodyName(s, subject) ?: subject.substringAfter('/')
+        val body = buildJsonObject {
+            put("kind", "calendar")
+            put("title", "Cancel $name")
+            putJsonArray("about") { add(JsonPrimitive(subject)) }
+            put("payload", buildJsonObject {
+                // title and starts as an add has them: the ship's own
+                // shape refuses a payload that lacks a required key,
+                // whatever the mode is.
+                put("title", name)
+                put("starts", isoUtc(starts))
+                put("mode", "cancel")
+                put("event", event.second)
+            })
+            put("message", "$name on ${isoUtc(starts)} was called off.")
+        }
+        val shape = (schema["payloads"] as? JsonObject)?.get("calendar") as? JsonObject ?: JsonObject(emptyMap())
+        val (payload, why) = checkPayload(body["payload"] as JsonObject, shape, known)
+        if (payload == null) return Log.i(TAG, "$sourceId cancel dropped: $why")
+        runCatching { a.act(JsonObject(body + ("payload" to payload)), token) }
+            .onSuccess { (id, _) ->
+                db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, key, id, now()))
+                Log.i(TAG, "$sourceId proposed taking $name off the calendar at ${isoUtc(starts)}")
+            }
+            .onFailure { Log.i(TAG, "$sourceId cancel not proposed: ${it.message}") }
+    }
+
+    /**
+     * The calendar and event this body was written from, as the pipe
+     * remembered it: `cal:<calendar>/<uid>` holds the body id, so the
+     * way back is a scan of what this install has written.
+     */
+    private suspend fun calendarEventFor(s: String, subject: String): Pair<String, String>? =
+        db.orrerySent().under(s, "cal:")
+            .firstOrNull { it.value.substringBefore('|') == subject }
+            ?.key?.removePrefix("cal:")
+            ?.let { ref ->
+                val cal = ref.substringBefore('/')
+                val uid = ref.substringAfter('/')
+                if (cal.isBlank() || uid.isBlank()) null else cal to uid
+            }
+
+    /**
+     * The realized start of the occurrence on the same day as [nearMs],
+     * off the occurrence records the pipe keeps, or null where it kept
+     * none. The calendar skips by the exact moment, so a reading of
+     * "tonight" that landed on the wrong hour would skip nothing.
+     */
+    private suspend fun occurrenceOn(s: String, event: Pair<String, String>, nearMs: Long): Long? {
+        val prefix = "occ:${event.first}/${event.second}/"
+        val starts = db.orrerySent().under(s, prefix).mapNotNull { it.key.removePrefix(prefix).toLongOrNull() }
+        val day = 24L * 60 * 60 * 1000
+        return starts.filter { kotlin.math.abs(it - nearMs) < day }.minByOrNull { kotlin.math.abs(it - nearMs) }
+    }
+
+    private suspend fun bodyName(s: String, subject: String): String? =
+        runCatching { api?.let { a -> db.orreryAccounts().get(s)?.token?.let { t -> Brief.names(a.stateJson(t))[subject] } } }.getOrNull()
 
     /** The person's word on an action: done, dismissed, or failed with why. */
     suspend fun setAction(id: String, status: String, note: String = ""): Result<Unit> = runCatching {

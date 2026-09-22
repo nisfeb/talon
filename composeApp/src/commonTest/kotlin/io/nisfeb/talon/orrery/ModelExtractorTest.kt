@@ -136,6 +136,51 @@ class ModelExtractorTest {
         assertEquals(listOf("location"), out.map { it.attr }, "the series is still running")
     }
 
+    // Orrery 37 gave the occurrence somewhere to go. The evening off
+    // is a `skipped` row carrying that occurrence's start, and the
+    // series keeps running: no status row of any kind.
+    @Test
+    fun `an evening off is a skipped occurrence and not a status`() {
+        val here = NameIndex(listOf(KnownBody("activity/pirates-practice", "Pirates practice", emptyList(), null)))
+        val answer = """{"claims":[
+            {"subject":"activity/pirates-practice","attr":"skipped","value":"2026-09-22T22:00:00Z","conf":90},
+            {"subject":"activity/pirates-practice","attr":"status","value":"cancelled","conf":90}
+        ]}"""
+        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me, null, emptyMap(), "pirates practice is cancelled tonight")
+        assertEquals(listOf("skipped"), out.map { it.attr }, "the series is still running")
+        assertEquals("2026-09-22T22:00:00Z", out[0].value.jsonPrimitive.content)
+    }
+
+    // The instant is worked out from "tonight" and the owner's clock,
+    // so it is never in the message. Held to being quoted, every
+    // skipped row would be dropped before it was written.
+    @Test
+    fun `a resolved instant does not have to be in the words`() {
+        val here = NameIndex(listOf(KnownBody("activity/pirates-practice", "Pirates practice", emptyList(), null)))
+        val answer = """{"claims":[{"subject":"activity/pirates-practice","attr":"skipped","value":"2026-09-22T22:00:00Z","conf":90}]}"""
+        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me, null, emptyMap(), "no practice tonight")
+        assertEquals(1, out.size, "the message never says 2026-09-22T22:00:00Z and does not have to")
+    }
+
+    // Multi-valued: a second cancelled evening stands beside the first
+    // rather than replacing it, which is what makes it a list.
+    @Test
+    fun `two evenings off are two rows`() {
+        val here = NameIndex(listOf(KnownBody("activity/pirates-practice", "Pirates practice", emptyList(), null)))
+        val answer = """{"claims":[
+            {"subject":"activity/pirates-practice","attr":"skipped","value":"2026-09-22T22:00:00Z","conf":90},
+            {"subject":"activity/pirates-practice","attr":"skipped","value":"2026-09-29T22:00:00Z","conf":90}
+        ]}"""
+        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me, null, emptyMap(), "no practice tonight or next week")
+        assertEquals(2, out.size)
+        // A status said twice is still a contradiction, and still one row.
+        val twice = """{"claims":[
+            {"subject":"person/sarah","attr":"status","value":"away","conf":90},
+            {"subject":"person/sarah","attr":"status","value":"back","conf":90}
+        ]}"""
+        assertEquals(1, ModelExtractor.parse(twice, index, "~bus", 1L, me).size)
+    }
+
     // Said of the series, though, it is the series that is meant.
     @Test
     fun `a season ending ends the series`() {

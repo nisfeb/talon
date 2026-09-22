@@ -102,6 +102,33 @@ object Brief {
 
     fun text(body: JsonObject, attr: String): String? = (value(body, attr) as? JsonPrimitive)?.contentOrNull
 
+    /** Every value of an attribute that holds more than one. */
+    fun texts(body: JsonObject, attr: String): List<String> = when (val v = value(body, attr)) {
+        is JsonArray -> v.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        is JsonPrimitive -> listOfNotNull(v.contentOrNull)
+        else -> emptyList()
+    }
+
+    /**
+     * An activity's next occurrence, unless that one is off.
+     *
+     * `next` does not move when an evening is cancelled: the series
+     * still meets weekly and the ship says which one is off in
+     * `skipped`, so the two are read together or tonight's cancelled
+     * practice is announced as tonight's plan. Nothing is said about
+     * the one after it, because nothing is known about it: only the
+     * ship's own next write says when that is.
+     *
+     * Compared as instants, since the same moment is written more than
+     * one way and a text comparison would miss a skip by the seconds.
+     */
+    fun nextOccurrence(body: JsonObject): String? {
+        val next = text(body, "next") ?: return null
+        val at = runCatching { Instant.parse(next) }.getOrNull() ?: return next
+        val off = texts(body, "skipped").mapNotNull { runCatching { Instant.parse(it) }.getOrNull() }
+        return if (off.any { it == at }) null else next
+    }
+
     /** person/me's timezone on the ship, which wins over the default. */
     fun zone(state: JsonObject): TimeZone {
         val me = state.str("me") ?: "person/me"
@@ -144,7 +171,7 @@ object Brief {
             val at = when {
                 id.startsWith("situation/") ->
                     if (text(b, "status") in setOf("closed", "cancelled")) continue else text(b, "starts")
-                id.startsWith("activity/") -> text(b, "next")
+                id.startsWith("activity/") -> nextOccurrence(b)
                 else -> continue
             }?.let { runCatching { Instant.parse(it).toEpochMilliseconds() }.getOrNull() } ?: continue
             val name = b.str("name") ?: id
@@ -289,7 +316,7 @@ object Brief {
                 phase(b, nowIso) !in setOf("closed", "cancelled", "over")
         }.mapNotNull { b -> text(b, "starts")?.takeIf { it > from && it <= to }?.let { b to it } }
         val activities = all.filter { it.str("kind") == "activity" }
-            .mapNotNull { b -> text(b, "next")?.takeIf { it > from && it <= to }?.let { b to it } }
+            .mapNotNull { b -> nextOccurrence(b)?.takeIf { it > from && it <= to }?.let { b to it } }
         return (situations + activities).sortedBy { it.second }.take(AHEAD_LINES).map { (b, at) -> row(b, at) }
     }
 
@@ -505,7 +532,7 @@ object Brief {
     /**
      * common/analyst-prompt.md from orrery-utils, word for word: the
      * owner's words are triaged as any message is. Copied at orrery-utils
-     * 61c2715, that file's last change; when it changes there, copy it
+     * d8905d4, that file's last change; when it changes there, copy it
      * again here, since the two must not drift. BriefTest holds the copy
      * to the file where orrery-utils sits beside this repo.
      */
@@ -514,7 +541,7 @@ object Brief {
         Three shapes exist.
         A body is something that exists: a person, place, thing, org, situation, activity or note. Its id is kind/slug, lowercase letters, digits and hyphens, for example person/sarah, place/johns-machine-shop, thing/subaru, situation/2026-09-16-breakdown.
         An observation is one claim about one body: subject.attr = value, with when it became true. Values are a short string, a number, true or false, null (which clears the attribute), or {"ref": "kind/slug"} pointing at another body.
-        An action is something to do: a task with a title, the bodies it is about, and an optional due time; or, when a message fixes a plan in time ("dinner Friday at 8", "dentist on the 3rd at 2:30"), a calendar event, kind "calendar", with a payload of title, starts and, when the message says, ends and location, the times ISO 8601 with the message's offset. The situation body records the plan as a fact; the calendar action asks the owner to put it on the calendar; when a message fixes a time, write both, and when it does not, write neither. Or a message to send, kind "message", when the conversation asks the owner something they would answer, or someone should be told what the messages just settled: payload via (the channel the conversation is on, one of the values the schema lists, unless the message says to use another), to (the person's body id) and text, short, in the owner's own voice. The text keeps the owner's prose rules: no em dashes, no semicolons or colons joining independent clauses, simple direct sentences of varied length, and a sentence with more than one parenthetical thought split in two. Never a message telling someone what they just said, and never one the owner already sent. Propose only the action kinds listed for you, with the payload shape given.
+        An action is something to do: a task with a title, the bodies it is about, and an optional due time; or, when a message fixes a plan in time ("dinner Friday at 8", "dentist on the 3rd at 2:30"), a calendar event, kind "calendar", with a payload of title, starts and, when the message says, ends and location, the times ISO 8601 with the message's offset. The situation body records the plan as a fact; the calendar action asks the owner to put it on the calendar; when a message fixes a time, write both, and when it does not, write neither. Or a message to send, kind "message", when the conversation asks the owner something they would answer, or someone should be told what the messages just settled: payload via (the channel the conversation is on, one of the values the schema lists, unless the message says to use another), to (the person's body id) and text, short, in the owner's own voice. The text keeps the owner's prose rules: no em dashes, no semicolons or colons joining independent clauses, simple direct sentences of varied length, and a sentence with more than one parenthetical thought split in two. Never a message telling someone what they just said, and never one the owner already sent. When a message cancels something that is on the calendar and you were given the calendar's own id for that event, propose a calendar action with mode "cancel", event that id and, for a repeating event, starts the occurrence being dropped, keeping title and starts as an ordinary calendar action has them; the owner approves it, and the cancellation is written as a fact either way. Propose only the action kinds listed for you, with the payload shape given.
         Rules.
         Only state what the messages say or clearly imply. Never invent. When unsure, leave it out or lower the confidence.
         Use the existing bodies by id whenever a message refers to one of them, by name or alias. When a message calls an existing body by a name the list does not have ("next door" for place/neighbors, "the Hendersons"), repeat that body in "bodies" with the new name under "aliases", so the ship learns the word. Create a new body only for a named person, place, thing or org, or for a situation (an event with participants) the messages describe.
@@ -522,7 +549,7 @@ object Brief {
         Read the notes given with the attribute names: they say what each one means. A person's "status" is what they are doing or dealing with right now, in plain words, as an observer would put it: "on jury duty", "stranded, waiting for a tow", "travelling", "sick". It is never a feeling, a quote or a wish. A feeling goes under "mood", which the reader throws away, so that it never lands on status. A status is specific enough that someone who reads only it knows what is going on: "training for the Chicago marathon", not "on a strict regimen"; "in meetings", not "busy". When the messages do not say what it is, write no status. A status that ends at a stated time carries "until".
         Worked examples. "jury duty makes me want to scream", from Sarah: person/sarah.status = "on jury duty" (conf 80), person/sarah.mood = "frustrated" (conf 60, discarded). "car died on route 9, stranded waiting for a tow": status = "stranded, waiting for a tow", location = "Route 9", thing/subaru.status = "broken down". "stuck in meetings till 11:30", from Sarah at 2026-08-19T10:03:00-04:00: person/sarah.status = "in meetings", until = "2026-08-19T11:30:00-04:00". "ugh, Mondays": nothing.
         A situation body carries participants (one observation per participant, value {"ref": ...}), location, and its times: "starts" and "ends" are the schedule (a meeting on December 5 has starts and ends on December 5, even today), "started" and "ended" are facts about what happened, written only once it has. Its status is "open" or "closed" (or "cancelled"), nothing else: never "upcoming", "under way" or "over", which are read off the times. A situation happens once: a breakdown, a birthday, a delivery.
-        An activity is something that repeats: a class, a practice, a standing appointment, a weekly meeting. It is one body of kind activity, with schedule ("Mon/Wed 18:00"), cadence ("weekly"), location, participants and organizer. An occurrence of an activity is never a new body: write the activity's "last" = the start of that occurrence, with "at" = that start, and "next" = the start of the following one when the message says it. A calendar reminder or notification for a repeating event is an occurrence of an activity, not a situation.
+        An activity is something that repeats: a class, a practice, a standing appointment, a weekly meeting. It is one body of kind activity, with schedule ("Mon/Wed 18:00"), cadence ("weekly"), location, participants and organizer. An occurrence of an activity is never a new body: write the activity's "last" = the start of that occurrence, with "at" = that start, and "next" = the start of the following one when the message says it. An occurrence that is called off is not a cancelled activity: write the activity's "skipped" = the start of that occurrence, one observation per occurrence, and never its "status", which means the whole series. A calendar reminder or notification for a repeating event is an occurrence of an activity, not a situation.
         Any part of an event can name a person: its title ("Mira- Ballet/Tap", "Theo and Juno- Opti Sail", "Felix Birthday"), its description ("bring Juno's helmet"), its attendee list, its organizer ("Coach Pat"), a note. Every person an event names is a participant of the activity or situation, and its organizer is its organizer. Resolve each name against the people listed; when nobody by that name exists, create the person, the first name (or the full name when the event gives it) as the body's name. A production, a team or a place is not a person: "Swan Lake rehearsal" and "Hornets practice" name no one.
         A person is never an org. A payment request, a reminder or a note from a person names a person body; reuse the existing person when the name or the address matches, even when only the first name is on record.
         "at" is when the fact became true, ISO 8601 with the offset the message times carry (they are in the owner's time zone), and defaults to the message's time; set it only when the message says otherwise. "until" is when it will stop being true, when the message says so.

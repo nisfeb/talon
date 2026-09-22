@@ -255,11 +255,9 @@ object ModelExtractor {
             ) continue
             // An activity's status is the whole series: cancelled says
             // it has stopped for good. "Practice is cancelled tonight"
-            // is one occurrence, and writing that as the series ending
-            // told the ship the activity was dead. One occurrence has
-            // nowhere to go until orrery 37's `skipped`, so it is
-            // dropped — but a message that plainly ends the series
-            // still ends it.
+            // is one occurrence, which since orrery 37 is a `skipped`
+            // row carrying that occurrence's start, and never a status.
+            // A message that plainly ends the series still ends it.
             if (attr == "status" && subject.startsWith("activity/")) {
                 val said = (value as? JsonPrimitive)?.content?.lowercase()
                 if (said != "active" && !(said == "cancelled" && text != null && endsTheSeries(text))) continue
@@ -270,7 +268,11 @@ object ModelExtractor {
             // attr whose whole point is a paraphrase, so it is judged
             // against the earlier messages instead: one that reads like
             // them and not like this message is a reading of them.
-            if (text != null && attr != "status" && !grounded(value, text, index)) continue
+            // A value has to be in the words, except where the whole
+            // point of it is that it is not: a status is a paraphrase
+            // and a `skipped` is an instant the model worked out from
+            // "tonight" and the owner's clock. Neither is ever quoted.
+            if (text != null && attr != "status" && attr !in RESOLVED && !grounded(value, text, index)) continue
             if (text != null && attr == "status" && !sharesAWord(value, text) &&
                 context.any { sharesAWord(value, it) }
             ) continue
@@ -280,7 +282,11 @@ object ModelExtractor {
             val body = if (subject == authorId && subject != "person/me" && !index.has(subject)) OBody(subject, aliases = listOf(author)) else null
             out += Noticed(subject, attr, value, atMs, until, conf, body)
         }
-        return out.distinctBy { it.subject to it.attr }
+        // One row per subject and attribute, so a model that says a
+        // thing twice does not write it twice — except where the
+        // attribute is meant to hold several, and a second cancelled
+        // evening has to stand beside the first rather than replace it.
+        return out.distinctBy { if (it.attr in MULTI) Triple(it.subject, it.attr, it.value.toString()) else it.subject to it.attr }
     }
 
     /**
@@ -336,6 +342,21 @@ object ModelExtractor {
     private val ATTR = Regex("[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?")
     /** Attrs any kind may carry whatever the schema lists. */
     private val ALWAYS = setOf("status", "location")
+
+    /**
+     * Attrs whose value is worked out rather than quoted, and so are
+     * not held to being findable in the message. `skipped` is the
+     * start of the occurrence that is off, which the model resolves
+     * from "tonight" and the owner's clock.
+     */
+    private val RESOLVED = setOf("skipped")
+
+    /**
+     * Attrs that hold more than one value at once. A second skipped
+     * occurrence stands beside the first: that is what makes a list of
+     * cancelled evenings rather than only the latest one.
+     */
+    private val MULTI = setOf("skipped")
 
     /** How many of the messages before this one the model is shown. */
     const val CONTEXT_MESSAGES = 4

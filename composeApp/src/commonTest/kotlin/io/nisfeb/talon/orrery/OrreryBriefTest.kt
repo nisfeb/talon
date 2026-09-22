@@ -113,6 +113,36 @@ class OrreryBriefTest {
         action("1789-ccc", "task", "Pick up the Subaru", "approved"),
     )
 
+    // `next` does not move when one evening is called off: the ship
+    // says which occurrence is off in `skipped`, and the two are read
+    // together or tonight's cancelled practice is read out as
+    // tonight's plan.
+    @Test
+    fun `an occurrence that is skipped is not the next one`() {
+        fun activity(vararg skipped: String): JsonObject = Json.parseToJsonElement(
+            """
+            {"id": "activity/practice", "kind": "activity", "name": "Practice",
+             "attrs": {"next": {"value": "2026-09-24T22:00:00Z"}
+             ${if (skipped.isEmpty()) "" else ", \"skipped\": [" + skipped.joinToString(",") { "{\"value\": \"$it\"}" } + "]"}}}
+            """.trimIndent(),
+        ).jsonObject
+
+        assertEquals("2026-09-24T22:00:00Z", Brief.nextOccurrence(activity()))
+        assertNull(Brief.nextOccurrence(activity("2026-09-24T22:00:00Z")), "that evening is off")
+        // Another evening off says nothing about this one.
+        assertEquals("2026-09-24T22:00:00Z", Brief.nextOccurrence(activity("2026-10-01T22:00:00Z")))
+        // Several, one of which is this one.
+        assertNull(Brief.nextOccurrence(activity("2026-10-01T22:00:00Z", "2026-09-24T22:00:00Z")))
+        // The same moment, written another way, is the same moment.
+        assertNull(Brief.nextOccurrence(activity("2026-09-24T22:00:00.000Z")))
+
+        // And it leaves the week ahead, which is where the owner would
+        // otherwise read it as a plan.
+        val nowIso = "2026-09-19T11:00:00Z"
+        assertTrue(Brief.ahead(listOf(activity()), nowIso).any { it.startsWith("Practice") })
+        assertEquals(emptyList(), Brief.ahead(listOf(activity("2026-09-24T22:00:00Z")), nowIso))
+    }
+
     @Test
     fun `the day is the calendar, what orrery adds, then the todos`() {
         assertEquals(
