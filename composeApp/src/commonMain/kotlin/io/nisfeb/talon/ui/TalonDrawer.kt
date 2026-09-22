@@ -12,11 +12,13 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.LocalFocusManager
 import kotlinx.coroutines.launch
 
 /**
@@ -82,6 +84,19 @@ fun TalonDrawer(
     val state = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     DrawerOverlay.Follow(state.isOpen)
+    // A text selection's handles and its copy menu are not drawn with
+    // the app: the handles sit in a layer of their own above it, and
+    // on iOS the menu is UIKit's. The drawer is drawn with the app, so
+    // it slid in underneath them and they floated over the sections.
+    // Opening it lets go of focus, and a selection lets go of itself
+    // when its container loses focus, which is also what leaving some
+    // text to go elsewhere ought to do. On the target, not the settled
+    // state, so they are gone as the drawer starts to move, whether a
+    // tap or a swipe opened it.
+    val focus = LocalFocusManager.current
+    LaunchedEffect(state.targetValue) {
+        if (state.targetValue == DrawerValue.Open) focus.clearFocus(force = true)
+    }
     ModalNavigationDrawer(
         drawerState = state,
         drawerContent = {
