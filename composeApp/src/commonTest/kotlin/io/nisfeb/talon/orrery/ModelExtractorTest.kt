@@ -121,6 +121,28 @@ class ModelExtractorTest {
         assertEquals(listOf("closed"), out.map { it.value.jsonPrimitive.content }, "open reopens what the ship retired")
     }
 
+    // One evening being called off is not the series ending, and until
+    // orrery 37 gives an occurrence somewhere to go there is no way to
+    // say the smaller thing. Saying the larger one killed the activity.
+    @Test
+    fun `one evening off does not end the series`() {
+        val here = NameIndex(listOf(KnownBody("activity/pirates-practice", "Pirates practice", emptyList(), null)))
+        val answer = """{"claims":[
+            {"subject":"activity/pirates-practice","attr":"status","value":"cancelled","conf":90},
+            {"subject":"activity/pirates-practice","attr":"location","value":"the rink","conf":90}
+        ]}"""
+        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me)
+        assertEquals(listOf("location"), out.map { it.attr }, "the series is still running")
+    }
+
+    @Test
+    fun `an activity can still be said to be running`() {
+        val here = NameIndex(listOf(KnownBody("activity/pirates-practice", "Pirates practice", emptyList(), null)))
+        val answer = """{"claims":[{"subject":"activity/pirates-practice","attr":"status","value":"active","conf":90}]}"""
+        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me)
+        assertEquals(listOf("active"), out.map { it.value.jsonPrimitive.content })
+    }
+
     @Test
     fun `a status that reads like the message before is a reading of it`() {
         val answer = """{"claims":[{"subject":"person/sarah","attr":"status","value":"stranded, waiting for a tow","conf":80}]}"""

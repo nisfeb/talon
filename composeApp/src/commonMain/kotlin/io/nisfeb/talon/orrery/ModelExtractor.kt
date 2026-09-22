@@ -253,6 +253,16 @@ object ModelExtractor {
             if (attr == "status" && subject.startsWith("situation/") &&
                 (value as? JsonPrimitive)?.content?.lowercase() !in SITUATION_STATUS
             ) continue
+            // An activity's status is the whole series: cancelled says
+            // it has stopped for good. "Practice is cancelled tonight"
+            // is one occurrence, and writing that as the series ending
+            // told the ship the activity was dead. There is no field
+            // for a single occurrence until orrery 37's `skipped`, so
+            // the reading is dropped rather than written as something
+            // it does not say.
+            if (attr == "status" && subject.startsWith("activity/") &&
+                (value as? JsonPrimitive)?.content?.lowercase() != "active"
+            ) continue
             // A value has to come from the words, or it came from the
             // model's memory: the string itself, or the named body's name
             // or an alias, must be in the message. A status is the one
