@@ -320,7 +320,7 @@ class CalendarRepo(
     }
 
     /** Tick or untick a task. */
-    suspend fun setDone(id: String, done: Boolean): Boolean = poke(doneBody(id, done))
+    suspend fun setDone(id: String, done: Boolean): Boolean = poke(doneBody(id, done), tasksOnly = true)
 
     /**
      * A new task, on the list at once and written behind it. The write
@@ -381,11 +381,26 @@ class CalendarRepo(
 
     private val details = io.nisfeb.talon.util.ConcurrentMap<String, JsonObject>()
 
-    /** A write, then the reads that show it. False when refused. */
-    suspend fun poke(body: JsonObject): Boolean {
+    /**
+     * A write, then the reads that show it. False when refused.
+     *
+     * [tasksOnly] reads back what a task write can have changed, which
+     * is the listing and the window, rather than the nine reads a full
+     * refresh makes. Ticking a box went through all nine, and every
+     * request into a grubbery app is about a second of its single
+     * thread, one behind another.
+     */
+    suspend fun poke(body: JsonObject, tasksOnly: Boolean = false): Boolean {
         val a = api ?: return false
         if (ball.isEmpty()) ball = runCatching { a.config().ball }.getOrDefault("")
         val ok = runCatching { a.poke(ball, body) }.getOrDefault(false)
+        if (ok && tasksOnly) {
+            details.clear()
+            delay(400)
+            runCatching { _tasks.value = a.tasks() }
+            range?.let { (f, t) -> loadRange(f, t) }
+            return true
+        }
         if (ok) {
             // What was read of an event the write may have changed is
             // no longer what the ship says.
@@ -467,6 +482,28 @@ class CalendarRepo(
                 delay(1500)
             }
             refresh()
+        }
+    }
+
+    /**
+     * The tasks, and nothing else.
+     *
+     * A full refresh asks the ship nine times: the window, the
+     * calendars, the whole listing, the shares, the conflicts, Google,
+     * the CalDAV subscriptions, the tags and the config. Every request
+     * into a grubbery app is about a second of its single thread and
+     * they queue, so refreshing a task list cost the lot of them.
+     * Ticking a box and pulling the list are one request now.
+     */
+    suspend fun refreshTasks(): Result<Unit> = gate.withLock {
+        val a = api ?: return@withLock Result.failure(IllegalStateException("Not attached to a ship."))
+        runCatching {
+            _tasks.value = a.tasks()
+            _availability.value = CalendarAvailability.PRESENT
+            _error.value = null
+        }.onFailure { e ->
+            if (e is AuspexError && e.isSignedOut) _availability.value = CalendarAvailability.SIGNED_OUT
+            _error.value = e.message
         }
     }
 

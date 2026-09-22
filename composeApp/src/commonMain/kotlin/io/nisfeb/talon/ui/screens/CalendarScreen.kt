@@ -34,6 +34,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.unit.Dp
 import kotlinx.datetime.minus
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material.icons.filled.Phone
@@ -95,6 +97,9 @@ import io.nisfeb.talon.ui.urlsIn
 import io.nisfeb.talon.ui.phoneNumbersIn
 import io.nisfeb.talon.ui.telUri
 import io.nisfeb.talon.calendar.dueDate
+import io.nisfeb.talon.calendar.groupTasks
+import io.nisfeb.talon.calendar.inFilter
+import io.nisfeb.talon.calendar.matches
 import io.nisfeb.talon.calendar.taskOrder
 import io.nisfeb.talon.calendar.EventCat
 import io.nisfeb.talon.calendar.EventDraft
@@ -205,6 +210,10 @@ fun CalendarScreen(
     // The page is read again on opening: ten minutes is a long time
     // after a change made on the calendar's page or another device.
     LaunchedEffect(Unit) { repo.refresh() }
+    // Opening the task list reads the tasks, not the nine things a full
+    // refresh reads: the calendars, the shares, the conflicts and the
+    // rest have not changed because somebody tapped Tasks.
+    LaunchedEffect(showTasks) { if (showTasks) repo.refreshTasks() }
     LaunchedEffect(year, month, zoneId, availability) {
         if (availability != CalendarAvailability.PRESENT) return@LaunchedEffect
         val from = grid.first().atTime(0, 0).toInstant(zone).toEpochMilliseconds()
@@ -1533,7 +1542,8 @@ private fun TasksView(
     var due by remember { mutableStateOf<LocalDate?>(null) }
     var cal by remember(calendars, defaultCal) { mutableStateOf(defaultCal ?: calendars.firstOrNull()?.id) }
     var picking by remember { mutableStateOf(false) }
-    var showDone by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    var filter by remember { mutableStateOf(io.nisfeb.talon.calendar.TaskFilter.OPEN) }
     fun add() {
         val n = name.trim()
         if (n.isEmpty()) return
@@ -1583,19 +1593,69 @@ private fun TasksView(
             Text("Looking…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
             return@Column
         }
-        val open = taskOrder(tasks.orEmpty().filter { !it.done })
-        val done = taskOrder(tasks.orEmpty().filter { it.done })
+        // What is being looked at, and what is being looked for. The
+        // counts are of everything, so a filter that would show nothing
+        // says so on its own chip rather than by emptying the screen.
+        val all = tasks.orEmpty()
+        val shown = groupTasks(
+            all.filter { it.inFilter(filter, today) && it.matches(query) },
+            today,
+        )
+        val count = { f: io.nisfeb.talon.calendar.TaskFilter -> all.count { it.inFilter(f, today) && it.matches(query) } }
         LazyColumn(Modifier.fillMaxSize()) {
-            items(pending, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), false, onTick, {}, pending = true) }
-            if (open.isEmpty() && pending.isEmpty()) item { Text("Nothing to do.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp)) }
-            items(open, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), t.cal !in readOnly, onTick, onOpen) }
-            if (done.isNotEmpty()) {
-                item {
-                    TextButton(onClick = { showDone = !showDone }, modifier = Modifier.padding(horizontal = 8.dp)) {
-                        Text(if (showDone) "Hide done (${done.size})" else "Done (${done.size})")
+            item {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("Search tasks") },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, contentDescription = "Clear the search") }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+            item {
+                LazyRow(
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(io.nisfeb.talon.calendar.TaskFilter.entries.toList(), key = { it.name }) { f ->
+                        val n = count(f)
+                        FilterChip(
+                            selected = filter == f,
+                            onClick = { filter = f },
+                            label = { Text(if (n > 0) "${f.label} $n" else f.label) },
+                        )
                     }
                 }
-                if (showDone) items(done, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), t.cal !in readOnly, onTick, onOpen) }
+            }
+            items(pending, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), false, onTick, {}, pending = true) }
+            if (shown.isEmpty() && pending.isEmpty()) {
+                item {
+                    Text(
+                        if (query.isNotBlank()) "Nothing matches \"${query.trim()}\"." else "Nothing to do.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+            }
+            shown.forEach { group ->
+                item(key = "head:" + group.label) {
+                    Text(
+                        group.label + " · " + group.tasks.size,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (group.label == "Overdue") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 2.dp),
+                    )
+                }
+                items(group.tasks, key = { it.id }) { t ->
+                    TaskLine(t, today, colourOf(t), t.cal !in readOnly, onTick, onOpen)
+                }
             }
         }
     }
