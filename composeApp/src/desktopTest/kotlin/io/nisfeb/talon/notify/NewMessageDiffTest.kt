@@ -147,6 +147,23 @@ class NewMessageDiffTest {
         assertEquals("~bus", n.title)
     }
 
+    // A comet's @p is fifty-six characters of key fingerprint. Whoever
+    // reads the balloon needs the name the rest of the app gives it.
+    @Test
+    fun `a message is announced by what its author is called`() {
+        val comet = "~dozzod-dozzod-dozzod-dozzod--dozzod-dozzod-dozzod-dozzod"
+        val diff = diffNewMessageNotifications(
+            rows = listOf(msg("~zod", "id-1", author = comet)),
+            lastSeen = emptyMap(),
+            ourPatp = "~me",
+            openChat = null,
+            levels = emptyMap(),
+            storyText = storyText,
+            nameFor = { if (it == comet) "..lucky.dozen" else it },
+        )
+        assertEquals("..lucky.dozen", diff.notifications[0].title)
+    }
+
     @Test
     fun `updated id for known whom fires`() {
         val diff = diffNewMessageNotifications(

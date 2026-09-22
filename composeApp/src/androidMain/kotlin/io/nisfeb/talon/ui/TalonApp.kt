@@ -1180,7 +1180,7 @@ fun TalonApp(
         // the group (its flag doubles as the whom via the "group:" route).
         app.repo.groupInviteListener = { invite ->
             appScope.launch {
-                val from = invite.inviter?.let { " from $it" } ?: ""
+                val from = invite.inviter?.let { " from " + contactMap.displayName(it) } ?: ""
                 Notifications.showMessage(
                     context = context,
                     whom = "group:${invite.flag}",

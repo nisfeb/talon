@@ -1305,14 +1305,14 @@ fun App(
             // against), so a brand-new DM no longer arrives silently.
             DisposableEffect(repo, notifier) {
                 repo.dmInviteListener = { ship ->
-                    runCatching { notifier.notify(ship, "wants to message you") }
+                    runCatching { notifier.notify(callContacts.displayName(ship), "wants to message you") }
                 }
                 // A new group invite is as easy to miss as a DM request —
                 // toast it the same way so it doesn't sit unseen behind a
                 // badge you have no reason to check.
                 repo.groupInviteListener = { invite ->
                     val name = invite.title ?: invite.flag
-                    val from = invite.inviter?.let { " from $it" } ?: ""
+                    val from = invite.inviter?.let { " from " + callContacts.displayName(it) } ?: ""
                     runCatching { notifier.notify(name, "invited you to a group$from") }
                 }
                 onDispose {
@@ -1378,6 +1378,10 @@ fun App(
                                 // and is dropped; live messages pass.
                                 nowMs = nowMs(),
                                 freshnessMaxAgeMs = 5L * 60_000L,
+                                // The name the rest of the app shows,
+                                // read as the balloon is built so a
+                                // nickname landing late is still used.
+                                nameFor = { callContacts.displayName(it) },
                             )
                         lastSeenIds = diff.newLastSeen
                         for (n in diff.notifications) {
