@@ -1642,21 +1642,7 @@ class OrreryRepo(
         // model's reading of "tonight" wherever the pipe has one.
         val starts = occurrenceOn(s, event, at.toEpochMilliseconds()) ?: at.toEpochMilliseconds()
         val name = bodyName(s, subject) ?: subject.substringAfter('/')
-        val body = buildJsonObject {
-            put("kind", "calendar")
-            put("title", "Cancel $name")
-            putJsonArray("about") { add(JsonPrimitive(subject)) }
-            put("payload", buildJsonObject {
-                // title and starts as an add has them: the ship's own
-                // shape refuses a payload that lacks a required key,
-                // whatever the mode is.
-                put("title", name)
-                put("starts", isoUtc(starts))
-                put("mode", "cancel")
-                put("event", event.second)
-            })
-            put("message", "$name on ${isoUtc(starts)} was called off.")
-        }
+        val body = cancelAction(subject, name, event.second, starts)
         val shape = (schema["payloads"] as? JsonObject)?.get("calendar") as? JsonObject ?: JsonObject(emptyMap())
         val (payload, why) = checkPayload(body["payload"] as JsonObject, shape, known)
         if (payload == null) return Log.i(TAG, "$sourceId cancel dropped: $why")
@@ -1691,9 +1677,10 @@ class OrreryRepo(
      */
     private suspend fun occurrenceOn(s: String, event: Pair<String, String>, nearMs: Long): Long? {
         val prefix = "occ:${event.first}/${event.second}/"
-        val starts = db.orrerySent().under(s, prefix).mapNotNull { it.key.removePrefix(prefix).toLongOrNull() }
-        val day = 24L * 60 * 60 * 1000
-        return starts.filter { kotlin.math.abs(it - nearMs) < day }.minByOrNull { kotlin.math.abs(it - nearMs) }
+        return occurrenceNear(
+            db.orrerySent().under(s, prefix).mapNotNull { it.key.removePrefix(prefix).toLongOrNull() },
+            nearMs,
+        )
     }
 
     private suspend fun bodyName(s: String, subject: String): String? =
