@@ -27,6 +27,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import io.nisfeb.talon.ui.parseIsoUtc
+import io.nisfeb.talon.urbit.asText
+import io.nisfeb.talon.calendar.dueDate
 
 /**
  * The daily brief: one mail each morning from the owner to the owner,
@@ -65,8 +68,10 @@ object Brief {
 
     /** The day a brief's subject names, through any "Re:". */
     fun dayOf(subject: String): LocalDate? =
-        Regex("""Daily brief (\d{4}-\d{2}-\d{2})""").find(subject)?.groupValues?.get(1)
+        BRIEF_DAY.find(subject)?.groupValues?.get(1)
             ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+
+    private val BRIEF_DAY = Regex("""Daily brief (\d{4}-\d{2}-\d{2})""")
 
     /** The day a brief is due for, when it is due now: seven in the owner's zone (plus [graceMs]), or within the hour after. */
     fun dueDay(nowMs: Long, zone: TimeZone, graceMs: Long = 0): LocalDate? {
@@ -90,7 +95,13 @@ object Brief {
     fun bodies(state: JsonObject): List<JsonObject> =
         (state["bodies"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
 
-    private fun JsonObject.str(k: String): String? = (this[k] as? JsonPrimitive)?.contentOrNull
+    private fun JsonObject.str(k: String): String? = this[k].asText()
+
+    /** The owner's own body id: what the ship says, or the one it always is. */
+    fun me(state: JsonObject): String = state.str("me") ?: "person/me"
+
+    /** One body of the state view by its id. */
+    fun bodyOf(state: JsonObject, id: String): JsonObject? = bodies(state).firstOrNull { it.str("id") == id }
 
     /** An attribute's current value: one, or a list of them for a multi. */
     fun value(body: JsonObject, attr: String): JsonElement? =
@@ -100,11 +111,11 @@ object Brief {
             else -> null
         }
 
-    fun text(body: JsonObject, attr: String): String? = (value(body, attr) as? JsonPrimitive)?.contentOrNull
+    fun text(body: JsonObject, attr: String): String? = value(body, attr).asText()
 
     /** Every value of an attribute that holds more than one. */
     fun texts(body: JsonObject, attr: String): List<String> = when (val v = value(body, attr)) {
-        is JsonArray -> v.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        is JsonArray -> v.mapNotNull { it.asText() }
         is JsonPrimitive -> listOfNotNull(v.contentOrNull)
         else -> emptyList()
     }
@@ -124,14 +135,13 @@ object Brief {
      */
     fun nextOccurrence(body: JsonObject): String? {
         val next = text(body, "next") ?: return null
-        val at = runCatching { Instant.parse(next) }.getOrNull() ?: return next
-        val off = texts(body, "skipped").mapNotNull { runCatching { Instant.parse(it) }.getOrNull() }
-        return if (off.any { it == at }) null else next
+        val at = parseIsoUtc(next) ?: return next
+        return if (texts(body, "skipped").any { parseIsoUtc(it) == at }) null else next
     }
 
     /** person/me's timezone on the ship, which wins over the default. */
     fun zone(state: JsonObject): TimeZone {
-        val me = state.str("me") ?: "person/me"
+        val me = me(state)
         val id = bodies(state).firstOrNull { it.str("id") == me }?.let { text(it, "timezone") }
         return runCatching { TimeZone.of(id ?: DEFAULT_ZONE) }.getOrElse { TimeZone.of(DEFAULT_ZONE) }
     }
@@ -173,7 +183,7 @@ object Brief {
                     if (text(b, "status") in setOf("closed", "cancelled")) continue else text(b, "starts")
                 id.startsWith("activity/") -> nextOccurrence(b)
                 else -> continue
-            }?.let { runCatching { Instant.parse(it).toEpochMilliseconds() }.getOrNull() } ?: continue
+            }?.let(::parseIsoUtc) ?: continue
             val name = b.str("name") ?: id
             if (at !in from until to || normalizeTitle(name) in onCalendar) continue
             slots += Slot(at, false, name)
@@ -184,9 +194,8 @@ object Brief {
             .toMutableList()
         // A todo's due is midnight UTC of its day.
         val open = todos.filter { it.cat == "todo" && !it.done && it.name.isNotBlank() }
-        fun dueDate(t: CalendarTask) = t.dueMs?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date }
-        open.filter { t -> dueDate(t)?.let { it <= day } == true }.sortedBy { it.dueMs }.forEach { t ->
-            lines += "To do  " + t.name + if (dueDate(t)!! < day) " (overdue)" else ""
+        open.filter { t -> t.dueDate()?.let { it <= day } == true }.sortedBy { it.dueMs }.forEach { t ->
+            lines += "To do  " + t.name + if (t.dueDate()!! < day) " (overdue)" else ""
         }
         val undated = open.filter { it.dueMs == null }
         undated.take(MAX_UNDATED).forEach { lines += "To do  " + it.name }
@@ -214,10 +223,10 @@ object Brief {
             val bits = listOfNotNull(
                 a.kind,
                 a.about.takeIf { it.isNotEmpty() }?.joinToString(", ", prefix = "about ") { names[it] ?: it },
-                a.due?.let { d -> runCatching { "due " + whenText(Instant.parse(d).toEpochMilliseconds(), zone) }.getOrNull() },
+                a.due?.let(::parseIsoUtc)?.let { "due " + whenText(it, zone) },
             )
             lines += "     " + bits.joinToString(", ")
-            (a.payload["why"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }?.let { lines += "     Why: $it" }
+            a.payload["why"].asText()?.takeIf { it.isNotBlank() }?.let { lines += "     Why: $it" }
         }
         return lines to tags
     }
@@ -263,7 +272,7 @@ object Brief {
         /** What yesterday's brief suggested, so that today's does not say it again. */
         saidYesterday: String = "",
     ): String = buildString {
-        appendLine("The owner is ${state.str("me") ?: "person/me"}.")
+        appendLine("The owner is ${me(state)}.")
         val all = bodies(state).take(MAX_BODIES)
         // The brief is about today, so the state it reads is what bears on
         // the next two days. A situation three weeks out, and every
@@ -358,7 +367,7 @@ object Brief {
             if (v is JsonNull) return@mapNotNull null
             // An occurrence further off than the brief reaches is under
             // Ahead instead, where it costs a line rather than a body.
-            if (k == "next" && within != null && (v as? JsonPrimitive)?.contentOrNull?.let { it > within } == true) return@mapNotNull null
+            if (k == "next" && within != null && v.asText()?.let { it > within } == true) return@mapNotNull null
             val shown = when (v) {
                 is JsonArray -> v.joinToString(", ") { refOrText(it) }
                 else -> refOrText(v)
@@ -371,7 +380,7 @@ object Brief {
     }
 
     private fun refOrText(v: JsonElement): String =
-        (v as? JsonObject)?.str("ref") ?: (v as? JsonPrimitive)?.contentOrNull ?: v.toString()
+        (v as? JsonObject)?.str("ref") ?: v.asText() ?: v.toString()
 
     fun render(day: LocalDate, today: List<String>, waiting: List<String>, suggestions: String): String = buildString {
         appendLine("Today, ${titled(day.dayOfWeek.name)} ${day.dayOfMonth} ${titled(day.month.name)}")
@@ -446,8 +455,8 @@ object Brief {
             val m = e as? JsonObject ?: continue
             val id = m.str("tag")?.uppercase()?.trim('[', ']', ' ')?.let { tags[it] } ?: continue
             val status = m.str("status")?.lowercase()?.takeIf { it in MOVES }
-            val due = m.str("due")?.let { runCatching { Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
-            val about = (m["about"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.lowercase() }
+            val due = m.str("due")?.let(::parseIsoUtc)
+            val about = (m["about"] as? JsonArray)?.mapNotNull { it.asText()?.lowercase() }
                 ?.takeIf { it.isNotEmpty() && it.all { b -> b in known } }
             if (status == null && due == null && about == null) continue
             val reason = m.str("reason")?.trim()?.takeIf { it.isNotEmpty() }?.let { clipBytes(it, 500) }
@@ -481,7 +490,7 @@ object Brief {
                 dropped("action ${title ?: "(no title)"}: ${if (title == null) "no title" else "a $kind is not a reader's to propose"}")
                 return@mapNotNull null
             }
-            val about = (a["about"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.lowercase() }
+            val about = (a["about"] as? JsonArray).orEmpty().mapNotNull { it.asText()?.lowercase() }
             if (!about.all { it in known }) {
                 dropped("action $title: it is about a body the ship does not have")
                 return@mapNotNull null
@@ -593,7 +602,7 @@ object Brief {
         zone: TimeZone = TimeZone.UTC,
     ): String = buildString {
         appendLine("Channel: mail")
-        appendLine("The owner is ${state.str("me") ?: "person/me"}.")
+        appendLine("The owner is ${me(state)}.")
         if (attrs.isNotEmpty()) {
             appendLine("Attribute names by kind:")
             attrs.forEach { (k, names) -> appendLine("  $k: ${names.joinToString(", ")}") }
@@ -617,7 +626,7 @@ object Brief {
         val all = bodies(state).take(MAX_BODIES)
         if (all.isEmpty()) appendLine("  (none known)")
         all.forEach { b ->
-            val aliases = (b["aliases"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            val aliases = (b["aliases"] as? JsonArray).orEmpty().mapNotNull { it.asText() }
             appendLine("  ${b.str("id")} | ${b.str("name").orEmpty()} | ${aliases.joinToString(", ")}")
         }
         if (tagged.isNotEmpty()) {
@@ -629,7 +638,7 @@ object Brief {
         appendLine("Now: ${isoUtc(nowMs)}, timezone ${zone.id}.")
         appendLine()
         appendLine("Messages, oldest first:")
-        appendLine("--- message $replyId | ${isoUtc(atMs)} | from ${state.str("me") ?: "person/me"}")
+        appendLine("--- message $replyId | ${isoUtc(atMs)} | from ${me(state)}")
         appendLine(text.take(4000))
         appendLine("---")
         append("Answer with the JSON object.")
@@ -672,7 +681,7 @@ object Brief {
             val raw = b.str("id")?.lowercase() ?: continue
             val id = target(raw)
             if (!ID.matches(id) || id.substringBefore('/') !in attrs) continue
-            val aliases = (b["aliases"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            val aliases = (b["aliases"] as? JsonArray).orEmpty().mapNotNull { it.asText() }
             if (id in known) {
                 // Names only: the ship keeps its own name, and an upsert of
                 // aliases alone unions them.
@@ -697,7 +706,7 @@ object Brief {
                     ?.let { buildJsonObject { put("ref", it) } } ?: continue
                 else -> continue
             }
-            fun ms(k: String) = o.str(k)?.let { runCatching { Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+            fun ms(k: String) = o.str(k)?.let(::parseIsoUtc)
             obs += Obs(subject, attr, value, ms("at") ?: atMs, ms("until"), conf = 100, sourceKind = "mail", sourceId = replyId)
         }
         return Facts(bodies, obs)

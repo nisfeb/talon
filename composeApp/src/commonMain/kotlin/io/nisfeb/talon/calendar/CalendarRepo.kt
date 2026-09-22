@@ -153,7 +153,8 @@ class CalendarRepo(
                 _rangeRows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
                 // Kept as it lands, not at the next refresh: a phone closed
                 // on a month it has just read opens on that month again.
-                keep()
+                // Only the month: nothing else changed by turning a page.
+                keepRange()
             }
             .onFailure { if (it !is AuspexError) throw it; _error.value = it.message }
     }
@@ -296,6 +297,19 @@ class CalendarRepo(
         }
     }
 
+    /** The month on screen alone, kept as it lands: the rest has not moved. */
+    private suspend fun keepRange() {
+        keepLock.withLock {
+            val c = cache ?: return
+            val snap = _rangeRows.value ?: return
+            runCatching {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    c.replace("range", snap.mapIndexed { i, r -> CalendarCacheEntity("range", i, AuspexApi.json.encodeToString(CalendarRow.serializer(), r)) })
+                }
+            }.onFailure { Log.w(TAG, "calendar range not kept", it) }
+        }
+    }
+
     suspend fun windowRows(fromMs: Long, toMs: Long): List<CalendarRow>? =
         api?.let { a -> runCatching { a.window(fromMs, toMs).rows.sortedWith(compareBy({ it.l }, { it.r })) }.getOrNull() }
 
@@ -320,7 +334,7 @@ class CalendarRepo(
     }
 
     /** Tick or untick a task. */
-    suspend fun setDone(id: String, done: Boolean): Boolean = poke(doneBody(id, done), tasksOnly = true)
+    suspend fun setDone(id: String, done: Boolean): Boolean = write(doneBody(id, done)).also { if (it) afterTaskWrite() }
 
     /**
      * A new task, on the list at once and written behind it. The write
@@ -345,7 +359,13 @@ class CalendarRepo(
         )
         _pendingTasks.value = _pendingTasks.value + ghost
         scope.launch {
-            val ok = poke(eventBody(d))
+            val ok = write(eventBody(d))
+            if (ok) {
+                afterTaskWrite()
+                // A tag the calendar has not seen before joins the list
+                // the editor offers; one it has is already there.
+                if (d.tags.any { it !in _tags.value }) api?.let { a -> runCatching { a.tags() }.getOrNull()?.let { _tags.value = it.map { t -> t.tag } } }
+            }
             _pendingTasks.value = _pendingTasks.value - ghost
             if (!ok) onFailed("The ship did not take \"${d.name.trim()}\".")
         }
@@ -383,34 +403,50 @@ class CalendarRepo(
 
     /**
      * A write, then the reads that show it. False when refused.
-     *
-     * [tasksOnly] reads back what a task write can have changed, which
-     * is the listing and the window, rather than the nine reads a full
-     * refresh makes. Ticking a box went through all nine, and every
-     * request into a grubbery app is about a second of its single
-     * thread, one behind another.
      */
-    suspend fun poke(body: JsonObject, tasksOnly: Boolean = false): Boolean {
+    suspend fun poke(body: JsonObject): Boolean = write(body).also { ok ->
+        if (ok) {
+            refresh()
+            range?.let { (f, t) -> loadRange(f, t) }
+        }
+    }
+
+    /** A write and nothing read back: the caller knows what it changed. False when refused. */
+    private suspend fun write(body: JsonObject): Boolean {
         val a = api ?: return false
         if (ball.isEmpty()) ball = runCatching { a.config().ball }.getOrDefault("")
         val ok = runCatching { a.poke(ball, body) }.getOrDefault(false)
-        if (ok && tasksOnly) {
-            details.clear()
-            delay(400)
-            runCatching { _tasks.value = a.tasks() }
-            range?.let { (f, t) -> loadRange(f, t) }
-            return true
-        }
         if (ok) {
             // What was read of an event the write may have changed is
             // no longer what the ship says.
             details.clear()
             // The nexus applies a poke after it answers; give it a beat.
             delay(400)
-            refresh()
-            range?.let { (f, t) -> loadRange(f, t) }
         }
         return ok
+    }
+
+    /**
+     * What a task write can have changed, read back: the listing, the
+     * window a todo also sits in (the home screen's agenda reads it),
+     * and the month on screen. Not the nine reads a full refresh makes:
+     * every request into a grubbery app is about a second of its single
+     * thread, one behind another, and a tick went through all nine.
+     */
+    private suspend fun afterTaskWrite() {
+        refreshTasks()
+        refreshWindow()
+        range?.let { (f, t) -> loadRange(f, t) }
+        // So a phone closed straight after a tick opens on the tick.
+        keep()
+    }
+
+    /** The window alone, read again. */
+    private suspend fun refreshWindow() {
+        val a = api ?: return
+        val now = nowMs()
+        runCatching { a.window(now - BEHIND_MS, now + AHEAD_MS) }
+            .onSuccess { w -> _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r })) }
     }
 
     fun attach(baseUrl: String) {

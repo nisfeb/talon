@@ -101,8 +101,9 @@ class AiClient(
         maxTokens: Int,
         timeoutMs: Long,
     ): String {
+        val model = cfg.model ?: "claude-sonnet-4-5-20250929"
         val payload = buildJsonObject {
-            put("model", cfg.model ?: "claude-sonnet-4-5-20250929")
+            put("model", model)
             put("max_tokens", maxTokens)
             systemPrompt?.let { put("system", it) }
             putJsonArray("messages") {
@@ -121,8 +122,8 @@ class AiClient(
             },
             timeoutMs = timeoutMs,
         ) { body ->
-            usageLine(cfg.provider, cfg.model ?: "claude-sonnet-4-5-20250929", body)?.let { Log.i("AiClient", it) }
-            lastCostUsd = usageCost(cfg.provider, cfg.model ?: "claude-sonnet-4-5-20250929", body)
+            usageLine(cfg.provider, model, body)?.let { Log.i("AiClient", it) }
+            lastCostUsd = usageCost(cfg.provider, model, body)
             // Shape: { content: [{type:"text", text:"..."}], ... }. A model
             // that thinks puts a thinking block first, so take the text.
             (body["content"] as? JsonArray)
@@ -217,13 +218,12 @@ class AiClient(
 }
 
 /**
- * One call's tokens and cost, for the log. OpenRouter says the cost;
- * Anthropic says the tokens and the price is Anthropic's list price
- * (cache reads a tenth of input, cache writes a quarter more). Other
- * providers give tokens only.
+ * One call's cost in dollars, or null where it cannot be known.
+ * OpenRouter says the cost; Anthropic says the tokens and the price is
+ * Anthropic's list price (cache reads a tenth of input, cache writes a
+ * quarter more). Other providers give tokens only.
  * ponytail: a price table in code; add a model's row when it ships.
  */
-/** One call's cost in dollars, by [usageLine]'s rules, or null where it cannot be known. */
 internal fun usageCost(provider: AiSettings.Provider, model: String, body: JsonObject): Double? {
     val u = body["usage"] as? JsonObject ?: return null
     fun n(k: String) = u[k]?.jsonPrimitive?.longOrNull ?: 0L
@@ -236,21 +236,19 @@ internal fun usageCost(provider: AiSettings.Provider, model: String, body: JsonO
     }
 }
 
+/** One call's tokens and cost, for the log, priced by [usageCost]. */
 internal fun usageLine(provider: AiSettings.Provider, model: String, body: JsonObject): String? {
     val u = body["usage"] as? JsonObject ?: return null
     fun n(k: String) = u[k]?.jsonPrimitive?.longOrNull ?: 0L
     fun dollars(d: Double) = "$" + (kotlin.math.round(d * 10_000) / 10_000).toString()
+    val cost = usageCost(provider, model, body)
     if (provider == AiSettings.Provider.Anthropic) {
-        val input = n("input_tokens")
-        val output = n("output_tokens")
         val read = n("cache_read_input_tokens")
         val wrote = n("cache_creation_input_tokens")
-        val cost = claudePrice(model)?.let { (i, o) -> (input * i + wrote * i * 1.25 + read * i * 0.1 + output * o) / 1_000_000 }
-        return "model $model: $input in, $output out" +
+        return "model $model: ${n("input_tokens")} in, ${n("output_tokens")} out" +
             (if (read + wrote > 0) ", cache $read read, $wrote written" else "") +
             ", " + (cost?.let(::dollars) ?: "cost unknown")
     }
-    val cost = u["cost"]?.jsonPrimitive?.doubleOrNull
     return "model $model: ${n("prompt_tokens")} in, ${n("completion_tokens")} out, " + (cost?.let(::dollars) ?: "cost not reported")
 }
 

@@ -41,15 +41,15 @@ object LocalServerRung : Rung() {
         val chosen = LocalModels.serverUrl.trim().trimEnd('/')
         found = if (chosen.isNotEmpty()) {
             // The person named a server: that one, whichever shape it speaks.
-            probe("The server at $chosen", chosen, "/v1/models") { it.jsonObject["data"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["id"]?.jsonPrimitive?.content } }
-                ?: probe("The server at $chosen", chosen, "/api/tags") { it.jsonObject["models"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["name"]?.jsonPrimitive?.content } }
+            probe("The server at $chosen", chosen, "/v1/models", OPENAI_MODELS)
+                ?: probe("The server at $chosen", chosen, "/api/tags", OLLAMA_TAGS)
         } else if (isTouchPrimary) {
             // Nothing is listening on a phone's own ports, so it looks
             // only where it has been told to.
             null
         } else {
-            probe("LM Studio", "http://localhost:1234", "/v1/models") { it.jsonObject["data"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["id"]?.jsonPrimitive?.content } }
-                ?: probe("Ollama", "http://localhost:11434", "/api/tags") { it.jsonObject["models"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["name"]?.jsonPrimitive?.content } }
+            probe("LM Studio", "http://localhost:1234", "/v1/models", OPENAI_MODELS)
+                ?: probe("Ollama", "http://localhost:11434", "/api/tags", OLLAMA_TAGS)
         }
         return when {
             found != null -> RungStatus.Ready
@@ -128,3 +128,11 @@ internal class OpenAiShapeModel(private val http: HttpClient, private val server
 /** A server model by address and name, with no probe, for the fixture gate. */
 internal fun serverModel(base: String, model: String): LocalModel =
     OpenAiShapeModel(createAppHttpClient(), LocalServerRung.Server("server", base.trimEnd('/'), model), "$model at $base")
+
+/** The model ids an OpenAI-shaped server lists at /v1/models: LM Studio, llama.cpp. */
+private val OPENAI_MODELS: (kotlinx.serialization.json.JsonElement) -> List<String> =
+    { it.jsonObject["data"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["id"]?.jsonPrimitive?.content } }
+
+/** The model names Ollama lists at /api/tags. */
+private val OLLAMA_TAGS: (kotlinx.serialization.json.JsonElement) -> List<String> =
+    { it.jsonObject["models"]?.jsonArray.orEmpty().mapNotNull { m -> m.jsonObject["name"]?.jsonPrimitive?.content } }

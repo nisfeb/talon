@@ -48,7 +48,7 @@ class OrreryCalendarTest {
     fun `a hit of kind activity is an occurrence of it, and makes no body`() {
         val s = subject(row(noon - week, "weekly"), row(noon, "weekly"), row(noon + week, "weekly"))
         val hits = listOf(ResolvedBody("activity/standup", "activity", "Standup", "exact"))
-        val w = calendarWrite(s, decided = null, hits = hits, written = emptySet(), ourShip = me, nowMs = noon + 3_600_000)
+        val w = calendarWrite(s, decided = null, hits = hits, written = emptySet(), nowMs = noon + 3_600_000)
         assertEquals("activity/standup", w.bodyId)
         assertTrue(w.facts.bodies.isEmpty(), "the ship already has it")
         assertEquals(false, w.creates)
@@ -62,7 +62,7 @@ class OrreryCalendarTest {
     fun `a hit of kind situation gets the facts, not a twin`() {
         val s = subject(row(noon))
         val hits = listOf(ResolvedBody("situation/bed-delivery", "situation", "Bed delivery", "exact"))
-        val w = calendarWrite(s, null, hits, emptySet(), me, noon + 3_600_000)
+        val w = calendarWrite(s, null, hits, emptySet(), noon + 3_600_000)
         assertEquals("situation/bed-delivery", w.bodyId)
         assertTrue(w.facts.bodies.isEmpty())
         assertEquals(listOf("ended", "participants", "started"), w.facts.observations.map { it.attr }.sorted())
@@ -72,7 +72,7 @@ class OrreryCalendarTest {
     @Test
     fun `no hit and it repeats makes one activity that can be resolved again`() {
         val s = subject(row(noon - week, "weekly", location = "the office"), row(noon, "weekly", location = "the office"))
-        val w = calendarWrite(s, null, emptyList(), emptySet(), me, noon + 3_600_000)
+        val w = calendarWrite(s, null, emptyList(), emptySet(), noon + 3_600_000)
         assertEquals(true, w.creates)
         val body = w.facts.bodies.single()
         assertEquals("activity/standup", body.id)
@@ -88,7 +88,7 @@ class OrreryCalendarTest {
     fun `a one-off ahead of us is a schedule, not something that happened`() {
         val s = subject(row(noon, title = "Bed delivery", uid = "UID-1"))
         val soon = noon - 3_600_000 // an hour before it is due
-        val w = calendarWrite(s, null, emptyList(), emptySet(), me, soon)
+        val w = calendarWrite(s, null, emptyList(), emptySet(), soon)
         assertEquals("situation/2026-09-17-bed-delivery", w.facts.bodies.single().id)
         assertTrue("UID-1" in w.facts.bodies.single().aliases)
         assertEquals(listOf("ends", "participants", "starts"), w.facts.observations.map { it.attr }.sorted())
@@ -103,7 +103,7 @@ class OrreryCalendarTest {
     @Test
     fun `a one-off under way has started, and still only ends`() {
         val s = subject(row(noon, title = "Bed delivery", uid = "UID-1"))
-        val w = calendarWrite(s, null, emptyList(), emptySet(), me, noon + 60_000)
+        val w = calendarWrite(s, null, emptyList(), emptySet(), noon + 60_000)
         assertEquals(listOf("ends", "participants", "started"), w.facts.observations.map { it.attr }.sorted())
         assertEquals(noon, w.facts.observations.single { it.attr == "started" }.atMs, "at its own moment")
         assertEquals(noon + 60_000, w.facts.observations.single { it.attr == "ends" }.atMs)
@@ -113,7 +113,7 @@ class OrreryCalendarTest {
     @Test
     fun `a one-off that is over is said in the past tense, and settles`() {
         val s = subject(row(noon, title = "Bed delivery", uid = "UID-1"))
-        val w = calendarWrite(s, null, emptyList(), emptySet(), me, noon + 2 * 3_600_000)
+        val w = calendarWrite(s, null, emptyList(), emptySet(), noon + 2 * 3_600_000)
         assertEquals(listOf("ended", "participants", "started"), w.facts.observations.map { it.attr }.sorted())
         assertEquals(noon, w.facts.observations.single { it.attr == "started" }.atMs)
         assertEquals(noon + 1_800_000, w.facts.observations.single { it.attr == "ended" }.atMs)
@@ -125,9 +125,9 @@ class OrreryCalendarTest {
     @Test
     fun `an occurrence already written is not written again`() {
         val s = subject(row(noon - week, "weekly"), row(noon, "weekly"))
-        val first = calendarWrite(s, "activity/standup", emptyList(), emptySet(), me, noon + 3_600_000)
+        val first = calendarWrite(s, "activity/standup", emptyList(), emptySet(), noon + 3_600_000)
         assertEquals(2, first.occurrenceKeys.size)
-        val again = calendarWrite(s, "activity/standup", emptyList(), first.occurrenceKeys.toSet(), me, noon + 3_600_000)
+        val again = calendarWrite(s, "activity/standup", emptyList(), first.occurrenceKeys.toSet(), noon + 3_600_000)
         assertTrue(again.facts.observations.none { it.attr == "last" }, "a replay says nothing new")
         assertTrue(again.occurrenceKeys.isEmpty())
     }
@@ -135,7 +135,7 @@ class OrreryCalendarTest {
     @Test
     fun `the decision this install already made skips the asking`() {
         val s = subject(row(noon, "weekly"))
-        val w = calendarWrite(s, decided = "activity/standup", hits = emptyList(), written = emptySet(), ourShip = me, nowMs = noon + 60_000)
+        val w = calendarWrite(s, decided = "activity/standup", hits = emptyList(), written = emptySet(), nowMs = noon + 60_000)
         assertEquals("activity/standup", w.bodyId)
         assertTrue(w.facts.bodies.isEmpty(), "a body is made once or never")
     }
@@ -145,7 +145,7 @@ class OrreryCalendarTest {
         val rows = listOf(row(noon - week), row(noon))
         val s = calendarSubjects(rows).single()
         assertTrue(s.repeats, "the same event twice is a series the calendar did not label")
-        assertEquals("activity/standup", calendarWrite(s, null, emptyList(), emptySet(), me, noon).bodyId)
+        assertEquals("activity/standup", calendarWrite(s, null, emptyList(), emptySet(), noon).bodyId)
     }
 
     @Test
@@ -161,9 +161,9 @@ class OrreryCalendarTest {
     @Test
     fun `an activity that changed says what it is again, without repeating its occurrences`() {
         val s = subject(row(noon - week, "weekly", location = "the cafe"), row(noon, "weekly", location = "the cafe"))
-        val written = calendarWrite(s, "activity/standup", emptyList(), emptySet(), me, noon + 3_600_000)
+        val written = calendarWrite(s, "activity/standup", emptyList(), emptySet(), noon + 3_600_000)
             .occurrenceKeys.toSet()
-        val again = calendarWrite(s, "activity/standup", emptyList(), written, me, noon + 3_600_000, changed = true)
+        val again = calendarWrite(s, "activity/standup", emptyList(), written, noon + 3_600_000, changed = true)
         val attrs = again.facts.observations.map { it.attr }.toSet()
         assertTrue(attrs.containsAll(setOf("cadence", "schedule", "participants", "location")), "$attrs")
         assertEquals("the cafe", again.facts.observations.single { it.attr == "location" }.value.jsonPrimitive.content)
@@ -175,9 +175,9 @@ class OrreryCalendarTest {
     @Test
     fun `a one-off that changed is said again although its occurrence was written`() {
         val s = subject(row(noon, title = "Bed delivery", uid = "UID-1", location = "the flat"))
-        val written = calendarWrite(s, "situation/bed-delivery", emptyList(), emptySet(), me, noon).occurrenceKeys.toSet()
-        assertTrue(calendarWrite(s, "situation/bed-delivery", emptyList(), written, me, noon).facts.observations.isEmpty())
-        val again = calendarWrite(s, "situation/bed-delivery", emptyList(), written, me, noon, changed = true)
+        val written = calendarWrite(s, "situation/bed-delivery", emptyList(), emptySet(), noon).occurrenceKeys.toSet()
+        assertTrue(calendarWrite(s, "situation/bed-delivery", emptyList(), written, noon).facts.observations.isEmpty())
+        val again = calendarWrite(s, "situation/bed-delivery", emptyList(), written, noon, changed = true)
         assertEquals(listOf("ends", "location", "participants", "started"), again.facts.observations.map { it.attr }.sorted())
         assertEquals(noon, again.facts.observations.single { it.attr == "started" }.atMs)
     }
@@ -203,12 +203,12 @@ class OrreryCalendarTest {
     @Test
     fun `an activity on our own calendar names who holds it`() {
         val s = subject(row(noon - week, "weekly"), row(noon, "weekly"))
-        val ours = calendarWrite(s, null, emptyList(), emptySet(), me, noon + 3_600_000, ours = true)
+        val ours = calendarWrite(s, null, emptyList(), emptySet(), noon + 3_600_000, ours = true)
         assertEquals(
             "person/me",
             ours.facts.observations.single { it.attr == "organizer" }.value.jsonObject["ref"]!!.jsonPrimitive.content,
         )
-        val theirs = calendarWrite(s, null, emptyList(), emptySet(), me, noon + 3_600_000)
+        val theirs = calendarWrite(s, null, emptyList(), emptySet(), noon + 3_600_000)
         assertTrue(
             theirs.facts.observations.none { it.attr == "organizer" },
             "on a calendar another ship shares, whose it is is not ours to say",
@@ -226,7 +226,7 @@ class OrreryCalendarTest {
     @Test
     fun `everyone the event names is in it, and the ship's own people are used`() {
         val s = subject(row(noon, title = "Rose and Linus- Opti Sail", uid = "S1"))
-        val w = calendarWrite(s, null, emptyList(), emptySet(), me, noon, people = cast)
+        val w = calendarWrite(s, null, emptyList(), emptySet(), noon, people = cast)
         assertEquals(listOf("person/me", "person/rose", "person/linus"), refs(w))
         assertEquals(
             listOf("person/rose"),
@@ -239,28 +239,28 @@ class OrreryCalendarTest {
     @Test
     fun `a production, a team or a place is never a person`() {
         val none = subject(row(noon, "weekly", title = "Nutcracker rehearsal", uid = "S2"))
-        val w = calendarWrite(none, null, emptyList(), emptySet(), me, noon + 60_000, people = cast)
+        val w = calendarWrite(none, null, emptyList(), emptySet(), noon + 60_000, people = cast)
         assertEquals(listOf("person/me"), refs(w))
         assertTrue(w.facts.bodies.none { it.id.startsWith("person/") }, "no body for a ballet")
         // A leading word the ship does keep as a person is that person.
         val known = subject(row(noon, "weekly", title = "Magnus Fencing Lesson", uid = "S3"))
-        val w2 = calendarWrite(known, null, emptyList(), emptySet(), me, noon + 60_000, people = cast)
+        val w2 = calendarWrite(known, null, emptyList(), emptySet(), noon + 60_000, people = cast)
         assertEquals(listOf("person/me", "person/magnus"), refs(w2))
     }
 
     @Test
     fun `a description names whoever the ship already knows`() {
         val s = subject(row(noon, title = "Sailing", uid = "S4", note = "bring Linus's helmet"))
-        val w = calendarWrite(s, null, emptyList(), emptySet(), me, noon, people = cast)
+        val w = calendarWrite(s, null, emptyList(), emptySet(), noon, people = cast)
         assertEquals(listOf("person/me", "person/linus"), refs(w))
     }
 
     @Test
     fun `a name in a description is written with a capital`() {
         val lower = subject(row(noon, title = "Sailing", uid = "S5", note = "linus can pick up the grace period forms"))
-        assertEquals(listOf("person/me"), refs(calendarWrite(lower, null, emptyList(), emptySet(), me, noon, people = cast)))
+        assertEquals(listOf("person/me"), refs(calendarWrite(lower, null, emptyList(), emptySet(), noon, people = cast)))
         val upper = subject(row(noon, title = "Sailing", uid = "S6", note = "Linus can pick up the forms"))
-        assertEquals(listOf("person/me", "person/linus"), refs(calendarWrite(upper, null, emptyList(), emptySet(), me, noon, people = cast)))
+        assertEquals(listOf("person/me", "person/linus"), refs(calendarWrite(upper, null, emptyList(), emptySet(), noon, people = cast)))
     }
 
     private fun hit(id: String, match: String = "exact") = ResolvedBody(id, id.substringBefore('/'), "Nutcracker Mandatory Parent Meeting", match)
@@ -309,7 +309,7 @@ class OrreryCalendarTest {
         // A rename must not recreate somebody the owner's reconcile merged
         // away: only the pass that makes the event may make a person.
         val s = subject(row(noon, title = "Rose and Linus- Opti Sail", uid = "S5"))
-        val again = calendarWrite(s, "situation/opti-sail", emptyList(), emptySet(), me, noon, changed = true, people = cast)
+        val again = calendarWrite(s, "situation/opti-sail", emptyList(), emptySet(), noon, changed = true, people = cast)
         assertEquals(listOf("person/me", "person/linus"), refs(again))
         assertTrue(again.facts.bodies.isEmpty())
     }

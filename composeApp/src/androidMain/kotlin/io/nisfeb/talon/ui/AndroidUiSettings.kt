@@ -144,14 +144,6 @@ class AndroidUiSettings(
         _calendarWeekView.value = on
     }
 
-    private val _orreryCloudTriage = MutableStateFlow(prefs.getBoolean(KEY_ORRERY_CLOUD_TRIAGE, false))
-    override val orreryCloudTriage: StateFlow<Boolean> = _orreryCloudTriage.asStateFlow()
-    override fun setOrreryCloudTriage(on: Boolean) {
-        if (_orreryCloudTriage.value == on) return
-        prefs.edit().putBoolean(KEY_ORRERY_CLOUD_TRIAGE, on).apply()
-        _orreryCloudTriage.value = on
-    }
-
     private val _orreryStandDown = MutableStateFlow(prefs.getBoolean(KEY_ORRERY_STAND_DOWN, true))
     override val orreryStandDown: StateFlow<Boolean> = _orreryStandDown.asStateFlow()
     override fun setOrreryStandDown(on: Boolean) {
@@ -172,21 +164,8 @@ class AndroidUiSettings(
         _orreryDecide.value = d
     }
 
-    private val _orreryServerUrl = MutableStateFlow(prefs.getString(KEY_ORRERY_SERVER_URL, "") ?: "")
-    override val orreryServerUrl: StateFlow<String> = _orreryServerUrl.asStateFlow()
-    override fun setOrreryServerUrl(url: String) {
-        if (_orreryServerUrl.value == url) return
-        prefs.edit().putString(KEY_ORRERY_SERVER_URL, url).apply()
-        _orreryServerUrl.value = url
-    }
-
-    private val _orreryServerModel = MutableStateFlow(prefs.getString(KEY_ORRERY_SERVER_MODEL, "") ?: "")
-    override val orreryServerModel: StateFlow<String> = _orreryServerModel.asStateFlow()
-    override fun setOrreryServerModel(model: String) {
-        if (_orreryServerModel.value == model) return
-        prefs.edit().putString(KEY_ORRERY_SERVER_MODEL, model).apply()
-        _orreryServerModel.value = model
-    }
+    override val orreryServerUrl: StateFlow<String> = MutableStateFlow(prefs.getString(KEY_ORRERY_SERVER_URL, "") ?: "")
+    override val orreryServerModel: StateFlow<String> = MutableStateFlow(prefs.getString(KEY_ORRERY_SERVER_MODEL, "") ?: "")
 
     private val _defaultCalendar = MutableStateFlow(prefs.getString(KEY_DEFAULT_CALENDAR, "") ?: "")
     override val defaultCalendar: StateFlow<String> = _defaultCalendar.asStateFlow()
@@ -426,7 +405,6 @@ class AndroidUiSettings(
         private const val KEY_HIDDEN_CALENDARS = "hidden_calendars"
         private const val KEY_DEFAULT_CALENDAR = "default_calendar"
         private const val KEY_CALENDAR_WEEK_VIEW = "calendar_week_view"
-        private const val KEY_ORRERY_CLOUD_TRIAGE = "orrery_cloud_triage"
         private const val KEY_ORRERY_STAND_DOWN = "orrery_stand_down"
         private const val KEY_ORRERY_DECIDE = "orrery_decide"
         private const val KEY_ORRERY_SERVER_URL = "orrery_server_url"

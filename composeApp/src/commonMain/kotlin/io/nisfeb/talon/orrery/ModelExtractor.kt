@@ -13,6 +13,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.datetime.offsetAt
 import kotlinx.datetime.toLocalDateTime
+import io.nisfeb.talon.ui.parseIsoUtc
+import io.nisfeb.talon.urbit.asStr
 
 /**
  * One message in, claims out, through whatever model the ladder gave.
@@ -147,8 +149,8 @@ object ModelExtractor {
     fun planOf(answer: String, text: String, atMs: Long): Plan? {
         val root = runCatching { Json.parseToJsonElement(answer.trim()).jsonObject }.getOrNull() ?: return null
         val p = root["plan"] as? JsonObject ?: return null
-        fun str(k: String) = (p[k] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()?.takeIf { it.isNotEmpty() }
-        fun ms(k: String) = str(k)?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+        fun str(k: String) = p[k].asStr()?.trim()?.takeIf { it.isNotEmpty() }
+        fun ms(k: String) = str(k)?.let(::parseIsoUtc)
         val title = str("title")?.take(120) ?: return null
         if (!FIXES_A_TIME.containsMatchIn(text.lowercase())) return null
         if (!sharesAWord(JsonPrimitive(title), text, min = 3)) return null
@@ -290,7 +292,7 @@ object ModelExtractor {
         // thing twice does not write it twice — except where the
         // attribute is meant to hold several, and a second cancelled
         // evening has to stand beside the first rather than replace it.
-        return out.distinctBy { if (it.attr in MULTI) Triple(it.subject, it.attr, it.value.toString()) else it.subject to it.attr }
+        return out.distinctBy { claimKey(it.subject, it.attr, it.value) }
     }
 
     /**
@@ -354,13 +356,6 @@ object ModelExtractor {
      * from "tonight" and the owner's clock.
      */
     private val RESOLVED = setOf("skipped")
-
-    /**
-     * Attrs that hold more than one value at once. A second skipped
-     * occurrence stands beside the first: that is what makes a list of
-     * cancelled evenings rather than only the latest one.
-     */
-    private val MULTI = setOf("skipped")
 
     /** How many of the messages before this one the model is shown. */
     const val CONTEXT_MESSAGES = 4

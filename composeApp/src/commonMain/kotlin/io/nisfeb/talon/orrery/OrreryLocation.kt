@@ -17,6 +17,7 @@ import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
+import io.nisfeb.talon.urbit.asText
 
 /**
  * Where the owner is, from the phone, as the schema asks for it: a
@@ -31,7 +32,7 @@ data class GeoPlace(val id: String, val lat: Double, val lon: Double)
 
 /** The places in the state view with a `geo` the ship can place: "lat,lon", or an object with lat and lon (or lng). */
 fun geoPlaces(state: JsonObject): List<GeoPlace> = Brief.bodies(state).mapNotNull { b ->
-    val id = (b["id"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.startsWith("place/") } ?: return@mapNotNull null
+    val id = b["id"].asText()?.takeIf { it.startsWith("place/") } ?: return@mapNotNull null
     val (lat, lon) = when (val g = Brief.value(b, "geo")) {
         is JsonPrimitive -> g.contentOrNull?.let { NUMBER.findAll(it).map { m -> m.value.toDouble() }.toList() }
             ?.takeIf { it.size == 2 }?.let { it[0] to it[1] } ?: return@mapNotNull null
@@ -100,7 +101,7 @@ suspend fun sendLocation(
     val last = sent.get(ship, LAST_KEY)?.value?.let { runCatching { kotlinx.serialization.json.Json.parseToJsonElement(it) }.getOrNull() }
     val value = locationValue(fix, geoPlaces(state), name, last) ?: return Result.success(Unit)
     if (value == last) return Result.success(Unit)
-    val me = (state["me"] as? JsonPrimitive)?.contentOrNull ?: "person/me"
+    val me = Brief.me(state)
     val obs = Obs(me, "location", value, fix.atMs, conf = if (value is JsonObject) 90 else 80, sourceKind = "device", sourceId = "location")
     val answer = api.observe(batches(Facts(emptyList(), listOf(obs))).single(), token)
     answer.refused.firstOrNull()?.let { error(it.error ?: "refused") }

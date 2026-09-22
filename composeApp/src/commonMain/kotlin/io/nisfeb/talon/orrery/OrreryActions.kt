@@ -4,6 +4,9 @@ import kotlinx.datetime.Instant
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import io.nisfeb.talon.ui.parseIsoUtc
+import io.nisfeb.talon.urbit.asText
+import io.nisfeb.talon.urbit.normalisePatp
 
 /**
  * A message action's payload as the schema shapes it: the channel it
@@ -42,18 +45,15 @@ fun OrreryAction.messageToSend(): MessageToSend? {
  */
 fun addressOf(state: kotlinx.serialization.json.JsonObject, to: String, via: String): String? {
     if (via !in TALON_CHANNELS) return null
-    val body = bodyOf(state, to) ?: return null
+    val body = Brief.bodyOf(state, to) ?: return null
     val said = Brief.text(body, "ship")?.trim()?.takeIf { it.isNotEmpty() }
-        ?: (body["ship"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.trim()
-    return said?.let { if (it.startsWith("~")) it else "~$it" }?.takeIf { PATP.matches(it) }
+        ?: body["ship"].asText()?.trim()
+    return said?.let(::normalisePatp)?.takeIf { PATP.matches(it) }
 }
 
 /** Why [to] cannot be reached on [via], for the note the owner reads. */
 fun noAddress(state: kotlinx.serialization.json.JsonObject, to: String, via: String): String =
     if (via in TALON_CHANNELS) "$to has no ship on record" else "$to is not reachable on $via from here"
-
-private fun bodyOf(state: kotlinx.serialization.json.JsonObject, id: String) =
-    Brief.bodies(state).firstOrNull { (it["id"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull == id }
 
 private val PATP = Regex("~[a-z]{3}(-{0,2}[a-z]{3,6})*")
 
@@ -73,7 +73,7 @@ fun OrreryAction.eventToAdd(): EventToAdd? {
 }
 
 /** An ISO 8601 instant, or a bare date read as that day at midnight UTC. */
-private fun instantMs(s: String): Long? = runCatching { Instant.parse(s).toEpochMilliseconds() }.getOrNull()
+private fun instantMs(s: String): Long? = parseIsoUtc(s)
     ?: runCatching { kotlinx.datetime.LocalDate.parse(s).atStartOfDayIn(kotlinx.datetime.TimeZone.UTC).toEpochMilliseconds() }.getOrNull()
 
 private fun OrreryAction.str(k: String): String? =
@@ -98,7 +98,7 @@ fun diffActionNotifications(open: List<OrreryAction>, lastSeen: Set<String>?, ca
     if (lastSeen == null) return ActionNews(emptyList(), emptySet(), seen)
     val fresh = proposals.filter { it.id !in lastSeen }
     val raise = fresh.take(cap).map { a ->
-        val why = (a.payload["why"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        val why = a.payload["why"].asText()?.takeIf { it.isNotBlank() }
         ActionNotification(
             a.id,
             a.title.ifBlank { a.kind },

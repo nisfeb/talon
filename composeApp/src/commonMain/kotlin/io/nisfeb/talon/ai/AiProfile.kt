@@ -218,7 +218,7 @@ fun AiSettings.Config.featureOn(f: AiFeature, before: Boolean): Boolean = savedP
  * on this machine's loopback, which the ship cannot reach.
  */
 fun AiProvider.shipBase(): String? = when (kind) {
-    ProviderKind.OpenRouter -> "https://openrouter.ai/api/v1"
+    ProviderKind.OpenRouter -> ModelCatalog.OPENROUTER
     ProviderKind.OpenAi -> "https://api.openai.com/v1"
     ProviderKind.OpenAiCompatible -> baseUrl?.trim()?.trimEnd('/')?.removeSuffix("/chat/completions")
         ?.takeUnless { u -> u.substringAfter("://").substringBefore('/').substringBefore(':').let { it == "localhost" || it.startsWith("127.") } }
@@ -397,8 +397,8 @@ fun AiProfile.withLegacy(cfg: AiSettings.Config): AiProfile {
     if (dp != null && providerOf(dp.kind) != null) {
         providers = providers.map {
             if (it.id != dp.id) it else it.copy(
-                kind = kindOfLegacy(cfg.provider),
-                label = if (it.label == it.kind.label) kindOfLegacy(cfg.provider).label else it.label,
+                kind = kindOf(cfg.provider),
+                label = if (it.label == it.kind.label) kindOf(cfg.provider).label else it.label,
                 apiKey = cfg.apiKey.ifBlank { it.apiKey },
                 baseUrl = cfg.baseUrl,
             )
@@ -408,7 +408,7 @@ fun AiProfile.withLegacy(cfg: AiSettings.Config): AiProfile {
         // Only where there is nothing here to speak of. A profile with
         // providers in it is one somebody curated, and an old install's
         // key used to put back the provider they had just deleted.
-        providers = listOf(AiProvider(MAIN_PROVIDER, kindOfLegacy(cfg.provider), kindOfLegacy(cfg.provider).label, cfg.baseUrl, cfg.apiKey)) +
+        providers = listOf(AiProvider(MAIN_PROVIDER, kindOf(cfg.provider), kindOf(cfg.provider).label, cfg.baseUrl, cfg.apiKey)) +
             providers.filterNot { it.id == MAIN_PROVIDER }
         def = ModelRef(MAIN_PROVIDER, cfg.model.orEmpty())
     }
@@ -416,13 +416,6 @@ fun AiProfile.withLegacy(cfg: AiSettings.Config): AiProfile {
     f[AiFeature.CatchUp] = (f[AiFeature.CatchUp] ?: FeatureSetting()).copy(on = cfg.catchMeUpEnabled)
     f[AiFeature.Assistant] = (f[AiFeature.Assistant] ?: FeatureSetting()).copy(on = cfg.assistantOn())
     return copy(providers = providers, defaultModel = def, features = f)
-}
-
-private fun kindOfLegacy(p: AiSettings.Provider): ProviderKind = when (p) {
-    AiSettings.Provider.OpenRouter -> ProviderKind.OpenRouter
-    AiSettings.Provider.Anthropic -> ProviderKind.Anthropic
-    AiSettings.Provider.OpenAi -> ProviderKind.OpenAi
-    AiSettings.Provider.Custom -> ProviderKind.OpenAiCompatible
 }
 
 /** The switches that travel whatever the key sync says, as the old toggles did. */

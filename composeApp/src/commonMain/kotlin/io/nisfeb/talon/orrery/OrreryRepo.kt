@@ -43,6 +43,8 @@ import kotlinx.datetime.Instant
 import io.nisfeb.talon.util.nowMs
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.toLocalDateTime
+import io.nisfeb.talon.ui.parseIsoUtc
+import io.nisfeb.talon.urbit.asText
 
 /**
  * The structural pipe into orrery: what Talon knows for certain about
@@ -89,6 +91,9 @@ class OrreryRepo(
     bareClient: HttpClient? = null,
 ) {
     private var cloudModel: LocalModel? = null
+
+    /** The last gate built, and the tray examples it was built from. */
+    private var gateBuilt: Pair<Pair<List<String>, List<String>>, PatternGate>? = null
 
     // Writes under the key ride a client with no cookie: with both on
     // one request the ship would take the cookie and write as the owner.
@@ -158,7 +163,7 @@ class OrreryRepo(
      * never gives it back. Anything not given is left as the ship has it.
      */
     suspend fun setGenerator(enabled: Boolean, url: String? = null, model: String? = null, key: String? = null): Result<Unit> = runCatching {
-        val a = api ?: error("Not attached to a ship.")
+        val a = attached()
         a.setGenerator(enabled, url, model, key)
         a.generatorSettings()?.let { _generatorSettings.value = it }
     }
@@ -170,12 +175,18 @@ class OrreryRepo(
     /** Today's tally as kept, for the settings screen before a pass has added to it. */
     suspend fun loadDecideToday() {
         val s = ship ?: return
-        val day = kotlinx.datetime.Instant.fromEpochMilliseconds(now())
-            .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).date.toString()
-        val kept = db.orrerySent().get(s, "decide:$day")?.value
-            ?.let { runCatching { Json.decodeFromString(DecideDay.serializer(), it) }.getOrNull() }
-        _decideToday.value = day to (kept ?: DecideDay())
+        val day = localDay(now())
+        _decideToday.value = day to keptDay(s, day)
     }
+
+    /** The owner's calendar day at [ms], which is what a day's tally is kept under. */
+    private fun localDay(ms: Long): String = kotlinx.datetime.Instant.fromEpochMilliseconds(ms)
+        .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).date.toString()
+
+    /** The tally kept for [day], or an empty one. */
+    private suspend fun keptDay(s: String, day: String): DecideDay =
+        db.orrerySent().get(s, "decide:$day")?.value
+            ?.let { runCatching { Json.decodeFromString(DecideDay.serializer(), it) }.getOrNull() } ?: DecideDay()
 
     /** The open list as the ship just said it, and what that means for notifications. */
     private fun published(list: List<OrreryAction>) {
@@ -252,12 +263,6 @@ class OrreryRepo(
         }
     }
 
-    /**
-     * What is open on the ship, read again: one small request, no
-     * calendar. What opening Actions asks for; the mirror, which reads
-     * every action ever filed and the whole calendar, runs on attach,
-     * after an answer and in the pipe's pass, not on every look.
-     */
     // ---- what the assistant is given ----------------------------------
     //
     // Orrery's own routes, thinly. The assistant is told what orrery's
@@ -266,14 +271,11 @@ class OrreryRepo(
     // that is the point of keeping these general.
 
     /** One settings document, as the ship serves it; credentials masked. */
-    suspend fun readSettings(name: String): Result<String> = runCatching {
-        val a = api ?: error("Not attached to a ship.")
-        a.settingsDoc(name)
-    }
+    suspend fun readSettings(name: String): Result<String> = runCatching { attached().settingsDoc(name) }
 
     /** Merge into a settings document. The ship keeps what is left blank. */
     suspend fun writeSettings(name: String, body: JsonObject): Result<String> = runCatching {
-        val a = api ?: error("Not attached to a ship.")
+        val a = attached()
         val said = a.setSettingsDoc(name, body)
         // The screens hold the generator's settings; a write from
         // anywhere else has to reach them or the card shows the old ones.
@@ -282,47 +284,39 @@ class OrreryRepo(
     }
 
     /** Register a settings document with the service it names; the ship's answer. */
-    suspend fun register(name: String): Result<String> = runCatching {
-        val a = api ?: error("Not attached to a ship.")
-        a.register(name)
-    }
+    suspend fun register(name: String): Result<String> = runCatching { attached().register(name) }
 
     /** What the outside service holds for a registered document. */
-    suspend fun readRegistration(name: String): Result<String> = runCatching {
-        val a = api ?: error("Not attached to a ship.")
-        a.registration(name)
-    }
+    suspend fun readRegistration(name: String): Result<String> = runCatching { attached().registration(name) }
 
     /** The state view under this install's key: bodies and what is known of them. */
-    suspend fun readState(): Result<JsonObject> = runCatching {
-        val a = api ?: error("Not attached to a ship.")
-        a.stateJson(keyToken() ?: error("This install has no orrery key yet."))
-    }
+    suspend fun readState(): Result<JsonObject> = runCatching { attached().stateJson(key()) }
 
     /** Ask the ship which body a name means, before writing about it. */
-    suspend fun resolveBody(q: String): Result<List<ResolvedBody>> = runCatching {
-        val a = api ?: error("Not attached to a ship.")
-        a.resolve(q, keyToken() ?: error("This install has no orrery key yet."))
-    }
+    suspend fun resolveBody(q: String): Result<List<ResolvedBody>> = runCatching { attached().resolve(q, key()) }
 
     /** One body's timeline: what was said about it, when, and by whom. */
-    suspend fun bodyTimeline(id: String): Result<List<KnownObs>> = runCatching {
-        val a = api ?: error("Not attached to a ship.")
-        a.observationsOf(id, keyToken() ?: error("This install has no orrery key yet."))
-    }
+    suspend fun bodyTimeline(id: String): Result<List<KnownObs>> = runCatching { attached().observationsOf(id, key()) }
 
     /** One observe batch under this install's key. */
-    suspend fun observeNow(batch: JsonObject): Result<ObserveAnswer> = runCatching {
-        val a = api ?: error("Not attached to a ship.")
-        a.observe(batch, keyToken() ?: error("This install has no orrery key yet."))
-    }
+    suspend fun observeNow(batch: JsonObject): Result<ObserveAnswer> = runCatching { attached().observe(batch, key()) }
+
+    private fun attached(): OrreryApi = api ?: error("Not attached to a ship.")
 
     private suspend fun keyToken(): String? = ship?.let { db.orreryAccounts().get(it)?.token }
 
+    private suspend fun key(): String = keyToken() ?: error("This install has no orrery key yet.")
+
+    /**
+     * What is open on the ship, read again: one small request, no
+     * calendar. What opening Actions asks for; the mirror, which reads
+     * every action ever filed and the whole calendar, runs on attach,
+     * after an answer and in the pipe's pass, not on every look.
+     */
     suspend fun refreshWaiting() {
         val a = api ?: return
-        val s = ship ?: return
-        runCatching { a.actions(db.orreryAccounts().get(s)?.token) }
+        if (ship == null) return
+        runCatching { a.actions(keyToken()) }
             .onSuccess { published(it) }
             .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
         // A pass files proposals and moves the beacon: its record comes with them.
@@ -331,8 +325,7 @@ class OrreryRepo(
 
     fun detach() {
         if (current === this) current = null
-        loop?.cancel()
-        loop = null
+        stopPipe()
         watching?.cancel()
         watching = null
         beacon?.cancel()
@@ -342,13 +335,19 @@ class OrreryRepo(
         shipUrl = null
         ship = null
         _availability.value = OrreryAvailability.UNKNOWN
+        _error.value = null
+        scopeChecked = false
+    }
+
+    /** The pipe is off: its loop stops, and so does the one switch that lives under it. */
+    private fun stopPipe() {
+        loop?.cancel()
+        loop = null
         _enabled.value = false
         // The switch for it lives under the pipe, so it goes off the
         // screen with the pipe: left on, the phone kept waking for moves
         // with nowhere to send them and no way to say stop.
         io.nisfeb.talon.ui.stopLocationSharing()
-        _error.value = null
-        scopeChecked = false
     }
 
     suspend fun probe() {
@@ -360,7 +359,7 @@ class OrreryRepo(
 
     /** Mint this install's key and start the walk. */
     suspend fun enable(): Result<Unit> = runCatching {
-        val a = api ?: error("Not attached to a ship.")
+        val a = attached()
         val s = ship ?: error("Not attached to a ship.")
         // Everything the ship has; the lists are only a fallback.
         val full = runCatching { a.schema() }.getOrNull()
@@ -371,7 +370,7 @@ class OrreryRepo(
         )
         scopeChecked = full != null
         val start = now() - BACKFILL_MS
-        db.orreryAccounts().upsert(OrreryAccountEntity(s, key.clientId(), key.token, start, start, 0))
+        db.orreryAccounts().upsert(OrreryAccountEntity(s, key.id, key.token, start, start, 0))
         _enabled.value = true
         _error.value = null
         startLoop()
@@ -391,11 +390,7 @@ class OrreryRepo(
                 .onFailure { if (it !is OrreryError.Refused || it.status != 404) throw it }
             db.orreryAccounts().delete(s)
         }
-        _enabled.value = false
-        // The switch for it lives under the pipe, so it goes off the
-        // screen with the pipe: left on, the phone kept waking for moves
-        // with nowhere to send them and no way to say stop.
-        io.nisfeb.talon.ui.stopLocationSharing()
+        stopPipe()
         _error.value = null
     }
 
@@ -680,12 +675,12 @@ class OrreryRepo(
         token: String,
         actions: List<OrreryAction>,
         /** What this pass moved on, for whoever reads the listing after it. */
-        settled: MutableMap<String, String> = mutableMapOf(),
+        settled: MutableMap<String, String>,
     ) {
         val s = ship ?: return
+        val dm = sendDm ?: return
         val out = actions.filter { it.status == "approved" || it.status == "claimed" }
             .mapNotNull { act -> act.messageToSend()?.takeIf { it.via in TALON_CHANNELS }?.let { act to it } }
-            .filter { sendDm != null }
         if (out.isEmpty()) return
         val state = a.stateJson(token)
         for ((act, m) in out) {
@@ -715,7 +710,7 @@ class OrreryRepo(
             // goes out from the ship now, through auspex, to the ship
             // the person's own attribute gives; Telegram from the
             // ship's bot. Neither was ever Talon's to send twice.
-            val sent = runCatching { sendDm!!(address, m.text); "sent as a DM to $address" }
+            val sent = runCatching { dm(address, m.text); "sent as a DM to $address" }
             val note = sent.getOrNull()
             if (note == null) {
                 db.orrerySent().forget(s, key)
@@ -841,7 +836,10 @@ class OrreryRepo(
             val called = pendingLock.withLock { calls.toList().also { calls.clear() } }.map { it(people::idFor) }
             called.forEach { facts += it }
             queuedForRetry = queuedForRetry + called
-            for (c in db.contacts().all().filter { it.ship == s || it.ship in book }) {
+            // Read once: the table holds every peer ever seen, and the
+            // triage below wants the same few.
+            val known = db.contacts().all().filter { it.ship == s || it.ship in book }
+            for (c in known) {
                 val handle = shipHandle(c.ship)
                 val id = people.idFor(c.ship, c.nickname ?: handle)
                 val body = personBody(c, id, handle, shipHandleLong(c.ship))
@@ -857,7 +855,7 @@ class OrreryRepo(
             val posts = db.messages().postsAfter(row.messagesCursor, s, MESSAGES_PER_PASS)
             // Contact from a DM is contact with you. In a channel it is only
             // worth recording when the author is already in your book.
-            val direct = posts.filter { it.whom.startsWith("~") || it.whom.startsWith("0v") || it.author in book }
+            val direct = posts.filter { isDirect(it.whom) || it.author in book }
             facts += Facts(observations = direct.mapNotNull { m -> messageFacts(m, s, people.idFor(m.author, null)) })
             var messagesCursor = posts.maxOfOrNull { it.sentMs } ?: row.messagesCursor
 
@@ -875,7 +873,7 @@ class OrreryRepo(
                 )
                 mailCursor = freshMail.maxOfOrNull { it.last } ?: mailCursor
             }.onFailure { Log.i(TAG, "mail skipped: ${it.message}") }
-            val triaged = triage(a, row, posts, s, nowMs, url, freshMail, book, view) { key, value -> remember(key, value) }
+            val triaged = triage(a, row, posts, s, nowMs, url, freshMail, known, view) { key, value -> remember(key, value) }
             facts += triaged.facts
 
             val calApi = CalendarApi(http, url)
@@ -899,14 +897,20 @@ class OrreryRepo(
                 // Who the ship keeps, so a name in a title lands on the
                 // person it already has.
                 val cast = view?.let { EventPeople.of(it.bodies) } ?: EventPeople.NONE
+                // What this install has written, read once for the pass.
+                // A prefix read cannot use an index, and the table also
+                // holds a row per message read, so one scan per event
+                // was the cost of the whole loop.
+                val written = sent.under(s, "cal:").associate { it.key to it.value }
+                val occurrences = sent.under(s, "occ:").associate { it.key to it.value }
+                val occByEvent = occurrences.entries.groupBy({ it.key.substringBeforeLast('/') }, { it.key to it.value })
                 for (subject in calendarSubjects(w.rows)) {
                     // The body decided for this event, and the event as
                     // it was when that decision was made.
-                    val mark = sent.get(s, subject.key)?.value?.takeIf { it.isNotBlank() }
+                    val mark = written[subject.key]?.takeIf { it.isNotBlank() }
                     val decided = mark?.substringBefore('|')
                     val digest = subject.digest
-                    val seen = sent.under(s, "occ:${subject.cal}/${subject.uid}/")
-                        .associate { it.key to it.value }
+                    val seen = occByEvent["occ:${subject.cal}/${subject.uid}"].orEmpty().toMap()
                     // An occurrence the calendar no longer has at a time
                     // this install can still see: moved, or called off.
                     val dropped = if (decided == null) emptySet() else retractMoved(a, row.token, decided, subject, seen, s, nowMs)
@@ -937,7 +941,7 @@ class OrreryRepo(
                         subject.occurrences.any { occurrenceKey(subject, it) !in seen.keys }
                     val ours = writes && subject.cal in calendarsNow().filter { it.kind == "local" }.map { it.id }
                     val write = calendarWrite(
-                        subject, decided, hits, seen.keys - dropped, s, nowMs, changed,
+                        subject, decided, hits, seen.keys - dropped, nowMs, changed,
                         ours, cast,
                     )
                     facts += write.facts
@@ -963,17 +967,21 @@ class OrreryRepo(
                 // cleared record (pipe off and on) forgets what to cancel.
                 // What this install wrote and the calendar no longer
                 // keeps. Nothing written, nothing to lose: the listing
-                // is only worth a request once there is a record.
-                val written = sent.under(s, "cal:").associate { it.key to it.value }
+                // is only worth a request once there is a record. The
+                // records are the ones read before the loop: what the
+                // loop forgot or remembered was for events still here.
                 if (written.isNotEmpty()) {
                     val all = events()
                     // An empty listing is likelier a hiccup than every
                     // event deleted at once, and a cancel is not undone.
-                    if (!all.isNullOrEmpty()) {
+                    val kept = all?.map { "cal:${it.cal}/${it.id}" }?.toSet()
+                    // And the calendar list is only asked for once an
+                    // event has actually gone: most passes, none has.
+                    if (!all.isNullOrEmpty() && kept != null && written.keys.any { it !in kept }) {
                         val gone = vanishedEvents(
                             written = written,
-                            occurrences = sent.under(s, "occ:").associate { it.key to it.value },
-                            kept = all.map { "cal:${it.cal}/${it.id}" }.toSet(),
+                            occurrences = occurrences,
+                            kept = kept,
                             calendars = calendarsNow().map { it.id }.toSet(),
                             nowMs = nowMs,
                         )
@@ -1046,14 +1054,8 @@ class OrreryRepo(
         } catch (e: OrreryError.Refused) {
             if (e.status == 403) {
                 // The ship no longer takes this install's key: stop, and say so.
-                loop?.cancel()
-                loop = null
+                stopPipe()
                 db.orreryAccounts().delete(s)
-                _enabled.value = false
-        // The switch for it lives under the pipe, so it goes off the
-        // screen with the pipe: left on, the phone kept waking for moves
-        // with nowhere to send them and no way to say stop.
-        io.nisfeb.talon.ui.stopLocationSharing()
                 _error.value = "The ship no longer accepts this install's key. Turn the pipe on again to mint a new one."
             } else {
                 _error.value = e.message
@@ -1130,13 +1132,10 @@ class OrreryRepo(
         bodies: List<KnownBody>,
     ) {
         private val byShip: Map<String, String> = bodies.mapNotNull { b -> b.ship?.let { it to b.id } }.toMap()
-        private val known: Set<String> = bodies.map { it.id }.toSet()
         private val names: List<Pair<String, String>> = bodies.filter { it.id.startsWith("person/") }.map { (it.name ?: "") to it.id }
         private val called: Map<String, Set<String>> =
             bodies.associate { b -> b.id to (b.aliases + listOfNotNull(b.name)).toSet() }
         private val decided = mutableMapOf<String, String>()
-
-        fun shipHasBody(id: String): Boolean = id in known
 
         /** What the ship already calls a body it has, or null when it has no such body. */
         fun goesBy(id: String): Set<String>? = called[id]
@@ -1180,7 +1179,13 @@ class OrreryRepo(
          * settle folds them anyway and the owner's daily cap is small.
          */
         var urgentAbout: List<String>? = null,
-    )
+    ) {
+        /** Every body id the pass can see: what a payload's refs are checked against. */
+        val known: Set<String> by lazy { bodies.mapTo(HashSet()) { it.id } }
+
+        /** What the ship calls [id], as the pass already read it. */
+        fun nameOf(id: String): String? = bodies.firstOrNull { it.id == id }?.let { it.name ?: it.id }
+    }
 
     /** The decision model, when the owner has turned it on and an OpenRouter key is set. */
     private fun decider(): Pair<Decider, DecideSettings>? {
@@ -1200,7 +1205,14 @@ class OrreryRepo(
         val model = cloudModelIfOn() ?: (if (isLocalTriageSupported) LocalModels.best()?.second else null)
         val emb = embedder
         val gate = if (model != null && emb != null) runCatching {
-            PatternGate.build(emb, db.orreryNoticed().snippets(s, "confirmed", GATE_EXAMPLES), db.orreryNoticed().snippets(s, "discarded", GATE_EXAMPLES))
+            val yes = db.orreryNoticed().snippets(s, "confirmed", GATE_EXAMPLES)
+            val no = db.orreryNoticed().snippets(s, "discarded", GATE_EXAMPLES)
+            // Built from up to a hundred embeddings, and the same
+            // examples build the same gate, so it is built again only
+            // when the tray has moved. A gate that could not be built
+            // is tried again next pass.
+            gateBuilt?.takeIf { it.first == yes to no }?.second
+                ?: PatternGate.build(emb, yes, no)?.also { gateBuilt = (yes to no) to it }
         }.getOrNull() else null
         val dec = if (model != null) decider() else null
         return Reading(
@@ -1227,7 +1239,8 @@ class OrreryRepo(
         nowMs: Long,
         url: String,
         freshMail: List<io.nisfeb.talon.mail.InboxEntry>,
-        book: Set<String>,
+        /** The people in the owner's book, as this pass already read them. */
+        contacts: List<io.nisfeb.talon.data.ContactEntity>,
         /** The state as this pass read it, so the triage adds no read of its own. */
         view: StateView?,
         remember: (String, String) -> Unit,
@@ -1235,8 +1248,7 @@ class OrreryRepo(
         val spoken = pendingLock.withLock { transcripts.toList().also { transcripts.clear() } }
         // Status lines change when nothing is said, so they are counted
         // in before the pass decides it has nothing to do.
-        val lines = db.contacts().all().filter { it.ship == s || it.ship in book }
-            .mapNotNull { c -> contactStatus(c)?.let { (line, at) -> Triple(c.ship, line, at) } }
+        val lines = contacts.mapNotNull { c -> contactStatus(c)?.let { (line, at) -> Triple(c.ship, line, at) } }
         val read = db.orrerySent().some(s, lines.map { "status:${it.first}" }).associate { it.key to it.value }
         val fresh = lines.filter { (ship, line, _) -> read["status:$ship"] != line.hashCode().toString(16) }
         if (posts.isEmpty() && spoken.isEmpty() && freshMail.isEmpty() && fresh.isEmpty()) return Triaged()
@@ -1277,11 +1289,13 @@ class OrreryRepo(
             val text = StoryCache.textFor(m.id, m.contentJson)
             remember(key, "")
             if (!inScope(m.whom, text, s, ourNick, allowed)) continue
-            val kind = if (m.whom.startsWith("~") || m.whom.startsWith("0v")) "talon-dm" else "talon-chat"
+            val kind = talonKind(m.whom)
             // A message is read with the ones before it: "yes, at 8"
             // says nothing alone. They are for reading only, and the
-            // claims are held to the words of this one.
-            val before = db.messages().before(m.whom, m.sentMs, ModelExtractor.CONTEXT_MESSAGES).reversed()
+            // claims are held to the words of this one. Only a model
+            // reads them, so with none there is nothing to fetch.
+            val before = if (r.model == null) emptyList()
+            else db.messages().before(m.whom, m.sentMs, ModelExtractor.CONTEXT_MESSAGES).reversed()
                 .map { it.author to StoryCache.textFor(it.id, it.contentJson) }
                 .filter { it.second.isNotBlank() }
             up += triageText(r, s, nowMs, text, m.author, m.sentMs, m.whom, m.id, kind, "talon://chat/${m.whom}?id=${m.id}", before)
@@ -1355,13 +1369,9 @@ class OrreryRepo(
      */
     private suspend fun tally(s: String, add: DecideDay, nowMs: Long) {
         if (add == DecideDay()) return
-        val day = kotlinx.datetime.Instant.fromEpochMilliseconds(nowMs)
-            .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).date.toString()
-        val key = "decide:$day"
-        val was = db.orrerySent().get(s, key)?.value
-            ?.let { runCatching { Json.decodeFromString(DecideDay.serializer(), it) }.getOrNull() } ?: DecideDay()
-        val now = was + add
-        db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, key, Json.encodeToString(DecideDay.serializer(), now), nowMs))
+        val day = localDay(nowMs)
+        val now = keptDay(s, day) + add
+        db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, "decide:$day", Json.encodeToString(DecideDay.serializer(), now), nowMs))
         io.nisfeb.talon.ai.AiSpend.add(io.nisfeb.talon.ai.AiFeature.OrreryTriage.name, add.analystUsd, nowMs)
         io.nisfeb.talon.ai.AiSpend.add(io.nisfeb.talon.ai.AiSpend.JEV, add.gateUsd + add.checkUsd + add.pickUsd, nowMs)
         now.lines(day).forEach { Log.i(TAG, it) }
@@ -1426,7 +1436,7 @@ class OrreryRepo(
         val walked = db.messages().postsBefore(now(), s, limit * 6)
         val picked = walked.asSequence()
             .map { it to StoryCache.textFor(it.id, it.contentJson) }
-            .filter { (m, t) -> t.length >= 8 && !t.trimEnd().endsWith("?") && !t.trimStart().startsWith("/") && inScope(m.whom, t, s, ourNick, allowed) }
+            .filter { (m, t) -> forTheGate(t) && inScope(m.whom, t, s, ourNick, allowed) }
             .take(limit).toList().reversed()
         progress(0, picked.size)
         // With picks, what Jev chose for each message the gate lets through.
@@ -1496,15 +1506,16 @@ class OrreryRepo(
         var plan: ModelExtractor.Plan? = null
         // A question states nothing, and the analyst never reads one, so
         // neither does the gate.
-        if (r.model != null && worth && r.modelRuns < MODEL_PER_PASS && text.length >= 8 && !text.trimEnd().endsWith("?")) {
+        val earlier = context.map { it.second }
+        // What the message names first, then people: wherever a list is
+        // cut, this decides what is cut. Worked out once, and only if
+        // the reader or the escalate question asks for it.
+        val ranked by lazy { rankBodies(r.bodies, r.index, text, earlier) }
+        if (r.model != null && worth && r.modelRuns < MODEL_PER_PASS && forTheReader(text)) {
             val model = r.model
             val dec = r.decider
             val from = r.index.authorId(author, s)
             val say: (String) -> Unit = { Log.i(TAG, "$sourceId $it") }
-            val earlier = context.map { it.second }
-            // What the message names first, then people: wherever a list
-            // is cut, this decides what is cut.
-            val ranked = rankBodies(r.bodies, r.index, text, earlier)
             val analyst: suspend () -> List<Noticed> = {
                 r.modelRuns++
                 // Jev chooses what the reader sees, when asked to: the few
@@ -1520,7 +1531,7 @@ class OrreryRepo(
                 ModelExtractor.extract(model, r.index, seen, text, author, atMs, s, r.attrs, r.notes, context, onPlan = { plan = it })
                     .also { r.day = r.day.copy(analystUsd = r.day.analystUsd + (model.lastCostUsd ?: 0.0)) }
             }
-            byModel = if (dec != null && r.threshold != null && !text.trimStart().startsWith("/")) {
+            byModel = if (dec != null && r.threshold != null && forTheGate(text)) {
                 val (g, rows) = Gate.around(dec, r.threshold, text, from, earlier, ranked, say, analyst)
                 r.day = r.day.copy(
                     read = r.day.read + (if (g.read) 1 else 0),
@@ -1541,15 +1552,15 @@ class OrreryRepo(
         // proposal on the ship, about the author and whom it names.
         plan?.let { p ->
             val about = (listOf(r.index.authorId(author, s)) + r.index.find(text).map { it.first.id }).filter { r.index.has(it) }.distinct().take(5)
-            proposePlan(s, sourceId, p, about, r.schema, r.bodies.map { it.id }.toSet())
+            proposePlan(s, sourceId, p, about, r)
         }
         // A cancelled occurrence is written as a fact whatever else
         // happens; the calendar still holding it is the owner's to
         // decide, so it is offered rather than done.
         for (n in (byRules + byModel)) {
             if (n.attr != "skipped" || !n.subject.startsWith("activity/")) continue
-            val iso = (n.value as? JsonPrimitive)?.contentOrNull ?: continue
-            proposeCancel(s, sourceId, n.subject, iso, r.schema, r.bodies.map { it.id }.toSet())
+            val iso = n.value.asText() ?: continue
+            proposeCancel(s, sourceId, n.subject, iso, r)
         }
         // Rule 16: the reader is the only thing with the words in front
         // of it, so the reader decides whether this is a thing somebody
@@ -1558,8 +1569,7 @@ class OrreryRepo(
         val kept = byRules + byModel
         val esc = r.escalate
         if (r.decider != null && esc != null && kept.isNotEmpty() && r.urgentAbout == null) {
-            val earlierText = context.map { it.second }
-            val p = Escalate.sure(r.decider, text, r.index.authorId(author, s), earlierText, rankBodies(r.bodies, r.index, text, earlierText), kept)
+            val p = Escalate.sure(r.decider, text, r.index.authorId(author, s), earlier, ranked, kept)
             if (p >= esc) {
                 r.urgentAbout = Escalate.about(kept)
                 Log.i(TAG, "$sourceId reads as help needed within the hour ($p): asking the ship for a pass")
@@ -1568,7 +1578,7 @@ class OrreryRepo(
         for (n in kept) {
             val trusted = trusted(s, n.attr)
             val entity = OrreryNoticedEntity(
-                id = noticedId(sourceId, n.subject, n.attr), ship = s, subject = n.subject, attr = n.attr,
+                id = noticedId(sourceId, n.subject, n.attr, n.value), ship = s, subject = n.subject, attr = n.attr,
                 valueJson = n.value.toString(), atMs = n.atMs, untilMs = n.untilMs, conf = n.conf,
                 sourceKind = kind, sourceId = sourceId, bodyJson = n.body?.toJson()?.toString(),
                 whom = whom, postId = postId, snippet = text.take(200),
@@ -1594,24 +1604,30 @@ class OrreryRepo(
      * of an open one with that one, and this install remembers the
      * message, so a replayed pass files nothing new.
      */
-    private suspend fun proposePlan(s: String, sourceId: String, p: ModelExtractor.Plan, about: List<String>, schema: JsonObject, known: Set<String>) {
-        val a = api ?: return
-        val token = db.orreryAccounts().get(s)?.token ?: return
+    private suspend fun proposePlan(s: String, sourceId: String, p: ModelExtractor.Plan, about: List<String>, r: Reading) {
         val key = "plan:$sourceId"
         if (db.orrerySent().get(s, key) != null) return
-        // The ship's shapes, not ours, rule 14: a kind it does not list,
-        // or a payload its shape refuses, is a note in the log.
-        val body = ModelExtractor.planAction(p, about)
-        if ("calendar" !in schemaActions(schema)) return Log.i(TAG, "$sourceId plan dropped: the schema lists no calendar action")
-        val shape = (schema["payloads"] as? JsonObject)?.get("calendar") as? JsonObject ?: JsonObject(emptyMap())
-        val (payload, why) = checkPayload(body["payload"] as JsonObject, shape, known)
-        if (payload == null) return Log.i(TAG, "$sourceId plan dropped: $why")
+        proposeCalendar(s, sourceId, key, ModelExtractor.planAction(p, about), r, "${p.title} at ${isoUtc(p.startMs)}")
+    }
+
+    /**
+     * One calendar action, proposed once under [key]. The ship's shapes,
+     * not ours, rule 14: a kind it does not list, or a payload its shape
+     * refuses, is a line in the log and never a request.
+     */
+    private suspend fun proposeCalendar(s: String, sourceId: String, key: String, body: JsonObject, r: Reading, what: String) {
+        val a = api ?: return
+        val token = keyToken() ?: return
+        if ("calendar" !in schemaActions(r.schema)) return Log.i(TAG, "$sourceId $what dropped: the schema lists no calendar action")
+        val shape = (r.schema["payloads"] as? JsonObject)?.get("calendar") as? JsonObject ?: JsonObject(emptyMap())
+        val (payload, why) = checkPayload(body["payload"] as JsonObject, shape, r.known)
+        if (payload == null) return Log.i(TAG, "$sourceId $what dropped: $why")
         runCatching { a.act(JsonObject(body + ("payload" to payload)), token) }
             .onSuccess { (id, _) ->
                 db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, key, id, now()))
-                Log.i(TAG, "$sourceId proposed ${p.title} at ${isoUtc(p.startMs)}")
+                Log.i(TAG, "$sourceId proposed $what")
             }
-            .onFailure { Log.i(TAG, "$sourceId plan not proposed: ${it.message}") }
+            .onFailure { Log.i(TAG, "$sourceId $what not proposed: ${it.message}") }
     }
 
     /**
@@ -1627,31 +1643,19 @@ class OrreryRepo(
      * A proposal, never a write. Taking something off a calendar is a
      * tap, and `calendar` is not a kind the ship does unasked.
      */
-    private suspend fun proposeCancel(s: String, sourceId: String, subject: String, skippedIso: String, schema: JsonObject, known: Set<String>) {
-        val a = api ?: return
-        val token = db.orreryAccounts().get(s)?.token ?: return
-        if ("calendar" !in schemaActions(schema)) return
+    private suspend fun proposeCancel(s: String, sourceId: String, subject: String, skippedIso: String, r: Reading) {
         // One proposal per occurrence, not per message: two people
         // saying practice is off should not ask the owner twice.
         val key = "uncal:$subject/$skippedIso"
         if (db.orrerySent().get(s, key) != null) return
-        val at = runCatching { Instant.parse(skippedIso) }.getOrNull() ?: return
+        val at = parseIsoUtc(skippedIso) ?: return
         val event = calendarEventFor(s, subject) ?: return Log.i(TAG, "$sourceId cancel not proposed: no calendar event for $subject")
         // The ship matches the occurrence by the moment it really
         // starts, so the calendar's own instant for that day beats the
         // model's reading of "tonight" wherever the pipe has one.
-        val starts = occurrenceOn(s, event, at.toEpochMilliseconds()) ?: at.toEpochMilliseconds()
-        val name = bodyName(s, subject) ?: subject.substringAfter('/')
-        val body = cancelAction(subject, name, event.second, starts)
-        val shape = (schema["payloads"] as? JsonObject)?.get("calendar") as? JsonObject ?: JsonObject(emptyMap())
-        val (payload, why) = checkPayload(body["payload"] as JsonObject, shape, known)
-        if (payload == null) return Log.i(TAG, "$sourceId cancel dropped: $why")
-        runCatching { a.act(JsonObject(body + ("payload" to payload)), token) }
-            .onSuccess { (id, _) ->
-                db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, key, id, now()))
-                Log.i(TAG, "$sourceId proposed taking $name off the calendar at ${isoUtc(starts)}")
-            }
-            .onFailure { Log.i(TAG, "$sourceId cancel not proposed: ${it.message}") }
+        val starts = occurrenceOn(s, event, at) ?: at
+        val name = r.nameOf(subject) ?: subject.substringAfter('/')
+        proposeCalendar(s, sourceId, key, cancelAction(subject, name, event.second, starts), r, "taking $name off the calendar at ${isoUtc(starts)}")
     }
 
     /**
@@ -1682,9 +1686,6 @@ class OrreryRepo(
             nearMs,
         )
     }
-
-    private suspend fun bodyName(s: String, subject: String): String? =
-        runCatching { api?.let { a -> db.orreryAccounts().get(s)?.token?.let { t -> Brief.names(a.stateJson(t))[subject] } } }.getOrNull()
 
     /** The person's word on an action: done, dismissed, or failed with why. */
     suspend fun setAction(id: String, status: String, note: String = ""): Result<Unit> = runCatching {
@@ -1746,16 +1747,19 @@ class OrreryRepo(
      */
     suspend fun refreshActions() {
         val a = api ?: return
-        val s = ship ?: return
-        val url = shipUrl ?: return
-        val token = db.orreryAccounts().get(s)?.token
-        runCatching { a.actions(token) }
+        if (ship == null) return
+        val token = keyToken()
+        // One read of every action serves both: the open ones are what
+        // the screen shows, which is what `?status=open` would answer,
+        // and the executor settles its own from the rest.
+        val all = token?.let { runCatching { a.actions(it, status = "all") }.getOrNull() }
+        runCatching { all?.filter { it.status in OPEN_STATUSES } ?: a.actions(token) }
             .onSuccess { published(it) }
             .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
         a.generatorLast()?.let { _generator.value = it }
         // An approved task becomes a todo wherever it can be approved,
         // not only on the install that runs the pipe.
-        runCatching { runExecutor(a, token) }.onFailure { Log.i(TAG, "messages skipped: ${it.message}") }
+        runCatching { runExecutor(a, token, all) }.onFailure { Log.i(TAG, "messages skipped: ${it.message}") }
     }
 
     /** The cloud rung, opened once, only while the person has it on and a key is set. */
@@ -1813,28 +1817,14 @@ class OrreryRepo(
          * once. Dropped when the pipe is off, since nothing would carry
          * them; a pass that fails keeps them for the next one.
          */
-        fun note(facts: Facts) {
-            val repo = current ?: return
-            if (!repo._enabled.value) return
-            repo.scope.launch {
-                repo.pendingLock.withLock { repo.pending += facts }
-                repo.push()
-            }
-        }
+        fun note(facts: Facts) = enqueue { pending += facts }
 
         /**
          * A call, whose facts are made inside the next pass: that is where
          * the ship is asked who each speaker is, so a person it keeps under
          * another id is that person and not a twin named from the @p.
          */
-        fun noteCall(make: (idFor: (ship: String, name: String?) -> String) -> Facts) {
-            val repo = current ?: return
-            if (!repo._enabled.value) return
-            repo.scope.launch {
-                repo.pendingLock.withLock { repo.calls += make }
-                repo.push()
-            }
-        }
+        fun noteCall(make: (idFor: (ship: String, name: String?) -> String) -> Facts) = enqueue { calls += make }
         // ponytail: fixed window; a setting when somebody asks for one.
         const val BACKFILL_MS = 30L * 24 * 60 * 60 * 1000
         const val AHEAD_MS = 90L * 24 * 60 * 60 * 1000
@@ -1911,10 +1901,18 @@ class OrreryRepo(
          * speaker. Dropped when the pipe is off, like [note].
          */
         fun noteTranscript(address: String, lines: List<Spoken>) {
-            val repo = current ?: return
-            if (!repo._enabled.value || lines.isEmpty()) return
+            if (lines.isNotEmpty()) enqueue { transcripts += address to lines }
+        }
+
+        /**
+         * Hand something to the live repo for its next pass, asked for
+         * at once. Nothing is queued while the pipe is off, since no pass
+         * would carry it; a pass that fails keeps it for the next one.
+         */
+        private fun enqueue(add: OrreryRepo.() -> Unit) {
+            val repo = current?.takeIf { it._enabled.value } ?: return
             repo.scope.launch {
-                repo.pendingLock.withLock { repo.transcripts += address to lines }
+                repo.pendingLock.withLock { repo.add() }
                 repo.push()
             }
         }
@@ -1922,7 +1920,6 @@ class OrreryRepo(
 }
 
 /** The key's id is the part of the token before the dot; the ship answers it separately too. */
-private fun MintedKey.clientId(): String = id
 
 /** The open list after an answer: approved stays, to be done; anything else has left it. */
 internal fun settledActions(list: List<OrreryAction>, id: String, status: String): List<OrreryAction> =

@@ -54,7 +54,7 @@ data class NewAction(val id: String, val kind: String, val title: String, val by
  */
 fun newActions(actions: List<io.nisfeb.talon.orrery.OrreryAction>): List<NewAction> =
     actions.filter { it.status == "proposed" }.map {
-        NewAction(it.id, it.kind, it.title, it.by, it.due?.let { d -> runCatching { kotlinx.datetime.Instant.parse(d).toEpochMilliseconds() }.getOrNull() })
+        NewAction(it.id, it.kind, it.title, it.by, it.due?.let(::parseIsoUtc))
     }
 
 /** One unread mail thread, as much of it as this needs. */

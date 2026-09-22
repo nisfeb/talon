@@ -859,7 +859,7 @@ fun CalendarScreen(
                             TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
                             TextButton(onClick = {
                                 act(if (r.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${r.name}\"; it is still there.") {
-                                    repo.poke(buildJsonObject { put("action", "del-event"); put("id", r.id) })
+                                    repo.poke(io.nisfeb.talon.calendar.deleteBody(r.id))
                                 }
                                 viewing = null
                             }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
@@ -894,7 +894,7 @@ fun CalendarScreen(
         var to by remember(r.id) { mutableStateOf("") }
         // A word name stands for its ship here too; what resolves to nobody stays as typed and is refused below.
         val ships = to.split(',').map { it.trim() }.filter { it.isNotEmpty() }
-            .map { io.nisfeb.talon.ui.NameToShip.one(it) ?: if (it.startsWith("~")) it else "~$it" }
+            .map { io.nisfeb.talon.ui.NameToShip.one(it) ?: io.nisfeb.talon.urbit.normalisePatp(it) }
         AlertDialog(
             onDismissRequest = { mailingRow = null },
             title = { Text("Mail the event") },
@@ -964,7 +964,7 @@ fun CalendarScreen(
             onDelete = if (id == null) null else {
                 {
                     act(if (draft.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${draft.name.trim()}\"; it is still there.") {
-                        repo.poke(buildJsonObject { put("action", "del-event"); put("id", id) })
+                        repo.poke(io.nisfeb.talon.calendar.deleteBody(id))
                     }
                 }
             },
@@ -1591,9 +1591,14 @@ private fun TasksView(
         name = ""; note = ""; due = null
     }
     // The counts are of everything, so a filter that would show nothing
-    // says so on its own chip rather than by emptying the screen.
+    // says so on its own chip rather than by emptying the screen. Worked
+    // out when the tasks or the words change, in one walk over them:
+    // every keystroke in the new-task field recomposes this screen.
     val all = tasks.orEmpty()
-    val count = { f: io.nisfeb.talon.calendar.TaskFilter -> all.count { it.inFilter(f, today) && it.matches(query) } }
+    val counts = remember(all, query, today) {
+        val found = all.filter { it.matches(query) }
+        io.nisfeb.talon.calendar.TaskFilter.entries.associateWith { f -> found.count { it.inFilter(f, today) } }
+    }
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = {
@@ -1614,7 +1619,7 @@ private fun TasksView(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 items(io.nisfeb.talon.calendar.TaskFilter.entries.toList(), key = { it.name }) { f ->
-                    val n = count(f)
+                    val n = counts[f] ?: 0
                     FilterChip(
                         selected = filter == f,
                         onClick = { filter = f },
@@ -1689,10 +1694,9 @@ private fun TasksView(
             Text("Looking…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
             return@Column
         }
-        val shown = groupTasks(
-            all.filter { it.inFilter(filter, today) && it.matches(query) },
-            today,
-        )
+        val shown = remember(all, filter, query, today) {
+            groupTasks(all.filter { it.inFilter(filter, today) && it.matches(query) }, today)
+        }
         LazyColumn(Modifier.fillMaxSize()) {
             items(pending, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), false, onTick, {}, pending = true) }
             if (shown.isEmpty() && pending.isEmpty()) {

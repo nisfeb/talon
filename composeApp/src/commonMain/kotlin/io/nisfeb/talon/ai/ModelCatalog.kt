@@ -19,6 +19,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.time.TimeSource
+import io.nisfeb.talon.urbit.asText
 
 /** What a provider offers: its models, and whether Jev is reachable through it. */
 data class Catalog(val models: List<ModelInfo>, val jev: Boolean = false)
@@ -101,7 +102,7 @@ class ModelCatalog(private val http: HttpClient = createAppHttpClient()) {
 }
 
 private fun JsonElement.data() = (this as? JsonObject)?.get("data")?.jsonArray.orEmpty().map { it.jsonObject }
-private fun JsonObject.str(k: String) = get(k)?.jsonPrimitive?.contentOrNull
+private fun JsonObject.str(k: String) = get(k).asText()
 
 /** OpenRouter's models, each marked ZDR when its ZDR endpoint list names it; Jev is on that list alone. */
 internal fun openRouterCatalog(models: JsonElement, zdr: JsonElement): Catalog {

@@ -107,7 +107,7 @@ fun teachNames(body: OBody, goesBy: Set<String>?, make: Boolean = true): List<OB
 /** Somebody wrote to us, or where we could see it. Our own posts say nothing. */
 fun messageFacts(m: MessageEntity, ourShip: String, subjectId: String): Obs? {
     if (m.author.isBlank() || m.author == ourShip || !m.author.startsWith("~")) return null
-    val kind = if (m.whom.startsWith("~") || m.whom.startsWith("0v")) "talon-dm" else "talon-chat"
+    val kind = talonKind(m.whom)
     return lastContact(subjectId, m.sentMs, kind, "talon://chat/${m.whom}?id=${m.id}")
 }
 
@@ -196,3 +196,9 @@ fun batches(facts: Facts): List<JsonObject> {
     }
     return out
 }
+
+/** A conversation of one or a few, a DM or a club, rather than a group's channel. */
+fun isDirect(whom: String): Boolean = whom.startsWith("~") || whom.startsWith("0v")
+
+/** The source kind the ship is told a message came from. */
+fun talonKind(whom: String): String = if (isDirect(whom)) "talon-dm" else "talon-chat"

@@ -429,7 +429,6 @@ fun TalonApp(
             app.session.http, appScope, app.db, io.nisfeb.talon.ui.platformLabel, app.searchEmbedderClient,
             cloud = io.nisfeb.talon.orrery.CloudTriage(
                 io.nisfeb.talon.orrery.frontierReadsMessages(app.aiSettings),
-                app.aiSettings::setFrontierReadsMessages,
             ) { app.aiSettings.state.value },
             book = { app.repo.bookContacts.value },
             standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),

@@ -129,14 +129,6 @@ interface UiSettings {
     fun setCalendarWeekView(on: Boolean)
 
     /**
-     * Whether the orrery triage may also read messages with the person's
-     * cloud AI key. Off by default, and stays off until they choose it:
-     * every message the triage reads then leaves the device. Per device.
-     */
-    val orreryCloudTriage: StateFlow<Boolean>
-    fun setOrreryCloudTriage(on: Boolean)
-
-    /**
      * On a phone: leave the reading of messages to a computer running
      * Talon when one has been on the job in the last two hours, since it has the
      * bigger model. Facts still go up from the phone. Per device, on by
@@ -154,16 +146,12 @@ interface UiSettings {
     fun setOrreryDecide(d: io.nisfeb.talon.orrery.DecideSettings)
 
     /**
-     * The local model server the orrery triage reads with, its own
-     * configuration and nothing to do with the AI provider used for
-     * summaries and actions: a base URL such as http://localhost:1234
-     * (empty means find LM Studio or Ollama on their usual ports) and a
-     * model name (empty means the server's best by name). Per device.
+     * The local model server the orrery triage once read with, before
+     * it moved into the AI profile. Read only by that move, so an older
+     * install's choice is carried over; nothing sets it any more.
      */
     val orreryServerUrl: StateFlow<String>
-    fun setOrreryServerUrl(url: String)
     val orreryServerModel: StateFlow<String>
-    fun setOrreryServerModel(model: String)
 
     /**
      * How the home dial reads out temperature and the hour.
@@ -392,21 +380,14 @@ class InMemoryUiSettings(
     private val _calendarWeekView = MutableStateFlow(false)
     override val calendarWeekView: StateFlow<Boolean> = _calendarWeekView.asStateFlow()
     override fun setCalendarWeekView(on: Boolean) { _calendarWeekView.value = on }
-    private val _orreryCloudTriage = MutableStateFlow(false)
-    override val orreryCloudTriage: StateFlow<Boolean> = _orreryCloudTriage.asStateFlow()
-    override fun setOrreryCloudTriage(on: Boolean) { _orreryCloudTriage.value = on }
     private val _orreryStandDown = MutableStateFlow(true)
     override val orreryStandDown: StateFlow<Boolean> = _orreryStandDown.asStateFlow()
     override fun setOrreryStandDown(on: Boolean) { _orreryStandDown.value = on }
     private val _orreryDecide = MutableStateFlow(io.nisfeb.talon.orrery.DecideSettings())
     override val orreryDecide: StateFlow<io.nisfeb.talon.orrery.DecideSettings> = _orreryDecide.asStateFlow()
     override fun setOrreryDecide(d: io.nisfeb.talon.orrery.DecideSettings) { _orreryDecide.value = d }
-    private val _orreryServerUrl = MutableStateFlow("")
-    override val orreryServerUrl: StateFlow<String> = _orreryServerUrl.asStateFlow()
-    override fun setOrreryServerUrl(url: String) { _orreryServerUrl.value = url }
-    private val _orreryServerModel = MutableStateFlow("")
-    override val orreryServerModel: StateFlow<String> = _orreryServerModel.asStateFlow()
-    override fun setOrreryServerModel(model: String) { _orreryServerModel.value = model }
+    override val orreryServerUrl: StateFlow<String> = MutableStateFlow("")
+    override val orreryServerModel: StateFlow<String> = MutableStateFlow("")
 
     private val _homeFahrenheit = MutableStateFlow(true)
     override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()

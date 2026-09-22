@@ -128,7 +128,7 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?, arm
             generatorModel = orrery?.generatorSettings?.value?.model,
         ),
     )
-    val started = remember(cfg, fed, decide.on, gen) { starting() }
+    val started = remember(cfg, fed, gen) { starting() }
     val profile = cfg.savedProfile ?: started
     // Always from the settings as they are now: a fetch lands after the screen has moved on.
     fun edit(change: (AiProfile) -> AiProfile) = aiSettings.setProfile(change(aiSettings.state.value.savedProfile ?: starting()))
@@ -259,13 +259,6 @@ private fun Quiet(text: String, error: Boolean = false) {
         style = MaterialTheme.typography.bodySmall,
         color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
     )
-}
-
-/** Dollars to the cent, for a month's spend. */
-private fun money(usd: Double): String {
-    if (usd < 0.005) return "under a cent"
-    val cents = kotlin.math.round(usd * 100).toLong()
-    return "$" + (cents / 100) + "." + (cents % 100).toString().padStart(2, '0')
 }
 
 // ── Providers ──────────────────────────────────────────────────────
@@ -984,7 +977,7 @@ private fun FeatureRow(
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.bodyLarge)
                 Quiet(line)
-                spent?.let { Quiet(money(it) + " this month.") }
+                spent?.let { Quiet(money(kotlin.math.round(it * 1_000_000).toLong()) + " this month.") }
             }
             if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             else Switch(checked = on, onCheckedChange = onSwitch, enabled = switchEnabled)

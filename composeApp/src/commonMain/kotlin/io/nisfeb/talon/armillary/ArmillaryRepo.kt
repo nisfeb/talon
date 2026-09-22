@@ -46,8 +46,8 @@ class ArmillaryRepo(
     val account: StateFlow<Account?> = _account.asStateFlow()
     private val _plans = MutableStateFlow<List<Plan>>(emptyList())
     val plans: StateFlow<List<Plan>> = _plans.asStateFlow()
-    private val _catalog = MutableStateFlow<List<CatalogRow>>(emptyList())
-    val catalog: StateFlow<List<CatalogRow>> = _catalog.asStateFlow()
+    /** What the vendor offers, read for its zero-retention flags; nothing shows it. */
+    private var catalog: List<CatalogRow> = emptyList()
     private val _inference = MutableStateFlow<Inference?>(null)
     val inference: StateFlow<Inference?> = _inference.asStateFlow()
     private val _refreshing = MutableStateFlow(false)
@@ -88,7 +88,7 @@ class ArmillaryRepo(
         _error.value = null
         _account.value = null
         _plans.value = emptyList()
-        _catalog.value = emptyList()
+        catalog = emptyList()
         _inference.value = null
         _refreshing.value = false
         _payment.value = null
@@ -120,7 +120,7 @@ class ArmillaryRepo(
                 .onSuccess { _plans.value = it }
                 .onFailure { Log.i(TAG, "plans skipped: ${it.message}") }
             runCatching { a.catalog() }
-                .onSuccess { _catalog.value = it }
+                .onSuccess { catalog = it }
                 .onFailure { Log.i(TAG, "catalog skipped: ${it.message}") }
             // The catalog is what says which models are ZDR, and it is
             // read last, so the row is written once everything is in.
@@ -201,9 +201,6 @@ class ArmillaryRepo(
             is CheckoutAnswer.Refused -> error(answer.reason)
         }
     }
-
-    /** A subscription plan, by card. The same checkout, on a plan rather than an amount. */
-    suspend fun subscribe(planId: String, rail: String = "stripe"): Result<String> = topUp(rail, planId, null)
 
     /** Ask the vendor to stop the subscription renewing. The view says when it is done. */
     suspend fun cancelSubscription(): Result<Unit> = runCatching {
@@ -287,7 +284,7 @@ class ArmillaryRepo(
      */
     private fun publish(inf: Inference) {
         val ai = aiSettings ?: return
-        val zdr = _catalog.value.filter { it.zdr }.map { it.id }.toSet()
+        val zdr = catalog.filter { it.zdr }.map { it.id }.toSet()
         val models = inf.models.map { ModelInfo(id = it, name = it, zdr = it in zdr) }
         val base = inf.baseUrl.trim().trimEnd('/').ifBlank { null }
         val profile: AiProfile = ai.state.value.savedProfile ?: return

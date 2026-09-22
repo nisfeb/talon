@@ -91,6 +91,21 @@ class MailEdits {
         recipientDraft = intent.to.joinToString(" ")
         draftId = intent.draftId ?: io.nisfeb.talon.mail.newDraftId()
     }
+
+    /**
+     * Who it is going to: the chips, and what sits in the field not yet
+     * made into one. A reply's recipients stay in the field until it is
+     * sent, so anything that saves it has to read both.
+     */
+    val to: List<String> get() = (recipients + parseRecipients(recipientDraft).first).distinct()
+
+    /**
+     * Nothing written anywhere. The way out keeps a draft unless this
+     * holds and the back button drops one only when it does, so the
+     * two have to agree, which they cannot if each spells it out.
+     */
+    val isBlank: Boolean get() =
+        body.isBlank() && subject.isBlank() && recipients.isEmpty() && recipientDraft.isBlank()
 }
 
 data class MailIntent(
@@ -197,7 +212,7 @@ fun MailComposer(
         // Typed but not yet committed still counts: the recipients of a
         // reply sit in the field until it is sent, and a draft saved on
         // the way out must not be the one that forgets them.
-        to = (recipients + parseRecipients(edits.recipientDraft).first).distinct(),
+        to = edits.to,
         subject = edits.subject,
         body = edits.body,
         prev = intent.prev,
@@ -212,7 +227,7 @@ fun MailComposer(
     // composable's scope is cancelled with it, so the repo's does it.
     DisposableEffect(intent) {
         onDispose {
-            if (!filed && (edits.body.isNotBlank() || edits.subject.isNotBlank() || recipients.isNotEmpty() || edits.recipientDraft.isNotBlank())) {
+            if (!filed && !edits.isBlank) {
                 repo.keepDraft(asDraft())
             }
         }
@@ -238,7 +253,7 @@ fun MailComposer(
                     // the save and the re-read that follows it meant the
                     // back button sat through two requests to the ship
                     // before the screen would move.
-                    if (edits.body.isBlank() && edits.subject.isBlank() && recipients.isEmpty() && edits.recipientDraft.isBlank() && intent.draftId != null) {
+                    if (edits.isBlank && intent.draftId != null) {
                         // Opened from a draft and emptied out: keeping
                         // the husk would say there is still something
                         // to send.

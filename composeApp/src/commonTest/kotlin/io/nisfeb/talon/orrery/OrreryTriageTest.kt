@@ -95,6 +95,15 @@ class OrreryTriageTest {
 
     @Test
     fun `a claim keeps its id across passes`() {
-        assertEquals(noticedId("talon://chat/~bus?id=1", "person/bus", "location"), noticedId("talon://chat/~bus?id=1", "person/bus", "location"))
+        val here = JsonPrimitive("the shop")
+        assertEquals(noticedId("talon://chat/~bus?id=1", "person/bus", "location", here), noticedId("talon://chat/~bus?id=1", "person/bus", "location", here))
+        // A single-valued attribute's id is what it always was, so the
+        // rows already in the tray keep theirs.
+        assertEquals("talon://chat/~bus?id=1|person/bus|location", noticedId("talon://chat/~bus?id=1", "person/bus", "location", here))
+        // Two evenings off in one message are two rows, not one row and
+        // a second insert quietly ignored.
+        val tonight = noticedId("m1", "activity/practice", "skipped", JsonPrimitive("2026-09-22T22:00:00Z"))
+        val nextWeek = noticedId("m1", "activity/practice", "skipped", JsonPrimitive("2026-09-29T22:00:00Z"))
+        assertTrue(tonight != nextWeek)
     }
 }

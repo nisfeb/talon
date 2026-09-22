@@ -1013,7 +1013,6 @@ fun App(
                 session.http, loopScope, db, io.nisfeb.talon.ui.platformLabel, searchEmbedderClient,
                 cloud = io.nisfeb.talon.orrery.CloudTriage(
                     io.nisfeb.talon.orrery.frontierReadsMessages(aiSettings),
-                    aiSettings::setFrontierReadsMessages,
                 ) { aiSettings.state.value },
                 book = { repo.bookContacts.value },
                 standDown = io.nisfeb.talon.orrery.StandDown(uiSettings.orreryStandDown, uiSettings::setOrreryStandDown),

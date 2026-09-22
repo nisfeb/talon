@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.StateFlow
  */
 class CloudTriage(
     val on: StateFlow<Boolean>,
-    val set: (Boolean) -> Unit,
     val config: () -> AiSettings.Config,
 ) {
     val rung: CloudRung by lazy { CloudRung(config) }

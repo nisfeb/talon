@@ -82,12 +82,23 @@ class NameIndex(bodies: List<KnownBody>) {
  * it names us.
  */
 fun inScope(whom: String, text: String, ourShip: String, ourNick: String?, allowedChannels: Set<String>): Boolean {
-    if (whom.startsWith("~") || whom.startsWith("0v")) return true
+    if (isDirect(whom)) return true
     if (whom in allowedChannels) return true
     if (text.contains(ourShip, ignoreCase = true)) return true
     val nick = ourNick?.trim().orEmpty()
-    return nick.length >= 2 && Regex("(?<!\\w)" + Regex.escape(nick) + "(?!\\w)", RegexOption.IGNORE_CASE).containsMatchIn(text)
+    return nick.length >= 2 && nickRegex(nick).containsMatchIn(text)
 }
+
+/**
+ * The nickname as a whole word. The same nickname is asked about for
+ * every post of a pass, so the pattern is built when it changes and
+ * not once a message.
+ */
+private fun nickRegex(nick: String): Regex =
+    nickPattern?.takeIf { it.first == nick }?.second
+        ?: Regex("(?<!\\w)" + Regex.escape(nick) + "(?!\\w)", RegexOption.IGNORE_CASE).also { nickPattern = nick to it }
+
+private var nickPattern: Pair<String, Regex>? = null
 
 private const val SIX_HOURS = 6L * 60 * 60 * 1000
 
@@ -142,11 +153,42 @@ fun ruleFacts(text: String, author: String, atMs: Long, ourShip: String, index: 
             if (body.id != self) out += Noticed(body.id, "status", JsonPrimitive(m.groupValues[2].lowercase()), atMs, atMs + SIX_HOURS, 60)
         }
     }
-    return out.distinctBy { it.subject to it.attr }
+    return out.distinctBy { claimKey(it.subject, it.attr, it.value) }
 }
 
-/** Stable per claim and source, so a message re-read on the next pass is the same row. */
-fun noticedId(sourceId: String, subject: String, attr: String): String = "$sourceId|$subject|$attr"
+/**
+ * Long enough to state something, and not a question: what the model
+ * is run on. The gate check simulates the pass with this same rule,
+ * so the two cannot drift into counting different messages.
+ */
+internal fun forTheReader(text: String): Boolean = text.length >= 8 && !text.trimEnd().endsWith("?")
+
+/** What reaches the gate: what the model is run on, less a slash command. */
+internal fun forTheGate(text: String): Boolean = forTheReader(text) && !text.trimStart().startsWith("/")
+
+/**
+ * Attributes that hold several values at once: a second evening off
+ * stands beside the first instead of replacing it.
+ */
+val MULTI_VALUED = setOf("skipped")
+
+/**
+ * What makes two claims the same claim: subject and attribute, and
+ * the value too where the attribute holds several. The parse drops
+ * duplicates by it and the tray's row id is built from it, so the two
+ * cannot disagree about what one claim is: a second skipped evening
+ * kept by the one and ignored on insert by the other was the bug.
+ */
+fun claimKey(subject: String, attr: String, value: JsonElement): String =
+    if (attr in MULTI_VALUED) "$subject|$attr|$value" else "$subject|$attr"
+
+/**
+ * Stable per claim and source, so a message re-read on the next pass
+ * is the same row. For a single-valued attribute it is the id it has
+ * always been, so rows already in the tray keep theirs.
+ */
+fun noticedId(sourceId: String, subject: String, attr: String, value: JsonElement): String =
+    "$sourceId|" + claimKey(subject, attr, value)
 
 /** One thing somebody said on a call. */
 data class Spoken(val ship: String, val text: String)

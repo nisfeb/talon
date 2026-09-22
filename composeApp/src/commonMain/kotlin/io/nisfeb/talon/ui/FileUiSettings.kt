@@ -62,7 +62,6 @@ class FileUiSettings(
         val hiddenCalendars: List<String> = emptyList(),
         val defaultCalendar: String = "",
         val calendarWeekView: Boolean = false,
-        val orreryCloudTriage: Boolean = false,
         val orreryStandDown: Boolean = true,
         val orreryDecide: io.nisfeb.talon.orrery.DecideSettings = io.nisfeb.talon.orrery.DecideSettings(),
         val orreryServerUrl: String = "",
@@ -192,14 +191,6 @@ class FileUiSettings(
         persistCurrent()
     }
 
-    private val _orreryCloudTriage = MutableStateFlow(initial.orreryCloudTriage)
-    override val orreryCloudTriage: StateFlow<Boolean> = _orreryCloudTriage.asStateFlow()
-    override fun setOrreryCloudTriage(on: Boolean) {
-        if (_orreryCloudTriage.value == on) return
-        _orreryCloudTriage.value = on
-        persistCurrent()
-    }
-
     private val _orreryStandDown = MutableStateFlow(initial.orreryStandDown)
     override val orreryStandDown: StateFlow<Boolean> = _orreryStandDown.asStateFlow()
     override fun setOrreryStandDown(on: Boolean) {
@@ -218,19 +209,8 @@ class FileUiSettings(
 
     private val _orreryServerUrl = MutableStateFlow(initial.orreryServerUrl)
     override val orreryServerUrl: StateFlow<String> = _orreryServerUrl.asStateFlow()
-    override fun setOrreryServerUrl(url: String) {
-        if (_orreryServerUrl.value == url) return
-        _orreryServerUrl.value = url
-        persistCurrent()
-    }
-
     private val _orreryServerModel = MutableStateFlow(initial.orreryServerModel)
     override val orreryServerModel: StateFlow<String> = _orreryServerModel.asStateFlow()
-    override fun setOrreryServerModel(model: String) {
-        if (_orreryServerModel.value == model) return
-        _orreryServerModel.value = model
-        persistCurrent()
-    }
 
     private val _homeFahrenheit = MutableStateFlow(initial.homeFahrenheit)
     override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()
@@ -392,7 +372,6 @@ class FileUiSettings(
                 hiddenCalendars = _hiddenCalendars.value.toList(),
                 defaultCalendar = _defaultCalendar.value,
                 calendarWeekView = _calendarWeekView.value,
-                orreryCloudTriage = _orreryCloudTriage.value,
                 orreryStandDown = _orreryStandDown.value,
                 orreryDecide = _orreryDecide.value,
                 orreryServerUrl = _orreryServerUrl.value,

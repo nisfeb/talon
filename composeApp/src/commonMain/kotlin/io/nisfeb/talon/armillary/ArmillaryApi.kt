@@ -21,6 +21,8 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import io.nisfeb.talon.urbit.asText
+import io.nisfeb.talon.urbit.asBool
 
 /**
  * Armillary's HTTP API on the buyer's own ship, at `/apps/armillary/api`.
@@ -43,7 +45,7 @@ class ArmillaryApi(
             resp.status.isSuccess() -> ArmillaryAvailability.PRESENT
             resp.status.value == NOT_FOUND -> ArmillaryAvailability.MISSING
             resp.status.value == FORBIDDEN -> ArmillaryAvailability.SIGNED_OUT
-            else -> throw ArmillaryError.Refused(resp.status.value, reasonOf(reading { resp.bodyAsText() }))
+            else -> throw ArmillaryError.Refused(resp.status.value, armillaryReason(reading { resp.bodyAsText() }))
         }
     }
 
@@ -57,9 +59,9 @@ class ArmillaryApi(
         val resp = send("/api/inference") { method = HttpMethod.Get }
         val text = reading { resp.bodyAsText() }
         if (resp.status.value == NOT_FOUND) {
-            return if (NO_KEY in reasonOf(text)) InferenceAnswer.NoKey else InferenceAnswer.Missing
+            return if (NO_KEY in armillaryReason(text)) InferenceAnswer.NoKey else InferenceAnswer.Missing
         }
-        if (!resp.status.isSuccess()) throw ArmillaryError.Refused(resp.status.value, reasonOf(text))
+        if (!resp.status.isSuccess()) throw ArmillaryError.Refused(resp.status.value, armillaryReason(text))
         return InferenceAnswer.Have(inferenceOf(reading { Json.parseToJsonElement(text).jsonObject }))
     }
 
@@ -111,8 +113,8 @@ class ArmillaryApi(
                 val o = reading { Json.parseToJsonElement(text).jsonObject }
                 CheckoutAnswer.Url(o.str("url").orEmpty(), o.str("nonce").orEmpty())
             }
-            resp.status.value == BAD_GATEWAY -> CheckoutAnswer.Refused(reasonOf(text))
-            else -> throw ArmillaryError.Refused(resp.status.value, reasonOf(text))
+            resp.status.value == BAD_GATEWAY -> CheckoutAnswer.Refused(armillaryReason(text))
+            else -> throw ArmillaryError.Refused(resp.status.value, armillaryReason(text))
         }
     }
 
@@ -129,7 +131,7 @@ class ArmillaryApi(
         }
         val text = reading { resp.bodyAsText() }
         if (resp.status.value == ACCEPTED) return false
-        if (!resp.status.isSuccess()) throw ArmillaryError.Refused(resp.status.value, reasonOf(text))
+        if (!resp.status.isSuccess()) throw ArmillaryError.Refused(resp.status.value, armillaryReason(text))
         return true
     }
 
@@ -142,7 +144,7 @@ class ArmillaryApi(
         val resp = send("/api/lease") { method = HttpMethod.Post }
         val text = reading { resp.bodyAsText() }
         if (resp.status.value == NOT_FOUND || resp.status.value == NOT_IMPLEMENTED) return false
-        if (!resp.status.isSuccess()) throw ArmillaryError.Refused(resp.status.value, reasonOf(text))
+        if (!resp.status.isSuccess()) throw ArmillaryError.Refused(resp.status.value, armillaryReason(text))
         return true
     }
 
@@ -151,7 +153,7 @@ class ArmillaryApi(
         val resp = send("/api/lease") { method = HttpMethod.Delete }
         val text = reading { resp.bodyAsText() }
         if (resp.status.value == NOT_FOUND || resp.status.value == NOT_IMPLEMENTED) return
-        if (!resp.status.isSuccess()) throw ArmillaryError.Refused(resp.status.value, reasonOf(text))
+        if (!resp.status.isSuccess()) throw ArmillaryError.Refused(resp.status.value, armillaryReason(text))
     }
 
     /** Ask the vendor to stop the subscription renewing. The view says when it is done. */
@@ -172,7 +174,7 @@ class ArmillaryApi(
             }
         }
         val text = reading { resp.bodyAsText() }
-        if (!resp.status.isSuccess()) throw ArmillaryError.Refused(resp.status.value, reasonOf(text))
+        if (!resp.status.isSuccess()) throw ArmillaryError.Refused(resp.status.value, armillaryReason(text))
         return text
     }
 
@@ -194,7 +196,6 @@ class ArmillaryApi(
         throw ArmillaryError.Garbled(t)
     }
 
-    private fun reasonOf(text: String): String = armillaryReason(text)
 
     companion object {
         const val APP_PATH = "/apps/armillary"
@@ -338,16 +339,27 @@ sealed class CheckoutAnswer {
 // documents grow fields between versions, and a reader that ignores
 // what it does not know keeps working when they do.
 
-private fun JsonObject.str(k: String): String? = (get(k) as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+private fun JsonObject.str(k: String): String? = get(k).asText()?.takeIf { it.isNotBlank() }
 
-private fun JsonObject.num(k: String): Long = (get(k) as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0L
+private fun JsonObject.num(k: String): Long = get(k).asText()?.toLongOrNull() ?: 0L
 
-private fun JsonObject.bool(k: String): Boolean = (get(k) as? JsonPrimitive)?.booleanOrNull ?: false
+private fun JsonObject.bool(k: String): Boolean = get(k).asBool() ?: false
 
 private fun JsonObject.obj(k: String): JsonObject = get(k) as? JsonObject ?: JsonObject(emptyMap())
 
 private fun texts(e: kotlinx.serialization.json.JsonElement?): List<String> =
-    (e as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+    (e as? JsonArray).orEmpty().mapNotNull { it.asText() }
+
+/**
+ * The objects of a list, or of a map keyed by id. The vendor keys some
+ * rows by id and older documents, or a page that flattened them, send
+ * a list; both read the same.
+ */
+private fun objectsOf(e: kotlinx.serialization.json.JsonElement?): List<JsonObject> = when (e) {
+    is JsonObject -> e.values
+    is JsonArray -> e
+    else -> emptyList()
+}.mapNotNull { it as? JsonObject }
 
 internal fun inferenceOf(o: JsonObject) = Inference(
     mode = o.str("mode") ?: "proxy",
@@ -368,13 +380,8 @@ internal fun checkoutOf(o: JsonObject) = Checkout(
 internal fun accountOf(o: JsonObject): Account {
     val sub = o.obj("subscription")
     val lease = o.obj("lease")
-    // The vendor keys its checkout rows by nonce; an older document, or
-    // a page that flattened them, sends a list. Both read the same.
-    val rows = when (val c = o["checkouts"]) {
-        is JsonObject -> c.values.mapNotNull { it as? JsonObject }
-        is JsonArray -> c.mapNotNull { it as? JsonObject }
-        else -> emptyList()
-    }
+    // The vendor keys its checkout rows by nonce.
+    val rows = objectsOf(o["checkouts"])
     return Account(
         hasView = o.containsKey("balance"),
         balanceMicro = o.num("balance"),
@@ -406,11 +413,7 @@ internal fun ledgerOf(e: kotlinx.serialization.json.JsonElement?): List<LedgerRo
     }.sortedByDescending { it.at }
 
 internal fun plansOf(e: kotlinx.serialization.json.JsonElement): List<Plan> {
-    val rows = when (e) {
-        is JsonArray -> e.mapNotNull { it as? JsonObject }
-        is JsonObject -> e.values.mapNotNull { it as? JsonObject }
-        else -> emptyList()
-    }
+    val rows = objectsOf(e)
     return rows.mapNotNull { o ->
         val id = o.str("id") ?: return@mapNotNull null
         Plan(
@@ -425,11 +428,7 @@ internal fun plansOf(e: kotlinx.serialization.json.JsonElement): List<Plan> {
 }
 
 internal fun catalogOf(e: kotlinx.serialization.json.JsonElement): List<CatalogRow> {
-    val rows = when (e) {
-        is JsonArray -> e.mapNotNull { it as? JsonObject }
-        is JsonObject -> e.values.mapNotNull { it as? JsonObject }
-        else -> emptyList()
-    }
+    val rows = objectsOf(e)
     return rows.mapNotNull { o ->
         val id = o.str("id") ?: return@mapNotNull null
         CatalogRow(

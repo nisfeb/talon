@@ -11,6 +11,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.JsonObject
+import io.nisfeb.talon.ui.parseIsoUtc
 
 /**
  * Deciding what a calendar event is to the ship, by the rules in
@@ -194,7 +195,6 @@ fun calendarWrite(
     decided: String?,
     hits: List<ResolvedBody>,
     written: Set<String>,
-    ourShip: String,
     nowMs: Long,
     changed: Boolean = false,
     ours: Boolean = false,
@@ -205,8 +205,8 @@ fun calendarWrite(
     return when {
         kind == "activity" -> occurrencesOn(existing!!, subject, written, nowMs, changed, ours, people)
         kind == "situation" -> onSituation(existing!!, subject, written, changed, people, nowMs)
-        subject.repeats -> newActivity(subject, written, ourShip, nowMs, ours, people)
-        else -> newSituation(subject, written, ourShip, people, nowMs)
+        subject.repeats -> newActivity(subject, written, nowMs, ours, people)
+        else -> newSituation(subject, written, people, nowMs)
     }
 }
 
@@ -263,7 +263,6 @@ private fun onSituation(
 private fun newActivity(
     subject: CalendarSubject,
     written: Set<String>,
-    ourShip: String,
     nowMs: Long,
     ours: Boolean,
     people: EventPeople,
@@ -272,28 +271,24 @@ private fun newActivity(
     val aliases = (listOf(subject.uid, subject.title, normalizeTitle(subject.title)) + subject.first.tags)
         .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
     val body = OBody(id, name = subject.title, aliases = aliases)
-    val obs = mutableListOf<Obs>()
-    val keys = mutableListOf<Occurrence>()
-    fun obs(attr: String, value: JsonElement, at: Long) =
-        obs.add(Obs(id, attr, value, at, sourceKind = "calendar", sourceId = source(subject)))
-    obs += activityContent(id, subject, nowMs, ours, people, create = true)
-    for (row in subject.occurrences.filter { it.l <= nowMs }) {
-        val key = occurrenceKey(subject, row)
-        if (key in written) continue
-        obs("last", JsonPrimitive(isoUtc(row.l)), row.l)
-        keys += Occurrence(key, row.r, settled = true)
-    }
-    nextOf(subject, nowMs)?.let { (next, anchor, ends) ->
-        obs.add(Obs(id, "next", JsonPrimitive(isoUtc(next)), anchor, untilMs = ends, sourceKind = "calendar", sourceId = source(subject)))
-    }
-    return CalendarWrite(id, Facts(listOf(body) + cast(subject, people, create = true).second, obs), keys, creates = true)
+    // Its occurrences and the next one, exactly as for an activity the
+    // ship already keeps, after what it is.
+    val seen = occurrencesOn(id, subject, written, nowMs, changed = false, ours, people)
+    return CalendarWrite(
+        id,
+        Facts(
+            listOf(body) + cast(subject, people, create = true).second,
+            activityContent(id, subject, nowMs, ours, people, create = true) + seen.facts.observations,
+        ),
+        seen.occurrences,
+        creates = true,
+    )
 }
 
 /** A one-off the ship does not have: a situation, started and ended. */
 private fun newSituation(
     subject: CalendarSubject,
     written: Set<String>,
-    ourShip: String,
     people: EventPeople,
     nowMs: Long,
 ): CalendarWrite {
@@ -578,9 +573,8 @@ data class BodyTimes(val status: String?, val startMs: Long?)
 
 /** A body's status and start in the raw state view. */
 fun bodyTimes(state: kotlinx.serialization.json.JsonObject, id: String): BodyTimes? {
-    val b = Brief.bodies(state).firstOrNull { (it["id"] as? JsonPrimitive)?.content == id } ?: return null
-    val start = (Brief.text(b, "starts") ?: Brief.text(b, "started"))
-        ?.let { runCatching { Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+    val b = Brief.bodyOf(state, id) ?: return null
+    val start = (Brief.text(b, "starts") ?: Brief.text(b, "started"))?.let(::parseIsoUtc)
     return BodyTimes(Brief.text(b, "status"), start)
 }
 

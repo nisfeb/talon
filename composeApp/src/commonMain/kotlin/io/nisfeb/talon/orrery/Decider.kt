@@ -26,6 +26,10 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import io.nisfeb.talon.urbit.asText
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.sync.withLock
+import io.nisfeb.talon.util.formatDecimals
 
 /**
  * A typed decision from TypeSafe's Jev through OpenRouter's decisions
@@ -173,10 +177,7 @@ object Relevance {
         val permits = kotlinx.coroutines.sync.Semaphore(atOnce)
         val answers = kotlinx.coroutines.coroutineScope {
             groups.map { g ->
-                async {
-                    permits.acquire()
-                    try { runCatching { g to decider.ask(st, questions(g)) } } finally { permits.release() }
-                }
+                async { permits.withPermit { runCatching { g to decider.ask(st, questions(g)) } } }
             }.map { it.await() }
         }
         val cost = answers.sumOf { r -> r.getOrNull()?.second?.costUsd ?: 0.0 }
@@ -226,10 +227,7 @@ fun DecideSettings.under(cfg: io.nisfeb.talon.ai.AiSettings.Config?): DecideSett
 fun openRouterKey(cfg: io.nisfeb.talon.ai.AiSettings.Config): String? = cfg.profile().jevProvider()?.apiKey
 
 /** Dollars to the millionth, never in exponent form: these calls cost fractions of a cent. */
-internal fun dollars(d: Double): String {
-    val micro = kotlin.math.round(d * 1_000_000).toLong()
-    return "$" + (micro / 1_000_000) + "." + (micro % 1_000_000).toString().padStart(6, '0')
-}
+internal fun dollars(d: Double): String = "$" + d.formatDecimals(6)
 
 private fun Decision.usage(): String =
     "${inputTokens ?: "?"} tokens in, ${costUsd?.let(::dollars) ?: "cost not reported"}"
@@ -306,13 +304,9 @@ object Gate {
         var done = 1
         kotlinx.coroutines.coroutineScope {
             for (i in 1 until n) launch {
-                permits.acquire()
-                try {
+                permits.withPermit {
                     val r = ask(i)
-                    lock.lock()
-                    try { out[i] = r; done++; progress(done, n) } finally { lock.unlock() }
-                } finally {
-                    permits.release()
+                    lock.withLock { out[i] = r; done++; progress(done, n) }
                 }
             }
         }
@@ -354,7 +348,7 @@ object StatusCheck {
     fun asked(rows: List<Noticed>): List<Int> =
         rows.indices.filter { rows[it].attr == "status" && rows[it].subject.startsWith("person/") }
 
-    private fun valueOf(n: Noticed) = (n.value as? JsonPrimitive)?.contentOrNull ?: n.value.toString()
+    private fun valueOf(n: Noticed) = n.value.asText() ?: n.value.toString()
 
     /**
      * One question per row, under status_<n>. Each names its own
@@ -406,7 +400,7 @@ object StatusCheck {
         val drop = mutableSetOf<Int>()
         for (n in asked) {
             val a = d.answers["status_$n"] as? JsonObject
-            val choice = (a?.get("choice") as? JsonPrimitive)?.contentOrNull
+            val choice = a?.get("choice").asText()
             val probs = (a?.get("probabilities") as? JsonObject).orEmpty()
                 .mapNotNull { (k, v) -> (v as? JsonPrimitive)?.doubleOrNull?.let { k to it } }.toMap()
             val p = choice?.let { probs[it] } ?: 0.0
