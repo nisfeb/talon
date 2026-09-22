@@ -183,6 +183,39 @@ class MailComposerTest {
         )
     }
 
+    // A reply's recipients sit in the To field rather than in chips
+    // beside it, so nothing has committed them when the composer goes
+    // away. The draft that is kept has to read them off the field.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a reply left half written keeps who it was going to`() = runComposeUiTest {
+        var closed = false
+        val showing = androidx.compose.runtime.mutableStateOf(true)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                if (showing.value) {
+                    MailComposer(
+                        repo = repo(),
+                        intent = MailIntent(prev = "0vparent", to = listOf("~zod"), subject = "Plans"),
+                        onSent = {},
+                        onCancel = { closed = true; showing.value = false },
+                    )
+                }
+            }
+        }
+        onNodeWithText("Message").performTextInput("later")
+        onNodeWithContentDescription("Close").performClick()
+        waitUntil(timeoutMillis = 5_000) { closed }
+        waitUntil(timeoutMillis = 5_000) { seen.any { it.url.encodedPath.endsWith("/api/draft") } }
+        val saved = seen.last { it.url.encodedPath.endsWith("/api/draft") }
+        val body = Json.parseToJsonElement((saved.body as TextContent).text).jsonObject
+        assertEquals(
+            listOf("~zod"),
+            body["to"]!!.jsonArray.map { it.jsonPrimitive.content },
+            "the reply was addressed before a word of it was written",
+        )
+    }
+
     @OptIn(ExperimentalTestApi::class)
     @Test
     fun `closing an empty composer writes nothing`() = runComposeUiTest {

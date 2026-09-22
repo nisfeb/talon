@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui.screens
 
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -84,7 +85,10 @@ class MailEdits {
         seeded = true
         subject = intent.subject
         body = intent.body
-        recipients.addAll(intent.to)
+        // In the field itself, not in chips beside it. A reply knows
+        // who it is going to, and an empty box labelled To above a
+        // filled-in subject reads as one still waiting to be answered.
+        recipientDraft = intent.to.joinToString(" ")
         draftId = intent.draftId ?: io.nisfeb.talon.mail.newDraftId()
     }
 }
@@ -151,7 +155,15 @@ fun MailComposer(
     val toFocus = remember { FocusRequester() }
     val bodyFocus = remember { FocusRequester() }
     LaunchedEffect(intent) {
-        runCatching { (if (intent.to.isEmpty()) toFocus else bodyFocus).requestFocus() }
+        // A field cannot take focus before it is attached, and on a
+        // cold open this effect can beat the layout to it. The failure
+        // is silent and leaves the composer with no cursor in it, so
+        // wait a frame, and ask again if the first ask was too early.
+        val want = if (intent.to.isEmpty()) toFocus else bodyFocus
+        if (runCatching { want.requestFocus() }.isFailure) {
+            withFrameNanos {}
+            runCatching { want.requestFocus() }
+        }
     }
     val files = edits.files
     var sending by remember(intent) { mutableStateOf(false) }
@@ -182,7 +194,10 @@ fun MailComposer(
     /** What is in the composer now, as a draft. */
     fun asDraft() = io.nisfeb.talon.mail.Draft(
         id = edits.draftId,
-        to = recipients.toList(),
+        // Typed but not yet committed still counts: the recipients of a
+        // reply sit in the field until it is sent, and a draft saved on
+        // the way out must not be the one that forgets them.
+        to = (recipients + parseRecipients(edits.recipientDraft).first).distinct(),
         subject = edits.subject,
         body = edits.body,
         prev = intent.prev,
@@ -197,7 +212,7 @@ fun MailComposer(
     // composable's scope is cancelled with it, so the repo's does it.
     DisposableEffect(intent) {
         onDispose {
-            if (!filed && (edits.body.isNotBlank() || edits.subject.isNotBlank() || recipients.isNotEmpty())) {
+            if (!filed && (edits.body.isNotBlank() || edits.subject.isNotBlank() || recipients.isNotEmpty() || edits.recipientDraft.isNotBlank())) {
                 repo.keepDraft(asDraft())
             }
         }
@@ -223,7 +238,7 @@ fun MailComposer(
                     // the save and the re-read that follows it meant the
                     // back button sat through two requests to the ship
                     // before the screen would move.
-                    if (edits.body.isBlank() && edits.subject.isBlank() && recipients.isEmpty() && intent.draftId != null) {
+                    if (edits.body.isBlank() && edits.subject.isBlank() && recipients.isEmpty() && edits.recipientDraft.isBlank() && intent.draftId != null) {
                         // Opened from a draft and emptied out: keeping
                         // the husk would say there is still something
                         // to send.
