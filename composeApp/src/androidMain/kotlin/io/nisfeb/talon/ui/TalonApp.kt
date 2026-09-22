@@ -436,6 +436,7 @@ fun TalonApp(
             claim = { key, stale, settle -> app.settingsSync.claimKey(key, stale, settle) },
             decide = io.nisfeb.talon.orrery.DecideControl(app.uiSettings.orreryDecide, app.uiSettings::setOrreryDecide),
             sendDm = { whom, text -> app.repo.send(whom, text) },
+            location = io.nisfeb.talon.ui.AndroidLocationControl,
         )
     }
     DisposableEffect(orreryRepo) {

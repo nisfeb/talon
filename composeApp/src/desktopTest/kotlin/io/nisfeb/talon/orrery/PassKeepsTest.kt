@@ -265,6 +265,46 @@ class PassKeepsTest {
         }
     }
 
+    // Halving without end, a batch the ship refused as a whole, a field
+    // every fact carries that its version does not know, cost 2n-1
+    // requests to its one thread and then dropped every item.
+    @Test
+    fun `a batch refused as a whole fails the pass rather than every item`() = runBlocking {
+        val dir = createTempDirectory(prefix = "talon-pass-whole-").toFile()
+        val db = db(dir)
+        val scope = CoroutineScope(SupervisorJob())
+        var observes = 0
+        try {
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
+            db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
+            (1..64).forEach { db.orreryNoticed().insertIfNew(claim("n$it")) }
+            val http = HttpClient(
+                MockEngine { req ->
+                    val url = req.url.toString()
+                    if ("/api/observe" in url) {
+                        observes++
+                        return@MockEngine respond("unknown field", io.ktor.http.HttpStatusCode.UnprocessableEntity)
+                    }
+                    val body = when {
+                        "/apps/orrery/api/state" in url -> state
+                        "/apps/calendar/window.json" in url -> """{"rows":[]}"""
+                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
+                        else -> "[]"
+                    }
+                    respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                },
+            )
+            OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
+            assertTrue(observes < 40, "a bounded number of requests, not 127, and was $observes")
+            assertEquals(64, db.orreryNoticed().confirming("~zod").size, "every claim still waits")
+            assertEquals(0L, db.orreryAccounts().get("~zod")!!.calendarCursor, "and the pass did not finish")
+        } finally {
+            scope.cancel()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
+
     // Turning off cancels the loop, which is the job a loop pass runs in,
     // so the delete after it never ran: the next launch turned the pipe
     // on again with the key the ship had refused. The tests drove pass(),
@@ -295,12 +335,71 @@ class PassKeepsTest {
         }
         try {
             repo.attach("https://ship.test", "~zod")
+            // The row goes first and the switch after it, so both are
+            // waited for: asserting the switch on the row alone raced.
             kotlinx.coroutines.withTimeout(20_000) {
-                while (db.orreryAccounts().get("~zod") != null) kotlinx.coroutines.delay(50)
+                while (db.orreryAccounts().get("~zod") != null || repo.enabled.value) kotlinx.coroutines.delay(50)
             }
-            assertTrue(!repo.enabled.value, "and the switch is off")
         } finally {
             repo.detach()
+            scope.cancel()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
+
+    // A model that gave no answer read as one that found nothing: each
+    // post was recorded as read and the cursor went past, so an hour of
+    // an outage, out of credit or rate limited, was never read by it.
+    @Test
+    fun `a model with no answer leaves what it would have read for later`() = runBlocking<Unit> {
+        val dir = createTempDirectory(prefix = "talon-pass-nomodel-").toFile()
+        val db = db(dir)
+        val scope = CoroutineScope(SupervisorJob())
+        var answering = false
+        var asked = 0
+        val model = object : LocalModel {
+            override val rung = "fake"
+            override suspend fun complete(system: String, user: String, grammar: String?, maxTokens: Int): String {
+                asked++
+                if (!answering) error("402: out of credit")
+                return """{"claims":[]}"""
+            }
+            override fun close() = Unit
+        }
+        try {
+            val start = io.nisfeb.talon.util.nowMs() - 3_600_000
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", messagesCursor = start, mailCursor = 90_000L))
+            db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
+            db.messages().upsertAll(
+                listOf(
+                    io.nisfeb.talon.data.MessageEntity(whom = "~sampel-palnet", id = "1", author = "~sampel-palnet", sentMs = start + 60_000, contentJson = """[{"inline":["I'm at the shop now"]}]""", kind = "chat"),
+                    io.nisfeb.talon.data.MessageEntity(whom = "~sampel-palnet", id = "2", author = "~sampel-palnet", sentMs = start + 120_000, contentJson = """[{"inline":["See you at eight"]}]""", kind = "chat"),
+                ),
+            )
+            val http = HttpClient(
+                MockEngine { req ->
+                    val url = req.url.toString()
+                    val body = when {
+                        "/api/observe" in url -> """{"bodies":[],"observations":[]}"""
+                        "/apps/orrery/api/state" in url -> state
+                        "/apps/calendar/window.json" in url -> """{"rows":[]}"""
+                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
+                        else -> "[]"
+                    }
+                    respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                },
+            )
+            suspend fun pass() = OrreryRepo(http, scope, db, "test", bareClient = http, readWith = model).pass("https://ship.test", "~zod")
+            pass()
+            assertEquals(1, asked, "it stops at the first post the model does not answer for")
+            assertTrue(db.orreryAccounts().get("~zod")!!.messagesCursor < start + 60_000, "and the cursor stays behind it")
+            assertNull(db.orrerySent().get("~zod", "msg:~sampel-palnet/1"), "which is not recorded as read")
+            answering = true
+            pass()
+            assertEquals(3, asked, "the next pass reads both")
+            assertNotNull(db.orrerySent().get("~zod", "msg:~sampel-palnet/2"))
+        } finally {
             scope.cancel()
             db.close()
             dir.deleteRecursively()
@@ -505,7 +604,9 @@ class PassKeepsTest {
             val repo = { OrreryRepo(http, scope, db, "test", bareClient = http) }
             repo().pass("https://ship.test", "~zod")
             val after = db.orreryAccounts().get("~zod")!!
-            assertTrue(after.calendarCursor > 0L, "the pass ran to the end and wrote its cursors")
+            // With no view of the ship's bodies the pass stops: run on, it
+            // made everyone again from their @p, the twins of merged ones.
+            assertEquals(0L, after.calendarCursor, "the pass stopped at the state and wrote nothing")
             assertEquals(5_000L, after.mailCursor, "and did not move past mail it never read")
             assertEquals(0, asked.count { "/apps/auspex/api/thread/" in it })
 

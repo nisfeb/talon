@@ -46,6 +46,7 @@ class OrreryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),
             decide = io.nisfeb.talon.orrery.DecideControl(app.uiSettings.orreryDecide, app.uiSettings::setOrreryDecide),
             sendDm = { whom, text -> app.repo.send(whom, text) },
+            location = io.nisfeb.talon.ui.AndroidLocationControl,
         )
         try {
             repo.pass(session.shipUrl, session.ship)

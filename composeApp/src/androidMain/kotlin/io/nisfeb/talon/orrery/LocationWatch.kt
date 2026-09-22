@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.StateFlow
 object LocationWatch {
     private const val PREFS = "talon_orrery_location"
     private const val KEY_ON = "on"
+    private const val KEY_PAUSED = "paused"
     private const val WORK = "talon-orrery-location"
     const val MIN_MOVE_M = 400f
     const val MIN_GAP_MS = 10 * 60 * 1000L
@@ -66,9 +67,15 @@ object LocationWatch {
     /** Off, from wherever: the pipe going off takes this with it. */
     fun stop() = app?.let { set(it, false) } ?: Unit
 
-    /** Listening held, or taken up again, with the switch left as saved. */
+    /**
+     * Listening held, or taken up again, with the switch left as saved.
+     * Saved too: [resume] runs on every start of the process, a boot or
+     * a background job included, and listened again for a ship with no
+     * pipe until the app was next opened.
+     */
     fun pause(paused: Boolean) {
         val ctx = app ?: return
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_PAUSED, paused).apply()
         if (paused) stopListening(ctx) else resume(ctx)
     }
 
@@ -92,6 +99,7 @@ object LocationWatch {
     fun resume(ctx: Context) {
         app = ctx.applicationContext
         if (!isOn(ctx) || !allowed(ctx)) return
+        if (ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_PAUSED, false)) return
         val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
         val providers = lm.getProviders(true)
         val provider = listOf(LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)

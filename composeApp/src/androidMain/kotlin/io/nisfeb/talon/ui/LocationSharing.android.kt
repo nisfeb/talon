@@ -14,16 +14,18 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.atomic.AtomicReference
 
+/** The pipe's side of [LocationWatch]: stopping and holding it from outside the screen. */
+object AndroidLocationControl : LocationControl {
+    override fun stop() = LocationWatch.stop()
+    override fun pause(paused: Boolean) = LocationWatch.pause(paused)
+}
+
 /**
  * The switch's side of [LocationWatch]: the prompts, then the listening.
  * Location first, then location all the time, asked for on its own as
  * Android 11 and later require; there the system shows its settings
  * page for it, and the answer arrives when the owner comes back.
  */
-actual fun stopLocationSharing() = LocationWatch.stop()
-
-actual fun pauseLocationSharing(paused: Boolean) = LocationWatch.pause(paused)
-
 @Composable
 actual fun rememberLocationSharing(): LocationSharing? {
     val ctx = LocalContext.current.applicationContext

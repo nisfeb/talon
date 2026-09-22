@@ -122,12 +122,16 @@ private val READS_MESSAGES = setOf(AiFeature.CatchUp, AiFeature.Assistant)
  */
 fun AiProfile.without(id: String): AiProfile {
     val gone = provider(id)
+    // A feature following the default was on this provider too, when the
+    // default was: left on, it went to whatever default was picked next.
+    val defaultGone = defaultModel?.provider == id
     return copy(
         providers = providers.filterNot { it.id == id },
         defaultModel = defaultModel?.takeUnless { it.provider == id },
         features = features.mapValues { (feature, f) ->
+            val onIt = f.model?.provider == id || (f.model == null && defaultGone)
             when {
-                f.model?.provider != id -> f
+                !onIt -> f
                 feature == AiFeature.OrreryTriage -> f.copy(model = ModelRef(DEVICE_PROVIDER, ""))
                 gone?.isPrivate == true && feature in READS_MESSAGES -> FeatureSetting(on = false, model = null)
                 else -> f.copy(model = null)

@@ -552,15 +552,12 @@ class MailRepo(
     }
 
     /**
-     * Sign and send a stored draft. The ship drops the draft itself,
-     * and only when the send landed, so a send its writer silently
-     * refuses keeps the draft — which is the whole reason to send one
-     * this way rather than [send] plus [deleteDraft].
-     */
-    /**
-     * Send a saved draft. True once the ship has dropped the draft, which
-     * it does only when the send landed; false when it refused; null when
-     * it took the send and has not yet been seen to drop the draft.
+     * Sign and send a saved draft. The ship drops the draft itself, and
+     * only when the send landed, so a send its writer silently refuses
+     * keeps the draft, which is the reason to send one this way rather
+     * than [send] plus [deleteDraft]. True once the ship has dropped the
+     * draft; false when it refused; null when it took the send and has
+     * not yet been seen to drop the draft.
      *
      * The route answers before the writer applies, so its yes means taken
      * and nothing more. The drafts list is the proof, and it can lag the

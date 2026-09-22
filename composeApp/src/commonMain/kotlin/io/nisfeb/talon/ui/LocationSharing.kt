@@ -30,18 +30,26 @@ interface LocationSharing {
 expect fun rememberLocationSharing(): LocationSharing?
 
 /**
- * Stop listening, from outside the screen. The switch lives under the
- * orrery pipe, so turning the pipe off takes the switch off the screen:
- * left listening, the phone went on waking for moves it had nowhere to
- * send, and nothing on the screen could stop it. A platform that does
- * not share location does nothing here.
+ * Location sharing as the orrery pipe reaches it, from outside the
+ * screen. The switch lives under the pipe, so the pipe going off takes
+ * the switch off the screen: left listening, the phone went on waking
+ * for moves it had nowhere to send, and nothing on the screen could
+ * stop it. [NoopLocationControl] where a platform shares no location.
  */
-expect fun stopLocationSharing()
+interface LocationControl {
+    /** Off, the switch with it: the pipe turned off, or its key refused. */
+    fun stop()
 
-/**
- * Stop listening for now, or listen again, keeping the switch as it is:
- * for a ship with no pipe, which has nowhere to send a move and no
- * switch on its screen. Turning the switch off there instead turned it
- * off for the ship that had a pipe, since there is one switch.
- */
-expect fun pauseLocationSharing(paused: Boolean)
+    /**
+     * Not listening for now, or listening again, the switch kept as it
+     * is: for a ship with no pipe, which has nowhere to send a move and
+     * no switch on its screen. Turning the switch off there turned it
+     * off for the ship that had a pipe, since there is one switch.
+     */
+    fun pause(paused: Boolean)
+}
+
+object NoopLocationControl : LocationControl {
+    override fun stop() = Unit
+    override fun pause(paused: Boolean) = Unit
+}

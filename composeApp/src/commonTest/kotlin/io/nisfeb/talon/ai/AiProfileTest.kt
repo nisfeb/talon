@@ -234,4 +234,26 @@ class AiProfileTest {
         val none = p.copy(providers = listOf(lm.copy(models = emptyList())))
         assertEquals(ModelRef("lm", ""), none.pinningModels().defaultModel, "left blank until there is a list")
     }
+
+    // A feature following a private default was on it as surely as one
+    // that named it; left on, it went to whatever default came next.
+    @Test
+    fun `removing a private default takes the features that followed it along`() {
+        val p = AiProfile(
+            providers = listOf(
+                AiProvider("lm", ProviderKind.OpenAiCompatible, "LM Studio", baseUrl = "http://127.0.0.1:1234/v1"),
+                AiProvider(DEVICE_PROVIDER, ProviderKind.ThisDevice, "On this device"),
+            ),
+            defaultModel = ModelRef("lm", "qwen"),
+            features = mapOf(
+                AiFeature.CatchUp to FeatureSetting(true),
+                AiFeature.OrreryTriage to FeatureSetting(true),
+                AiFeature.OrreryBrief to FeatureSetting(true),
+            ),
+        )
+        val after = p.without("lm")
+        assertFalse(after.isOn(AiFeature.CatchUp))
+        assertEquals(ProviderKind.ThisDevice, after.resolve(AiFeature.OrreryTriage)?.provider?.kind)
+        assertTrue(after.isOn(AiFeature.OrreryBrief), "the brief reads no messages")
+    }
 }

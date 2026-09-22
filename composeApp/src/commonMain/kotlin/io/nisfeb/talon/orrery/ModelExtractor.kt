@@ -123,12 +123,18 @@ object ModelExtractor {
         context: List<Pair<String, String>> = emptyList(),
         onPlan: (Plan) -> Unit = {},
         zone: kotlinx.datetime.TimeZone = kotlinx.datetime.TimeZone.currentSystemDefault(),
+        /** The model gave no answer, which is not the same as finding nothing. */
+        onNoAnswer: () -> Unit = {},
     ): List<Noticed> {
         if (text.isBlank() || text.trimEnd().endsWith("?")) return emptyList()
         val authorId = index.authorId(author, ourShip)
         val prompt = user(bodies, author, authorId, whenLine(atMs, zone), text, notes, context)
         val answer = runCatching { model.complete(SYSTEM, prompt, GRAMMAR, MAX_TOKENS) }
-            .getOrElse { io.nisfeb.talon.util.Log.w("ModelExtractor", "${model.rung} did not answer: ${it.message}", it); return emptyList() }
+            .getOrElse {
+                io.nisfeb.talon.util.Log.w("ModelExtractor", "${model.rung} did not answer: ${it.message}", it)
+                onNoAnswer()
+                return emptyList()
+            }
         // Only the author and what the message names may be claimed about: a
         // small model otherwise writes what it remembers, not what it read.
         val mentioned = index.find(text).map { it.first.id }.toSet() + authorId + (if (author == ourShip) setOf("person/me") else emptySet())
