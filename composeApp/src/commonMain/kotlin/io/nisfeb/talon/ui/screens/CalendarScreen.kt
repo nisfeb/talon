@@ -41,6 +41,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
@@ -160,7 +161,10 @@ fun CalendarScreen(
 ) {
     val availability by repo.availability.collectAsState()
     val allTags by repo.tags.collectAsState()
-    var tagFilter by remember { mutableStateOf<String?>(null) }
+    /** Tags to narrow to. Empty is the default and means all of them. */
+    var tagFilter by remember { mutableStateOf(emptySet<String>()) }
+    // Any of the chosen tags, not all: picking two asks for both sets.
+    val tagged = { tags: List<String> -> tagFilter.isEmpty() || tags.any { it in tagFilter } }
     val rows by repo.rangeRows.collectAsState()
     val tasks by repo.tasks.collectAsState()
     var showTasks by remember { mutableStateOf(false) }
@@ -248,7 +252,7 @@ fun CalendarScreen(
         )
     }
     val visible = remember(rows, hidden, tagFilter, pendingTicks, pendingRows, pendingEdits) {
-        (rows.orEmpty() + pendingRows).filter { it.cal !in hidden && (tagFilter == null || tagFilter in it.tags) }
+        (rows.orEmpty() + pendingRows).filter { it.cal !in hidden && tagged(it.tags) }
             .map { r -> pendingTicks[r.id]?.let { r.copy(done = it) } ?: r }
             .map { r ->
                 pendingEdits[r.id]?.let { d ->
@@ -376,7 +380,7 @@ fun CalendarScreen(
     // leaving this screen does not lose it.
     val pendingTasks by repo.pendingTasks.collectAsState()
     fun addTask(name: String, due: LocalDate?, cal: String?, note: String = "") {
-        repo.addTask(EventDraft(name = name, note = note, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = listOfNotNull(tagFilter))) { status = it }
+        repo.addTask(EventDraft(name = name, note = note, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = tagFilter.toList())) { status = it }
     }
 
     // A title and nine controls do not fit a phone. The title was left a
@@ -465,17 +469,43 @@ fun CalendarScreen(
             }
             Spacer(Modifier.height(4.dp))
         }
+        // Tags narrow what is shown, and nothing is ticked to begin
+        // with, so the calendar opens showing everything. A menu rather
+        // than a row of chips: a ship with twenty tags scrolled the row
+        // sideways past whatever was being looked for.
         if (allTags.isNotEmpty()) {
-            LazyRow(
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                item { FilterChip(selected = tagFilter == null, onClick = { tagFilter = null }, label = { Text("All tags") }) }
-                items(allTags, key = { it }) { t ->
-                    FilterChip(selected = tagFilter == t, onClick = { tagFilter = if (tagFilter == t) null else t }, label = { Text("#$t") })
+            var tagsOpen by remember { mutableStateOf(false) }
+            Box(Modifier.padding(start = 8.dp)) {
+                TextButton(onClick = { tagsOpen = true }) {
+                    Text(
+                        when (tagFilter.size) {
+                            0 -> "All tags"
+                            1 -> "#" + tagFilter.first()
+                            else -> "${tagFilter.size} tags"
+                        },
+                    )
+                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(18.dp))
+                }
+                androidx.compose.material3.DropdownMenu(expanded = tagsOpen, onDismissRequest = { tagsOpen = false }) {
+                    if (tagFilter.isNotEmpty()) {
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("Clear") },
+                            onClick = { tagFilter = emptySet() },
+                        )
+                        androidx.compose.material3.HorizontalDivider()
+                    }
+                    allTags.forEach { t ->
+                        val on = t in tagFilter
+                        // Stays open: picking tags is usually picking
+                        // more than one.
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("#$t") },
+                            leadingIcon = { Checkbox(checked = on, onCheckedChange = null) },
+                            onClick = { tagFilter = if (on) tagFilter - t else tagFilter + t },
+                        )
+                    }
                 }
             }
-            Spacer(Modifier.height(4.dp))
         }
         if (narrow) {
             Row(
@@ -494,7 +524,7 @@ fun CalendarScreen(
         }
         if (showTasks) {
             TasksView(
-                tasks = tasks?.filter { it.cal !in hidden && (tagFilter == null || tagFilter in it.tags) }
+                tasks = tasks?.filter { it.cal !in hidden && tagged(it.tags) }
                     ?.map { t -> pendingTicks[t.id]?.let { t.copy(done = it) } ?: t },
                 today = today,
                 calendars = calendars.filter { it.id !in hidden && it.id !in readOnly },
@@ -513,7 +543,7 @@ fun CalendarScreen(
                 onMore = { n, due, c, note ->
                     editing = null to EventDraft(
                         name = n, note = note, cat = EventCat.TODO, date = due ?: today, due = due,
-                        cal = c, tags = listOfNotNull(tagFilter),
+                        cal = c, tags = tagFilter.toList(),
                     )
                     editingIdx = null
                     editingStartMs = null
