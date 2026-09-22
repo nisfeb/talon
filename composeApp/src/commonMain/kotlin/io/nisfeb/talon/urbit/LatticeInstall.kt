@@ -1,6 +1,11 @@
 package io.nisfeb.talon.urbit
 
 import io.ktor.client.HttpClient
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.client.request.get
 import io.ktor.client.statement.HttpResponse
 import kotlinx.serialization.json.JsonElement
@@ -115,6 +120,81 @@ object LatticeInstall {
      * finishes. Installing any of them installs Grubbery.
      */
     val GRUBBERY_APPS = setOf("lattice", "auspex", "mail", "calendar", "orrery")
+
+    /**
+     * Add a desk to the grubbery shell, which is how an app that is not
+     * part of grubbery itself arrives: orrery and armillary are shell
+     * desks published by [PUBLISHER], not kiln desks, so `|install` can
+     * never fetch them. The shell's own route takes the name and where
+     * to read the code from, as the README's curl does.
+     */
+    suspend fun addDesk(
+        http: HttpClient,
+        shipUrl: String,
+        name: String,
+        publisher: String = PUBLISHER,
+    ): Result<Unit> = runCatching {
+        val body = buildJsonObject {
+            put("name", name)
+            put("code", "$publisher/apps/shell.shell/desks/$name.desk/desk/code")
+        }
+        val resp = http.post("${shipUrl.trimEnd('/')}/apps/grubbery/desks/add") {
+            contentType(ContentType.Application.Json)
+            setBody(body.toString())
+        }
+        if (!resp.status.isSuccess()) {
+            error(
+                when (resp.status.value) {
+                    403 -> "Your ship did not accept that; sign in to it again."
+                    404 -> "The Grubbery shell is not answering on this ship."
+                    else -> "The shell would not add $name (HTTP ${resp.status.value})."
+                },
+            )
+        }
+    }
+
+    /**
+     * Install a shell desk: the Grubbery shell first where it is not
+     * here, then the desk itself through the shell, then wait for the
+     * app to answer.
+     *
+     * The wait is the honest part. The shell syncs the desk over the
+     * network in its own time, and the owner still has to approve the
+     * roads it reaches outside its own tree, which happens on the
+     * ship's own page and not here. So a timeout says that rather than
+     * calling the install failed.
+     */
+    fun shellDesk(
+        http: HttpClient,
+        shipUrl: () -> String?,
+        name: String,
+        answers: suspend (String) -> Boolean,
+        timeoutMs: Long = GRUBBERY_TIMEOUT_MS,
+        poke: suspend (String, String, JsonElement) -> Boolean,
+    ): suspend () -> Result<Unit> = {
+        val url = shipUrl()
+        if (url == null) {
+            Result.failure(IllegalStateException("Not signed in to a ship."))
+        } else {
+            runCatching {
+                // The shell has to be there before it can be asked for
+                // anything. Where it already is, this costs one probe.
+                if (!isInstalled(http, url)) {
+                    installAndWait(http, url, poke, timeoutMs = timeoutMs).getOrThrow()
+                }
+                addDesk(http, url, name).getOrThrow()
+                val deadline = io.nisfeb.talon.util.nowMs() + timeoutMs
+                while (io.nisfeb.talon.util.nowMs() < deadline) {
+                    kotlinx.coroutines.delay(POLL_MS)
+                    if (answers(url)) return@runCatching
+                }
+                error(
+                    "$name was asked for and has not answered yet. The shell syncs it over the network, " +
+                        "and it asks you to approve what it reaches: open /apps/$name on your ship.",
+                )
+            }
+        }
+    }
 
     /**
      * Install a grubbery app: fetch the desk it lives in, and wait for

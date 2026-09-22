@@ -73,19 +73,22 @@ class GrubberyAppsTest {
     // Armillary, like orrery, is installed from the ship's own Grubbery
     // shell, so its row never offers an install: it says where to go.
     @Test
-    fun `armillary is never offered an install, whatever it is doing`() {
+    fun `armillary is offered the shell's own add, and only where it is missing`() {
         val here = armillaryRow(io.nisfeb.talon.armillary.ArmillaryAvailability.PRESENT)
         assertEquals(AppState.WORKING, here.state)
         assertEquals("Answering on this ship.", here.detail)
         val gone = armillaryRow(io.nisfeb.talon.armillary.ArmillaryAvailability.MISSING, "404")
         assertEquals(AppState.MISSING, gone.state)
-        assertFalse(gone.canInstall)
+        // Not kiln's: a shell desk, added through an authenticated call
+        // to the shell the ship already runs.
+        assertEquals(AppInstall.ARMILLARY, gone.install)
         assertEquals("404", gone.error)
         assertEquals(AppState.SIGNED_OUT, armillaryRow(io.nisfeb.talon.armillary.ArmillaryAvailability.SIGNED_OUT).state)
         assertEquals(AppState.UNKNOWN, armillaryRow(io.nisfeb.talon.armillary.ArmillaryAvailability.UNKNOWN).state)
+        // Everything but missing has nothing to add: a ship that is
+        // answering has it, and one that is signed out cannot be asked.
         assertTrue(listOf(
             io.nisfeb.talon.armillary.ArmillaryAvailability.PRESENT,
-            io.nisfeb.talon.armillary.ArmillaryAvailability.MISSING,
             io.nisfeb.talon.armillary.ArmillaryAvailability.SIGNED_OUT,
             io.nisfeb.talon.armillary.ArmillaryAvailability.UNKNOWN,
         ).none { armillaryRow(it).canInstall })

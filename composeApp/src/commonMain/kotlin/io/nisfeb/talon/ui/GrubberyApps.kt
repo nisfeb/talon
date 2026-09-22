@@ -30,7 +30,21 @@ enum class AppState {
 }
 
 /** Which desk an install would fetch, and from whom. */
-enum class AppInstall { GRUBBERY, GROUPS }
+enum class AppInstall {
+    GRUBBERY,
+    GROUPS,
+
+    /**
+     * A desk of the Grubbery shell rather than of kiln: orrery and
+     * armillary are published by the same ship but are not part of
+     * grubbery, so `|install` never brings them. The shell's own
+     * desks/add route does, which is an authenticated call Talon can
+     * make, and the owner then approves what the desk reaches on the
+     * ship's own page.
+     */
+    ORRERY,
+    ARMILLARY,
+}
 
 data class AppRow(
     val name: String,
@@ -99,25 +113,27 @@ fun groupsRow(installed: Boolean?, error: String? = null): AppRow = when (instal
 }
 
 /**
- * Orrery is its own desk app from the same publisher, installed from
- * the ship's Grubbery shell rather than by kiln, so there is no install
- * to offer here: the row says where to go.
+ * Orrery is its own desk app from the same publisher, added to the
+ * ship's Grubbery shell rather than installed by kiln. That is an
+ * authenticated call, so the row offers it, and the shell then syncs
+ * the desk and asks the owner to approve what it reaches.
  */
 fun orreryRow(availability: io.nisfeb.talon.orrery.OrreryAvailability, error: String? = null): AppRow = when (availability) {
     io.nisfeb.talon.orrery.OrreryAvailability.PRESENT -> AppRow("Orrery", AppState.WORKING, "Answering on this ship.", null, error)
-    io.nisfeb.talon.orrery.OrreryAvailability.MISSING -> AppRow("Orrery", AppState.MISSING, "Not on this ship. Install it from the Grubbery shell on your ship.", null, error)
+    io.nisfeb.talon.orrery.OrreryAvailability.MISSING ->
+        AppRow("Orrery", AppState.MISSING, "Not on this ship. Talon can add it to your Grubbery shell.", AppInstall.ORRERY, error)
     io.nisfeb.talon.orrery.OrreryAvailability.SIGNED_OUT -> AppRow("Orrery", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
     io.nisfeb.talon.orrery.OrreryAvailability.UNKNOWN -> AppRow("Orrery", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
 
 /**
- * Armillary is its own desk app from the same publisher, installed from
- * the ship's Grubbery shell rather than by kiln, so there is no install
- * to offer here either: the row says where to go.
+ * Armillary is its own desk app from the same publisher, added to the
+ * shell the same way orrery is.
  */
 fun armillaryRow(availability: io.nisfeb.talon.armillary.ArmillaryAvailability, error: String? = null): AppRow = when (availability) {
     io.nisfeb.talon.armillary.ArmillaryAvailability.PRESENT -> AppRow("Armillary", AppState.WORKING, "Answering on this ship.", null, error)
-    io.nisfeb.talon.armillary.ArmillaryAvailability.MISSING -> AppRow("Armillary", AppState.MISSING, "Not on this ship. Install it from the Grubbery shell on your ship.", null, error)
+    io.nisfeb.talon.armillary.ArmillaryAvailability.MISSING ->
+        AppRow("Armillary", AppState.MISSING, "Not on this ship. Talon can add it to your Grubbery shell.", AppInstall.ARMILLARY, error)
     io.nisfeb.talon.armillary.ArmillaryAvailability.SIGNED_OUT -> AppRow("Armillary", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
     io.nisfeb.talon.armillary.ArmillaryAvailability.UNKNOWN -> AppRow("Armillary", AppState.UNKNOWN, "Not asked yet.", null, error)
 }

@@ -2118,6 +2118,26 @@ fun TalonApp(
                     app.session.http,
                     { app.sessionStore.active()?.shipUrl },
                 ) { a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess },
+                // Shell desks, not kiln desks: the session's own client,
+                // since adding one is an owner's call.
+                onAddOrrery = io.nisfeb.talon.urbit.LatticeInstall.shellDesk(
+                    app.session.http,
+                    { app.sessionStore.active()?.shipUrl },
+                    name = "orrery",
+                    answers = {
+                        orreryRepo.probe()
+                        orreryRepo.availability.value == io.nisfeb.talon.orrery.OrreryAvailability.PRESENT
+                    },
+                ) { a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess },
+                onAddArmillary = io.nisfeb.talon.urbit.LatticeInstall.shellDesk(
+                    app.session.http,
+                    { app.sessionStore.active()?.shipUrl },
+                    name = "armillary",
+                    answers = {
+                        runCatching { armillaryRepo.refresh(fresh = true) }
+                        armillaryRepo.availability.value == io.nisfeb.talon.armillary.ArmillaryAvailability.PRESENT
+                    },
+                ) { a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess },
                 shipUrl = app.sessionStore.active()?.shipUrl,
                 onBack = { appsOpen = false },
                 modifier = mod,

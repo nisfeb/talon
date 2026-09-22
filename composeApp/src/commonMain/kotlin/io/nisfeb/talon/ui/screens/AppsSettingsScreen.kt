@@ -67,6 +67,10 @@ fun AppsSettingsScreen(
     groupsInstalled: (suspend () -> Boolean)? = null,
     /** Installs %groups from its own publisher. Null hides the offer. */
     onInstallGroups: (suspend () -> Result<Unit>)? = null,
+    /** Adds orrery to the ship's Grubbery shell. Null hides the offer. */
+    onAddOrrery: (suspend () -> Result<Unit>)? = null,
+    /** Adds armillary the same way. Null hides the offer. */
+    onAddArmillary: (suspend () -> Result<Unit>)? = null,
     /** This ship's base URL, for the permits page. Null when signed out. */
     shipUrl: String?,
     onBack: () -> Unit,
@@ -123,6 +127,8 @@ fun AppsSettingsScreen(
         val action = when (row.install) {
             io.nisfeb.talon.ui.AppInstall.GROUPS -> onInstallGroups
             io.nisfeb.talon.ui.AppInstall.GRUBBERY -> installGrubbery
+            io.nisfeb.talon.ui.AppInstall.ORRERY -> onAddOrrery
+            io.nisfeb.talon.ui.AppInstall.ARMILLARY -> onAddArmillary
             null -> null
         } ?: return
         busy = row.name
@@ -130,8 +136,13 @@ fun AppsSettingsScreen(
         scope.launch {
             action().fold(
                 onSuccess = {
-                    note = if (row.install == io.nisfeb.talon.ui.AppInstall.GROUPS) "Installed Groups."
-                    else "Installed Grubbery. The apps arrive with it."
+                    note = when (row.install) {
+                        io.nisfeb.talon.ui.AppInstall.GROUPS -> "Installed Groups."
+                        io.nisfeb.talon.ui.AppInstall.GRUBBERY -> "Installed Grubbery. The apps arrive with it."
+                        // The desk is on the ship; what it may reach is
+                        // the owner's to allow, on the ship's own page.
+                        else -> "Added ${row.name} to your Grubbery shell. Open it on your ship to approve what it reaches."
+                    }
                 },
                 onFailure = { note = it.message ?: "The install did not finish." },
             )
