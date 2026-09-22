@@ -126,6 +126,33 @@ class OrreryApi(
         request(owner, HttpMethod.Put, "/api/generator", body.toString())
     }
 
+    /**
+     * One of the ship's settings documents, read and written whole.
+     *
+     * Generic on purpose. Orrery keeps its configuration in a handful
+     * of owner-only docs under the same shape of route, so a client
+     * that knows the shape needs to know nothing about what any one of
+     * them is for: what the telegram reader wants is orrery's business
+     * and the ship's, not this app's. New docs cost nothing here.
+     *
+     * The ship masks credentials on the way out — a token reads back as
+     * `token_set: true` and never as itself — and a blank field on the
+     * way in keeps what the ship has. Both are its rules, not ours.
+     *
+     * [name] is checked against [SETTINGS] rather than passed through:
+     * it lands in a URL path, and the caller is sometimes a model.
+     */
+    suspend fun settingsDoc(name: String): String {
+        require(name in SETTINGS) { "no settings document called $name" }
+        return request(owner, HttpMethod.Get, "/api/$name")
+    }
+
+    /** Merge [body] into a settings document. Owner's route, owner's client. */
+    suspend fun setSettingsDoc(name: String, body: JsonObject): String {
+        require(name in SETTINGS) { "no settings document called $name" }
+        return request(owner, HttpMethod.Put, "/api/$name", body.toString())
+    }
+
     /** The bodies the key may see, with the rev the view was at. */
     suspend fun state(token: String): StateView = viewOf(stateJson(token))
 
@@ -455,6 +482,14 @@ class OrreryApi(
 
         const val CLAIM_READS = 5
         const val CLAIM_PAUSE_MS = 200L
+
+        /**
+         * The settings documents the owner may read and write through
+         * [settingsDoc]. An allow-list because the name is part of a
+         * URL and a model sometimes chooses it: anything outside this
+         * set is a mistake, and `../` is not a document.
+         */
+        val SETTINGS = setOf("generator", "telegram", "schema", "policy")
 
         const val APP_PATH = "/apps/orrery"
         /** The ship refuses a longer note on a retraction. */

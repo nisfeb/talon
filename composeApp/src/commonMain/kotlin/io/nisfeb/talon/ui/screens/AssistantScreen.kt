@@ -180,6 +180,11 @@ fun AssistantScreen(
     mail: io.nisfeb.talon.mail.MailRepo? = null,
     calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
     calls: io.nisfeb.talon.call.CallController? = null,
+    /** The owner's own model on their ship, where orrery is installed
+     *  and this install has a key. Its rules stay behind a tool rather
+     *  than in the prompt: a question about Urbit should not pay for
+     *  them. */
+    orrery: io.nisfeb.talon.orrery.OrreryRepo? = null,
     /** Start listening as the screen opens (the home widget's tap);
      *  where nothing can listen, the field takes the cursor instead. */
     listenOnOpen: Boolean = false,
@@ -265,7 +270,7 @@ fun AssistantScreen(
         AgentPrompt.forAssistant(aiState)
     }
     val calendarZone by (calendar?.zone ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, braveKeyPresent, systemPrompt, mail, calendar, calls, calendarZone) {
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
         if (repo != null) {
@@ -290,7 +295,8 @@ fun AssistantScreen(
                     repo, db, embedder,
                     braveSearch = if (braveKeyPresent) braveSearch else null,
                     urlFetcher = urlFetcher,
-                ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) + mcpTools).dedupToolNames(),
+                ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) +
+                    orrery?.let { io.nisfeb.talon.ai.orreryTools(it) }.orEmpty() + mcpTools).dedupToolNames(),
                 systemPrompt = systemPrompt,
             )
         } else null

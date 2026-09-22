@@ -2160,6 +2160,7 @@ fun TalonApp(
                 mail = mailRepo,
                 calendar = calendarRepo,
                 calls = callController,
+                orrery = orreryRepo,
                 listenOnOpen = assistantListen,
                 onTopUp = openTopUp,
                 scheduler = app.loops,

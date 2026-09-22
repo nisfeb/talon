@@ -1089,6 +1089,11 @@ fun App(
                         send = { whom, text -> repo.send(whom, text) },
                     ),
                 ),
+                // No orrery here. A loop runs headless on a timer, and
+                // reconfiguring the ship is not something to wake up
+                // and find done. The assistant has them; a loop asks a
+                // person. Android's Loops has no orrery handle either,
+                // and the two shells agreeing is the point.
                 completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
                 aiConfig = { aiSettings.state.value },
                 // One device runs a scheduled write fire — the %settings lease
@@ -3346,6 +3351,7 @@ fun App(
                                         mail = mailRepo,
                                         calendar = calendarRepo,
                                         calls = callController,
+                                        orrery = orreryRepo,
                                         listenOnOpen = assistantListen,
                                         onTopUp = openTopUp,
                                         scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,

@@ -252,6 +252,55 @@ class OrreryRepo(
      * every action ever filed and the whole calendar, runs on attach,
      * after an answer and in the pipe's pass, not on every look.
      */
+    // ---- what the assistant is given ----------------------------------
+    //
+    // Orrery's own routes, thinly. The assistant is told what orrery's
+    // documents mean by orrery, not by a wrapper here: a setting this
+    // app has never heard of is one the assistant can still write, and
+    // that is the point of keeping these general.
+
+    /** One settings document, as the ship serves it; credentials masked. */
+    suspend fun readSettings(name: String): Result<String> = runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        a.settingsDoc(name)
+    }
+
+    /** Merge into a settings document. The ship keeps what is left blank. */
+    suspend fun writeSettings(name: String, body: JsonObject): Result<String> = runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        val said = a.setSettingsDoc(name, body)
+        // The screens hold the generator's settings; a write from
+        // anywhere else has to reach them or the card shows the old ones.
+        if (name == "generator") runCatching { a.generatorSettings() }.getOrNull()?.let { _generatorSettings.value = it }
+        said
+    }
+
+    /** The state view under this install's key: bodies and what is known of them. */
+    suspend fun readState(): Result<JsonObject> = runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        a.stateJson(keyToken() ?: error("This install has no orrery key yet."))
+    }
+
+    /** Ask the ship which body a name means, before writing about it. */
+    suspend fun resolveBody(q: String): Result<List<ResolvedBody>> = runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        a.resolve(q, keyToken() ?: error("This install has no orrery key yet."))
+    }
+
+    /** One body's timeline: what was said about it, when, and by whom. */
+    suspend fun bodyTimeline(id: String): Result<List<KnownObs>> = runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        a.observationsOf(id, keyToken() ?: error("This install has no orrery key yet."))
+    }
+
+    /** One observe batch under this install's key. */
+    suspend fun observeNow(batch: JsonObject): Result<ObserveAnswer> = runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        a.observe(batch, keyToken() ?: error("This install has no orrery key yet."))
+    }
+
+    private suspend fun keyToken(): String? = ship?.let { db.orreryAccounts().get(it)?.token }
+
     suspend fun refreshWaiting() {
         val a = api ?: return
         val s = ship ?: return

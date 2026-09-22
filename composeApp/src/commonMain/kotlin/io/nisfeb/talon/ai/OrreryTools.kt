@@ -1,0 +1,247 @@
+package io.nisfeb.talon.ai
+
+import io.nisfeb.talon.orrery.OrreryApi
+import io.nisfeb.talon.orrery.OrreryRepo
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
+
+/**
+ * Orrery, as something the owner can talk to.
+ *
+ * Deliberately general. Orrery's own routes are a handful of documents
+ * and one fact-writing route, so these tools are that shape and know
+ * nothing about what any one document is for: setting up the Telegram
+ * reader is writing `telegram`, and this file has never heard of
+ * Telegram. A setting orrery grows next month needs nothing here.
+ *
+ * The long rules are not in the system prompt. A general question
+ * about Urbit should not pay for them, so they sit behind
+ * [orreryGuide] and arrive only once somebody is actually doing this.
+ */
+
+/** What the model is told before it writes anything to orrery. */
+internal const val ORRERY_GUIDE = """
+Orrery is the owner's own model of their life, kept on their ship. It
+holds bodies — person/, place/, activity/, situation/, thing/ — and
+facts about them. You are talking to it as the owner.
+
+Before you write:
+
+- Ask the ship what it knows. orrery_find resolves a name to a body id;
+  a hit IS the thing, so never create a second body for a name that
+  already resolves. orrery_read with no body gives the whole view,
+  including the schema: which kinds exist, which attributes each kind
+  takes, and what the ship says each one means.
+- A fact is one subject, one attribute, one value. `at` is when the
+  thing happened or will happen, not when you are writing it.
+- A schedule is not a fact about the past. An activity's `next` and a
+  situation's `starts` are the plan; `started` and `ended` are written
+  only once they have.
+- A status is a circumstance, not a feeling. "on jury duty" is a
+  status; "fed up" is not, and does not go on one.
+- An activity's `status` is the whole series: `active`, or `cancelled`
+  only where the owner says the series itself is over. One meeting
+  being called off is not that and has no field yet.
+- health and income are kept from most keys. If the ship refuses one,
+  that is its answer, not a problem to work around.
+
+Settings live in documents, read and written whole by name:
+
+- `generator`: the on-ship model. Its OpenRouter key is what every
+  other on-ship reader borrows, so a blank key means the ship reads
+  nothing, whatever else is switched on.
+- `telegram`: the Telegram reader. Its token comes from BotFather, its
+  secret is the owner's own invention and must be 16 bytes or longer,
+  and `public_url` is where the ship is reachable from the internet,
+  because Telegram pushes to it. `chats` is the chat ids it may read,
+  `people` maps a Telegram user id to a body id. Registering the
+  webhook is a separate step the owner takes on the ship's own page
+  once the three are set.
+- `schema`, `policy`: what bodies may carry, and what the ship does
+  with what it is told.
+
+Writing a document merges: a field you leave out keeps its value, and
+a credential you leave blank keeps the stored one. Credentials read
+back as `token_set: true` and never as themselves, so you cannot show
+the owner a token they have already set, and you should not ask them
+to repeat one to confirm it.
+"""
+
+/**
+ * What the tools need of orrery, which is less than orrery is.
+ *
+ * Here so the tools can be held to their own behaviour — a document
+ * name refused, a malformed batch refused, the ship's answer read
+ * back — without a ship, a database and a key to do it with.
+ */
+interface OrreryTap {
+    suspend fun find(q: String): Result<List<Pair<String, String>>>
+    suspend fun state(): Result<String>
+    suspend fun body(id: String): Result<List<String>>
+    suspend fun observe(batch: JsonObject): Result<List<String>>
+    suspend fun settings(name: String): Result<String>
+    suspend fun configure(name: String, body: JsonObject): Result<String>
+}
+
+/** The repo as the tools see it. */
+fun OrreryRepo.asTap(): OrreryTap = object : OrreryTap {
+    override suspend fun find(q: String) =
+        resolveBody(q).map { hits -> hits.map { it.id to "kind=${it.kind} name=${it.name} matched=${it.match}" } }
+
+    override suspend fun state() = readState().map { it.toString() }
+
+    override suspend fun body(id: String) = bodyTimeline(id).map { rows ->
+        rows.map { "obs=${it.id} attr=${it.attr} at=${it.atMs} source=${it.sourceId} ${if (it.stands) "stands" else it.status}" }
+    }
+
+    override suspend fun observe(batch: JsonObject) = observeNow(batch).map { answer ->
+        answer.observations.mapIndexed { i, it ->
+            when {
+                it.ok && it.existing -> "${i + 1}: already known"
+                it.ok -> "${i + 1}: written"
+                else -> "${i + 1}: refused, ${it.error ?: "no reason given"}"
+            }
+        }
+    }
+
+    override suspend fun settings(name: String) = readSettings(name)
+
+    override suspend fun configure(name: String, body: JsonObject) = writeSettings(name, body)
+}
+
+/** Orrery's tools, where this install is attached to a ship that has it. */
+fun orreryTools(repo: OrreryRepo): List<Tool> = orreryTools(repo.asTap())
+
+fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_guide",
+            "How orrery works and what its rules are. Call this once before writing facts or settings to orrery; it is short and it says what the other orrery tools expect.",
+            toolSchema(required = emptyList()),
+        ),
+        write = false,
+    ) { ORRERY_GUIDE.trim() })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_find",
+            "Ask orrery which body a name means, before writing anything about it. A hit is the thing itself: use its id rather than making a second body.",
+            toolSchema("name" to ("string" to "The name as the owner said it."), required = listOf("name")),
+        ),
+        write = false,
+    ) { args ->
+        val q = args.str("name") ?: return@Tool "Error: name is required."
+        orrery.find(q).fold(
+            onSuccess = { hits ->
+                if (hits.isEmpty()) "Nothing in orrery matches \"$q\"."
+                else hits.take(10).joinToString("\n") { (id, rest) -> "id=$id $rest" }
+            },
+            onFailure = { "Could not ask orrery: ${it.message}" },
+        )
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_read",
+            "Read orrery. With no argument: every body the key may see, the attributes each kind takes and what the ship says they mean. With body: that body's timeline, what was said about it and whether each row still stands.",
+            toolSchema("body" to ("string" to "A body id, e.g. person/alice. Omit for the whole view."), required = emptyList()),
+        ),
+        write = false,
+    ) { args ->
+        val id = args.str("body")
+        if (id == null) {
+            orrery.state().fold(
+                onSuccess = { clip(it) },
+                onFailure = { "Could not read orrery: ${it.message}" },
+            )
+        } else {
+            orrery.body(id).fold(
+                onSuccess = { rows ->
+                    if (rows.isEmpty()) "orrery holds nothing about $id." else rows.take(60).joinToString("\n")
+                },
+                onFailure = { "Could not read $id: ${it.message}" },
+            )
+        }
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_observe",
+            "Write facts to orrery under this install's key. Give a JSON array of observations, each {\"subject\": body id, \"attr\": attribute, \"value\": the value, \"at\": ISO 8601 UTC when it happened}. Resolve names with orrery_find first; the ship answers per item and may refuse one.",
+            toolSchema(
+                "observations" to ("string" to "A JSON array of observation objects."),
+                required = listOf("observations"),
+            ),
+        ),
+        write = true,
+    ) { args ->
+        val raw = args.str("observations") ?: return@Tool "Error: observations is required."
+        val arr = runCatching { Json.parseToJsonElement(raw) as? JsonArray }.getOrNull()
+            ?: return@Tool "Error: observations must be a JSON array."
+        if (arr.isEmpty()) return@Tool "Error: nothing to write."
+        val batch = buildJsonObject { put("observations", arr) }
+        orrery.observe(batch).fold(
+            onSuccess = { said -> if (said.isEmpty()) "The ship answered nothing." else said.joinToString("\n") },
+            onFailure = { "Could not write to orrery: ${it.message}" },
+        )
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_settings",
+            "Read one of orrery's settings documents: " + OrreryApi.SETTINGS.sorted().joinToString(", ") +
+                ". Credentials come back only as whether they are set, never as themselves.",
+            toolSchema("document" to ("string" to "The document name."), required = listOf("document")),
+        ),
+        write = false,
+    ) { args ->
+        val name = args.str("document") ?: return@Tool "Error: document is required."
+        if (name !in OrreryApi.SETTINGS) return@Tool unknownDoc(name)
+        orrery.settings(name).fold(
+            onSuccess = { clip(it) },
+            onFailure = { "Could not read $name: ${it.message}" },
+        )
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_configure",
+            "Change one of orrery's settings documents: " + OrreryApi.SETTINGS.sorted().joinToString(", ") +
+                ". Give only the fields to change; the ship keeps the rest, and keeps a stored credential where the field is blank. Read orrery_guide first: some fields have rules the ship enforces and will refuse.",
+            toolSchema(
+                "document" to ("string" to "The document name."),
+                "settings" to ("string" to "A JSON object of the fields to change."),
+                required = listOf("document", "settings"),
+            ),
+        ),
+        write = true,
+    ) { args ->
+        val name = args.str("document") ?: return@Tool "Error: document is required."
+        if (name !in OrreryApi.SETTINGS) return@Tool unknownDoc(name)
+        val raw = args.str("settings") ?: return@Tool "Error: settings is required."
+        val obj = runCatching { Json.parseToJsonElement(raw).jsonObject }.getOrNull()
+            ?: return@Tool "Error: settings must be a JSON object."
+        if (obj.isEmpty()) return@Tool "Error: nothing to change."
+        orrery.configure(name, obj).fold(
+            onSuccess = { "Written to $name. The ship says: " + clip(it) },
+            onFailure = { "Could not write $name: ${it.message}" },
+        )
+    })
+}
+
+private fun unknownDoc(name: String) =
+    "There is no orrery settings document called \"$name\". It is one of: " +
+        OrreryApi.SETTINGS.sorted().joinToString(", ") + "."
+
+/** Enough of an answer to work from; the whole state view is long. */
+private fun clip(s: String, max: Int = 6000): String =
+    if (s.length <= max) s else s.take(max) + "\n… cut here; ask for one body instead."
+
+private fun JsonObject.str(key: String): String? =
+    this[key]?.let { (it as? JsonPrimitive)?.contentOrNull }?.takeIf { it.isNotBlank() }
