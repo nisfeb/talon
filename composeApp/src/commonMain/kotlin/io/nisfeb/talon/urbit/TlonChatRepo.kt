@@ -2935,7 +2935,7 @@ class TlonChatRepo(
         }
 
         // %contacts /v1/news — {page}, {peer}, or {wipe} envelope.
-        if (payload.containsKey("page") || payload.containsKey("peer")) {
+        if (payload.containsKey("page") || payload.containsKey("peer") || payload.containsKey("self")) {
             applyContactsNews(payload)
             return
         }
@@ -3880,6 +3880,31 @@ class TlonChatRepo(
             db.contacts().upsert(mergeContact(parseContact(who, contact, modAt)))
             return
         }
+        // Our own profile is the ship's own, kept apart from the
+        // directory: the bootstrap reads it from /v1/self rather than
+        // /v1/all, and its change arrives here on its own. Handled by
+        // reading it back rather than off the fact, since only the
+        // bootstrap's own path knows how self is shaped, and the two
+        // must not drift.
+        if (event.containsKey("self")) {
+            refreshSelf()
+            return
+        }
+    }
+
+    /**
+     * Re-read this ship's own profile.
+     *
+     * Editing it in another client of the same ship left Talon showing
+     * the old name until a sign-out and back in: the change arrives on
+     * the contacts feed in an envelope of its own, and nothing here
+     * listened for it. A re-read is one scry and is what the bootstrap
+     * does, so the two cannot disagree.
+     */
+    suspend fun refreshSelf() {
+        val ch = channel ?: return
+        val body = runCatching { ch.scry("contacts", "/v1/self") }.getOrNull() as? JsonObject ?: return
+        db.contacts().upsert(mergeContact(parseContact(ourPatp, directoryFields(body), parseContactModAt(body))))
     }
 
     /**

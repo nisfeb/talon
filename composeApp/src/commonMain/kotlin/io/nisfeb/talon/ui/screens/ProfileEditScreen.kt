@@ -102,6 +102,10 @@ fun ProfileEditScreen(
     }
 
     LaunchedEffect(ourPatp) {
+        // Ask the ship before showing it: this screen is where an edit
+        // made in another client of the same ship would otherwise be
+        // overwritten with what Talon last saw.
+        runCatching { repo.refreshSelf() }
         val c = db.contacts().get(ourPatp) ?: return@LaunchedEffect
         nickname = c.nickname.orEmpty()
         status = c.status.orEmpty()
