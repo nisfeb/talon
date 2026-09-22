@@ -1043,9 +1043,37 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
                 Switch(checked = standing, onCheckedChange = { sd.set(it) })
             }
         }
+        ChatReaderRow(orrery)
         if (io.nisfeb.talon.ui.isLocationSharingSupported) LocationRow()
     }
     (note ?: error)?.let { Quiet(it, error = true) }
+}
+
+/**
+ * The ship's own reader of the owner's chats (orrery 39). With it on,
+ * this install reads no chats, so each message is read once. Hidden
+ * where the ship cannot say, one before 39.
+ */
+@Composable
+private fun ChatReaderRow(orrery: OrreryRepo) {
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(orrery) { orrery.loadShipChats() }
+    val on = orrery.shipReadsChats.collectAsState().value ?: return
+    var note by remember { mutableStateOf<String?>(null) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("The ship reads my chats", style = MaterialTheme.typography.bodyMedium)
+            Quiet(
+                if (on) "Your ship reads the chats chosen for it, so this install reads only calls, mail and status lines. Ask the assistant to change which chats."
+                else "Your ship can read your DMs and channels itself, with the generator's model. This install then stops reading chats, so each message is read once. Ask the assistant to choose which.",
+            )
+        }
+        Switch(checked = on, onCheckedChange = { want ->
+            note = null
+            scope.launch { orrery.setShipReadsChats(want).onFailure { note = it.message ?: "Orrery did not answer." } }
+        })
+    }
+    note?.let { Quiet(it, error = true) }
 }
 
 /** Where the owner is, from this phone, when they move. See [io.nisfeb.talon.ui.LocationSharing]. */

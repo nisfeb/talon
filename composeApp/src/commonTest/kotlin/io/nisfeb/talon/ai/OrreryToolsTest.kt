@@ -162,4 +162,18 @@ class OrreryToolsTest {
         val said = orreryTools(Tap()).first { it.spec.name == "orrery_configure" }.spec.description
         OrreryApi.SETTINGS.forEach { assertTrue(it in said, "$it is not named in the description") }
     }
+
+    // Orrery 39's chat reader: its DMs and channels are there to pick
+    // from, and a list the ship holds is not a document anyone writes.
+    @Test
+    fun `the chat reader's lists are read, never written`() = runTest {
+        val t = Tap()
+        run(t, "orrery_settings", buildJsonObject { put("document", "chat/dms") })
+        assertEquals("chat/dms", t.read)
+        val said = run(t, "orrery_configure", buildJsonObject { put("document", "chat/dms"); put("settings", """{"x":1}""") })
+        assertTrue("no orrery settings document" in said, said)
+        assertEquals(null, t.wroteTo, "never sent")
+        run(t, "orrery_configure", buildJsonObject { put("document", "chat"); put("settings", """{"enabled":true}""") })
+        assertEquals("chat", t.wroteTo, "the reader's own document is written as any other")
+    }
 }

@@ -451,6 +451,54 @@ class PassKeepsTest {
         assertEquals("2026-09-25T17:00:00Z", dues[made])
     }
 
+    // Orrery 39 reads the owner's chats on the ship. With that on, Talon
+    // reading them too read every message twice and paid the model twice.
+    @Test
+    fun `a ship that reads the chats itself has Talon read none`() = runBlocking<Unit> {
+        val dir = createTempDirectory(prefix = "talon-pass-shipchats-").toFile()
+        val db = db(dir)
+        val scope = CoroutineScope(SupervisorJob())
+        var asked = 0
+        val model = object : LocalModel {
+            override val rung = "fake"
+            override suspend fun complete(system: String, user: String, grammar: String?, maxTokens: Int): String {
+                asked++
+                return """{"claims":[]}"""
+            }
+            override fun close() = Unit
+        }
+        try {
+            val start = io.nisfeb.talon.util.nowMs() - 3_600_000
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", messagesCursor = start, mailCursor = 90_000L))
+            db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
+            db.messages().upsertAll(
+                listOf(io.nisfeb.talon.data.MessageEntity(whom = "~sampel-palnet", id = "1", author = "~sampel-palnet", sentMs = start + 60_000, contentJson = """[{"inline":["I'm at the shop now"]}]""", kind = "chat")),
+            )
+            val http = HttpClient(
+                MockEngine { req ->
+                    val url = req.url.toString()
+                    val body = when {
+                        url.substringBefore('?').endsWith("/api/chat") -> """{"enabled":true,"dms":["~sampel-palnet"]}"""
+                        "/api/observe" in url -> """{"bodies":[],"observations":[]}"""
+                        "/apps/orrery/api/state" in url -> state
+                        "/apps/calendar/window.json" in url -> """{"rows":[]}"""
+                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
+                        else -> "[]"
+                    }
+                    respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                },
+            )
+            OrreryRepo(http, scope, db, "test", bareClient = http, readWith = model).pass("https://ship.test", "~zod")
+            assertEquals(0, asked, "no post read here")
+            assertNull(db.orrerySent().get("~zod", "msg:~sampel-palnet/1"))
+            assertEquals(start + 60_000, db.orreryAccounts().get("~zod")!!.messagesCursor, "and the cursor keeps up, so turning the ship's reader off hands Talon nothing it read")
+        } finally {
+            scope.cancel()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
+
     @Test
     fun `an approved message is written down before it is sent`() = runBlocking {
         val dir = createTempDirectory(prefix = "talon-pass-send-").toFile()

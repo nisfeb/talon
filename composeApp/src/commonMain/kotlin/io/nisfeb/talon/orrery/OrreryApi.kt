@@ -143,8 +143,25 @@ class OrreryApi(
      * it lands in a URL path, and the caller is sometimes a model.
      */
     suspend fun settingsDoc(name: String): String {
-        require(name in SETTINGS) { "no settings document called $name" }
+        require(name in SETTINGS || name in LISTS) { "no settings document called $name" }
         return request(owner, HttpMethod.Get, "/api/$name")
+    }
+
+    /**
+     * Whether the ship reads the owner's chats itself (orrery 39), as a
+     * key with write may ask: then Talon must not, or every message is
+     * read twice and paid for twice. Null where the ship cannot say, one
+     * before 39 or a key without write, which is not a refused key.
+     */
+    suspend fun shipReadsChats(token: String): Boolean? {
+        val text = try {
+            request(bare, HttpMethod.Get, "/api/chat") { header(HttpHeaders.Authorization, "Bearer $token") }
+        } catch (e: OrreryError.Refused) {
+            if (e.status == 404 || e.status == 403) return null
+            throw e
+        }
+        return runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull()
+            ?.get("enabled")?.jsonPrimitive?.booleanOrNull
     }
 
     /** Merge [body] into a settings document. Owner's route, owner's client. */
@@ -504,7 +521,10 @@ class OrreryApi(
          * URL and a model sometimes chooses it: anything outside this
          * set is a mistake, and `../` is not a document.
          */
-        val SETTINGS = setOf("generator", "telegram", "schema", "policy")
+        val SETTINGS = setOf("generator", "telegram", "schema", "policy", "chat")
+
+        /** What the ship holds for a settings document to pick from, read and never written: the chat reader's DMs and channels. */
+        val LISTS = setOf("chat/dms", "chat/channels")
 
         /**
          * The documents that register themselves with an outside

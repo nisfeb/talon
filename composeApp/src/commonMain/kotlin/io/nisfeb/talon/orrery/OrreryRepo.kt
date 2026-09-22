@@ -122,6 +122,27 @@ class OrreryRepo(
     /** The analyst's open actions, as of the last pass. */
     private val _actions = MutableStateFlow<List<OrreryAction>>(emptyList())
     val actions: StateFlow<List<OrreryAction>> = _actions.asStateFlow()
+    /**
+     * Whether the ship reads the owner's chats itself (orrery 39), when
+     * Talon reads only calls, status lines and mail; null where the ship
+     * cannot say. As the last pass or look found it.
+     */
+    private val _shipReadsChats = MutableStateFlow<Boolean?>(null)
+    val shipReadsChats: StateFlow<Boolean?> = _shipReadsChats.asStateFlow()
+
+    /** Ask the ship now, for the screen, rather than wait for a pass. */
+    suspend fun loadShipChats() {
+        val a = api ?: return
+        val token = keyToken() ?: return
+        runCatching { a.shipReadsChats(token) }.onSuccess { _shipReadsChats.value = it }
+    }
+
+    /** Turn the ship's own chat reader on or off: its `chat` document, written as the owner. */
+    suspend fun setShipReadsChats(on: Boolean): Result<Unit> = runCatching {
+        attached().setSettingsDoc("chat", buildJsonObject { put("enabled", on) })
+        _shipReadsChats.value = on
+    }
+
     /** True while this phone is leaving the reading to a computer. */
     private val _yielding = MutableStateFlow(false)
     val yielding: StateFlow<Boolean> = _yielding.asStateFlow()
@@ -295,6 +316,7 @@ class OrreryRepo(
         // The screens hold the generator's settings; a write from
         // anywhere else has to reach them or the card shows the old ones.
         if (name == "generator") runCatching { a.generatorSettings() }.getOrNull()?.let { _generatorSettings.value = it }
+        if (name == "chat") loadShipChats()
         said
     }
 
@@ -353,6 +375,7 @@ class OrreryRepo(
         ship = null
         _availability.value = OrreryAvailability.UNKNOWN
         _error.value = null
+        _shipReadsChats.value = null
         scopeChecked = false
     }
 
@@ -986,7 +1009,7 @@ class OrreryRepo(
                 facts += Facts(bodies = teachNames(body, people.goesBy(body.id)))
             }
 
-            val ahead = db.messages().postsAfter(row.messagesCursor, s, MESSAGES_PER_PASS)
+            val aheadAll = db.messages().postsAfter(row.messagesCursor, s, MESSAGES_PER_PASS)
             // The cursor is the author's clock, so a post that syncs after
             // the cursor passed its time sits under it for good: the other
             // channel catching up just after the app opened. The newest
@@ -998,7 +1021,16 @@ class OrreryRepo(
             // ponytail: a catch-up deeper than LATE_POSTS or older than
             // LATE_WINDOW_MS still loses the rest; a cursor on insertion
             // order (a column and a migration) is the whole fix.
-            val under = db.messages().postsBetween(nowMs - LATE_WINDOW_MS, row.messagesCursor + 1, s, LATE_POSTS)
+            val underAll = db.messages().postsBetween(nowMs - LATE_WINDOW_MS, row.messagesCursor + 1, s, LATE_POSTS)
+            // The ship reads the owner's chats itself (orrery 39): Talon
+            // steps aside from them, or every message was read twice and
+            // the model paid twice. Calls, status lines, mail, location
+            // and the brief stay Talon's. Asked only when there is a post
+            // to read, so an idle pass costs the ship nothing more.
+            val shipChats = (aheadAll.isNotEmpty() || underAll.isNotEmpty()) &&
+                a.shipReadsChats(row.token).also { _shipReadsChats.value = it } == true
+            val ahead = if (shipChats) emptyList() else aheadAll
+            val under = if (shipChats) emptyList() else underAll
             val readAlready = if (under.isEmpty()) emptySet()
             else sent.some(s, under.map { "msg:${it.whom}/${it.id}" }).mapTo(HashSet()) { it.key }
             val posts = under.filter { "msg:${it.whom}/${it.id}" !in readAlready }.reversed() + ahead
@@ -1006,7 +1038,10 @@ class OrreryRepo(
             // worth recording when the author is already in your book.
             val direct = posts.filter { isDirect(it.whom) || it.author in book }
             facts += Facts(observations = direct.mapNotNull { m -> oneItem("post ${m.id}") { messageFacts(m, s, people.idFor(m.author, null)) } })
-            var messagesCursor = ahead.maxOfOrNull { it.sentMs } ?: row.messagesCursor
+            // While the ship reads them, the cursor keeps up with the newest
+            // post, so turning its reader off later does not hand Talon
+            // everything the ship already read.
+            var messagesCursor = (if (shipChats) aheadAll else ahead).maxOfOrNull { it.sentMs } ?: row.messagesCursor
 
             // Mail and the calendar may be absent on this ship; a source
             // that is not there is skipped, not an error of the pipe.
