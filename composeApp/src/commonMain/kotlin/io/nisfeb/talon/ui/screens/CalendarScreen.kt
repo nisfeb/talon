@@ -1574,40 +1574,106 @@ private fun TasksView(
     var picking by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(io.nisfeb.talon.calendar.TaskFilter.OPEN) }
+    // Writing a task and looking for one are both occasional; the list
+    // is what the screen is for. Each is a tap away and costs a row
+    // only while it is open.
+    var adding by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(false) }
+    val addFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val searchFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // Without this the field appears but stays inert until tapped.
+    LaunchedEffect(adding) { if (adding) addFocus.requestFocus() }
+    LaunchedEffect(searching) { if (searching) searchFocus.requestFocus() }
     fun add() {
         val n = name.trim()
         if (n.isEmpty()) return
         onAdd(n, due, cal, note.trim())
         name = ""; note = ""; due = null
     }
+    // The counts are of everything, so a filter that would show nothing
+    // says so on its own chip rather than by emptying the screen.
+    val all = tasks.orEmpty()
+    val count = { f: io.nisfeb.talon.calendar.TaskFilter -> all.count { it.inFilter(f, today) && it.matches(query) } }
     Column(modifier) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            OutlinedTextField(
-                value = name, onValueChange = { name = it }, placeholder = { Text("New task") }, singleLine = true,
-                modifier = Modifier.weight(1f),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { add() }),
-            )
-            TextButton(onClick = { picking = true }) { Text(due?.let { "${it.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[it.monthNumber - 1]}" } ?: "Due") }
-            IconButton(onClick = ::add, enabled = name.isNotBlank()) { Icon(Icons.Filled.Add, contentDescription = "Add task") }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = {
+                searching = !searching
+                // A search left behind a closed field would go on
+                // narrowing the list with nothing on screen saying so.
+                if (!searching) query = ""
+            }) {
+                Icon(
+                    if (searching) Icons.Filled.Clear else Icons.Filled.Search,
+                    contentDescription = if (searching) "Close the search" else "Search tasks",
+                )
+            }
+            LazyRow(
+                Modifier.weight(1f),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                items(io.nisfeb.talon.calendar.TaskFilter.entries.toList(), key = { it.name }) { f ->
+                    val n = count(f)
+                    FilterChip(
+                        selected = filter == f,
+                        onClick = { filter = f },
+                        label = { Text(if (n > 0) "${f.label} $n" else f.label) },
+                    )
+                }
+            }
+            IconButton(onClick = { adding = !adding }) {
+                Icon(
+                    if (adding) Icons.Filled.Clear else Icons.Filled.Add,
+                    contentDescription = if (adding) "Close the new task" else "New task",
+                )
+            }
         }
-        // A description as soon as there is something to describe; the
-        // rest of what a task carries is one tap further, in the editor.
-        if (name.isNotBlank()) {
+        if (searching) {
             OutlinedTextField(
-                value = note, onValueChange = { note = it }, placeholder = { Text("Description") },
-                minLines = 1, maxLines = 4,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Search tasks") },
+                singleLine = true,
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, contentDescription = "Clear the search") }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).focusRequester(searchFocus),
             )
-            TextButton(
-                onClick = { onMore(name.trim(), due, cal, note.trim()); name = ""; note = ""; due = null },
-                modifier = Modifier.padding(horizontal = 8.dp),
-            ) { Text("More: place, tags, colour") }
         }
-        if (calendars.size > 1) {
-            LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(calendars, key = { it.id }) { c ->
-                    FilterChip(selected = cal == c.id, onClick = { cal = c.id }, label = { Text(c.name.ifBlank { c.id }) })
+        if (adding) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it }, placeholder = { Text("New task") }, singleLine = true,
+                    modifier = Modifier.weight(1f).focusRequester(addFocus),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { add() }),
+                )
+                TextButton(onClick = { picking = true }) { Text(due?.let { "${it.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[it.monthNumber - 1]}" } ?: "Due") }
+                IconButton(onClick = ::add, enabled = name.isNotBlank()) { Icon(Icons.Filled.Add, contentDescription = "Add task") }
+            }
+            // A description as soon as there is something to describe; the
+            // rest of what a task carries is one tap further, in the editor.
+            if (name.isNotBlank()) {
+                OutlinedTextField(
+                    value = note, onValueChange = { note = it }, placeholder = { Text("Description") },
+                    minLines = 1, maxLines = 4,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+                TextButton(
+                    onClick = { onMore(name.trim(), due, cal, note.trim()); name = ""; note = ""; due = null; adding = false },
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                ) { Text("More: place, tags, colour") }
+            }
+            // Which calendar it lands in: asked here, where it is being
+            // written, rather than kept on screen the rest of the time.
+            if (calendars.size > 1) {
+                LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(calendars, key = { it.id }) { c ->
+                        FilterChip(selected = cal == c.id, onClick = { cal = c.id }, label = { Text(c.name.ifBlank { c.id }) })
+                    }
                 }
             }
         }
@@ -1623,51 +1689,19 @@ private fun TasksView(
             Text("Looking…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
             return@Column
         }
-        // What is being looked at, and what is being looked for. The
-        // counts are of everything, so a filter that would show nothing
-        // says so on its own chip rather than by emptying the screen.
-        val all = tasks.orEmpty()
         val shown = groupTasks(
             all.filter { it.inFilter(filter, today) && it.matches(query) },
             today,
         )
-        val count = { f: io.nisfeb.talon.calendar.TaskFilter -> all.count { it.inFilter(f, today) && it.matches(query) } }
         LazyColumn(Modifier.fillMaxSize()) {
-            item {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("Search tasks") },
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, contentDescription = "Clear the search") }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                )
-            }
-            item {
-                LazyRow(
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    items(io.nisfeb.talon.calendar.TaskFilter.entries.toList(), key = { it.name }) { f ->
-                        val n = count(f)
-                        FilterChip(
-                            selected = filter == f,
-                            onClick = { filter = f },
-                            label = { Text(if (n > 0) "${f.label} $n" else f.label) },
-                        )
-                    }
-                }
-            }
             items(pending, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), false, onTick, {}, pending = true) }
             if (shown.isEmpty() && pending.isEmpty()) {
                 item {
                     Text(
-                        if (query.isNotBlank()) "Nothing matches \"${query.trim()}\"." else "Nothing to do.",
+                        // The way to add one is an icon now, so an empty
+                        // list says where it is rather than leaving the
+                        // screen blank.
+                        if (query.isNotBlank()) "Nothing matches \"${query.trim()}\"." else "Nothing to do. Tap + to add a task.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(16.dp),
