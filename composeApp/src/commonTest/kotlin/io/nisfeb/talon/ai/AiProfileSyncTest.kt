@@ -380,4 +380,17 @@ class AiProfileSyncTest {
             assertTrue(profileAfterEntry(e, base.copy(savedProfile = here), base)!!.isOn(AiFeature.Transcription))
         }
     }
+
+    // Typed on a device the revocation had not reached, a key had no mark
+    // of its own, and the older revocation took it out when it arrived.
+    @Test
+    fun `a key typed later wins, even where the revocation had not arrived`() {
+        val saved = migrateProfile(base)
+        val noMain = saved.copy(providers = saved.providers.filter { it.id != MAIN_PROVIDER }, defaultModel = null)
+        val phone = base.copy(savedProfile = saved).withProfile(noMain, now = 1_000L)
+        // The desktop never heard; it had the provider out already, and the owner puts it back.
+        val desktop = base.copy(apiKey = "", savedProfile = noMain).withProfile(saved, now = 2_000L)
+        assertEquals("sk-or", phone.keepingCredentials(desktop).apiKey, "the phone takes the desktop's later word")
+        assertEquals("sk-or", desktop.keepingCredentials(phone).apiKey, "and the desktop keeps what was typed")
+    }
 }

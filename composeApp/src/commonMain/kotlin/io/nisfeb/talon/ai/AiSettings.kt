@@ -289,11 +289,15 @@ fun AiSettings.Config.withoutRevoked(): AiSettings.Config {
  * These settings once the owner, on this device at [now], took the keys
  * [gone] out and put [back] in: the one way a key is revoked, or a
  * revoked one restored.
+ *
+ * Every key put in is marked, not only one this device knows was
+ * revoked: typed on a device the revocation had not reached yet, it
+ * had no mark, and the older revocation took it out when it arrived.
  */
 fun AiSettings.Config.marking(gone: Collection<String>, back: Collection<String>, now: Long): AiSettings.Config {
     val marks = revokedKeys.toMutableMap()
     gone.filter { it.isNotBlank() }.forEach { marks[keyPrint(it)] = KeyMark(now) }
-    back.filter { isRevoked(it) }.forEach { marks[keyPrint(it)] = KeyMark(now, revoked = false) }
+    back.filter { it.isNotBlank() }.forEach { marks[keyPrint(it)] = KeyMark(now, revoked = false) }
     return copy(revokedKeys = mergedMarks(marks, emptyMap())).withoutRevoked()
 }
 

@@ -173,4 +173,33 @@ class AiProfileTest {
             assertEquals(c.hasKey() || c.provider == AiSettings.Provider.Custom, c.hasModelFor(AiFeature.CatchUp), c.toString())
         }
     }
+
+    // Taking out the provider a feature read messages with sent it to
+    // the default model, which is usually a cloud one, with no word
+    // from the owner. Triage goes to this device wherever it read.
+    @Test
+    fun `removing a private provider keeps message reading off the cloud`() {
+        val p = AiProfile(
+            providers = listOf(
+                AiProvider("or", ProviderKind.OpenRouter, "OpenRouter", apiKey = "sk-or"),
+                AiProvider("an", ProviderKind.Anthropic, "Anthropic", apiKey = "sk-an"),
+                AiProvider("lm", ProviderKind.OpenAiCompatible, "LM Studio", baseUrl = "http://127.0.0.1:1234/v1"),
+                AiProvider(DEVICE_PROVIDER, ProviderKind.ThisDevice, "On this device"),
+            ),
+            defaultModel = ModelRef("or", "m"),
+            features = mapOf(
+                AiFeature.OrreryTriage to FeatureSetting(true, ModelRef("lm", "")),
+                AiFeature.CatchUp to FeatureSetting(true, ModelRef("lm", "")),
+                AiFeature.OrreryBrief to FeatureSetting(true, ModelRef("lm", "")),
+                AiFeature.Assistant to FeatureSetting(true, ModelRef("an", "")),
+            ),
+        )
+        val noLm = p.without("lm")
+        assertEquals(ProviderKind.ThisDevice, noLm.resolve(AiFeature.OrreryTriage)?.provider?.kind)
+        assertEquals(ProviderKind.ThisDevice, noLm.resolve(AiFeature.CatchUp)?.provider?.kind, "it read on a model of the owner's own")
+        assertEquals("or", noLm.resolve(AiFeature.OrreryBrief)?.provider?.id, "the brief reads no messages, and follows the default")
+        assertEquals("or", p.without("an").resolve(AiFeature.Assistant)?.provider?.id, "from one cloud to the default one, as before")
+        val cloudTriage = p.copy(features = p.features + (AiFeature.OrreryTriage to FeatureSetting(true, ModelRef("an", ""))))
+        assertEquals(ProviderKind.ThisDevice, cloudTriage.without("an").resolve(AiFeature.OrreryTriage)?.provider?.kind)
+    }
 }

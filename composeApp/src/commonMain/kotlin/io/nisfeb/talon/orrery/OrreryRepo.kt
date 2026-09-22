@@ -209,6 +209,10 @@ class OrreryRepo(
             probe()
             _enabled.value = db.orreryAccounts().get(ship) != null
             if (_enabled.value) startLoop()
+            // A ship with no pipe has nowhere to send a move, and its
+            // screen has no switch to stop them: the phone kept waking
+            // for every one after a switch from a ship that had a pipe.
+            else io.nisfeb.talon.ui.stopLocationSharing()
             if (_availability.value == OrreryAvailability.PRESENT) {
                 refreshActions()
                 // Orrery's beacon moves once for every write that changed
@@ -371,10 +375,11 @@ class OrreryRepo(
      * waking for moves with nowhere to send them and no way to say
      * stop.
      *
-     * Only here, not on detach. Detaching is a restart, a ship switch,
-     * an Activity going away: turning the saved switch off there put it
-     * off on every cold start and every time the app was swiped away,
-     * which is exactly when hearing moves with the app closed matters.
+     * Here, and on attaching to a ship with no pipe, not on detach.
+     * Detaching is a restart, a ship switch, an Activity going away:
+     * turning the saved switch off there put it off on every cold start
+     * and every time the app was swiped away, which is exactly when
+     * hearing moves with the app closed matters.
      */
     private fun turnOff() {
         stopPipe()
@@ -840,8 +845,7 @@ class OrreryRepo(
         val a = api ?: return
         val s = ship ?: return
         val url = shipUrl ?: return
-        val row0 = db.orreryAccounts().get(s) ?: return
-        ensureScope(s, row0)
+        if (db.orreryAccounts().get(s) == null) return
         if (_pushing.value) return
         _pushing.value = true
         // One pass in the process at a time. The app's loop and the
@@ -855,6 +859,7 @@ class OrreryRepo(
         var callsForRetry: List<((String, String?) -> String) -> Facts> = emptyList()
         var spokenForRetry: List<Pair<String, List<Spoken>>> = emptyList()
         var confirmed: List<io.nisfeb.talon.data.OrreryNoticedEntity> = emptyList()
+        var token: String? = null
         // Put back what this pass took from the queues, for the next one,
         // unless the queues have moved to another ship since.
         suspend fun requeue() = pendingLock.withLock {
@@ -863,6 +868,9 @@ class OrreryRepo(
                 transcripts.addAll(0, spokenForRetry)
             }
         }
+        // Whether the row this pass read is still the pipe: not turned
+        // off, and its key not replaced, while the pass ran.
+        suspend fun stillOurs() = db.orreryAccounts().get(s)?.token == token
         try {
             // Inside the try, so a pass cancelled while it waits for the
             // lock still clears [_pushing]. Outside it, the flag stayed
@@ -870,7 +878,12 @@ class OrreryRepo(
             // quiet until the process restarted.
             passLock.lock()
             locked = true
+            // Under the lock: a key replaced while another pass still
+            // sent with the old one got that pass a 403, which turned the
+            // pipe off and deleted the row holding the new key.
+            db.orreryAccounts().get(s)?.let { ensureScope(s, it) }
             val row = db.orreryAccounts().get(s) ?: return
+            token = row.token
             val nowMs = now()
             var facts = Facts()
             // Claims the owner confirmed in the tray. They wait in the
@@ -953,6 +966,12 @@ class OrreryRepo(
             }.onFailure { Log.i(TAG, "mail skipped: ${it.message}") }
             val triaged = triage(a, row, posts, spoken, s, nowMs, url, freshMail, known, view) { key, value -> remember(key, value) }
             facts += triaged.facts
+            // Calls the triage did not get to go back now; the rest go
+            // back only if the pass fails.
+            if (triaged.unread.isNotEmpty()) {
+                pendingLock.withLock { if (holding(s)) transcripts.addAll(0, triaged.unread) }
+                spokenForRetry = spoken.filter { it !in triaged.unread }
+            }
 
             val calApi = CalendarApi(http, url)
             // The whole listing, read once and shared: the vanished
@@ -1082,7 +1101,19 @@ class OrreryRepo(
             var refused = 0
             var firstReason: String? = null
             for (batch in batches(facts)) {
-                val answer = a.observe(batch, row.token)
+                // A batch the ship will not read at all is its items
+                // refused, as one refused item is: said, and passed over.
+                // Thrown, it ended the pass before the cursors moved, and
+                // the same batch went up and was refused on every pass.
+                val answer = try {
+                    a.observe(batch, row.token)
+                } catch (e: OrreryError.Refused) {
+                    if (e.status != 400 && e.status != 422) throw e
+                    refused += listOf("bodies", "observations").sumOf { (batch[it] as? kotlinx.serialization.json.JsonArray)?.size ?: 0 }
+                    if (firstReason == null) firstReason = e.reason
+                    Log.w(TAG, "batch refused: ${e.message}")
+                    continue
+                }
                 answer.refused.forEach {
                     refused++
                     if (firstReason == null) firstReason = it.error
@@ -1100,6 +1131,11 @@ class OrreryRepo(
                     .onSuccess { Log.i(TAG, "urgent pass: $it (${about.joinToString().ifBlank { "the owner" }})") }
                     .onFailure { Log.i(TAG, "urgent pass not asked for: ${it.message}") }
             }
+            // Turned off while this pass ran: nothing it did is written
+            // back. Its cursor write brought back the row turning off had
+            // just deleted, and the next launch turned the pipe on again
+            // with a revoked key.
+            if (!stillOurs()) return
             // Only once the ship has taken them: a pass that failed
             // halfway must be free to say the same things again.
             if (record.isNotEmpty()) sent.putAll(record)
@@ -1121,6 +1157,8 @@ class OrreryRepo(
                 .onFailure { Log.w(TAG, "brief not sent: ${it.message}") }.getOrDefault(emptyList())
             val heldBack = unfinished.minOfOrNull { it.last }?.let { it - 1 } ?: Long.MAX_VALUE
             messagesCursor = minOf(messagesCursor, triaged.postFloor).coerceAtLeast(row.messagesCursor)
+            if (!stillOurs()) return
+            faultsInARow = 0
             db.orreryAccounts().upsert(
                 row.copy(
                     messagesCursor = messagesCursor,
@@ -1130,38 +1168,49 @@ class OrreryRepo(
             )
             _lastPushMs.value = nowMs
             _error.value = if (refused == 0) null else "$refused refused: ${firstReason ?: "no reason given"}"
+        // What a failed pass does with what it carried: one rule. A key
+        // the ship refuses turns the pipe off. A batch it cannot read was
+        // passed over above. Anything else, a busy or updating ship, no
+        // answer, one cut off halfway, is tried again: the calls and
+        // transcripts go back on the queue and the claims stay in the
+        // table. Only a fault in this code three passes running drops the
+        // queues, so what it trips on cannot stop the pipe for good.
         } catch (e: OrreryError.Refused) {
+            _error.value = e.message
             if (e.status == 403) {
-                // The ship no longer takes this install's key: stop, and say so.
-                turnOff()
-                db.orreryAccounts().delete(s)
-                _error.value = "The ship no longer accepts this install's key. Turn the pipe on again to mint a new one."
+                // The ship no longer takes this install's key: stop, and
+                // say so. Unless the key has been replaced since.
+                if (stillOurs()) {
+                    turnOff()
+                    db.orreryAccounts().delete(s)
+                    _error.value = "The ship no longer accepts this install's key. Turn the pipe on again to mint a new one."
+                }
             } else {
-                // A busy ship's 500 is a pass lost, not what it carried:
-                // a call's words have no other copy. A 4xx is the ship
-                // refusing what was sent, and sent again it is refused
-                // again, first in every pass, and nothing behind it
-                // ever goes: those are dropped.
-                _error.value = e.message
-                if (e.status >= 500 || e.status == 408 || e.status == 429) requeue()
-                else confirmed.forEach { db.orreryNoticed().setState(it.id, "confirmed") }
+                requeue()
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
-            // Detached mid-pass: what was queued waits for the next one,
-            // on this ship; [requeue] drops it if the ship has changed.
+            // The loop restarted mid-pass: what it took waits for the
+            // next one. A detach or a ship switch drops it instead, since
+            // [requeue] keeps only this ship's.
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { requeue() }
             throw e
         } catch (e: Exception) {
             _error.value = e.message ?: e::class.simpleName
+            if (e is OrreryError || ++faultsInARow < MAX_FAULTS) {
+                requeue()
+            } else {
+                faultsInARow = 0
+                Log.w(TAG, "pass failed $MAX_FAULTS times running; the queued calls and transcripts are dropped", e)
+            }
             if (e !is OrreryError) Log.w(TAG, "pass failed", e)
-            // No answer is worth trying again. An answer the parsing did
-            // not expect, or a fault here, would fail the same way.
-            if (e is OrreryError.Unreachable) requeue()
         } finally {
             if (locked) passLock.unlock()
             _pushing.value = false
         }
     }
+
+    /** Passes in a row a fault in this code ended; see the failure rule in [push]. */
+    private var faultsInARow = 0
 
     /** The owner's zone as the last brief pass read it, for the loop's wake at seven. */
     private var briefZone: kotlinx.datetime.TimeZone? = null
@@ -1352,23 +1401,28 @@ class OrreryRepo(
         // own, which did not. ponytail: a computer that never returns
         // leaves them unread; a second cursor would need a column, and
         // the table is already on testers' phones.
-        if (io.nisfeb.talon.ui.isTouchPrimary && standDown?.on?.value == true) {
-            val yielded = runCatching { computerActive(a.clients(), nowMs) }.getOrDefault(false)
-            _yielding.value = yielded
-            if (yielded) {
-                // Marked read, since the computer reads them: with no
-                // record, the late walk read them all again here the
-                // moment the phone took the reading back.
-                posts.forEach { remember("msg:${it.whom}/${it.id}", "") }
-                return Triaged()
-            }
-        } else {
-            _yielding.value = false
+        val yielded = io.nisfeb.talon.ui.isTouchPrimary && standDown?.on?.value == true &&
+            runCatching { computerActive(a.clients(), nowMs) }.getOrDefault(false)
+        _yielding.value = yielded
+        if (yielded) {
+            // Marked read, since the computer reads them: with no
+            // record, the late walk read them all again here the
+            // moment the phone took the reading back.
+            posts.forEach { remember("msg:${it.whom}/${it.id}", "") }
+            // A call recorded here is this phone's alone: the computer
+            // never has its words, so the phone reads those itself.
+            if (spoken.isEmpty()) return Triaged()
         }
         // No state, no reading, and nothing read: both cursors stay where
-        // they were, so the next pass reads these. The defaults move them
-        // past everything, which is right only when the pass did read.
-        val r = reading(a, row, s, view) ?: return Triaged(postFloor = row.messagesCursor, mailFloor = row.mailCursor)
+        // they were, and the calls go back, so the next pass reads these.
+        // The defaults move the cursors past everything, which is right
+        // only when the pass did read.
+        val r = reading(a, row, s, view)
+            ?: return Triaged(postFloor = row.messagesCursor, mailFloor = row.mailCursor, unread = spoken)
+        // Yielding, the calls are all this phone reads.
+        val readPosts = if (yielded) emptyList() else posts
+        val readStatus = if (yielded) emptyList() else fresh
+        val readMail = if (yielded) emptyList() else freshMail
         r.remember = remember
         val allowed = db.orreryChannels().all().toSet()
         val ourNick = db.contacts().get(s)?.nickname
@@ -1376,14 +1430,14 @@ class OrreryRepo(
         // A message is read once. The ship answers "existing" for an
         // observation it already holds, but the model costs a second
         // every time and its answer is not guaranteed to be the same.
-        val handled = db.orrerySent().some(s, posts.map { "msg:${it.whom}/${it.id}" }).map { it.key }.toSet()
+        val handled = db.orrerySent().some(s, readPosts.map { "msg:${it.whom}/${it.id}" }).map { it.key }.toSet()
         // How far the cursors may move. A message the budget stopped
         // short of was marked read and the cursor went past it, so it
         // was never read by anything: the pass keeps the cursor behind
         // whatever it left, and the next one picks it up.
         var postFloor = Long.MAX_VALUE
         var mailFloor = Long.MAX_VALUE
-        for (m in posts) {
+        for (m in readPosts) {
             val key = "msg:${m.whom}/${m.id}"
             if (key in handled) continue
             if (r.modelRuns >= MODEL_PER_PASS) {
@@ -1405,7 +1459,14 @@ class OrreryRepo(
             up += triageText(r, s, nowMs, text, m.author, m.sentMs, m.whom, m.id, kind, "talon://chat/${m.whom}?id=${m.id}", before)
         }
         // A call's words, by speaker: each run of one voice is one message.
+        // Out of model runs, a call waits for a pass that has some, as a
+        // post does; it was read by the rules alone and gone.
+        val unread = mutableListOf<Pair<String, List<Spoken>>>()
         for ((address, lines) in spoken) {
+            if (r.model != null && r.modelRuns >= MODEL_PER_PASS) {
+                unread += address to lines
+                continue
+            }
             val said = mergeSpoken(lines)
             said.forEachIndexed { i, sp ->
                 val before = said.subList(maxOf(0, i - ModelExtractor.CONTEXT_MESSAGES), i).map { it.ship to it.text }
@@ -1414,7 +1475,7 @@ class OrreryRepo(
         }
         // A status line, read the way a message is read. Once per line:
         // the digest is of the words, so a line put back says nothing new.
-        for ((ship, line, at) in fresh.take(STATUS_PER_PASS)) {
+        for ((ship, line, at) in readStatus.take(STATUS_PER_PASS)) {
             remember("status:$ship", line.hashCode().toString(16))
             up += triageText(
                 r, s, nowMs, line, ship, at.coerceAtMost(nowMs), "contact:$ship", ship,
@@ -1426,9 +1487,9 @@ class OrreryRepo(
         // cursor may be held behind a thread this pass left, and without
         // a record the ones beside it would be read again every pass.
         val mailApi = AuspexApi(http, url)
-        val mailRead = db.orrerySent().some(s, freshMail.map { "mail:${it.id}" }).associate { it.key to it.value }
+        val mailRead = db.orrerySent().some(s, readMail.map { "mail:${it.id}" }).associate { it.key to it.value }
         var threads = 0
-        for (e in freshMail) {
+        for (e in readMail) {
             val key = "mail:${e.id}"
             if (mailRead[key] == e.last.toString()) continue
             if (threads >= MAIL_THREADS_PER_PASS || r.modelRuns >= MODEL_PER_PASS) {
@@ -1449,7 +1510,7 @@ class OrreryRepo(
             }
         }
         tally(s, r.day, nowMs)
-        return Triaged(up, postFloor, mailFloor, r.urgentAbout)
+        return Triaged(up, postFloor, mailFloor, r.urgentAbout, unread)
     }
 
     /**
@@ -1463,6 +1524,8 @@ class OrreryRepo(
         val mailFloor: Long = Long.MAX_VALUE,
         /** The bodies to ask the ship to look at now, or null for the usual wait. */
         val urgentAbout: List<String>? = null,
+        /** Calls this pass took and did not read, for the next one. */
+        val unread: List<Pair<String, List<Spoken>>> = emptyList(),
     )
 
     /**
@@ -1936,6 +1999,8 @@ class OrreryRepo(
         const val LATE_POSTS = 500
         /** How far back a post can have synced late and still be read. */
         const val LATE_WINDOW_MS = 2L * 24 * 60 * 60 * 1000
+        /** Passes a fault here may end in a row before the queues are dropped. */
+        const val MAX_FAULTS = 3
         /** What the ship calls open: the three statuses `?status=open` answers with. */
         val OPEN_STATUSES = setOf("proposed", "approved", "claimed")
 
@@ -1997,7 +2062,7 @@ class OrreryRepo(
 
         /**
          * The words of a call just transcribed, read on the next pass by
-         * speaker. Dropped when the pipe is off, like [note].
+         * speaker. Dropped when the pipe is off, like [noteCall].
          */
         fun noteTranscript(address: String, lines: List<Spoken>) {
             if (lines.isNotEmpty()) enqueue { transcripts += address to lines }
@@ -2006,7 +2071,9 @@ class OrreryRepo(
         /**
          * Hand something to the live repo for its next pass, asked for
          * at once. Nothing is queued while the pipe is off, since no pass
-         * would carry it; a pass that fails keeps it for the next one.
+         * would carry it. What a failed pass does with it is the failure
+         * rule in [push]; the queue is memory, and a process that ends
+         * takes it along.
          */
         private fun enqueue(add: OrreryRepo.() -> Unit) {
             val repo = current?.takeIf { it._enabled.value } ?: return

@@ -104,9 +104,11 @@ class PassKeepsTest {
     }
 
     // A claim confirmed in the tray waited in memory for the next pass:
-    // a process killed first lost it, after it had left the tray. And a
-    // failed pass put back whatever it carried, 4xx included, so a claim
-    // the ship refused went first in every pass after and wedged it.
+    // a process killed first lost it, after it had left the tray. A
+    // failed pass must keep it, whatever the failure, unless the ship
+    // could not read the batch at all: that batch is passed over, as a
+    // refused item is, and the pass finishes, or it would be refused
+    // again first in every pass after and nothing behind it would go.
     @Test
     fun `a confirmed claim waits in the table until the ship takes it, and a refusal ends it`() = runBlocking {
         val dir = createTempDirectory(prefix = "talon-pass-confirm-").toFile()
@@ -141,15 +143,65 @@ class PassKeepsTest {
                 },
             )
             suspend fun pass() = OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
+            suspend fun waiting() = db.orreryNoticed().confirming("~zod").map { it.id }
             pass()
             assertEquals(1, observed)
-            assertEquals(listOf("n1"), db.orreryNoticed().confirming("~zod").map { it.id }, "a busy ship's 503 leaves it waiting")
+            assertEquals(listOf("n1"), waiting(), "a busy ship's 503 leaves it waiting")
+            answer = 404
+            pass()
+            assertEquals(listOf("n1"), waiting(), "and so does a 404 from a desk mid-update: it is not the claim's fault")
+            assertEquals(0L, db.orreryAccounts().get("~zod")!!.calendarCursor, "no failed pass moves a cursor")
             answer = 400
             pass()
-            assertEquals(2, observed, "sent again on the next pass")
-            assertEquals(emptyList(), db.orreryNoticed().confirming("~zod"), "a 400 settles it")
+            assertEquals(3, observed, "sent again on each pass")
+            assertEquals(emptyList(), waiting(), "a 400 settles it")
+            assertTrue(db.orreryAccounts().get("~zod")!!.calendarCursor > 0, "and the pass finished, so nothing is stuck behind it")
             pass()
-            assertEquals(2, observed, "and a refused claim is not sent a third time")
+            assertEquals(3, observed, "and a refused claim is not sent again")
+        } finally {
+            scope.cancel()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
+
+    // Turning the pipe off does not wait for a pass already running. The
+    // pass then wrote its cursors back, which made the row again, and the
+    // next launch turned the pipe on with the key just revoked.
+    @Test
+    fun `a pass the owner turned the pipe off under writes nothing back`() = runBlocking {
+        val dir = createTempDirectory(prefix = "talon-pass-off-").toFile()
+        val db = db(dir)
+        val scope = CoroutineScope(SupervisorJob())
+        try {
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
+            db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
+            db.orreryNoticed().insertIfNew(
+                io.nisfeb.talon.data.OrreryNoticedEntity(
+                    id = "n1", ship = "~zod", subject = "person/rose", attr = "location", valueJson = "\"the shop\"", atMs = 1,
+                    untilMs = null, conf = 70, sourceKind = "talon-dm", sourceId = "talon://chat/~sampel-palnet?id=1", bodyJson = null,
+                    whom = "~sampel-palnet", postId = "1", snippet = "at the shop", state = OrreryRepo.CONFIRMING, createdMs = 1,
+                ),
+            )
+            val http = HttpClient(
+                MockEngine { req ->
+                    val url = req.url.toString()
+                    // The owner turns the pipe off while the facts go up.
+                    if ("/api/observe" in url) {
+                        db.orreryAccounts().delete("~zod")
+                        return@MockEngine respond("""{"bodies":[],"observations":[{"ok":true}]}""", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                    }
+                    val body = when {
+                        "/apps/orrery/api/state" in url -> state
+                        "/apps/calendar/window.json" in url -> """{"rows":[]}"""
+                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
+                        else -> "[]"
+                    }
+                    respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                },
+            )
+            OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
+            assertNull(db.orreryAccounts().get("~zod"), "the row turning off deleted stays deleted")
         } finally {
             scope.cancel()
             db.close()

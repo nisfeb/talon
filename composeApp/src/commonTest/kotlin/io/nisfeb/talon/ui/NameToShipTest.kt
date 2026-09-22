@@ -123,4 +123,14 @@ class NameToShipTest {
         }
         assertTrue(caught >= words.size - 2, "caught $caught of ${words.size}")
     }
+
+    // "rex" typed for a contact nicknamed Rex resolved to the galaxy
+    // ~rex, while the suggestions under the box offered the contact.
+    @Test
+    fun `a nickname beats a galaxy typed without its sig`() {
+        val rex: (String) -> String? = { if (it == planet) "Rex" else null }
+        assertEquals(planet, one(NameToShip.resolve("rex", known = listOf(planet), nicknameOf = rex)))
+        assertEquals("~rex", one(NameToShip.resolve("~rex", known = listOf(planet), nicknameOf = rex)), "the sig says the galaxy")
+        assertEquals("~rex", one(NameToShip.resolve("rex")), "and with nobody called Rex, it is the galaxy")
+    }
 }

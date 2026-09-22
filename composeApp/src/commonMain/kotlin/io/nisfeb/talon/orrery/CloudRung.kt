@@ -6,7 +6,7 @@ import io.nisfeb.talon.ai.triageInCloud
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiSettings
 import kotlinx.coroutines.flow.StateFlow
-import io.nisfeb.talon.ai.hasModelFor
+import io.nisfeb.talon.ai.modelProblem
 import io.nisfeb.talon.ai.AiFeature
 
 /**
@@ -34,11 +34,8 @@ class CloudRung(private val config: () -> AiSettings.Config) : Rung() {
     override val name: String get() = "${provider()?.label ?: "A cloud model"}, in the cloud"
     private val ai by lazy { AiClient { triage() } }
 
-    override suspend fun status(): RungStatus = when {
-        config().hasModelFor(AiFeature.OrreryTriage) -> RungStatus.Ready
-        provider() == null -> RungStatus.Unavailable("No model is set for reading messages under AI.")
-        else -> RungStatus.Unavailable("${provider()?.label} has no key. Add one under AI.")
-    }
+    override suspend fun status(): RungStatus =
+        config().modelProblem(AiFeature.OrreryTriage)?.let { RungStatus.Unavailable("$it See AI in Settings.") } ?: RungStatus.Ready
 
     override suspend fun open(): LocalModel = object : LocalModel {
         override val rung: String get() = name

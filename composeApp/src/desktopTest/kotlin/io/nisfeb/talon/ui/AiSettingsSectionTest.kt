@@ -38,7 +38,6 @@ import io.nisfeb.talon.ui.screens.minTopUp
 import io.nisfeb.talon.ui.screens.paymentLine
 import io.nisfeb.talon.ui.screens.planLine
 import io.nisfeb.talon.ui.screens.subscribeLabel
-import io.nisfeb.talon.ui.screens.without
 import io.nisfeb.talon.ui.screens.subscriptionLine
 import io.nisfeb.talon.ui.screens.topUpSizes
 import kotlinx.coroutines.CoroutineScope
@@ -472,25 +471,4 @@ class AiSettingsSectionTest {
         )
     }
 
-    // Taking out the provider triage read with sent it to the default
-    // model, which is usually a cloud one: every message the pipe reads
-    // went there with no word from the owner.
-    @Test
-    fun `removing triage's provider sends it to this device, not the default`() {
-        val p = AiProfile(
-            providers = listOf(
-                AiProvider("or", ProviderKind.OpenRouter, "OpenRouter", apiKey = "sk-or"),
-                AiProvider("lm", ProviderKind.OpenAiCompatible, "LM Studio", baseUrl = "http://127.0.0.1:1234/v1"),
-                AiProvider(io.nisfeb.talon.ai.DEVICE_PROVIDER, ProviderKind.ThisDevice, "On this device"),
-            ),
-            defaultModel = ModelRef("or", "m"),
-            features = mapOf(
-                AiFeature.OrreryTriage to io.nisfeb.talon.ai.FeatureSetting(true, ModelRef("lm", "")),
-                AiFeature.CatchUp to io.nisfeb.talon.ai.FeatureSetting(true, ModelRef("lm", "")),
-            ),
-        )
-        val after = p.without("lm")
-        assertEquals(ProviderKind.ThisDevice, after.resolve(AiFeature.OrreryTriage)?.provider?.kind)
-        assertEquals("or", after.resolve(AiFeature.CatchUp)?.provider?.id, "the rest follow the default, as before")
-    }
 }

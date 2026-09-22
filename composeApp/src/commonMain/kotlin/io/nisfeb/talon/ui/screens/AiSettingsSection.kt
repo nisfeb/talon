@@ -49,7 +49,6 @@ import io.nisfeb.talon.ai.AiFeature
 import io.nisfeb.talon.ai.AiProfile
 import io.nisfeb.talon.ai.AiProvider
 import io.nisfeb.talon.ai.ARMILLARY_PROVIDER
-import io.nisfeb.talon.ai.DEVICE_PROVIDER
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.AiSpend
@@ -61,6 +60,7 @@ import io.nisfeb.talon.ai.ProfileInputs
 import io.nisfeb.talon.ai.ProviderKind
 import io.nisfeb.talon.ai.migrateProfile
 import io.nisfeb.talon.ai.shipBase
+import io.nisfeb.talon.ai.without
 import io.nisfeb.talon.armillary.Account
 import io.nisfeb.talon.armillary.ArmillaryAvailability
 import io.nisfeb.talon.armillary.ArmillaryRepo
@@ -246,24 +246,6 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?, arm
     // Until the owner flips it here, Jev is what this install had.
     JevRow(orrery, profile, profile.jev ?: decide.on, orreryHere, spend[AiSpend.JEV]) { on -> edit { it.copy(jev = on) } }
 }
-
-/**
- * The profile with provider [id] taken out. A feature on it follows the
- * default model after, except triage, which reads every message and
- * goes to this device: following the default moved it to whatever
- * cloud model that was, with no word from the owner.
- */
-internal fun AiProfile.without(id: String): AiProfile = copy(
-    providers = providers.filterNot { it.id == id },
-    defaultModel = defaultModel?.takeUnless { it.provider == id },
-    features = features.mapValues { (feature, f) ->
-        when {
-            f.model?.provider != id -> f
-            feature == AiFeature.OrreryTriage -> f.copy(model = ModelRef(DEVICE_PROVIDER, ""))
-            else -> f.copy(model = null)
-        }
-    },
-)
 
 
 @Composable

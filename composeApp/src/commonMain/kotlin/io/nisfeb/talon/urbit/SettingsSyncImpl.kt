@@ -182,6 +182,9 @@ class SettingsSyncImpl(
 
     @Volatile private var channel: UrbitChannel? = null
     @Volatile private var ui: io.nisfeb.talon.ui.UiSettings? = null
+    /** Where a push that an arriving entry calls for runs, off the event stream: the shell's scope. */
+    @Volatile private var pushScope: kotlinx.coroutines.CoroutineScope? = null
+    private var marksPush: kotlinx.coroutines.Job? = null
     // Bootstrap can beat the host's attachUiSettings call. Hold what
     // the ship said until there's somewhere to put it.
     @Volatile private var pendingUiPrefs: JsonObject? = null
@@ -246,6 +249,7 @@ class SettingsSyncImpl(
     ) {
         if (ui != null) return
         ui = settings
+        pushScope = scope
         // Drain anything bootstrap parked before we had a store.
         pendingUiPrefs?.let { parked ->
             pendingUiPrefs = null
@@ -1140,7 +1144,7 @@ class SettingsSyncImpl(
         )
     }
 
-    private suspend fun applyAiEntry(obj: JsonObject) {
+    private fun applyAiEntry(obj: JsonObject) {
         val current = aiSettings.state.value
         fun bool(key: String, default: Boolean) =
             obj[key].asText()?.toBooleanStrictOrNull() ?: default
@@ -1266,10 +1270,22 @@ class SettingsSyncImpl(
         // A peer that had not heard of a removal yet wrote its
         // credentials over the ones that carried it. Said again, once:
         // the peer takes the marks from this push, and this device's
-        // next apply of its own entry finds nothing missing.
+        // next apply of its own entry finds nothing missing. Off the
+        // event stream, which two pokes waiting on acks held up, and
+        // one at a time, since an older build's every write lacks them.
         val kept = aiSettings.state.value.revokedKeys
-        if (current.syncEnabled && obj.containsKey("provider") && io.nisfeb.talon.ai.mergedMarks(marks, kept) != marks) {
-            runCatching { pushAiSettings() }.onFailure { Log.w(TAG, "revoked keys push failed", it) }
+        if (current.syncEnabled && obj.containsKey("provider") && io.nisfeb.talon.ai.mergedMarks(marks, kept) != marks &&
+            marksPush?.isActive != true
+        ) {
+            marksPush = pushScope?.launch {
+                try {
+                    pushAiSettings()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "revoked keys push failed", e)
+                }
+            }
         }
         // applyRemote deliberately bypasses onStateChange (anti-pingpong),
         // which is also the only rearm-on-key-change hook — so a key or

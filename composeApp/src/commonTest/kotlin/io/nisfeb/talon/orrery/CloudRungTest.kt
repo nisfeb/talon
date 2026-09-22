@@ -21,4 +21,25 @@ class CloudRungTest {
         assertEquals(RungStatus.Ready, keyed.status())
         assertTrue("Anthropic" in keyed.name)
     }
+
+    // The status said "has no key" for every gap, so a server of your
+    // own with no address was told to add a key it did not need.
+    @Test
+    fun `it says what is missing`() = runTest {
+        fun triageOn(p: io.nisfeb.talon.ai.AiProvider, model: String = "qwen") = CloudRung {
+            AiSettings.Config(
+                AiSettings.Provider.Anthropic, "", null,
+                savedProfile = io.nisfeb.talon.ai.AiProfile(
+                    providers = listOf(p),
+                    features = mapOf(io.nisfeb.talon.ai.AiFeature.OrreryTriage to io.nisfeb.talon.ai.FeatureSetting(true, io.nisfeb.talon.ai.ModelRef(p.id, model))),
+                ),
+            )
+        }
+        suspend fun why(r: CloudRung) = (r.status() as RungStatus.Unavailable).reason
+        val lm = io.nisfeb.talon.ai.AiProvider("lm", io.nisfeb.talon.ai.ProviderKind.OpenAiCompatible, "LM Studio")
+        assertTrue("no address" in why(triageOn(lm)))
+        assertTrue("no model" in why(triageOn(lm.copy(baseUrl = "http://10.0.0.2:1234/v1"), model = "")))
+        assertTrue("no key" in why(triageOn(io.nisfeb.talon.ai.AiProvider("or", io.nisfeb.talon.ai.ProviderKind.OpenRouter, "OpenRouter"))))
+        assertEquals(RungStatus.Ready, triageOn(lm.copy(baseUrl = "http://10.0.0.2:1234/v1")).status())
+    }
 }

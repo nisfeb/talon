@@ -91,8 +91,14 @@ data class AiProfile(
         // Armillary and a server of your own have no default model: the
         // list is all there is, so a blank ref takes the first of it
         // rather than reaching the OpenAI-shaped client with no model.
+        // ponytail: "embed" in the id is how an embedding model is told
+        // from a chat one; LM Studio lists both, and says nothing else.
         val listOnly = p.kind == ProviderKind.Armillary || p.kind == ProviderKind.OpenAiCompatible
-        val model = if (ref.model.isBlank() && listOnly) p.models.firstOrNull()?.id.orEmpty() else ref.model
+        val model = if (ref.model.isBlank() && listOnly) {
+            p.models.firstOrNull { !it.speech && "embed" !in it.id.lowercase() }?.id.orEmpty()
+        } else {
+            ref.model
+        }
         return Resolved(p, model)
     }
 
@@ -105,6 +111,33 @@ data class AiProfile(
     fun jevProvider(): AiProvider? = providers.firstOrNull {
         it.kind == ProviderKind.OpenRouter && it.apiKey.isNotBlank() && (it.models.isEmpty() || it.offersJev)
     }
+}
+
+/** The features that read the owner's messages. */
+private val READS_MESSAGES = setOf(AiFeature.CatchUp, AiFeature.Assistant, AiFeature.OrreryTriage)
+
+/**
+ * The profile with provider [id] taken out. A feature on it follows
+ * the default model after, which is usually a cloud one. Not a feature
+ * that reads messages on a model of the owner's own: that goes to this
+ * device, and so does triage wherever it read, since it reads every
+ * message with no one asking. Following the default sent them to the
+ * cloud with no word from the owner.
+ */
+fun AiProfile.without(id: String): AiProfile {
+    val gone = provider(id)
+    return copy(
+        providers = providers.filterNot { it.id == id },
+        defaultModel = defaultModel?.takeUnless { it.provider == id },
+        features = features.mapValues { (feature, f) ->
+            val staysHere = feature == AiFeature.OrreryTriage || (gone?.isPrivate == true && feature in READS_MESSAGES)
+            when {
+                f.model?.provider != id -> f
+                staysHere -> f.copy(model = ModelRef(DEVICE_PROVIDER, ""))
+                else -> f.copy(model = null)
+            }
+        },
+    )
 }
 
 /** A feature's provider and model. */
@@ -360,10 +393,26 @@ fun AiProfile.keepingLocal(local: AiProfile?): AiProfile {
  * went on satisfying. With no profile saved yet it answers as the old
  * check did, a keyless server of the owner's own aside.
  */
-fun AiSettings.Config.hasModelFor(f: AiFeature): Boolean {
-    val p = profile().resolve(f)?.provider ?: return false
-    if (providerOf(p.kind) == null) return false
-    return p.apiKey.isNotBlank() || (p.kind == ProviderKind.OpenAiCompatible && !p.baseUrl.isNullOrBlank())
+fun AiSettings.Config.hasModelFor(f: AiFeature): Boolean = modelProblem(f) == null
+
+/**
+ * Why [f] has no model a chat client can call, as a sentence, or null
+ * when it has one. One answer for the gate and for the screens that
+ * say why: they disagreed, and a server with no address was told it
+ * lacked a key.
+ */
+fun AiSettings.Config.modelProblem(f: AiFeature): String? {
+    val r = profile().resolve(f) ?: return "No model is set."
+    val p = r.provider
+    return when {
+        providerOf(p.kind) == null -> "${p.label} runs no chat model."
+        p.kind == ProviderKind.OpenAiCompatible && p.baseUrl.isNullOrBlank() -> "${p.label} has no address."
+        p.kind != ProviderKind.OpenAiCompatible && p.apiKey.isBlank() -> "${p.label} has no key."
+        // A server of your own, or Armillary, before a model is picked
+        // or listed: every call failed with "requires a model name".
+        r.model.isBlank() && (p.kind == ProviderKind.OpenAiCompatible || p.kind == ProviderKind.Armillary) -> "${p.label} has no model chosen."
+        else -> null
+    }
 }
 
 /**
