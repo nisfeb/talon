@@ -153,4 +153,46 @@ class S3UploaderTest {
         // canonical URI used in signing or AWS rejects with 403.
         assertEquals("/talon-test/talon/space%20file.png", req.url.encodedPath)
     }
+
+    // An endpoint is not always a bare host. A ship serving Jars sits
+    // at https://ship/jars, and that prefix is in the URL the server
+    // reads: it signed /jars/default/<key> while we had signed
+    // /default/<key>, and answered 403 to every upload. Issue #17.
+    @Test
+    fun `an endpoint with a path of its own signs the path it sends`() = runBlocking {
+        val slot = arrayOfNulls<HttpRequestData>(1)
+        val url = S3Uploader.put(
+            http = captureClient(slot),
+            creds = creds.copy(endpoint = "https://my.ship/jars"),
+            config = S3Uploader.Configuration(bucket = "default", region = "us-east-1", publicUrlBase = null),
+            key = "talon/foo.png",
+            bytes = "hello".encodeToByteArray(),
+            contentType = "image/png",
+        )
+
+        val req = slot[0]
+        assertNotNull(req)
+        assertEquals("/jars/default/talon/foo.png", req.url.encodedPath)
+        // What is signed is read off the URL that is sent, so the two
+        // cannot drift; this is that same reading, from the outside.
+        assertEquals(
+            req.url.encodedPath,
+            S3Uploader.canonicalPathOf(req.url.toString()),
+            "the signed path is the sent path",
+        )
+        // The address handed back is under the prefix too, or the
+        // picture uploads and then cannot be fetched.
+        assertEquals("https://my.ship/jars/default/talon/foo.png", url)
+    }
+
+    @Test
+    fun `a path is everything after the host, without the query`() {
+        assertEquals("/bucket/k.png", S3Uploader.canonicalPathOf("https://s3.example.com/bucket/k.png"))
+        assertEquals("/jars/default/k.png", S3Uploader.canonicalPathOf("https://my.ship/jars/default/k.png"))
+        assertEquals("/a/b/c/bucket/k.png", S3Uploader.canonicalPathOf("https://my.ship/a/b/c/bucket/k.png"))
+        assertEquals("/bucket/k.png", S3Uploader.canonicalPathOf("https://s3.example.com/bucket/k.png?X-Amz-Date=x"))
+        assertEquals("/bucket/sp%20ace.png", S3Uploader.canonicalPathOf("https://s3.example.com/bucket/sp%20ace.png"))
+        // A host with nothing after it has no path, which is a slash.
+        assertEquals("/", S3Uploader.canonicalPathOf("https://s3.example.com"))
+    }
 }
