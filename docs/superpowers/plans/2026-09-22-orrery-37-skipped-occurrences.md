@@ -13,10 +13,12 @@ tonight" is about one occurrence. Talon wrote `status: cancelled` on
 then read the series as dead.
 
 Until 37 there is nowhere for the smaller fact to go, so the reader
-drops it: `ModelExtractor` writes no activity `status` but `active`.
-That is the fix already shipped, and it is deliberately broader than
-the bug — a series genuinely ending is dropped too, because no reader
-can tell the two apart from the message alone.
+drops it. `ModelExtractor` writes `cancelled` on an activity only when
+the message plainly ends the series — "over for the season", "the last
+practice", "no more" — and otherwise writes nothing. The series is
+ended by the owner's words, never by the model's reading of them: an
+activity wrongly retired takes every future occurrence with it and
+nobody is told.
 
 ## What 37 adds
 
@@ -51,8 +53,9 @@ filter.
 ## When it lands
 
 1. Re-read rules 3 and 14 for the wording.
-2. Teach the extractor `skipped` on activities, and let a genuine
-   series end write `status: cancelled` again once the occurrence case
-   has somewhere else to go.
+2. Teach the extractor `skipped` on activities. The series-ending
+   phrase list stops being the only way through once one occurrence
+   has its own field, though the guard on `status` should stay: it is
+   the thing that keeps a bad reading from retiring a live activity.
 3. `next` filtered by `skipped` in the brief and every other reader.
 4. The `cancel` mode proposal from the calendar pipe.

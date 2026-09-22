@@ -7,6 +7,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 /**
  * The parse is the contract every rung is held to. A model that answers
@@ -131,8 +132,17 @@ class ModelExtractorTest {
             {"subject":"activity/pirates-practice","attr":"status","value":"cancelled","conf":90},
             {"subject":"activity/pirates-practice","attr":"location","value":"the rink","conf":90}
         ]}"""
-        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me)
+        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me, null, emptyMap(), "pirates practice is cancelled tonight, see you at the rink next week")
         assertEquals(listOf("location"), out.map { it.attr }, "the series is still running")
+    }
+
+    // Said of the series, though, it is the series that is meant.
+    @Test
+    fun `a season ending ends the series`() {
+        val here = NameIndex(listOf(KnownBody("activity/pirates-practice", "Pirates practice", emptyList(), null)))
+        val answer = """{"claims":[{"subject":"activity/pirates-practice","attr":"status","value":"cancelled","conf":90}]}"""
+        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me, null, emptyMap(), "that was the last practice, we're done for the season")
+        assertEquals(listOf("cancelled"), out.map { it.value.jsonPrimitive.content })
     }
 
     @Test
@@ -141,6 +151,25 @@ class ModelExtractorTest {
         val answer = """{"claims":[{"subject":"activity/pirates-practice","attr":"status","value":"active","conf":90}]}"""
         val out = ModelExtractor.parse(answer, here, "~bus", 1L, me)
         assertEquals(listOf("active"), out.map { it.value.jsonPrimitive.content })
+    }
+
+    @Test
+    fun `what ends a series and what does not`() {
+        listOf(
+            "practice is over for the season",
+            "we're ending the series",
+            "no more practice after this",
+            "that was the last practice",
+            "the team disbanded",
+            "cancelled permanently",
+        ).forEach { assertTrue(ModelExtractor.endsTheSeries(it), it) }
+        listOf(
+            "practice is cancelled tonight",
+            "no practice this week",
+            "cancelled, the rink is flooded",
+            "skipping tomorrow",
+            "cancelled until further notice",
+        ).forEach { assertFalse(ModelExtractor.endsTheSeries(it), it) }
     }
 
     @Test

@@ -256,13 +256,14 @@ object ModelExtractor {
             // An activity's status is the whole series: cancelled says
             // it has stopped for good. "Practice is cancelled tonight"
             // is one occurrence, and writing that as the series ending
-            // told the ship the activity was dead. There is no field
-            // for a single occurrence until orrery 37's `skipped`, so
-            // the reading is dropped rather than written as something
-            // it does not say.
-            if (attr == "status" && subject.startsWith("activity/") &&
-                (value as? JsonPrimitive)?.content?.lowercase() != "active"
-            ) continue
+            // told the ship the activity was dead. One occurrence has
+            // nowhere to go until orrery 37's `skipped`, so it is
+            // dropped — but a message that plainly ends the series
+            // still ends it.
+            if (attr == "status" && subject.startsWith("activity/")) {
+                val said = (value as? JsonPrimitive)?.content?.lowercase()
+                if (said != "active" && !(said == "cancelled" && text != null && endsTheSeries(text))) continue
+            }
             // A value has to come from the words, or it came from the
             // model's memory: the string itself, or the named body's name
             // or an alias, must be in the message. A status is the one
@@ -281,6 +282,35 @@ object ModelExtractor {
         }
         return out.distinctBy { it.subject to it.attr }
     }
+
+    /**
+     * Whether [text] ends the series rather than one of its meetings.
+     *
+     * "Practice is cancelled tonight" and "practice is over for the
+     * season" both reach the model as a cancellation, and only the
+     * second one may retire the activity. So the series is ended by
+     * the words, not by the reading of them: something in the message
+     * has to say it is not coming back. Anything short of that leaves
+     * the activity running, because an activity wrongly retired takes
+     * every future occurrence with it and nobody is told.
+     */
+    internal fun endsTheSeries(text: String): Boolean {
+        val t = text.lowercase()
+        return ENDINGS.any { it in t }
+    }
+
+    /** Said of a series, never of one evening. Kept deliberately short:
+     *  a phrase earns its place by being unsayable about tonight. */
+    private val ENDINGS = listOf(
+        "for the season", "for this season", "rest of the season", "season is over",
+        "for the year", "rest of the year", "for the summer", "for the winter",
+        "for good", "permanently", "for ever", "forever", "no more",
+        "end the series", "ending the series", "series is over", "series is done",
+        "last practice", "last session", "last meeting", "last class", "last one",
+        "wound up", "winding up", "winding down", "shutting down", "shut down",
+        "disbanded", "disbanding", "not coming back", "done for the season",
+        "no longer running", "stopped running", "called it off for",
+    )
 
     /** Whether a paraphrase could be of this text: one word of [min] letters or more in common. */
     private fun sharesAWord(value: JsonElement, text: String, min: Int = 4): Boolean {
