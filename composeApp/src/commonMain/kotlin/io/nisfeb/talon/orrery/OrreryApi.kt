@@ -342,7 +342,8 @@ class OrreryApi(
      * actually holds, with the same tap as before.
      */
     suspend fun refine(token: String?, id: String, text: String): Refined {
-        val body = buildJsonObject { put("text", clipBytes(text.trim(), 500)) }
+        // The ship takes up to 2000 bytes here, not the 500 of a note.
+        val body = buildJsonObject { put("text", clipBytes(text.trim(), 2000)) }
         // A refusal is an answer the owner reads, not a failure of the
         // call: 409 for an action that has moved or a kind the ship
         // does not refine, 404 for one this key cannot see, 403 for a
@@ -380,6 +381,20 @@ class OrreryApi(
         } else {
             request(owner, HttpMethod.Post, "/api/actions/$id", body.toString())
         }
+    }
+
+    /**
+     * Whether action [id] shows [status] yet. The ship answers a change,
+     * and a new action's id, before its writer applies them, so what
+     * follows at once can still see the action as it was: read back a
+     * few times, as a claim is.
+     */
+    suspend fun landed(token: String, id: String, status: String): Boolean {
+        repeat(CLAIM_READS) { n ->
+            if (n > 0) kotlinx.coroutines.delay(CLAIM_PAUSE_MS)
+            if (actions(token, status).any { it.id == id }) return true
+        }
+        return false
     }
 
     /**

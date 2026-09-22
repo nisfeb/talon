@@ -288,9 +288,11 @@ class ModelHttpError(val status: Int, message: String) : IllegalStateException(m
 
 /**
  * No answer from a model that another try may get: the network, out of
- * credit, rate limited, the provider's own fault. Anything else, a
- * prompt too long, a reply that cannot be read, is about the input, and
- * asking again gets the same.
+ * credit, rate limited, a key revoked or a model unloaded, the
+ * provider's own fault. Only a request the provider calls bad, 400, 413
+ * or 422, or a reply that cannot be read, is about the input, and
+ * asking again gets the same. A key or a model gone was read as the
+ * input's fault, and every message was marked read unread.
  */
 fun isModelUnavailable(e: Throwable): Boolean = io.nisfeb.talon.util.isTransientNetworkError(e) ||
-    (e is ModelHttpError && (e.status == 402 || e.status == 408 || e.status == 429 || e.status >= 500))
+    (e is ModelHttpError && e.status != 400 && e.status != 413 && e.status != 422)

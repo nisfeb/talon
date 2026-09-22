@@ -487,8 +487,10 @@ class OrreryRepo(
                     push()
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
-                } catch (e: Exception) {
-                    Log.w(TAG, "pass failed before it began", e)
+                } catch (e: Throwable) {
+                    // Throwable: an Error from a local model's runtime
+                    // ended the loop here, and nothing said so.
+                    Log.w(TAG, "pass failed", e)
                     _error.value = e.message ?: e::class.simpleName
                 }
                 // Wake for seven in the owner's zone, so the brief is not
@@ -707,53 +709,89 @@ class OrreryRepo(
         val facts = Brief.replyFacts(answer, known, view.attrs, resolved, reply.id, at)
         val moves = Brief.movesOf(answer, tags, known)
         val asked = Brief.replyActions(answer, state["schema"] as? JsonObject, known) { Log.i(TAG, "reply ${reply.id}: dropped $it") }
-        for (d in moves) move(a, token, byId[d.actionId] ?: continue, d)
+        for (d in moves) move(a, token, byId[d.actionId] ?: continue, d, known)
         for (body in asked) {
             runCatching { a.act(body, token) }.onFailure { Log.i(TAG, "reply ${reply.id}: an action was refused: ${it.message}") }
         }
-        // Halved like a pass's: one refused fact threw here, the reply
-        // was never marked handled, and the frontier model was asked
-        // about it again on every pass after.
         for (batch in batches(facts)) {
-            observeSplitting(a, batch, token).forEach { Log.w(TAG, "reply ${reply.id}: refused $it") }
+            a.observe(batch, token).refused.forEach { Log.w(TAG, "reply ${reply.id}: refused ${it.error}") }
         }
         Log.i(TAG, "reply ${reply.id}: ${moves.size} moves, ${asked.size} actions, ${facts.observations.size} facts")
     }
 
-    /** One move from a reply: a new due or subject replaces the action, then the status moves. */
-    internal suspend fun move(a: OrreryApi, token: String, old: OrreryAction, d: Brief.Direction) {
+    /**
+     * One move from a reply: a new due or subject replaces the action,
+     * then the status moves. [known] is every body the ship has, which a
+     * replacement's subjects are held to.
+     */
+    internal suspend fun move(a: OrreryApi, token: String, old: OrreryAction, d: Brief.Direction, known: Set<String> = emptySet()) {
+        // Only an action still open. One the owner has done or dismissed
+        // since the brief named it is settled, and a move made it again.
+        if (old.status !in OPEN_STATUSES) return
         // The owner's reason, or none: a note on a dismissal is read by the
         // generator as the owner's taste, so Talon never writes its own.
         val note = d.reason.orEmpty()
         var id = old.id
         var status = old.status
         if (d.dueMs != null || d.about != null) {
-            // The old one dismissed first. The ship answers a proposal that
-            // has an open twin, the same kind and title, with that twin, so
-            // a replacement made first came back as the old action, which
-            // was then dismissed: every move of a due lost the action.
-            // Replaced, not refused: no reason, since the owner gave none
-            // and still wants the thing.
+            // The old one dismissed first, and seen dismissed. The ship
+            // answers a proposal that has an open twin, the same kind and
+            // title, with that twin, and answers a change before its
+            // writer applies it: made at once, the replacement came back
+            // as the old action. Replaced, not refused: no reason, since
+            // the owner gave none and still wants the thing.
             runCatching { a.transition(token, old.id, "dismissed", "") }
-                .onFailure { Log.i(TAG, "${old.id} not dismissed: ${it.message}") }
-            val made = try {
-                a.act(Brief.replacement(old, d.dueMs, d.about), token)
-            } catch (e: OrreryError.Refused) {
-                if (e.status != 400 && e.status != 422) throw e
-                // Refused, the old one is put back as it was, rather than
-                // the owner left with neither; the status still moves.
-                Log.i(TAG, "${old.id} not replaced: ${e.message}")
-                runCatching { a.act(Brief.replacement(old, null, null), token) }
-                    .onFailure { Log.w(TAG, "${old.id} could not be put back: ${it.message}") }
-                    .getOrNull() ?: return
-            }
+                .onFailure { Log.i(TAG, "${old.id} not dismissed, so not moved: ${it.message}"); return }
+            a.landed(token, old.id, "dismissed")
+            // Its subjects held to bodies the ship still has: one since
+            // merged away got the replacement refused.
+            val held = if (known.isEmpty()) old else old.copy(about = old.about.filter { it in known })
+            val made = propose(a, token, Brief.replacement(held, d.dueMs, d.about), old.id)
+                // Not taken: the old one put back as it was, rather than
+                // the owner left with neither.
+                ?: propose(a, token, Brief.replacement(held, null, null), old.id)
+                ?: run {
+                    Log.w(TAG, "${old.id} was dismissed and could be neither replaced nor put back")
+                    return
+                }
             id = made.first
             status = made.second
+            // The new one is stored after its id is answered, too: a status
+            // moved at once found no action there.
+            a.landed(token, id, status)
         }
-        for (step in Brief.steps(status, d.status ?: return)) {
+        // A replacement starts as a proposal; one the owner had approved
+        // is approved again unless the reply says otherwise.
+        val want = d.status ?: (if (id != old.id && old.status != "proposed") "approved" else return)
+        for (step in Brief.steps(status, want)) {
             runCatching { a.transition(token, id, step, note) }
                 .onFailure { Log.i(TAG, "$id not moved to $step: ${it.message}") }
         }
+    }
+
+    /**
+     * A proposal made, and not answered with the action it replaces
+     * ([instead]), which the ship does while that one still reads open.
+     * Asked again a few times for that, and for no answer; null where
+     * the ship refused it, or never let the old one go.
+     */
+    private suspend fun propose(a: OrreryApi, token: String, body: JsonObject, instead: String): Pair<String, String>? {
+        for (n in 0 until 3) {
+            if (n > 0) delay(1_000)
+            val made = try {
+                a.act(body, token)
+            } catch (e: OrreryError.Refused) {
+                if (e.status < 500) {
+                    Log.i(TAG, "a proposal was refused: ${e.message}")
+                    return null
+                }
+                continue
+            } catch (e: OrreryError.Unreachable) {
+                continue
+            }
+            if (made.first != instead) return made
+        }
+        return null
     }
 
     /**
@@ -1060,12 +1098,10 @@ class OrreryRepo(
             val triaged = triage(a, row, posts, spoken, s, nowMs, url, freshMail, known, view) { key, value -> remember(key, value) }
             facts += triaged.facts
             ran = triaged.ran
-            // Calls the triage did not get to go back now; the rest go
-            // back only if the pass fails.
-            if (triaged.unread.isNotEmpty()) {
-                putBack(emptyList(), triaged.unread)
-                spokenForRetry = spoken.filter { h -> triaged.unread.none { it.lines === h.lines } }
-            }
+            // Calls the triage did not finish go back once the pass has put
+            // what it read of them on the ship, from where it stopped. A
+            // pass that fails puts every call back from where it began:
+            // resumed at once, the turns it had read were lost with it.
 
             val calApi = CalendarApi(http, url)
             // The whole listing, read once and shared: the vanished
@@ -1182,23 +1218,28 @@ class OrreryRepo(
                 }
             }.onFailure { Log.i(TAG, "calendar skipped: ${it.message}") }
 
-            // Only what the ship's schema lists for a kind it keeps: a row
-            // on an attribute the owner has not named sits outside their
-            // vocabulary, and the ship's readers never see it.
+            // Only what the key's schema lists: a row on an attribute the
+            // owner has not named sits outside their vocabulary, and one on
+            // a kind the key may not see got the whole batch refused with
+            // a 403, which read as the key revoked and turned the pipe off.
             view.attrs.takeIf { it.isNotEmpty() }?.let { attrs ->
-                val (listed, not) = facts.observations.partition { o -> attrs[o.subject.substringBefore('/')]?.contains(o.attr) != false }
-                if (not.isNotEmpty()) {
-                    Log.i(TAG, "${not.size} rows not written, the schema lacks " + not.map { "${it.subject.substringBefore('/')}.${it.attr}" }.distinct().joinToString())
-                    facts = facts.copy(observations = listed)
+                val (listed, not) = facts.observations.partition { o -> attrs[o.subject.substringBefore('/')]?.contains(o.attr) == true }
+                val (seen, unseen) = facts.bodies.partition { b -> b.id.substringBefore('/') in attrs }
+                if (not.isNotEmpty() || unseen.isNotEmpty()) {
+                    Log.i(TAG, "${not.size + unseen.size} not written, outside the key's schema: " +
+                        (not.map { "${it.subject.substringBefore('/')}.${it.attr}" } + unseen.map { it.id.substringBefore('/') }).distinct().joinToString())
+                    facts = facts.copy(observations = listed, bodies = seen)
                 }
             }
             var refused = 0
             var firstReason: String? = null
+            // The ship answers a bad item in its 200, beside the good ones:
+            // a 400 is a batch it cannot read at all, which fails the pass.
             for (batch in batches(facts)) {
-                for (why in observeSplitting(a, batch, row.token)) {
+                a.observe(batch, row.token).refused.forEach {
                     refused++
-                    if (firstReason == null) firstReason = why
-                    Log.w(TAG, "refused: $why")
+                    if (firstReason == null) firstReason = it.error
+                    Log.w(TAG, "refused: ${it.error}")
                 }
             }
             // Rule 16: once the facts are on the ship, and only then,
@@ -1255,10 +1296,11 @@ class OrreryRepo(
             )
             if (!rowLock.withLock { stillOurs().also { if (it) db.orreryAccounts().upsert(cursors) } }) return
             failuresInARow = 0
+            if (triaged.unread.isNotEmpty()) putBack(emptyList(), triaged.unread)
             _lastPushMs.value = nowMs
             _error.value = listOfNotNull(
                 "$refused refused: ${firstReason ?: "no reason given"}".takeIf { refused > 0 },
-                "The model did not answer. What it would have read waits for it.".takeIf { triaged.modelDown },
+                "The model did not answer: ${triaged.modelDownWhy ?: "no reason given"}. What it would have read waits for it.".takeIf { triaged.modelDown },
             ).joinToString(" ").ifEmpty { null }
         // What a failed pass does with what it carried: one rule. A key
         // the ship refuses turns the pipe off. Anything else, a busy or
@@ -1272,7 +1314,10 @@ class OrreryRepo(
         // holds what it would have read and is not a failure either.
         } catch (e: OrreryError.Refused) {
             _error.value = e.message
-            if (e.status == 403) {
+            // Only "forbidden" is the key refused. The ship answers 403
+            // too for a batch reaching past the key's scope, and for a
+            // read-only key, neither of which is the key gone.
+            if (e.status == 403 && e.reason == "forbidden") {
                 // Deleted before anything is cancelled: turning off cancels
                 // the loop this pass may run in, and a delete after that
                 // never ran, so the next launch turned the pipe on again
@@ -1288,7 +1333,7 @@ class OrreryRepo(
                     requeue()
                 }
             } else {
-                failuresInARow++
+                if (ran > 0 || costTheShip(e)) failuresInARow++
                 requeue()
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1300,11 +1345,7 @@ class OrreryRepo(
         } catch (e: Exception) {
             _error.value = e.message ?: e::class.simpleName
             if (e !is OrreryError) Log.w(TAG, "pass failed", e)
-            // No answer at all, the ship or the network down, cost the
-            // ship nothing and nothing to repeat: the usual ten minutes.
-            // An answer that was an error, or model runs thrown away, waits
-            // longer each time.
-            if (ran > 0 || !(e is OrreryError.Unreachable || io.nisfeb.talon.util.isTransientNetworkError(e))) failuresInARow++
+            if (ran > 0 || costTheShip(e)) failuresInARow++
             requeue()
         } finally {
             if (locked) passLock.unlock()
@@ -1314,6 +1355,22 @@ class OrreryRepo(
 
     /** A call's words on the queue, and the turn to read from: one the model stopped answering in resumes there. */
     private data class Heard(val address: String, val lines: List<Spoken>, val from: Int = 0)
+
+    /**
+     * Whether a failure could have cost the ship: an error it answered,
+     * or a wait it timed out on while its one thread was busy. A refused
+     * connection, or a proxy answering 502 or 503 with no ship behind
+     * it, cost it nothing, and waiting longer after those left the pipe
+     * idle for hours after a restart. The first waits longer each time;
+     * the second keeps the usual ten minutes.
+     */
+    private fun costTheShip(e: Throwable): Boolean = when (e) {
+        is OrreryError.Refused -> e.status != 502 && e.status != 503
+        is OrreryError.Unreachable -> generateSequence(e.cause) { it.cause }.take(5).any {
+            it is io.ktor.client.plugins.HttpRequestTimeoutException || it is io.ktor.client.network.sockets.SocketTimeoutException
+        }
+        else -> !io.nisfeb.talon.util.isTransientNetworkError(e)
+    }
 
     /** Passes in a row that failed; the loop waits longer after each ([backoff]). */
     private var failuresInARow = 0
@@ -1335,45 +1392,6 @@ class OrreryRepo(
         if (e is OrreryError || io.nisfeb.talon.util.isTransientNetworkError(e)) throw e
         Log.w(TAG, "$what skipped", e)
         null
-    }
-
-    /**
-     * One batch to the ship, and where it cannot read it, 400 or 422, its
-     * halves, down to the items it cannot read. What it refused, a reason
-     * per item. One bad fact used to cost its whole batch, two hundred
-     * facts recorded as sent and never sent again.
-     *
-     * Eight facts refused on their own before any part of the batch was
-     * taken is the ship refusing the batch, not items in it, say a field
-     * every fact carries that its version does not know. That is thrown,
-     * and the pass tried again later, rather than every item dropped
-     * after four hundred requests to the ship's one thread. Items that
-     * are bad among good ones are found however many there are.
-     * ponytail: eight bad facts first in a batch read as the batch; a
-     * probe of one fact from the far end, if that ever happens.
-     */
-    private suspend fun observeSplitting(a: OrreryApi, batch: JsonObject, token: String): List<String> {
-        fun items(b: JsonObject) = listOf("bodies", "observations")
-            .firstNotNullOfOrNull { k -> (b[k] as? kotlinx.serialization.json.JsonArray)?.takeIf { it.isNotEmpty() }?.let { k to it } }
-        var taken = 0
-        var refusedAlone = 0
-        suspend fun send(b: JsonObject): List<String> {
-            try {
-                return a.observe(b, token).refused.map { it.error ?: "no reason given" }.also { taken++ }
-            } catch (e: OrreryError.Refused) {
-                if (e.status != 400 && e.status != 422) throw e
-                val (key, list) = items(b) ?: return emptyList()
-                if (list.size == 1) {
-                    if (taken == 0 && ++refusedAlone >= 8) throw e
-                    return listOf(e.reason)
-                }
-                val half = list.size / 2
-                return listOf(list.subList(0, half), list.subList(half, list.size)).flatMap { part ->
-                    send(JsonObject(b + (key to kotlinx.serialization.json.JsonArray(part))))
-                }
-            }
-        }
-        return send(batch)
     }
 
     /** The owner's zone as the last brief pass read it, for the loop's wake at seven. */
@@ -1503,6 +1521,8 @@ class OrreryRepo(
          * as having said nothing, it was marked read and never read.
          */
         var modelDown: Boolean = false,
+        /** What the model's failure said: an empty balance says so, and the owner can top up. */
+        var modelDownWhy: String? = null,
     ) {
         /** Every body id the pass can see: what a payload's refs are checked against. */
         val known: Set<String> by lazy { bodies.mapTo(HashSet()) { it.id } }
@@ -1715,7 +1735,7 @@ class OrreryRepo(
             remember(key, e.last.toString())
         }
         tally(s, r.day, nowMs)
-        return Triaged(up, postFloor, mailFloor, r.urgentAbout, unread, ran = r.modelRuns, modelDown = r.modelDown)
+        return Triaged(up, postFloor, mailFloor, r.urgentAbout, unread, ran = r.modelRuns, modelDown = r.modelDown, modelDownWhy = r.modelDownWhy)
     }
 
     /**
@@ -1735,6 +1755,7 @@ class OrreryRepo(
         val ran: Int = 0,
         /** The model gave no answer, and what it would have read waits. */
         val modelDown: Boolean = false,
+        val modelDownWhy: String? = null,
     )
 
     /**
@@ -1908,7 +1929,7 @@ class OrreryRepo(
                     r.day = r.day.copy(picked = r.day.picked + 1, pickedBodies = r.day.pickedBodies + chosen.size, pickUsd = r.day.pickUsd + p.costUsd)
                     chosen
                 } else ranked
-                ModelExtractor.extract(model, r.index, seen, text, author, atMs, s, r.attrs, r.notes, context, onPlan = { plan = it }, onNoAnswer = { r.modelDown = true })
+                ModelExtractor.extract(model, r.index, seen, text, author, atMs, s, r.attrs, r.notes, context, onPlan = { plan = it }, onNoAnswer = { r.modelDown = true; r.modelDownWhy = it.message })
                     .also { r.day = r.day.copy(analystUsd = r.day.analystUsd + (model.lastCostUsd ?: 0.0)) }
             }
             byModel = if (dec != null && r.threshold != null && forTheGate(text)) {

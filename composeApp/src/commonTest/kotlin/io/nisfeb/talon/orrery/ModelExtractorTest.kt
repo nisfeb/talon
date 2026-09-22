@@ -280,7 +280,10 @@ class ModelExtractorTest {
         kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(429, "rate limited")))
         kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(402, "out of credit")))
         kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(503, "busy")))
+        kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(401, "key revoked")), "a key or a model gone is not the input's fault")
+        kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(404, "no such model")))
         kotlin.test.assertFalse(held(io.nisfeb.talon.ai.ModelHttpError(400, "context length exceeded")))
+        kotlin.test.assertFalse(held(io.nisfeb.talon.ai.ModelHttpError(413, "too large")))
         kotlin.test.assertFalse(held(IllegalStateException("input too long")))
     }
 }

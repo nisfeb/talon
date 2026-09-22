@@ -124,7 +124,7 @@ object ModelExtractor {
         onPlan: (Plan) -> Unit = {},
         zone: kotlinx.datetime.TimeZone = kotlinx.datetime.TimeZone.currentSystemDefault(),
         /** The model gave no answer another try may get ([io.nisfeb.talon.ai.isModelUnavailable]), which is not finding nothing. */
-        onNoAnswer: () -> Unit = {},
+        onNoAnswer: (Throwable) -> Unit = {},
     ): List<Noticed> {
         if (text.isBlank() || text.trimEnd().endsWith("?")) return emptyList()
         val authorId = index.authorId(author, ourShip)
@@ -133,12 +133,15 @@ object ModelExtractor {
             model.complete(SYSTEM, prompt, GRAMMAR, MAX_TOKENS)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // Throwable: a local runtime's out of memory or missing
+            // library is an Error, and past here nothing caught it, so
+            // the pipe's loop ended and nothing said so.
             io.nisfeb.talon.util.Log.w("ModelExtractor", "${model.rung} did not answer: ${e.message}", e)
             // Only an answer another try may get holds the reading. One
             // this input can never get, too long or unreadable, is the
             // input's, and holding it held everything behind it forever.
-            if (io.nisfeb.talon.ai.isModelUnavailable(e)) onNoAnswer()
+            if (io.nisfeb.talon.ai.isModelUnavailable(e)) onNoAnswer(e)
             return emptyList()
         }
         // Only the author and what the message names may be claimed about: a

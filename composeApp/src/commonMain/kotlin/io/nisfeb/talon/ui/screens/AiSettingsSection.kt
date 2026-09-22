@@ -1047,6 +1047,11 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
         if (io.nisfeb.talon.ui.isLocationSharingSupported) LocationRow()
     }
     (note ?: error)?.let { Quiet(it, error = true) }
+    // An empty balance holds every message the pipe would read, so it
+    // says how to fix that, as a chat's failed summary does.
+    if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(error)) {
+        TextButton(onClick = { AiSettings.pendingTopUp.value = true }) { Text("Top up") }
+    }
 }
 
 /**

@@ -134,6 +134,11 @@ class PassKeepsTest {
                     val url = req.url.toString()
                     if ("/api/observe" in url) {
                         observed++
+                        // As orrery answers one fact it will not take: in
+                        // its 200, not as a 400 for the batch.
+                        if (answer == 200) {
+                            return@MockEngine respond("""{"bodies":[],"observations":[{"ok":false,"error":"attr: unknown"}]}""", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                        }
                         return@MockEngine respond("no", io.ktor.http.HttpStatusCode.fromValue(answer))
                     }
                     val body = when {
@@ -154,10 +159,10 @@ class PassKeepsTest {
             pass()
             assertEquals(listOf("n1"), waiting(), "and so does a 404 from a desk mid-update: it is not the claim's fault")
             assertEquals(0L, db.orreryAccounts().get("~zod")!!.calendarCursor, "no failed pass moves a cursor")
-            answer = 400
+            answer = 200
             pass()
             assertEquals(3, observed, "sent again on each pass")
-            assertEquals(emptyList(), waiting(), "a 400 settles it")
+            assertEquals(emptyList(), waiting(), "the ship refusing it in its answer settles it")
             assertTrue(db.orreryAccounts().get("~zod")!!.calendarCursor > 0, "and the pass finished, so nothing is stuck behind it")
             pass()
             assertEquals(3, observed, "and a refused claim is not sent again")
@@ -218,9 +223,9 @@ class PassKeepsTest {
         whom = "~sampel-palnet", postId = id, snippet = "at the shop", state = OrreryRepo.CONFIRMING, createdMs = 1,
     )
 
-    // One bad fact cost its whole batch, up to two hundred facts recorded
-    // as sent and never sent. And a claim that could not be read threw on
-    // every pass, before anything moved.
+    // A claim that could not be read threw on every pass, before anything
+    // moved. And a bad fact costs that fact: the ship refuses it in its
+    // answer, beside the good ones.
     @Test
     fun `one bad item costs that item, not its batch or the pass`() = runBlocking {
         val dir = createTempDirectory(prefix = "talon-pass-split-").toFile()
@@ -236,12 +241,14 @@ class PassKeepsTest {
                 MockEngine { req ->
                     val url = req.url.toString()
                     if ("/api/observe" in url) {
+                        // As orrery answers: a bad item refused in the 200,
+                        // beside the good ones, never a 400 for the batch.
                         val said = (req.body as? TextContent)?.text.orEmpty()
-                        if ("poison" in said) return@MockEngine respond("unreadable", io.ktor.http.HttpStatusCode.BadRequest)
-                        val n = kotlinx.serialization.json.Json.parseToJsonElement(said).jsonObject["observations"]!!.jsonArray.size
-                        took += n
+                        val obs = kotlinx.serialization.json.Json.parseToJsonElement(said).jsonObject["observations"]!!.jsonArray
+                        val answers = obs.map { if ("poison" in it.toString()) """{"ok":false,"error":"attr: unknown"}""" else """{"ok":true}""" }
+                        took += answers.count { "true" in it }
                         return@MockEngine respond(
-                            """{"bodies":[],"observations":[${List(n) { """{"ok":true}""" }.joinToString(",")}]}""",
+                            """{"bodies":[],"observations":[${answers.joinToString(",")}]}""",
                             headers = headersOf(HttpHeaders.ContentType, "application/json"),
                         )
                     }
@@ -255,7 +262,7 @@ class PassKeepsTest {
                 },
             )
             OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
-            assertEquals(2, took, "the two good claims went up, split away from the one the ship could not read")
+            assertEquals(2, took, "the two good claims went up beside the one the ship refused")
             assertEquals(emptyList(), db.orreryNoticed().confirming("~zod"))
             assertEquals("unreadable", db.orreryNoticed().get("n4")?.state, "a claim that cannot be read is set aside")
             assertTrue(db.orreryAccounts().get("~zod")!!.calendarCursor > 0, "and the pass finished")
@@ -266,15 +273,16 @@ class PassKeepsTest {
         }
     }
 
-    // Halving without end, a batch the ship refused as a whole, a field
-    // every fact carries that its version does not know, cost 2n-1
-    // requests to its one thread and then dropped every item.
+    // A batch the ship cannot read at all is a batch problem, never one
+    // item: the pass fails and is tried again, and nothing is dropped.
+    // And a 403 for a batch past the key's scope is not the key refused.
     @Test
-    fun `a batch refused as a whole fails the pass rather than every item`() = runBlocking {
+    fun `a batch refused as a whole fails the pass rather than every item`() = runBlocking<Unit> {
         val dir = createTempDirectory(prefix = "talon-pass-whole-").toFile()
         val db = db(dir)
         val scope = CoroutineScope(SupervisorJob())
         var observes = 0
+        var scopeRefusal = false
         try {
             db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
             db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
@@ -284,6 +292,7 @@ class PassKeepsTest {
                     val url = req.url.toString()
                     if ("/api/observe" in url) {
                         observes++
+                        if (scopeRefusal) return@MockEngine respond("""{"error":"not in scope: activity","note":"not in scope: activity"}""", io.ktor.http.HttpStatusCode.Forbidden)
                         return@MockEngine respond("unknown field", io.ktor.http.HttpStatusCode.UnprocessableEntity)
                     }
                     val body = when {
@@ -296,9 +305,12 @@ class PassKeepsTest {
                 },
             )
             OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
-            assertTrue(observes < 40, "a bounded number of requests, not 127, and was $observes")
+            assertEquals(1, observes, "one request, not a hunt through the batch")
             assertEquals(64, db.orreryNoticed().confirming("~zod").size, "every claim still waits")
             assertEquals(0L, db.orreryAccounts().get("~zod")!!.calendarCursor, "and the pass did not finish")
+            scopeRefusal = true
+            OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
+            assertNotNull(db.orreryAccounts().get("~zod"), "a 403 for scope leaves the pipe on")
         } finally {
             scope.cancel()
             db.close()
@@ -322,7 +334,8 @@ class PassKeepsTest {
             val http = HttpClient(
                 MockEngine { req ->
                     val url = req.url.toString()
-                    if ("/api/observe" in url) return@MockEngine respond("revoked", io.ktor.http.HttpStatusCode.Forbidden)
+                    // What orrery answers a key it no longer takes.
+                    if ("/api/observe" in url) return@MockEngine respond("""{"error":"forbidden","note":"forbidden"}""", io.ktor.http.HttpStatusCode.Forbidden)
                     val body = when {
                         "/apps/orrery/api/state" in url -> state
                         "/apps/calendar/window.json" in url -> """{"rows":[]}"""
@@ -413,8 +426,11 @@ class PassKeepsTest {
     // every reply that moved a due lost the action.
     @Test
     fun `moving a due makes a new action and leaves no action lost`() = runBlocking<Unit> {
-        val statuses = mutableMapOf("a1" to "proposed")
+        val statuses = mutableMapOf("a1" to "approved")
         val dues = mutableMapOf("a1" to "2026-09-24T17:00:00Z")
+        // Orrery answers a status change before its writer applies it:
+        // here the change lands on the next read of the actions.
+        val landing = mutableMapOf<String, String>()
         var next = 2
         val http = HttpClient(
             MockEngine { req ->
@@ -435,20 +451,36 @@ class PassKeepsTest {
                     }
                     req.method == HttpMethod.Post && "/api/actions/" in url -> {
                         val id = url.substringAfter("/api/actions/").substringBefore('/').substringBefore('?')
-                        statuses[id] = o?.get("status")?.jsonPrimitive?.content ?: statuses.getValue(id)
-                        respond("""{"id":"$id","status":"${statuses[id]}"}""", headers = json)
+                        val want = o?.get("status")?.jsonPrimitive?.content ?: statuses.getValue(id)
+                        landing[id] = want
+                        respond("""{"id":"$id","status":"$want"}""", headers = json)
+                    }
+                    req.method == HttpMethod.Get && "/api/actions" in url -> {
+                        statuses.putAll(landing)
+                        landing.clear()
+                        val want = url.substringAfter("status=", "")
+                        respond(
+                            statuses.filter { it.value == want }.keys.joinToString(",", "[", "]") { id ->
+                                """{"id":"$id","kind":"task","title":"Call the shop","status":"${statuses[id]}"}"""
+                            },
+                            headers = json,
+                        )
                     }
                     else -> respond("[]", headers = json)
                 }
             },
         )
         val repo = OrreryRepo(http, CoroutineScope(SupervisorJob()), db(createTempDirectory(prefix = "talon-move-").toFile()), "test", bareClient = http)
-        val old = OrreryAction("a1", "task", "Call the shop", kotlinx.serialization.json.JsonObject(emptyMap()), emptyList(), dues.getValue("a1"), "proposed", "generator")
-        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", old, Brief.Direction("a1", status = "approved", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-25T17:00:00Z")))
+        val old = OrreryAction("a1", "task", "Call the shop", kotlinx.serialization.json.JsonObject(emptyMap()), emptyList(), dues.getValue("a1"), "approved", "generator")
+        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", old, Brief.Direction("a1", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-25T17:00:00Z")))
+        statuses.putAll(landing)
         assertEquals("dismissed", statuses["a1"], "the old one goes")
         val made = statuses.keys.single { it != "a1" }
-        assertEquals("approved", statuses[made], "a new one stands, and takes the status the owner gave")
+        assertEquals("approved", statuses[made], "a new one stands, approved again as the old one was")
         assertEquals("2026-09-25T17:00:00Z", dues[made])
+        // One the owner has settled since the brief named it is left be.
+        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", old.copy(status = "done"), Brief.Direction("a1", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-26T17:00:00Z")))
+        assertEquals(2, statuses.size, "nothing made again")
     }
 
     // Orrery 39 reads the owner's chats on the ship. With that on, Talon

@@ -111,7 +111,11 @@ internal class OpenAiShapeModel(private val http: HttpClient, private val server
                 timeout { requestTimeoutMillis = 180_000 }
             }
             val text = resp.bodyAsText()
-            if (resp.status.value == 400 && format < 2) { format++; continue }
+            // Down a format only when the refusal is about the format: a
+            // prompt over the context answers 400 too, and one long post
+            // took the schema off every request after it.
+            val aboutFormat = listOf("response_format", "json_schema", "json_object", "schema", "grammar").any { it in text.lowercase() }
+            if (resp.status.value == 400 && format < 2 && aboutFormat) { format++; continue }
             if (resp.status.value >= 400) throw io.nisfeb.talon.ai.ModelHttpError(resp.status.value, "${server.label} answered ${resp.status.value}: ${text.take(160)}")
             return Json.parseToJsonElement(text).jsonObject["choices"]!!.jsonArray[0].jsonObject["message"]!!.jsonObject["content"]!!.jsonPrimitive.content
         }
