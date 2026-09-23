@@ -119,3 +119,17 @@ class CometDomes(
 
 /** The signed-in ship's [CometDomes], or null before there is one. */
 val LocalCometDomes = staticCompositionLocalOf<CometDomes?> { null }
+
+/** "Groundwire comet" under a comet's name, where the ship's Jael says it is one. */
+@androidx.compose.runtime.Composable
+fun GroundwireLine(ship: String) {
+    val domes = LocalCometDomes.current
+    val registry = androidx.compose.runtime.produceState<String?>(null, ship, domes) { value = domes?.registry(ship) }.value
+    if (!registry.isNullOrEmpty()) {
+        androidx.compose.material3.Text(
+            "Groundwire comet",
+            style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
+        )
+    }
+}

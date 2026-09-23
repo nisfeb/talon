@@ -30,7 +30,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -99,16 +98,17 @@ fun ContactProfileSheet(
             // read somebody's name in full and take it away with you.
             val clipboard = LocalClipboardManager.current
             var copied by remember { mutableStateOf<String?>(null) }
-            fun copyRow(text: String): () -> Unit = {
+            fun copyRow(text: String, said: String = text): () -> Unit = {
                 clipboard.setText(AnnotatedString(text))
-                copied = text
+                copied = said
             }
             // A comet is its word name and nothing else, here as
             // everywhere. This is the long form of it -- every word,
             // not the two-word short name the rest of the app shows --
             // because telling two alike-looking comets apart is what
             // somebody opened this sheet to do. Its @p is not shown at
-            // all: it is the fifty-six characters the name replaces.
+            // unless asked for: it is the fifty-six characters the name
+            // replaces, and some places still want exactly those.
             //
             // Every other ship shows its @p, which is its real name and
             // short enough to read.
@@ -124,16 +124,23 @@ fun ContactProfileSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.clickable(onClick = copyRow(nym ?: ship)),
             )
-            // Asked of the ship once per comet, ever: see [CometDomes].
-            val domes = LocalCometDomes.current
-            val registry by produceState<String?>(null, ship, domes) { value = domes?.registry(ship) }
-            if (!registry.isNullOrEmpty()) {
-                Text(
-                    "Groundwire comet",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+            if (nym != null) {
+                var showPatp by remember(ship) { mutableStateOf(false) }
+                if (showPatp) {
+                    Text(
+                        ship,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.clickable(onClick = copyRow(ship, "the @p")),
+                    )
+                    TextButton(onClick = copyRow(ship, "the @p")) { Text("Copy @p") }
+                } else {
+                    TextButton(onClick = { showPatp = true }) { Text("Show @p") }
+                }
             }
+            // Asked of the ship once per comet, ever: see [CometDomes].
+            GroundwireLine(ship)
             copied?.let {
                 Text(
                     "Copied $it",
@@ -198,7 +205,7 @@ fun ContactProfileSheet(
                     ) {
                         Icon(Icons.Filled.Edit, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Edit profile")
+                        FitText("Edit profile")
                     }
                 } else {
                     Button(
@@ -207,7 +214,8 @@ fun ContactProfileSheet(
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Message")
+                        // Shrinks rather than wrapping beside Mail and Close.
+                        FitText("Message")
                     }
                     if (mailTo != null) {
                         OutlinedButton(
@@ -216,10 +224,10 @@ fun ContactProfileSheet(
                         ) {
                             Icon(Icons.Filled.MailOutline, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
-                            Text("Mail")
+                            FitText("Mail")
                         }
                     }
-                    OutlinedButton(onClick = onDismiss) { Text("Close") }
+                    OutlinedButton(onClick = onDismiss) { FitText("Close") }
                 }
             }
             Spacer(Modifier.height(12.dp))

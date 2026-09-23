@@ -1524,7 +1524,10 @@ private fun NotificationHealthPanel(
     val needsAppDetails = systemState.notificationsAllowed == false ||
         systemState.backgroundRestricted == true
     if (needsBatteryFix || needsAppDetails || needsFullScreenFix || systemState.callLogIsVoip) {
-        Row(
+        // Up to four fixes: on a phone they go on to a second line
+        // whole, not squeezed into labels that wrap.
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        androidx.compose.foundation.layout.FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(top = 4.dp),
         ) {
@@ -1750,7 +1753,8 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
         return
     }
 
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (deviceId.isBlank()) {
             TextButton(
                 enabled = !working,
@@ -1946,10 +1950,10 @@ private fun SystemPromptEditorDialog(
                         // Unchanged default → store "" so future default
                         // improvements still reach this user.
                         onSave(if (text.trim() == default.trim()) "" else text)
-                    }) { Text("Save") }
-                    OutlinedButton(onClick = { text = default }) { Text("Reset to default") }
+                    }) { io.nisfeb.talon.ui.FitText("Save") }
+                    OutlinedButton(onClick = { text = default }) { io.nisfeb.talon.ui.FitText("Reset to default") }
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    TextButton(onClick = onDismiss) { io.nisfeb.talon.ui.FitText("Cancel") }
                 }
             }
         }

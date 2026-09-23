@@ -122,7 +122,7 @@ fun OrreryActionDialog(
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (proposed && action.kind in REFINABLE) {
                             TextButton(onClick = { saying = if (saying == Saying.REFINE) Saying.NOTHING else Saying.REFINE }) {
-                                Text("Say what it should be")
+                                io.nisfeb.talon.ui.FitText("Say what it should be")
                             }
                         }
                         TextButton(onClick = { saying = if (saying == Saying.DISMISS) Saying.NOTHING else Saying.DISMISS }) {

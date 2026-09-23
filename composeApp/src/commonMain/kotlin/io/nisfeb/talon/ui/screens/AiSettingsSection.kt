@@ -520,7 +520,9 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     note?.let { (text, bad) -> Quiet(text, error = bad) }
 
     val subscription = plans.firstOrNull { it.kind == "subscription" }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    // As many as five: on a phone the rest go on to a second line whole.
+    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         // Buying is the one part of this card that a store may refuse to
         // carry. The balance, the warning, the history and the vendor
         // stand without it; see isArmillaryPurchaseSupported.

@@ -188,10 +188,24 @@ fun ProfileEditScreen(
                 enabled = !uploading,
             ) { Text("Change photo") }
 
+            // A comet is its word name everywhere else, so it is here
+            // too, whole, above the @p it stands for.
+            io.nisfeb.talon.ui.Mnemonym.forShip(ourPatp)?.let { nym ->
+                Text(nym, style = MaterialTheme.typography.bodyMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+            io.nisfeb.talon.ui.GroundwireLine(ourPatp)
+            // Tap to copy: a comet's @p is fifty-six characters nobody
+            // types, and some places still want it.
+            var patpCopied by remember(ourPatp) { mutableStateOf(false) }
             Text(
-                ourPatp,
+                if (patpCopied) "Copied $ourPatp" else ourPatp,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (patpCopied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.clickable {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(ourPatp))
+                    patpCopied = true
+                },
             )
 
             OutlinedTextField(
