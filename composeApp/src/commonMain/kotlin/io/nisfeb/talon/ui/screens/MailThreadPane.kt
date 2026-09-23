@@ -200,11 +200,6 @@ fun MailThreadPane(
                 ?: repo.error.value ?: "Could not file it."
         }
     }
-    fun fileMessage(m: io.nisfeb.talon.mail.MailMessage) = file(
-        title = m.subject.ifBlank { "Mail" },
-        seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, m.id),
-        gemtext = io.nisfeb.talon.mail.MailGemtext.message(m, nameFor, ::whenAt),
-    )
 
     Column(modifier.fillMaxSize()) {
         MailThreadHeader(
@@ -311,7 +306,6 @@ fun MailThreadPane(
                                 hidden = 0,
                                 copies = copies[shown.id] ?: 1,
                                 nameFor = nameFor,
-                                onFile = { fileMessage(shown) },
                                 repo = repo,
                                 imagesShown = imagesShown,
                                 onShowImages = { imagesShown = true },
@@ -345,7 +339,6 @@ fun MailThreadPane(
                             selectable = node.message.verdict != Verdict.FORGED,
                             nameFor = nameFor,
                             onSelect = { selected = node.message.id },
-                            onFile = { fileMessage(node.message) },
                             repo = repo,
                             imagesShown = imagesShown,
                             onShowImages = { imagesShown = true },
@@ -569,7 +562,6 @@ private fun MailMessageCard(
     selected: Boolean = false,
     selectable: Boolean = false,
     onSelect: () -> Unit = {},
-    onFile: () -> Unit,
     repo: MailRepo,
     /** Whether remote images may load. False shows the affordance
      *  instead; true only after the reader asked, per thread. */
@@ -655,7 +647,6 @@ private fun MailMessageCard(
                     Icon(TalonIcons.Forward, contentDescription = "Forward", modifier = Modifier.size(18.dp))
                 }
             }
-            TextButton(onClick = onFile) { Text("File", style = MaterialTheme.typography.labelSmall) }
         }
         if (hidden > 0) {
             Text(
