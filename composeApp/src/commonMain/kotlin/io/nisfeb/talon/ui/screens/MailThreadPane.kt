@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material.icons.filled.MoreVert
@@ -357,6 +358,7 @@ private fun ThreadActions(
     onMarkUnread: () -> Unit,
     onDelete: () -> Unit,
     onFile: () -> Unit,
+    onLabels: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     var confirming by remember { mutableStateOf(false) }
@@ -373,6 +375,10 @@ private fun ThreadActions(
             DropdownMenuItem(
                 text = { Text("Mark unread") },
                 onClick = { open = false; onMarkUnread() },
+            )
+            DropdownMenuItem(
+                text = { Text("Labels…") },
+                onClick = { open = false; onLabels() },
             )
             DropdownMenuItem(
                 text = { Text("File to Lattice") },
@@ -441,6 +447,18 @@ private fun MailThreadHeader(
     onMode: (Boolean) -> Unit,
     onBack: (() -> Unit)?,
 ) {
+    // Labelling is not common enough to hold the space above every
+    // message: the editor is behind the menu, and only the labels a
+    // thread has show here, a tap away from it.
+    var labeling by remember { mutableStateOf(false) }
+    if (labeling) {
+        AlertDialog(
+            onDismissRequest = { labeling = false },
+            title = { Text("Labels") },
+            text = { MailLabelRow(labels = labels, known = known, onToggle = onLabel) },
+            confirmButton = { TextButton(onClick = { labeling = false }) { Text("Done") } },
+        )
+    }
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (onBack != null) {
@@ -459,6 +477,7 @@ private fun MailThreadHeader(
                 onMarkUnread = onMarkUnread,
                 onDelete = onDelete,
                 onFile = onFile,
+                onLabels = { labeling = true },
             )
             // Offered only where there is a tree to see. A straight
             // thread has nothing the two modes would show differently.
@@ -484,7 +503,11 @@ private fun MailThreadHeader(
                 modifier = Modifier.padding(start = 8.dp),
             )
         }
-        MailLabelRow(labels = labels, known = known, onToggle = onLabel)
+        if (labels.isNotEmpty()) {
+            Row(Modifier.padding(start = 8.dp, top = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                labels.forEach { l -> AssistChip(onClick = { labeling = true }, label = { Text(l) }) }
+            }
+        }
         if (unreadable > 0) {
             Text(
                 unreadableThreadLine(unreadable),

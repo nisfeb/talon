@@ -376,7 +376,29 @@ fun MailComposer(
                         }
                     }
                 },
-            ) { Text("Send") }
+            ) {
+                // By the button, not under the message: a long body put
+                // the progress line below the screen.
+                if (sending) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Sending")
+                } else {
+                    Text("Send")
+                }
+            }
+        }
+        // Where the sending stands, and what went wrong, under the bar
+        // for the same reason: at the end of a long body nobody saw them.
+        progress?.let {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(it, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        problem?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         }
         HorizontalDivider()
 
@@ -516,17 +538,6 @@ fun MailComposer(
                     }
                 },
             ) { Text("Attach a file") }
-
-            progress?.let {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                    Text(it, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            problem?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            }
         }
     }
 

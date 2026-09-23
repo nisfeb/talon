@@ -60,7 +60,10 @@ fun MailAttachmentRow(
     val isInvite = attachment.mime.startsWith("text/calendar", ignoreCase = true) || attachment.name.endsWith(".ics", ignoreCase = true)
     val shipCalendar = io.nisfeb.talon.calendar.LocalCalendarRepo.current
     var inviteMenu by remember { mutableStateOf(false) }
-    var invited by remember(attachment.hash) { mutableStateOf<String?>(null) }
+    // Where adding an invite stands. Once asked, it is all the row says:
+    // the fetch it needs made the file's own Save appear beside "Adding",
+    // and the two read as one control that had not finished.
+    var invite by remember(attachment.hash) { mutableStateOf<Invite?>(null) }
     // A small picture is worth fetching unasked; it is what the
     // message is about, and the row still says where it stands.
     LaunchedEffect(attachment.hash) {
@@ -90,17 +93,21 @@ fun MailAttachmentRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                statusLine(state, attachment),
+                invite?.line ?: statusLine(state, attachment),
                 style = MaterialTheme.typography.labelSmall,
-                color = when (state) {
-                    is AttachState.Failed -> MaterialTheme.colorScheme.error
+                color = when {
+                    invite is Invite.Failed || (invite == null && state is AttachState.Failed) -> MaterialTheme.colorScheme.error
+                    invite is Invite.Added -> MaterialTheme.colorScheme.primary
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 },
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        when (val s = state) {
+        if (invite is Invite.Adding) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+        } else if (invite == null) when (val s = state) {
             is AttachState.Working -> {
                 CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
@@ -134,9 +141,9 @@ fun MailAttachmentRow(
             ) { Text(if (state is AttachState.Failed) "Try again" else "Get") }
         }
         // An invite goes straight into one of the ship's calendars, fetched first if need be.
-        if (isInvite && shipCalendar != null && state !is AttachState.Working) {
+        if (isInvite && shipCalendar != null && state !is AttachState.Working && invite !is Invite.Adding && invite !is Invite.Added) {
             androidx.compose.foundation.layout.Box {
-                TextButton(onClick = { inviteMenu = true }) { Text(invited ?: "Add to calendar") }
+                TextButton(onClick = { inviteMenu = true }) { Text(if (invite is Invite.Failed) "Try again" else "Add to calendar") }
                 androidx.compose.material3.DropdownMenu(expanded = inviteMenu, onDismissRequest = { inviteMenu = false }) {
                     shipCalendar.writable().forEach { c ->
                         androidx.compose.material3.DropdownMenuItem(
@@ -144,16 +151,15 @@ fun MailAttachmentRow(
                             onClick = {
                                 inviteMenu = false
                                 scope.launch {
-                                    invited = "Adding…"
-                                    val bytes = (state as? AttachState.Held)?.bytes ?: run {
-                                        state = AttachState.Working("Looking for it")
-                                        state = pull(repo, attachment, from) { state = AttachState.Working(it) }
-                                        (state as? AttachState.Held)?.bytes
-                                    }
-                                    invited = when {
-                                        bytes == null -> "Could not fetch it"
-                                        shipCalendar.importIcs(c.id, bytes.decodeToString()) -> "Added to ${c.name.ifBlank { c.id }}"
-                                        else -> "Not added"
+                                    val to = c.name.ifBlank { c.id }
+                                    invite = Invite.Adding(to)
+                                    val bytes = (state as? AttachState.Held)?.bytes
+                                        ?: (pull(repo, attachment, from) { invite = Invite.Adding(to, it) } as? AttachState.Held)
+                                            ?.also { state = it }?.bytes
+                                    invite = when {
+                                        bytes == null -> Invite.Failed("The invite could not be fetched, so nothing was added.")
+                                        shipCalendar.importIcs(c.id, bytes.decodeToString()) -> Invite.Added(to)
+                                        else -> Invite.Failed("$to did not take the event.")
                                     }
                                 }
                             },
@@ -163,6 +169,23 @@ fun MailAttachmentRow(
             }
         }
     }
+    }
+}
+
+/** Where adding a calendar invite stands, as the row says it. */
+private sealed interface Invite {
+    val line: String
+
+    data class Adding(val to: String, val step: String? = null) : Invite {
+        override val line get() = "Adding to $to" + (step?.let { ": $it" } ?: "…")
+    }
+
+    data class Added(val to: String) : Invite {
+        override val line get() = "Added to $to"
+    }
+
+    data class Failed(val why: String) : Invite {
+        override val line get() = why
     }
 }
 
