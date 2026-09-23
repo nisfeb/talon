@@ -2,7 +2,6 @@ package io.nisfeb.talon.orrery
 
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.data.ContactEntity
-import io.nisfeb.talon.mail.InboxEntry
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -29,15 +28,6 @@ class OrreryFactsTest {
     fun `a person is their patp without the sig`() {
         assertEquals("person/sampel-palnet", personId("~sampel-palnet"))
         assertEquals("person/sampel-palnet-sampel-palnet--sampel-palnet-sampel-palnet", personId("~sampel-palnet-sampel-palnet--sampel-palnet-sampel-palnet"))
-    }
-
-    @Test
-    fun `mail names everyone on the thread but us and never the future`() {
-        val e = InboxEntry(id = "t1", last = evening + 48 * 3_600_000, participants = listOf(me, "~bus", "~nec", "bad"))
-        val obs = mailFacts(e, me, nowMs = evening) { ship -> personId(ship) }
-        assertEquals(listOf("person/bus", "person/nec"), obs.map { it.subject })
-        assertEquals(JsonPrimitive("2026-09-17"), obs[0].value, "capped to now: the author's clock is theirs")
-        assertEquals("talon://mail/t1", obs[0].sourceId)
     }
 
     @Test

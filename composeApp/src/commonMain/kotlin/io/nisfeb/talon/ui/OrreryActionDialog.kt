@@ -54,7 +54,7 @@ fun OrreryActionDialog(
     val action = shown
     val message = remember(action) { action.messageToSend() }
     val event = remember(action) { action.eventToAdd() }
-    val ours = message?.via in io.nisfeb.talon.orrery.TALON_CHANNELS
+    val how = message?.let { if (it.via == "chat") "as a DM" else "by ${it.via}" }
 
     // Taken at once: the dialog closes and the ship is told behind it.
     fun move(status: String, why: String = "") {
@@ -76,7 +76,7 @@ fun OrreryActionDialog(
                     // "The analyst", as the notification says: the
                     // assistant is the one you talk to, and did not.
                     action.kind + " proposed by " + action.by.ifBlank { "the analyst" } +
-                        (action.due?.let { io.nisfeb.talon.orrery.Brief.dueText(it, kotlinx.datetime.TimeZone.currentSystemDefault(), twentyFourHour) }?.let { ", due $it" } ?: ""),
+                        (action.due?.let { io.nisfeb.talon.orrery.OrreryText.dueText(it, kotlinx.datetime.TimeZone.currentSystemDefault(), twentyFourHour) }?.let { ", due $it" } ?: ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -98,14 +98,12 @@ fun OrreryActionDialog(
                     when {
                         proposed && action.kind == "task" -> "Waiting for you. Approved, the ship puts it on your calendar's task list."
                         proposed && event != null -> "Waiting for you. Approved, the ship puts it on your calendar at that time; move it there if it is wrong."
-                        proposed && ours -> "Waiting for you. Approved, Talon sends it as a DM."
-                        proposed && message != null -> "Waiting for you. Approved, the ship sends it by ${message.via}."
+                        proposed && how != null -> "Waiting for you. Approved, the ship sends it $how."
                         proposed -> "Waiting for you."
-                        // The ship carries out everything but a DM now, on
-                        // its own executor, the moment the owner approves.
+                        // The ship carries it out on its own executor, the
+                        // moment the owner approves.
                         event != null -> "Approved. The ship puts it on your calendar."
-                        ours -> "Approved. Talon sends it as a DM on the next pass."
-                        message != null -> "Approved. The ship sends it by ${message.via}."
+                        how != null -> "Approved. The ship sends it $how."
                         action.kind == "task" -> "Approved, and on your task list. Tick it there, or mark it done here."
                         else -> "Approved. Talon cannot carry this kind out; mark it done once you have."
                     },
@@ -214,11 +212,11 @@ fun OrreryActionDialog(
                 // lands mid-refinement is refused by the ship and files
                 // nothing, so the tap would be a tap that did nothing.
                 proposed -> androidx.compose.material3.Button(enabled = !refining, onClick = { move("approved") }) {
-                    Text(if (ours) "Approve and send" else "Approve")
+                    Text(if (message != null) "Approve and send" else "Approve")
                 }
-                // What is carried out reports itself, by the ship or by
-                // Talon; marking it done here would skip the doing.
-                event != null || ours || message != null -> Unit
+                // What the ship carries out reports itself; marking it
+                // done here would skip the doing.
+                event != null || message != null -> Unit
                 else -> androidx.compose.material3.Button(onClick = { move("done") }) { Text("Mark done") }
             }
         },

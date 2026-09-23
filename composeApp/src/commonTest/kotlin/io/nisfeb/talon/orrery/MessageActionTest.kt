@@ -1,12 +1,5 @@
 package io.nisfeb.talon.orrery
 
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.mock.MockEngine
-import io.ktor.client.engine.mock.respond
-import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpMethod
-import io.ktor.http.headersOf
-import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -15,58 +8,15 @@ import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
-/** A message action, rules 11 and 14: the payload read, the address the person's own, the claim confirmed. */
+/** A message action, rule 11: the payload read and held to its shape. */
 class MessageActionTest {
-    private val state = Json.parseToJsonElement(
-        """{"bodies": [
-            {"id": "person/rose", "name": "Rose", "attrs": {"ship": {"value": "sampel-palnet"}, "email": {"value": "rose@example.com"}}},
-            {"id": "person/sam", "name": "Sam", "ship": "~dozzod-sampel", "attrs": {}},
-            {"id": "person/andrea", "name": "Andrea", "attrs": {"email": {"value": "not an address"}}}]}""",
-    ).jsonObject
-
-    @Test
-    fun `the address is the person's own attribute, never the body id`() {
-        assertEquals("~sampel-palnet", addressOf(state, "person/rose", "chat"))
-        assertEquals("~dozzod-sampel", addressOf(state, "person/sam", "chat"), "the ship the view gives the body")
-        assertNull(addressOf(state, "person/andrea", "chat"), "no ship, and none guessed from the id")
-        assertNull(addressOf(state, "person/ghost", "chat"))
-        // Mail and Telegram are the ship's own as of orrery 34: Talon
-        // resolves no address for them, because it sends neither.
-        assertNull(addressOf(state, "person/rose", "mail"))
-        assertNull(addressOf(state, "person/rose", "telegram"))
-        assertTrue("not reachable on mail from here" in noAddress(state, "person/rose", "mail"))
-    }
-
     @Test
     fun `a message action reads the schema's via, to and text`() {
         fun action(vararg p: Pair<String, String>) = OrreryAction("m", "message", "Tell Rose", buildJsonObject { p.forEach { (k, v) -> put(k, v) } }, listOf("person/rose"), null, "approved", "generator")
         assertEquals(MessageToSend("chat", "person/rose", "late"), action("via" to "Chat", "to" to "person/rose", "text" to " late ").messageToSend())
         assertNull(action("to" to "person/rose", "text" to "late").messageToSend(), "no channel, no guess")
         assertNull(action("via" to "chat", "text" to "late").messageToSend(), "no one to send it to")
-        assertEquals(setOf("chat"), TALON_CHANNELS, "one channel, and the ship has the rest")
-    }
-
-    private fun api(claimedBy: String?, answerBy: String = "talon-desktop") = OrreryApi(
-        HttpClient(MockEngine { respond("{}") }),
-        HttpClient(MockEngine { req ->
-            val body = when {
-                req.method == HttpMethod.Post -> """{"id": "a1", "status": "claimed", "by": "$answerBy"}"""
-                claimedBy == null -> "[]"
-                else -> """[{"id": "a1", "status": "claimed", "history": [
-                    {"status": "claimed", "by": "telegram"}, {"status": "approved", "by": "owner"}, {"status": "claimed", "by": "$claimedBy"}]}]"""
-            }
-            respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
-        }),
-        "https://ship",
-    )
-
-    @Test
-    fun `a claim is ours only when the ship's last claimed step says so`() = runTest {
-        assertNull(api("talon-desktop").claim("k", "a1"))
-        assertEquals("claimed by telegram", api("telegram").claim("k", "a1"))
-        assertEquals("the claim did not land", api(null).claim("k", "a1"))
     }
 
     @Test

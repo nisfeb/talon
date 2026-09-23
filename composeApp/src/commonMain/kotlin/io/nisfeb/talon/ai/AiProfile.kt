@@ -64,6 +64,8 @@ data class AiProvider(
 data class ModelRef(val provider: String, val model: String)
 
 @Serializable
+// OrreryBrief does nothing now that the ship writes the brief; it stays
+// so a profile saved with it, here or by an older install, still reads.
 enum class AiFeature { CatchUp, Assistant, OrreryTriage, OrreryGenerator, OrreryBrief, Transcription }
 
 /** A feature's switch and model; a null [model] follows the default model. */
@@ -251,9 +253,6 @@ fun migrateProfile(cfg: AiSettings.Config, inputs: ProfileInputs = ProfileInputs
             AiFeature.Assistant to FeatureSetting(cfg.assistantOn()),
             AiFeature.OrreryTriage to FeatureSetting(inputs.orreryFed, if (cfg.frontierReadsMessages && default != null) default else privateRef),
             AiFeature.OrreryGenerator to FeatureSetting(inputs.generatorOn, generator),
-            // The brief was never a switch: every install feeding orrery
-            // with a model sent it. On is what it was, on every device.
-            AiFeature.OrreryBrief to FeatureSetting(true),
             AiFeature.Transcription to FeatureSetting(speech != null, speech),
         ),
         jev = inputs.jevOn,
@@ -262,13 +261,6 @@ fun migrateProfile(cfg: AiSettings.Config, inputs: ProfileInputs = ProfileInputs
 
 /** The profile these settings stand for: the one the owner saved, else the one today's fields make. */
 fun AiSettings.Config.profile(): AiProfile = savedProfile ?: migrateProfile(this)
-
-/**
- * Whether the owner switched [f] on. Before a profile is saved the old
- * settings decide, which for a switch the migration cannot see (the
- * brief, which followed Feed Orrery) is [before].
- */
-fun AiSettings.Config.featureOn(f: AiFeature, before: Boolean): Boolean = savedProfile?.isOn(f) ?: before
 
 /**
  * The OpenAI-shaped base the ship's generator can call on this
@@ -549,7 +541,7 @@ fun AiProfile.withLegacy(cfg: AiSettings.Config): AiProfile {
 // Transcription is not here: it is migrated from what the device
 // itself can do (a speech key, or an OpenAI chat key), so syncing it
 // let a phone with neither turn transcription off on the computer.
-private val SYNCED_SWITCHES = listOf(AiFeature.CatchUp, AiFeature.Assistant, AiFeature.OrreryBrief)
+private val SYNCED_SWITCHES = listOf(AiFeature.CatchUp, AiFeature.Assistant)
 
 /** The switches as the config entry carries them. Triage is Feed Orrery, per install; the generator is the ship's. */
 fun AiProfile.switches(): kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.buildJsonObject {

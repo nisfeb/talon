@@ -18,8 +18,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * The orrery pass while the phone is charging and idle, so the model
- * reads the day's mail and calls without the app open and without the
- * battery paying for it. Android-only: no desktop analog, since the
+ * reads the day's calls without the app open and without the battery
+ * paying for it. Android-only: no desktop analog, since the
  * desktop app runs its pass while open and there is no scheduler to
  * ask otherwise.
  *
@@ -45,7 +45,6 @@ class OrreryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             book = { app.repo.bookContacts.value },
             standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),
             decide = io.nisfeb.talon.orrery.DecideControl(app.uiSettings.orreryDecide, app.uiSettings::setOrreryDecide),
-            sendDm = { whom, text -> app.repo.send(whom, text) },
             location = io.nisfeb.talon.ui.AndroidLocationControl,
         )
         try {

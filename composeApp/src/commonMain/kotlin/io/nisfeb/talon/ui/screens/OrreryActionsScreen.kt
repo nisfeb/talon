@@ -31,7 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.filled.Refresh
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
-import io.nisfeb.talon.orrery.Brief
+import io.nisfeb.talon.orrery.OrreryText
 import kotlinx.datetime.TimeZone
 
 /**
@@ -224,9 +224,9 @@ private fun Heading(text: String, accent: Boolean) {
 
 /** Kind, who proposed it, and when it is due, in one quiet line. */
 private fun detail(a: OrreryAction, twentyFourHour: Boolean): String {
-    // In the owner's own zone, as the brief says it: the UTC date read a
+    // In the owner's own zone: the UTC date read a
     // day late for anything due in the evening west of Greenwich.
-    val due = a.due?.let { Brief.dueText(it, TimeZone.currentSystemDefault(), twentyFourHour) }
+    val due = a.due?.let { OrreryText.dueText(it, TimeZone.currentSystemDefault(), twentyFourHour) }
     return listOfNotNull(
         a.kind,
         a.status.takeIf { it != "proposed" },

@@ -390,45 +390,10 @@ class OrreryApi(
      * Whether action [id] shows [status] yet. The ship answers a change,
      * and a new action's id, before its writer applies them, so what
      * follows at once can still see the action as it was: read back a
-     * few times, as a claim is.
+     * few times.
      */
     suspend fun landed(token: String, id: String, status: String): Boolean =
         settle { actions(token, status).any { it.id == id } }
-
-    /**
-     * Whether action [id] stands at all yet, open or already done: a new
-     * proposal of an auto-approved kind can be claimed and finished by
-     * the ship's executor before it is read back.
-     */
-    suspend fun standing(token: String, id: String): Boolean =
-        settle { actions(token, "open").any { it.id == id } || actions(token, "done").any { it.id == id } }
-
-    /**
-     * Claim [id] for this install, rule 14: null when the claim held,
-     * else why not. The ship answers a claim before its writer applies
-     * it, so the claim is read back a few times, the way the Telegram
-     * bot does, and it is ours only when the last claimed step in the
-     * action's history names the key the ship said claimed it.
-     */
-    suspend fun claim(token: String, id: String): String? {
-        val auth: HttpRequestBuilder.() -> Unit = { header(HttpHeaders.Authorization, "Bearer $token") }
-        val said = request(bare, HttpMethod.Post, "/api/actions/$id", """{"status":"claimed"}""", extra = auth)
-        val mine = runCatching { Json.parseToJsonElement(said).jsonObject["by"]?.jsonPrimitive?.contentOrNull }.getOrNull()
-            ?.takeIf { it.isNotBlank() } ?: return "the claim answered no by"
-        var who: String? = null
-        val seen = settle {
-            val text = request(bare, HttpMethod.Get, "/api/actions?status=claimed", extra = auth)
-            val arr = reading { Json.parseToJsonElement(text) }.let { it as? kotlinx.serialization.json.JsonArray ?: it.jsonObject["actions"]?.jsonArray }.orEmpty()
-            val a = arr.firstOrNull { (it as? JsonObject)?.get("id")?.jsonPrimitive?.contentOrNull == id } as? JsonObject
-            a?.let {
-                who = it["history"]?.jsonArray.orEmpty().mapNotNull { h -> h as? JsonObject }
-                    .lastOrNull { h -> h["status"]?.jsonPrimitive?.contentOrNull == "claimed" }
-                    ?.get("by")?.jsonPrimitive?.contentOrNull.orEmpty()
-            } != null
-        }
-        if (!seen) return "the claim did not land"
-        return if (who == mine) null else "claimed by $who"
-    }
 
     /**
      * Ask the ship for a pass now, rather than at the top of the next
@@ -787,7 +752,7 @@ fun generatorLine(r: GeneratorRun, nowMs: Long, zone: kotlinx.datetime.TimeZone)
     r.atMs?.let { at ->
         val day = kotlinx.datetime.Instant.fromEpochMilliseconds(at).toLocalDateTime(zone).date
         val today = kotlinx.datetime.Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
-        val clock = Brief.clock(at, zone)
+        val clock = OrreryText.clock(at, zone)
         parts += if (day == today) "ran $clock" else "ran ${day.dayOfMonth} ${day.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)} $clock"
     }
     when {
@@ -797,7 +762,7 @@ fun generatorLine(r: GeneratorRun, nowMs: Long, zone: kotlinx.datetime.TimeZone)
             val until = held?.substringAfter(" until ", "")?.trim()
                 ?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
             parts += when {
-                until != null -> "held by the limits until ${Brief.clock(until, zone)}"
+                until != null -> "held by the limits until ${OrreryText.clock(until, zone)}"
                 held != null -> "held by the limits"
                 else -> "nothing new to ask about"
             }

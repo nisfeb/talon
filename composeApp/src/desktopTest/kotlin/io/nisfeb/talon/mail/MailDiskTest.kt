@@ -16,6 +16,7 @@ import io.nisfeb.talon.data.ORRERY_ACCOUNTS_MIGRATION
 import io.nisfeb.talon.data.ORRERY_SENT_MIGRATION
 import io.nisfeb.talon.data.COMET_DOMES_MIGRATION
 import io.nisfeb.talon.data.ORRERY_HANDOFF_MIGRATION
+import io.nisfeb.talon.data.ORRERY_SHIP_WORK_MIGRATION
 import io.nisfeb.talon.data.MAIL_ROWS_MIGRATION
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -49,15 +50,17 @@ class MailDiskTest {
     // No destructive fallback: a migration that does not match the entity fails here.
     private fun db() = Room.databaseBuilder<AppDatabase>(name = dbPath)
         .setDriver(BundledSQLiteDriver())
-        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION, COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION)
+        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION, COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION)
         .build()
 
     @Test
     fun `the mail table arrives by migration and everything else stays`() = runBlocking {
         db().also { it.mailRows().listing("inbox"); it.close() }
-        // Wind the file back to 41: the table gone, a row of other data in place.
+        // Wind the file back to 41: the tables gone, a row of other data in place.
         BundledSQLiteDriver().open(dbPath).also { c ->
             c.execSQL("DROP TABLE mail_rows")
+            // Made at 44 in an older shape, which the later migrations read.
+            c.execSQL("DROP TABLE orrery_accounts")
             c.execSQL("INSERT INTO rail_item_prefs (itemName, visible) VALUES ('Mail', 0)")
             c.execSQL("PRAGMA user_version = 41")
             c.close()

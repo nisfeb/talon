@@ -46,7 +46,7 @@ class AiProfileTest {
         val served = migrateProfile(cfg(privateUrl = "http://127.0.0.1:1234/v1", privateModel = "qwen3-8b"), ProfileInputs(orreryFed = true))
         assertEquals(Resolved(served.provider(PRIVATE_PROVIDER)!!, "qwen3-8b"), served.resolve(AiFeature.OrreryTriage))
         assertTrue(served.resolve(AiFeature.OrreryTriage)!!.private)
-        assertTrue(served.isOn(AiFeature.OrreryTriage) && served.isOn(AiFeature.OrreryBrief), "feeding orrery turns both on")
+        assertTrue(served.isOn(AiFeature.OrreryTriage), "feeding orrery turns triage on")
         val device = migrateProfile(cfg())
         assertEquals(DEVICE_PROVIDER, device.resolve(AiFeature.OrreryTriage)!!.provider.id)
         assertFalse(device.isOn(AiFeature.OrreryTriage))
@@ -94,8 +94,8 @@ class AiProfileTest {
     }
 
     @Test
-    fun `catch-up, the assistant and the brief see the frontier model, as before`() {
-        for (c in combos.filter { it.hasKey() }) for (f in listOf(AiFeature.CatchUp, AiFeature.Assistant, AiFeature.OrreryBrief)) {
+    fun `catch-up and the assistant see the frontier model, as before`() {
+        for (c in combos.filter { it.hasKey() }) for (f in listOf(AiFeature.CatchUp, AiFeature.Assistant)) {
             val r = c.forFeature(f)
             assertEquals(listOf(c.provider, c.apiKey, c.model, c.baseUrl), listOf(r.provider, r.apiKey, r.model, r.baseUrl), "$f on $c")
         }
@@ -191,14 +191,12 @@ class AiProfileTest {
             features = mapOf(
                 AiFeature.OrreryTriage to FeatureSetting(true, ModelRef("lm", "")),
                 AiFeature.CatchUp to FeatureSetting(true, ModelRef("lm", "")),
-                AiFeature.OrreryBrief to FeatureSetting(true, ModelRef("lm", "")),
                 AiFeature.Assistant to FeatureSetting(true, ModelRef("an", "")),
             ),
         )
         val noLm = p.without("lm")
         assertEquals(ProviderKind.ThisDevice, noLm.resolve(AiFeature.OrreryTriage)?.provider?.kind)
         assertFalse(noLm.isOn(AiFeature.CatchUp), "it read on a model of the owner's own, and cannot run here: off, where the owner sees it")
-        assertEquals("or", noLm.resolve(AiFeature.OrreryBrief)?.provider?.id, "the brief reads no messages, and follows the default")
         assertEquals("or", p.without("an").resolve(AiFeature.Assistant)?.provider?.id, "from one cloud to the default one, as before")
         val cloudTriage = p.copy(features = p.features + (AiFeature.OrreryTriage to FeatureSetting(true, ModelRef("an", ""))))
         assertEquals(ProviderKind.ThisDevice, cloudTriage.without("an").resolve(AiFeature.OrreryTriage)?.provider?.kind)
@@ -248,12 +246,10 @@ class AiProfileTest {
             features = mapOf(
                 AiFeature.CatchUp to FeatureSetting(true),
                 AiFeature.OrreryTriage to FeatureSetting(true),
-                AiFeature.OrreryBrief to FeatureSetting(true),
             ),
         )
         val after = p.without("lm")
         assertFalse(after.isOn(AiFeature.CatchUp))
         assertEquals(ProviderKind.ThisDevice, after.resolve(AiFeature.OrreryTriage)?.provider?.kind)
-        assertTrue(after.isOn(AiFeature.OrreryBrief), "the brief reads no messages")
     }
 }

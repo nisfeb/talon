@@ -223,13 +223,6 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?, arm
     }
     if (orrery != null) TriageRow(orrery, profile, orreryHere, spend[AiFeature.OrreryTriage.name]) { ref -> setFeature(AiFeature.OrreryTriage) { it.copy(model = ref) } }
     if (orrery != null && orreryHere) GeneratorRow(orrery, profile) { ref -> setFeature(AiFeature.OrreryGenerator) { it.copy(model = ref) } }
-    if (orreryHere) FeatureRow(
-        "Orrery brief", "Mail at seven each morning: today, what waits on you, and suggestions. Your reply is read by the same model, which files what you say. Sent by an install that feeds orrery.",
-        on = profile.isOn(AiFeature.OrreryBrief), spent = spend[AiFeature.OrreryBrief.name],
-        onSwitch = { on -> setFeature(AiFeature.OrreryBrief) { it.copy(on = on) } },
-    ) {
-        FeatureModel(profile, AiFeature.OrreryBrief, chat, reads = false) { ref -> setFeature(AiFeature.OrreryBrief) { it.copy(model = ref) } }
-    }
     if (isCallsSupported) {
         val speech = profile.providers.filter { it.kind == ProviderKind.OpenAi || it.kind == ProviderKind.OpenAiCompatible }
         FeatureRow(
@@ -1020,7 +1013,7 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
     }
     FeatureRow(
         "Orrery triage",
-        "Reads your calls, mail and contacts' status lines on this install and sends orrery the facts, with your contacts, under a key made for this install. Your ship reads your chats and calendar itself.",
+        "Reads your calls and contacts' status lines on this install and sends orrery the facts, with your contacts, under a key made for this install. Your ship reads your chats, calendar and mail itself.",
         on = on, spent = spent, busy = busy,
         onSwitch = { want ->
             note = null

@@ -58,7 +58,7 @@ fun newActions(
     zone: kotlinx.datetime.TimeZone = kotlinx.datetime.TimeZone.currentSystemDefault(),
 ): List<NewAction> =
     actions.filter { it.status == "proposed" }.map {
-        NewAction(it.id, it.kind, it.title, it.by, it.due?.let { d -> io.nisfeb.talon.orrery.Brief.dueText(d, zone, twentyFourHour) })
+        NewAction(it.id, it.kind, it.title, it.by, it.due?.let { d -> io.nisfeb.talon.orrery.OrreryText.dueText(d, zone, twentyFourHour) })
     }
 
 /** One unread mail thread, as much of it as this needs. */

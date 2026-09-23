@@ -28,13 +28,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * What a pass does with what it did not get to.
- *
- * A pass reads a bounded amount: ten mail threads, twenty model runs.
- * The cursors used to move past everything the listing held anyway, so
- * the eleventh thread of a busy morning was never read by anything. And
- * a message it sent was recorded afterwards, so a pass the phone stopped
- * in between sent it a second time.
+ * What a pass does with what it did not get to: what a model or the
+ * ship could not answer waits for the next pass, and what the ship now
+ * does itself, Talon leaves alone.
  */
 class PassKeepsTest {
     private val state = """{"me":"person/me","rev":1,"bodies":[
@@ -43,68 +39,6 @@ class PassKeepsTest {
 
     private fun db(dir: File) = Room.databaseBuilder<AppDatabase>(name = File(dir, "t.db").absolutePath)
         .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
-
-    /** A thread listed as newer than the cursor, newest first. */
-    private fun thread(n: Int) = """{"id":"t$n","subject":"Thread $n","last":${9_000 + n},"count":1}"""
-
-    @Test
-    fun `the mail cursor stays behind the threads a pass did not read`() = runBlocking {
-        val dir = createTempDirectory(prefix = "talon-pass-keeps-").toFile()
-        val db = db(dir)
-        val scope = CoroutineScope(SupervisorJob())
-        val asked = mutableListOf<String>()
-        // Twelve waiting, newest first; a pass reads ten.
-        val waiting = (12 downTo 1).map(::thread)
-        try {
-            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 5_000L))
-            db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
-            val http = HttpClient(
-                MockEngine { req ->
-                    val url = req.url.toString()
-                    asked += url
-                    val body = when {
-                        "/apps/orrery/api/state" in url -> state
-                        "/apps/orrery/api/actions" in url -> "[]"
-                        "/apps/auspex/api/thread/" in url -> {
-                            val id = url.substringAfterLast('/')
-                            """{"id":"$id","subject":"Thread","messages":[
-                                {"id":"m-$id","from":"~sampel-palnet","to":["~zod"],"sent":9000,"body":"a note"}]}"""
-                        }
-                        "/apps/auspex/api/inbox" in url ->
-                            if ("offset=0" in url || "offset" !in url) {
-                                """{"total":12,"offset":0,"limit":20,"view":"all","threads":[${waiting.joinToString(",")}]}"""
-                            } else {
-                                """{"total":12,"offset":20,"limit":20,"view":"all","threads":[]}"""
-                            }
-                        "/apps/calendar/window.json" in url -> """{"rows":[]}"""
-                        else -> "[]"
-                    }
-                    respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
-                },
-            )
-            val repo = { OrreryRepo(http, scope, db, "test", bareClient = http) }
-            repo().pass("https://ship.test", "~zod")
-
-            val read = asked.count { "/apps/auspex/api/thread/" in it }
-            assertEquals(OrreryRepo.MAIL_THREADS_PER_PASS, read, "a pass reads ten threads")
-            val cursor = db.orreryAccounts().get("~zod")!!.mailCursor
-            assertTrue(
-                cursor < 9_003L,
-                "the cursor stays behind the oldest thread the pass left (t2 at 9002), and is $cursor",
-            )
-
-            // The next pass reads the two it left, and not the ten it read.
-            asked.clear()
-            repo().pass("https://ship.test", "~zod")
-            val again = asked.filter { "/apps/auspex/api/thread/" in it }.map { it.substringAfterLast('/') }
-            assertEquals(listOf("t2", "t1"), again, "only what was left, and each thread once")
-            assertEquals(9_012L, db.orreryAccounts().get("~zod")!!.mailCursor, "and now the cursor is past them all")
-        } finally {
-            scope.cancel()
-            db.close()
-            dir.deleteRecursively()
-        }
-    }
 
     // A claim confirmed in the tray waited in memory for the next pass:
     // a process killed first lost it, after it had left the tray. A
@@ -120,7 +54,7 @@ class PassKeepsTest {
         var answer = 503
         var observed = 0
         try {
-            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
             db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
             db.orreryNoticed().insertIfNew(
                 io.nisfeb.talon.data.OrreryNoticedEntity(
@@ -144,7 +78,6 @@ class PassKeepsTest {
                     val body = when {
                         "/apps/orrery/api/state" in url -> state
                         "/apps/calendar/window.json" in url -> """{"rows":[]}"""
-                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
                         else -> "[]"
                     }
                     respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
@@ -181,7 +114,7 @@ class PassKeepsTest {
         val db = db(dir)
         val scope = CoroutineScope(SupervisorJob())
         try {
-            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
             db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
             db.orreryNoticed().insertIfNew(
                 io.nisfeb.talon.data.OrreryNoticedEntity(
@@ -201,7 +134,6 @@ class PassKeepsTest {
                     val body = when {
                         "/apps/orrery/api/state" in url -> state
                         "/apps/calendar/window.json" in url -> """{"rows":[]}"""
-                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
                         else -> "[]"
                     }
                     respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
@@ -232,7 +164,7 @@ class PassKeepsTest {
         val scope = CoroutineScope(SupervisorJob())
         var took = 0
         try {
-            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
             db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
             listOf(claim("n1"), claim("n2", attr = "poison"), claim("n3"), claim("n4", value = "{not json"))
                 .forEach { db.orreryNoticed().insertIfNew(it) }
@@ -254,7 +186,6 @@ class PassKeepsTest {
                     val body = when {
                         "/apps/orrery/api/state" in url -> state
                         "/apps/calendar/window.json" in url -> """{"rows":[]}"""
-                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
                         else -> "[]"
                     }
                     respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
@@ -284,7 +215,7 @@ class PassKeepsTest {
         var observes = 0
         var scopeRefusal = false
         try {
-            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
             db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
             (1..64).forEach { db.orreryNoticed().insertIfNew(claim("n$it")) }
             val http = HttpClient(
@@ -298,7 +229,6 @@ class PassKeepsTest {
                     val body = when {
                         "/apps/orrery/api/state" in url -> state
                         "/apps/calendar/window.json" in url -> """{"rows":[]}"""
-                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
                         else -> "[]"
                     }
                     respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
@@ -329,7 +259,7 @@ class PassKeepsTest {
         val db = db(dir)
         val scope = CoroutineScope(SupervisorJob())
         val repo = run {
-            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
             db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
             db.orreryNoticed().insertIfNew(claim("n1"))
             val http = HttpClient(
@@ -340,7 +270,6 @@ class PassKeepsTest {
                     val body = when {
                         "/apps/orrery/api/state" in url -> state
                         "/apps/calendar/window.json" in url -> """{"rows":[]}"""
-                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
                         else -> "[]"
                     }
                     respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
@@ -383,137 +312,39 @@ class PassKeepsTest {
             override fun close() = Unit
         }
         try {
-            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 5_000L))
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
             db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
+            db.contacts().upsert(
+                io.nisfeb.talon.data.ContactEntity(
+                    "~sampel-palnet", "Rose", null, null,
+                    status = "At the shop now, home by eight", statusUpdatedMs = io.nisfeb.talon.util.nowMs() - 60_000,
+                ),
+            )
             val http = HttpClient(
                 MockEngine { req ->
                     val url = req.url.toString()
                     val body = when {
                         "/api/observe" in url -> """{"bodies":[],"observations":[]}"""
                         "/apps/orrery/api/state" in url -> state
-                        "/apps/auspex/api/thread/" in url -> """{"id":"t1","subject":"Thread","messages":[
-                            {"id":"m1","from":"~sampel-palnet","to":["~zod"],"sent":9000,"body":"I'm at the shop now"},
-                            {"id":"m2","from":"~sampel-palnet","to":["~zod"],"sent":9001,"body":"See you at eight"}]}"""
-                        "/apps/auspex/api/inbox" in url ->
-                            if ("offset=0" in url || "offset" !in url) """{"total":1,"offset":0,"limit":20,"view":"all","threads":[${thread(1)}]}"""
-                            else """{"total":1,"offset":20,"limit":20,"view":"all","threads":[]}"""
                         else -> "[]"
                     }
                     respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
                 },
             )
-            suspend fun pass() = OrreryRepo(http, scope, db, "test", bareClient = http, readWith = model).pass("https://ship.test", "~zod")
+            suspend fun pass() = OrreryRepo(http, scope, db, "test", book = { setOf("~sampel-palnet") }, bareClient = http, readWith = model)
+                .pass("https://ship.test", "~zod")
             pass()
-            assertEquals(1, asked, "it stops at the first message the model does not answer for")
-            assertTrue(db.orreryAccounts().get("~zod")!!.mailCursor < 9_001L, "and the cursor stays behind its thread")
-            assertNull(db.orrerySent().get("~zod", "mail:t1"), "which is not recorded as read")
+            assertEquals(1, asked, "the model was asked and did not answer")
+            assertNull(db.orrerySent().get("~zod", "status:~sampel-palnet"), "so the line is not recorded as read")
             answering = true
             pass()
-            assertEquals(3, asked, "the next pass reads both")
-            assertNotNull(db.orrerySent().get("~zod", "mail:t1"))
+            assertEquals(2, asked, "the next pass reads it")
+            assertNotNull(db.orrerySent().get("~zod", "status:~sampel-palnet"))
         } finally {
             scope.cancel()
             db.close()
             dir.deleteRecursively()
         }
-    }
-
-    // The ship answers a proposal that has an open twin, the same kind
-    // and title, with that twin. A replacement made before the old one was
-    // dismissed came back as the old action, which was then dismissed:
-    // every reply that moved a due lost the action.
-    @Test
-    fun `moving a due makes a new action and leaves no action lost`() = runBlocking<Unit> {
-        val statuses = mutableMapOf("a1" to "approved")
-        val dues = mutableMapOf("a1" to "2026-09-24T17:00:00Z")
-        val titles = mutableMapOf<String, String?>("a1" to "Call the shop")
-        // Orrery answers a status change before its writer applies it:
-        // here the change lands on the next read of the actions, or not
-        // at all while the writer is slow.
-        val landing = mutableMapOf<String, String>()
-        var slow = false
-        var next = 2
-        val http = HttpClient(
-            MockEngine { req ->
-                val url = req.url.toString()
-                val said = (req.body as? TextContent)?.text.orEmpty()
-                val o = runCatching { kotlinx.serialization.json.Json.parseToJsonElement(said).jsonObject }.getOrNull()
-                val json = headersOf(HttpHeaders.ContentType, "application/json")
-                when {
-                    req.method == HttpMethod.Post && url.substringBefore('?').endsWith("/api/act") -> {
-                        val title = o?.get("title")?.jsonPrimitive?.content
-                        val twin = statuses.entries.firstOrNull { it.value in setOf("proposed", "approved", "claimed") && titles[it.key] == title }
-                        if (twin != null) respond("""{"id":"${twin.key}","status":"${twin.value}","existing":true}""", headers = json)
-                        else {
-                            val id = "a${next++}"
-                            statuses[id] = "proposed"
-                            titles[id] = title
-                            dues[id] = o?.get("due")?.jsonPrimitive?.content.orEmpty()
-                            respond("""{"id":"$id","status":"proposed","existing":false}""", headers = json)
-                        }
-                    }
-                    req.method == HttpMethod.Post && "/api/actions/" in url -> {
-                        val id = url.substringAfter("/api/actions/").substringBefore('/').substringBefore('?')
-                        val want = o?.get("status")?.jsonPrimitive?.content ?: statuses.getValue(id)
-                        landing[id] = want
-                        respond("""{"id":"$id","status":"$want"}""", headers = json)
-                    }
-                    req.method == HttpMethod.Get && "/api/actions" in url -> {
-                        if (!slow) {
-                            statuses.putAll(landing)
-                            landing.clear()
-                        }
-                        val want = url.substringAfter("status=", "")
-                        // As orrery reads "open": proposed, approved or claimed.
-                        val open = setOf("proposed", "approved", "claimed")
-                        respond(
-                            statuses.filter { if (want == "open") it.value in open else it.value == want }.keys.joinToString(",", "[", "]") { id ->
-                                """{"id":"$id","kind":"task","title":"Call the shop","status":"${statuses[id]}"}"""
-                            },
-                            headers = json,
-                        )
-                    }
-                    else -> respond("[]", headers = json)
-                }
-            },
-        )
-        val movesDb = db(createTempDirectory(prefix = "talon-move-").toFile())
-        val repo = OrreryRepo(http, CoroutineScope(SupervisorJob()), movesDb, "test", bareClient = http)
-        val old = OrreryAction("a1", "task", "Call the shop", kotlinx.serialization.json.JsonObject(emptyMap()), emptyList(), dues.getValue("a1"), "approved", "generator")
-        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", "~zod", old, Brief.Direction("a1", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-25T17:00:00Z")))
-        statuses.putAll(landing)
-        assertEquals("dismissed", statuses["a1"], "the old one goes")
-        val made = statuses.keys.single { it != "a1" }
-        assertEquals("approved", statuses[made], "a new one stands, approved again as the old one was")
-        assertEquals("2026-09-25T17:00:00Z", dues[made])
-        // Dismissed with a new due in the same breath is dismissed: no
-        // replacement made only to be closed.
-        statuses["a9"] = "proposed"
-        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", "~zod", old.copy(id = "a9", status = "proposed"), Brief.Direction("a9", status = "dismissed", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-27T17:00:00Z")))
-        statuses.putAll(landing)
-        assertEquals("dismissed", statuses["a9"])
-        assertEquals(3, statuses.size, "and nothing made for it")
-        // A dismissal the writer applies late: nothing proposed over it, the
-        // move kept, and finished once it lands, with the brief's tag
-        // pointed at what replaced it.
-        statuses["a5"] = "approved"
-        titles["a5"] = "Book the tyres"
-        movesDb.orrerySent().put(OrrerySentEntity("~zod", "brief:2026-09-24", """{"A1":"a5"}""", 1L))
-        slow = true
-        val api = OrreryApi(http, http, "https://ship.test")
-        assertEquals(null, repo.move(api, "k1.secret", "~zod", old.copy(id = "a5", title = "Book the tyres"), Brief.Direction("a5", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-28T17:00:00Z")), tagsKey = "brief:2026-09-24"))
-        assertEquals(4, statuses.size, "nothing proposed over a dismissal not yet seen")
-        slow = false
-        repo.finishMoves(api, "k1.secret", "~zod")
-        statuses.putAll(landing)
-        val late = statuses.keys.single { it !in setOf("a1", "a9", "a5") && statuses[it] != null && dues[it] == "2026-09-28T17:00:00Z" }
-        assertEquals("approved", statuses[late], "made once the dismissal landed, approved as the old one was")
-        assertEquals("""{"A1":"$late"}""", movesDb.orrerySent().get("~zod", "brief:2026-09-24")?.value, "and the tag names it")
-        repo.finishMoves(api, "k1.secret", "~zod")
-        assertEquals(1, statuses.count { dues[it.key] == "2026-09-28T17:00:00Z" }, "finished once, not again")
-        // One the owner has settled since the brief named it is left be.
-        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", "~zod", old.copy(status = "done"), Brief.Direction("a1", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-26T17:00:00Z")))
-        assertEquals(5, statuses.size, "nothing made again")
     }
 
     // The ship reads the owner's chats itself (orrery 39): Talon reading
@@ -533,7 +364,7 @@ class PassKeepsTest {
             override fun close() = Unit
         }
         try {
-            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
             db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
             db.messages().upsertAll(
                 listOf(
@@ -550,7 +381,6 @@ class PassKeepsTest {
                     val body = when {
                         "/api/observe" in url -> """{"bodies":[],"observations":[]}"""
                         "/apps/orrery/api/state" in url -> state
-                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
                         else -> "[]"
                     }
                     respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
@@ -569,153 +399,34 @@ class PassKeepsTest {
         }
     }
 
+    // The ship sends every approved message itself now, chat included:
+    // Talon claiming them too would be a second sender racing the first.
     @Test
-    fun `an approved message is written down before it is sent`() = runBlocking {
-        val dir = createTempDirectory(prefix = "talon-pass-send-").toFile()
+    fun `Talon claims and sends no messages, the ship's executor being the only one`() = runBlocking {
+        val dir = createTempDirectory(prefix = "talon-pass-nosend-").toFile()
         val db = db(dir)
         val scope = CoroutineScope(SupervisorJob())
-        val action = """{"id":"a1","kind":"message","title":"Tell Rose","status":"approved","by":"generator",
-            "about":["person/rose"],"payload":{"via":"chat","to":"person/rose","text":"on my way"}}"""
-        var recordedWhenSent: String? = null
-        var sends = 0
+        val asked = mutableListOf<String>()
         try {
-            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
             db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
             val http = HttpClient(
                 MockEngine { req ->
-                    val url = req.url.toString()
+                    asked += "${req.method.value} ${req.url}"
                     val body = when {
-                        "/apps/orrery/api/state" in url -> state
-                        // The claim: this install's, as the ship's own history says.
-                        req.method == HttpMethod.Post && "/apps/orrery/api/actions/a1" in url -> {
-                            val said = (req.body as? TextContent)?.text.orEmpty()
-                            if ("claimed" in said) """{"id":"a1","status":"claimed","by":"mine"}""" else "{}"
-                        }
-                        "status=claimed" in url -> """[{"id":"a1","status":"claimed","history":[{"status":"claimed","by":"mine"}]}]"""
-                        "/apps/orrery/api/actions" in url -> "[$action]"
-                        "/apps/calendar/window.json" in url -> """{"rows":[]}"""
-                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
+                        "/apps/orrery/api/state" in req.url.toString() -> state
+                        "/apps/orrery/api/actions" in req.url.toString() -> """[{"id":"a1","kind":"message","title":"Tell Rose",
+                            "payload":{"via":"chat","to":"person/rose","text":"late"},"about":["person/rose"],"status":"approved","by":"owner"}]"""
                         else -> "[]"
                     }
                     respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
                 },
             )
-            // The DM is the send, and what was written down when it went.
-            val dm: suspend (String, String) -> Unit = { _, _ ->
-                sends++
-                recordedWhenSent = db.orrerySent().get("~zod", "sent:a1")?.value
-            }
-            OrreryRepo(http, scope, db, "test", bareClient = http, sendDm = dm).pass("https://ship.test", "~zod")
-            assertEquals(1, sends, "sent once")
-            assertEquals(
-                OrreryRepo.UNCONFIRMED,
-                recordedWhenSent,
-                "the record was already there when the message went out, so a pass that dies here sends nothing twice",
-            )
-            assertNotNull(db.orrerySent().get("~zod", "sent:a1"), "and it stands afterwards")
-
-            // The same listing again: it is reported, not sent again.
-            OrreryRepo(http, scope, db, "test", bareClient = http, sendDm = dm).pass("https://ship.test", "~zod")
-            assertEquals(1, sends, "and never twice")
-        } finally {
-            scope.cancel()
-            db.close()
-            dir.deleteRecursively()
-        }
-    }
-
-    @Test
-    fun `a send that fails leaves nothing behind, so it can be approved again`() = runBlocking {
-        val dir = createTempDirectory(prefix = "talon-pass-fail-").toFile()
-        val db = db(dir)
-        val scope = CoroutineScope(SupervisorJob())
-        val action = """{"id":"a1","kind":"message","title":"Tell Rose","status":"approved","by":"generator",
-            "about":["person/rose"],"payload":{"via":"chat","to":"person/rose","text":"on my way"}}"""
-        try {
-            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
-            db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
-            val http = HttpClient(
-                MockEngine { req ->
-                    val url = req.url.toString()
-                    run {
-                        val body = when {
-                            "/apps/orrery/api/state" in url -> state
-                            req.method == HttpMethod.Post && "/apps/orrery/api/actions/a1" in url -> {
-                                val said = (req.body as? TextContent)?.text.orEmpty()
-                                if ("claimed" in said) """{"id":"a1","status":"claimed","by":"mine"}""" else "{}"
-                            }
-                            "status=claimed" in url -> """[{"id":"a1","status":"claimed","history":[{"status":"claimed","by":"mine"}]}]"""
-                            "/apps/orrery/api/actions" in url -> "[$action]"
-                            "/apps/calendar/window.json" in url -> """{"rows":[]}"""
-                            "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
-                            else -> "[]"
-                        }
-                        respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
-                    }
-                },
-            )
-            OrreryRepo(
-                http, scope, db, "test", bareClient = http,
-                sendDm = { _, _ -> error("the ship would not take the DM") },
-            ).pass("https://ship.test", "~zod")
-            assertNull(db.orrerySent().get("~zod", "sent:a1"), "nothing stands for a message that did not go")
-        } finally {
-            scope.cancel()
-            db.close()
-            dir.deleteRecursively()
-        }
-    }
-
-    @Test
-    fun `the executor claims chat and nothing else`() = runBlocking {
-        val dir = createTempDirectory(prefix = "talon-pass-one-channel-").toFile()
-        val db = db(dir)
-        val scope = CoroutineScope(SupervisorJob())
-        // Everything the ship carries out itself as of orrery 34, all
-        // approved and all waiting: a task, a calendar action, and
-        // messages by telegram and by mail. Talon touches none of them.
-        val theirs = listOf(
-            """{"id":"t1","kind":"task","title":"Book the ferry","status":"approved","by":"generator","about":[],"payload":{}}""",
-            """{"id":"c1","kind":"calendar","title":"Dinner","status":"approved","by":"reader","about":[],
-                "payload":{"title":"Dinner","starts":"2026-10-02T00:00:00Z"}}""",
-            """{"id":"m1","kind":"message","title":"Tell Rose","status":"approved","by":"generator","about":["person/rose"],
-                "payload":{"via":"telegram","to":"person/rose","text":"on my way"}}""",
-            """{"id":"m2","kind":"message","title":"Tell Rose","status":"approved","by":"generator","about":["person/rose"],
-                "payload":{"via":"mail","to":"person/rose","text":"on my way"}}""",
-        )
-        val posted = mutableListOf<String>()
-        var dms = 0
-        try {
-            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 90_000L))
-            db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
-            val http = HttpClient(
-                MockEngine { req ->
-                    val url = req.url.toString()
-                    if (req.method == HttpMethod.Post) posted += url
-                    val body = when {
-                        "/apps/orrery/api/state" in url -> state
-                        "/apps/orrery/api/actions" in url -> "[" + theirs.joinToString(",") + "]"
-                        "/apps/calendar/window.json" in url -> """{"rows":[]}"""
-                        "/apps/auspex/api/inbox" in url -> """{"total":0,"offset":0,"limit":20,"view":"all","threads":[]}"""
-                        else -> "[]"
-                    }
-                    respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
-                },
-            )
-            OrreryRepo(
-                http, scope, db, "test", bareClient = http,
-                sendDm = { _, _ -> dms++ },
-            ).pass("https://ship.test", "~zod")
-
-            assertEquals(0, dms, "nothing was sent: not one of these is a chat message")
-            assertTrue(
-                posted.none { "/apps/orrery/api/actions/" in it },
-                "no action was claimed or moved:\n" + posted.joinToString("\n"),
-            )
-            assertTrue(
-                posted.none { "/apps/calendar" in it },
-                "and nothing was written to the calendar:\n" + posted.joinToString("\n"),
-            )
+            val repo = OrreryRepo(http, scope, db, "test", bareClient = http)
+            repo.pass("https://ship.test", "~zod")
+            assertNotNull(repo.lastPushMs.value, "the pass ran")
+            assertEquals(listOf("a1"), repo.actions.value.map { it.id }, "the approved message is shown as waiting on the ship")
+            assertTrue(asked.none { it.startsWith("POST") && "/api/actions/" in it }, "and never claimed here: $asked")
         } finally {
             scope.cancel()
             db.close()
@@ -727,16 +438,16 @@ class PassKeepsTest {
     // where they were. They used to jump past the whole pass, and those
     // threads were never read by anything.
     @Test
-    fun `a pass that cannot read the state reads nothing and moves no cursor`() = runBlocking {
+    fun `a pass that cannot read the state writes nothing`() = runBlocking {
         val dir = createTempDirectory(prefix = "talon-pass-no-state-").toFile()
         val db = db(dir)
         val scope = CoroutineScope(SupervisorJob())
         val asked = java.util.concurrent.CopyOnWriteArrayList<String>()
         var stateUp = false
-        val waiting = (12 downTo 1).map(::thread)
         try {
-            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret", mailCursor = 5_000L))
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
             db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
+            db.contacts().upsert(io.nisfeb.talon.data.ContactEntity("~sampel-palnet", "Rose", null, null))
             val http = HttpClient(
                 MockEngine { req ->
                     val url = req.url.toString()
@@ -745,37 +456,24 @@ class PassKeepsTest {
                         return@MockEngine respond("busy", io.ktor.http.HttpStatusCode.InternalServerError)
                     }
                     val body = when {
+                        "/api/observe" in url -> """{"bodies":[],"observations":[]}"""
                         "/apps/orrery/api/state" in url -> state
-                        "/apps/orrery/api/actions" in url -> "[]"
-                        "/apps/auspex/api/thread/" in url -> {
-                            val id = url.substringAfterLast('/')
-                            """{"id":"$id","subject":"Thread","messages":[
-                                {"id":"m-$id","from":"~sampel-palnet","to":["~zod"],"sent":9000,"body":"a note"}]}"""
-                        }
-                        "/apps/auspex/api/inbox" in url ->
-                            if ("offset=0" in url || "offset" !in url) {
-                                """{"total":12,"offset":0,"limit":20,"view":"all","threads":[${waiting.joinToString(",")}]}"""
-                            } else {
-                                """{"total":12,"offset":20,"limit":20,"view":"all","threads":[]}"""
-                            }
-                        "/apps/calendar/window.json" in url -> """{"rows":[]}"""
                         else -> "[]"
                     }
                     respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
                 },
             )
-            val repo = { OrreryRepo(http, scope, db, "test", bareClient = http) }
+            val repo = { OrreryRepo(http, scope, db, "test", book = { setOf("~sampel-palnet") }, bareClient = http) }
             val first = repo().also { it.pass("https://ship.test", "~zod") }
-            val after = db.orreryAccounts().get("~zod")!!
             // With no view of the ship's bodies the pass stops: run on, it
             // made everyone again from their @p, the twins of merged ones.
             assertNull(first.lastPushMs.value, "the pass stopped at the state and wrote nothing")
-            assertEquals(5_000L, after.mailCursor, "and did not move past mail it never read")
-            assertEquals(0, asked.count { "/apps/auspex/api/thread/" in it })
+            assertEquals(0, asked.count { "/api/observe" in it })
 
             stateUp = true
-            repo().pass("https://ship.test", "~zod")
-            assertEquals(OrreryRepo.MAIL_THREADS_PER_PASS, asked.count { "/apps/auspex/api/thread/" in it }, "read on the next pass")
+            val second = repo().also { it.pass("https://ship.test", "~zod") }
+            assertNotNull(second.lastPushMs.value, "the next pass runs")
+            assertEquals(1, asked.count { "/api/observe" in it }, "and writes what it knows")
         } finally {
             scope.cancel()
             db.close()

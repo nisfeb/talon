@@ -2,7 +2,6 @@ package io.nisfeb.talon.orrery
 
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.data.ContactEntity
-import io.nisfeb.talon.mail.InboxEntry
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
@@ -100,14 +99,6 @@ fun teachNames(body: OBody, goesBy: Set<String>?): List<OBody> {
     if (goesBy == null) return listOf(body)
     val fresh = (body.aliases + listOfNotNull(body.name)).filter { it.isNotBlank() }.distinct() - goesBy
     return if (fresh.isEmpty()) emptyList() else listOf(OBody(body.id, name = null, aliases = fresh))
-}
-
-/** Everyone on a mail thread but us, dated by the thread's last message, capped to now. */
-fun mailFacts(e: InboxEntry, ourShip: String, nowMs: Long, idFor: (String) -> String): List<Obs> {
-    val at = e.last.coerceAtMost(nowMs)
-    if (at <= 0) return emptyList()
-    return e.participants.filter { it.startsWith("~") && it != ourShip }.distinct()
-        .map { lastContact(idFor(it), at, "mail", "talon://mail/${e.id}") }
 }
 
 /**

@@ -63,7 +63,7 @@ import androidx.room.RoomDatabaseConstructor
         OrrerySentEntity::class,
         CometDomeEntity::class,
     ],
-    version = 47,
+    version = 48,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)

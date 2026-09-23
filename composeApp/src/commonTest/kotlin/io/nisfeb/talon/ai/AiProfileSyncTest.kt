@@ -164,17 +164,13 @@ class AiProfileSyncTest {
     }
 
     @Test
-    fun `once a profile is saved its switches decide jev and the brief, before it the old ones do`() {
+    fun `once a profile is saved its switch decides jev, before it the old ones do`() {
         val ds = DecideSettings(on = true, gate = false, relevance = false)
         assertEquals(ds, ds.under(base))
         val jevOn = base.copy(savedProfile = migrateProfile(base).copy(jev = true))
         assertEquals(ds.copy(gate = true, relevance = true), ds.under(jevOn), "one switch, all three")
         assertEquals(ds, ds.under(base.copy(savedProfile = migrateProfile(base))), "never flipped: this install's own")
         assertFalse(ds.under(base.copy(savedProfile = migrateProfile(base).copy(jev = false))).on)
-        assertTrue(base.featureOn(AiFeature.OrreryBrief, before = true))
-        assertTrue(jevOn.featureOn(AiFeature.OrreryBrief, before = false), "the brief migrates on, as it always sent")
-        val briefOff = migrateProfile(base).let { it.copy(features = it.features + (AiFeature.OrreryBrief to FeatureSetting(false))) }
-        assertFalse(base.copy(savedProfile = briefOff).featureOn(AiFeature.OrreryBrief, before = true))
     }
 
     // ── Armillary ──────────────────────────────────────────────────
@@ -263,14 +259,14 @@ class AiProfileSyncTest {
 
     @Test
     fun `switches travel whatever the key sync says, providers and models only with it`() {
-        val theirs = migrateProfile(base).let { it.copy(jev = true, features = it.features + (AiFeature.OrreryBrief to FeatureSetting(false))) }
+        val theirs = migrateProfile(base).let { it.copy(jev = true, features = it.features + (AiFeature.CatchUp to FeatureSetting(false))) }
         val offHere = base.copy(syncEnabled = false)
         assertNull(profileAfterEntry(profileEntry(theirs), offHere, offHere), "no key sync, no providers from elsewhere")
         // Switches arriving where no profile is saved make one from this device's own settings.
         val phone = base.copy(provider = AiSettings.Provider.Anthropic, apiKey = "sk-ant", syncEnabled = false)
         val got = profileAfterEntry(entry("schemaVersion" to "2", "switches" to theirs.switches()), phone, phone)!!
         assertEquals(true, got.jev)
-        assertFalse(got.isOn(AiFeature.OrreryBrief))
+        assertFalse(got.isOn(AiFeature.CatchUp))
         assertEquals(ProviderKind.Anthropic, got.provider(MAIN_PROVIDER)!!.kind)
         assertEquals("sk-ant", got.provider(MAIN_PROVIDER)!!.apiKey)
         // A switch never flipped does not travel, so it cannot turn another install's off.

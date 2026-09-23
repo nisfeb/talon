@@ -66,7 +66,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_29_30, MIGRATION_30_31, MIGRATION_34_35, MIGRATION_35_36,
             MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39,
             MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44, MIGRATION_44_45,
-            MIGRATION_45_46, MIGRATION_46_47,
+            MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -424,6 +424,13 @@ private val MIGRATION_42_43 = object : Migration(42, 43) {
 private val MIGRATION_46_47 = object : Migration(46, 47) {
     override fun migrate(db: SupportSQLiteDatabase) {
         ORRERY_HANDOFF_SQL.forEach { db.execSQL(it) }
+    }
+}
+
+/** Talon's mail, brief and sending records gone, the key kept. Shared statements. */
+private val MIGRATION_47_48 = object : Migration(47, 48) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        ORRERY_SHIP_WORK_SQL.forEach { db.execSQL(it) }
     }
 }
 

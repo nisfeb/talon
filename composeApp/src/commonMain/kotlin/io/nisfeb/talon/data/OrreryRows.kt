@@ -12,24 +12,18 @@ import kotlinx.coroutines.flow.Flow
 
 /**
  * What this install holds for one ship's orrery: the key it minted for
- * itself and how far its mail has been read.
+ * itself.
  *
  * The key is a per-ship secret like the session cookie and lives where
  * the app's other per-ship state does. A row exists only while the
  * pipe is on; turning it off revokes the key on the ship and deletes
  * the row.
- *
- * The cursor is conservative on purpose. An observation's id is a
- * hash of its content, so pushing something twice is a no-op on the
- * ship, and a cursor that lags costs a resend, never a duplicate.
  */
 @Entity(tableName = "orrery_accounts")
 data class OrreryAccountEntity(
     @PrimaryKey val ship: String,
     val clientId: String,
     val token: String,
-    /** `last` of the newest mail thread pushed. */
-    val mailCursor: Long = 0,
 )
 
 @Dao
@@ -212,4 +206,28 @@ internal val ORRERY_HANDOFF_SQL = listOf(
 /** 46 to 47: see [ORRERY_HANDOFF_SQL]. Android runs the same statements its own way. */
 val ORRERY_HANDOFF_MIGRATION = object : Migration(46, 47) {
     override fun migrate(connection: SQLiteConnection) = ORRERY_HANDOFF_SQL.forEach { connection.execSQL(it) }
+}
+
+/**
+ * The ship reads the mail, writes the daily brief and sends the chat
+ * messages the owner approved, so what Talon kept to do those goes:
+ * the records of mail read (`mail:`), of messages sent (`sent:`), of
+ * briefs sent, their replies read, what the last one said and the
+ * moves a reply left waiting, and the mail cursor. The accounts table
+ * is made again without the cursor, as in [ORRERY_HANDOFF_SQL].
+ */
+internal val ORRERY_SHIP_WORK_SQL = listOf(
+    "DELETE FROM `orrery_sent` WHERE `key` LIKE 'mail:%' OR `key` LIKE 'sent:%' OR `key` LIKE 'brief:%' " +
+        "OR `key` LIKE 'brief-said:%' OR `key` LIKE 'reply:%' OR `key` = 'moves:pending'",
+    "CREATE TABLE `orrery_accounts_new` (`ship` TEXT NOT NULL, `clientId` TEXT NOT NULL, " +
+        "`token` TEXT NOT NULL, PRIMARY KEY(`ship`))",
+    "INSERT INTO `orrery_accounts_new` (`ship`, `clientId`, `token`) " +
+        "SELECT `ship`, `clientId`, `token` FROM `orrery_accounts`",
+    "DROP TABLE `orrery_accounts`",
+    "ALTER TABLE `orrery_accounts_new` RENAME TO `orrery_accounts`",
+)
+
+/** 47 to 48: see [ORRERY_SHIP_WORK_SQL]. Android runs the same statements its own way. */
+val ORRERY_SHIP_WORK_MIGRATION = object : Migration(47, 48) {
+    override fun migrate(connection: SQLiteConnection) = ORRERY_SHIP_WORK_SQL.forEach { connection.execSQL(it) }
 }

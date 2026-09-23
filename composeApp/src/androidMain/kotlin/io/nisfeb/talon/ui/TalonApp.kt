@@ -436,9 +436,7 @@ fun TalonApp(
             ) { app.aiSettings.state.value },
             book = { app.repo.bookContacts.value },
             standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),
-            claim = { key, stale, settle -> app.settingsSync.claimKey(key, stale, settle) },
             decide = io.nisfeb.talon.orrery.DecideControl(app.uiSettings.orreryDecide, app.uiSettings::setOrreryDecide),
-            sendDm = { whom, text -> app.repo.send(whom, text) },
             location = io.nisfeb.talon.ui.AndroidLocationControl,
         )
     }

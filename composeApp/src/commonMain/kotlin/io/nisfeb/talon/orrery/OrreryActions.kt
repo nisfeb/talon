@@ -6,23 +6,13 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import io.nisfeb.talon.ui.parseIsoUtc
 import io.nisfeb.talon.urbit.asText
-import io.nisfeb.talon.urbit.normalisePatp
 
 /**
  * A message action's payload as the schema shapes it: the channel it
- * goes out on, the person's body, and the words. Where it goes is never
- * read off the body id: [addressOf] asks the person's own attributes.
+ * goes out on, the person's body, and the words. The ship sends it on
+ * every channel, chat included, the moment the owner approves.
  */
 data class MessageToSend(val via: String, val to: String, val text: String)
-
-/**
- * The channels Talon sends on, rule 14: an Urbit DM, and nothing else.
- * As of orrery 34 the ship sends Telegram through its bot and mail
- * through auspex, on its own executor fiber, the moment the owner
- * approves. Talon claiming those too would be a second sender racing
- * the first.
- */
-val TALON_CHANNELS = setOf("chat")
 
 /** A calendar action's event: [endMs] and [location] only where the payload says; [bareDate] when it gave a day and no time. */
 data class EventToAdd(val title: String, val startMs: Long, val endMs: Long?, val location: String? = null, val bareDate: Boolean = false)
@@ -34,28 +24,6 @@ fun OrreryAction.messageToSend(): MessageToSend? {
     val text = str("text")?.trim() ?: return null
     return MessageToSend(via, to, text)
 }
-
-/**
- * Where [to] is reached on the channels Talon serves: the person's own
- * ship, for both of them. A DM goes to it, and so does mail, because
- * auspex carries mail between ships and does not bridge to internet
- * email: an address out of the person's `email` could never arrive.
- * Null when the body has no ship, which the executor reports rather
- * than guesses around.
- */
-fun addressOf(state: kotlinx.serialization.json.JsonObject, to: String, via: String): String? {
-    if (via !in TALON_CHANNELS) return null
-    val body = Brief.bodyOf(state, to) ?: return null
-    val said = Brief.text(body, "ship")?.trim()?.takeIf { it.isNotEmpty() }
-        ?: body["ship"].asText()?.trim()
-    return said?.let(::normalisePatp)?.takeIf { PATP.matches(it) }
-}
-
-/** Why [to] cannot be reached on [via], for the note the owner reads. */
-fun noAddress(state: kotlinx.serialization.json.JsonObject, to: String, via: String): String =
-    if (via in TALON_CHANNELS) "$to has no ship on record" else "$to is not reachable on $via from here"
-
-private val PATP = Regex("~[a-z]{3}(-{0,2}[a-z]{3,6})*")
 
 /**
  * The event a calendar action asks for, in the schema's payload shape:
