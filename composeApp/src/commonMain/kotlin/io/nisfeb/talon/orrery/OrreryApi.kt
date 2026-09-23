@@ -167,6 +167,7 @@ class OrreryApi(
             dms = strings("dms"),
             channels = strings("channels"),
             people = (o["people"] as? JsonObject)?.keys.orEmpty(),
+            backfillHours = o["backfill_hours"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 24L,
         )
     }
 
@@ -176,10 +177,29 @@ class OrreryApi(
      * forbidden: used at once, that read as revoked and turned the pipe
      * straight back off.
      */
-    suspend fun keyLanded(token: String): Boolean {
-        repeat(CLAIM_READS * 2) { n ->
-            if (n > 0) kotlinx.coroutines.delay(CLAIM_PAUSE_MS)
-            if (runCatching { stateJson(token) }.isSuccess) return true
+    suspend fun keyLanded(token: String): Boolean = settle {
+        // The state narrowed to no kind: the key proved, and not the whole
+        // view serialised on the ship's one thread to prove it.
+        request(bare, HttpMethod.Get, "/api/state?kind=none") { header(HttpHeaders.Authorization, "Bearer $token") }
+        true
+    }
+
+    /**
+     * The ship answers a write before its writer applies it (write-then),
+     * so a read straight after can still see things as they were. This
+     * asks [seen] until it says yes, pausing longer each time, for about
+     * six seconds; a read that fails counts as not seen. It never throws,
+     * since whatever calls it has already changed something. The one
+     * loop every read-back of a write goes through.
+     */
+    suspend fun settle(seen: suspend () -> Boolean): Boolean {
+        var pause = SETTLE_FIRST_MS
+        repeat(SETTLE_READS) { n ->
+            if (n > 0) {
+                kotlinx.coroutines.delay(pause)
+                pause *= 2
+            }
+            if (runCatching { seen() }.getOrDefault(false)) return true
         }
         return false
     }
@@ -409,15 +429,16 @@ class OrreryApi(
      * follows at once can still see the action as it was: read back a
      * few times, as a claim is.
      */
-    suspend fun landed(token: String, id: String, status: String): Boolean {
-        repeat(CLAIM_READS) { n ->
-            if (n > 0) kotlinx.coroutines.delay(CLAIM_PAUSE_MS)
-            // A read that fails is a read that did not see it: this never
-            // throws, since what calls it has already changed something.
-            if (runCatching { actions(token, status) }.getOrNull().orEmpty().any { it.id == id }) return true
-        }
-        return false
-    }
+    suspend fun landed(token: String, id: String, status: String): Boolean =
+        settle { actions(token, status).any { it.id == id } }
+
+    /**
+     * Whether action [id] stands at all yet, open or already done: a new
+     * proposal of an auto-approved kind can be claimed and finished by
+     * the ship's executor before it is read back.
+     */
+    suspend fun standing(token: String, id: String): Boolean =
+        settle { actions(token, "open").any { it.id == id } || actions(token, "done").any { it.id == id } }
 
     /**
      * Claim [id] for this install, rule 14: null when the claim held,
@@ -431,19 +452,19 @@ class OrreryApi(
         val said = request(bare, HttpMethod.Post, "/api/actions/$id", """{"status":"claimed"}""", extra = auth)
         val mine = runCatching { Json.parseToJsonElement(said).jsonObject["by"]?.jsonPrimitive?.contentOrNull }.getOrNull()
             ?.takeIf { it.isNotBlank() } ?: return "the claim answered no by"
-        repeat(CLAIM_READS) { n ->
-            if (n > 0) kotlinx.coroutines.delay(CLAIM_PAUSE_MS)
+        var who: String? = null
+        val seen = settle {
             val text = request(bare, HttpMethod.Get, "/api/actions?status=claimed", extra = auth)
             val arr = reading { Json.parseToJsonElement(text) }.let { it as? kotlinx.serialization.json.JsonArray ?: it.jsonObject["actions"]?.jsonArray }.orEmpty()
             val a = arr.firstOrNull { (it as? JsonObject)?.get("id")?.jsonPrimitive?.contentOrNull == id } as? JsonObject
-            if (a != null) {
-                val who = a["history"]?.jsonArray.orEmpty().mapNotNull { it as? JsonObject }
-                    .lastOrNull { it["status"]?.jsonPrimitive?.contentOrNull == "claimed" }
+            a?.let {
+                who = it["history"]?.jsonArray.orEmpty().mapNotNull { h -> h as? JsonObject }
+                    .lastOrNull { h -> h["status"]?.jsonPrimitive?.contentOrNull == "claimed" }
                     ?.get("by")?.jsonPrimitive?.contentOrNull.orEmpty()
-                return if (who == mine) null else "claimed by $who"
-            }
+            } != null
         }
-        return "the claim did not land in $CLAIM_READS reads"
+        if (!seen) return "the claim did not land"
+        return if (who == mine) null else "claimed by $who"
     }
 
     /**
@@ -549,8 +570,9 @@ class OrreryApi(
          */
         private const val refineTimeout = 45_000L
 
-        const val CLAIM_READS = 5
-        const val CLAIM_PAUSE_MS = 200L
+        /** A settle's reads and first pause: 200 ms doubling, about six seconds in all. */
+        const val SETTLE_READS = 6
+        const val SETTLE_FIRST_MS = 200L
 
         /**
          * The settings documents the owner may read and write through
@@ -645,14 +667,29 @@ data class StateView(
 
 /**
  * The ship's own chat reader as a key reads it: whether it is on, the
- * DMs and channels it reads, and the ships its `people` map names. It
- * reads a message only in those, and only from an author it can name:
- * a person body carrying that ship, or one in `people`.
+ * DMs and channels it reads, the ships its `people` map names, and how
+ * far back its first pass looks. It reads a message only in those,
+ * only from an author it can name (a person body carrying that ship,
+ * or one in `people`), only with the generator's key set, and nothing
+ * sent before its window.
  */
-data class ShipChats(val enabled: Boolean, val dms: Set<String>, val channels: Set<String>, val people: Set<String>) {
-    /** Whether the ship reads this post, given the ships its person bodies carry. */
-    fun reads(whom: String, author: String, shipped: Set<String>): Boolean =
-        enabled && (whom in dms || whom in channels) && (author in shipped || author in people)
+data class ShipChats(
+    val enabled: Boolean,
+    val dms: Set<String>,
+    val channels: Set<String>,
+    val people: Set<String>,
+    val backfillHours: Long = 24L,
+) {
+    /**
+     * Whether the ship reads this post, given the ships its person
+     * bodies carry, whether its generator has a key, and the time now.
+     * ponytail: the window is read as from now; a reader switched on
+     * long ago reads further back than this assumes, which only means
+     * Talon reads a few the ship read too.
+     */
+    fun reads(whom: String, author: String, sentMs: Long, shipped: Set<String>, keyed: Boolean, nowMs: Long): Boolean =
+        enabled && keyed && (whom in dms || whom in channels) && (author in shipped || author in people) &&
+            sentMs >= nowMs - backfillHours * 3_600_000
 }
 
 data class ItemAnswer(val id: String?, val ok: Boolean, val existing: Boolean, val error: String?)

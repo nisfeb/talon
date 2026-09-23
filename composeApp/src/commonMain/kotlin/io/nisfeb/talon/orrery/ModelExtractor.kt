@@ -124,7 +124,7 @@ object ModelExtractor {
         onPlan: (Plan) -> Unit = {},
         zone: kotlinx.datetime.TimeZone = kotlinx.datetime.TimeZone.currentSystemDefault(),
         /** The model gave no answer another try may get ([io.nisfeb.talon.ai.isModelUnavailable]), which is not finding nothing. */
-        onNoAnswer: (Throwable) -> Unit = {},
+        onNoAnswer: suspend (Throwable) -> Unit = {},
     ): List<Noticed> {
         if (text.isBlank() || text.trimEnd().endsWith("?")) return emptyList()
         val authorId = index.authorId(author, ourShip)

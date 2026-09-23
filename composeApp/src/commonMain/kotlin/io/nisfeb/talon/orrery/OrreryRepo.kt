@@ -35,6 +35,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
@@ -123,9 +124,10 @@ class OrreryRepo(
     private val _actions = MutableStateFlow<List<OrreryAction>>(emptyList())
     val actions: StateFlow<List<OrreryAction>> = _actions.asStateFlow()
     /**
-     * Whether the ship reads the owner's chats itself (orrery 39), when
-     * Talon reads only calls, status lines and mail; null where the ship
-     * cannot say. As the last pass or look found it.
+     * Whether the ship's own chat reader is on (orrery 39); null where
+     * the ship cannot say. Talon then leaves it the posts it reads (see
+     * [ShipChats.reads]) and reads the rest. As the last pass or look
+     * found it.
      */
     private val _shipReadsChats = MutableStateFlow<Boolean?>(null)
     val shipReadsChats: StateFlow<Boolean?> = _shipReadsChats.asStateFlow()
@@ -315,8 +317,15 @@ class OrreryRepo(
         val said = a.setSettingsDoc(name, body)
         // The screens hold the generator's settings; a write from
         // anywhere else has to reach them or the card shows the old ones.
-        if (name == "generator") runCatching { a.generatorSettings() }.getOrNull()?.let { _generatorSettings.value = it }
-        if (name == "chat") loadShipChats()
+        if (name == "generator") {
+            val before = _generatorSettings.value
+            var read: GeneratorSettings? = null
+            a.settle { a.generatorSettings().also { read = it } != before }
+            read?.let { _generatorSettings.value = it }
+        }
+        // What was written, not a read straight after, which the ship
+        // answers from before its writer merged the document.
+        if (name == "chat") (body["enabled"] as? JsonPrimitive)?.booleanOrNull?.let { _shipReadsChats.value = it }
         said
     }
 
@@ -442,9 +451,14 @@ class OrreryRepo(
             full?.let(::schemaActions) ?: OrreryApi.ACTIONS,
         )
         scopeChecked = full != null
+        // Best effort: a writer slower than this is covered by the grace
+        // a new key gets in the pass's 403 (see [minted]).
         a.keyLanded(key.token)
         val start = now() - BACKFILL_MS
-        rowLock.withLock { db.orreryAccounts().upsert(OrreryAccountEntity(s, key.id, key.token, start, start, 0)) }
+        rowLock.withLock {
+            db.orreryAccounts().upsert(OrreryAccountEntity(s, key.id, key.token, start, start, 0))
+            minted(s, key.id)
+        }
         _enabled.value = true
         location.pause(false)
         _error.value = null
@@ -654,19 +668,19 @@ class OrreryRepo(
             for (reply in Brief.pendingReplies(thread, s, handled)) {
                 val words = Brief.ownWords(reply.body, brief.body)
                 if (words.isNotBlank()) {
-                    val read = runCatching { answer(a, token, state, zone, nowMs, reply, words, tags) }
+                    // A tag names the action that replaced the one it named:
+                    // left on the old one, a later reply about it found it
+                    // dismissed and did nothing.
+                    val read = runCatching {
+                        answer(a, token, state, zone, nowMs, reply, words, tags) { moved ->
+                            tags = tags.mapValues { (_, id) -> moved[id] ?: id }
+                            sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, tagsKey, buildJsonObject { tags.forEach { (t, id) -> put(t, id) } }.toString(), nowMs))
+                        }
+                    }
                     if (read.isFailure) {
                         Log.w(TAG, "reply ${reply.id} not read: ${read.exceptionOrNull()?.message}")
                         unfinished += entry
                         continue
-                    }
-                    // A tag names the action that replaced the one it named:
-                    // left on the old one, a later reply about it found it
-                    // dismissed and did nothing.
-                    val moved = read.getOrThrow()
-                    if (moved.isNotEmpty()) {
-                        tags = tags.mapValues { (_, id) -> moved[id] ?: id }
-                        sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, tagsKey, buildJsonObject { tags.forEach { (t, id) -> put(t, id) } }.toString(), nowMs))
                     }
                 }
                 // Only once all of it is written: a reply that failed
@@ -687,7 +701,9 @@ class OrreryRepo(
         reply: io.nisfeb.talon.mail.MailMessage,
         words: String,
         tags: Map<String, String>,
-    ): Map<String, String> {
+        /** Called with what the moves replaced, and with what, as soon as they are made. */
+        onMoved: suspend (Map<String, String>) -> Unit = {},
+    ) {
         val frontier = cloud?.config?.invoke()?.takeIf { it.hasModelFor(io.nisfeb.talon.ai.AiFeature.OrreryBrief) }?.forFeature(io.nisfeb.talon.ai.AiFeature.OrreryBrief)
             ?: error("no frontier model is set under AI")
         val at = reply.sent.takeIf { it > 0 } ?: nowMs
@@ -725,6 +741,10 @@ class OrreryRepo(
             val old = byId[d.actionId] ?: continue
             move(a, token, old, d, known)?.let { moved[old.id] = it }
         }
+        // Now, not once the reply is all written: a failure after the moves
+        // lost the tags, and read again the reply found the old actions
+        // dismissed and moved nothing.
+        if (moved.isNotEmpty()) onMoved(moved)
         for (body in asked) {
             runCatching { a.act(body, token) }.onFailure { Log.i(TAG, "reply ${reply.id}: an action was refused: ${it.message}") }
         }
@@ -732,7 +752,6 @@ class OrreryRepo(
             a.observe(batch, token).refused.forEach { Log.w(TAG, "reply ${reply.id}: refused ${it.error}") }
         }
         Log.i(TAG, "reply ${reply.id}: ${moves.size} moves, ${asked.size} actions, ${facts.observations.size} facts")
-        return moved
     }
 
     /**
@@ -764,15 +783,25 @@ class OrreryRepo(
                 .onFailure { Log.i(TAG, "${old.id} not dismissed, so not moved: ${it.message}"); return null }
             // From here nothing throws. The old one is dismissed, so a
             // reply read again would find it so and move nothing: what is
-            // made has to be made now, or the old one put back now.
-            a.landed(token, old.id, "dismissed")
+            // made has to be made now, or the old one put back now. But
+            // not over a dismissal not yet seen: the ship answers the twin
+            // while the old one reads open, and every proposal came back
+            // as it, and then the dismissal landed on nothing made.
+            // ponytail: two settles, about twelve seconds. A dismissal the
+            // writer applies later than that still lands on nothing made;
+            // a pending move kept in the table and finished on the next
+            // pass is the whole fix, if a ship is ever that slow.
+            if (!a.landed(token, old.id, "dismissed") && !a.landed(token, old.id, "dismissed")) {
+                Log.w(TAG, "${old.id}: the dismissal was not seen, so nothing was proposed; the reply moved nothing")
+                return null
+            }
             // Its subjects held to bodies the ship still has: one since
             // merged away got the replacement refused.
             val held = if (known.isEmpty()) old else old.copy(about = old.about.filter { it in known })
             // Each counted only once it is there: the ship answers an id
             // before its writer applies the proposal, and the writer can
             // still turn it down.
-            suspend fun laid(body: JsonObject) = propose(a, token, body, old.id)?.takeIf { a.landed(token, it.first, it.second) }
+            suspend fun laid(body: JsonObject) = propose(a, token, body, old.id)?.takeIf { a.standing(token, it.first) }
             val made = laid(Brief.replacement(held, d.dueMs, d.about))
                 // Not taken: the old one put back as it was, rather than
                 // the owner left with neither.
@@ -1098,7 +1127,10 @@ class OrreryRepo(
             // ship nothing more. What the ship reads is marked read here.
             val chats = if (allPosts.isEmpty()) null else a.shipChats(row.token).also { _shipReadsChats.value = it?.enabled }
             val shipped = view.bodies.mapNotNullTo(HashSet()) { b -> b.ship?.takeIf { b.id.startsWith("person/") } }
-            val (theShips, posts) = allPosts.partition { chats?.reads(it.whom, it.author, shipped) == true }
+            // It reads with the generator's key, and with none reads
+            // nothing while marking what it skipped as seen.
+            val keyed = chats?.enabled == true && runCatching { a.generatorSettings()?.keySet }.getOrNull() == true
+            val (theShips, posts) = allPosts.partition { chats?.reads(it.whom, it.author, it.sentMs, shipped, keyed, nowMs) == true }
             theShips.forEach { remember("msg:${it.whom}/${it.id}") }
             // Contact from a DM is contact with you. In a channel it is only
             // worth recording when the author is already in your book. From
@@ -1258,7 +1290,12 @@ class OrreryRepo(
                 // never went.
                 val blind = (not.map { it.subject.substringBefore('/') } + unseen.map { it.id.substringBefore('/') })
                     .filter { it !in attrs }.toSet()
-                if (blind.isNotEmpty()) {
+                // Once an hour at most: a re-mint the ship keeps refusing
+                // (fifty keys, or more kinds than a key may hold) failed
+                // every pass after its model runs, and moved nothing. Past
+                // that the facts are dropped, as an unnamed attribute is.
+                val lastMeasure = db.orrerySent().get(s, SCOPE_KEY)?.value?.toLongOrNull() ?: 0L
+                if (blind.isNotEmpty() && nowMs - lastMeasure > BLIND_RETRY_MS) {
                     val full = runCatching { a.schema() }.getOrNull()?.let(::schemaKinds).orEmpty()
                     if (blind.any { it in full }) {
                         db.orrerySent().forget(s, SCOPE_KEY)
@@ -1363,8 +1400,13 @@ class OrreryRepo(
             _error.value = e.message
             // Only "forbidden" is the key refused. The ship answers 403
             // too for a batch reaching past the key's scope, and for a
-            // read-only key, neither of which is the key gone.
-            if (e.status == 403 && e.reason == "forbidden") {
+            // read-only key, neither of which is the key gone; and for a
+            // key it has minted and not stored yet, which is a key not
+            // there yet, and was turning the pipe off as it was turned on.
+            val fresh = token?.let { t -> db.orreryAccounts().get(s)?.takeIf { it.token == t } }
+                ?.let { r -> db.orrerySent().get(s, "minted:${r.clientId}")?.atMs }
+                ?.let { now() - it < KEY_GRACE_MS } == true
+            if (e.status == 403 && e.reason == "forbidden" && !fresh) {
                 // Deleted before anything is cancelled: turning off cancels
                 // the loop this pass may run in, and a delete after that
                 // never ran, so the next launch turned the pipe on again
@@ -1420,6 +1462,10 @@ class OrreryRepo(
         }
         else -> !io.nisfeb.talon.util.isTransientNetworkError(e)
     }
+
+    /** When a key was minted, for the grace it gets while the ship stores it. */
+    private suspend fun minted(s: String, clientId: String) =
+        db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, "minted:$clientId", "", now()))
 
     /** Passes in a row that failed; the loop waits longer after each ([backoff]). */
     private var failuresInARow = 0
@@ -1483,19 +1529,25 @@ class OrreryRepo(
             measured()
             return
         }
+        // A mint refused is measured all the same, so it is tried again in
+        // twelve hours rather than on every pass.
         val minted = runCatching { a.mint("Talon on $platform", by(), schemaKinds(full), schemaActions(full)) }
             .onFailure { Log.w(TAG, "could not mint a key with the whole scope: ${it.message}") }
-            .getOrNull() ?: return
-        // Not used before the ship has stored it; see [OrreryApi.keyLanded].
-        if (!a.keyLanded(minted.token)) {
-            runCatching { a.revoke(minted.id) }
-            return
-        }
+            .getOrNull() ?: return measured()
+        // Waited for, as far as it goes: a key the ship has not stored yet
+        // is forbidden, and revoked before it lands it answered 404 and
+        // then landed anyway, a full-scope key nobody held, one more on
+        // every pass until the ship's fifty were gone. A slower writer is
+        // covered by the grace a new key gets ([minted]).
+        a.keyLanded(minted.token)
         // Only over the row it measured: turned off meanwhile, the new
         // key is given back rather than the row made again.
         val replaced = rowLock.withLock {
             (db.orreryAccounts().get(s)?.token == row.token).also {
-                if (it) db.orreryAccounts().upsert(row.copy(clientId = minted.id, token = minted.token))
+                if (it) {
+                    db.orreryAccounts().upsert(row.copy(clientId = minted.id, token = minted.token))
+                    minted(s, minted.id)
+                }
             }
         }
         if (!replaced) {
@@ -1983,7 +2035,12 @@ class OrreryRepo(
                     r.day = r.day.copy(picked = r.day.picked + 1, pickedBodies = r.day.pickedBodies + chosen.size, pickUsd = r.day.pickUsd + p.costUsd)
                     chosen
                 } else ranked
-                ModelExtractor.extract(model, r.index, seen, text, author, atMs, s, r.attrs, r.notes, context, onPlan = { plan = it }, onNoAnswer = { r.modelDown = true; r.modelDownWhy = it.message })
+                ModelExtractor.extract(model, r.index, seen, text, author, atMs, s, r.attrs, r.notes, context, onPlan = { plan = it }, onNoAnswer = { e ->
+                    r.modelDown = true
+                    r.modelDownWhy = e.message ?: e::class.simpleName
+                    // An Error is the runtime: the ladder moves past it next pass.
+                    if (e !is Exception) LocalModels.broke(model.rung)
+                })
                     .also { r.day = r.day.copy(analystUsd = r.day.analystUsd + (model.lastCostUsd ?: 0.0)) }
             }
             byModel = if (dec != null && r.threshold != null && forTheGate(text)) {
@@ -2147,12 +2204,18 @@ class OrreryRepo(
         val a = api ?: error("Not attached to a ship.")
         val s = ship ?: error("Not attached to a ship.")
         // This install's key where it has one, else the owner's own say.
-        a.transition(db.orreryAccounts().get(s)?.token, id, status, note)
+        val token = db.orreryAccounts().get(s)?.token
+        a.transition(token, id, status, note)
         _actions.value = settledActions(_actions.value, id, status)
         // The mirror reads every action and the whole calendar before it
         // makes the todo: seconds on a busy ship, so it runs behind the
-        // answer, never in its way.
-        scope.launch { refreshActions() }
+        // answer, never in its way. And after the answer has landed: read
+        // at once, the list still had the action open, and the screen put
+        // back what the owner had just answered.
+        scope.launch {
+            if (token != null) a.landed(token, id, status) else delay(2_000)
+            refreshActions()
+        }
     }
 
     /**
@@ -2287,6 +2350,11 @@ class OrreryRepo(
         const val LATE_POSTS = 500
         /** How far back a post can have synced late and still be read. */
         const val LATE_WINDOW_MS = 2L * 24 * 60 * 60 * 1000
+        /** How long a new key's forbidden reads as not stored yet, not as revoked. */
+        const val KEY_GRACE_MS = 5L * 60 * 1000
+        /** How often a pass may fail on a key behind the schema, to have it measured again. */
+        const val BLIND_RETRY_MS = 60L * 60 * 1000
+
         /** How long the loop waits after [failures] failed passes in a row: ten minutes, doubling, to five hours and a bit. */
         fun backoff(failures: Int): Long = PUSH_EVERY_MS shl (failures - 1).coerceIn(0, 5)
 

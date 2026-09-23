@@ -75,9 +75,11 @@ Settings live in documents, read and written whole by name:
   (0 to 100), `max_daily_messages` and `model`. A list you give
   replaces the list whole. What the ship holds to pick from is
   orrery_settings chat/dms and chat/channels. It borrows the
-  generator's key, so that is set first. Once it is on, Talon stops
-  reading chats itself, so each message is read once; Talon goes on
-  reading calls and mail.
+  generator's key, so that is set first. It reads only the DMs and
+  channels listed, and only from people it knows by ship (a person
+  body with its ship, or one in `people`). Talon leaves it those and
+  reads the rest itself, so each message is read once; Talon also
+  goes on reading calls and mail.
 - `schema`, `policy`: what bodies may carry, and what the ship does
   with what it is told.
 

@@ -179,26 +179,45 @@ fun Obs.toJson(): JsonObject = buildJsonObject {
  * goes in the same batch as the facts about it, since the ship counts
  * a batch's own bodies as known: it answers before its writer applies
  * a batch, so a fact sent in the batch after its body's was refused as
- * about an unknown subject. What is about a body the ship already has
- * goes after, in batches of its own.
+ * about an unknown subject. A batch takes bodies while their facts
+ * fit; a body with more facts than one batch holds goes again with
+ * the rest. What is about a body the ship already has goes after.
  */
 fun batches(facts: Facts): List<JsonObject> {
     val bodies = facts.bodies.distinctBy { it.id }
     val bySubject = facts.observations.indices.groupBy { facts.observations[it].subject }
     val placed = HashSet<Int>()
     val out = mutableListOf<JsonObject>()
-    fun batch(bs: List<OBody>, os: List<Obs>) = buildJsonObject {
-        put("bodies", buildJsonArray { bs.forEach { add(it.toJson()) } })
-        put("observations", buildJsonArray { os.forEach { add(it.toJson()) } })
+    fun batch(bs: List<OBody>, os: List<Int>) {
+        out += buildJsonObject {
+            put("bodies", buildJsonArray { bs.forEach { add(it.toJson()) } })
+            put("observations", buildJsonArray { os.forEach { add(facts.observations[it].toJson()) } })
+        }
+        placed += os
     }
-    bodies.chunked(MAX_BODIES).forEach { chunk ->
-        val with = chunk.flatMap { bySubject[it.id].orEmpty() }.take(MAX_OBS)
-        placed += with
-        out += batch(chunk, with.map { facts.observations[it] })
+    var bs = mutableListOf<OBody>()
+    var os = mutableListOf<Int>()
+    for (b in bodies) {
+        val mine = bySubject[b.id].orEmpty()
+        if (bs.size == MAX_BODIES || (bs.isNotEmpty() && os.size + mine.size > MAX_OBS)) {
+            batch(bs, os)
+            bs = mutableListOf()
+            os = mutableListOf()
+        }
+        // One body's facts past a batch's worth: it goes again with each.
+        mine.chunked(MAX_OBS).forEachIndexed { i, part ->
+            if (i > 0) {
+                batch(bs, os)
+                bs = mutableListOf()
+                os = mutableListOf()
+            }
+            bs += b
+            os += part
+        }
+        if (mine.isEmpty()) bs += b
     }
-    facts.observations.indices.filter { it !in placed }.chunked(MAX_OBS).forEach { chunk ->
-        out += batch(emptyList(), chunk.map { facts.observations[it] })
-    }
+    if (bs.isNotEmpty()) batch(bs, os)
+    facts.observations.indices.filter { it !in placed }.chunked(MAX_OBS).forEach { batch(emptyList(), it) }
     return out
 }
 

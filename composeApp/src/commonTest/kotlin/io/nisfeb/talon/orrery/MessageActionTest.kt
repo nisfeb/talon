@@ -66,7 +66,7 @@ class MessageActionTest {
     fun `a claim is ours only when the ship's last claimed step says so`() = runTest {
         assertNull(api("talon-desktop").claim("k", "a1"))
         assertEquals("claimed by telegram", api("telegram").claim("k", "a1"))
-        assertEquals("the claim did not land in 5 reads", api(null).claim("k", "a1"))
+        assertEquals("the claim did not land", api(null).claim("k", "a1"))
     }
 
     @Test

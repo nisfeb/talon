@@ -76,11 +76,27 @@ object LocalModels {
     private val lock = Mutex()
     private var opened: Pair<Rung, LocalModel>? = null
     private val failed = mutableSetOf<String>()
+    /** Rungs that opened and then failed as a runtime (an Error), set aside for the process. */
+    private val broken = mutableSetOf<String>()
+
+    /**
+     * A rung whose runtime failed mid-answer, out of memory or a library
+     * missing: set aside until the process restarts, so the ladder moves
+     * on. Held as "the model did not answer", it held the reading on the
+     * same failure every pass for good.
+     */
+    suspend fun broke(rung: String) = lock.withLock {
+        broken += rung
+        if (opened?.first?.name == rung) {
+            runCatching { opened?.second?.close() }
+            opened = null
+        }
+    }
 
     suspend fun best(): Pair<Rung, LocalModel>? = lock.withLock {
         opened?.let { return it }
         for (r in localModelRungs()) {
-            if (r.name in failed || r.status() != RungStatus.Ready) continue
+            if (r.name in failed || r.name in broken || r.status() != RungStatus.Ready) continue
             val m = runCatching { r.open() }.getOrElse { failed += r.name; null } ?: continue
             opened = r to m
             return opened

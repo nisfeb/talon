@@ -459,8 +459,10 @@ class PassKeepsTest {
                         statuses.putAll(landing)
                         landing.clear()
                         val want = url.substringAfter("status=", "")
+                        // As orrery reads "open": proposed, approved or claimed.
+                        val open = setOf("proposed", "approved", "claimed")
                         respond(
-                            statuses.filter { it.value == want }.keys.joinToString(",", "[", "]") { id ->
+                            statuses.filter { if (want == "open") it.value in open else it.value == want }.keys.joinToString(",", "[", "]") { id ->
                                 """{"id":"$id","kind":"task","title":"Call the shop","status":"${statuses[id]}"}"""
                             },
                             headers = json,
@@ -527,6 +529,8 @@ class PassKeepsTest {
                     if ("/api/observe" in url) observed += (req.body as? TextContent)?.text.orEmpty()
                     val body = when {
                         url.substringBefore('?').endsWith("/api/chat") -> """{"enabled":true,"dms":["~sampel-palnet"],"channels":[],"people":{}}"""
+                        // The generator's key, which the ship's reader reads with.
+                        url.substringBefore('?').endsWith("/api/generator") -> """{"enabled":true,"api_key_set":true}"""
                         "/api/observe" in url -> """{"bodies":[],"observations":[]}"""
                         // Rose's body carries her ship, as orrery keeps it: that
                         // is how its chat reader names her.

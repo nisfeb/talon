@@ -1071,8 +1071,8 @@ private fun ChatReaderRow(orrery: OrreryRepo) {
         Column(Modifier.weight(1f)) {
             Text("The ship reads my chats", style = MaterialTheme.typography.bodyMedium)
             Quiet(
-                if (on) "Your ship reads the chats chosen for it, so this install reads only calls, mail and status lines. Ask the assistant to change which chats."
-                else "Your ship can read your DMs and channels itself, with the generator's model. This install then stops reading chats, so each message is read once. Ask the assistant to choose which.",
+                if (on) "Your ship reads the chats chosen for it, from people it knows by ship, and this install leaves those to it and reads the rest, so each message is read once. Ask the assistant to change which chats."
+                else "Your ship can read chosen DMs and channels itself, with the generator's model and key. This install then leaves those to it and reads the rest. Ask the assistant to choose which.",
             )
         }
         Switch(checked = on, onCheckedChange = { want ->

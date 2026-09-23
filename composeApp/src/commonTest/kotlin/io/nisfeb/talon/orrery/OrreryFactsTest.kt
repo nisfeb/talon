@@ -130,9 +130,17 @@ class OrreryFactsTest {
             Obs("person/known", "a", JsonPrimitive(0), 1L, sourceKind = "t", sourceId = "k")
         val out = batches(Facts(bodies, obs))
         fun sizes(k: String) = out.map { it.jsonObject[k]!!.jsonArray.size }
-        assertEquals(listOf(50, 50, 20, 0, 0), sizes("bodies"))
-        assertEquals(listOf(200, 0, 0, 200, 51), sizes("observations"), "p1's facts ride with p1 as far as the cap allows")
-        assertTrue(out.all { sizes("bodies").max() <= MAX_BODIES && sizes("observations").max() <= MAX_OBS })
+        assertTrue(sizes("bodies").max() <= MAX_BODIES && sizes("observations").max() <= MAX_OBS)
+        // Every fact about a new body rides in a batch that carries it.
+        out.forEach { b ->
+            val carried = b.jsonObject["bodies"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content }.toSet()
+            b.jsonObject["observations"]!!.jsonArray.map { it.jsonObject["subject"]!!.jsonPrimitive.content }
+                .filter { it.startsWith("person/p") }
+                .forEach { assertTrue(it in carried, "$it sent without its body") }
+        }
+        assertEquals(listOf(1, 1, 50, 50, 20, 0), sizes("bodies"), "p1 again with each batch of its facts, then the rest fifty at a time")
+        assertEquals(listOf(200, 200, 50, 0, 0, 1), sizes("observations"))
+        assertEquals(451, sizes("observations").sum(), "and every fact once")
         val one: JsonObject = out[0].jsonObject["observations"]!!.jsonArray[0].jsonObject
         assertEquals("1970-01-01T00:00:00.001Z", one["at"]!!.jsonPrimitive.content)
         assertEquals("t", one["source"]!!.jsonObject["kind"]!!.jsonPrimitive.content)
