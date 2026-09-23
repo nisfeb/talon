@@ -168,6 +168,18 @@ class MailRepo(
         pages.values.mapNotNull { p -> p.threads.firstOrNull { it.id == threadId }?.last }.maxOrNull()
     }
 
+    /**
+     * The threads being read as a tree, this session. Here and not in the
+     * pane: writing a reply puts the composer where the pane was, and the
+     * pane came back as a list. Read when a pane opens, so plain storage
+     * is enough; only the UI thread touches it.
+     */
+    private val treeShown = HashSet<String>()
+    fun treeShown(threadId: String): Boolean = threadId in treeShown
+    fun showTree(threadId: String, on: Boolean) {
+        if (on) treeShown += threadId else treeShown -= threadId
+    }
+
     /** Whether the inbox as last listed holds unread mail: the Mail section's pip. No request of its own. */
     val inboxUnread: StateFlow<Boolean> = io.nisfeb.talon.util.mapState(pageCache) { pages ->
         pages[PageKey(MailView.INBOX, null, "")]?.threads?.any { it.unread } == true

@@ -2,6 +2,9 @@ package io.nisfeb.talon.mail
 
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
@@ -163,5 +166,40 @@ class MailThreadPaneTest {
         assertEquals("2.0 KB", sizeLabel(2048))
         assertTrue(unreadableThreadLine(1).startsWith("1 copy here is"))
         assertTrue(unreadableThreadLine(3).startsWith("3 copies here are"))
+    }
+
+    // Writing a reply puts the composer where the reader was, and the
+    // reader came back from it as a list, not the tree it was left in.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `the tree is still shown when the reader comes back from a reply`() = runComposeUiTest {
+        val repo = repoServing(branching)
+        var reading by androidx.compose.runtime.mutableStateOf(true)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                if (reading) {
+                    MailThreadPane(
+                        repo = repo,
+                        threadId = "0vt",
+                        contacts = ContactMap.EMPTY,
+                        ourShip = "~nec",
+                        onCompose = {},
+                    )
+                }
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) {
+            runCatching { onNodeWithText("Tree").assertIsDisplayed(); true }.getOrDefault(false)
+        }
+        onNodeWithText("Tree").performClick()
+        waitForIdle()
+        onNodeWithText("Tree").assertIsSelected()
+        reading = false // the composer takes its place
+        waitForIdle()
+        reading = true // sent, and back to the thread
+        waitUntil(timeoutMillis = 5_000) {
+            runCatching { onNodeWithText("Tree").assertIsDisplayed(); true }.getOrDefault(false)
+        }
+        onNodeWithText("Tree").assertIsSelected()
     }
 }

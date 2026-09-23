@@ -104,7 +104,8 @@ fun MailThreadPane(
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var loading by remember(threadId) { mutableStateOf(repo.cachedThread(threadId) == null) }
     var refreshing by remember(threadId) { mutableStateOf(false) }
-    var drawn by remember(threadId) { mutableStateOf(false) }
+    // Kept by the repo, so a reply written from the tree comes back to it.
+    var drawn by remember(threadId) { mutableStateOf(repo.treeShown(threadId)) }
     // Folded subtrees, and messages read down to their header line.
     var filed by remember(threadId) { mutableStateOf<String?>(null) }
     val folded = remember(threadId) { mutableStateListOf<String>() }
@@ -219,7 +220,7 @@ fun MailThreadPane(
             },
             showTree = hasBranches,
             drawn = drawn,
-            onMode = { drawn = it },
+            onMode = { drawn = it; repo.showTree(threadId, it) },
             onBack = onBack,
             archived = thread?.archived == true,
             // Each shows at once and writes in the background, so the view can leave straight away.
