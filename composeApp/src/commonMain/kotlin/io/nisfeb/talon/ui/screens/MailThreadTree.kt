@@ -72,6 +72,8 @@ private val STUB = 18.dp
 fun MailThreadTree(
     messages: List<MailMessage>,
     selected: String?,
+    /** New when the thread was opened: a dot on their nodes. */
+    fresh: Set<String> = emptySet(),
     nameFor: (String) -> String,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -160,6 +162,7 @@ fun MailThreadTree(
                     nameFor = nameFor,
                     selected = n.message.id == selected,
                     onPath = n.message.id in lit,
+                    fresh = n.message.id in fresh,
                     onClick = { onSelect(n.message.id) },
                     width = nodeWidth,
                     modifier = Modifier.offset(
@@ -183,6 +186,7 @@ private fun TreeNode(
     nameFor: (String) -> String,
     selected: Boolean,
     onPath: Boolean,
+    fresh: Boolean,
     onClick: () -> Unit,
     width: Dp,
     modifier: Modifier,
@@ -211,10 +215,14 @@ private fun TreeNode(
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (fresh) {
+                    MenuBadgeDot()
+                    Spacer(Modifier.width(4.dp))
+                }
                 Text(
                     nameFor(message.from),
                     style = MaterialTheme.typography.labelMedium
-                        .copy(fontWeight = FontWeight.Medium),
+                        .copy(fontWeight = if (fresh) FontWeight.Bold else FontWeight.Medium),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),

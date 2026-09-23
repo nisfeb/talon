@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.UnreadDividerRow
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -110,6 +112,17 @@ fun MailThreadPane(
     var filed by remember(threadId) { mutableStateOf<String?>(null) }
     val folded = remember(threadId) { mutableStateListOf<String>() }
     val shut = remember(threadId) { mutableStateListOf<String>() }
+    // What was unread when the thread was opened, and what has arrived
+    // since. The ship marks a message read the moment it is shown, so by
+    // the time anyone looks nothing here is unread any more: this is kept
+    // for as long as the thread is open, as a chat keeps its New line.
+    val fresh = remember(threadId) { mutableStateListOf<String>() }
+    // Whether the read messages have been folded yet: once, when the
+    // thread first comes back from the ship, and never over a choice made.
+    var tidied by remember(threadId) { mutableStateOf(false) }
+    // Scrolled to the first new message, once.
+    var landed by remember(threadId) { mutableStateOf(false) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     var selected by remember(threadId) { mutableStateOf<String?>(null) }
     // Remote images in a sender-controlled body are a read receipt and
     // an IP leak, so they never load unasked. One tap trusts the thread
@@ -127,6 +140,19 @@ fun MailThreadPane(
         // Reading it is what marks it read, and the mark is invisible to
         // every other client, so nothing else would ever do it.
         val unread = t?.messages.orEmpty().filter { !it.read }.map { it.id }
+        // A forged copy is never news.
+        t?.messages.orEmpty().filter { !it.read && it.verdict != Verdict.FORGED }
+            .forEach { if (it.id !in fresh) fresh += it.id }
+        // MAIL READS LIKE MAIL: in a thread of three or more, what has
+        // been read folds to its header line, and the newest and anything
+        // new stay open. A thread of one or two saves nothing by folding.
+        if (t != null && !tidied) {
+            tidied = true
+            val shown = io.nisfeb.talon.mail.collapse(t.messages)
+            val newest = shown.maxByOrNull { it.sent }?.id
+            if (shown.size >= 3) shown.map { it.id }.filter { it != newest && it !in fresh }
+                .forEach { if (it !in shut) shut += it }
+        }
         if (unread.isNotEmpty()) {
             repo.markRead(unread, threadId)
             thread = repo.cachedThread(threadId) ?: thread
@@ -281,6 +307,7 @@ fun MailThreadPane(
                     // The picture, and under it the message it selects.
                     MailThreadTree(
                         messages = t.messages,
+                        fresh = fresh.toSet(),
                         selected = answering,
                         nameFor = nameFor,
                         onSelect = { selected = it },
@@ -311,15 +338,26 @@ fun MailThreadPane(
                                 onShowImages = { imagesShown = true },
                                 onAnswer = if (shown.verdict == Verdict.FORGED) null else { f -> onCompose(intent(f, shown.id)) },
                                 full = true,
+                                fresh = shown.id in fresh,
                             )
                         }
                     }
-                } else LazyColumn(Modifier.fillMaxSize()) {
+                } else {
+                    val firstNew = visible.indexOfFirst { it.node.message.id in fresh }
+                    LaunchedEffect(threadId, firstNew) {
+                        if (!landed && firstNew >= 0) {
+                            landed = true
+                            listState.scrollToItem(firstNew)
+                        }
+                    }
+                    LazyColumn(Modifier.fillMaxSize(), state = listState) {
                     items(
                         visible,
                         key = { it.node.message.id },
                     ) { v ->
                         val node = v.node
+                        // The chat's New line, above the first of them.
+                        if (visible.getOrNull(firstNew)?.node?.message?.id == node.message.id) UnreadDividerRow()
                         MailMessageCard(
                             node = node,
                             depth = v.depth,
@@ -338,7 +376,10 @@ fun MailThreadPane(
                             selected = node.message.id == selected,
                             selectable = node.message.verdict != Verdict.FORGED,
                             nameFor = nameFor,
-                            onSelect = { selected = node.message.id },
+                            // A folded one opens where it is tapped, not
+                            // only on the name.
+                            onSelect = { selected = node.message.id; shut.remove(node.message.id) },
+                            fresh = node.message.id in fresh,
                             repo = repo,
                             imagesShown = imagesShown,
                             onShowImages = { imagesShown = true },
@@ -349,6 +390,7 @@ fun MailThreadPane(
                             full = node.message.id == answering,
                         )
                         HorizontalDivider()
+                    }
                     }
                 }
             }
@@ -572,6 +614,8 @@ private fun MailMessageCard(
     onAnswer: ((forwarding: Boolean) -> Unit)? = null,
     /** The message being read: Reply, Forward and Copy in full under it. */
     full: Boolean = false,
+    /** New when the thread was opened: marked as an unread thread is. */
+    fresh: Boolean = false,
 ) {
     val m = node.message
     val ground = when {
@@ -586,10 +630,13 @@ private fun MailMessageCard(
     // isTapToOpenMenuSupported): there a plain click is only watched for,
     // never taken, and a drag stays the text's.
     val touch = io.nisfeb.talon.ui.isTapToOpenMenuSupported
+    val rule = MaterialTheme.colorScheme.primary
     Column(
         Modifier
             .fillMaxWidth()
             .background(ground)
+            // New: the accent down its edge, as an unread thread has its dot.
+            .drawBehind { if (fresh) drawRect(rule, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height)) }
             .then(
                 when {
                     !selectable -> Modifier
@@ -616,9 +663,13 @@ private fun MailMessageCard(
             } else {
                 Spacer(Modifier.width(24.dp))
             }
+            if (fresh) {
+                MenuBadgeDot()
+                Spacer(Modifier.width(6.dp))
+            }
             Text(
                 nameFor(m.from),
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = if (fresh) FontWeight.Bold else FontWeight.SemiBold),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.clickable(onClick = onShut),
@@ -669,7 +720,8 @@ private fun MailMessageCard(
         // the row still says what it is.
         if (shut) {
             Text(
-                m.body.lineSequence().firstOrNull().orEmpty().take(120),
+                // Its own words, not a quote of what it answers.
+                treePreview(m.body).take(120),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

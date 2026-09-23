@@ -202,4 +202,35 @@ class MailThreadPaneTest {
         }
         onNodeWithText("Tree").assertIsSelected()
     }
+
+    // By the time the thread shows, the ship has marked it read. What was
+    // new when it opened stays marked under a New line, and what had been
+    // read already folds to its header, in a thread long enough to fold.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `what was new when the thread opened is marked, and what was read folds`() = runComposeUiTest {
+        val repo = repoServing(
+            """
+            {"id":"0vt","participants":["~zod","~nec"],"last":30,"unreadable":0,
+             "archived":false,"labels":[],"messages":[
+              {"id":"0va","from":"~zod","to":["~nec"],"subject":"Plans",
+               "body":"first line\nsecond line","sent":10,"prev":null,"verdict":"verified","read":true},
+              {"id":"0vb","from":"~nec","to":["~zod"],"subject":"Plans",
+               "body":"a reply","sent":20,"prev":"0va","verdict":"verified","read":true},
+              {"id":"0vc","from":"~zod","to":["~nec"],"subject":"Plans",
+               "body":"the news","sent":30,"prev":"0vb","verdict":"verified","read":false}]}
+            """.trimIndent(),
+        )
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailThreadPane(repo = repo, threadId = "0vt", contacts = ContactMap.EMPTY, ourShip = "~nec", onCompose = {})
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) {
+            runCatching { onNodeWithText("New").assertIsDisplayed(); true }.getOrDefault(false)
+        }
+        onNodeWithText("the news").assertIsDisplayed()
+        // Folded: its two lines as one, which only the header line shows.
+        onNodeWithText("first line second line").assertIsDisplayed()
+    }
 }
