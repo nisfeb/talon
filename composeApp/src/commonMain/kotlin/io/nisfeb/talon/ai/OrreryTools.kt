@@ -264,7 +264,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
         spec = ToolSpec(
             "orrery_configure",
             "Change one of orrery's settings documents: " + OrreryApi.SETTINGS.sorted().joinToString(", ") +
-                ". For generator, telegram and chat give only the fields to change: the ship keeps the rest, clears a field given as null, and keeps a stored credential given as \"\". schema and policy are replaced whole, so send the whole document. It answers with the document as stored. Read orrery_guide first: some fields have rules the ship enforces and will refuse.",
+                ". For generator, telegram, chat and mail give only the fields to change: the ship keeps the rest, clears a field given as null, and keeps a stored credential given as \"\". schema and policy are replaced whole, so send the whole document. It answers with the document as stored. Read orrery_guide first: some fields have rules the ship enforces and will refuse.",
             toolSchema(
                 "document" to ("string" to "The document name."),
                 "settings" to ("string" to "A JSON object of the fields to change."),

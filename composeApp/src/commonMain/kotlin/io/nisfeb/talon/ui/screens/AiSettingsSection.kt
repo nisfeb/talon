@@ -1053,8 +1053,9 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
         TextButton(onClick = { AiSettings.pendingTopUp.value = true }) { Text("Top up") }
     }
     // The ship's, not this install's: shown whether or not this install
-    // feeds orrery, since it is the only reader of the owner's chats.
+    // feeds orrery, since it is the only reader of the owner's chats and mail.
     ChatReaderRow(orrery)
+    MailReaderRow(orrery)
 }
 
 /**
@@ -1112,7 +1113,65 @@ private fun ChatReaderRow(orrery: OrreryRepo) {
         }
     }) { Text(if (waking) "Reading" else "Read now") }
     said?.let { (text, bad) -> Quiet(text, error = bad) }
+    // The ship's sender, in the chat reader's document (orrery 52). Off,
+    // nothing sends an approved chat message: this install sends none.
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("The ship sends my approved DMs", style = MaterialTheme.typography.bodyMedium)
+            Quiet(
+                if (reader.sendDms) "An approved message by chat goes from your ship as a DM. This install sends none."
+                else "Approved messages by chat wait until this is on. This install sends none. It needs a grubbery recent enough to send a DM, and an older one stalls the ship's executor at the first.",
+            )
+        }
+        Switch(checked = reader.sendDms, onCheckedChange = { want ->
+            said = null
+            scope.launch {
+                orrery.setChatReader(buildJsonObject { put("send_dms", want) })
+                    .onFailure { said = (it.message ?: "Orrery did not answer.") to true }
+            }
+        })
+    }
     ChatPicker(orrery, reader)
+}
+
+/**
+ * The ship's own reader of the owner's mail (orrery 52), which also
+ * reads the replies to the daily brief the ship sends. This install
+ * reads no mail, so none is read while it is off.
+ */
+@Composable
+private fun MailReaderRow(orrery: OrreryRepo) {
+    val scope = rememberCoroutineScope()
+    var failed by remember { mutableStateOf(false) }
+    LaunchedEffect(orrery) { failed = !orrery.loadMailReader() }
+    val on = orrery.mailReader.collectAsState().value
+    if (on == null) {
+        if (failed) Row(verticalAlignment = Alignment.CenterVertically) {
+            Quiet("Your ship did not say how its mail reader is set.", error = true)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { scope.launch { failed = !orrery.loadMailReader() } }) { Text("Try again") }
+        }
+        return
+    }
+    val run by orrery.mailReaderRun.collectAsState()
+    var said by remember { mutableStateOf<String?>(null) }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text("The ship reads my mail", style = MaterialTheme.typography.bodyMedium)
+            Quiet(
+                if (on) "Your ship reads your mail and your replies to its daily brief. This install reads no mail."
+                else "Your ship can read your mail and your replies to its daily brief. This install reads no mail, so none is read while this is off.",
+            )
+            run?.let { Quiet(chatRunLine(it)) }
+        }
+        Switch(checked = on, onCheckedChange = { want ->
+            said = null
+            scope.launch {
+                orrery.setMailReader(want).onFailure { said = it.message ?: "Orrery did not answer." }
+            }
+        })
+    }
+    said?.let { Quiet(it, error = true) }
 }
 
 private fun plural(n: Int, one: String) = "$n $one" + if (n == 1) "" else "s"

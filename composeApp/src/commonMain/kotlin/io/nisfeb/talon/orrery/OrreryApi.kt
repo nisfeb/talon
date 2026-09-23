@@ -508,10 +508,10 @@ class OrreryApi(
          * URL and a model sometimes chooses it: anything outside this
          * set is a mistake, and `../` is not a document.
          */
-        val SETTINGS = setOf("generator", "telegram", "schema", "policy", "chat")
+        val SETTINGS = setOf("generator", "telegram", "schema", "policy", "chat", "mail")
 
         /** Read and never written: what the chat reader may pick from, and each reader's last pass. */
-        val LISTS = setOf("chat/dms", "chat/channels", "chat/last", "telegram/last")
+        val LISTS = setOf("chat/dms", "chat/channels", "chat/last", "mail/last", "telegram/last")
 
         /**
          * The documents that register themselves with an outside
@@ -591,13 +591,18 @@ data class StateView(
     val schema: JsonObject = JsonObject(emptyMap()),
 )
 
-/** The ship's own reader of the owner's Tlon chats, as far as the screen needs it. */
-data class ChatReader(val enabled: Boolean, val dms: Set<String>, val channels: Set<String>)
+/**
+ * The ship's own reader of the owner's Tlon chats, as far as the screen
+ * needs it, and [sendDms], whether the ship sends approved chat messages
+ * (orrery 52), which lives in the same document.
+ */
+data class ChatReader(val enabled: Boolean, val dms: Set<String>, val channels: Set<String>, val sendDms: Boolean = false)
 
 fun chatReaderOf(o: JsonObject) = ChatReader(
     enabled = o["enabled"]?.jsonPrimitive?.booleanOrNull == true,
     dms = names(o["dms"]).toSet(),
     channels = names(o["channels"]).toSet(),
+    sendDms = o["send_dms"]?.jsonPrimitive?.booleanOrNull == true,
 )
 
 /** A DM or channel the chat reader could read: its id, and the name a person knows it by, which may be blank. */
@@ -609,7 +614,7 @@ fun chatOptionsOf(o: JsonObject): List<ChatOption> = (o["items"] as? kotlinx.ser
     ChatOption(id, item["name"]?.jsonPrimitive?.contentOrNull.orEmpty())
 }
 
-/** The chat reader's last pass (`chat/last`): when, how much it read and filed, and what it said. */
+/** A reader's last pass (`chat/last`, `mail/last`): when, how much it read and filed, and what it said. */
 data class ChatReaderRun(val atMs: Long?, val read: Int, val filed: Int, val notes: List<String>, val modelDown: Boolean)
 
 fun chatReaderRunOf(o: JsonObject) = ChatReaderRun(

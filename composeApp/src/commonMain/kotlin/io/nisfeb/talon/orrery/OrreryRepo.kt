@@ -135,6 +135,25 @@ class OrreryRepo(
     /** Change the chat reader's settings; the ship's answer is the new state. */
     suspend fun setChatReader(body: JsonObject): Result<Unit> = writeSettings("chat", body).map { }
 
+    private val _mailReader = MutableStateFlow<Boolean?>(null)
+    /** Whether the ship reads the owner's mail (orrery 52); null until it says. */
+    val mailReader: StateFlow<Boolean?> = _mailReader.asStateFlow()
+    private val _mailReaderRun = MutableStateFlow<ChatReaderRun?>(null)
+    val mailReaderRun: StateFlow<ChatReaderRun?> = _mailReaderRun.asStateFlow()
+
+    /** Ask the ship whether its mail reader is on, and for its last pass; false where it did not say. */
+    suspend fun loadMailReader(): Boolean {
+        val a = api ?: return false
+        runCatching { chatReaderRunOf(Json.parseToJsonElement(a.settingsDoc("mail/last")).jsonObject) }.onSuccess { _mailReaderRun.value = it }
+        return runCatching { mailReaderOn(Json.parseToJsonElement(a.settingsDoc("mail")).jsonObject) }
+            .onSuccess { _mailReader.value = it }.isSuccess
+    }
+
+    private fun mailReaderOn(o: JsonObject) = o["enabled"]?.jsonPrimitive?.booleanOrNull == true
+
+    /** Turn the ship's mail reader on or off; the ship's answer is the new state. */
+    suspend fun setMailReader(on: Boolean): Result<Unit> = writeSettings("mail", buildJsonObject { put("enabled", on) }).map { }
+
     /** What the chat reader may pick from: the ship's DMs, then its channels, each with a name. */
     suspend fun chatOptions(): Result<Pair<List<ChatOption>, List<ChatOption>>> = runCatching {
         val a = attached()
@@ -346,6 +365,7 @@ class OrreryRepo(
         (runCatching { Json.parseToJsonElement(said) }.getOrNull() as? JsonObject)?.takeIf { "enabled" in it }?.let { doc ->
             if (name == "generator") _generatorSettings.value = generatorSettingsOf(doc)
             if (name == "chat") _chatReader.value = chatReaderOf(doc)
+            if (name == "mail") _mailReader.value = mailReaderOn(doc)
         }
         said
     }

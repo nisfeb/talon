@@ -528,14 +528,18 @@ class PassKeepsTest {
         val db = db(dir)
         val scope = CoroutineScope(SupervisorJob())
         val gets = mutableListOf<String>()
+        val puts = mutableListOf<String>()
         try {
             val http = HttpClient(
                 MockEngine { req ->
                     val path = req.url.encodedPath
                     if (req.method == HttpMethod.Get) gets += path
+                    if (req.method == HttpMethod.Put) puts += path + " " + (req.body as? TextContent)?.text
                     val body = when {
                         req.method == HttpMethod.Put && path.endsWith("/api/chat") ->
-                            """{"enabled":true,"dms":["~bus"],"channels":["chat/~host/general"],"people":{},"poll_minutes":5}"""
+                            """{"enabled":true,"dms":["~bus"],"channels":["chat/~host/general"],"people":{},"poll_minutes":5,"send_dms":true}"""
+                        req.method == HttpMethod.Put && path.endsWith("/api/mail") ->
+                            """{"enabled":true,"poll_minutes":10,"backfill_hours":720}"""
                         req.method == HttpMethod.Put && path.endsWith("/api/generator") ->
                             """{"enabled":true,"url":"https://openrouter.ai/api/v1","model":"m","api_key":"...abcd"}"""
                         else -> "[]"
@@ -547,11 +551,14 @@ class PassKeepsTest {
             repo.attach("https://ship.test", "~zod")
             gets.clear()
             repo.setChatReader(kotlinx.serialization.json.buildJsonObject { put("enabled", kotlinx.serialization.json.JsonPrimitive(true)) }).getOrThrow()
-            assertEquals(ChatReader(true, setOf("~bus"), setOf("chat/~host/general")), repo.chatReader.value)
+            assertEquals(ChatReader(true, setOf("~bus"), setOf("chat/~host/general"), sendDms = true), repo.chatReader.value)
+            repo.setMailReader(true).getOrThrow()
+            assertEquals(true, repo.mailReader.value, "the ship's mail reader, as its answer says")
+            assertEquals(listOf("/apps/orrery/api/mail {\"enabled\":true}"), puts.filter { "/api/mail" in it }, "only the switch is sent")
             repo.setGenerator(true).getOrThrow()
             val g = repo.generatorSettings.value!!
             assertTrue(g.enabled && g.keySet, "a key shown by its last four is a key set")
-            assertEquals(emptyList(), gets.filter { it.endsWith("/api/chat") || it.endsWith("/api/generator") }, "nothing read back")
+            assertEquals(emptyList(), gets.filter { it.endsWith("/api/chat") || it.endsWith("/api/mail") || it.endsWith("/api/generator") }, "nothing read back")
         } finally {
             scope.cancel()
             db.close()
