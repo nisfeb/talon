@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.Flow
  * pipe is on; turning it off revokes the key on the ship and deletes
  * the row.
  *
- * The cursors are conservative on purpose. An observation's id is a
+ * The cursor is conservative on purpose. An observation's id is a
  * hash of its content, so pushing something twice is a no-op on the
  * ship, and a cursor that lags costs a resend, never a duplicate.
  */
@@ -28,12 +28,8 @@ data class OrreryAccountEntity(
     @PrimaryKey val ship: String,
     val clientId: String,
     val token: String,
-    /** sentMs of the newest message pushed. */
-    val messagesCursor: Long = 0,
     /** `last` of the newest mail thread pushed. */
     val mailCursor: Long = 0,
-    /** When the calendar window was last pushed. */
-    val calendarCursor: Long = 0,
 )
 
 @Dao
@@ -51,7 +47,7 @@ interface OrreryAccountDao {
     suspend fun delete(ship: String)
 }
 
-/** The table exactly as Room creates it, which is what a migration must match. */
+/** The table as 43 to 44 made it; [ORRERY_HANDOFF_MIGRATION] makes it again as it is now. */
 internal const val ORRERY_ACCOUNTS_SQL =
     "CREATE TABLE IF NOT EXISTS `orrery_accounts` (`ship` TEXT NOT NULL, `clientId` TEXT NOT NULL, " +
         "`token` TEXT NOT NULL, `messagesCursor` INTEGER NOT NULL, `mailCursor` INTEGER NOT NULL, " +
@@ -121,25 +117,6 @@ interface OrreryNoticedDao {
 
     @Query("DELETE FROM orrery_noticed WHERE ship = :ship")
     suspend fun clear(ship: String)
-}
-
-/** A channel the person lets the triage read. DMs need no row: they are always in scope. */
-@Entity(tableName = "orrery_channels")
-data class OrreryChannelEntity(@PrimaryKey val whom: String)
-
-@Dao
-interface OrreryChannelDao {
-    @Query("SELECT whom FROM orrery_channels")
-    fun stream(): Flow<List<String>>
-
-    @Query("SELECT whom FROM orrery_channels")
-    suspend fun all(): List<String>
-
-    @Upsert
-    suspend fun put(row: OrreryChannelEntity)
-
-    @Query("DELETE FROM orrery_channels WHERE whom = :whom")
-    suspend fun remove(whom: String)
 }
 
 internal const val ORRERY_NOTICED_SQL =
@@ -215,4 +192,27 @@ internal const val ORRERY_SENT_SQL =
 /** 44 to 45: what has already been sent. Android runs the same statement its own way. */
 val ORRERY_SENT_MIGRATION = object : Migration(44, 45) {
     override fun migrate(connection: SQLiteConnection) = connection.execSQL(ORRERY_SENT_SQL)
+}
+
+/**
+ * The ship reads the owner's chats and writes the calendar's events
+ * itself now, so what Talon kept to do either goes: the channels its
+ * triage read, the records of what it had read and written (`msg:`,
+ * `cal:`, `occ:`) and the two cursors. SQLite before 3.35 cannot drop
+ * a column, so the accounts table is made again without them.
+ */
+internal val ORRERY_HANDOFF_SQL = listOf(
+    "DROP TABLE IF EXISTS `orrery_channels`",
+    "DELETE FROM `orrery_sent` WHERE `key` LIKE 'msg:%' OR `key` LIKE 'cal:%' OR `key` LIKE 'occ:%'",
+    "CREATE TABLE `orrery_accounts_new` (`ship` TEXT NOT NULL, `clientId` TEXT NOT NULL, " +
+        "`token` TEXT NOT NULL, `mailCursor` INTEGER NOT NULL, PRIMARY KEY(`ship`))",
+    "INSERT INTO `orrery_accounts_new` (`ship`, `clientId`, `token`, `mailCursor`) " +
+        "SELECT `ship`, `clientId`, `token`, `mailCursor` FROM `orrery_accounts`",
+    "DROP TABLE `orrery_accounts`",
+    "ALTER TABLE `orrery_accounts_new` RENAME TO `orrery_accounts`",
+)
+
+/** 46 to 47: see [ORRERY_HANDOFF_SQL]. Android runs the same statements its own way. */
+val ORRERY_HANDOFF_MIGRATION = object : Migration(46, 47) {
+    override fun migrate(connection: SQLiteConnection) = ORRERY_HANDOFF_SQL.forEach { connection.execSQL(it) }
 }

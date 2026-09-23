@@ -77,6 +77,10 @@ import io.nisfeb.talon.orrery.OrreryAvailability
 import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.orrery.RungStatus
 import io.nisfeb.talon.orrery.generatorLine
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import io.nisfeb.talon.ui.icons.TalonIcons
 import io.nisfeb.talon.ui.isAssistantSupported
 import io.nisfeb.talon.ui.isCallsSupported
@@ -1014,7 +1018,7 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
     }
     FeatureRow(
         "Orrery triage",
-        "Reads your messages on this install and sends orrery the facts: who wrote, about what, your contacts and calendar, under a key made for this install.",
+        "Reads your calls, mail and contacts' status lines on this install and sends orrery the facts, with your contacts, under a key made for this install. Your ship reads your chats and calendar itself.",
         on = on, spent = spent, busy = busy,
         onSwitch = { want ->
             note = null
@@ -1046,7 +1050,6 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
             }
         }
         ChatReaderRow(orrery)
-        ChatsOrreryReads(orrery)
         if (io.nisfeb.talon.ui.isLocationSharingSupported) LocationRow()
     }
     (note ?: error)?.let { Quiet(it, error = true) }
@@ -1058,70 +1061,110 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
 }
 
 /**
- * Every chat orrery reads, in one place: the channels this install's
- * triage may read, each with its switch, and which of them, and how
- * many DMs, the ship's own reader reads instead. The switch used to be
- * only in each channel's info pane, one at a time, so there was nowhere
- * to see what was read.
- */
-@Composable
-private fun ChatsOrreryReads(orrery: OrreryRepo) {
-    val scope = rememberCoroutineScope()
-    val channels by remember(orrery) { orrery.chatChannels() }.collectAsState(initial = emptyList())
-    val read by remember(orrery) { orrery.channelsRead() }.collectAsState(initial = emptyList())
-    val ship by orrery.shipChats.collectAsState()
-    val keyed = orrery.generatorSettings.collectAsState().value?.keySet == true
-    val onShip = ship?.takeIf { it.enabled && keyed }
-    var all by remember { mutableStateOf(false) }
-    Text("Chats orrery reads", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
-    Quiet(
-        "DMs and group DMs are always read. A channel is read only once it is switched on here, or in its info." +
-            (onShip?.let { " Your ship reads ${it.channels.size} of these channels and ${it.dms.size} DMs itself, from people it knows by ship; those are marked, and this install leaves them to it." } ?: ""),
-    )
-    val readSet = read.toSet()
-    val shown = if (all) channels else channels.filter { it.first in readSet || onShip?.channels?.contains(it.first) == true }
-    if (channels.isEmpty()) Quiet("You are in no channels yet.")
-    shown.forEach { (nest, label) ->
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(label, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                if (onShip?.channels?.contains(nest) == true) Quiet("Read on your ship")
-            }
-            Switch(checked = nest in readSet, onCheckedChange = { on -> scope.launch { orrery.readChannel(nest, on) } })
-        }
-    }
-    if (channels.size > shown.size || all) {
-        TextButton(onClick = { all = !all }) {
-            Text(if (all) "Show only the channels read" else "Show all ${channels.size} channels")
-        }
-    }
-}
-
-/**
- * The ship's own reader of the owner's chats (orrery 39). With it on,
- * this install reads no chats, so each message is read once. Hidden
- * where the ship cannot say, one before 39.
+ * The ship's own reader of the owner's Tlon chats (orrery 39): on or
+ * off, what it read last, and which chats it reads. This install reads
+ * no chats itself, so each message is read once, on the ship. Hidden
+ * where the ship cannot say.
  */
 @Composable
 private fun ChatReaderRow(orrery: OrreryRepo) {
     val scope = rememberCoroutineScope()
-    LaunchedEffect(orrery) { orrery.loadShipChats() }
-    val on = orrery.shipReadsChats.collectAsState().value ?: return
-    var note by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(orrery) { orrery.loadChatReader() }
+    val reader = orrery.chatReader.collectAsState().value ?: return
+    val run by orrery.chatReaderRun.collectAsState()
+    var said by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("The ship reads my chats", style = MaterialTheme.typography.bodyMedium)
             Quiet(
-                if (on) "Your ship reads the chats chosen for it, from people it knows by ship, and this install leaves those to it and reads the rest, so each message is read once. Ask the assistant to change which chats."
-                else "Your ship can read chosen DMs and channels itself, with the generator's model and key. This install then leaves those to it and reads the rest. Ask the assistant to choose which.",
+                if (reader.enabled) "Your ship reads the chats picked below, with the generator's model and key. This install reads no chats."
+                else "Your ship can read the chats you pick, with the generator's model and key. This install reads no chats, so none are read while this is off.",
             )
+            run?.let { Quiet(chatRunLine(it)) }
         }
-        Switch(checked = on, onCheckedChange = { want ->
-            note = null
-            scope.launch { orrery.setShipReadsChats(want).onFailure { note = it.message ?: "Orrery did not answer." } }
+        Switch(checked = reader.enabled, onCheckedChange = { want ->
+            said = null
+            scope.launch {
+                orrery.setChatReader(buildJsonObject { put("enabled", want) })
+                    .onFailure { said = (it.message ?: "Orrery did not answer.") to true }
+            }
         })
     }
-    note?.let { Quiet(it, error = true) }
+    if (reader.enabled) TextButton(onClick = {
+        scope.launch {
+            said = orrery.wakeChatReader().fold(
+                onSuccess = { "Your ship is reading now." to false },
+                onFailure = { (it.message ?: "Orrery did not answer.") to true },
+            )
+        }
+    }) { Text("Read now") }
+    said?.let { (text, bad) -> Quiet(text, error = bad) }
+    ChatPicker(orrery, reader)
+}
+
+private fun chatRunLine(r: io.nisfeb.talon.orrery.ChatReaderRun): String {
+    val at = r.atMs ?: return "Not read yet."
+    if (r.modelDown) return "Last read ${agoLabel(at)}: the model did not answer."
+    val line = "Last read ${agoLabel(at)}: ${r.read} ${if (r.read == 1) "message" else "messages"}, ${r.filed} filed."
+    return if (r.read == 0) r.notes.firstOrNull()?.let { "$line $it" } ?: line else line
+}
+
+/**
+ * Which chats the ship reads, picked by name, since many channel ids
+ * are random strings now; filtered as you type, by name or id. A switch
+ * writes that whole list, and the ship's answer is what then shows.
+ */
+@Composable
+private fun ChatPicker(orrery: OrreryRepo, reader: io.nisfeb.talon.orrery.ChatReader) {
+    val scope = rememberCoroutineScope()
+    var options by remember { mutableStateOf<Pair<List<io.nisfeb.talon.orrery.ChatOption>, List<io.nisfeb.talon.orrery.ChatOption>>?>(null) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    var all by remember { mutableStateOf(false) }
+    LaunchedEffect(orrery) {
+        orrery.chatOptions().fold(onSuccess = { options = it }, onFailure = { problem = it.message ?: "Orrery did not answer." })
+    }
+    Text("Chats your ship reads", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+    Quiet("${reader.dms.size} DMs and ${reader.channels.size} channels.")
+    problem?.let { Quiet(it, error = true) }
+    val (dms, channels) = options ?: return
+    OutlinedTextField(
+        value = query, onValueChange = { query = it }, singleLine = true,
+        placeholder = { Text("Find a DM or channel") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    val q = query.trim().lowercase()
+    // With nothing typed, only what is read, unless all is asked for.
+    val rows = listOf("dms" to dms, "channels" to channels).flatMap { (field, list) ->
+        val picked = if (field == "dms") reader.dms else reader.channels
+        list.filter { o ->
+            if (q.isEmpty()) all || o.id in picked else q in o.name.lowercase() || q in o.id.lowercase()
+        }.map { Triple(field, it, picked) }
+    }
+    // ponytail: the first fifty; typing narrows the rest.
+    rows.take(50).forEach { (field, o, picked) ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(o.name.ifBlank { o.id }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (field == "dms" && o.name.isNotBlank()) Quiet(o.id)
+            }
+            Switch(checked = o.id in picked, enabled = !busy, onCheckedChange = { on ->
+                val next = if (on) picked + o.id else picked - o.id
+                problem = null
+                scope.launch {
+                    busy = true
+                    orrery.setChatReader(buildJsonObject { putJsonArray(field) { next.sorted().forEach { add(JsonPrimitive(it)) } } })
+                        .onFailure { problem = it.message ?: "Orrery did not answer." }
+                    busy = false
+                }
+            })
+        }
+    }
+    if (rows.size > 50) Quiet("${rows.size - 50} more. Type to narrow them.")
+    if (q.isEmpty()) TextButton(onClick = { all = !all }) {
+        Text(if (all) "Show only the chats read" else "Show all ${dms.size + channels.size} chats")
+    }
 }
 
 /** Where the owner is, from this phone, when they move. See [io.nisfeb.talon.ui.LocationSharing]. */

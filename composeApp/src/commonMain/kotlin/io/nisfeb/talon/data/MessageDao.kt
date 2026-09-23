@@ -135,14 +135,6 @@ abstract class MessageDao {
     """)
     abstract suspend fun before(whom: String, beforeMs: Long, limit: Int): List<MessageEntity>
 
-    /** Other people's posts after [sinceMs], oldest first, for a cursor walk. */
-    @Query("""
-        SELECT * FROM messages
-        WHERE isDeleted = 0 AND parentId IS NULL AND sentMs > :sinceMs AND author != :notAuthor
-        ORDER BY sentMs ASC LIMIT :limit
-    """)
-    abstract suspend fun postsAfter(sinceMs: Long, notAuthor: String, limit: Int): List<MessageEntity>
-
     /** Other people's posts after [sinceMs] and before [beforeMs], newest first: what a cursor has already walked. */
     @Query("""
         SELECT * FROM messages

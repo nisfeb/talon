@@ -2,7 +2,6 @@ package io.nisfeb.talon.orrery
 
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.data.ContactEntity
-import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.mail.InboxEntry
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -26,33 +25,10 @@ class OrreryFactsTest {
     private val noon = 1_789_646_400_000L // 2026-09-17T12:00:00Z
     private val evening = noon + 6 * 3_600_000
 
-    private fun post(author: String, whom: String, at: Long, id: String = "170") =
-        MessageEntity(whom = whom, id = id, author = author, sentMs = at, contentJson = "[]", kind = "chat")
-
     @Test
     fun `a person is their patp without the sig`() {
         assertEquals("person/sampel-palnet", personId("~sampel-palnet"))
         assertEquals("person/sampel-palnet-sampel-palnet--sampel-palnet-sampel-palnet", personId("~sampel-palnet-sampel-palnet--sampel-palnet-sampel-palnet"))
-    }
-
-    @Test
-    fun `two messages on one day are one last-contact claim`() {
-        val a = messageFacts(post("~bus", "~bus", noon), me, "person/bus")!!
-        val b = messageFacts(post("~bus", "~bus", evening, id = "171"), me, "person/bus")!!
-        assertEquals("person/bus", a.subject)
-        assertEquals(JsonPrimitive("2026-09-17"), a.value)
-        assertEquals(a.value, b.value)
-        assertEquals(a.atMs, b.atMs, "asserted at the start of the day, so the id ignores the hour")
-        assertEquals("talon-dm", a.sourceKind)
-        assertEquals("talon://chat/~bus?id=170", a.sourceId)
-    }
-
-    @Test
-    fun `our own posts and channel posts are told apart`() {
-        assertNull(messageFacts(post(me, "~bus", noon), me, "person/me"))
-        val chan = messageFacts(post("~bus", "chat/~host/general", noon), me, "person/bus")!!
-        assertEquals("talon-chat", chan.sourceKind)
-        assertEquals("talon://chat/chat/~host/general?id=170", chan.sourceId)
     }
 
     @Test
@@ -88,9 +64,8 @@ class OrreryFactsTest {
         val taught = teachNames(body, setOf("~bus")).single()
         assertEquals(null, taught.name)
         assertEquals(listOf("Buster", "bus"), taught.aliases)
-        // No such body: made whole, or left alone where a pass may not make one.
+        // No such body: made whole.
         assertEquals(listOf(body), teachNames(body, null))
-        assertTrue(teachNames(body, null, make = false).isEmpty(), "names alone would come back hollow")
     }
 
     @Test

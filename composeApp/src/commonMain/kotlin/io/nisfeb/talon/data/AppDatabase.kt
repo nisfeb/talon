@@ -60,11 +60,10 @@ import androidx.room.RoomDatabaseConstructor
         CalendarCacheEntity::class,
         OrreryAccountEntity::class,
         OrreryNoticedEntity::class,
-        OrreryChannelEntity::class,
         OrrerySentEntity::class,
         CometDomeEntity::class,
     ],
-    version = 46,
+    version = 47,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -96,7 +95,6 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun calendarCache(): CalendarCacheDao
     abstract fun orreryAccounts(): OrreryAccountDao
     abstract fun orreryNoticed(): OrreryNoticedDao
-    abstract fun orreryChannels(): OrreryChannelDao
     abstract fun orrerySent(): OrrerySentDao
     abstract fun cometDomes(): CometDomeDao
 }

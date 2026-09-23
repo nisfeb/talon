@@ -115,15 +115,19 @@ class OrreryApi(
         return runCatching { generatorSettingsOf(Json.parseToJsonElement(text).jsonObject) }.getOrNull()
     }
 
-    /** Merge into the generator's settings. A blank or absent key keeps the one the ship has. */
-    suspend fun setGenerator(enabled: Boolean, url: String?, model: String?, apiKey: String?) {
+    /**
+     * Merge into the generator's settings, and what the ship then holds:
+     * it answers a write once the write has landed. A blank or absent
+     * key keeps the one the ship has.
+     */
+    suspend fun setGenerator(enabled: Boolean, url: String?, model: String?, apiKey: String?): GeneratorSettings {
         val body = buildJsonObject {
             put("enabled", enabled)
             url?.let { put("url", it) }
             model?.let { put("model", it) }
             apiKey?.takeIf { it.isNotBlank() }?.let { put("api_key", it) }
         }
-        request(owner, HttpMethod.Put, "/api/generator", body.toString())
+        return generatorSettingsOf(reading { Json.parseToJsonElement(setSettingsDoc("generator", body)).jsonObject })
     }
 
     /**
@@ -135,9 +139,9 @@ class OrreryApi(
      * them is for: what the telegram reader wants is orrery's business
      * and the ship's, not this app's. New docs cost nothing here.
      *
-     * The ship masks credentials on the way out — a token reads back as
-     * `token_set: true` and never as itself — and a blank field on the
-     * way in keeps what the ship has. Both are its rules, not ours.
+     * The ship masks credentials on the way out, and a blank credential
+     * on the way in keeps what the ship has; a field left out is kept
+     * and one sent as null is cleared. All its rules, not ours.
      *
      * [name] is checked against [SETTINGS] rather than passed through:
      * it lands in a URL path, and the caller is sometimes a model.
@@ -145,30 +149,6 @@ class OrreryApi(
     suspend fun settingsDoc(name: String): String {
         require(name in SETTINGS || name in LISTS) { "no settings document called $name" }
         return request(owner, HttpMethod.Get, "/api/$name")
-    }
-
-    /**
-     * What the ship's own chat reader reads (orrery 39), as a key with
-     * write may ask: what it reads, Talon must not, or it is read twice
-     * and paid for twice. Null where the ship cannot say, one before 39
-     * or a key without write, which is not a refused key.
-     */
-    suspend fun shipChats(token: String): ShipChats? {
-        val text = try {
-            request(bare, HttpMethod.Get, "/api/chat") { header(HttpHeaders.Authorization, "Bearer $token") }
-        } catch (e: OrreryError.Refused) {
-            if (e.status == 404 || e.status == 403) return null
-            throw e
-        }
-        val o = runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return null
-        fun strings(k: String) = (o[k] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNullTo(HashSet()) { it.jsonPrimitive.contentOrNull }
-        return ShipChats(
-            enabled = o["enabled"]?.jsonPrimitive?.booleanOrNull == true,
-            dms = strings("dms"),
-            channels = strings("channels"),
-            people = (o["people"] as? JsonObject)?.keys.orEmpty(),
-            backfillHours = o["backfill_hours"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 24L,
-        )
     }
 
     /**
@@ -204,10 +184,20 @@ class OrreryApi(
         return false
     }
 
-    /** Merge [body] into a settings document. Owner's route, owner's client. */
+    /**
+     * Merge [body] into a settings document. Owner's route, owner's
+     * client. The ship answers once the write has landed, with the
+     * document as its GET gives it: that answer is the new state, and
+     * reading it again straight after adds nothing.
+     */
     suspend fun setSettingsDoc(name: String, body: JsonObject): String {
         require(name in SETTINGS) { "no settings document called $name" }
         return request(owner, HttpMethod.Put, "/api/$name", body.toString())
+    }
+
+    /** Run the ship's chat reader now; [settingsDoc] `chat/last` is its record once it is done. */
+    suspend fun wakeChat() {
+        request(owner, HttpMethod.Post, "/api/chat/wake")
     }
 
     /**
@@ -306,6 +296,7 @@ class OrreryApi(
                     ?: return@mapNotNull null,
                 sourceId = o["source"]?.jsonObject?.get("id")?.jsonPrimitive?.content ?: "",
                 status = o["status"]?.jsonPrimitive?.content ?: "",
+                sourceKind = o["source"]?.jsonObject?.get("kind")?.jsonPrimitive?.content ?: "",
             )
         }
     }
@@ -582,8 +573,8 @@ class OrreryApi(
          */
         val SETTINGS = setOf("generator", "telegram", "schema", "policy", "chat")
 
-        /** What the ship holds for a settings document to pick from, read and never written: the chat reader's DMs and channels. */
-        val LISTS = setOf("chat/dms", "chat/channels")
+        /** Read and never written: what the chat reader may pick from, and its last pass. */
+        val LISTS = setOf("chat/dms", "chat/channels", "chat/last")
 
         /**
          * The documents that register themselves with an outside
@@ -625,7 +616,7 @@ data class ResolvedBody(val id: String, val kind: String, val name: String, val 
 }
 
 /** One row of a body's timeline, as far as a client needs to read it. */
-data class KnownObs(val id: String, val attr: String, val atMs: Long, val sourceId: String, val status: String) {
+data class KnownObs(val id: String, val attr: String, val atMs: Long, val sourceId: String, val status: String, val sourceKind: String = "") {
     val stands: Boolean get() = status != "retracted"
 }
 
@@ -665,32 +656,34 @@ data class StateView(
     val schema: JsonObject = JsonObject(emptyMap()),
 )
 
-/**
- * The ship's own chat reader as a key reads it: whether it is on, the
- * DMs and channels it reads, the ships its `people` map names, and how
- * far back its first pass looks. It reads a message only in those,
- * only from an author it can name (a person body carrying that ship,
- * or one in `people`), only with the generator's key set, and nothing
- * sent before its window.
- */
-data class ShipChats(
-    val enabled: Boolean,
-    val dms: Set<String>,
-    val channels: Set<String>,
-    val people: Set<String>,
-    val backfillHours: Long = 24L,
-) {
-    /**
-     * Whether the ship reads this post, given the ships its person
-     * bodies carry, whether its generator has a key, and the time now.
-     * ponytail: the window is read as from now; a reader switched on
-     * long ago reads further back than this assumes, which only means
-     * Talon reads a few the ship read too.
-     */
-    fun reads(whom: String, author: String, sentMs: Long, shipped: Set<String>, keyed: Boolean, nowMs: Long): Boolean =
-        enabled && keyed && (whom in dms || whom in channels) && (author in shipped || author in people) &&
-            sentMs >= nowMs - backfillHours * 3_600_000
+/** The ship's own reader of the owner's Tlon chats, as far as the screen needs it. */
+data class ChatReader(val enabled: Boolean, val dms: Set<String>, val channels: Set<String>)
+
+fun chatReaderOf(o: JsonObject) = ChatReader(
+    enabled = o["enabled"]?.jsonPrimitive?.booleanOrNull == true,
+    dms = names(o["dms"]).toSet(),
+    channels = names(o["channels"]).toSet(),
+)
+
+/** A DM or channel the chat reader could read: its id, and the name a person knows it by, which may be blank. */
+data class ChatOption(val id: String, val name: String)
+
+fun chatOptionsOf(o: JsonObject): List<ChatOption> = (o["items"] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { e ->
+    val item = e as? JsonObject ?: return@mapNotNull null
+    val id = item["id"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+    ChatOption(id, item["name"]?.jsonPrimitive?.contentOrNull.orEmpty())
 }
+
+/** The chat reader's last pass (`chat/last`): when, how much it read and filed, and what it said. */
+data class ChatReaderRun(val atMs: Long?, val read: Int, val filed: Int, val notes: List<String>, val modelDown: Boolean)
+
+fun chatReaderRunOf(o: JsonObject) = ChatReaderRun(
+    atMs = o["at"]?.jsonPrimitive?.contentOrNull?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
+    read = o["read"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0,
+    filed = o["filed"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0,
+    notes = names(o["notes"]),
+    modelDown = o["down"] is JsonObject,
+)
 
 data class ItemAnswer(val id: String?, val ok: Boolean, val existing: Boolean, val error: String?)
 
@@ -785,7 +778,8 @@ fun generatorSettingsOf(o: JsonObject) = GeneratorSettings(
     enabled = o["enabled"]?.jsonPrimitive?.booleanOrNull == true,
     url = o["url"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() },
     model = o["model"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() },
-    keySet = o["api_key_set"]?.jsonPrimitive?.booleanOrNull == true,
+    // Said as a flag, or as the key's last four characters.
+    keySet = o["api_key_set"]?.jsonPrimitive?.booleanOrNull == true || !o["api_key"]?.jsonPrimitive?.contentOrNull.isNullOrBlank(),
 )
 
 data class GeneratorRun(

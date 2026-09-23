@@ -2,7 +2,6 @@ package io.nisfeb.talon.orrery
 
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.data.ContactEntity
-import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.mail.InboxEntry
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -95,20 +94,12 @@ fun contactStatus(c: ContactEntity): Pair<String, Long>? {
  * upsert carrying aliases and no name unions them and leaves the ship's
  * own name where it is, which is how a new nickname arrives without
  * remaking a body the owner may have merged. A body it lacks is sent
- * whole, and only when [make] says this is a pass that may make one:
- * names alone would come back as a hollow body named after its slug.
+ * whole: names alone would come back as a hollow body named after its slug.
  */
-fun teachNames(body: OBody, goesBy: Set<String>?, make: Boolean = true): List<OBody> {
-    if (goesBy == null) return if (make) listOf(body) else emptyList()
+fun teachNames(body: OBody, goesBy: Set<String>?): List<OBody> {
+    if (goesBy == null) return listOf(body)
     val fresh = (body.aliases + listOfNotNull(body.name)).filter { it.isNotBlank() }.distinct() - goesBy
     return if (fresh.isEmpty()) emptyList() else listOf(OBody(body.id, name = null, aliases = fresh))
-}
-
-/** Somebody wrote to us, or where we could see it. Our own posts say nothing. */
-fun messageFacts(m: MessageEntity, ourShip: String, subjectId: String): Obs? {
-    if (m.author.isBlank() || m.author == ourShip || !m.author.startsWith("~")) return null
-    val kind = talonKind(m.whom)
-    return lastContact(subjectId, m.sentMs, kind, "talon://chat/${m.whom}?id=${m.id}")
 }
 
 /** Everyone on a mail thread but us, dated by the thread's last message, capped to now. */
@@ -223,6 +214,3 @@ fun batches(facts: Facts): List<JsonObject> {
 
 /** A conversation of one or a few, a DM or a club, rather than a group's channel. */
 fun isDirect(whom: String): Boolean = whom.startsWith("~") || whom.startsWith("0v")
-
-/** The source kind the ship is told a message came from. */
-fun talonKind(whom: String): String = if (isDirect(whom)) "talon-dm" else "talon-chat"

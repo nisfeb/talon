@@ -74,12 +74,14 @@ Settings live in documents, read and written whole by name:
   `read_own`, `poll_minutes`, `backfill_hours`, `gate` and `escalate`
   (0 to 100), `max_daily_messages` and `model`. A list you give
   replaces the list whole. What the ship holds to pick from is
-  orrery_settings chat/dms and chat/channels. It borrows the
+  orrery_settings chat/dms and chat/channels, each item an id and a
+  name: pick by the name, since many channel ids are random strings.
+  Its last pass is orrery_settings chat/last. It borrows the
   generator's key, so that is set first. It reads only the DMs and
   channels listed, and only from people it knows by ship (a person
-  body with its ship, or one in `people`). Talon leaves it those and
-  reads the rest itself, so each message is read once; Talon also
-  goes on reading calls and mail.
+  body with its ship, or one in `people`). It is the only reader of
+  the owner's chats: Talon reads none itself. Talon goes on reading
+  calls and mail. The calendar's events the ship also writes itself.
 - `schema`, `policy`: what bodies may carry, and what the ship does
   with what it is told.
 
@@ -87,11 +89,14 @@ A fresh setup goes: the generator's key; `telegram`'s three fields,
 then orrery_register telegram; then `chat` with the DMs and channels
 the owner picked and enabled true.
 
-Writing a document merges: a field you leave out keeps its value, and
-a credential you leave blank keeps the stored one. Credentials read
-back as `token_set: true` and never as themselves, so you cannot show
-the owner a token they have already set, and you should not ask them
-to repeat one to confirm it.
+Writing a document merges: a field you leave out keeps its value, a
+field you send as null is cleared so the ship's default stands, and a
+credential you leave blank ("") keeps the stored one. The ship answers
+a write once it has landed, with the document as stored: that answer
+is the settings now, so there is no need to read it again. Credentials
+come back masked, never as themselves, so you cannot show the owner a
+token they have already set, and you should not ask them to repeat one
+to confirm it.
 """
 
 /**
@@ -102,6 +107,8 @@ to repeat one to confirm it.
  * back — without a ship, a database and a key to do it with.
  */
 interface OrreryTap {
+    /** Where this install reaches the owner's ship; each owner's is their own. */
+    val shipUrl: String? get() = null
     suspend fun find(q: String): Result<List<Pair<String, String>>>
     suspend fun state(): Result<String>
     suspend fun body(id: String): Result<List<String>>
@@ -114,6 +121,8 @@ interface OrreryTap {
 
 /** The repo as the tools see it. */
 fun OrreryRepo.asTap(): OrreryTap = object : OrreryTap {
+    override val shipUrl get() = this@asTap.shipUrl
+
     override suspend fun find(q: String) =
         resolveBody(q).map { hits -> hits.map { it.id to "kind=${it.kind} name=${it.name} matched=${it.match}" } }
 
@@ -153,7 +162,12 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
             toolSchema(required = emptyList()),
         ),
         write = false,
-    ) { ORRERY_GUIDE.trim() })
+    ) {
+        ORRERY_GUIDE.trim() + (orrery.shipUrl?.let {
+            "\n\nThis install reaches the owner's ship at $it. That is usually the `public_url` Telegram needs; " +
+                "confirm it with the owner, since it must be reachable from the internet."
+        } ?: "")
+    })
 
     add(Tool(
         spec = ToolSpec(
@@ -241,7 +255,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
         spec = ToolSpec(
             "orrery_configure",
             "Change one of orrery's settings documents: " + OrreryApi.SETTINGS.sorted().joinToString(", ") +
-                ". Give only the fields to change; the ship keeps the rest, and keeps a stored credential where the field is blank. Read orrery_guide first: some fields have rules the ship enforces and will refuse.",
+                ". Give only the fields to change: the ship keeps the rest, clears a field given as null, and keeps a stored credential given as \"\". It answers with the document as stored. Read orrery_guide first: some fields have rules the ship enforces and will refuse.",
             toolSchema(
                 "document" to ("string" to "The document name."),
                 "settings" to ("string" to "A JSON object of the fields to change."),
@@ -257,7 +271,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
             ?: return@Tool "Error: settings must be a JSON object."
         if (obj.isEmpty()) return@Tool "Error: nothing to change."
         orrery.configure(name, obj).fold(
-            onSuccess = { "Written to $name. The ship says: " + clip(it) },
+            onSuccess = { "Written to $name. It now holds: " + clip(it) },
             onFailure = { "Could not write $name: ${it.message}" },
         )
     })

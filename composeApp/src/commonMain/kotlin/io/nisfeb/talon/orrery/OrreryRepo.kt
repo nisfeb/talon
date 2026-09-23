@@ -124,47 +124,35 @@ class OrreryRepo(
     private val _actions = MutableStateFlow<List<OrreryAction>>(emptyList())
     val actions: StateFlow<List<OrreryAction>> = _actions.asStateFlow()
     /**
-     * Whether the ship's own chat reader is on (orrery 39); null where
-     * the ship cannot say. Talon then leaves it the posts it reads (see
-     * [ShipChats.reads]) and reads the rest. As the last pass or look
-     * found it.
+     * The ship's own reader of the owner's Tlon chats, as the ship last
+     * answered: null until asked, or where it cannot say. Talon reads no
+     * chats itself, so this is the only reader of them.
      */
-    private val _shipChats = MutableStateFlow<ShipChats?>(null)
-    /** The ship's own chat reader, what it reads, as the last pass or look found it. */
-    val shipChats: StateFlow<ShipChats?> = _shipChats.asStateFlow()
-    val shipReadsChats: StateFlow<Boolean?> = io.nisfeb.talon.util.mapState(_shipChats) { it?.enabled }
+    private val _chatReader = MutableStateFlow<ChatReader?>(null)
+    val chatReader: StateFlow<ChatReader?> = _chatReader.asStateFlow()
+    private val _chatReaderRun = MutableStateFlow<ChatReaderRun?>(null)
+    /** The chat reader's last pass. */
+    val chatReaderRun: StateFlow<ChatReaderRun?> = _chatReaderRun.asStateFlow()
 
-    /**
-     * The chat channels this ship is in, as their id and "Group · Channel",
-     * for the list of what orrery reads. A new flow each time: remember it.
-     */
-    fun chatChannels(): kotlinx.coroutines.flow.Flow<List<Pair<String, String>>> =
-        kotlinx.coroutines.flow.combine(db.groups().streamChannelGroups(), db.groups().streamGroups()) { chans, groups ->
-            val titles = groups.associate { it.flag to (it.title ?: it.flag) }
-            chans.filter { it.nest.startsWith("chat/") }
-                .map { c -> c.nest to "${titles[c.groupFlag] ?: c.groupFlag} · ${c.title ?: c.nest.substringAfterLast('/')}" }
-                .sortedBy { it.second.lowercase() }
-        }
-
-    /** The channels this install's triage may read. A new flow each time: remember it. */
-    fun channelsRead(): kotlinx.coroutines.flow.Flow<List<String>> = db.orreryChannels().stream()
-
-    /** Let this install's triage read [whom], or not. DMs need no switch: they are always read. */
-    suspend fun readChannel(whom: String, on: Boolean) =
-        if (on) db.orreryChannels().put(io.nisfeb.talon.data.OrreryChannelEntity(whom)) else db.orreryChannels().remove(whom)
-
-    /** Ask the ship now, for the screen, rather than wait for a pass. */
-    suspend fun loadShipChats() {
+    /** Ask the ship for its chat reader's settings and last pass. */
+    suspend fun loadChatReader() {
         val a = api ?: return
-        val token = keyToken() ?: return
-        runCatching { a.shipChats(token) }.onSuccess { _shipChats.value = it }
+        runCatching { chatReaderOf(Json.parseToJsonElement(a.settingsDoc("chat")).jsonObject) }.onSuccess { _chatReader.value = it }
+        runCatching { chatReaderRunOf(Json.parseToJsonElement(a.settingsDoc("chat/last")).jsonObject) }.onSuccess { _chatReaderRun.value = it }
     }
 
-    /** Turn the ship's own chat reader on or off: its `chat` document, written as the owner. */
-    suspend fun setShipReadsChats(on: Boolean): Result<Unit> = runCatching {
-        attached().setSettingsDoc("chat", buildJsonObject { put("enabled", on) })
-        _shipChats.value = (_shipChats.value ?: ShipChats(on, emptySet(), emptySet(), emptySet())).copy(enabled = on)
+    /** Change the chat reader's settings; the ship's answer is the new state. */
+    suspend fun setChatReader(body: JsonObject): Result<Unit> = writeSettings("chat", body).map { }
+
+    /** What the chat reader may pick from: the ship's DMs, then its channels, each with a name. */
+    suspend fun chatOptions(): Result<Pair<List<ChatOption>, List<ChatOption>>> = runCatching {
+        val a = attached()
+        chatOptionsOf(Json.parseToJsonElement(a.settingsDoc("chat/dms")).jsonObject) to
+            chatOptionsOf(Json.parseToJsonElement(a.settingsDoc("chat/channels")).jsonObject)
     }
+
+    /** Run the chat reader now. Its record changes once the pass is done, which [loadChatReader] reads. */
+    suspend fun wakeChatReader(): Result<Unit> = runCatching { attached().wakeChat() }
 
     /** True while this phone is leaving the reading to a computer. */
     private val _yielding = MutableStateFlow(false)
@@ -181,7 +169,9 @@ class OrreryRepo(
     // The pass and an answer can both reach the mirror; one at a time,
     // or both see no todo and each make one.
     private val mirrorLock = Mutex()
-    private var shipUrl: String? = null
+    /** The ship this repo is attached to, as this install reaches it. */
+    var shipUrl: String? = null
+        private set
     private var ship: String? = null
     private var loop: Job? = null
     private var attaching: Job? = null
@@ -214,9 +204,7 @@ class OrreryRepo(
      * never gives it back. Anything not given is left as the ship has it.
      */
     suspend fun setGenerator(enabled: Boolean, url: String? = null, model: String? = null, key: String? = null): Result<Unit> = runCatching {
-        val a = attached()
-        a.setGenerator(enabled, url, model, key)
-        a.generatorSettings()?.let { _generatorSettings.value = it }
+        _generatorSettings.value = attached().setGenerator(enabled, url, model, key)
     }
 
     private val _decideToday = MutableStateFlow<Pair<String, DecideDay>?>(null)
@@ -332,22 +320,20 @@ class OrreryRepo(
     /** One settings document, as the ship serves it; credentials masked. */
     suspend fun readSettings(name: String): Result<String> = runCatching { attached().settingsDoc(name) }
 
-    /** Merge into a settings document. The ship keeps what is left blank. */
+    /**
+     * Merge into a settings document: a field left out is kept, one sent
+     * as null is cleared, and a blank credential keeps the stored one.
+     * The ship answers with the document as stored once the write has
+     * landed, and that answer is what the screens then show: a write
+     * from anywhere, the assistant included, reaches them.
+     */
     suspend fun writeSettings(name: String, body: JsonObject): Result<String> = runCatching {
-        val a = attached()
-        val said = a.setSettingsDoc(name, body)
-        // The screens hold the generator's settings; a write from
-        // anywhere else has to reach them or the card shows the old ones.
-        if (name == "generator") {
-            val before = _generatorSettings.value
-            var read: GeneratorSettings? = null
-            a.settle { a.generatorSettings().also { read = it } != before }
-            read?.let { _generatorSettings.value = it }
-        }
-        // What was written, not a read straight after, which the ship
-        // answers from before its writer merged the document.
-        if (name == "chat") (body["enabled"] as? JsonPrimitive)?.booleanOrNull?.let { on ->
-            _shipChats.value = (_shipChats.value ?: ShipChats(on, emptySet(), emptySet(), emptySet())).copy(enabled = on)
+        val said = attached().setSettingsDoc(name, body)
+        // Only an answer that is the document: anything else is left for
+        // the next read rather than shown as everything turned off.
+        (runCatching { Json.parseToJsonElement(said) }.getOrNull() as? JsonObject)?.takeIf { "enabled" in it }?.let { doc ->
+            if (name == "generator") _generatorSettings.value = generatorSettingsOf(doc)
+            if (name == "chat") _chatReader.value = chatReaderOf(doc)
         }
         said
     }
@@ -407,7 +393,8 @@ class OrreryRepo(
         ship = null
         _availability.value = OrreryAvailability.UNKNOWN
         _error.value = null
-        _shipChats.value = null
+        _chatReader.value = null
+        _chatReaderRun.value = null
         scopeChecked = false
     }
 
@@ -479,7 +466,7 @@ class OrreryRepo(
         a.keyLanded(key.token)
         val start = now() - BACKFILL_MS
         rowLock.withLock {
-            db.orreryAccounts().upsert(OrreryAccountEntity(s, key.id, key.token, start, start, 0))
+            db.orreryAccounts().upsert(OrreryAccountEntity(s, key.id, key.token, mailCursor = start))
             minted(s, key.id)
         }
         _enabled.value = true
@@ -1030,40 +1017,6 @@ class OrreryRepo(
     }
 
     /**
-     * What the ship was told about occurrences the calendar has since
-     * moved or called off, taken back, and those occurrences forgotten
-     * so the new times are written as new. Rows of this event only, and
-     * only inside the window, which is the one stretch of time this
-     * install can see the truth of.
-     */
-    private suspend fun retractMoved(
-        a: OrreryApi,
-        token: String,
-        bodyId: String,
-        subject: CalendarSubject,
-        seen: Map<String, String>,
-        s: String,
-        nowMs: Long,
-    ): Set<String> {
-        val stale = staleOccurrences(subject, seen, nowMs - BACKFILL_MS, nowMs + AHEAD_MS)
-        if (stale.isEmpty()) return emptySet()
-        val rows = runCatching { a.observationsOf(bodyId, token) }
-            .onFailure { Log.i(TAG, "timeline skipped: ${it.message}") }
-            .getOrNull() ?: return emptySet()
-        val here = subject.occurrences.flatMap { listOf(it.l, it.r) }.toSet()
-        val gone = stale.flatMap { it.second }.toSet() - here
-        val src = "${subject.cal}/${subject.uid}"
-        for (o in rows) {
-            if (o.sourceId != src || !o.stands || o.atMs !in gone) continue
-            runCatching { a.retract(o.id, "the calendar no longer has this event at this time", token) }
-                .onFailure { Log.i(TAG, "retract skipped: ${it.message}") }
-        }
-        val keys = stale.map { it.first }.toSet()
-        keys.forEach { db.orrerySent().forget(s, it) }
-        return keys
-    }
-
-    /**
      * The mail newer than [cursor], a page at a time from the newest.
      * A quiet inbox costs one small listing rather than two hundred
      * threads: every request into a grubbery app is about a second of
@@ -1171,7 +1124,6 @@ class OrreryRepo(
             val view = a.viewOf(raw)
             val sent = db.orrerySent()
             val record = mutableListOf<io.nisfeb.talon.data.OrrerySentEntity>()
-            val forgets = mutableListOf<String>()
             fun remember(key: String, value: String = "") {
                 record += io.nisfeb.talon.data.OrrerySentEntity(s, key, value, nowMs)
             }
@@ -1197,45 +1149,11 @@ class OrreryRepo(
                 facts += Facts(bodies = teachNames(body, people.goesBy(body.id)))
             }
 
-            val aheadAll = db.messages().postsAfter(row.messagesCursor, s, MESSAGES_PER_PASS)
-            // The cursor is the author's clock, so a post that syncs after
-            // the cursor passed its time sits under it for good: the other
-            // channel catching up just after the app opened. The newest
-            // few under the cursor, from the last two days, are walked
-            // again, and kept only where no msg: record says a pass
-            // already read them. Unbounded, the walk reached past the
-            // backfill into months of posts no pass ever read, and spent
-            // the pass's model runs on them ahead of anything new.
-            // ponytail: a catch-up deeper than LATE_POSTS or older than
-            // LATE_WINDOW_MS still loses the rest; a cursor on insertion
-            // order (a column and a migration) is the whole fix.
-            val underAll = db.messages().postsBetween(nowMs - LATE_WINDOW_MS, row.messagesCursor + 1, s, LATE_POSTS)
-            val readAlready = if (underAll.isEmpty()) emptySet()
-            else sent.some(s, underAll.map { "msg:${it.whom}/${it.id}" }).mapTo(HashSet()) { it.key }
-            val allPosts = underAll.filter { "msg:${it.whom}/${it.id}" !in readAlready }.reversed() + aheadAll
-            // The ship reads the owner's chats itself (orrery 39), and what
-            // it reads Talon does not, or it was read twice and the model
-            // paid twice. It reads only the DMs and channels picked for it,
-            // and only an author it can name, so Talon reads the rest:
-            // stepping aside from every chat left those read by nobody.
-            // Asked only when there is a post, so an idle pass costs the
-            // ship nothing more. What the ship reads is marked read here.
-            val chats = if (allPosts.isEmpty()) null else a.shipChats(row.token).also { _shipChats.value = it }
-            val shipped = view.bodies.mapNotNullTo(HashSet()) { b -> b.ship?.takeIf { b.id.startsWith("person/") } }
-            // It reads with the generator's key, and with none reads
-            // nothing while marking what it skipped as seen.
-            val keyed = chats?.enabled == true && runCatching { a.generatorSettings()?.keySet }.getOrNull() == true
-            val (theShips, posts) = allPosts.partition { chats?.reads(it.whom, it.author, it.sentMs, shipped, keyed, nowMs) == true }
-            theShips.forEach { remember("msg:${it.whom}/${it.id}") }
-            // Contact from a DM is contact with you. In a channel it is only
-            // worth recording when the author is already in your book. From
-            // every post, the ship's too: its reader writes no last-contact.
-            val direct = allPosts.filter { isDirect(it.whom) || it.author in book }
-            facts += Facts(observations = direct.mapNotNull { m -> oneItem("post ${m.id}") { messageFacts(m, s, people.idFor(m.author, null)) } })
-            var messagesCursor = aheadAll.maxOfOrNull { it.sentMs } ?: row.messagesCursor
-
-            // Mail and the calendar may be absent on this ship; a source
-            // that is not there is skipped, not an error of the pipe.
+            // The ship reads the owner's chats itself (orrery 39) and
+            // writes the calendar's events itself (orrery 47): read here
+            // too, each was read twice and every event written twice.
+            // Mail may be absent on this ship; a source that is not there
+            // is skipped, not an error of the pipe.
             var mailCursor = row.mailCursor
             var freshMail: List<io.nisfeb.talon.mail.InboxEntry> = emptyList()
             val mailApi = AuspexApi(http, url)
@@ -1248,7 +1166,7 @@ class OrreryRepo(
                 )
                 mailCursor = freshMail.maxOfOrNull { it.last } ?: mailCursor
             }.onFailure { Log.i(TAG, "mail skipped: ${it.message}") }
-            val triaged = triage(a, row, posts, spoken, s, nowMs, url, freshMail, known, view) { key, value -> remember(key, value) }
+            val triaged = triage(a, spoken, s, nowMs, url, freshMail, known, view) { key, value -> remember(key, value) }
             facts += triaged.facts
             ran = triaged.ran
             // Calls the triage did not finish go back once the pass has put
@@ -1256,120 +1174,6 @@ class OrreryRepo(
             // pass that fails puts every call back from where it began:
             // resumed at once, the turns it had read were lost with it.
 
-            val calApi = CalendarApi(http, url)
-            // The whole listing, read once and shared: the vanished
-            // check reads it, and so does the task mirror below.
-            var allEvents: List<io.nisfeb.talon.calendar.CalendarTask>? = null
-            suspend fun events(): List<io.nisfeb.talon.calendar.CalendarTask>? {
-                allEvents?.let { return it }
-                return runCatching { calApi.events() }.onFailure { Log.i(TAG, "events skipped: ${it.message}") }
-                    .getOrNull()?.also { allEvents = it }
-            }
-            runCatching { calApi.window(nowMs - BACKFILL_MS, nowMs + AHEAD_MS) }.onSuccess { w ->
-                // The calendars this ship keeps itself. An event on one
-                // another ship shares is not ours to name an organizer
-                // for. Asked for only where this pass writes something:
-                // on a pass where nothing moved it is a request the ship
-                // spends a second on for an answer nobody reads.
-                var calendars: List<io.nisfeb.talon.calendar.CalendarInfo>? = null
-                suspend fun calendarsNow(): List<io.nisfeb.talon.calendar.CalendarInfo> =
-                    calendars ?: runCatching { calApi.calendars() }.getOrDefault(emptyList()).also { calendars = it }
-                // Who the ship keeps, so a name in a title lands on the
-                // person it already has.
-                val cast = EventPeople.of(view.bodies)
-                // What this install has written, read once for the pass.
-                // A prefix read cannot use an index, and the table also
-                // holds a row per message read, so one scan per event
-                // was the cost of the whole loop.
-                val written = sent.under(s, "cal:").associate { it.key to it.value }
-                val occurrences = sent.under(s, "occ:").associate { it.key to it.value }
-                val occByEvent = occurrences.entries.groupBy({ it.key.substringBeforeLast('/') }, { it.key to it.value })
-                for (subject in calendarSubjects(w.rows)) oneItem("event ${subject.uid}") {
-                    // The body decided for this event, and the event as
-                    // it was when that decision was made.
-                    val mark = written[subject.key]?.takeIf { it.isNotBlank() }
-                    val decided = mark?.substringBefore('|')
-                    val digest = subject.digest
-                    val seen = occByEvent["occ:${subject.cal}/${subject.uid}"].orEmpty().toMap()
-                    // An occurrence the calendar no longer has at a time
-                    // this install can still see: moved, or called off.
-                    val dropped = if (decided == null) emptySet() else retractMoved(a, row.token, decided, subject, seen, s, nowMs)
-                    // An occurrence the ship was told the schedule of,
-                    // which has since happened: what was said in the
-                    // future tense is said again in the past.
-                    val due = seen.any { (key, record) ->
-                        Occurrence.unsettled(record) && (Occurrence.endOf(record) ?: Long.MAX_VALUE) <= nowMs &&
-                            key !in dropped
-                    }
-                    // A new time, place or description means what the
-                    // ship was told no longer describes the event.
-                    val changed = mark != null &&
-                        (mark.substringAfter('|', "") != digest || dropped.isNotEmpty() || due)
-                    // Ask the ship before making anything: by the calendar's
-                    // own id first, which reconcile keeps as an alias of what
-                    // it built, then by the title, which only a body that is
-                    // plainly this occasion may answer.
-                    val hits = if (decided != null) emptyList() else {
-                        val byUid = runCatching { a.resolve(subject.uid, row.token) }.getOrDefault(emptyList())
-                        val byTitle = if (byUid.any { it.isExact }) emptyList()
-                        else runCatching { a.resolve(subject.title, row.token) }.getOrDefault(emptyList())
-                        listOfNotNull(sameEvent(subject, byUid, byTitle) { id -> bodyTimes(raw, id) })
-                    }
-                    // Whether anything of this event is going up: a new
-                    // body, a change, or an occurrence never written.
-                    val writes = decided == null || changed ||
-                        subject.occurrences.any { occurrenceKey(subject, it) !in seen.keys }
-                    val ours = writes && subject.cal in calendarsNow().filter { it.kind == "local" }.map { it.id }
-                    val write = calendarWrite(
-                        subject, decided, hits, seen.keys - dropped, nowMs, changed,
-                        ours, cast,
-                    )
-                    facts += write.facts
-                    // A renamed event: the ship keeps the name it has and
-                    // learns the new one as an alias, so whoever resolves
-                    // by either finds the one body.
-                    if (changed && decided != null) {
-                        facts += Facts(
-                            bodies = teachNames(
-                                OBody(decided, name = null, aliases = listOf(subject.title, normalizeTitle(subject.title))),
-                                people.goesBy(decided),
-                                make = false,
-                            ),
-                        )
-                    }
-                    if (mark != "${write.bodyId}|$digest") remember(subject.key, "${write.bodyId}|$digest")
-                    write.occurrences.forEach { remember(it.key, it.record) }
-                }
-                // An event this install wrote that the calendar no longer
-                // keeps at all. Read from the full listing: the window
-                // also loses an event moved past its edge.
-                // ponytail: only what this install remembers writing; a
-                // cleared record (pipe off and on) forgets what to cancel.
-                // What this install wrote and the calendar no longer
-                // keeps. Nothing written, nothing to lose: the listing
-                // is only worth a request once there is a record. The
-                // records are the ones read before the loop: what the
-                // loop forgot or remembered was for events still here.
-                if (written.isNotEmpty()) {
-                    val all = events()
-                    // An empty listing is likelier a hiccup than every
-                    // event deleted at once, and a cancel is not undone.
-                    val kept = all?.map { "cal:${it.cal}/${it.id}" }?.toSet()
-                    // And the calendar list is only asked for once an
-                    // event has actually gone: most passes, none has.
-                    if (!all.isNullOrEmpty() && kept != null && written.keys.any { it !in kept }) {
-                        val gone = vanishedEvents(
-                            written = written,
-                            occurrences = occurrences,
-                            kept = kept,
-                            calendars = calendarsNow().map { it.id }.toSet(),
-                            nowMs = nowMs,
-                        )
-                        facts += gone.facts
-                        forgets += gone.forget
-                    }
-                }
-            }.onFailure { Log.i(TAG, "calendar skipped: ${it.message}") }
 
             // Only what the key's schema lists: a row on an attribute the
             // owner has not named sits outside their vocabulary, and one on
@@ -1443,7 +1247,6 @@ class OrreryRepo(
                         // Only once the ship has taken them: a pass that
                         // failed halfway must be free to say them again.
                         if (record.isNotEmpty()) sent.putAll(record)
-                        forgets.forEach { k -> sent.forget(s, k) }
                         confirmed.forEach { n -> db.orreryNoticed().setState(n.id, "confirmed") }
                     }
                 }
@@ -1470,12 +1273,7 @@ class OrreryRepo(
             val unfinished = runCatching { brief(a, row.token, s, url, nowMs, raw, freshMail, standing) }
                 .onFailure { Log.w(TAG, "brief not sent: ${it.message}") }.getOrDefault(emptyList())
             val heldBack = unfinished.minOfOrNull { it.last }?.let { it - 1 } ?: Long.MAX_VALUE
-            messagesCursor = minOf(messagesCursor, triaged.postFloor).coerceAtLeast(row.messagesCursor)
-            val cursors = row.copy(
-                messagesCursor = messagesCursor,
-                mailCursor = minOf(mailCursor, heldBack, triaged.mailFloor).coerceAtLeast(row.mailCursor),
-                calendarCursor = nowMs,
-            )
+            val cursors = row.copy(mailCursor = minOf(mailCursor, heldBack, triaged.mailFloor).coerceAtLeast(row.mailCursor))
             if (!rowLock.withLock { stillOurs().also { if (it) db.orreryAccounts().upsert(cursors) } }) return
             failuresInARow = 0
             if (triaged.unread.isNotEmpty()) putBack(emptyList(), triaged.unread)
@@ -1770,8 +1568,8 @@ class OrreryRepo(
     }
 
     /**
-     * The funnel over this pass's messages, the transcripts published
-     * since the last, and the mail that arrived: the ones in scope go
+     * The funnel over the transcripts published since the last pass,
+     * the contacts' status lines and the mail that arrived: the ones go
      * through the rules and, where there is one, the model, against
      * the ship's own bodies. Each claim lands in the tray, or goes
      * straight up when the person has trusted that kind of claim. A
@@ -1779,8 +1577,6 @@ class OrreryRepo(
      */
     private suspend fun triage(
         a: OrreryApi,
-        row: OrreryAccountEntity,
-        posts: List<io.nisfeb.talon.data.MessageEntity>,
         /** Calls transcribed since the last pass, taken off the queue by the pass. */
         spoken: List<Heard>,
         s: String,
@@ -1798,7 +1594,7 @@ class OrreryRepo(
         val lines = contacts.mapNotNull { c -> contactStatus(c)?.let { (line, at) -> Triple(c.ship, line, at) } }
         val read = db.orrerySent().some(s, lines.map { "status:${it.first}" }).associate { it.key to it.value }
         val fresh = lines.filter { (ship, line, _) -> read["status:$ship"] != line.hashCode().toString(16) }
-        if (posts.isEmpty() && spoken.isEmpty() && freshMail.isEmpty() && fresh.isEmpty()) return Triaged()
+        if (spoken.isEmpty() && freshMail.isEmpty() && fresh.isEmpty()) return Triaged()
         // A phone with a computer on the job leaves the reading to it. The
         // phone's cursor still moves; the computer reads these from its
         // own, which did not. ponytail: a computer that never returns
@@ -1807,38 +1603,24 @@ class OrreryRepo(
         val yielded = io.nisfeb.talon.ui.isTouchPrimary && standDown?.on?.value == true &&
             runCatching { computerActive(a.clients(), nowMs) }.getOrDefault(false)
         _yielding.value = yielded
-        if (yielded) {
-            // Marked read, since the computer reads them: with no
-            // record, the late walk read them all again here the
-            // moment the phone took the reading back.
-            posts.forEach { remember("msg:${it.whom}/${it.id}", "") }
-            // A call recorded here is this phone's alone: the computer
-            // never has its words, so the phone reads those itself.
-            if (spoken.isEmpty()) return Triaged()
-        }
+        // A call recorded here is this phone's alone: the computer never
+        // has its words, so the phone reads those itself.
+        if (yielded && spoken.isEmpty()) return Triaged()
         val r = reading(s, view)
         // Yielding, the calls are all this phone reads.
-        val readPosts = if (yielded) emptyList() else posts
         val readStatus = if (yielded) emptyList() else fresh
         val readMail = if (yielded) emptyList() else freshMail
         r.remember = remember
-        val allowed = db.orreryChannels().all().toSet()
-        val ourNick = db.contacts().get(s)?.nickname
         var up = Facts()
-        // A message is read once. The ship answers "existing" for an
-        // observation it already holds, but the model costs a second
-        // every time and its answer is not guaranteed to be the same.
-        val handled = db.orrerySent().some(s, readPosts.map { "msg:${it.whom}/${it.id}" }).map { it.key }.toSet()
-        // How far the cursors may move. A message the budget stopped
+        // How far the mail cursor may move. A thread the budget stopped
         // short of was marked read and the cursor went past it, so it
         // was never read by anything: the pass keeps the cursor behind
         // whatever it left, and the next one picks it up.
-        var postFloor = Long.MAX_VALUE
         var mailFloor = Long.MAX_VALUE
         // A call's words, by speaker: each run of one voice is one message.
         // Calls first, and whole: they are few, their words are kept
-        // nowhere else, and read after the posts they waited behind every
-        // post of a busy day. A long call held to the pass's model runs
+        // nowhere else, and read after the mail they waited behind all
+        // of a busy day's. A long call held to the pass's model runs
         // had its later turns read by the rules alone, and then was gone.
         // A model that stops answering sends the call back, whole.
         val unread = mutableListOf<Heard>()
@@ -1858,37 +1640,6 @@ class OrreryRepo(
             // provider's burst bought its first turns again every pass and
             // never finished.
             if (r.modelDown && i < said.size) unread += h.copy(from = i)
-        }
-        for (m in readPosts) {
-            val key = "msg:${m.whom}/${m.id}"
-            if (key in handled) continue
-            if (r.modelDown || r.modelRuns >= MODEL_PER_PASS) {
-                postFloor = minOf(postFloor, m.sentMs - 1)
-                break
-            }
-            oneItem("post ${m.id}") {
-                val text = StoryCache.textFor(m.id, m.contentJson)
-                if (inScope(m.whom, text, s, ourNick, allowed)) {
-                    val kind = talonKind(m.whom)
-                    // A message is read with the ones before it: "yes, at 8"
-                    // says nothing alone. They are for reading only, and the
-                    // claims are held to the words of this one. Only a model
-                    // reads them, so with none there is nothing to fetch.
-                    val before = if (r.model == null) emptyList()
-                    else db.messages().before(m.whom, m.sentMs, ModelExtractor.CONTEXT_MESSAGES).reversed()
-                        .map { it.author to StoryCache.textFor(it.id, it.contentJson) }
-                        .filter { it.second.isNotBlank() }
-                    up += triageText(r, s, nowMs, text, m.author, m.sentMs, m.whom, m.id, kind, "talon://chat/${m.whom}?id=${m.id}", before)
-                }
-            }
-            // Unanswered, it waits with the rest. Read, or faulted in the
-            // reading, it is recorded, so a post that cannot be read is
-            // passed over once rather than tried every pass.
-            if (r.modelDown) {
-                postFloor = minOf(postFloor, m.sentMs - 1)
-                break
-            }
-            remember(key, "")
         }
         // A status line, read the way a message is read. Once per line:
         // the digest is of the words, so a line put back says nothing new.
@@ -1939,17 +1690,16 @@ class OrreryRepo(
             remember(key, e.last.toString())
         }
         tally(s, r.day, nowMs)
-        return Triaged(up, postFloor, mailFloor, r.urgentAbout, unread, ran = r.modelRuns, modelDown = r.modelDown, modelDownWhy = r.modelDownWhy)
+        return Triaged(up, mailFloor, r.urgentAbout, unread, ran = r.modelRuns, modelDown = r.modelDown, modelDownWhy = r.modelDownWhy)
     }
 
     /**
-     * What one triage read, and how far the cursors may go: a floor is
-     * the last moment a cursor may take, so that whatever this pass did
-     * not get to is still there for the next one.
+     * What one triage read, and how far the mail cursor may go: the
+     * floor is the last moment it may take, so that whatever this pass
+     * did not get to is still there for the next one.
      */
     private data class Triaged(
         val facts: Facts = Facts(),
-        val postFloor: Long = Long.MAX_VALUE,
         val mailFloor: Long = Long.MAX_VALUE,
         /** The bodies to ask the ship to look at now, or null for the usual wait. */
         val urgentAbout: List<String>? = null,
@@ -2030,14 +1780,13 @@ class OrreryRepo(
         val (dec, settings) = decider() ?: error(if (decideHasKey()) "Turn the decision model on first." else "Set OpenRouter as the AI provider, with its key, first.")
         val view = a.state(row.token)
         val index = NameIndex(view.bodies)
-        val allowed = db.orreryChannels().all().toSet()
         val ourNick = db.contacts().get(s)?.nickname
         // What Talon already holds and the funnel would read: in scope,
         // free text, not a question. Not a new read of the chats.
         val walked = db.messages().postsBetween(0L, now(), s, limit * 6)
         val picked = walked.asSequence()
             .map { it to StoryCache.textFor(it.id, it.contentJson) }
-            .filter { (m, t) -> forTheGate(t) && inScope(m.whom, t, s, ourNick, allowed) }
+            .filter { (m, t) -> forTheGate(t) && inScope(m.whom, t, s, ourNick, emptySet()) }
             .take(limit).toList().reversed()
         progress(0, picked.size)
         // With picks, what Jev chose for each message the gate lets through.
@@ -2247,8 +1996,8 @@ class OrreryRepo(
      * A `skipped` row says the evening is off, and says nothing to the
      * calendar, which goes on showing it and reminding about it. Rule
      * 14: where the client knows the event the occurrence came from,
-     * it may propose taking it off, and this client does know, because
-     * its own pipe wrote the body from that event and kept the tie.
+     * it may propose taking it off, and this client can know, because
+     * the ship signs what it writes from an event with that event.
      *
      * A proposal, never a write. Taking something off a calendar is a
      * tap, and `calendar` is not a kind the ship does unasked.
@@ -2269,32 +2018,31 @@ class OrreryRepo(
     }
 
     /**
-     * The calendar and event this body was written from, as the pipe
-     * remembered it: `cal:<calendar>/<uid>` holds the body id, so the
-     * way back is a scan of what this install has written.
+     * The calendar and event this body was written from. The ship's
+     * calendar reader signs each fact it writes with its event, as
+     * source kind `calendar` and id `<calendar>/<uid>`, so the way back
+     * is the body's own timeline.
      */
-    private suspend fun calendarEventFor(s: String, subject: String): Pair<String, String>? =
-        db.orrerySent().under(s, "cal:")
-            .firstOrNull { it.value.substringBefore('|') == subject }
-            ?.key?.removePrefix("cal:")
-            ?.let { ref ->
-                val cal = ref.substringBefore('/')
-                val uid = ref.substringAfter('/')
-                if (cal.isBlank() || uid.isBlank()) null else cal to uid
-            }
+    private suspend fun calendarEventFor(s: String, subject: String): Pair<String, String>? {
+        val a = api ?: return null
+        val token = keyToken() ?: return null
+        val ref = runCatching { a.observationsOf(subject, token) }.getOrNull()
+            ?.firstOrNull { it.sourceKind == "calendar" && it.stands }?.sourceId ?: return null
+        val cal = ref.substringBefore('/')
+        val uid = ref.substringAfter('/', "")
+        return if (cal.isBlank() || uid.isBlank()) null else cal to uid
+    }
 
     /**
-     * The realized start of the occurrence on the same day as [nearMs],
-     * off the occurrence records the pipe keeps, or null where it kept
-     * none. The calendar skips by the exact moment, so a reading of
-     * "tonight" that landed on the wrong hour would skip nothing.
+     * The realized start of the event's occurrence on the same day as
+     * [nearMs], off the calendar itself, or null where it has none then.
+     * The calendar skips by the exact moment, so a reading of "tonight"
+     * that landed on the wrong hour would skip nothing.
      */
     private suspend fun occurrenceOn(s: String, event: Pair<String, String>, nearMs: Long): Long? {
-        val prefix = "occ:${event.first}/${event.second}/"
-        return occurrenceNear(
-            db.orrerySent().under(s, prefix).mapNotNull { it.key.removePrefix(prefix).toLongOrNull() },
-            nearMs,
-        )
+        val url = shipUrl ?: return null
+        val rows = runCatching { CalendarApi(http, url).window(nearMs - DAY_MS, nearMs + DAY_MS).rows }.getOrNull() ?: return null
+        return occurrenceNear(rows.filter { it.cal == event.first && it.id == event.second }.map { it.l }, nearMs)
     }
 
     /** The person's word on an action: done, dismissed, or failed with why. */
@@ -2435,7 +2183,6 @@ class OrreryRepo(
         fun noteCall(make: (idFor: (ship: String, name: String?) -> String) -> Facts) = enqueue { calls += make }
         // ponytail: fixed window; a setting when somebody asks for one.
         const val BACKFILL_MS = 30L * 24 * 60 * 60 * 1000
-        const val AHEAD_MS = 90L * 24 * 60 * 60 * 1000
         const val PUSH_EVERY_MS = 10L * 60 * 1000
         /** How often what is waiting is read again while attached, as a net under the beacon: one small request. */
         const val ACTIONS_EVERY_MS = 15L * 60 * 1000
@@ -2443,11 +2190,6 @@ class OrreryRepo(
         /** Decision calls the gate check has in flight at once. */
         const val GATE_CHECK_AT_ONCE = 6
         private const val BRIEF_LEASE = "orrery-brief"
-        const val MESSAGES_PER_PASS = 2000
-        /** Posts under the cursor walked again each pass for ones that synced late. */
-        const val LATE_POSTS = 500
-        /** How far back a post can have synced late and still be read. */
-        const val LATE_WINDOW_MS = 2L * 24 * 60 * 60 * 1000
         /** How long a new key's forbidden reads as not stored yet, not as revoked. */
         const val KEY_GRACE_MS = 5L * 60 * 1000
         /** The record the moves waiting on their dismissal are kept under. */

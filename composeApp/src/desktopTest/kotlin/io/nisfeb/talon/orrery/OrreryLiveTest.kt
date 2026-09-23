@@ -10,10 +10,6 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.ContactEntity
-import io.nisfeb.talon.calendar.CalendarApi
-import io.nisfeb.talon.calendar.EventDraft
-import io.nisfeb.talon.calendar.eventBody
-import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.urbit.upsertAllWithMedia
 import io.nisfeb.talon.util.createAppHttpClient
 import io.nisfeb.talon.util.nowMs
@@ -32,6 +28,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
@@ -96,81 +93,6 @@ class OrreryLiveTest {
         }
     }
 
-    /**
-     * An event people edit, twice over. A new place at the same time
-     * rests on the ship preferring the row it saw last when the two tie
-     * on `at`. A new time rests on the opposite: what was said about the
-     * time it used to be at has to come back off, or a meeting moved
-     * earlier goes on reading as the old time for ever.
-     */
-    @Test
-    fun `an event that is edited is said again, and its old time comes off`() = live { owner, db, scope, url, ship ->
-        val cal = CalendarApi(owner, url)
-        val ball = runCatching { cal.config().ball }.getOrNull()?.takeIf { it.isNotBlank() }
-        if (ball == null) {
-            println("OrreryLiveTest: no calendar on this ship; skipped")
-            return@live
-        }
-        val title = "Talon live move check"
-        val today = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(TimeZone.currentSystemDefault()).date
-        val yesterday = today.minus(1, DateTimeUnit.DAY)
-        val draft = EventDraft(name = title, date = yesterday, minuteOfDay = 13 * 60, durMin = 30, location = "the flat")
-        assertTrue(cal.poke(ball, eventBody(draft)), "the calendar took the event")
-        var uid: String? = null
-        try {
-            val now = nowMs()
-            val made = cal.window(now - 3 * 86_400_000L, now + 86_400_000L).rows.first { it.name == title }
-            uid = made.id
-            val was = made.l
-
-            val repo = OrreryRepo(owner, scope, db, "live test", book = { emptySet() })
-            repo.attach(url, ship)
-            withTimeout(30_000) { while (repo.availability.value != OrreryAvailability.PRESENT) delay(200) }
-            repo.enable().getOrThrow()
-            withTimeout(60_000) { while (repo.lastPushMs.value == null) delay(200) }
-            val row = assertNotNull(db.orreryAccounts().get(ship))
-            val api = OrreryApi(owner, createAppHttpClient(), url)
-            val bodyId = assertNotNull(db.orrerySent().get(ship, "cal:${made.cal}/$uid")?.value?.substringBefore('|'))
-            assertTrue(
-                api.observationsOf(bodyId, row.token).any { it.attr == "started" && it.atMs == was && it.stands },
-                "the ship holds the event at the time it was made",
-            )
-            assertEquals("the flat", folded(owner, url, bodyId, "location"))
-
-            // A different place at the same time. The new row ties with
-            // the old one on `at`, so it wins only because the ship saw
-            // it later, which is what every edit but a move rests on.
-            assertTrue(cal.poke(ball, eventBody(draft.copy(location = "the shop"), id = uid)), "the calendar took the place")
-            repo.push()
-            assertEquals("the shop", folded(owner, url, bodyId, "location"), "the edited place did not take")
-
-            // Three hours earlier, which is the case that matters: the
-            // old row's `at` is the later one.
-            assertTrue(
-                cal.poke(ball, eventBody(draft.copy(minuteOfDay = 10 * 60, location = "the shop"), id = uid)),
-                "the calendar moved it",
-            )
-            val moved = cal.window(now - 3 * 86_400_000L, now + 86_400_000L).rows.first { it.id == uid }
-            assertTrue(moved.l < was, "the calendar really moved it: ${moved.l} vs $was")
-            repo.push()
-
-            val after = api.observationsOf(bodyId, row.token)
-            val old = after.filter { it.atMs == was }
-            assertTrue(old.isNotEmpty(), "the old rows are still on the ship, as retracted rows: $after")
-            assertTrue(old.none { it.stands }, "a row at the old time still stands: $old")
-            assertTrue(
-                after.any { it.attr == "started" && it.atMs == moved.l && it.stands },
-                "the new time was not written: $after",
-            )
-            assertEquals(null, db.orrerySent().get(ship, "occ:${made.cal}/$uid/$was"), "the moved occurrence is forgotten")
-
-            owner.delete("$url/apps/orrery/api/body/$bodyId")
-            repo.disable().getOrThrow()
-        } finally {
-            uid?.let { cal.poke(ball, buildJsonObject { put("action", "del-event"); put("id", it) }) }
-        }
-    }
-
     @Test
     fun `the structural pipe lands on the ship and the key dies with the switch`() {
         if (url.isNullOrBlank() || cookie.isNullOrBlank() || ship.isNullOrBlank()) {
@@ -188,10 +110,6 @@ class OrreryLiveTest {
         try {
             runBlocking {
                 db.contacts().upsert(ContactEntity(ship = peer, nickname = "Sampel", bio = null, avatarUrl = null, status = "on the road", statusUpdatedMs = nowMs() - 60_000))
-                db.messages().upsertAllWithMedia(db.messageMedia(), listOf(
-                    MessageEntity(whom = peer, id = "170.141.184.506", author = peer, sentMs = nowMs() - 3_600_000, contentJson = "[]", kind = "chat"),
-                    MessageEntity(whom = peer, id = "170.141.184.507", author = peer, sentMs = nowMs() - 1_800_000, contentJson = """[{"inline":["I'm at the shop now"]}]""", kind = "chat"),
-                ))
 
                 val repo = OrreryRepo(owner, scope, db, "live test", book = { setOf(peer) })
                 repo.attach(url, ship)
@@ -202,17 +120,12 @@ class OrreryLiveTest {
                 assertTrue(row.token.startsWith(row.clientId + "."), "the token names its key")
                 withTimeout(60_000) { while (repo.lastPushMs.value == null) delay(200) }
                 assertEquals(null, repo.error.value, "the pass reported nothing refused")
-                val noticed = db.orreryNoticed().pending(ship).first()
-                // The DM says where they are. The status line may add a
-                // claim of its own, which is the tray's business too.
-                val located = noticed.filter { it.attr == "location" }
-                assertEquals(1, located.size, "the triage read the DM against the ship's bodies: $noticed")
-                assertEquals(personId(peer), located.single().subject)
 
+                // Chats are the ship's own reader's now; the contact is
+                // still this install's to tell it about.
                 val body = owner.get("$url/apps/orrery/api/body/${personId(peer)}").bodyAsText()
                 val view = Json.parseToJsonElement(body).jsonObject
-                assertTrue("last-contact" in body, "the ship holds the contact: $body")
-                assertTrue("Sampel" in body, "with the nickname as an alias: $body")
+                assertTrue("Sampel" in body, "the ship holds the contact, with the nickname as an alias: $body")
                 // Tlon's status field is a social one. What it says is
                 // read like any other text and waits in the tray; it is
                 // never sent as a fact about the person.
@@ -232,7 +145,7 @@ class OrreryLiveTest {
                 delay(1_500)
                 val dead = assertFailsWith<OrreryError.Refused> {
                     OrreryApi(owner, createAppHttpClient(), url).observe(
-                        batches(Facts(observations = listOf(messageFacts(MessageEntity(whom = peer, id = "1", author = peer, sentMs = nowMs(), contentJson = "[]", kind = "chat"), ship, personId(peer))!!))).single(),
+                        batches(Facts(observations = listOf(Obs(personId(peer), "last-contact", JsonPrimitive("2026-09-23"), nowMs(), sourceKind = "talon-dm", sourceId = "talon://chat/$peer?id=1")))).single(),
                         token,
                     )
                 }
