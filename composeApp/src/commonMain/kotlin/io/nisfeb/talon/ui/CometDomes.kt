@@ -15,10 +15,14 @@ import kotlinx.coroutines.CancellationException
  *
  * Asked once per comet, ever: an answer goes into the per-ship
  * database and is never asked again. Only an answer is kept. A ship
- * without Groundwire's Jael has no `/dome` at all: it says 404, or
- * answers some page that is not a jam, which means "can't tell", not
- * "no". Either stops the asking for the session, and a request that
- * failed is simply asked again next time.
+ * without Groundwire's Jael has no `%dome` at all: it says 500 or 404,
+ * or answers some page that is not a jam, which means "can't tell",
+ * not "no". Any of those stops the asking for the session, and a
+ * request that failed is simply asked again next time.
+ *
+ * A dome is what that ship's Jael holds. `~` is its answer, and not
+ * proof of anything wider: a comet attested on Bitcoin that this Jael
+ * does not know of reads the same.
  */
 class CometDomes(
     private val http: HttpClient,
@@ -36,7 +40,11 @@ class CometDomes(
             if (noDome) return null
             // Eyre's scry of Jael: care `j`, path `/dome/<ship>`.
             val resp = http.get("${baseUrl.trimEnd('/')}/_~_/=/dome/=/j/$comet")
-            if (resp.status.value == 404) { noDome = true; return null }
+            // Eyre answers a scry the ship does not have with a 500
+            // "scry failed", for every ship alike (a Jael without
+            // Groundwire's %dome), and a 404 where the path is not
+            // served at all. Either way there is nothing to ask here.
+            if (resp.status.value == 404 || resp.status.value == 500) { noDome = true; return null }
             if (resp.status.value != 200) return null
             val answer = registryOf(resp.readRawBytes()) ?: run { noDome = true; return null }
             db.cometDomes().put(CometDomeEntity(comet, answer))
