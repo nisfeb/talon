@@ -15,9 +15,10 @@ import kotlinx.coroutines.CancellationException
  *
  * Asked once per comet, ever: an answer goes into the per-ship
  * database and is never asked again. Only an answer is kept. A ship
- * without Groundwire's Jael has no `/dome` at all and says 404, which
- * means "can't tell", not "no"; that stops the asking for the session,
- * and a failed request is simply asked again next time.
+ * without Groundwire's Jael has no `/dome` at all: it says 404, or
+ * answers some page that is not a jam, which means "can't tell", not
+ * "no". Either stops the asking for the session, and a request that
+ * failed is simply asked again next time.
  */
 class CometDomes(
     private val http: HttpClient,
@@ -30,26 +31,29 @@ class CometDomes(
      *  none, or null when it is not a comet or the ship can't tell. */
     suspend fun registry(comet: String): String? {
         if (!isComet(comet)) return null
-        db.cometDomes().get(comet)?.let { return it.registry }
-        if (noDome) return null
-        val answer = try {
-            val resp = http.get("${baseUrl.trimEnd('/')}/~_~/=/dome/=/j/$comet")
+        return try {
+            db.cometDomes().get(comet)?.let { return it.registry }
+            if (noDome) return null
+            // Eyre's scry of Jael: care `j`, path `/dome/<ship>`.
+            val resp = http.get("${baseUrl.trimEnd('/')}/_~_/=/dome/=/j/$comet")
             if (resp.status.value == 404) { noDome = true; return null }
             if (resp.status.value != 200) return null
-            registryOf(resp.readRawBytes())
+            val answer = registryOf(resp.readRawBytes()) ?: run { noDome = true; return null }
+            db.cometDomes().put(CometDomeEntity(comet, answer))
+            answer
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             null
-        } ?: return null
-        db.cometDomes().put(CometDomeEntity(comet, answer))
-        return answer
+        }
     }
 
     internal companion object {
         /** What a jammed `%dome` answer says: the registry's name, "" for
          *  `~`, or null when the body is not a dome answer at all. */
         fun registryOf(jam: ByteArray): String? {
+            // A dome's jam is a few bytes; anything long is some other page.
+            if (jam.size > 64) return null
             val noun = try { cue(jam) } catch (e: IllegalArgumentException) { return null }
             if (noun is ByteArray) return if (noun.isEmpty()) "" else null
             val (head, tail) = noun as Pair<*, *>
@@ -61,7 +65,8 @@ class CometDomes(
          * Urbit's `cue`: a jammed noun back from its bits. An atom comes
          * back as its little-endian bytes with no trailing zeros (so 0
          * is empty), a cell as a [Pair]. Throws IllegalArgumentException
-         * on a body that is not a jam.
+         * on a body that is not one jam, whole: a page that happens to
+         * start like one is not taken for it.
          */
         fun cue(jam: ByteArray): Any {
             val end = jam.size * 8L
@@ -104,7 +109,10 @@ class CometDomes(
                 }
                 else -> rub(i + 2).let { (w, at) -> (2 + w) to requireNotNull(refs[num(at)]) { "bad backref" } }
             }
-            return go(0).second
+            val (width, noun) = go(0)
+            // A jam ends on a set bit, so its bytes are exactly its bits.
+            require((width + 7) / 8 == jam.size.toLong()) { "not one jam" }
+            return noun
         }
     }
 }

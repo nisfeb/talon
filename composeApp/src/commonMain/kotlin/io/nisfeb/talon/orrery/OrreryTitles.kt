@@ -61,29 +61,3 @@ fun samePerson(a: String?, b: String?): Boolean {
     }
     return true
 }
-
-private val DASH = Regex("^([A-Z][a-z]+)(?:,? and ([A-Z][a-z]+))?\\s*-\\s+\\S")
-private val BIRTHDAY = Regex("^([A-Z][a-z]+)(?:'s)?\\s+birthday\\b", RegexOption.IGNORE_CASE)
-private val LEAD = Regex("^([A-Z][a-z]+)\\b")
-
-/**
- * The people a title names: the ones it is certain about, and a
- * leading first name that only counts if the ship already knows
- * somebody by it.
- *
- * "Adelaide- Ballet/Tap" is certain of Adelaide and "Rose and Linus-
- * Opti Sail" of both; "Magnus Birthday" of Magnus. "Magnus Fencing
- * Lesson" only says Magnus if there is a Magnus, and "Nutcracker
- * rehearsal" names nobody, because a production, a team and a place
- * are not people.
- */
-fun namesInTitle(title: String?): Pair<List<String>, String?> {
-    val t = (title ?: "").trim()
-    DASH.find(t)?.let { m -> return m.groupValues.drop(1).filter { it.isNotEmpty() } to null }
-    BIRTHDAY.find(t)?.let { m -> return listOf(m.groupValues[1]) to null }
-    return emptyList<String>() to LEAD.find(t)?.groupValues?.get(1)
-}
-
-/** The first name a person body goes by, lowercased, for matching a name in a title. */
-fun firstNameOf(name: String?): String? =
-    words(name).firstOrNull { it !in ROLE_WORDS }

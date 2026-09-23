@@ -84,7 +84,7 @@ class OrreryToolsTest {
         // Passed on whole: what the fields mean is orrery's business,
         // and a wrapper that knew would be a wrapper to keep in step.
         assertEquals("""{"enabled":true,"chats":["-100123"]}""", t.wrote.toString())
-        assertTrue("Written to telegram" in said, said)
+        assertTrue("Sent to telegram" in said, said)
     }
 
     @Test
@@ -175,5 +175,16 @@ class OrreryToolsTest {
         assertEquals(null, t.wroteTo, "never sent")
         run(t, "orrery_configure", buildJsonObject { put("document", "chat"); put("settings", """{"enabled":true}""") })
         assertEquals("chat", t.wroteTo, "the reader's own document is written as any other")
+    }
+
+    // Telegram pushes to the ship, so only an address the internet
+    // reaches can be its public_url, and the ship adds the path itself.
+    @Test
+    fun `the ship's address is offered for telegram only where the internet reaches it`() {
+        val public = shipUrlHint("https://urbit.example.com/apps/talon")
+        assertTrue("at https://urbit.example.com." in public && "is the `public_url`" in public, public)
+        for (home in listOf("http://localhost:8080", "https://192.168.1.4", "https://172.20.0.2:8443", "http://my.ship.example")) {
+            assertTrue("not a `public_url`" in shipUrlHint(home), home)
+        }
     }
 }

@@ -116,21 +116,6 @@ class OrreryApi(
     }
 
     /**
-     * Merge into the generator's settings, and what the ship then holds:
-     * it answers a write once the write has landed. A blank or absent
-     * key keeps the one the ship has.
-     */
-    suspend fun setGenerator(enabled: Boolean, url: String?, model: String?, apiKey: String?): GeneratorSettings {
-        val body = buildJsonObject {
-            put("enabled", enabled)
-            url?.let { put("url", it) }
-            model?.let { put("model", it) }
-            apiKey?.takeIf { it.isNotBlank() }?.let { put("api_key", it) }
-        }
-        return generatorSettingsOf(reading { Json.parseToJsonElement(setSettingsDoc("generator", body)).jsonObject })
-    }
-
-    /**
      * One of the ship's settings documents, read and written whole.
      *
      * Generic on purpose. Orrery keeps its configuration in a handful
@@ -298,19 +283,6 @@ class OrreryApi(
                 status = o["status"]?.jsonPrimitive?.content ?: "",
                 sourceKind = o["source"]?.jsonObject?.get("kind")?.jsonPrimitive?.content ?: "",
             )
-        }
-    }
-
-    /**
-     * Take one observation back, with a note saying why. The row stays
-     * where it was and stops counting: the ship's fold takes the latest
-     * `at` it has, so a row left behind by an event that moved earlier
-     * would otherwise outlive the truth.
-     */
-    suspend fun retract(id: String, note: String, token: String) {
-        val body = buildJsonObject { put("id", id); put("note", note.take(MAX_NOTE)) }
-        request(bare, HttpMethod.Post, "/api/retract", body.toString()) {
-            header(HttpHeaders.Authorization, "Bearer $token")
         }
     }
 
@@ -573,8 +545,8 @@ class OrreryApi(
          */
         val SETTINGS = setOf("generator", "telegram", "schema", "policy", "chat")
 
-        /** Read and never written: what the chat reader may pick from, and its last pass. */
-        val LISTS = setOf("chat/dms", "chat/channels", "chat/last")
+        /** Read and never written: what the chat reader may pick from, and each reader's last pass. */
+        val LISTS = setOf("chat/dms", "chat/channels", "chat/last", "telegram/last")
 
         /**
          * The documents that register themselves with an outside
@@ -585,8 +557,6 @@ class OrreryApi(
         val REGISTRATIONS = mapOf("telegram" to "/api/telegram/webhook")
 
         const val APP_PATH = "/apps/orrery"
-        /** The ship refuses a longer note on a retraction. */
-        private const val MAX_NOTE = 500
         private const val NOT_FOUND = 404
         private const val FORBIDDEN = 403
         // activity is in this list because a recurring event is one:

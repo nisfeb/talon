@@ -24,8 +24,8 @@ import kotlinx.serialization.json.put
  * open, never the text.
  *
  * Contact is coarsened to the day: `last-contact` is a date, asserted
- * at the start of that day, so a chatty friend costs one observation
- * a day rather than one a message, and a resend is a no-op.
+ * at the start of that day, so somebody in touch often costs one
+ * observation a day rather than one a message, and a resend is a no-op.
  */
 data class OBody(val id: String, val name: String? = null, val aliases: List<String> = emptyList())
 

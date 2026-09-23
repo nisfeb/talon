@@ -28,8 +28,8 @@ import kotlinx.serialization.json.put
 /** What the model is told before it writes anything to orrery. */
 internal const val ORRERY_GUIDE = """
 Orrery is the owner's own model of their life, kept on their ship. It
-holds bodies — person/, place/, activity/, situation/, thing/ — and
-facts about them. You are talking to it as the owner.
+holds bodies (person/, place/, activity/, situation/, thing/, org/,
+note/) and facts about them. You are talking to it as the owner.
 
 Before you write:
 
@@ -58,24 +58,32 @@ Settings live in documents, read and written whole by name:
   nothing, whatever else is switched on.
 - `telegram`: the Telegram reader. Its token comes from BotFather, its
   secret is the owner's own invention and must be 16 bytes or longer,
-  and `public_url` is where the ship is reachable from the internet,
-  because Telegram pushes to it. `chats` is the chat ids it may read,
-  `people` maps a Telegram user id to a body id. Once the three are
-  set, orrery_register telegram: the ship asks Telegram to push
-  updates to it and reads back what Telegram holds. A 200 is not
-  delivery: report the url held, pending_update_count and
-  last_error_message. A last_error_message naming TLS or DNS means
-  the public URL is not reachable from the internet, which is the
-  owner's to fix.
+  and `public_url` is the ship's base HTTPS address as the internet
+  reaches it, with no path, because Telegram pushes to it. `enabled`
+  must be true, or the ship drops every update it is sent. It reads a
+  message only from a chat id listed in `chats` and a sender whose
+  Telegram user id is in `people` (mapped to a body id); anything else
+  is dropped. Once token, secret and public_url are set,
+  orrery_register telegram: the ship asks Telegram to push updates to
+  it and reads back what Telegram holds. A 200 is not delivery: report
+  the url held, pending_update_count and last_error_message. A
+  last_error_message naming TLS or DNS means the public URL is not
+  reachable from the internet, which is the owner's to fix. To learn
+  the ids for `chats` and `people`, have the owner message the bot,
+  then read orrery_settings telegram/last: its `chat` and `from` are
+  the last update's ids, and `outcome` says why it was dropped.
 - `chat`: the ship's own reader of the owner's Tlon chats. `enabled`,
   `dms` (whom strings: a ~ship, or a group DM id like 0v4.abcde),
   `channels` (nests like chat/~host/general), `people` (a ship to a
   body id, needed only for a person with no body carrying that ship),
   `read_own`, `poll_minutes`, `backfill_hours`, `gate` and `escalate`
   (0 to 100), `max_daily_messages` and `model`. A list you give
-  replaces the list whole. What the ship holds to pick from is
-  orrery_settings chat/dms and chat/channels, each item an id and a
-  name: pick by the name, since many channel ids are random strings.
+  replaces the list whole. `poll_minutes` is 1 to 1440 and
+  `backfill_hours` at most 720; the ship clamps what is outside. What
+  the ship holds to pick from is orrery_settings chat/dms and
+  chat/channels, each item an id and a name: pick by the name, since
+  many channel ids are random strings, and by the id where the name is
+  blank.
   Its last pass is orrery_settings chat/last. It borrows the
   generator's key, so that is set first. It reads only the DMs and
   channels listed, and only from people it knows by ship (a person
@@ -85,15 +93,19 @@ Settings live in documents, read and written whole by name:
 - `schema`, `policy`: what bodies may carry, and what the ship does
   with what it is told.
 
-A fresh setup goes: the generator's key; `telegram`'s three fields,
-then orrery_register telegram; then `chat` with the DMs and channels
-the owner picked and enabled true.
+A fresh setup goes: the generator's key; `telegram`'s token, secret,
+public_url and enabled true, then orrery_register telegram, then its
+`chats` and `people` from telegram/last once the owner has messaged
+the bot; then `chat` with the DMs and channels the owner picked and
+enabled true.
 
-Writing a document merges: a field you leave out keeps its value, a
-field you send as null is cleared so the ship's default stands, and a
-credential you leave blank ("") keeps the stored one. The ship answers
-a write once it has landed, with the document as stored: that answer
-is the settings now, so there is no need to read it again. Credentials
+Writing `generator`, `telegram` or `chat` merges: a field you leave
+out keeps its value, a field you send as null is cleared so the ship's
+default stands, and a credential you leave blank ("") keeps the stored
+one. `schema` and `policy` are replaced whole: read the document,
+change it, and send all of it, or what you left out is gone. The ship
+answers a write with the document as stored, once the write has landed
+or it has stopped waiting: check your change is in it. Credentials
 come back masked, never as themselves, so you cannot show the owner a
 token they have already set, and you should not ask them to repeat one
 to confirm it.
@@ -163,10 +175,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
         ),
         write = false,
     ) {
-        ORRERY_GUIDE.trim() + (orrery.shipUrl?.let {
-            "\n\nThis install reaches the owner's ship at $it. That is usually the `public_url` Telegram needs; " +
-                "confirm it with the owner, since it must be reachable from the internet."
-        } ?: "")
+        ORRERY_GUIDE.trim() + (orrery.shipUrl?.let { "\n\n" + shipUrlHint(it) } ?: "")
     })
 
     add(Tool(
@@ -237,14 +246,14 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
         spec = ToolSpec(
             "orrery_settings",
             "Read one of orrery's settings documents: " + OrreryApi.SETTINGS.sorted().joinToString(", ") +
-                ". Credentials come back only as whether they are set, never as themselves. Also " +
-                OrreryApi.LISTS.sorted().joinToString(", ") + ": what the ship holds to pick from, read only.",
+                ". Credentials come back only as whether they are set, never as themselves. Also, read only: " +
+                OrreryApi.LISTS.sorted().joinToString(", ") + ", what the chat reader may pick from and each reader's last pass.",
             toolSchema("document" to ("string" to "The document name."), required = listOf("document")),
         ),
         write = false,
     ) { args ->
         val name = args.str("document") ?: return@Tool "Error: document is required."
-        if (name !in OrreryApi.SETTINGS && name !in OrreryApi.LISTS) return@Tool unknownDoc(name)
+        if (name !in OrreryApi.SETTINGS && name !in OrreryApi.LISTS) return@Tool unknownDoc(name, OrreryApi.SETTINGS + OrreryApi.LISTS)
         orrery.settings(name).fold(
             onSuccess = { clip(it) },
             onFailure = { "Could not read $name: ${it.message}" },
@@ -255,7 +264,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
         spec = ToolSpec(
             "orrery_configure",
             "Change one of orrery's settings documents: " + OrreryApi.SETTINGS.sorted().joinToString(", ") +
-                ". Give only the fields to change: the ship keeps the rest, clears a field given as null, and keeps a stored credential given as \"\". It answers with the document as stored. Read orrery_guide first: some fields have rules the ship enforces and will refuse.",
+                ". For generator, telegram and chat give only the fields to change: the ship keeps the rest, clears a field given as null, and keeps a stored credential given as \"\". schema and policy are replaced whole, so send the whole document. It answers with the document as stored. Read orrery_guide first: some fields have rules the ship enforces and will refuse.",
             toolSchema(
                 "document" to ("string" to "The document name."),
                 "settings" to ("string" to "A JSON object of the fields to change."),
@@ -271,7 +280,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
             ?: return@Tool "Error: settings must be a JSON object."
         if (obj.isEmpty()) return@Tool "Error: nothing to change."
         orrery.configure(name, obj).fold(
-            onSuccess = { "Written to $name. It now holds: " + clip(it) },
+            onSuccess = { "Sent to $name. The ship now holds: " + clip(it) },
             onFailure = { "Could not write $name: ${it.message}" },
         )
     })
@@ -302,9 +311,9 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
     })
 }
 
-private fun unknownDoc(name: String) =
+private fun unknownDoc(name: String, names: Set<String> = OrreryApi.SETTINGS) =
     "There is no orrery settings document called \"$name\". It is one of: " +
-        OrreryApi.SETTINGS.sorted().joinToString(", ") + "."
+        names.sorted().joinToString(", ") + "."
 
 /** Enough of an answer to work from; the whole state view is long. */
 private fun clip(s: String, max: Int = 6000): String =
@@ -312,3 +321,22 @@ private fun clip(s: String, max: Int = 6000): String =
 
 private fun JsonObject.str(key: String): String? =
     this[key]?.let { (it as? JsonPrimitive)?.contentOrNull }?.takeIf { it.isNotBlank() }
+
+/**
+ * What the guide says about the address this install reaches the ship
+ * at. Each owner's is their own, so it is read, never written in; and
+ * only an HTTPS one off this machine and off a home network can be
+ * what Telegram pushes to.
+ */
+internal fun shipUrlHint(url: String): String {
+    val host = url.substringAfter("://").substringBefore('/').substringBefore(':').lowercase()
+    val private = host == "localhost" || host.endsWith(".local") || host.startsWith("127.") ||
+        host.startsWith("10.") || host.startsWith("192.168.") || Regex("^172\\.(1[6-9]|2\\d|3[01])\\.").containsMatchIn(host)
+    val base = if ("://" in url) url.substringBefore("://") + "://" + url.substringAfter("://").substringBefore('/') else url
+    return if (url.startsWith("https://") && !private) {
+        "This install reaches the owner's ship at $base. Once the owner confirms the internet reaches it there, that is the `public_url` for Telegram, as it is."
+    } else {
+        "This install reaches the owner's ship at $base, which the internet cannot reach, so it is not a `public_url`. Ask the owner for the ship's public HTTPS address."
+    }
+}
+

@@ -1049,7 +1049,6 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
                 Switch(checked = standing, onCheckedChange = { sd.set(it) })
             }
         }
-        ChatReaderRow(orrery)
         if (io.nisfeb.talon.ui.isLocationSharingSupported) LocationRow()
     }
     (note ?: error)?.let { Quiet(it, error = true) }
@@ -1058,21 +1057,35 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
     if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(error)) {
         TextButton(onClick = { AiSettings.pendingTopUp.value = true }) { Text("Top up") }
     }
+    // The ship's, not this install's: shown whether or not this install
+    // feeds orrery, since it is the only reader of the owner's chats.
+    ChatReaderRow(orrery)
 }
 
 /**
  * The ship's own reader of the owner's Tlon chats (orrery 39): on or
  * off, what it read last, and which chats it reads. This install reads
- * no chats itself, so each message is read once, on the ship. Hidden
- * where the ship cannot say.
+ * no chats itself, so each message is read once, on the ship.
  */
 @Composable
 private fun ChatReaderRow(orrery: OrreryRepo) {
     val scope = rememberCoroutineScope()
-    LaunchedEffect(orrery) { orrery.loadChatReader() }
-    val reader = orrery.chatReader.collectAsState().value ?: return
+    var failed by remember { mutableStateOf(false) }
+    LaunchedEffect(orrery) { failed = !orrery.loadChatReader() }
+    val reader = orrery.chatReader.collectAsState().value
+    if (reader == null) {
+        // Not hidden: with no other reader of the chats, a ship that did
+        // not answer is worth saying, and asking again.
+        if (failed) Row(verticalAlignment = Alignment.CenterVertically) {
+            Quiet("Your ship did not say how its chat reader is set.", error = true)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { scope.launch { failed = !orrery.loadChatReader() } }) { Text("Try again") }
+        }
+        return
+    }
     val run by orrery.chatReaderRun.collectAsState()
     var said by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    var waking by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("The ship reads my chats", style = MaterialTheme.typography.bodyMedium)
@@ -1090,17 +1103,24 @@ private fun ChatReaderRow(orrery: OrreryRepo) {
             }
         })
     }
-    if (reader.enabled) TextButton(onClick = {
+    if (reader.enabled) TextButton(enabled = !waking, onClick = {
+        waking = true
+        said = null
         scope.launch {
+            // Its record says when it is done; one that takes longer than
+            // the wait shows on the next visit.
             said = orrery.wakeChatReader().fold(
-                onSuccess = { "Your ship is reading now." to false },
+                onSuccess = { done -> if (done) null else "Your ship is reading now." to false },
                 onFailure = { (it.message ?: "Orrery did not answer.") to true },
             )
+            waking = false
         }
-    }) { Text("Read now") }
+    }) { Text(if (waking) "Reading" else "Read now") }
     said?.let { (text, bad) -> Quiet(text, error = bad) }
     ChatPicker(orrery, reader)
 }
+
+private fun plural(n: Int, one: String) = "$n $one" + if (n == 1) "" else "s"
 
 private fun chatRunLine(r: io.nisfeb.talon.orrery.ChatReaderRun): String {
     val at = r.atMs ?: return "Not read yet."
@@ -1126,7 +1146,7 @@ private fun ChatPicker(orrery: OrreryRepo, reader: io.nisfeb.talon.orrery.ChatRe
         orrery.chatOptions().fold(onSuccess = { options = it }, onFailure = { problem = it.message ?: "Orrery did not answer." })
     }
     Text("Chats your ship reads", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
-    Quiet("${reader.dms.size} DMs and ${reader.channels.size} channels.")
+    Quiet("${plural(reader.dms.size, "DM")} and ${plural(reader.channels.size, "channel")}.")
     problem?.let { Quiet(it, error = true) }
     val (dms, channels) = options ?: return
     OutlinedTextField(
@@ -1135,25 +1155,33 @@ private fun ChatPicker(orrery: OrreryRepo, reader: io.nisfeb.talon.orrery.ChatRe
         modifier = Modifier.fillMaxWidth(),
     )
     val q = query.trim().lowercase()
+    // A DM the ship has no nickname for goes by the name Talon shows
+    // for that ship everywhere else, not its raw @p.
+    fun label(o: io.nisfeb.talon.orrery.ChatOption) =
+        o.name.ifBlank { if (o.id.startsWith("~")) io.nisfeb.talon.ui.ShipNames.resolve(o.id) else o.id }
     // With nothing typed, only what is read, unless all is asked for.
     val rows = listOf("dms" to dms, "channels" to channels).flatMap { (field, list) ->
         val picked = if (field == "dms") reader.dms else reader.channels
         list.filter { o ->
-            if (q.isEmpty()) all || o.id in picked else q in o.name.lowercase() || q in o.id.lowercase()
+            if (q.isEmpty()) all || o.id in picked else q in label(o).lowercase() || q in o.name.lowercase() || q in o.id.lowercase()
         }.map { Triple(field, it, picked) }
     }
     // ponytail: the first fifty; typing narrows the rest.
     rows.take(50).forEach { (field, o, picked) ->
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(o.name.ifBlank { o.id }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (field == "dms" && o.name.isNotBlank()) Quiet(o.id)
+                Text(label(o), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (field == "dms" && label(o) != o.id) Quiet(o.id)
             }
             Switch(checked = o.id in picked, enabled = !busy, onCheckedChange = { on ->
+                // Set before the write starts: two taps in one frame each
+                // built the whole list from the same picks, and the second
+                // write dropped the first.
+                if (busy) return@Switch
+                busy = true
                 val next = if (on) picked + o.id else picked - o.id
                 problem = null
                 scope.launch {
-                    busy = true
                     orrery.setChatReader(buildJsonObject { putJsonArray(field) { next.sorted().forEach { add(JsonPrimitive(it)) } } })
                         .onFailure { problem = it.message ?: "Orrery did not answer." }
                     busy = false
@@ -1163,7 +1191,7 @@ private fun ChatPicker(orrery: OrreryRepo, reader: io.nisfeb.talon.orrery.ChatRe
     }
     if (rows.size > 50) Quiet("${rows.size - 50} more. Type to narrow them.")
     if (q.isEmpty()) TextButton(onClick = { all = !all }) {
-        Text(if (all) "Show only the chats read" else "Show all ${dms.size + channels.size} chats")
+        Text(if (all) "Show only the chats read" else "Show all ${plural(dms.size + channels.size, "chat")}")
     }
 }
 

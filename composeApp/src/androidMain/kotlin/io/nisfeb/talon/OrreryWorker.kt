@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * The orrery pass while the phone is charging and idle, so the model
- * reads the day's messages without the app open and without the
+ * reads the day's mail and calls without the app open and without the
  * battery paying for it. Android-only: no desktop analog, since the
  * desktop app runs its pass while open and there is no scheduler to
  * ask otherwise.

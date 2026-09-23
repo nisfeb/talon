@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
 
 /**
  * What this install holds for one ship's orrery: the key it minted for
- * itself and how far each source has been pushed.
+ * itself and how far its mail has been read.
  *
  * The key is a per-ship secret like the session cookie and lives where
  * the app's other per-ship state does. A row exists only while the
@@ -132,16 +132,13 @@ internal const val ORRERY_CHANNELS_SQL =
  * What this install has already told the ship, so it never says it
  * twice. The ship dedupes an observation by its content, but a body
  * upsert always makes the body again: without this, every pass
- * recreated whatever a consolidation had just merged away, and the
- * calendar's events came back as hollow twins minutes later.
+ * recreated whatever a consolidation had just merged away.
  *
- * The key says what kind of thing it is: `cal:<calendar>/<uid>` for an
- * event the ship already has a body for (the value is that body's id),
- * `occ:<calendar>/<uid>/<n>` for an occurrence whose rows are written,
- * `msg:<source id>` for a message that has been read, and
- * `person:<ship>` for someone who has a body (the value is its id, and
- * a digest of the name and aliases we sent, so a rename is noticed
- * while a replay is not).
+ * The key says what kind of thing it is: `mail:<thread>` for a thread
+ * read at a given last message, `status:<ship>` for a status line read,
+ * `sent:<action>` for a message sent, `brief:<day>` for a day's brief
+ * and its tags, `reply:<message>` for a reply to one answered, and a
+ * few others for the pass's own bookkeeping.
  */
 @Entity(tableName = "orrery_sent", primaryKeys = ["ship", "key"])
 data class OrrerySentEntity(

@@ -17,6 +17,9 @@ class CometDomesTest {
     @Test fun `a body that is not a dome answer can't tell`() {
         assertNull(CometDomes.registryOf(hex("01")), "life's answer is not a jam of a dome")
         assertNull(CometDomes.registryOf(ByteArray(0)))
+        // A page whose first byte happens to start like `~` is not `~`.
+        assertNull(CometDomes.registryOf("null".encodeToByteArray()), "json null")
+        assertNull(CometDomes.registryOf("<!doctype html>".encodeToByteArray()), "a redirected landing page")
     }
 
     @Test fun `cue follows a backref`() {

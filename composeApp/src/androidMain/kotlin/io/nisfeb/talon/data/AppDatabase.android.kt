@@ -420,20 +420,21 @@ private val MIGRATION_42_43 = object : Migration(42, 43) {
     }
 }
 
-/** This install's orrery key and cursors, per ship. Shared statement. */
-/** What this install has already told the ship. Shared statement. */
+/** Talon's chat and calendar records gone, the key kept. Shared statements. */
 private val MIGRATION_46_47 = object : Migration(46, 47) {
     override fun migrate(db: SupportSQLiteDatabase) {
         ORRERY_HANDOFF_SQL.forEach { db.execSQL(it) }
     }
 }
 
+/** What the ship's Jael said about each comet. Shared statement. */
 private val MIGRATION_45_46 = object : Migration(45, 46) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL(COMET_DOMES_SQL)
     }
 }
 
+/** What this install has already told the ship. Shared statement. */
 private val MIGRATION_44_45 = object : Migration(44, 45) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL(ORRERY_SENT_SQL)

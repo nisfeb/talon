@@ -30,27 +30,4 @@ class OrreryTitlesTest {
         assertFalse(samePerson("", "dana"))
         assertTrue(samePerson("dana quill", "quill dana"))
     }
-
-    @Test
-    fun `a title is certain of some names, guesses at one, and invents none`() {
-        // Every answer here is what common/reconcile.py's names_in gives.
-        assertEquals(listOf("Adelaide") to null, namesInTitle("Adelaide- Ballet/Tap"))
-        assertEquals(listOf("Rose", "Linus") to null, namesInTitle("Rose and Linus- Opti Sail"))
-        assertEquals(listOf("Magnus") to null, namesInTitle("Magnus Birthday"))
-        assertEquals(listOf("magnus") to null, namesInTitle("magnus's birthday"))
-        assertEquals(listOf("Dana") to null, namesInTitle("  Dana - Pottery"))
-        // A leading word is only a name if the ship keeps somebody by it.
-        assertEquals(emptyList<String>() to "Magnus", namesInTitle("Magnus Fencing Lesson"))
-        assertEquals(emptyList<String>() to "Nutcracker", namesInTitle("Nutcracker rehearsal"))
-        assertEquals(emptyList<String>() to "Pirates", namesInTitle("Pirates practice"))
-        assertEquals(emptyList<String>() to null, namesInTitle("standup"))
-    }
-
-    @Test
-    fun `a first name skips the role it is written with`() {
-        assertEquals("dana", firstNameOf("Dana Quill"))
-        assertEquals("dana", firstNameOf("the Dana"))
-        assertEquals(null, firstNameOf("wife"))
-        assertEquals(null, firstNameOf(""))
-    }
 }
