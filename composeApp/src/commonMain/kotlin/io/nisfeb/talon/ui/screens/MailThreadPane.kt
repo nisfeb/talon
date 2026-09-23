@@ -17,6 +17,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.heightIn
@@ -110,10 +114,7 @@ fun MailThreadPane(
     var imagesShown by remember(threadId) { mutableStateOf(false) }
 
     io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:$threadId")
-    LaunchedEffect(threadId) {
-        // Not read this session: the copy an earlier one left on disk, if any.
-        if (thread == null) thread = repo.storedThread(threadId)
-        loading = thread == null
+    suspend fun read() {
         refreshing = thread != null
         val t = repo.loadThread(threadId)
         // Out of reach with a copy on screen: keep the copy rather than call the thread gone.
@@ -127,6 +128,22 @@ fun MailThreadPane(
             repo.markRead(unread, threadId)
             thread = repo.cachedThread(threadId) ?: thread
         }
+    }
+    LaunchedEffect(threadId) {
+        // Not read this session: the copy an earlier one left on disk, if any.
+        if (thread == null) thread = repo.storedThread(threadId)
+        loading = thread == null
+        read()
+    }
+    // A reply that arrives while the thread is open: once a listing says
+    // the thread has something newer than what is on screen, it is read
+    // again here, as it was only by leaving and coming back. The listing
+    // is read anyway, so this costs the ship nothing of its own.
+    val listedLast by remember(threadId) { repo.listedLast(threadId) }.collectAsState()
+    LaunchedEffect(threadId, listedLast) {
+        val shown = thread ?: return@LaunchedEffect
+        val newest = maxOf(shown.last, shown.messages.maxOfOrNull { it.sent } ?: 0L)
+        if (!loading && !refreshing && (listedLast ?: 0L) > newest) read()
     }
 
     // A refused write's rollback lands in the repo's caches, not in the
@@ -218,6 +235,7 @@ fun MailThreadPane(
                 repo.deleteThread(threadId)
                 onGone()
             },
+            onCopyLink = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(io.nisfeb.talon.urbit.TalonLink.forMail(threadId))) },
             onFile = {
                 val t = thread ?: return@MailThreadHeader
                 file(
@@ -260,15 +278,6 @@ fun MailThreadPane(
             else -> {
                 TravelLine(travelling.size)
                 HorizontalDivider()
-                MailThreadActions(
-                    // A forged copy cannot be answered, so a thread of
-                    // nothing else has nothing to reply to.
-                    enabled = answering != null,
-                    onReply = { onCompose(intent(forwarding = false)) },
-                    onForward = { onCompose(intent(forwarding = true)) },
-                    onCopyLink = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(io.nisfeb.talon.urbit.TalonLink.forMail(threadId))) },
-                )
-                HorizontalDivider()
                 if (drawn) {
                     // The picture, and under it the message it selects.
                     MailThreadTree(
@@ -302,6 +311,7 @@ fun MailThreadPane(
                                 repo = repo,
                                 imagesShown = imagesShown,
                                 onShowImages = { imagesShown = true },
+                                answer = if (shown.verdict == Verdict.FORGED) null else { f -> onCompose(intent(forwarding = f)) },
                             )
                         }
                     }
@@ -334,6 +344,9 @@ fun MailThreadPane(
                             repo = repo,
                             imagesShown = imagesShown,
                             onShowImages = { imagesShown = true },
+                            // A forged copy cannot be answered, so only the
+                            // message a reply would really answer has them.
+                            answer = if (node.message.id == answering) { f -> onCompose(intent(forwarding = f)) } else null,
                         )
                         HorizontalDivider()
                     }
@@ -358,6 +371,7 @@ private fun ThreadActions(
     onMarkUnread: () -> Unit,
     onDelete: () -> Unit,
     onFile: () -> Unit,
+    onCopyLink: () -> Unit,
     onLabels: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -379,6 +393,10 @@ private fun ThreadActions(
             DropdownMenuItem(
                 text = { Text("Labels…") },
                 onClick = { open = false; onLabels() },
+            )
+            DropdownMenuItem(
+                text = { Text("Copy link") },
+                onClick = { open = false; onCopyLink() },
             )
             DropdownMenuItem(
                 text = { Text("File to Lattice") },
@@ -411,24 +429,6 @@ private fun ThreadActions(
     }
 }
 
-/**
- * Reply and forward. Both send from the message the reader is on: the
- * newest honest one in list mode, the selected node in tree mode. That
- * is what makes selecting a node and replying a deliberate act rather
- * than a surprise.
- */
-@Composable
-private fun MailThreadActions(enabled: Boolean, onReply: () -> Unit, onForward: () -> Unit, onCopyLink: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        TextButton(onClick = onReply, enabled = enabled) { Text("Reply") }
-        TextButton(onClick = onForward, enabled = enabled) { Text("Forward") }
-        TextButton(onClick = onCopyLink) { Text("Copy link") }
-    }
-}
-
 @Composable
 private fun MailThreadHeader(
     subject: String,
@@ -441,6 +441,7 @@ private fun MailThreadHeader(
     onArchive: () -> Unit,
     onMarkUnread: () -> Unit,
     onDelete: () -> Unit,
+    onCopyLink: () -> Unit,
     onFile: () -> Unit,
     showTree: Boolean,
     drawn: Boolean,
@@ -477,6 +478,7 @@ private fun MailThreadHeader(
                 onMarkUnread = onMarkUnread,
                 onDelete = onDelete,
                 onFile = onFile,
+                onCopyLink = onCopyLink,
                 onLabels = { labeling = true },
             )
             // Offered only where there is a tree to see. A straight
@@ -569,6 +571,9 @@ private fun MailMessageCard(
      *  instead; true only after the reader asked, per thread. */
     imagesShown: Boolean = false,
     onShowImages: () -> Unit = {},
+    /** The message a reply or forward would answer carries the buttons
+     *  for them, under its body; null on every other message. */
+    answer: ((forwarding: Boolean) -> Unit)? = null,
 ) {
     val m = node.message
     val ground = when {
@@ -576,11 +581,24 @@ private fun MailMessageCard(
         onPath -> MaterialTheme.colorScheme.primary.copy(alpha = 0.045f)
         else -> Color.Transparent
     }
+    // A tap selects the message. On touch that is a clickable, with
+    // long-press left for selecting text. With a mouse a clickable over
+    // the body swallowed the drag that selects text, so none of a message
+    // could be highlighted or copied (chat rows had the same trouble; see
+    // isTapToOpenMenuSupported): there a plain click is only watched for,
+    // never taken, and a drag stays the text's.
+    val touch = io.nisfeb.talon.ui.isTapToOpenMenuSupported
     Column(
         Modifier
             .fillMaxWidth()
             .background(ground)
-            .then(if (selectable) Modifier.clickable(onClick = onSelect) else Modifier)
+            .then(
+                when {
+                    !selectable -> Modifier
+                    touch -> Modifier.clickable(onClick = onSelect)
+                    else -> Modifier.onPlainClick(onSelect)
+                },
+            )
             .padding(start = (12 + depth * 14).dp, end = 12.dp, top = 8.dp, bottom = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -731,6 +749,21 @@ private fun MailMessageCard(
                     }
                 }
             }
+            // On the message itself, not above the thread: which message
+            // a reply answers is the one the buttons sit under. The body
+            // copies whole from here too; any part of it selects.
+            if (answer != null) {
+                val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                var copied by remember(m.id) { mutableStateOf(false) }
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    androidx.compose.material3.OutlinedButton(onClick = { answer(false) }) { io.nisfeb.talon.ui.FitText("Reply") }
+                    androidx.compose.material3.OutlinedButton(onClick = { answer(true) }) { io.nisfeb.talon.ui.FitText("Forward") }
+                    TextButton(onClick = {
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(m.body))
+                        copied = true
+                    }) { io.nisfeb.talon.ui.FitText(if (copied) "Copied" else "Copy") }
+                }
+            }
         }
     }
 }
@@ -738,3 +771,23 @@ private fun MailMessageCard(
 internal fun sizeLabel(bytes: Long): String =
     if (bytes <= 0) "unknown size" else io.nisfeb.talon.util.humanFileSize(bytes)
 
+/**
+ * A click that did not move, seen after everything under it has had the
+ * event and without taking it: the text's selection keeps its drag, a
+ * link or button inside keeps its click, and the message is selected
+ * as well.
+ */
+private fun Modifier.onPlainClick(onClick: () -> Unit): Modifier = pointerInput(onClick) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
+        var moved = false
+        while (true) {
+            val change = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id } ?: break
+            if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
+            if (!change.pressed) {
+                if (!moved) onClick()
+                break
+            }
+        }
+    }
+}

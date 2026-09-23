@@ -159,6 +159,15 @@ class MailRepo(
     private val pageCache = MutableStateFlow<Map<PageKey, InboxPage>>(emptyMap())
     private val threadCache = MutableStateFlow<Map<String, MailThread>>(emptyMap())
 
+    /**
+     * When [threadId]'s newest message is, as any listing read this
+     * session says. An open thread reads it again once a listing says
+     * there is something newer, rather than only when it is reopened.
+     */
+    fun listedLast(threadId: String): StateFlow<Long?> = io.nisfeb.talon.util.mapState(pageCache) { pages ->
+        pages.values.mapNotNull { p -> p.threads.firstOrNull { it.id == threadId }?.last }.maxOrNull()
+    }
+
     /** Whether the inbox as last listed holds unread mail: the Mail section's pip. No request of its own. */
     val inboxUnread: StateFlow<Boolean> = io.nisfeb.talon.util.mapState(pageCache) { pages ->
         pages[PageKey(MailView.INBOX, null, "")]?.threads?.any { it.unread } == true
