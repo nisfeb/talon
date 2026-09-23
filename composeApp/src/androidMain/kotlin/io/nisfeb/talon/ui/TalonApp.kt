@@ -1394,6 +1394,7 @@ fun TalonApp(
         LocalCometDomes provides remember(app.session, app.db) {
             app.session.baseUrl?.takeIf { it.isNotBlank() }?.let { CometDomes(app.session.http, it, app.db) }
         },
+        LocalOpenProfile provides { ship: String -> profileSheetShip = ship },
         io.nisfeb.talon.mail.LocalMailTo provides
             if (mailAvailable) {
                 { peer: String ->

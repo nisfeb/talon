@@ -3,6 +3,8 @@ package io.nisfeb.talon.ui.icons
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.Forward
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Archive
@@ -106,5 +108,7 @@ object TalonIconSources {
         "WaterDrop" to Icons.Filled.WaterDrop,
         "Chat" to Icons.AutoMirrored.Filled.Chat,
         "Logout" to Icons.AutoMirrored.Filled.Logout,
+        "Reply" to Icons.AutoMirrored.Filled.Reply,
+        "Forward" to Icons.AutoMirrored.Filled.Forward,
     )
 }

@@ -24,6 +24,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -178,12 +180,13 @@ fun MailThreadPane(
 
     val nameFor: (String) -> String = contacts::displayName
     fun whenAt(ms: Long) = shortRelativeTime(ms, nowMs())
-    fun intent(forwarding: Boolean) = MailIntent(
-        prev = answering,
+    /** A reply or forward from [id]: what travels is the path down to it. */
+    fun intent(forwarding: Boolean, id: String? = answering) = MailIntent(
+        prev = id,
         threadId = threadId,
         to = if (forwarding) emptyList() else thread?.participants.orEmpty().filter { it != ourShip },
         subject = answerSubject(thread?.messages?.firstOrNull()?.subject.orEmpty(), forwarding),
-        travels = travelling.size,
+        travels = if (id == answering) travelling.size else id?.let { pathTo(forest, it).size } ?: 0,
         forwarding = forwarding,
     )
 
@@ -311,7 +314,8 @@ fun MailThreadPane(
                                 repo = repo,
                                 imagesShown = imagesShown,
                                 onShowImages = { imagesShown = true },
-                                answer = if (shown.verdict == Verdict.FORGED) null else { f -> onCompose(intent(forwarding = f)) },
+                                onAnswer = if (shown.verdict == Verdict.FORGED) null else { f -> onCompose(intent(f, shown.id)) },
+                                full = true,
                             )
                         }
                     }
@@ -344,9 +348,11 @@ fun MailThreadPane(
                             repo = repo,
                             imagesShown = imagesShown,
                             onShowImages = { imagesShown = true },
-                            // A forged copy cannot be answered, so only the
-                            // message a reply would really answer has them.
-                            answer = if (node.message.id == answering) { f -> onCompose(intent(forwarding = f)) } else null,
+                            // A forged copy cannot be answered. Every other
+                            // message answers from its own header, and the
+                            // selected one has the full row under it too.
+                            onAnswer = if (node.message.verdict == Verdict.FORGED) null else { f -> onCompose(intent(f, node.message.id)) },
+                            full = node.message.id == answering,
                         )
                         HorizontalDivider()
                     }
@@ -484,15 +490,12 @@ private fun MailThreadHeader(
             // Offered only where there is a tree to see. A straight
             // thread has nothing the two modes would show differently.
             if (showTree) {
-                FilterChip(
-                    selected = !drawn,
-                    onClick = { onMode(false) },
-                    label = { Text("Messages") },
-                )
-                Spacer(Modifier.width(6.dp))
+                // One switch: the tree is shown or it is not. Two chips,
+                // Messages and Tree, read as a pair of views, and Tree
+                // clicked again did nothing.
                 FilterChip(
                     selected = drawn,
-                    onClick = { onMode(true) },
+                    onClick = { onMode(!drawn) },
                     label = { Text("Tree") },
                 )
             }
@@ -571,9 +574,11 @@ private fun MailMessageCard(
      *  instead; true only after the reader asked, per thread. */
     imagesShown: Boolean = false,
     onShowImages: () -> Unit = {},
-    /** The message a reply or forward would answer carries the buttons
-     *  for them, under its body; null on every other message. */
-    answer: ((forwarding: Boolean) -> Unit)? = null,
+    /** Reply to or forward this message; null where it cannot be
+     *  answered, a forged copy. */
+    onAnswer: ((forwarding: Boolean) -> Unit)? = null,
+    /** The message being read: Reply, Forward and Copy in full under it. */
+    full: Boolean = false,
 ) {
     val m = node.message
     val ground = when {
@@ -639,6 +644,16 @@ private fun MailMessageCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            // On every message, so answering one never means selecting it
+            // and then going back up to the top of the thread.
+            if (onAnswer != null) {
+                IconButton(onClick = { onAnswer(false) }, modifier = Modifier.size(30.dp)) {
+                    Icon(TalonIcons.Reply, contentDescription = "Reply", modifier = Modifier.size(18.dp))
+                }
+                IconButton(onClick = { onAnswer(true) }, modifier = Modifier.size(30.dp)) {
+                    Icon(TalonIcons.Forward, contentDescription = "Forward", modifier = Modifier.size(18.dp))
+                }
+            }
             TextButton(onClick = onFile) { Text("File", style = MaterialTheme.typography.labelSmall) }
         }
         if (hidden > 0) {
@@ -695,8 +710,30 @@ private fun MailMessageCard(
         Column(Modifier.padding(start = 24.dp, top = 6.dp)) {
             // Links open through the app's handler, so an urb:// address
             // lands in lattice as it does from a chat; the rest go out.
+            // A quote, lines taken from an earlier message with "> ",
+            // is set off with a rule beside it and quieter text: what
+            // somebody else said, inside what this sender says.
             SelectionContainer {
-                Text(io.nisfeb.talon.ui.linkifyStatus(m.body), style = MaterialTheme.typography.bodyMedium)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    quoteBlocks(m.body).forEach { (quoted, text) ->
+                        if (quoted) {
+                            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+                                Box(
+                                    Modifier.width(3.dp).fillMaxHeight()
+                                        .background(MaterialTheme.colorScheme.outlineVariant),
+                                )
+                                Text(
+                                    io.nisfeb.talon.ui.linkifyStatus(text),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 8.dp),
+                                )
+                            }
+                        } else {
+                            Text(io.nisfeb.talon.ui.linkifyStatus(text), style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
             }
             val images = remember(m.body) { io.nisfeb.talon.ui.imageUrlsIn(m.body) }
             if (images.isNotEmpty()) {
@@ -752,12 +789,14 @@ private fun MailMessageCard(
             // On the message itself, not above the thread: which message
             // a reply answers is the one the buttons sit under. The body
             // copies whole from here too; any part of it selects.
-            if (answer != null) {
+            if (full) {
                 val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
                 var copied by remember(m.id) { mutableStateOf(false) }
                 Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    androidx.compose.material3.OutlinedButton(onClick = { answer(false) }) { io.nisfeb.talon.ui.FitText("Reply") }
-                    androidx.compose.material3.OutlinedButton(onClick = { answer(true) }) { io.nisfeb.talon.ui.FitText("Forward") }
+                    if (onAnswer != null) {
+                        androidx.compose.material3.OutlinedButton(onClick = { onAnswer(false) }) { io.nisfeb.talon.ui.FitText("Reply") }
+                        androidx.compose.material3.OutlinedButton(onClick = { onAnswer(true) }) { io.nisfeb.talon.ui.FitText("Forward") }
+                    }
                     TextButton(onClick = {
                         clipboard.setText(androidx.compose.ui.text.AnnotatedString(m.body))
                         copied = true
@@ -790,4 +829,20 @@ private fun Modifier.onPlainClick(onClick: () -> Unit): Modifier = pointerInput(
             }
         }
     }
+}
+
+/**
+ * A body as runs of its own words and of quoted lines, a quoted line
+ * being one that starts with ">", which is taken off. Blank lines stay
+ * with the run they sit in.
+ */
+internal fun quoteBlocks(body: String): List<Pair<Boolean, String>> {
+    val out = mutableListOf<Pair<Boolean, MutableList<String>>>()
+    for (line in body.trimEnd().lines()) {
+        val quoted = line.trimStart().startsWith(">")
+        val text = if (quoted) line.trimStart().removePrefix(">").removePrefix(" ") else line
+        if (out.isNotEmpty() && out.last().first == quoted) out.last().second += text
+        else out += quoted to mutableListOf(text)
+    }
+    return out.map { (q, lines) -> q to lines.joinToString("\n").trim('\n') }.filter { it.second.isNotBlank() }
 }

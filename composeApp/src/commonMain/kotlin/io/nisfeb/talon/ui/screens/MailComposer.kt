@@ -1,5 +1,10 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.withFrameNanos
@@ -406,31 +411,29 @@ fun MailComposer(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (intent.prev != null) {
-                // Counted off the thread rather than remembered from the
-                // intent: a draft comes back from the ship with neither
-                // the count nor the forward flag, since auspex keeps
-                // neither, and the notice then said "this message alone
-                // travels with this reply" over a send that still
-                // carried the whole chain. Who has not seen it is read
-                // off the recipients as they are chosen, so adding a
-                // stranger to a plain reply says so too.
-                val path = remember(thread, intent.prev) {
-                    val id = intent.prev
-                    if (thread == null || id == null) emptyList()
-                    else io.nisfeb.talon.mail.pathTo(io.nisfeb.talon.mail.threadTree(thread!!.messages), id)
-                }
-                val seenIt = thread?.participants.orEmpty().toSet()
-                val strangers = recipients.count { it !in seenIt }
-                when {
-                    path.isNotEmpty() -> TravelNotice(path.size, intent.forwarding || strangers > 0)
-                    intent.travels > 0 -> TravelNotice(intent.travels, intent.forwarding || strangers > 0)
-                    // Neither the thread nor a count in hand, which is a
-                    // draft whose thread this install no longer holds.
-                    // What travels is unknown, so it is not called small:
-                    // the reassuring sentence is the one thing that must
-                    // never be said without knowing.
-                    else -> Text(
+            // Counted off the thread rather than remembered from the
+            // intent: a draft comes back from the ship with neither the
+            // count nor the forward flag, since auspex keeps neither.
+            // Who has not seen it is read off the recipients as they are
+            // chosen, so adding a stranger to a plain reply says so too.
+            val path = remember(thread, intent.prev) {
+                val id = intent.prev
+                if (thread == null || id == null) emptyList()
+                else io.nisfeb.talon.mail.pathTo(io.nisfeb.talon.mail.threadTree(thread!!.messages), id)
+            }
+            val seenIt = thread?.participants.orEmpty().toSet()
+            val strangers = recipients.count { it !in seenIt }
+            // Until the thread is in hand (loading, or a draft whose thread
+            // this install no longer holds) what travels is said from the
+            // count the reply was opened with; with the thread, the message
+            // itself is shown below and says it. With neither, what travels
+            // is unknown, so it is not called small: the reassuring
+            // sentence is the one thing never said without knowing.
+            if (intent.prev != null && path.isEmpty()) {
+                if (intent.travels > 0) {
+                    TravelNotice(intent.travels, intent.forwarding || strangers > 0)
+                } else {
+                    Text(
                         "This reply carries the conversation it answers to whoever you name.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
@@ -438,17 +441,41 @@ fun MailComposer(
                 }
             }
 
+            // Who it is going to, by name under a To: a tap opens their
+            // card, the cross takes them off. A tap used to remove them,
+            // which nothing about a chip says.
             if (recipients.isNotEmpty()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val openProfile = io.nisfeb.talon.ui.LocalOpenProfile.current
+                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        "To",
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.align(Alignment.CenterVertically).padding(end = 2.dp),
+                    )
                     recipients.forEach { r ->
-                        AssistChip(onClick = { recipients.remove(r) }, label = { Text(r) })
+                        androidx.compose.material3.InputChip(
+                            selected = false,
+                            onClick = { openProfile?.invoke(r) },
+                            label = { Text(nameFor(r), maxLines = 1) },
+                            trailingIcon = {
+                                Icon(
+                                    androidx.compose.material.icons.Icons.Filled.Close,
+                                    contentDescription = "Remove ${nameFor(r)}",
+                                    modifier = Modifier.size(16.dp).clickable(enabled = !sending) { recipients.remove(r) },
+                                )
+                            },
+                        )
                     }
                 }
             }
             OutlinedTextField(
                 value = edits.recipientDraft,
                 onValueChange = { edits.recipientDraft = it },
-                label = { Text("To") },
+                label = { Text(if (recipients.isEmpty()) "To" else "Add another") },
                 placeholder = { Text("~sampel-palnet") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().focusRequester(toFocus),
@@ -482,6 +509,21 @@ fun MailComposer(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            // What is being answered, above where the answer is written:
+            // a reply written to something out of sight is written to
+            // the memory of it.
+            if (path.isNotEmpty()) {
+                Answering(
+                    path = path,
+                    forwarding = intent.forwarding,
+                    strangers = strangers,
+                    nameFor = nameFor,
+                    onQuote = { lines ->
+                        edits.body = quoteInto(edits.body, lines)
+                        runCatching { bodyFocus.requestFocus() }
+                    },
+                )
+            }
             OutlinedTextField(
                 value = edits.body,
                 onValueChange = { edits.body = it },
@@ -489,12 +531,6 @@ fun MailComposer(
                 minLines = 8,
                 modifier = Modifier.fillMaxWidth().focusRequester(bodyFocus),
             )
-
-            // What is being answered, under the message the way a reply
-            // is read: shown, because writing a reply to something you
-            // cannot see is guesswork, and foldable, because a long
-            // thread would otherwise push the composer off the screen.
-            thread?.let { Answering(it, intent.prev, nameFor) }
 
             if (files.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -632,46 +668,109 @@ internal fun storedName(displayName: String, mime: String): String {
     return "$name.$ext"
 }
 
-
 /**
- * The conversation a reply answers, under the message being written.
- * Open to start with: the point of it is to be read while writing.
+ * The message being answered, and above it, folded, the ones that
+ * travel with it: a reply carries its whole branch, signed, and the
+ * sender should be able to read what they are handing on. On a forward,
+ * or to somebody new to the thread, that it goes to people who have not
+ * seen it is said in the error color, since that is the part that
+ * cannot be taken back.
+ *
+ * The answered message is a read-only field, so a selection in it can
+ * be quoted into the reply: its lines, whole, each set with "> ".
  */
 @Composable
 private fun Answering(
-    thread: io.nisfeb.talon.mail.MailThread,
-    answering: String?,
+    path: List<io.nisfeb.talon.mail.MailMessage>,
+    forwarding: Boolean,
+    strangers: Int,
     nameFor: (String) -> String,
+    onQuote: (String) -> Unit,
 ) {
-    var open by remember(thread.id) { mutableStateOf(true) }
-    val messages = thread.messages
-    if (messages.isEmpty()) return
+    val answered = path.last()
+    val earlier = path.dropLast(1)
+    var open by remember(answered.id) { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        HorizontalDivider()
-        TextButton(onClick = { open = !open }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                (if (open) "Hide" else "Show") + " the conversation (" + messages.size + ")",
+                (if (forwarding) "Forwarding " else "Replying to ") + nameFor(answered.from) + " · " +
+                    io.nisfeb.talon.ui.shortRelativeTime(answered.sent, io.nisfeb.talon.util.nowMs()),
                 style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.weight(1f),
+            )
+            if (earlier.isNotEmpty()) {
+                TextButton(onClick = { open = !open }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
+                    Text(
+                        if (open) "Hide included messages"
+                        else "Show ${earlier.size} included message${if (earlier.size == 1) "" else "s"}",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+            }
+        }
+        if (forwarding || strangers > 0) {
+            Text(
+                (if (path.size == 1) "This signed message goes" else "These ${path.size} signed messages go") +
+                    " to people who have not seen ${if (path.size == 1) "it" else "them"}.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
             )
         }
         if (open) {
-            messages.sortedBy { it.sent }.forEach { m ->
+            earlier.forEach { m ->
                 Column(Modifier.fillMaxWidth().padding(start = 8.dp)) {
                     Text(
-                        nameFor(m.from) + " · " + io.nisfeb.talon.ui.shortRelativeTime(m.sent, io.nisfeb.talon.util.nowMs()) +
-                            (if (m.id == answering) " · the one you are answering" else ""),
+                        nameFor(m.from) + " · " + io.nisfeb.talon.ui.shortRelativeTime(m.sent, io.nisfeb.talon.util.nowMs()),
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (m.id == answering) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     SelectionContainer {
-                        Text(
-                            m.body.trim(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Text(m.body.trim(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
         }
+        val body = answered.body.trim()
+        var field by remember(answered.id) { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(body)) }
+        androidx.compose.foundation.text.BasicTextField(
+            value = field,
+            // Read-only: only the selection moves.
+            onValueChange = { field = it.copy(text = body) },
+            readOnly = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+            modifier = Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .padding(10.dp),
+        )
+        val picked = field.selection
+        TextButton(
+            enabled = !picked.collapsed,
+            onClick = {
+                onQuote(wholeLines(body, picked.min, picked.max))
+                field = field.copy(selection = androidx.compose.ui.text.TextRange(picked.max))
+            },
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+        ) {
+            Text(if (picked.collapsed) "Select lines above to quote them" else "Quote", style = MaterialTheme.typography.labelMedium)
+        }
     }
+}
+
+/** The whole lines a selection from [start] to [end] touches. */
+internal fun wholeLines(text: String, start: Int, end: Int): String {
+    val from = text.lastIndexOf('\n', (start - 1).coerceAtLeast(0)).let { if (it < 0 || start == 0) 0 else it + 1 }
+    val to = text.indexOf('\n', (end - 1).coerceAtLeast(0)).let { if (it < 0) text.length else it }
+    return text.substring(from.coerceAtMost(to), to)
+}
+
+/**
+ * [lines] quoted into [body]: each line set with "> ", after what is
+ * already written, with a blank line either side so the answer to it
+ * goes under it.
+ */
+internal fun quoteInto(body: String, lines: String): String {
+    val quote = lines.trimEnd().lines().joinToString("\n") { if (it.isBlank()) ">" else "> $it" }
+    val before = body.trimEnd()
+    return (if (before.isEmpty()) "" else "$before\n\n") + quote + "\n\n"
 }

@@ -1649,6 +1649,36 @@ object TalonIcons {
         }
     }
 
+    val Reply: ImageVector by lazy {
+        materialIcon(name = "AutoMirrored.Filled.Reply", autoMirror = true) {
+            materialPath() {
+                moveTo(10.0f, 9.0f)
+                verticalLineTo(5.0f)
+                lineToRelative(-7.0f, 7.0f)
+                lineToRelative(7.0f, 7.0f)
+                verticalLineToRelative(-4.1f)
+                curveToRelative(5.0f, 0.0f, 8.5f, 1.6f, 11.0f, 5.1f)
+                curveToRelative(-1.0f, -5.0f, -4.0f, -10.0f, -11.0f, -11.0f)
+                close()
+            }
+        }
+    }
+
+    val Forward: ImageVector by lazy {
+        materialIcon(name = "AutoMirrored.Filled.Forward", autoMirror = true) {
+            materialPath() {
+                moveTo(12.0f, 8.0f)
+                verticalLineTo(4.0f)
+                lineToRelative(8.0f, 8.0f)
+                lineToRelative(-8.0f, 8.0f)
+                verticalLineToRelative(-4.0f)
+                horizontalLineTo(4.0f)
+                verticalLineTo(8.0f)
+                close()
+            }
+        }
+    }
+
     /** Every icon by name, for the fidelity test. */
     fun entries(): List<Pair<String, ImageVector>> = listOf(
         "AcUnit" to AcUnit,
@@ -1698,5 +1728,7 @@ object TalonIcons {
         "WaterDrop" to WaterDrop,
         "Chat" to Chat,
         "Logout" to Logout,
+        "Reply" to Reply,
+        "Forward" to Forward,
     )
 }

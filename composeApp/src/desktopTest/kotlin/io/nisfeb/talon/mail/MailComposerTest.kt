@@ -386,4 +386,36 @@ class MailComposerTest {
         onNodeWithText("This reply carries the conversation it answers to whoever you name.")
             .assertIsDisplayed()
     }
+
+    // A recipient is a name to tap for their card and a cross to take
+    // them off. A tap used to take them off, which nothing said.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a tap on a recipient opens their card, and only the cross removes them`() = runComposeUiTest {
+        var opened: String? = null
+        setContent {
+            TalonTheme(darkTheme = false) {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    io.nisfeb.talon.ui.LocalOpenProfile provides { ship: String -> opened = ship },
+                ) {
+                    MailComposer(
+                        repo = repo(),
+                        intent = MailIntent(prev = null, to = emptyList(), subject = "Hi"),
+                        onSent = {},
+                        onCancel = {},
+                    )
+                }
+            }
+        }
+        onNodeWithText("To").performTextInput("~zod")
+        onNodeWithText("Add recipient").performClick()
+        waitForIdle()
+        onNodeWithText("~zod").performClick()
+        waitForIdle()
+        assertEquals("~zod", opened, "the card was asked for")
+        onNodeWithText("~zod").assertIsDisplayed()
+        onNodeWithContentDescription("Remove ~zod").performClick()
+        waitForIdle()
+        assertTrue(onAllNodesWithText("~zod").fetchSemanticsNodes().isEmpty(), "and the cross took them off")
+    }
 }

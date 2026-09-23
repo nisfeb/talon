@@ -234,3 +234,10 @@ fun ContactProfileSheet(
         }
     }
 }
+
+/**
+ * Opens a ship's profile sheet over whatever is showing, where the host
+ * has one: a recipient in the mail composer, say. Null where there is
+ * none, and the tap does nothing.
+ */
+val LocalOpenProfile = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
