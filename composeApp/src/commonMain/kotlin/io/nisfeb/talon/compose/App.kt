@@ -2954,12 +2954,14 @@ fun App(
                         val railEffectiveStatusesSeenMs =
                             maxOf(menuSeenState.lastSeenStatusesMs, railSyncedStatusesSeenMs)
                         val calendarShares by calendarRepo.shares.collectAsState()
+                        val mailUnread by mailRepo.inboxUnread.collectAsState()
                         val menuBadges = remember(
                             railStatusFeed, railPendingInvites,
                             railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship, calendarShares,
-                            orreryActions,
+                            orreryActions, mailUnread,
                         ) {
                             MenuBadges(
+                                mailUnread = mailUnread,
                                 // A proposal is a question, and a question
                                 // nobody sees is the same as no question.
                                 actionsWaiting = orreryActions.any { it.status == "proposed" },
@@ -3221,6 +3223,7 @@ fun App(
                                         runCatching { io.nisfeb.talon.ui.RailItem.valueOf(it.name) }.getOrNull()
                                     },
                                     canOpen = { item -> item in enabledItems },
+                                    badges = menuBadges.byItem(),
                                     onSection = { item ->
                                         closeDrawer()
                                         onRailItemClicked(item)

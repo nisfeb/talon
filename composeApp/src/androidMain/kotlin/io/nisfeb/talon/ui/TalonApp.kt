@@ -1632,6 +1632,14 @@ fun TalonApp(
         val shipNicknamesMap = app.shipProfiles.nicknames.collectAsState().value
         val railOrder by app.uiSettings.railItemOrder.collectAsState()
         val railVisible by app.uiSettings.railVisibility.collectAsState()
+        val mailUnread by mailRepo.inboxUnread.collectAsState()
+        // The desktop rail's dots, as far as this host has them.
+        val drawerBadges = remember(orreryActions, mailUnread) {
+            io.nisfeb.talon.ui.MenuBadges(
+                actionsWaiting = orreryActions.any { it.status == "proposed" },
+                mailUnread = mailUnread,
+            ).byItem()
+        }
 
         io.nisfeb.talon.ui.TalonDrawer(
             drawer = { close ->
@@ -1641,6 +1649,7 @@ fun TalonApp(
                     // Chats is the root of this host rather than a
                     // destination, so nothing is ever marked.
                     active = null,
+                    badges = drawerBadges,
                     canOpen = { item ->
                         when (item) {
                             io.nisfeb.talon.ui.RailItem.Assistant ->

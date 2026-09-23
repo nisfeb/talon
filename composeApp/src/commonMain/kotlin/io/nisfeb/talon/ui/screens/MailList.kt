@@ -402,7 +402,11 @@ internal fun MailAbsent(text: String, actionLabel: String? = null, onAction: (()
 
 @Composable
 private fun MailRow(row: InboxEntry, people: String, onClick: () -> Unit) {
-    val weight = if (row.unread) FontWeight.SemiBold else FontWeight.Normal
+    // Unread has to be seen at a glance down a long list, which a
+    // slightly heavier weight was not: a dot in its own gutter, bold,
+    // the time in the accent, and the read rows around it quieter.
+    val weight = if (row.unread) FontWeight.Bold else FontWeight.Normal
+    val readInk = if (row.unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
     // Scanned by the dozen with a mouse, read by thumb on a phone: the
     // phone gets the chat list's sizes and its density setting's spacing.
     val touch = io.nisfeb.talon.ui.isTouchPrimary
@@ -415,69 +419,81 @@ private fun MailRow(row: InboxEntry, people: String, onClick: () -> Unit) {
     // three-slot list item is built for one line of each with generous
     // vertical padding — which put the timestamp floating in the middle
     // of a tall cell instead of on the line it belongs to.
-    Column(
+    Row(
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .padding(
-                horizontal = if (touch) 16.dp else 12.dp,
-                vertical = if (touch) io.nisfeb.talon.ui.LocalChatDensity.current.listRowVertical else 5.dp,
+                start = if (touch) 8.dp else 4.dp,
+                end = if (touch) 16.dp else 12.dp,
+                top = if (touch) io.nisfeb.talon.ui.LocalChatDensity.current.listRowVertical else 5.dp,
+                bottom = if (touch) io.nisfeb.talon.ui.LocalChatDensity.current.listRowVertical else 5.dp,
             ),
-        verticalArrangement = Arrangement.spacedBy(if (touch) 2.dp else 0.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // Every row keeps the gutter, so read and unread names line up.
+        Box(Modifier.width(8.dp).padding(top = if (touch) 8.dp else 4.dp)) {
+            if (row.unread) MenuBadgeDot()
+        }
+        Column(
+            Modifier.weight(1f).padding(start = if (touch) 8.dp else 6.dp),
+            verticalArrangement = Arrangement.spacedBy(if (touch) 2.dp else 0.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    people,
+                    style = nameStyle.copy(fontWeight = weight),
+                    color = readInk,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = true),
+                )
+                // A thread carrying any forged copy says so here, even when
+                // the summary above it was drawn from an honest one.
+                if (row.forged || row.verdict == Verdict.FORGED) {
+                    VerdictTag("FORGED", MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(6.dp))
+                } else if (row.verdict == Verdict.UNVERIFIED) {
+                    VerdictTag("UNVERIFIED", MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(6.dp))
+                }
+                if (row.last > 0) {
+                    Text(
+                        shortRelativeTime(row.last, nowMs()),
+                        style = if (row.unread) timeStyle.copy(fontWeight = FontWeight.Bold) else timeStyle,
+                        color = if (row.unread) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             Text(
-                people,
-                style = nameStyle.copy(fontWeight = weight),
+                row.subject.ifBlank { "(no subject)" },
+                style = subjectStyle.copy(fontWeight = weight),
+                color = readInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = true),
             )
-            // A thread carrying any forged copy says so here, even when
-            // the summary above it was drawn from an honest one.
-            if (row.forged || row.verdict == Verdict.FORGED) {
-                VerdictTag("FORGED", MaterialTheme.colorScheme.error)
-                Spacer(Modifier.width(6.dp))
-            } else if (row.verdict == Verdict.UNVERIFIED) {
-                VerdictTag("UNVERIFIED", MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.width(6.dp))
-            }
-            if (row.last > 0) {
+            // The preview is what an unread row is for. A read one has been
+            // seen, so it gives its line back to the rows below it.
+            if (row.snippet.isNotBlank() && row.unread) {
                 Text(
-                    shortRelativeTime(row.last, nowMs()),
-                    style = timeStyle,
+                    row.snippet,
+                    style = detailStyle,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-        }
-        Text(
-            row.subject.ifBlank { "(no subject)" },
-            style = subjectStyle.copy(fontWeight = weight),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        // The preview is what an unread row is for. A read one has been
-        // seen, so it gives its line back to the rows below it.
-        if (row.snippet.isNotBlank() && row.unread) {
-            Text(
-                row.snippet,
-                style = detailStyle,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        // A thread whose only copies this build cannot read still gets a
-        // row: one silently missing from the listing is the failure that
-        // count exists to prevent.
-        if (row.unreadable > 0) {
-            Text(
-                unreadableLine(row),
-                style = if (touch) type.bodySmall else type.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // A thread whose only copies this build cannot read still gets a
+            // row: one silently missing from the listing is the failure that
+            // count exists to prevent.
+            if (row.unreadable > 0) {
+                Text(
+                    unreadableLine(row),
+                    style = if (touch) type.bodySmall else type.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

@@ -159,6 +159,11 @@ class MailRepo(
     private val pageCache = MutableStateFlow<Map<PageKey, InboxPage>>(emptyMap())
     private val threadCache = MutableStateFlow<Map<String, MailThread>>(emptyMap())
 
+    /** Whether the inbox as last listed holds unread mail: the Mail section's pip. No request of its own. */
+    val inboxUnread: StateFlow<Boolean> = io.nisfeb.talon.util.mapState(pageCache) { pages ->
+        pages[PageKey(MailView.INBOX, null, "")]?.threads?.any { it.unread } == true
+    }
+
     /** The last copy of a thread this session read, to show while it is read again. */
     fun cachedThread(id: String): MailThread? = threadCache.value[id]
 

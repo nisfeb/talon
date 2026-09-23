@@ -40,6 +40,13 @@ class MenuBadgesTest {
     }
 
     @Test
+    fun `unread mail maps only to RailItem Mail, and the drawer gets it too`() {
+        val b = MenuBadges(mailUnread = true)
+        assertEquals(setOf(RailItem.Mail), RailItem.entries.filter(b::forItem).toSet())
+        assertEquals(true, b.byItem()[RailItem.Mail])
+    }
+
+    @Test
     fun `all three flags compose without crosstalk`() {
         val b = MenuBadges(
             statusesFresh = true,
