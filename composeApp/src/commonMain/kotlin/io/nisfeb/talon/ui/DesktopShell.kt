@@ -20,7 +20,6 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.Notifications
@@ -277,8 +276,6 @@ internal fun railIcon(item: RailItem): ImageVector? = when (item) {
     // Chats gave up the house to the home page and took the icon
     // that actually means chat.
     RailItem.Chats -> TalonIcons.Chat
-    // MailOutline is in material-icons-core, so it survives the slim
-    // strip; Email is already spent on Invites.
     RailItem.Mail -> Icons.Filled.MailOutline
     RailItem.Calendar -> Icons.Filled.DateRange
     RailItem.Statuses -> Icons.Filled.Person
@@ -289,7 +286,8 @@ internal fun railIcon(item: RailItem): ImageVector? = when (item) {
     RailItem.Profile -> Icons.Filled.AccountCircle
     RailItem.Watchwords -> Icons.Filled.Search
     RailItem.Administration -> Icons.Filled.Build
-    RailItem.Invites -> Icons.Filled.Email
+    // Not an envelope: that reads as mail. An invite is to a group.
+    RailItem.Invites -> TalonIcons.GroupAdd
     RailItem.Actions -> TalonIcons.Checklist
     RailItem.Settings -> Icons.Filled.Settings
 }
