@@ -42,6 +42,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun orreryNoticed(): OrreryNoticedDao
     actual abstract fun orreryChannels(): OrreryChannelDao
     actual abstract fun orrerySent(): OrrerySentDao
+    actual abstract fun cometDomes(): CometDomeDao
 }
 
 /**
@@ -66,6 +67,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_29_30, MIGRATION_30_31, MIGRATION_34_35, MIGRATION_35_36,
             MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39,
             MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44, MIGRATION_44_45,
+            MIGRATION_45_46,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -421,6 +423,12 @@ private val MIGRATION_42_43 = object : Migration(42, 43) {
 
 /** This install's orrery key and cursors, per ship. Shared statement. */
 /** What this install has already told the ship. Shared statement. */
+private val MIGRATION_45_46 = object : Migration(45, 46) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(COMET_DOMES_SQL)
+    }
+}
+
 private val MIGRATION_44_45 = object : Migration(44, 45) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL(ORRERY_SENT_SQL)

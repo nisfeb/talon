@@ -1391,6 +1391,9 @@ fun TalonApp(
             io.nisfeb.talon.urbit.LatticeInstall.installer(app.ktorHttp, { app.sessionStore.active()?.shipUrl }) {
                 a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess
             },
+        LocalCometDomes provides remember(app.session, app.db) {
+            app.session.baseUrl?.takeIf { it.isNotBlank() }?.let { CometDomes(app.session.http, it, app.db) }
+        },
         io.nisfeb.talon.mail.LocalMailTo provides
             if (mailAvailable) {
                 { peer: String ->

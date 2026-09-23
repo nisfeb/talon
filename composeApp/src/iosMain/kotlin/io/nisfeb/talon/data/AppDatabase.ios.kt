@@ -46,6 +46,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun orreryNoticed(): OrreryNoticedDao
     actual abstract fun orreryChannels(): OrreryChannelDao
     actual abstract fun orrerySent(): OrrerySentDao
+    actual abstract fun cometDomes(): CometDomeDao
 }
 
 internal fun sanitizeShipKey(shipKey: String): String =
@@ -114,7 +115,7 @@ fun createAppDatabase(shipKey: String): AppDatabase {
         // creating a folder from the tab strip — was not.
         .setQueryCoroutineContext(io.nisfeb.talon.util.ioDispatcher)
         // Migrations from 41 on; older databases still rebuild. See AppDatabase.desktop.kt.
-        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION)
+        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION, COMET_DOMES_MIGRATION)
         .fallbackToDestructiveMigration(dropAllTables = true)
         .build()
 }

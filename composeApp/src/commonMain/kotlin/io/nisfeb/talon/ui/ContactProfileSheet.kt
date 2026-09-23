@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -123,6 +124,16 @@ fun ContactProfileSheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.clickable(onClick = copyRow(nym ?: ship)),
             )
+            // Asked of the ship once per comet, ever: see [CometDomes].
+            val domes = LocalCometDomes.current
+            val registry by produceState<String?>(null, ship, domes) { value = domes?.registry(ship) }
+            if (!registry.isNullOrEmpty()) {
+                Text(
+                    "Groundwire comet",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             copied?.let {
                 Text(
                     "Copied $it",

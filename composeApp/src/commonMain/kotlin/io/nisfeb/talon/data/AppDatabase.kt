@@ -62,8 +62,9 @@ import androidx.room.RoomDatabaseConstructor
         OrreryNoticedEntity::class,
         OrreryChannelEntity::class,
         OrrerySentEntity::class,
+        CometDomeEntity::class,
     ],
-    version = 45,
+    version = 46,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -97,6 +98,7 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun orreryNoticed(): OrreryNoticedDao
     abstract fun orreryChannels(): OrreryChannelDao
     abstract fun orrerySent(): OrrerySentDao
+    abstract fun cometDomes(): CometDomeDao
 }
 
 /**
