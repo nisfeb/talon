@@ -382,6 +382,9 @@ fun TalonApp(
     }
     // Mail rides the ship's own HTTP surface, not the eyre channel, so
     // the session's cookie-bearing client is all it needs.
+    // The assistant's runs, over the app's scope: a run goes on when the
+    // Assistant is left, and dots its icon when done.
+    val assistantSession = remember(app.db) { io.nisfeb.talon.ui.screens.AssistantSession(appScope) }
     val mailRepo = remember(app.session) {
         io.nisfeb.talon.mail.MailRepo(
             app.session.http, appScope,
@@ -1634,11 +1637,13 @@ fun TalonApp(
         val railOrder by app.uiSettings.railItemOrder.collectAsState()
         val railVisible by app.uiSettings.railVisibility.collectAsState()
         val mailUnread by mailRepo.inboxUnread.collectAsState()
+        val assistantNews by assistantSession.news.collectAsState()
         // The desktop rail's dots, as far as this host has them.
-        val drawerBadges = remember(orreryActions, mailUnread) {
+        val drawerBadges = remember(orreryActions, mailUnread, assistantNews) {
             io.nisfeb.talon.ui.MenuBadges(
                 actionsWaiting = orreryActions.any { it.status == "proposed" },
                 mailUnread = mailUnread,
+                assistantNews = assistantNews,
             ).byItem()
         }
 
@@ -2179,6 +2184,7 @@ fun TalonApp(
                 orrery = orreryRepo,
                 listenOnOpen = assistantListen,
                 onTopUp = openTopUp,
+                session = assistantSession,
                 scheduler = app.loops,
                 onRunLoop = { app.loops.runOneNow(it) },
                 onBack = { assistantOpen = false; assistantListen = false },

@@ -907,6 +907,10 @@ fun App(
 
         // Mail lives on the ship's own HTTP surface, not the eyre
         // channel, so it needs only the session's cookie-bearing client.
+        // The assistant's runs, over a scope that outlives its section: a
+        // run goes on when the Assistant is left, and dots its icon when done.
+        val assistantScope = rememberCoroutineScope()
+        val assistantSession = remember(db) { io.nisfeb.talon.ui.screens.AssistantSession(assistantScope) }
         val mailRepo = remember(session, db, loggedInShip) {
             io.nisfeb.talon.mail.MailRepo(
                 session.http, loopScope,
@@ -2956,13 +2960,15 @@ fun App(
                             maxOf(menuSeenState.lastSeenStatusesMs, railSyncedStatusesSeenMs)
                         val calendarShares by calendarRepo.shares.collectAsState()
                         val mailUnread by mailRepo.inboxUnread.collectAsState()
+                        val assistantNews by assistantSession.news.collectAsState()
                         val menuBadges = remember(
                             railStatusFeed, railPendingInvites,
                             railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship, calendarShares,
-                            orreryActions, mailUnread,
+                            orreryActions, mailUnread, assistantNews,
                         ) {
                             MenuBadges(
                                 mailUnread = mailUnread,
+                                assistantNews = assistantNews,
                                 // A proposal is a question, and a question
                                 // nobody sees is the same as no question.
                                 actionsWaiting = orreryActions.any { it.status == "proposed" },
@@ -3364,6 +3370,7 @@ fun App(
                                         orrery = orreryRepo,
                                         listenOnOpen = assistantListen,
                                         onTopUp = openTopUp,
+                                        session = assistantSession,
                                         scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
                                         onRunLoop = runLoopNow,
                                         onBack = if (expanded) null else ({ showAssistant = false; assistantListen = false }),

@@ -44,6 +44,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -142,7 +143,43 @@ internal fun toExchanges(lines: List<Line>): List<List<Line>> {
     return out
 }
 
-private data class Pending(val call: ToolCall, val tool: Tool, val gate: CompletableDeferred<Boolean>)
+internal data class Pending(val call: ToolCall, val tool: Tool, val gate: CompletableDeferred<Boolean>)
+
+/**
+ * An assistant run, and everything the screen shows of it, held by the
+ * host rather than by the screen. A run is minutes of model calls and
+ * tool use, and it lived in the screen's own scope: leaving the Assistant
+ * section tore that down and cancelled the run halfway, transcript and
+ * all. The host keeps one of these per ship, over a scope that outlives
+ * the section, and the screen reads and writes it.
+ */
+class AssistantSession(internal val scope: kotlinx.coroutines.CoroutineScope) {
+    internal val transcript = mutableStateListOf<Line>()
+    internal var question by mutableStateOf(TextFieldValue(""))
+    internal var busy by mutableStateOf(false)
+    internal var error by mutableStateOf<String?>(null)
+    internal var pending by mutableStateOf<Pending?>(null)
+    internal var convId by mutableStateOf<Long?>(null)
+    internal var convGid by mutableStateOf<String?>(null)
+    internal var centroid by mutableStateOf<FloatArray?>(null)
+    internal var turnCount by mutableStateOf(0)
+    internal var explicit by mutableStateOf(false)
+    internal var generation by mutableStateOf(0)
+    /** The most recent conversation is resumed once, not on every return. */
+    internal var resumed = false
+    /** Whether the Assistant is on screen now. */
+    internal var shown = false
+
+    private val _news = kotlinx.coroutines.flow.MutableStateFlow(false)
+    /**
+     * A run finished, or is waiting on a confirmation, while the Assistant
+     * was not on screen: the dot on its icon. Cleared once it is shown.
+     */
+    val news: kotlinx.coroutines.flow.StateFlow<Boolean> = _news
+
+    internal fun tell() { if (!shown) _news.value = true }
+    internal fun seen() { shown = true; _news.value = false }
+}
 
 /** How many turns to retain across all conversations. Defined with the DAO
  *  so the sync path (which re-applies the cap after pulling the ship's
@@ -192,8 +229,14 @@ fun AssistantScreen(
     /** Opens Settings, AI on the top-up sheet, for a failure that was
      *  the empty Armillary balance. Null where the shell has no way there. */
     onTopUp: (() -> Unit)? = null,
+    /** The run and what it shows, kept by the host so it goes on when the screen goes. */
+    session: AssistantSession,
     modifier: Modifier = Modifier,
 ) {
+    DisposableEffect(session) {
+        session.seen()
+        onDispose { session.shown = false }
+    }
     val aiState by aiSettings.state.collectAsState()
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
     val scope = rememberCoroutineScope()
@@ -303,13 +346,13 @@ fun AssistantScreen(
         } else null
     }
 
-    var questionField by remember { mutableStateOf(TextFieldValue("")) }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var questionField by session::question
+    var busy by session::busy
+    var error by session::error
 
     // The agent transcript + the in-flight write awaiting confirmation.
-    val transcript = remember { mutableStateListOf<Line>() }
-    var pending by remember { mutableStateOf<Pending?>(null) }
+    val transcript = session.transcript
+    var pending by session::pending
 
     // @p autocomplete: candidate ships are the contact book. Mirrors the
     // chat composer (ChatComposer.kt) so referring to a ship feels the
@@ -326,18 +369,18 @@ fun AssistantScreen(
     // and re-registers the invalidation observer on every recomposition.
     val conversations by remember(convDao) { convDao.recent(CONV_KEEP) }
         .collectAsState(initial = emptyList())
-    var currentConvId by remember { mutableStateOf<Long?>(null) }
-    var currentConvGid by remember { mutableStateOf<String?>(null) }
-    var currentCentroid by remember { mutableStateOf<FloatArray?>(null) }
-    var currentTurnCount by remember { mutableStateOf(0) }
+    var currentConvId by session::convId
+    var currentConvGid by session::convGid
+    var currentCentroid by session::centroid
+    var currentTurnCount by session::turnCount
     // The user picked / resumed this conversation, so a follow-up continues it
     // regardless of what the similarity heuristic thinks (and the heuristic
     // can't judge at all without an embedder). Cleared by "New conversation".
-    var explicitConv by remember { mutableStateOf(false) }
+    var explicitConv by session::explicit
     // Bumped whenever the active conversation is re-pointed. A run that
     // finishes after a switch must not write its turn into the newly
     // selected conversation, nor clobber that conversation's live state.
-    var convGeneration by remember { mutableStateOf(0) }
+    var convGeneration by session::generation
 
     // Sidebar (master pane) state: which tab is showing, and — on narrow
     // screens where the panes stack — whether the sidebar or the transcript
@@ -351,6 +394,10 @@ fun AssistantScreen(
     var listFraction by remember { mutableStateOf(DEFAULT_LIST_FRACTION) }
 
     LaunchedEffect(Unit) {
+        // Once per session: coming back to a run still going, or to a
+        // conversation picked before leaving, must not re-point it.
+        if (session.resumed) return@LaunchedEffect
+        session.resumed = true
         convDao.mostRecent()?.let { c ->
             currentConvId = c.id
             currentConvGid = c.gid.ifBlank { null }
@@ -391,7 +438,9 @@ fun AssistantScreen(
         var snapCentroid = currentCentroid
         val snapTurnCount = currentTurnCount
         val snapExplicit = explicitConv
-        scope.launch {
+        // The host's scope, not this screen's: the run goes on when the
+        // screen is left, and its dot says so when it is done.
+        session.scope.launch {
             runCatching {
                 val qVec = embedder?.embed(q)
                 // Lazily rebuild a synced conversation's centroid. A
@@ -437,6 +486,8 @@ fun AssistantScreen(
                     confirm = { call, tool ->
                         val gate = CompletableDeferred<Boolean>()
                         pending = Pending(call, tool, gate)
+                        // It cannot go on without the owner: say so.
+                        session.tell()
                         val ok = gate.await()
                         pending = null
                         ok
@@ -536,6 +587,7 @@ fun AssistantScreen(
                 }
             }
             busy = false
+            session.tell()
         }
     }
 
