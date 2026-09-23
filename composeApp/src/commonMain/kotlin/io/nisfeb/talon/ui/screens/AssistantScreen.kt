@@ -294,6 +294,32 @@ fun AssistantScreen(
         }
     }
 
+    // The owner's memory in Lattice, where the ship has it: a second MCP,
+    // grubbery's, beside %mcp-server's. None is not an error, only no
+    // memory, and the prompt says nothing of one.
+    var latticeTools by remember { mutableStateOf<List<Tool>>(emptyList()) }
+    LaunchedEffect(repo) {
+        val shipHttp = repo?.shipHttp
+        val shipBase = repo?.shipBaseUrl
+        if (shipHttp == null || shipBase == null) {
+            latticeTools = emptyList()
+            return@LaunchedEffect
+        }
+        io.nisfeb.talon.ai.LatticeMemory.cached(shipHttp, shipBase)?.let {
+            latticeTools = it
+            return@LaunchedEffect
+        }
+        runCatching { io.nisfeb.talon.ai.LatticeMemory.connect(shipHttp, shipBase) }
+            .onSuccess {
+                io.nisfeb.talon.ai.LatticeMemory.keep(shipHttp, shipBase, it)
+                latticeTools = it
+            }
+            .onFailure { e ->
+                latticeTools = emptyList()
+                Log.i("AssistantScreen", "no Lattice memory: ${e.message}")
+            }
+    }
+
     // Web access is part of the assistant (no separate toggle) — being here
     // means it's on, so fetch_url is always wired and web_search whenever a
     // Brave key is set. Gating tool *presence* means the model never sees a
@@ -310,11 +336,15 @@ fun AssistantScreen(
     // Built once per prompt change, not per recomposition — it's a multi-KB
     // concat used as a remember key, so rebuilding it every frame also meant
     // a full-length string compare every frame.
-    val systemPrompt = remember(aiState.urbitKnowledgePrompt, aiState.assistantPrompt) {
-        AgentPrompt.forAssistant(aiState)
+    val hasMemory = latticeTools.isNotEmpty()
+    val systemPrompt = remember(aiState.urbitKnowledgePrompt, aiState.assistantPrompt, hasMemory) {
+        // Told of a memory only where it has one: the tools and the prompt
+        // arrive together or not at all.
+        AgentPrompt.forAssistant(aiState) +
+            if (hasMemory) "\n\n" + io.nisfeb.talon.ai.LatticeMemory.prompt else ""
     }
     val calendarZone by (calendar?.zone ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone) {
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, latticeTools, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
         if (repo != null) {
@@ -340,7 +370,7 @@ fun AssistantScreen(
                     braveSearch = if (braveKeyPresent) braveSearch else null,
                     urlFetcher = urlFetcher,
                 ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) +
-                    orrery?.let { io.nisfeb.talon.ai.orreryTools(it) }.orEmpty() + mcpTools).dedupToolNames(),
+                    orrery?.let { io.nisfeb.talon.ai.orreryTools(it) }.orEmpty() + mcpTools + latticeTools).dedupToolNames(),
                 systemPrompt = systemPrompt,
             )
         } else null
