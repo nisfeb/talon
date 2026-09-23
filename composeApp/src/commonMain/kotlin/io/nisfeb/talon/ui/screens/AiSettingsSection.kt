@@ -1046,6 +1046,7 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
             }
         }
         ChatReaderRow(orrery)
+        ChatsOrreryReads(orrery)
         if (io.nisfeb.talon.ui.isLocationSharingSupported) LocationRow()
     }
     (note ?: error)?.let { Quiet(it, error = true) }
@@ -1053,6 +1054,46 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
     // says how to fix that, as a chat's failed summary does.
     if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(error)) {
         TextButton(onClick = { AiSettings.pendingTopUp.value = true }) { Text("Top up") }
+    }
+}
+
+/**
+ * Every chat orrery reads, in one place: the channels this install's
+ * triage may read, each with its switch, and which of them, and how
+ * many DMs, the ship's own reader reads instead. The switch used to be
+ * only in each channel's info pane, one at a time, so there was nowhere
+ * to see what was read.
+ */
+@Composable
+private fun ChatsOrreryReads(orrery: OrreryRepo) {
+    val scope = rememberCoroutineScope()
+    val channels by remember(orrery) { orrery.chatChannels() }.collectAsState(initial = emptyList())
+    val read by remember(orrery) { orrery.channelsRead() }.collectAsState(initial = emptyList())
+    val ship by orrery.shipChats.collectAsState()
+    val keyed = orrery.generatorSettings.collectAsState().value?.keySet == true
+    val onShip = ship?.takeIf { it.enabled && keyed }
+    var all by remember { mutableStateOf(false) }
+    Text("Chats orrery reads", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+    Quiet(
+        "DMs and group DMs are always read. A channel is read only once it is switched on here, or in its info." +
+            (onShip?.let { " Your ship reads ${it.channels.size} of these channels and ${it.dms.size} DMs itself, from people it knows by ship; those are marked, and this install leaves them to it." } ?: ""),
+    )
+    val readSet = read.toSet()
+    val shown = if (all) channels else channels.filter { it.first in readSet || onShip?.channels?.contains(it.first) == true }
+    if (channels.isEmpty()) Quiet("You are in no channels yet.")
+    shown.forEach { (nest, label) ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(label, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                if (onShip?.channels?.contains(nest) == true) Quiet("Read on your ship")
+            }
+            Switch(checked = nest in readSet, onCheckedChange = { on -> scope.launch { orrery.readChannel(nest, on) } })
+        }
+    }
+    if (channels.size > shown.size || all) {
+        TextButton(onClick = { all = !all }) {
+            Text(if (all) "Show only the channels read" else "Show all ${channels.size} channels")
+        }
     }
 }
 

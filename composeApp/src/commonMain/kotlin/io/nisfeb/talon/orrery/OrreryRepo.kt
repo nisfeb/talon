@@ -129,20 +129,41 @@ class OrreryRepo(
      * [ShipChats.reads]) and reads the rest. As the last pass or look
      * found it.
      */
-    private val _shipReadsChats = MutableStateFlow<Boolean?>(null)
-    val shipReadsChats: StateFlow<Boolean?> = _shipReadsChats.asStateFlow()
+    private val _shipChats = MutableStateFlow<ShipChats?>(null)
+    /** The ship's own chat reader, what it reads, as the last pass or look found it. */
+    val shipChats: StateFlow<ShipChats?> = _shipChats.asStateFlow()
+    val shipReadsChats: StateFlow<Boolean?> = io.nisfeb.talon.util.mapState(_shipChats) { it?.enabled }
+
+    /**
+     * The chat channels this ship is in, as their id and "Group · Channel",
+     * for the list of what orrery reads. A new flow each time: remember it.
+     */
+    fun chatChannels(): kotlinx.coroutines.flow.Flow<List<Pair<String, String>>> =
+        kotlinx.coroutines.flow.combine(db.groups().streamChannelGroups(), db.groups().streamGroups()) { chans, groups ->
+            val titles = groups.associate { it.flag to (it.title ?: it.flag) }
+            chans.filter { it.nest.startsWith("chat/") }
+                .map { c -> c.nest to "${titles[c.groupFlag] ?: c.groupFlag} · ${c.title ?: c.nest.substringAfterLast('/')}" }
+                .sortedBy { it.second.lowercase() }
+        }
+
+    /** The channels this install's triage may read. A new flow each time: remember it. */
+    fun channelsRead(): kotlinx.coroutines.flow.Flow<List<String>> = db.orreryChannels().stream()
+
+    /** Let this install's triage read [whom], or not. DMs need no switch: they are always read. */
+    suspend fun readChannel(whom: String, on: Boolean) =
+        if (on) db.orreryChannels().put(io.nisfeb.talon.data.OrreryChannelEntity(whom)) else db.orreryChannels().remove(whom)
 
     /** Ask the ship now, for the screen, rather than wait for a pass. */
     suspend fun loadShipChats() {
         val a = api ?: return
         val token = keyToken() ?: return
-        runCatching { a.shipChats(token) }.onSuccess { _shipReadsChats.value = it?.enabled }
+        runCatching { a.shipChats(token) }.onSuccess { _shipChats.value = it }
     }
 
     /** Turn the ship's own chat reader on or off: its `chat` document, written as the owner. */
     suspend fun setShipReadsChats(on: Boolean): Result<Unit> = runCatching {
         attached().setSettingsDoc("chat", buildJsonObject { put("enabled", on) })
-        _shipReadsChats.value = on
+        _shipChats.value = (_shipChats.value ?: ShipChats(on, emptySet(), emptySet(), emptySet())).copy(enabled = on)
     }
 
     /** True while this phone is leaving the reading to a computer. */
@@ -325,7 +346,9 @@ class OrreryRepo(
         }
         // What was written, not a read straight after, which the ship
         // answers from before its writer merged the document.
-        if (name == "chat") (body["enabled"] as? JsonPrimitive)?.booleanOrNull?.let { _shipReadsChats.value = it }
+        if (name == "chat") (body["enabled"] as? JsonPrimitive)?.booleanOrNull?.let { on ->
+            _shipChats.value = (_shipChats.value ?: ShipChats(on, emptySet(), emptySet(), emptySet())).copy(enabled = on)
+        }
         said
     }
 
@@ -384,7 +407,7 @@ class OrreryRepo(
         ship = null
         _availability.value = OrreryAvailability.UNKNOWN
         _error.value = null
-        _shipReadsChats.value = null
+        _shipChats.value = null
         scopeChecked = false
     }
 
@@ -672,9 +695,8 @@ class OrreryRepo(
                     // left on the old one, a later reply about it found it
                     // dismissed and did nothing.
                     val read = runCatching {
-                        answer(a, token, state, zone, nowMs, reply, words, tags) { moved ->
+                        answer(a, token, state, zone, nowMs, reply, words, tags, tagsKey) { moved ->
                             tags = tags.mapValues { (_, id) -> moved[id] ?: id }
-                            sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, tagsKey, buildJsonObject { tags.forEach { (t, id) -> put(t, id) } }.toString(), nowMs))
                         }
                     }
                     if (read.isFailure) {
@@ -701,6 +723,8 @@ class OrreryRepo(
         reply: io.nisfeb.talon.mail.MailMessage,
         words: String,
         tags: Map<String, String>,
+        /** The brief's tags record, which a move points at its replacement. */
+        tagsKey: String? = null,
         /** Called with what the moves replaced, and with what, as soon as they are made. */
         onMoved: suspend (Map<String, String>) -> Unit = {},
     ) {
@@ -739,11 +763,10 @@ class OrreryRepo(
         val moved = mutableMapOf<String, String>()
         for (d in moves) {
             val old = byId[d.actionId] ?: continue
-            move(a, token, old, d, known)?.let { moved[old.id] = it }
+            move(a, token, ship ?: return, old, d, known, tagsKey)?.let { moved[old.id] = it }
         }
-        // Now, not once the reply is all written: a failure after the moves
-        // lost the tags, and read again the reply found the old actions
-        // dismissed and moved nothing.
+        // The record is pointed at them as each is made ([finishMove]);
+        // this keeps the tags a later reply in this thread reads current.
         if (moved.isNotEmpty()) onMoved(moved)
         for (body in asked) {
             runCatching { a.act(body, token) }.onFailure { Log.i(TAG, "reply ${reply.id}: an action was refused: ${it.message}") }
@@ -757,70 +780,142 @@ class OrreryRepo(
     /**
      * One move from a reply: a new due or subject replaces the action,
      * then the status moves. [known] is every body the ship has, which a
-     * replacement's subjects are held to. The id of the replacement, or
-     * null where the action stayed itself.
+     * replacement's subjects are held to; [tagsKey] is the brief's tags
+     * record, pointed at the replacement. The replacement's id, or null
+     * where the action stayed itself or the move waits for a later pass.
      */
-    internal suspend fun move(a: OrreryApi, token: String, old: OrreryAction, d: Brief.Direction, known: Set<String> = emptySet()): String? {
+    internal suspend fun move(
+        a: OrreryApi,
+        token: String,
+        s: String,
+        old: OrreryAction,
+        d: Brief.Direction,
+        known: Set<String> = emptySet(),
+        tagsKey: String? = null,
+    ): String? {
         // Only an action still open. One the owner has done or dismissed
         // since the brief named it is settled, and a move made it again.
         if (old.status !in OPEN_STATUSES) return null
         // The owner's reason, or none: a note on a dismissal is read by the
         // generator as the owner's taste, so Talon never writes its own.
         val note = d.reason.orEmpty()
-        var id = old.id
-        var status = old.status
         // Closed with a new due in the same breath is closed: a replacement
         // made only to be closed was a new proposal, notified, then gone.
         val replace = (d.dueMs != null || d.about != null) && d.status !in setOf("dismissed", "done", "failed")
-        if (replace) {
-            // The old one dismissed first, and seen dismissed. The ship
-            // answers a proposal that has an open twin, the same kind and
-            // title, with that twin, and answers a change before its
-            // writer applies it: made at once, the replacement came back
-            // as the old action. Replaced, not refused: no reason, since
-            // the owner gave none and still wants the thing.
-            runCatching { a.transition(token, old.id, "dismissed", "") }
-                .onFailure { Log.i(TAG, "${old.id} not dismissed, so not moved: ${it.message}"); return null }
-            // From here nothing throws. The old one is dismissed, so a
-            // reply read again would find it so and move nothing: what is
-            // made has to be made now, or the old one put back now. But
-            // not over a dismissal not yet seen: the ship answers the twin
-            // while the old one reads open, and every proposal came back
-            // as it, and then the dismissal landed on nothing made.
-            // ponytail: two settles, about twelve seconds. A dismissal the
-            // writer applies later than that still lands on nothing made;
-            // a pending move kept in the table and finished on the next
-            // pass is the whole fix, if a ship is ever that slow.
-            if (!a.landed(token, old.id, "dismissed") && !a.landed(token, old.id, "dismissed")) {
-                Log.w(TAG, "${old.id}: the dismissal was not seen, so nothing was proposed; the reply moved nothing")
-                return null
-            }
-            // Its subjects held to bodies the ship still has: one since
-            // merged away got the replacement refused.
-            val held = if (known.isEmpty()) old else old.copy(about = old.about.filter { it in known })
-            // Each counted only once it is there: the ship answers an id
-            // before its writer applies the proposal, and the writer can
-            // still turn it down.
-            suspend fun laid(body: JsonObject) = propose(a, token, body, old.id)?.takeIf { a.standing(token, it.first) }
-            val made = laid(Brief.replacement(held, d.dueMs, d.about))
-                // Not taken: the old one put back as it was, rather than
-                // the owner left with neither.
-                ?: laid(Brief.replacement(held, null, null))
-                ?: run {
-                    Log.w(TAG, "${old.id} was dismissed and could be neither replaced nor put back")
-                    return null
-                }
-            id = made.first
-            status = made.second
+        if (!replace) {
+            d.status?.let { steps(a, token, old.id, old.status, it, note) }
+            return null
         }
-        // A replacement starts as a proposal; one the owner had approved
-        // is approved again unless the reply says otherwise.
-        val want = d.status ?: (if (id != old.id && old.status != "proposed") "approved" else null)
-        if (want != null) for (step in Brief.steps(status, want)) {
+        // The old one dismissed first, and seen dismissed. The ship answers
+        // a proposal that has an open twin, the same kind and title, with
+        // that twin, and answers a change before its writer applies it:
+        // made at once, the replacement came back as the old action.
+        // Replaced, not refused: no reason, since the owner gave none and
+        // still wants the thing.
+        runCatching { a.transition(token, old.id, "dismissed", "") }
+            .onFailure { Log.i(TAG, "${old.id} not dismissed, so not moved: ${it.message}"); return null }
+        // Its subjects held to bodies the ship still has: one since merged
+        // away got the replacement refused. A replacement starts as a
+        // proposal; one the owner had approved is approved again unless
+        // the reply says otherwise.
+        val held = if (known.isEmpty()) old else old.copy(about = old.about.filter { it in known })
+        val job = PendingMove(
+            old = old.id,
+            replacement = Brief.replacement(held, d.dueMs, d.about).toString(),
+            putBack = Brief.replacement(held, null, null).toString(),
+            want = d.status ?: "approved".takeIf { old.status != "proposed" },
+            note = note,
+            tags = tagsKey,
+            atMs = now(),
+        )
+        // From here nothing throws: the old one is dismissed, so a reply
+        // read again would find it so and move nothing. And not over a
+        // dismissal not yet seen, where every proposal came back as the
+        // twin: kept, and finished on a later pass once it lands. Given up
+        // on, the dismissal landed later on nothing made.
+        if (!a.landed(token, old.id, "dismissed")) {
+            keepMove(s, job)
+            Log.i(TAG, "${old.id}: the dismissal was not seen yet; the move is kept for a later pass")
+            return null
+        }
+        return finishMove(a, token, s, job)
+    }
+
+    /**
+     * A move made once its old action reads dismissed: the replacement,
+     * or the old one put back as it was if that is refused, then its
+     * status, then the brief's tag pointed at it. Each counted only once
+     * it stands: the ship answers an id before its writer applies the
+     * proposal, and the writer can still turn it down.
+     */
+    private suspend fun finishMove(a: OrreryApi, token: String, s: String, m: PendingMove): String? {
+        suspend fun laid(body: String) =
+            propose(a, token, Json.parseToJsonElement(body).jsonObject, m.old)?.takeIf { a.standing(token, it.first) }
+        val made = laid(m.replacement) ?: laid(m.putBack) ?: run {
+            Log.w(TAG, "${m.old} was dismissed and could be neither replaced nor put back")
+            return null
+        }
+        m.want?.let { steps(a, token, made.first, made.second, it, m.note) }
+        // A tag names the action that replaced the one it named: left on
+        // the old one, a later reply about it found it dismissed and did
+        // nothing.
+        m.tags?.let { key ->
+            val sent = db.orrerySent()
+            sent.get(s, key)?.value?.takeIf { it.isNotBlank() }?.let { raw ->
+                val tags = Json.parseToJsonElement(raw).jsonObject.mapValues { (_, v) -> v.jsonPrimitive.content.let { if (it == m.old) made.first else it } }
+                sent.put(io.nisfeb.talon.data.OrrerySentEntity(s, key, buildJsonObject { tags.forEach { (t, id) -> put(t, id) } }.toString(), now()))
+            }
+        }
+        return made.first
+    }
+
+    /** [id]'s status moved from [from] toward [to], a step at a time, as the ship allows. */
+    private suspend fun steps(a: OrreryApi, token: String, id: String, from: String, to: String, note: String) {
+        for (step in Brief.steps(from, to)) {
             runCatching { a.transition(token, id, step, note) }
                 .onFailure { Log.i(TAG, "$id not moved to $step: ${it.message}") }
         }
-        return id.takeIf { it != old.id }
+    }
+
+    /** The moves waiting on their dismissal, under one record: one read a pass, and none where none wait. */
+    private suspend fun pendingMoves(s: String): List<PendingMove> =
+        db.orrerySent().get(s, MOVES_KEY)?.value?.takeIf { it.isNotBlank() }
+            ?.let { runCatching { Json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(PendingMove.serializer()), it) }.getOrNull() }
+            .orEmpty()
+
+    private suspend fun keepMoves(s: String, moves: List<PendingMove>) {
+        if (moves.isEmpty()) db.orrerySent().forget(s, MOVES_KEY)
+        else db.orrerySent().put(
+            io.nisfeb.talon.data.OrrerySentEntity(s, MOVES_KEY, Json.encodeToString(kotlinx.serialization.builtins.ListSerializer(PendingMove.serializer()), moves), now()),
+        )
+    }
+
+    private suspend fun keepMove(s: String, m: PendingMove) = keepMoves(s, pendingMoves(s) + m)
+
+    /**
+     * The moves a reply left waiting on their dismissal, finished once it
+     * has landed. One whose old action still reads open after an hour was
+     * never dismissed, so nothing is lost, and is dropped; so is one whose
+     * old action is gone.
+     */
+    internal suspend fun finishMoves(a: OrreryApi, token: String, s: String) {
+        val waiting = pendingMoves(s).takeIf { it.isNotEmpty() } ?: return
+        val dismissed = a.actions(token, "dismissed").mapTo(HashSet()) { it.id }
+        val open = a.actions(token, "open").mapTo(HashSet()) { it.id }
+        val still = waiting.filter { m ->
+            when {
+                m.old in dismissed -> {
+                    finishMove(a, token, s, m)
+                    false
+                }
+                m.old in open && now() - m.atMs < MOVE_WAIT_MS -> true
+                else -> {
+                    Log.i(TAG, "${m.old}: a move was dropped; the old action ${if (m.old in open) "was never dismissed" else "is gone"}")
+                    false
+                }
+            }
+        }
+        keepMoves(s, still)
     }
 
     /**
@@ -1125,7 +1220,7 @@ class OrreryRepo(
             // stepping aside from every chat left those read by nobody.
             // Asked only when there is a post, so an idle pass costs the
             // ship nothing more. What the ship reads is marked read here.
-            val chats = if (allPosts.isEmpty()) null else a.shipChats(row.token).also { _shipReadsChats.value = it?.enabled }
+            val chats = if (allPosts.isEmpty()) null else a.shipChats(row.token).also { _shipChats.value = it }
             val shipped = view.bodies.mapNotNullTo(HashSet()) { b -> b.ship?.takeIf { b.id.startsWith("person/") } }
             // It reads with the generator's key, and with none reads
             // nothing while marking what it skipped as seen.
@@ -1361,6 +1456,9 @@ class OrreryRepo(
             // want them: what is open, the mirror, and the brief.
             val actions = runCatching { a.actions(row.token, status = "all") }
                 .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }.getOrNull()
+            // Moves from a reply that waited on their dismissal, finished
+            // once it has landed.
+            runCatching { finishMoves(a, row.token, s) }.onFailure { Log.i(TAG, "waiting moves skipped: ${it.message}") }
             val settled = runCatching { runExecutor(a, row.token, actions) }
                 .onFailure { Log.i(TAG, "messages skipped: ${it.message}") }.getOrDefault(emptyMap())
             // The listing as the mirror left it: what it finished is
@@ -2352,6 +2450,10 @@ class OrreryRepo(
         const val LATE_WINDOW_MS = 2L * 24 * 60 * 60 * 1000
         /** How long a new key's forbidden reads as not stored yet, not as revoked. */
         const val KEY_GRACE_MS = 5L * 60 * 1000
+        /** The record the moves waiting on their dismissal are kept under. */
+        private const val MOVES_KEY = "moves:pending"
+        /** How long a move waits for its old action to read dismissed before it is dropped. */
+        const val MOVE_WAIT_MS = 60L * 60 * 1000
         /** How often a pass may fail on a key behind the schema, to have it measured again. */
         const val BLIND_RETRY_MS = 60L * 60 * 1000
 
@@ -2452,3 +2554,22 @@ class OrreryRepo(
 internal fun settledActions(list: List<OrreryAction>, id: String, status: String): List<OrreryAction> =
     if (status == "approved" || status == "claimed") list.map { if (it.id == id) it.copy(status = status) else it }
     else list.filterNot { it.id == id }
+
+/**
+ * A move from a brief reply whose old action was dismissed and not yet
+ * seen so: kept in the table and finished on a later pass once it is,
+ * since the ship answers a dismissal before its writer applies it.
+ */
+@kotlinx.serialization.Serializable
+internal data class PendingMove(
+    val old: String,
+    /** The replacement, and the old one as it was, put back if that is refused. */
+    val replacement: String,
+    val putBack: String,
+    /** Where the replacement's status goes, or null to leave it proposed. */
+    val want: String? = null,
+    val note: String = "",
+    /** The brief's tags record, to point at the replacement. */
+    val tags: String? = null,
+    val atMs: Long,
+)

@@ -428,9 +428,12 @@ class PassKeepsTest {
     fun `moving a due makes a new action and leaves no action lost`() = runBlocking<Unit> {
         val statuses = mutableMapOf("a1" to "approved")
         val dues = mutableMapOf("a1" to "2026-09-24T17:00:00Z")
+        val titles = mutableMapOf<String, String?>("a1" to "Call the shop")
         // Orrery answers a status change before its writer applies it:
-        // here the change lands on the next read of the actions.
+        // here the change lands on the next read of the actions, or not
+        // at all while the writer is slow.
         val landing = mutableMapOf<String, String>()
+        var slow = false
         var next = 2
         val http = HttpClient(
             MockEngine { req ->
@@ -440,11 +443,13 @@ class PassKeepsTest {
                 val json = headersOf(HttpHeaders.ContentType, "application/json")
                 when {
                     req.method == HttpMethod.Post && url.substringBefore('?').endsWith("/api/act") -> {
-                        val twin = statuses.entries.firstOrNull { it.value in setOf("proposed", "approved", "claimed") }
+                        val title = o?.get("title")?.jsonPrimitive?.content
+                        val twin = statuses.entries.firstOrNull { it.value in setOf("proposed", "approved", "claimed") && titles[it.key] == title }
                         if (twin != null) respond("""{"id":"${twin.key}","status":"${twin.value}","existing":true}""", headers = json)
                         else {
                             val id = "a${next++}"
                             statuses[id] = "proposed"
+                            titles[id] = title
                             dues[id] = o?.get("due")?.jsonPrimitive?.content.orEmpty()
                             respond("""{"id":"$id","status":"proposed","existing":false}""", headers = json)
                         }
@@ -456,8 +461,10 @@ class PassKeepsTest {
                         respond("""{"id":"$id","status":"$want"}""", headers = json)
                     }
                     req.method == HttpMethod.Get && "/api/actions" in url -> {
-                        statuses.putAll(landing)
-                        landing.clear()
+                        if (!slow) {
+                            statuses.putAll(landing)
+                            landing.clear()
+                        }
                         val want = url.substringAfter("status=", "")
                         // As orrery reads "open": proposed, approved or claimed.
                         val open = setOf("proposed", "approved", "claimed")
@@ -472,9 +479,10 @@ class PassKeepsTest {
                 }
             },
         )
-        val repo = OrreryRepo(http, CoroutineScope(SupervisorJob()), db(createTempDirectory(prefix = "talon-move-").toFile()), "test", bareClient = http)
+        val movesDb = db(createTempDirectory(prefix = "talon-move-").toFile())
+        val repo = OrreryRepo(http, CoroutineScope(SupervisorJob()), movesDb, "test", bareClient = http)
         val old = OrreryAction("a1", "task", "Call the shop", kotlinx.serialization.json.JsonObject(emptyMap()), emptyList(), dues.getValue("a1"), "approved", "generator")
-        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", old, Brief.Direction("a1", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-25T17:00:00Z")))
+        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", "~zod", old, Brief.Direction("a1", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-25T17:00:00Z")))
         statuses.putAll(landing)
         assertEquals("dismissed", statuses["a1"], "the old one goes")
         val made = statuses.keys.single { it != "a1" }
@@ -483,13 +491,31 @@ class PassKeepsTest {
         // Dismissed with a new due in the same breath is dismissed: no
         // replacement made only to be closed.
         statuses["a9"] = "proposed"
-        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", old.copy(id = "a9", status = "proposed"), Brief.Direction("a9", status = "dismissed", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-27T17:00:00Z")))
+        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", "~zod", old.copy(id = "a9", status = "proposed"), Brief.Direction("a9", status = "dismissed", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-27T17:00:00Z")))
         statuses.putAll(landing)
         assertEquals("dismissed", statuses["a9"])
         assertEquals(3, statuses.size, "and nothing made for it")
+        // A dismissal the writer applies late: nothing proposed over it, the
+        // move kept, and finished once it lands, with the brief's tag
+        // pointed at what replaced it.
+        statuses["a5"] = "approved"
+        titles["a5"] = "Book the tyres"
+        movesDb.orrerySent().put(OrrerySentEntity("~zod", "brief:2026-09-24", """{"A1":"a5"}""", 1L))
+        slow = true
+        val api = OrreryApi(http, http, "https://ship.test")
+        assertEquals(null, repo.move(api, "k1.secret", "~zod", old.copy(id = "a5", title = "Book the tyres"), Brief.Direction("a5", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-28T17:00:00Z")), tagsKey = "brief:2026-09-24"))
+        assertEquals(4, statuses.size, "nothing proposed over a dismissal not yet seen")
+        slow = false
+        repo.finishMoves(api, "k1.secret", "~zod")
+        statuses.putAll(landing)
+        val late = statuses.keys.single { it !in setOf("a1", "a9", "a5") && statuses[it] != null && dues[it] == "2026-09-28T17:00:00Z" }
+        assertEquals("approved", statuses[late], "made once the dismissal landed, approved as the old one was")
+        assertEquals("""{"A1":"$late"}""", movesDb.orrerySent().get("~zod", "brief:2026-09-24")?.value, "and the tag names it")
+        repo.finishMoves(api, "k1.secret", "~zod")
+        assertEquals(1, statuses.count { dues[it.key] == "2026-09-28T17:00:00Z" }, "finished once, not again")
         // One the owner has settled since the brief named it is left be.
-        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", old.copy(status = "done"), Brief.Direction("a1", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-26T17:00:00Z")))
-        assertEquals(3, statuses.size, "nothing made again")
+        repo.move(OrreryApi(http, http, "https://ship.test"), "k1.secret", "~zod", old.copy(status = "done"), Brief.Direction("a1", dueMs = io.nisfeb.talon.ui.parseIsoUtc("2026-09-26T17:00:00Z")))
+        assertEquals(5, statuses.size, "nothing made again")
     }
 
     // Orrery 39 reads the owner's chats on the ship: Talon reading them
