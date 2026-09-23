@@ -7,7 +7,10 @@ import kotlinx.coroutines.CancellationException
  *
  *   question → model → tool calls → execute → feed results → repeat
  *
- * until the model returns a final answer or the step cap is hit.
+ * until the model returns a final answer. The step cap is a backstop
+ * against a model that loops, not a limit on real work, and reaching it
+ * still ends in an answer: the model is asked once more, with no tools,
+ * to say what it did and what is left.
  *
  * The trust boundary lives here: **read** tools run automatically;
  * every **write** tool must clear [confirm] before it executes. A
@@ -82,7 +85,17 @@ class AgentLoop(
                 }
             }
         }
-        val msg = "Stopped after $maxSteps steps without finishing."
+        // Out of steps: not a canned "stopped" in place of an answer, which
+        // left the owner with nothing after all that work. One more turn
+        // with the tools taken away, so the model has to answer.
+        history.add(AgentMessage.User(WRAP_UP))
+        val last = runCatching { completer.complete(systemPrompt, history, emptyList()) }
+            .getOrElse { if (it is CancellationException) throw it; null }
+        val msg = when (last) {
+            is AgentTurn.Final -> last.text
+            is AgentTurn.Calls -> last.text?.takeIf { it.isNotBlank() }
+            null -> null
+        } ?: "I ran out of steps ($maxSteps) before finishing. Ask me to carry on and I will pick up from here."
         onEvent(Event.Answer(msg))
         return msg
     }
@@ -112,8 +125,15 @@ class AgentLoop(
     }
 
     companion object {
-        // ponytail: hard step cap as a runaway/cost backstop; raise if
-        // real multi-step tasks legitimately need more.
-        const val MAX_STEPS = 8
+        // A backstop against a model that loops, not a budget for work:
+        // 8 cut real tasks off partway (setting up a reader is several
+        // reads, writes and checks). Each step is a model call, so it is
+        // still a bound on what a runaway costs.
+        const val MAX_STEPS = 50
+
+        private const val WRAP_UP =
+            "You have used every step this run allows, so no more tools can be called. " +
+                "Answer now: say what you did, what you found, and what is left undone, " +
+                "so the owner can ask you to carry on from here."
     }
 }

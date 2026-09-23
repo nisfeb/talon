@@ -66,15 +66,27 @@ class AgentLoopTest {
     }
 
     @Test
-    fun `loop stops at the step cap when the model never finishes`() = runBlocking {
-        // Model always asks for the read tool again — never returns Final.
-        val read = Tool(spec("read"), write = false) { "ok" }
-        val completer = AgentLoop.Completer { _, _, _ ->
-            AgentTurn.Calls(null, listOf(call("read")))
+    fun `at the step cap the model answers without tools rather than being cut off`() = runBlocking {
+        // Model asks for the read tool every time it has one, and answers
+        // only once it has none: the loop's last turn must take them away.
+        var reads = 0
+        val read = Tool(spec("read"), write = false) { reads++; "ok" }
+        val completer = AgentLoop.Completer { _, _, tools ->
+            if (tools.isEmpty()) AgentTurn.Final("did three reads; the fourth is left")
+            else AgentTurn.Calls(null, listOf(call("read")))
         }
         val loop = AgentLoop(completer, listOf(read), maxSteps = 3)
         val out = loop.run("q", confirm = { _, _ -> true })
-        assertTrue(out.contains("Stopped after 3 steps"), "expected step-cap message, got: $out")
+        assertEquals("did three reads; the fourth is left", out)
+        assertEquals(3, reads, "the cap still bounds the work")
+    }
+
+    @Test
+    fun `a model that still will not answer gets a way to carry on, not a dead end`() = runBlocking {
+        val read = Tool(spec("read"), write = false) { "ok" }
+        val completer = AgentLoop.Completer { _, _, _ -> AgentTurn.Calls(null, listOf(call("read"))) }
+        val out = AgentLoop(completer, listOf(read), maxSteps = 2).run("q", confirm = { _, _ -> true })
+        assertTrue("carry on" in out, out)
     }
 
     @Test
