@@ -27,8 +27,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.graphics.Color
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -192,6 +192,10 @@ fun DmListScreen(
      *  default because on compact layouts "open" navigates away
      *  from the list the user was in the middle of browsing. */
     autoOpenOnExpand: Boolean = false,
+    /** The conversation open beside the list, whose row keeps a soft
+     *  accent for as long as it has the focus. Null where the chat
+     *  replaces the list rather than sitting beside it. */
+    openWhom: String? = null,
     /** How the home list's Groups section and any custom folder's
      *  top-level entries sort. Same UiSettings-driven plumbing as
      *  [groupChannelOrder]. */
@@ -434,10 +438,6 @@ fun DmListScreen(
     // Persist expanded-group set across navigations so groups stay open
     // when the user returns from a chat.
     var expandedGroups by remember { mutableStateOf(snap.expandedGroups) }
-    // The channel a group expand just landed in, with a nonce so landing
-    // in the same channel again replays the glow. Read by GroupChannelRow.
-    var jumpedWhom by remember { mutableStateOf<String?>(null) }
-    var jumpNonce by remember { mutableStateOf(0) }
     // Mirror every change back into the snapshot so the next mount
     // starts from the user's latest expansion state.
     androidx.compose.runtime.LaunchedEffect(expandedGroups) {
@@ -598,11 +598,7 @@ fun DmListScreen(
             homeRows.filterIsInstance<HomeRow.GroupChild>()
                 .filter { it.groupFlag == flag }
                 .maxByOrNull { it.m?.sentMs ?: 0L }
-                ?.let {
-                    jumpedWhom = it.whom
-                    jumpNonce++
-                    onRowOpen(it.whom)
-                }
+                ?.let { onRowOpen(it.whom) }
         }
         // Lazy-item index of the group head: each Header / GroupHead /
         // Flat is one item; GroupChild rows are bundled into their
@@ -1221,6 +1217,7 @@ fun DmListScreen(
                             draft = drafts[m.whom],
                             onClick = onRowOpen,
                             onLongClick = onRowLongPress,
+                            open = m.whom == openWhom,
                         )
                         HorizontalDivider()
                     }
@@ -1252,6 +1249,7 @@ fun DmListScreen(
                                 draft = drafts[u.whom],
                                 onClick = onRowOpen,
                                 onLongClick = onRowLongPress,
+                                open = m.whom == openWhom,
                             )
                         } else {
                             MentionPlaceholderRow(
@@ -1344,11 +1342,7 @@ fun DmListScreen(
                                                 if (autoOpenOnExpand && expanding && !editMode) {
                                                     childrenSnapshot
                                                         .maxByOrNull { it.m?.sentMs ?: 0L }
-                                                        ?.let {
-                                                            jumpedWhom = it.whom
-                                                            jumpNonce++
-                                                            onRowOpen(it.whom)
-                                                        }
+                                                        ?.let { onRowOpen(it.whom) }
                                                 }
                                             },
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
@@ -1394,7 +1388,7 @@ fun DmListScreen(
                                                         draft = drafts[child.whom],
                                                         onClick = onRowOpen,
                                                         onLongClick = onRowLongPress,
-                                                        flashKey = if (jumpedWhom == child.whom) jumpNonce else null,
+                                                        open = child.whom == openWhom,
                                                     )
                                                     HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                                                 }
@@ -1434,6 +1428,7 @@ fun DmListScreen(
                                         draft = drafts[row.m.whom],
                                         onClick = onRowOpen,
                                         onLongClick = onRowLongPress,
+                                        open = row.m.whom == openWhom,
                                         editMode = editMode,
                                         dragHandleModifier = if (!canReorder) null else reorderHandle(
                                             onDragStarted = {
@@ -1531,11 +1526,7 @@ fun DmListScreen(
                                                 if (autoOpenOnExpand && expanding && !editMode) {
                                                     childrenSnapshot
                                                         .maxByOrNull { it.m?.sentMs ?: 0L }
-                                                        ?.let {
-                                                            jumpedWhom = it.whom
-                                                            jumpNonce++
-                                                            onRowOpen(it.whom)
-                                                        }
+                                                        ?.let { onRowOpen(it.whom) }
                                                 }
                                             },
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
@@ -1585,7 +1576,7 @@ fun DmListScreen(
                                                         draft = drafts[child.whom],
                                                         onClick = onRowOpen,
                                                         onLongClick = onRowLongPress,
-                                                        flashKey = if (jumpedWhom == child.whom) jumpNonce else null,
+                                                        open = child.whom == openWhom,
                                                     )
                                                     HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                                                 }
@@ -1609,6 +1600,7 @@ fun DmListScreen(
                                     draft = drafts[row.m.whom],
                                     onClick = onRowOpen,
                                     onLongClick = onRowLongPress,
+                                    open = row.m.whom == openWhom,
                                 )
                                 HorizontalDivider()
                             }
@@ -2268,9 +2260,12 @@ private fun ConversationRow(
     draft: String?,
     onClick: (String) -> Unit,
     onLongClick: (String) -> Unit,
+    /** Open beside the list: see [focusGlow]. */
+    open: Boolean = false,
     editMode: Boolean = false,
     dragHandleModifier: Modifier? = null,
 ) {
+    val glow = focusGlow(open)
     val preview = remember(m.id, m.contentJson) {
         StoryCache.textFor(m.id, m.contentJson)
             .take(200)
@@ -2298,6 +2293,7 @@ private fun ConversationRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(glow)
             .then(rowClickModifier)
             .padding(horizontal = 16.dp, vertical = density.listRowVertical),
         verticalAlignment = Alignment.CenterVertically,
@@ -2633,6 +2629,20 @@ private fun GroupHeaderRow(
     }
 }
 
+/**
+ * The soft accent behind the row of the conversation open beside the
+ * list. It was a flash that faded when a group expand landed on a
+ * channel; kept, it says at a glance which one has the focus. It eases
+ * in and out as the focus moves.
+ */
+@Composable
+private fun focusGlow(open: Boolean): Color =
+    animateColorAsState(
+        if (open) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else Color.Transparent,
+        animationSpec = tween(durationMillis = 300),
+        label = "focus",
+    ).value
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GroupChannelRow(
@@ -2643,18 +2653,11 @@ private fun GroupChannelRow(
     draft: String?,
     onClick: (String) -> Unit,
     onLongClick: (String) -> Unit,
-    /** Non-null when a group expand just landed here: the row glows in the accent and fades. */
-    flashKey: Any? = null,
+    /** Open beside the list: see [focusGlow]. */
+    open: Boolean = false,
 ) {
     val shortName = remember(whom) { contactMap.channelShortName(whom) }
-    val flash = remember(whom) { Animatable(0f) }
-    LaunchedEffect(flashKey) {
-        if (flashKey != null) {
-            flash.snapTo(1f)
-            flash.animateTo(0f, tween(1_800, easing = LinearEasing))
-        }
-    }
-    val glow = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f * flash.value)
+    val glow = focusGlow(open)
     val preview = m?.let {
         remember(it.id, it.contentJson, it.title) {
             StoryCache.previewFor(it).take(200).replace('\n', ' ')

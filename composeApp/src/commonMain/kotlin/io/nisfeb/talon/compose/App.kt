@@ -3069,6 +3069,7 @@ fun App(
                                         // so expanding a group can land its most
                                         // recent channel there without navigating.
                                         autoOpenOnExpand = expanded,
+                                        openWhom = openChat.takeIf { expanded },
                                         onOpenConversation = { whom ->
                                             openConversationAction()
                                             openChatFocusMessageId = null
