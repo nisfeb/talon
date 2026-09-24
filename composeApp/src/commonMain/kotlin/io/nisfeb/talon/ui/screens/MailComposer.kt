@@ -5,6 +5,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.withFrameNanos
@@ -688,6 +689,10 @@ private fun Answering(
                 onQuote(wholeLines(body, picked.min, picked.max))
                 field = field.copy(selection = androidx.compose.ui.text.TextRange(picked.max))
             },
+            // Pressed with a mouse, a button that takes focus takes it from
+            // the text above, which drops the selection it is to quote and
+            // disables the button before the click lands.
+            modifier = Modifier.focusProperties { canFocus = false },
             contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
         ) {
             Text(if (picked.collapsed) "Select lines above to quote them" else "Quote", style = MaterialTheme.typography.labelMedium)
