@@ -168,6 +168,10 @@ class CalParseTest {
         // tomorrow is Jan 8 from the Sun Jan 7 anchor. Both start AND end on Jan 8.
         assertEquals(8, ldt(r.startMs).dayOfMonth)
         assertEquals(8, ldt(r.endMs).dayOfMonth)
+        // 11pm to 1am ends on the next day, not before it starts.
+        val late = parseCalText("tomorrow 11p-1a Meet", nowMs = now) as CalParseResult.Ok
+        assertEquals(8, ldt(late.startMs).dayOfMonth)
+        assertEquals(9, ldt(late.endMs).dayOfMonth)
     }
 
     @Test

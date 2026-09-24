@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 import io.nisfeb.talon.urbit.Fuzz
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -71,6 +72,8 @@ class SlashCommandFuzzTest {
                 assertTrue("end.m=${it.m}", it.m in 0..59)
             }
         }
+        // Random strings rarely make an out-of-range time, so name some.
+        for (t in listOf("25", "9:75", "30-31", "9-25")) assertNull(t, parseTimeToken(t))
     }
 
     // ─── parseTzInput invariants ────────────────────────────────────

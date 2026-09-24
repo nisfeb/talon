@@ -130,7 +130,7 @@ class SlashCommandsTest {
     @Test
     fun `pet with only a ship and no name returns usage error`() {
         val r = run("/pet ~zod")
-        assertTrue(r is CommandResult.Error)
+        assertTrue(r is CommandResult.Error && "usage" in r.message, "$r")
     }
 
     @Test
@@ -259,9 +259,11 @@ class SlashCommandsTest {
 
     @Test
     fun `filterSlashCommands prioritizes prefix hits over substring hits`() {
-        // "ic" is a substring of "mic" but not a prefix of any command.
-        val r = filterSlashCommands("ic")
-        assertNotNull(r.firstOrNull { it.name == "mic" })
+        // "loc" starts with l; the rest only contain it.
+        assertEquals(
+            listOf("loc", "call", "cal", "file", "poll", "talk"),
+            filterSlashCommands("l").map { it.name },
+        )
     }
 
     @Test

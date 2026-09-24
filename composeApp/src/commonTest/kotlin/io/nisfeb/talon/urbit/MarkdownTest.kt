@@ -121,8 +121,8 @@ class MarkdownTest {
     fun `partial link-shape falls through`() {
         // `[label]` without `(url)` shouldn't try to be a link.
         val out = Markdown.parseInlines("say [hi] there")
-        // At least doesn't explode — output is some sequence of primitives.
-        assertTrue(out.size >= 1)
+        assertTrue(out.all { it is JsonPrimitive }, "$out")
+        assertEquals("say [hi] there", out.joinToString("") { it.jsonPrimitive.content })
     }
 
     @Test

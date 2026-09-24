@@ -19,7 +19,9 @@ class MarkdownBlocksTest {
     @Test
     fun `consecutive lines in a paragraph are joined with newline`() {
         val story = MarkdownBlocks.toStory("line one\nline two")
-        assertEquals(1, story.size)
+        val inline = story.single().jsonObject["inline"]!!.jsonArray
+        val text = inline.joinToString("") { (it as? JsonPrimitive)?.content ?: "\n" }
+        assertEquals("$inline", "line one\nline two", text)
     }
 
     // ─── headings ──────────────────────────────────────────────────
