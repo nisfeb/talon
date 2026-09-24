@@ -36,6 +36,9 @@ internal class FakeShip(val us: String = "~zod") {
     val pokes: MutableList<Poke> = Collections.synchronizedList(mutableListOf())
     val scries = ConcurrentHashMap<String, String>()
 
+    /** Every subscription opened, as `app/path`. */
+    val subscribed: MutableList<String> = Collections.synchronizedList(mutableListOf())
+
     /** Every scry path asked for, answered or not, in order. */
     val scried: MutableList<String> = Collections.synchronizedList(mutableListOf())
 
@@ -72,7 +75,10 @@ internal class FakeShip(val us: String = "~zod") {
                                 else """{"id":$id,"response":"poke","err":${JsonPrimitive(err)}}""",
                             )
                         }
-                        "subscribe" -> emit("""{"id":$id,"response":"subscribe","ok":"ok"}""")
+                        "subscribe" -> {
+                            subscribed += "${o["app"]?.jsonPrimitive?.content}${o["path"]?.jsonPrimitive?.content}"
+                            emit("""{"id":$id,"response":"subscribe","ok":"ok"}""")
+                        }
                     }
                 }
                 respond("", HttpStatusCode.NoContent)
