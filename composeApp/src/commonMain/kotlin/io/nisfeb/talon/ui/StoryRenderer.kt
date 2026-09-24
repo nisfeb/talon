@@ -193,7 +193,9 @@ fun StoryRenderer(
     parts: List<StoryPart>,
     modifier: Modifier = Modifier,
     onMentionTap: (String) -> Unit = {},
-    onLinkTap: (String) -> Unit = {},
+    // The gallery and notebook posts passed none, and every link in
+    // them did nothing.
+    onLinkTap: (String) -> Unit = rememberLinkOpener(),
     onImageTap: (String) -> Unit = {},
     /** Reactions on this message, used by the poll widget to render
      *  per-option tallies. */

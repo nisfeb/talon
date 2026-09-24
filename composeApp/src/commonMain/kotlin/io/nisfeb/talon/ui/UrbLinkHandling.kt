@@ -24,6 +24,24 @@ import io.nisfeb.talon.urbit.UrbLinkLauncher
 val LocalUrbLinkHandler = staticCompositionLocalOf<(String) -> Unit> { {} }
 
 /**
+ * Open a link the way a message does: an urb:// one through
+ * [LocalUrbLinkHandler], anything else through the platform's handler.
+ * The default for every rendered story, so a screen that shows one
+ * cannot leave its links dead by not passing a handler.
+ */
+@Composable
+fun rememberLinkOpener(): (String) -> Unit {
+    val uriHandler = LocalUriHandler.current
+    val urbLinkHandler = LocalUrbLinkHandler.current
+    return androidx.compose.runtime.remember(uriHandler, urbLinkHandler) {
+        { url ->
+            if (UrbLink.isUrbUrl(url)) urbLinkHandler(url)
+            else runCatching { uriHandler.openUri(url) }
+        }
+    }
+}
+
+/**
  * A [UriHandler] that routes `urb://` links to [onUrb] (the Lattice
  * handoff) and delegates everything else to [delegate].
  *
