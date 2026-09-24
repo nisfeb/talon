@@ -494,24 +494,17 @@ class MailRepo(
      * that can say the mark landed. Read marks are invisible to every
      * other client, so nothing else will ever tell us.
      */
-    fun markRead(msgIds: List<String>, threadId: String? = null) =
-        act(threadOf(msgIds, threadId), { readState(msgIds, threadId, read = true) }) { it.markRead(msgIds) }
+    fun markRead(msgIds: List<String>, threadId: String) =
+        act(threadId, { readState(msgIds, threadId, read = true) }) { it.markRead(threadId, msgIds) }
 
     /** Put a thread back to unread, so it stands out again on return.
      *  Also local, so this refreshes its own view like the rest. */
-    fun markUnread(msgIds: List<String>, threadId: String? = null) =
-        act(threadOf(msgIds, threadId), { readState(msgIds, threadId, read = false) }) { it.markUnread(msgIds) }
+    fun markUnread(msgIds: List<String>, threadId: String) =
+        act(threadId, { readState(msgIds, threadId, read = false) }) { it.markUnread(threadId, msgIds) }
 
-    /** The thread a read-mark edits on screen, when that can be told.
-     *  Null only means the optimistic half has nothing to edit; the
-     *  write goes either way. */
-    private fun threadOf(msgIds: List<String>, threadId: String?): String? =
-        threadId ?: threadCache.value.values.firstOrNull { t -> t.messages.any { it.id in msgIds } }?.id
-
-    private fun readState(msgIds: List<String>, threadId: String?, read: Boolean) {
-        val tid = threadId ?: threadCache.value.values.firstOrNull { t -> t.messages.any { it.id in msgIds } }?.id ?: return
-        editPages { _, p -> p.editRow(tid) { it.copy(unread = !read) } }
-        editThread(tid) { t -> t.copy(messages = t.messages.map { m -> if (m.id in msgIds) m.copy(read = read) else m }) }
+    private fun readState(msgIds: List<String>, threadId: String, read: Boolean) {
+        editPages { _, p -> p.editRow(threadId) { it.copy(unread = !read) } }
+        editThread(threadId) { t -> t.copy(messages = t.messages.map { m -> if (m.id in msgIds) m.copy(read = read) else m }) }
     }
 
     fun setArchived(threadId: String, archived: Boolean) = act(threadId, {
@@ -575,31 +568,6 @@ class MailRepo(
         }
         refresh()
         return true
-    }
-
-    /**
-     * Sign and send a saved draft. The ship drops the draft itself, and
-     * only when the send landed, so a send its writer silently refuses
-     * keeps the draft, which is the reason to send one this way rather
-     * than [send] plus [deleteDraft]. True once the ship has dropped the
-     * draft; false when it refused; null when it took the send and has
-     * not yet been seen to drop the draft.
-     *
-     * The route answers before the writer applies, so its yes means taken
-     * and nothing more. The drafts list is the proof, and it can lag the
-     * answer or fail to read: taking a single look as final reported a
-     * sent message as unsent, which then invited sending it twice.
-     */
-    suspend fun sendDraft(id: String): Boolean? {
-        if (call { it.sendDraft(id) } == null) return false
-        refresh()
-        repeat(4) { i ->
-            if (i > 0) kotlinx.coroutines.delay(1_000)
-            val now = call { it.drafts() } ?: return@repeat
-            _drafts.value = now
-            if (now.none { it.id == id }) return true
-        }
-        return null
     }
 
     /** Distinguishes two phantom replies minted inside one millisecond. */

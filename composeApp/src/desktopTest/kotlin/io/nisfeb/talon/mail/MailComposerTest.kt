@@ -40,11 +40,7 @@ class MailComposerTest {
     // plain list throws when one thread walks it while another adds.
     private val seen = java.util.concurrent.CopyOnWriteArrayList<HttpRequestData>()
 
-    /**
-     * A ship that takes everything. [draftsListed] is what its drafts
-     * list says: empty by default, which is how a send shows it landed,
-     * since the ship drops the draft only once the send is applied.
-     */
+    /** A ship that takes everything. [draftsListed] is what its drafts list says. */
     private fun repo(draftsListed: () -> String = { "[]" }): MailRepo {
         val http = HttpClient(
             MockEngine { req ->
@@ -61,7 +57,7 @@ class MailComposerTest {
             .also { it.attach("https://ship.example") }
     }
 
-    /** The last draft saved, which is what a send without files goes out as. */
+    /** The last draft saved. */
     private fun draftBody() = Json.parseToJsonElement(
         (seen.last { it.url.encodedPath.endsWith("/api/draft") }.body as TextContent).text,
     ).jsonObject
@@ -118,66 +114,23 @@ class MailComposerTest {
         onNodeWithText("Send").performClick()
         waitUntil(timeoutMillis = 5_000) { sent }
 
-        // A message with no files goes out as the draft it was saved
-        // as: the ship deletes one only when the send has landed, and
-        // that absence is the only proof a poke can give that it was
-        // applied rather than merely accepted.
-        val body = draftBody()
+        // One send path since auspex 14: the send route, then the draft
+        // it was saved as dropped.
+        val body = sentBody()
         assertEquals("0vparent", body["prev"]!!.jsonPrimitive.content)
         assertEquals(
             listOf("~zod"),
             body["to"]!!.jsonArray.map { it.jsonPrimitive.content },
         )
         assertEquals("answering", body["body"]!!.jsonPrimitive.content)
-        val sendReq = seen.last { it.url.encodedPath.endsWith("/api/draft-send") }
+        waitUntil(timeoutMillis = 5_000) { seen.any { it.url.encodedPath.endsWith("/api/draft-delete") } }
+        val dropped = seen.last { it.url.encodedPath.endsWith("/api/draft-delete") }
         assertEquals(
-            body["id"]!!.jsonPrimitive.content,
-            Json.parseToJsonElement((sendReq.body as TextContent).text).jsonObject["id"]!!.jsonPrimitive.content,
-            "the draft that was saved is the one the ship is asked to send",
+            draftBody()["id"]!!.jsonPrimitive.content,
+            Json.parseToJsonElement((dropped.body as TextContent).text).jsonObject["id"]!!.jsonPrimitive.content,
+            "the draft that was saved is the one dropped",
         )
-    }
-
-    // The ship takes a send before it applies it, and its drafts list is
-    // the only proof it went. A list still showing the draft is not proof
-    // it did not: calling it unsent invited a second Send, and closing
-    // filed an already-sent message back into Drafts.
-    @OptIn(ExperimentalTestApi::class)
-    @Test
-    fun `a send not yet seen to land is not called unsent, and is not filed again`() = runComposeUiTest {
-        var sent = false
-        val showing = androidx.compose.runtime.mutableStateOf(true)
-        // The draft stays listed however often it is asked for.
-        val still = {
-            val id = seen.lastOrNull { it.url.encodedPath.endsWith("/api/draft") }
-                ?.let { Json.parseToJsonElement((it.body as TextContent).text).jsonObject["id"]!!.jsonPrimitive.content }
-            if (id == null) "[]" else """[{"id":"$id","to":["~zod"],"body":"answering"}]"""
-        }
-        setContent {
-            TalonTheme(darkTheme = false) {
-                if (showing.value) {
-                    MailComposer(
-                        repo = repo(still),
-                        intent = MailIntent(prev = "0vparent", to = listOf("~zod"), subject = "Plans"),
-                        onSent = { sent = true },
-                        onCancel = { showing.value = false },
-                    )
-                }
-            }
-        }
-        onNodeWithText("Message").performTextInput("answering")
-        onNodeWithText("Send").performClick()
-        waitUntil(timeoutMillis = 10_000) {
-            onAllNodesWithText("has not confirmed it went", substring = true).fetchSemanticsNodes().isNotEmpty()
-        }
-        assertTrue(!sent, "not reported as sent")
-        assertTrue(
-            onAllNodesWithText("has not sent it", substring = true).fetchSemanticsNodes().isEmpty(),
-            "and not reported as unsent either",
-        )
-        val saves = seen.count { it.url.encodedPath.endsWith("/api/draft") }
-        showing.value = false
-        waitForIdle()
-        assertEquals(saves, seen.count { it.url.encodedPath.endsWith("/api/draft") }, "closing files nothing again")
+        assertTrue(seen.none { it.url.encodedPath.endsWith("/api/draft-send") }, "a route auspex 14 no longer has")
     }
 
     @OptIn(ExperimentalTestApi::class)

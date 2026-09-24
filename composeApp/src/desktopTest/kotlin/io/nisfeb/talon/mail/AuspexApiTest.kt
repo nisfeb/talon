@@ -166,16 +166,18 @@ class AuspexApiTest {
     }
 
     @Test
-    fun `marking read sends one set, and nothing at all when empty`() = runBlocking<Unit> {
+    fun `marking read sends one set with its thread, and nothing at all when empty`() = runBlocking<Unit> {
         val a = api { jsonOk(this, """{"ok":true}""") }
-        a.markRead(emptyList())
+        a.markRead("0vt", emptyList())
         assertTrue(seen.isEmpty(), "an empty mark is a no-op, not a request")
-        a.markRead(listOf("0va", "0vb"))
+        a.markRead("0vt", listOf("0va", "0vb"))
         assertEquals(1, seen.size)
         assertEquals(
             listOf("0va", "0vb"),
             sentBody()["msg-ids"]!!.jsonArray.map { it.jsonPrimitive.content },
         )
+        // Auspex 14 answers a mark with no thread 400 "bad thread-id".
+        assertEquals("0vt", sentBody()["thread-id"]!!.jsonPrimitive.content)
     }
 
     // ---- the three failures --------------------------------------------

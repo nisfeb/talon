@@ -338,36 +338,18 @@ fun MailComposer(
                                     return@launch
                                 }
                                 progress = "Sending"
-                                // Every send without files goes out AS the
-                                // draft just saved. The ship deletes a draft
-                                // only once the send has landed, so a draft
-                                // still standing afterwards is a poke that was
-                                // taken and never applied: the one failure a
-                                // poke cannot report, and the reason this
-                                // route exists. A message with files goes
-                                // direct, since no draft carries them, and its
-                                // text is what the draft holds until it lands.
-                                val sent: Boolean? = if (refs.isEmpty()) {
-                                    repo.sendDraft(edits.draftId)
-                                } else {
-                                    repo.send(to, edits.subject, edits.body, intent.prev, refs).also {
-                                        // The message carries the text now.
-                                        // Dropped on the repo's scope, so
-                                        // leaving cannot leave the husk.
-                                        if (it) repo.dropDraft(edits.draftId)
-                                    }
-                                }
+                                // One send path, as auspex's own client has
+                                // since auspex 14 dropped sending a draft by
+                                // its id: the send route, then the draft
+                                // dropped once the ship took the message.
+                                val sent = repo.send(to, edits.subject, edits.body, intent.prev, refs)
                                 progress = null
                                 when (sent) {
-                                    true -> onSent()
-                                    // Taken and not yet seen to go. The draft
-                                    // is the ship's now: filing it again, or a
-                                    // second Send, could put the message out
-                                    // twice. So it stays filed, and Send stays
-                                    // off, and the owner is told where to look.
-                                    null -> {
-                                        problem = "The ship took the message and has not confirmed it went. If it did not, it is in Drafts."
-                                        return@launch
+                                    true -> {
+                                        // Dropped on the repo's scope, so
+                                        // leaving cannot leave the husk.
+                                        repo.dropDraft(edits.draftId)
+                                        onSent()
                                     }
                                     false -> {
                                         filed = false
