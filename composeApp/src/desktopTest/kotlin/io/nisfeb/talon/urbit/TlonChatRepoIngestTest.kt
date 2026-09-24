@@ -3,6 +3,8 @@ package io.nisfeb.talon.urbit
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.ChannelGroupEntity
+import io.nisfeb.talon.data.GroupEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.ReactionPalette
 import kotlinx.coroutines.runBlocking
@@ -197,5 +199,74 @@ class TlonChatRepoIngestTest {
         repo.applyEvent(Json.parseToJsonElement("""{"id":3,"response":"poke","ok":"ok"}"""))
         assertFalse(db.messages().getOne(nest, "170141184506") != null)
         assertTrue(heard.isEmpty())
+    }
+
+    // ─── groups ───────────────────────────────────────────────────
+
+    private val flag = "~bus/garden"
+
+    private fun group(rGroup: String) = """{"flag":"$flag","r-group":$rGroup}"""
+
+    @Test
+    fun `a group made elsewhere arrives with its title and channels`() = runBlocking<Unit> {
+        fact(group("""{"create":{"meta":{"title":"The Garden","description":"","image":"","cover":""},
+            "channels":{"chat/~bus/general":{"meta":{"title":"general"}},"chat/~bus/beds":{"meta":{"title":""}}}}}"""))
+        assertEquals("The Garden", db.groups().getGroup(flag)?.title)
+        assertEquals("general", db.groups().channelGroupFor("chat/~bus/general")?.title)
+        assertEquals(flag, db.groups().channelGroupFor("chat/~bus/beds")?.groupFlag)
+        assertNull(db.groups().channelGroupFor("chat/~bus/beds")?.title, "a blank title is no title")
+    }
+
+    @Test
+    fun `a channel is added, renamed keeping its pin, and removed`() = runBlocking<Unit> {
+        val added = javaClass.getResource("/fixtures/groups/channel-add.json")!!.readText()
+        fact(added)
+        val nest = "chat/~ricsul-bilwyt-dozzod-nisfeb/random"
+        val owner = "~ricsul-bilwyt-dozzod-nisfeb/v1h84eoe"
+        assertEquals("Random", db.groups().channelGroupFor(nest)?.title)
+        db.groups().setPinnedPostId(nest, "170141184506")
+        fact("""{"flag":"$owner","r-group":{"channel":{"nest":"$nest","r-channel":{"edit":{"meta":{"title":"Chatter"}}}}}}""")
+        assertEquals("Chatter", db.groups().channelGroupFor(nest)?.title)
+        assertEquals("170141184506", db.groups().pinnedPostIdFor(nest), "renaming keeps the pin")
+        fact("""{"flag":"$owner","r-group":{"channel":{"nest":"$nest","r-channel":{"del":null}}}}""")
+        assertNull(db.groups().channelGroupFor(nest))
+    }
+
+    @Test
+    fun `a group's new title and picture replace the old, and a deleted group takes its channels`() = runBlocking<Unit> {
+        db.groups().upsertGroups(listOf(GroupEntity(flag, "Old name", null)))
+        db.groups().upsertChannelGroups(listOf(ChannelGroupEntity("chat/~bus/general", flag, title = "general")))
+        fact(group("""{"meta":{"title":"New name","description":"","image":"https://img/x.png","cover":""}}"""))
+        assertEquals("New name" to "https://img/x.png", db.groups().getGroup(flag)?.let { it.title to it.image })
+        fact(group("""{"delete":null}"""))
+        assertNull(db.groups().getGroup(flag))
+        assertNull(db.groups().channelGroupFor("chat/~bus/general"))
+    }
+
+    // ─── contacts ─────────────────────────────────────────────────
+
+    private fun text(v: String) = """{"type":"text","value":"$v"}"""
+
+    @Test
+    fun `a contact page puts them in the book with their name and status`() = runBlocking<Unit> {
+        fact("""{"page":{"kip":"~bus","contact":{"nickname":${text("Bus")},"status":${text("at lunch")}}}}""")
+        val row = assertNotNull(db.contacts().get("~bus"))
+        assertEquals("Bus" to "at lunch", row.nickname to row.status)
+        assertTrue("~bus" in repo.bookContacts.value)
+    }
+
+    @Test
+    fun `a contact wiped elsewhere leaves the book but keeps what we know of them`() = runBlocking<Unit> {
+        fact("""{"page":{"kip":"~bus","contact":{"nickname":${text("Bus")}}}}""")
+        fact("""{"wipe":{"kip":"~bus"}}""")
+        assertTrue("~bus" !in repo.bookContacts.value, "removed from the book")
+        assertEquals("Bus", db.contacts().get("~bus")?.nickname, "the directory row stays")
+    }
+
+    @Test
+    fun `a peer's new profile updates the directory without adding them to the book`() = runBlocking<Unit> {
+        fact("""{"peer":{"who":"~nec","contact":{"nickname":${text("Nec")},"bio":${text("a galaxy")}}}}""")
+        assertEquals("Nec" to "a galaxy", db.contacts().get("~nec")?.let { it.nickname to it.bio })
+        assertTrue("~nec" !in repo.bookContacts.value)
     }
 }

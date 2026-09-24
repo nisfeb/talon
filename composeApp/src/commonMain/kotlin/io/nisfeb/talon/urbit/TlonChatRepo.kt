@@ -2907,8 +2907,10 @@ class TlonChatRepo(
             return
         }
 
-        // %contacts /v1/news — {page}, {peer}, or {wipe} envelope.
-        if (payload.containsKey("page") || payload.containsKey("peer") || payload.containsKey("self")) {
+        // %contacts /v1/news — {page}, {wipe}, {peer} or {self} envelope.
+        if (payload.containsKey("page") || payload.containsKey("wipe") ||
+            payload.containsKey("peer") || payload.containsKey("self")
+        ) {
             applyContactsNews(payload)
             return
         }
