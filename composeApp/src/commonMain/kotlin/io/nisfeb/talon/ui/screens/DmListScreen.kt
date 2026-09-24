@@ -1113,6 +1113,7 @@ fun DmListScreen(
             },
             onDismiss = { updateState.dismiss() },
         )
+        io.nisfeb.talon.ui.PermitsBanner(repo.shipHttp, repo.shipBaseUrl)
         // Mentions-tab list: drive off the unreads table directly, not
         // the messages-derived `rows`. A whom can carry notifyCount > 0
         // (drives the badge total) without having any cached message —
