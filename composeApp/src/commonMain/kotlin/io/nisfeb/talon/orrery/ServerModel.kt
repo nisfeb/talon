@@ -88,7 +88,7 @@ internal class OpenAiShapeModel(private val http: HttpClient, private val server
             val body = buildJsonObject {
                 put("model", server.model)
                 put("temperature", 0)
-                put("max_tokens", maxTokens)
+                put(io.nisfeb.talon.ai.outputCapKey(server.base), maxTokens)
                 when (format) {
                     0 -> put("response_format", buildJsonObject {
                         put("type", "json_schema")

@@ -148,7 +148,7 @@ class AiClient(
     ): String {
         val payload = buildJsonObject {
             put("model", cfg.model ?: defaultModel)
-            put("max_tokens", maxTokens)
+            put(outputCapKey(endpoint), maxTokens)
             // OpenRouter says what a call cost only when asked, and so
             // does an Armillary base, which is OpenRouter under a lease
             // and the vendor's own proxy otherwise.
