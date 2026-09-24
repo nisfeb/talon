@@ -111,9 +111,8 @@ fun LoginQrShareScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                "Enter the ship URL and +code below. The QR is generated " +
-                    "live — show it to the person logging in on Android, " +
-                    "or save the deep-link URI for an agent flow.",
+                "Enter your ship URL and +code. Scan the QR with Talon on " +
+                    "your other device to sign in there, or copy the link.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

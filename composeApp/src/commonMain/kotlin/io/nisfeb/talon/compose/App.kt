@@ -280,7 +280,7 @@ fun App(
     // so a stale anchor can't paint on the wrong chat.
     var openChatFocusMessageId by remember { mutableStateOf<String?>(null) }
     /** Login-handoff QR generator. Reachable from LoginScreen
-     *  ("Helping someone else? Generate a login QR →") on cold launch
+     *  ("Signing in on another device? Make a login QR →") on cold launch
      *  and from Settings once a ship is logged in. */
     var shareLoginQrOpen by remember { mutableStateOf(false) }
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }

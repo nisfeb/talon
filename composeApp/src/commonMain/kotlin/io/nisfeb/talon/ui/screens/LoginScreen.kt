@@ -104,12 +104,12 @@ fun LoginScreen(
     /** Desktop only: boot a comet on this computer instead of signing
      *  in to a hosted ship. Null hides the action. */
     onRunLocalShip: (() -> Unit)? = null,
-    /** Optional callback to open the "Generate handoff QR" screen.
-     *  When non-null, LoginScreen shows a "Generate QR for someone"
-     *  link below the main form so helpers/admins can build a QR
-     *  with another user's credentials. Both targets support
-     *  generation (ZXing core is JVM-only and works under both
-     *  Compose Desktop and Compose Android). */
+    /** Optional callback to open the login QR screen. When non-null,
+     *  LoginScreen shows a link below the main form for making a QR
+     *  of your own login, which your other devices scan to sign in
+     *  quickly. Both targets support generation (ZXing core is
+     *  JVM-only and works under both Compose Desktop and Compose
+     *  Android). */
     onOpenShareQr: (() -> Unit)? = null,
     /** Optional update-status hook. When non-null, the global
      *  [UpdateBanner] renders above the login form so users see
@@ -348,14 +348,14 @@ fun LoginScreen(
                         )
                     }
                     onOpenShareQr?.let { openShare ->
-                        // "Helping someone else log in?" affordance —
-                        // opens the QR generator screen. Lives inside
+                        // Signing in on another device: opens the QR
+                        // generator screen. Lives inside
                         // the form card so it reads as a related action
                         // and not a stray link. Available on both
                         // targets since QR generation is JVM-only and
                         // ZXing core is wired into both leaves.
                         Text(
-                            text = "Helping someone else? Generate a login QR →",
+                            text = "Signing in on another device? Make a login QR →",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             textAlign = TextAlign.Center,

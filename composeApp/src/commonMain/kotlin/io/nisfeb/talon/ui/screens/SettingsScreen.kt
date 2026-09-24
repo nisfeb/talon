@@ -653,7 +653,7 @@ fun SettingsScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Login QR generator", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "Build a scannable QR with a ship URL + +code for handoff.",
+                        "A QR of your login, for signing in quickly on your other devices.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
