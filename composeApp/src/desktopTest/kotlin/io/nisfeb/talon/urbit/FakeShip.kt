@@ -49,7 +49,8 @@ internal class FakeShip(val us: String = "~zod") {
         stream.writeStringUtf8("id: ${nextEventId++}\ndata: $json\n\n")
     }
 
-    private val http = HttpClient(MockEngine { req ->
+    /** What the app talks to the ship through; pass it as the app's client. */
+    val http = HttpClient(MockEngine { req ->
         val path = req.url.encodedPath
         when {
             req.method == HttpMethod.Put -> {
@@ -87,7 +88,8 @@ internal class FakeShip(val us: String = "~zod") {
         }
     })
 
-    private val session = object : SessionStore {
+    /** Signed in to this ship at https://ship.test, and nothing else. */
+    val session = object : SessionStore {
         private val s = SavedSession("https://ship.test", us, "test-session", "0v1", "ship.test")
         override fun all() = listOf(s)
         override fun active() = s

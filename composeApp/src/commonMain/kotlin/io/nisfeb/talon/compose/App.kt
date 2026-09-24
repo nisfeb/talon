@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.pointer.pointerInput
@@ -1736,21 +1737,32 @@ fun App(
                     .fillMaxSize()
                     .focusRequester(rootFocusRequester)
                     .focusable()
+                    // Escape is taken on the way back up, after whatever has
+                    // focus: a composer drops its attachment, a viewer or a
+                    // dialog closes, and only an Escape nobody took leaves the
+                    // screen. Sections are drawn over the chat, so they close
+                    // first, the last opened first, by the registry that
+                    // knows every one of them.
+                    .onKeyEvent { event ->
+                        if (io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost) !=
+                            io.nisfeb.talon.ui.ShortcutAction.Back
+                        ) return@onKeyEvent false
+                        when {
+                            sections.anyOpen -> sections.closeLast()
+                            openThreadParent != null -> {
+                                openThreadParent = null
+                                openThreadReplyAnchor = null
+                            }
+                            openChat != null -> openChat = null
+                            else -> return@onKeyEvent false
+                        }
+                        true
+                    }
                     .onPreviewKeyEvent { event ->
                         val action = io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost)
                             ?: return@onPreviewKeyEvent false
                         when (action) {
-                            io.nisfeb.talon.ui.ShortcutAction.Back -> {
-                                when {
-                                    openThreadParent != null -> {
-                                        openThreadParent = null
-                                        openThreadReplyAnchor = null
-                                    }
-                                    openChat != null -> openChat = null
-                                    showSettings -> showSettings = false
-                                    else -> return@onPreviewKeyEvent false
-                                }
-                            }
+                            io.nisfeb.talon.ui.ShortcutAction.Back -> return@onPreviewKeyEvent false
                             io.nisfeb.talon.ui.ShortcutAction.OpenSettings -> showSettings = true
                             io.nisfeb.talon.ui.ShortcutAction.NewDm -> showNewDmRequest = true
                             io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
