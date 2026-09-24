@@ -10,6 +10,8 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.writeStringUtf8
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -47,8 +49,12 @@ internal class FakeShip(val us: String = "~zod") {
     private val stream = ByteChannel(autoFlush = true)
     private var nextEventId = 1L
 
+    // Pokes arrive on concurrent requests; the stream takes one writer at a
+    // time, or two acks interleave, one is lost, and its poke waits it out.
+    private val writing = Mutex()
+
     /** Put a fact on the event stream, framed as eyre frames it. */
-    suspend fun emit(json: String) {
+    suspend fun emit(json: String) = writing.withLock {
         stream.writeStringUtf8("id: ${nextEventId++}\ndata: $json\n\n")
     }
 
