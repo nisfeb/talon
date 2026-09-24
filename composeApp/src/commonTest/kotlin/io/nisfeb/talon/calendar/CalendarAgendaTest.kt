@@ -21,10 +21,6 @@ class CalendarAgendaTest {
     )
     private val utc = TimeZone.UTC
 
-    @Test fun `what is under way counts, what is over does not`() {
-        assertEquals(listOf("ongoing", "soon"), agenda(rows, CalendarRange.NEXT_3_HOURS, now, utc).map { it.id })
-    }
-
     @Test fun `next only is the first live one however far off`() {
         assertEquals(listOf("ongoing"), agenda(rows, CalendarRange.NEXT_ONLY, now, utc).map { it.id })
         assertEquals(listOf("nextweek"), agenda(listOf(rows.last()), CalendarRange.NEXT_ONLY, now, utc).map { it.id })

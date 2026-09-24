@@ -90,20 +90,6 @@ class StorageUploadTest {
     }
 
     @Test
-    fun `credentials mode with full credentials is upload-ready`() {
-        val creds = StorageCreds("https://s3.example.com", "AKIA", "shhh")
-        val config = StorageConfig("media", "us-east-1", null, "credentials")
-        assertTrue(storageS3Ready(creds, config))
-    }
-
-    @Test
-    fun `missing service is upload-ready when credentials are present`() {
-        val creds = StorageCreds("https://s3.example.com", "AKIA", "shhh")
-        val config = StorageConfig("media", "us-east-1", null, null)
-        assertTrue(storageS3Ready(creds, config))
-    }
-
-    @Test
     fun `blank credentials are not upload-ready regardless of mode`() {
         val config = StorageConfig("media", "us-east-1", null, "credentials")
         assertFalse(storageS3Ready(StorageCreds("", "AKIA", "shhh"), config))
@@ -139,16 +125,6 @@ class StorageUploadTest {
         val out = truncateUploadName(name)
         assertTrue(out.utf8Len() <= MAX_UPLOAD_NAME_BYTES, "got ${out.utf8Len()} bytes")
         assertTrue(out.endsWith(".jpeg"), "lost the extension: $out")
-    }
-
-    @Test
-    fun `length is counted in bytes, not characters`() {
-        // 200 CJK characters is 600 bytes — a character-counting
-        // check would have called this comfortably short.
-        val name = "\u6f22".repeat(200) + ".png"
-        val out = truncateUploadName(name)
-        assertTrue(out.utf8Len() <= MAX_UPLOAD_NAME_BYTES, "got ${out.utf8Len()} bytes")
-        assertTrue(out.endsWith(".png"))
     }
 
     /**

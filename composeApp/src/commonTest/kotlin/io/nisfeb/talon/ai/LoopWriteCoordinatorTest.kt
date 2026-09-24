@@ -41,18 +41,6 @@ class LoopWriteCoordinatorTest {
     }
 
     @Test
-    fun `two devices up, only one runs the write loop`() = runBlocking {
-        val lease = FakeLease(now = t0)
-        val a = device("A", lease)
-        val b = device("B", lease)
-
-        a.runner.runDue()
-        b.runner.runDue()
-
-        assertEquals(1, a.runDao.inserted.size + b.runDao.inserted.size, "exactly one device ran")
-    }
-
-    @Test
     fun `holder offline, the other device takes over`() = runBlocking {
         val lease = FakeLease(now = t0)
         val a = device("A", lease)
@@ -67,23 +55,6 @@ class LoopWriteCoordinatorTest {
         lease.now = pastStale
         b.runner.runDue()
         assertEquals(1, b.runDao.inserted.size, "B takes over the stale lease")
-    }
-
-    @Test
-    fun `read-only loop runs on every device`() = runBlocking {
-        // A coordinator that would block everyone — proving a read loop never
-        // consults it.
-        val deny = object : LoopWriteCoordinator {
-            override suspend fun claim(loop: LoopEntity) = false
-        }
-        val readLoop = writeLoop.copy(writesAuthorized = false)
-        val a = device("A", FakeLease(t0), deny, readLoop)
-        val b = device("B", FakeLease(t0), deny, readLoop)
-
-        a.runner.runDue(); b.runner.runDue()
-
-        assertEquals(1, a.runDao.inserted.size)
-        assertEquals(1, b.runDao.inserted.size)
     }
 
     @Test

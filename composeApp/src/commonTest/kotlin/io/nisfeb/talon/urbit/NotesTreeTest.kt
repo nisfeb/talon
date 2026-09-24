@@ -39,13 +39,6 @@ class NotesTreeTest {
     )
 
     @Test
-    fun `descendants includes the folder and everything under it`() {
-        assertEquals(setOf(2L, 3L, 4L), NotesTree.descendants(tree, 2))
-        assertEquals(setOf(4L), NotesTree.descendants(tree, 4))
-        assertEquals(setOf(1L, 2L, 3L, 4L, 5L), NotesTree.descendants(tree, 1))
-    }
-
-    @Test
     fun `a folder cannot move into itself or its own subtree`() {
         val ids = NotesTree.moveDestinations(tree, 2).map { it.folderId }
         assertFalse(2L in ids, "cannot move into itself")

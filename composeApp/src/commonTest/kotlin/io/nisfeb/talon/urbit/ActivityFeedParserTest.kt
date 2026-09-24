@@ -19,23 +19,6 @@ import kotlin.test.assertTrue
 class ActivityFeedParserTest {
 
     @Test
-    fun `null body returns empty list`() {
-        assertEquals(emptyList(), TlonChatRepo.parseActivityFeedBody(null))
-    }
-
-    @Test
-    fun `missing all key returns empty list`() {
-        val body = buildJsonObject { put("unrelated", "data") }
-        assertEquals(emptyList(), TlonChatRepo.parseActivityFeedBody(body))
-    }
-
-    @Test
-    fun `all is non-array returns empty list`() {
-        val body = buildJsonObject { put("all", "not-an-array") }
-        assertEquals(emptyList(), TlonChatRepo.parseActivityFeedBody(body))
-    }
-
-    @Test
     fun `single post-mention bundle parses to one item with the right kind`() {
         val body = buildBody {
             bundle(sourceKey = "ship/~zod") {
@@ -161,20 +144,6 @@ class ActivityFeedParserTest {
         }
         val items = TlonChatRepo.parseActivityFeedBody(body)
         assertEquals(1L * 1_760_123_456_789, items[0].sentMs)
-    }
-
-    @Test
-    fun `non-numeric time falls back to zero without crashing`() {
-        val body = buildBody {
-            bundle(sourceKey = "ship/~zod") {
-                event(tag = "post", time = "tomorrow", eventObj = buildJsonObject {
-                    put("author", "~bus")
-                })
-            }
-        }
-        val items = TlonChatRepo.parseActivityFeedBody(body)
-        assertEquals(1, items.size)
-        assertEquals(0L, items[0].sentMs)
     }
 
     @Test

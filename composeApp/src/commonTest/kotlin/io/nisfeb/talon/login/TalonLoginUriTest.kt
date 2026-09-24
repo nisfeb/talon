@@ -8,28 +8,6 @@ import kotlin.test.assertNull
 class TalonLoginUriTest {
 
     @Test
-    fun roundTripsHttpsAndCode() {
-        val original = TalonLoginUri.Payload(
-            url = "https://ship.example.com",
-            code = "foo-bar-baz-quux",
-        )
-        val encoded = TalonLoginUri.encode(original)
-        val decoded = assertNotNull(TalonLoginUri.decode(encoded))
-        assertEquals(original, decoded)
-    }
-
-    @Test
-    fun roundTripsLocalhostWithPort() {
-        val original = TalonLoginUri.Payload(
-            url = "http://localhost:8080",
-            code = "lidlut-tabwed-pillex-ridrup",
-        )
-        val encoded = TalonLoginUri.encode(original)
-        val decoded = assertNotNull(TalonLoginUri.decode(encoded))
-        assertEquals(original, decoded)
-    }
-
-    @Test
     fun escapesSpecialCharactersInUrl() {
         // Edge case: a URL with characters that must be percent-encoded
         // (query string, path with spaces). Trip through encode/decode
@@ -47,24 +25,14 @@ class TalonLoginUriTest {
     }
 
     @Test
-    fun rejectsForeignScheme() {
-        assertNull(TalonLoginUri.decode("https://login?url=foo&code=bar"))
-        assertNull(TalonLoginUri.decode("matrix://login?url=foo&code=bar"))
-    }
-
-    @Test
-    fun rejectsWrongHost() {
-        assertNull(TalonLoginUri.decode("talon://elsewhere?url=foo&code=bar"))
-    }
-
-    @Test
-    fun rejectsMissingUrl() {
-        assertNull(TalonLoginUri.decode("talon://login?code=foo"))
-    }
-
-    @Test
-    fun rejectsMissingCode() {
-        assertNull(TalonLoginUri.decode("talon://login?url=http://x"))
+    fun rejectsForeignOrIncompleteLinks() {
+        for (uri in listOf(
+            "https://login?url=foo&code=bar",
+            "matrix://login?url=foo&code=bar",
+            "talon://elsewhere?url=foo&code=bar",
+            "talon://login?code=foo",
+            "talon://login?url=http://x",
+        )) assertNull(TalonLoginUri.decode(uri), uri)
     }
 
     @Test

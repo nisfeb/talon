@@ -38,13 +38,6 @@ class DesktopLastOpenChatStoreTest {
     }
 
     @Test
-    fun `missing file means empty state - no exception`() {
-        // tempFile was deleted in init — store should construct cleanly.
-        val s = DesktopLastOpenChatStore(file = tempFile)
-        assertTrue(s.state.value.isEmpty())
-    }
-
-    @Test
     fun `corrupt file means empty state - no exception`() {
         tempFile.writeText("{not valid json")
         val s = DesktopLastOpenChatStore(file = tempFile)

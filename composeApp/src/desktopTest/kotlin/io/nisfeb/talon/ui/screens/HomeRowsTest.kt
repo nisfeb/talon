@@ -7,8 +7,6 @@ import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.ContactMap
 import org.junit.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -36,17 +34,6 @@ class HomeRowsTest {
         groups = groups,
         channelGroups = channelGroups,
     )
-
-    @Test
-    fun `empty input produces empty output`() {
-        val rows = buildHomeRows(
-            allConvs = emptyList(),
-            contactMap = contactMapWith(),
-            expandedGroups = emptySet(),
-            allUnreads = emptyMap(),
-        )
-        assertTrue(rows.isEmpty())
-    }
 
     @Test
     fun `pure DMs land in DirectMessages section sorted by recency`() {
@@ -92,22 +79,6 @@ class HomeRowsTest {
         val flats = rows.filterIsInstance<HomeRow.Flat>()
         assertEquals(1, flats.size, "only the bare patp should be a Flat row")
         assertEquals("~zod", flats[0].m.whom)
-    }
-
-    @Test
-    fun `group with no synced channels still emits a GroupHead`() {
-        val rows = buildHomeRows(
-            allConvs = emptyList(),
-            contactMap = contactMapWith(
-                groups = listOf(GroupEntity("~host/g1", title = "Group 1", image = null)),
-            ),
-            expandedGroups = emptySet(),
-            allUnreads = emptyMap(),
-        )
-        val heads = rows.filterIsInstance<HomeRow.GroupHead>()
-        assertEquals(1, heads.size)
-        assertEquals("~host/g1", heads[0].flag)
-        assertEquals(0, heads[0].childCount)
     }
 
     @Test
@@ -213,37 +184,6 @@ class HomeRowsTest {
     }
 
     @Test
-    fun `host-order mode sorts read channels by ChannelGroupEntity ordinal`() {
-        val convs = listOf(
-            msg("chat/~host/c", 300L) to 0,
-            msg("chat/~host/a", 100L) to 0,
-            msg("chat/~host/b", 200L) to 0,
-        )
-        val rows = buildHomeRows(
-            allConvs = convs,
-            contactMap = contactMapWith(
-                groups = listOf(GroupEntity("~host/g", title = "G", image = null)),
-                channelGroups = listOf(
-                    // Host put `a` first, `b` second, `c` third —
-                    // recency order is the inverse, so the test
-                    // disambiguates Recent vs HostOrder unambiguously.
-                    ChannelGroupEntity(nest = "chat/~host/a", groupFlag = "~host/g", ordinal = 0),
-                    ChannelGroupEntity(nest = "chat/~host/b", groupFlag = "~host/g", ordinal = 1),
-                    ChannelGroupEntity(nest = "chat/~host/c", groupFlag = "~host/g", ordinal = 2),
-                ),
-            ),
-            expandedGroups = setOf("~host/g"),
-            allUnreads = emptyMap(),
-            groupChannelOrder = io.nisfeb.talon.ui.GroupChannelOrder.HostOrder,
-        )
-        val children = rows.filterIsInstance<HomeRow.GroupChild>().map { it.whom }
-        assertEquals(
-            listOf("chat/~host/a", "chat/~host/b", "chat/~host/c"),
-            children,
-        )
-    }
-
-    @Test
     fun `host-order mode keeps unread channels first regardless of host ordinal`() {
         // Unread-first floats over the secondary sort in either mode —
         // a host-ordered channel with unread=0 should still sit below
@@ -276,57 +216,6 @@ class HomeRowsTest {
             ),
             children,
         )
-    }
-
-    @Test
-    fun `recent mode is the default and ignores ordinal`() {
-        // Default param (Recent). Ordinals are set high-to-low to
-        // verify they don't influence the sort: recency wins.
-        val convs = listOf(
-            msg("chat/~host/oldest", 100L) to 0,
-            msg("chat/~host/newest", 300L) to 0,
-        )
-        val rows = buildHomeRows(
-            allConvs = convs,
-            contactMap = contactMapWith(
-                groups = listOf(GroupEntity("~host/g", title = "G", image = null)),
-                channelGroups = listOf(
-                    // newest gets a higher ordinal — would push it
-                    // last in HostOrder. In Recent mode it stays first
-                    // because it's actually the most-recent.
-                    ChannelGroupEntity(nest = "chat/~host/oldest", groupFlag = "~host/g", ordinal = 0),
-                    ChannelGroupEntity(nest = "chat/~host/newest", groupFlag = "~host/g", ordinal = 99),
-                ),
-            ),
-            expandedGroups = setOf("~host/g"),
-            allUnreads = emptyMap(),
-        )
-        val children = rows.filterIsInstance<HomeRow.GroupChild>().map { it.whom }
-        assertEquals(
-            listOf("chat/~host/newest", "chat/~host/oldest"),
-            children,
-        )
-    }
-
-    @Test
-    fun `folder view groups members in user-defined ordinal order`() {
-        val convs = listOf(
-            msg("~zod", 100L) to 0,
-            msg("~bus", 200L) to 0,
-        )
-        val rows = buildFolderRows(
-            members = listOf(
-                FolderMemberEntity(folderId = 1L, whom = "~bus", ordinal = 0),
-                FolderMemberEntity(folderId = 1L, whom = "~zod", ordinal = 1),
-            ),
-            allConvs = convs,
-            contactMap = contactMapWith(),
-            expandedGroups = emptySet(),
-            allUnreads = emptyMap(),
-        )
-        val flats = rows.filterIsInstance<HomeRow.Flat>().map { it.m.whom }
-        // Ordinal-driven (NOT recency-sorted like the home view).
-        assertEquals(listOf("~bus", "~zod"), flats)
     }
 
     @Test

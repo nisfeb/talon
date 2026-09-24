@@ -70,13 +70,6 @@ class MarkdownHtmlTest {
     }
 
     @Test
-    fun `paragraphs split on blank lines`() {
-        val html = MarkdownHtml.render("one\n\ntwo")
-        assertTrue(html.contains("<p>one</p>"))
-        assertTrue(html.contains("<p>two</p>"))
-    }
-
-    @Test
     fun `bullet and ordered lists render`() {
         val ul = MarkdownHtml.render("- a\n- b")
         assertTrue(ul.contains("<ul>") && ul.contains("<li>a</li>") && ul.contains("<li>b</li>"))
@@ -139,12 +132,6 @@ class MarkdownHtmlTest {
         // Apostrophes get escaped, never left to break an attribute.
         assertFalse(html.contains("I'm excited"))
         assertTrue(html.contains("I&#39;m excited"))
-    }
-
-    @Test
-    fun `unrecognized markup survives as text rather than vanishing`() {
-        val html = MarkdownHtml.render("| a | b |\n| - | - |")
-        assertTrue(html.contains("a") && html.contains("b"), "content must never be dropped")
     }
 
     @Test

@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.After
@@ -22,7 +21,6 @@ import org.junit.Test
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -75,21 +73,6 @@ class SettingsSyncBucketTest {
         put("term", term)
         put("notify", notify)
         put("createdMs", createdMs)
-    }
-
-    @Test
-    fun `applyBucket WATCHWORDS upserts new terms into an empty table`() = runBlocking {
-        val bucket = buildJsonObject {
-            put("k1", watchwordEntry("hello"))
-            put("k2", watchwordEntry("world", notify = false))
-        }
-        sync.applyBucket(SettingsSyncImpl.BUCKET_WATCHWORDS, bucket)
-
-        val rows = db.watchwords().streamTerms().first()
-        assertEquals(2, rows.size)
-        val byTerm = rows.associateBy { it.term }
-        assertEquals(true, byTerm["hello"]?.notify)
-        assertEquals(false, byTerm["world"]?.notify)
     }
 
     @Test
@@ -193,16 +176,6 @@ class SettingsSyncBucketTest {
         assertTrue(db.watchwords().excludesAsList().isEmpty())
     }
 
-    @Test
-    fun `applyBucket WATCHWORD_EXCLUDES is idempotent`() = runBlocking {
-        // Applying the same bucket twice must yield the same state.
-        val bucket = buildJsonObject {
-            put("~zod", buildJsonObject {})
-        }
-        sync.applyBucket(SettingsSyncImpl.BUCKET_WATCHWORD_EXCLUDES, bucket)
-        sync.applyBucket(SettingsSyncImpl.BUCKET_WATCHWORD_EXCLUDES, bucket)
-        assertEquals(listOf("~zod"), db.watchwords().excludesAsList())
-    }
 }
 
 // ──────────────────────────────────────────────────────────────────

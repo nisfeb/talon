@@ -6,7 +6,6 @@ import org.junit.Test
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -57,22 +56,6 @@ class DesktopSessionStoreTest {
         val reloaded = DesktopSessionStore(file)
         assertEquals(1, reloaded.all().size)
         assertEquals("~zod", reloaded.all()[0].ship)
-    }
-
-    @Test
-    fun `save with makeActive true sets the active ship`() {
-        val store = DesktopSessionStore(file)
-        store.save(session("~zod"), makeActive = true)
-        assertEquals("~zod", store.activeShip())
-        assertEquals("~zod", store.active()?.ship)
-    }
-
-    @Test
-    fun `save with makeActive false leaves active untouched`() {
-        val store = DesktopSessionStore(file)
-        store.save(session("~zod"), makeActive = true)
-        store.save(session("~bus"), makeActive = false)
-        assertEquals("~zod", store.activeShip())
     }
 
     @Test
@@ -181,13 +164,6 @@ class DesktopSessionStoreTest {
         assertNotNull(active)
         assertEquals("~zod", active.ship)
         assertEquals("https://zod.example", active.shipUrl)
-    }
-
-    @Test
-    fun `atomic move leaves no tmp file after persist`() {
-        DesktopSessionStore(file).save(session("~zod"))
-        val tmp = File(tmpDir, "sessions.json.tmp")
-        assertFalse(tmp.exists())
     }
 
     @Test

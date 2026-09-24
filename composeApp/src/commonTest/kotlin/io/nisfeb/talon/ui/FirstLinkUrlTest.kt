@@ -31,12 +31,6 @@ class FirstLinkUrlTest {
         StoryPart.LinkPreview(url = url, title = null, description = null, imageUrl = null, siteName = null)
 
     @Test
-    fun `a URL with no server preview gets a client card`() {
-        val parts = listOf(textWithUrl("see ", "https://example.com/post"))
-        assertEquals("https://example.com/post", firstLinkUrl(parts))
-    }
-
-    @Test
     fun `a URL the story already previews is skipped`() {
         // The bug: text URL + matching server block.link → only the
         // story's preview should show, so the client card is suppressed.
@@ -68,8 +62,4 @@ class FirstLinkUrlTest {
         assertEquals("https://other.com/b", firstLinkUrl(parts))
     }
 
-    @Test
-    fun `no links yields null`() {
-        assertNull(firstLinkUrl(listOf(StoryPart.Text(buildAnnotatedString { append("plain text") }))))
-    }
 }

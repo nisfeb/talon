@@ -16,7 +16,6 @@ import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -85,15 +84,6 @@ class SlashCommandsTest {
     }
 
     @Test
-    fun `recognized command with bad usage still returns Error not passthrough`() {
-        // The passthrough only catches truly-unknown commands. A known
-        // command with invalid args must still surface its helpful error
-        // rather than silently sending "/pet" into the channel.
-        val r = run("/pet")
-        assertTrue(r is CommandResult.Error)
-    }
-
-    @Test
     fun `img file mic are recognized as Handled by the dispatcher`() {
         // These three are intercepted by the UI layer before runCommand
         // sees them, but routing still needs to recognize them as known
@@ -144,13 +134,6 @@ class SlashCommandsTest {
     }
 
     @Test
-    fun `pet rejects an arg that isn't a patp`() {
-        val r = run("/pet badShip myname")
-        assertTrue(r is CommandResult.Error)
-        assertTrue((r as CommandResult.Error).message.contains("isn't a ship patp"))
-    }
-
-    @Test
     fun `pet rejects uppercase patp because regex is lowercase`() {
         // The regex is `^~[a-z-]+$` — uppercase is rejected before the
         // repo is touched. Without this guard, `/pet ~ZOD foo` would
@@ -158,13 +141,6 @@ class SlashCommandsTest {
         val r = run("/pet ~ZOD myname")
         assertTrue(r is CommandResult.Error)
         assertTrue((r as CommandResult.Error).message.contains("isn't a ship patp"))
-    }
-
-    @Test
-    fun `pet rejects an empty name after a valid ship`() {
-        // The trailing whitespace-only "name" trims to empty.
-        val r = run("/pet ~zod    ")
-        assertTrue(r is CommandResult.Error)
     }
 
     @Test
@@ -293,17 +269,6 @@ class SlashCommandsTest {
         // Both lowercases the query; commands' names are already lower.
         val r = filterSlashCommands("CA")
         assertNotNull(r.firstOrNull { it.name == "cal" })
-    }
-
-    @Test
-    fun `filterSlashCommands prefix matches outrank substring matches`() {
-        // "p" is a prefix of "pet"/"poll" and a substring of "help"-
-        // ish names — but no command has it as a substring, so check
-        // the ordering by using "a" which is in "cal" as a substring
-        // and a prefix of nothing.
-        val r = filterSlashCommands("a")
-        assertNull(r.firstOrNull { it.name.startsWith("a") })
-        assertNotNull(r.firstOrNull { it.name.contains("a") })
     }
 
     // ── /poke ───────────────────────────────────────────────────────

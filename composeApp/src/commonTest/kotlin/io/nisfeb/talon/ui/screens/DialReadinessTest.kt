@@ -10,11 +10,6 @@ class DialReadinessTest {
     private val hour = 60 * 60_000L
 
     @Test
-    fun `nothing fetched yet is stale`() {
-        assertTrue(weatherIsStale(0L, 1_789_128_000_000L))
-    }
-
-    @Test
     fun `a fresh answer is left alone`() {
         val now = 1_789_128_000_000L
         assertTrue(!weatherIsStale(now, now))

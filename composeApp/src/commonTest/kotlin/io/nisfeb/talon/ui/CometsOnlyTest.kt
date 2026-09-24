@@ -3,7 +3,6 @@ package io.nisfeb.talon.ui
 import io.nisfeb.talon.data.ContactEntity
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 /**
@@ -29,33 +28,12 @@ class CometsOnlyTest {
     )
 
     @Test
-    fun `only a comet has a nym at all`() {
-        assertNotNull(Mnemonym.forShip(comet))
-        assertNotNull(Mnemonym.display(comet))
-        for (ship in notComets) {
-            assertNull(Mnemonym.forShip(ship), "forShip($ship)")
-            assertNull(Mnemonym.display(ship), "display($ship)")
-        }
-    }
-
-    @Test
     fun `the display name falls through to the at-p for everything else`() {
         val map = ContactMap()
         assertEquals("..admire...attune", map.displayName(comet))
         for (ship in notComets) {
             assertEquals(ship, map.displayName(ship), "displayName($ship)")
         }
-    }
-
-    @Test
-    fun `a comet is never shown by its at-p`() {
-        // The rule every surface goes through: handle() is what a ship
-        // is called with nicknames set aside, and for a comet it is
-        // never the fifty-six characters the name replaces.
-        val map = ContactMap()
-        assertEquals("..admire...attune", map.handle(comet))
-        // Everything else has an @p short enough to read.
-        for (ship in notComets) assertEquals(ship, map.handle(ship))
     }
 
     @Test

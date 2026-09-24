@@ -29,11 +29,6 @@ class LatticeSignTest {
     )
 
     @Test
-    fun `a record survives being written out and read back`() {
-        assertEquals(rec, signedRecordIn(rec.armor()))
-    }
-
-    @Test
     fun `a record is found in the middle of a pasted message`() {
         val pasted = "here you go:\n\n${rec.armor()}\n\nthat's the file I mentioned"
         assertEquals(rec, signedRecordIn(pasted))

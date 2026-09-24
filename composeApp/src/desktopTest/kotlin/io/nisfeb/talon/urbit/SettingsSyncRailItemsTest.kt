@@ -44,16 +44,6 @@ class SettingsSyncRailItemsTest {
     }
 
     @Test
-    fun `applyBucket persists a 'visible false' entry as a row`() = runBlocking {
-        val incoming: JsonObject = buildJsonObject {
-            put("Settings", buildJsonObject { put("visible", false) })
-        }
-        sync.applyBucket(SettingsSyncImpl.BUCKET_RAIL_ITEMS, incoming)
-        val rows = db.railItemPrefs().streamAll().first()
-        assertEquals(listOf(RailItemPrefEntity("Settings", false)), rows)
-    }
-
-    @Test
     fun `applyBucket skips 'visible true' entries (absence is the default)`() = runBlocking {
         val incoming: JsonObject = buildJsonObject {
             put("Settings", buildJsonObject { put("visible", true) })

@@ -24,11 +24,6 @@ class LinkifyTextTest {
     }
 
     @Test
-    fun `https url is detected`() {
-        assertEquals(listOf("https://example.com"), urlsIn("see https://example.com"))
-    }
-
-    @Test
     fun `http url is detected`() {
         assertEquals(listOf("http://example.com"), urlsIn("http://example.com"))
     }

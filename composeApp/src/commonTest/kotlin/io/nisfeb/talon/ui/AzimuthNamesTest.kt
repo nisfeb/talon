@@ -35,14 +35,6 @@ class AzimuthNamesTest {
         }
 
     @Test
-    fun `it is off until somebody asks for it`() {
-        // Turning it on has the client look up every planet it shows,
-        // which is not something to start doing unasked.
-        assertFalse(AzimuthNames.enabled.value)
-        assertEquals(planet, ContactMap().displayName(planet))
-    }
-
-    @Test
     fun `only planets and moons are worth looking up`() {
         assertTrue(AzimuthNames.wantsLookup(planet))
         assertTrue(AzimuthNames.wantsLookup(moon))

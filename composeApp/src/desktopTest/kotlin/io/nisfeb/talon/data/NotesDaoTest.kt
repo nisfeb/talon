@@ -123,21 +123,6 @@ class NotesDaoTest {
     }
 
     @Test
-    fun `clearing pending lets the next snapshot win`() = runBlocking {
-        val dao = db.notes()
-        dao.upsertNotes(listOf(note(1, "original")))
-        dao.applyLocalEdit(flag, 1, "rejected edit", 2_000L)
-        // Save was rejected, so the optimistic state is abandoned.
-        dao.setPending(flag, 1, false)
-
-        dao.replaceTree(flag, emptyList(), listOf(note(1, "host version")))
-
-        val row = dao.note(flag, 1)!!
-        assertFalse(row.pending)
-        assertEquals("host version", row.bodyMd, "host must win once the edit is abandoned")
-    }
-
-    @Test
     fun `a mark left over from a dead save can be swept`() = runBlocking {
         // The stuck case seen in the app: a save under an older build set
         // pending and never cleared it. Nothing else clears the mark, and

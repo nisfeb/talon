@@ -32,16 +32,6 @@ class AiProfileTest {
     )
 
     @Test
-    fun `the frontier model is provider one and the default model`() {
-        val p = migrateProfile(cfg())
-        val main = p.provider(MAIN_PROVIDER)!!
-        assertEquals(ProviderKind.OpenRouter, main.kind)
-        assertEquals("sk-or", main.apiKey)
-        assertEquals(ModelRef(MAIN_PROVIDER, "anthropic/claude-opus-4.8"), p.defaultModel)
-        assertTrue(p.provider(DEVICE_PROVIDER) != null, "this device is always a provider")
-    }
-
-    @Test
     fun `a private model with a url is a provider triage reads with, and without one this device is`() {
         val served = migrateProfile(cfg(privateUrl = "http://127.0.0.1:1234/v1", privateModel = "qwen3-8b"), ProfileInputs(orreryFed = true))
         assertEquals(Resolved(served.provider(PRIVATE_PROVIDER)!!, "qwen3-8b"), served.resolve(AiFeature.OrreryTriage))

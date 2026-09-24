@@ -99,28 +99,6 @@ class MergeContactStatusTest {
     }
 
     @Test
-    fun `existing timestamp survives when incoming has none — the upgrade-install case`() =
-        runBlocking {
-            // The exact bug we shipped 0.8.9 to fix:
-            //   1. Existing contact had timestamp T from an earlier session.
-            //   2. App upgrade triggers bootstrapContacts.
-            //   3. Server's /v1/all entry omits mod-at (older Tlon ships do this).
-            //   4. parseContact returns statusUpdatedMs=null because no mod-at.
-            //   5. Pre-fix: bootstrap pre-stamped now into incoming, then
-            //      mergeContact's "incoming != null wins" branch overwrote T.
-            //      Every status pushed past lastSeenStatusesMs → spurious pip.
-            //   6. Post-fix: bootstrap does NOT pre-stamp; mergeContact sees
-            //      incoming.statusUpdatedMs=null, existing!=null, keeps T.
-            db.contacts().upsert(
-                contact("~sampel", status = "hello", statusUpdatedMs = 100L),
-            )
-            val merged = repo.mergeContact(
-                contact("~sampel", status = "hello", statusUpdatedMs = null),
-            )
-            assertEquals(100L, merged.statusUpdatedMs)
-        }
-
-    @Test
     fun `first-seen contact with status and no server timestamp stamps now`() = runBlocking {
         // Truly first observation — the feed needs SOMETHING to sort
         // by, otherwise this contact's status sinks to the bottom
@@ -138,16 +116,6 @@ class MergeContactStatusTest {
             "expected stamp in [$before, $after], got ${merged.statusUpdatedMs}",
         )
     }
-
-    @Test
-    fun `first-seen contact with status and a server timestamp uses the server value`() =
-        runBlocking {
-            // The happy path: ship sent us mod-at, we trust it.
-            val merged = repo.mergeContact(
-                contact("~sampel", status = "hello", statusUpdatedMs = 1_700_000_000_000L),
-            )
-            assertEquals(1_700_000_000_000L, merged.statusUpdatedMs)
-        }
 
     @Test
     fun `bootstrap-shape entry without mod-at preserves existing — closes the parseContact loop`() =

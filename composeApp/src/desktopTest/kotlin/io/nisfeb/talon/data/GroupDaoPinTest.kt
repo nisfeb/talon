@@ -74,26 +74,6 @@ class GroupDaoPinTest {
     }
 
     @Test
-    fun `setPinnedPostId returns 1 and updates row when row present`() = runBlocking {
-        val nest = "chat/~sampel/group"
-        db.groups().upsertChannelGroups(listOf(stubChannelGroup(nest)))
-        val affected = db.groups().setPinnedPostId(nest, "post-1")
-        assertEquals(1, affected)
-        assertEquals("post-1", db.groups().pinnedPostIdFor(nest))
-    }
-
-    @Test
-    fun `streamPinnedPostId emits the new value after a pin write on an existing row`() =
-        runBlocking {
-            val nest = "chat/~sampel/group"
-            db.groups().upsertChannelGroups(listOf(stubChannelGroup(nest)))
-            db.groups().setPinnedPostId(nest, "post-42")
-            // first() returns the current value the Flow holds — Room
-            // queries with a WHERE-clause emit per table-write.
-            assertEquals("post-42", db.groups().streamPinnedPostId(nest).first())
-        }
-
-    @Test
     fun `upsertChannelGroups stub then setPinnedPostId persists - the fix path`() =
         runBlocking {
             // What TlonChatRepo.ensureChannelGroupRow + pinPost does

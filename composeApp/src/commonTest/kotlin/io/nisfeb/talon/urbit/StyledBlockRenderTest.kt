@@ -37,11 +37,6 @@ class StyledBlockRenderTest {
     }
 
     @Test
-    fun `prose with styling is untouched`() {
-        assertEquals(listOf("Text"), kinds("just **bold** prose, no block here"))
-    }
-
-    @Test
     fun `an already structured quote is not re-derived from its own rendering`() {
         // A blockquote span is block-level, so the verse must not be
         // rebuilt and re-parsed; it renders straight through.

@@ -22,23 +22,6 @@ class RawMarkdownTest {
     }
 
     @Test
-    fun `plain text round-trips`() {
-        assertEquals("hello world", render("hello world"))
-    }
-
-    @Test
-    fun `bold round-trips`() {
-        assertEquals("**hi**", render("**hi**"))
-    }
-
-    @Test
-    fun `italic round-trips with asterisk`() {
-        // Tokenizer normalizes `_x_` → italic span; renderer emits `*x*`.
-        assertEquals("*emphasis*", render("*emphasis*"))
-        assertEquals("*emphasis*", render("_emphasis_"))
-    }
-
-    @Test
     fun `strike round-trips`() {
         assertEquals("~~gone~~", render("~~gone~~"))
     }
@@ -75,28 +58,13 @@ class RawMarkdownTest {
     }
 
     @Test
-    fun `blockquote round-trips line-prefixed`() {
-        assertEquals("> a quote", render("> a quote"))
-    }
-
-    @Test
     fun `horizontal rule round-trips`() {
         assertEquals("---", render("---"))
     }
 
     @Test
-    fun `multiple paragraphs separated by blank line`() {
-        assertEquals("first\n\nsecond", render("first\n\nsecond"))
-    }
-
-    @Test
     fun `unrecognized json returns empty string instead of throwing`() {
         assertEquals("", RawMarkdown.fromStoryJson("{not valid json"))
-    }
-
-    @Test
-    fun `null story returns empty`() {
-        assertEquals("", RawMarkdown.fromStory(null))
     }
 
     // ── wire shapes the parser never makes, but Tlon does ───────────

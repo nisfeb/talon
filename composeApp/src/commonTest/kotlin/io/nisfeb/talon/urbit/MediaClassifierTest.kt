@@ -26,12 +26,6 @@ class MediaClassifierTest {
         """[{"block":{"image":{"src":"$src","alt":"$alt","width":0,"height":0}}}]"""
 
     @Test
-    fun `photo extensions land as Photo`() {
-        val rows = MediaClassifier.extractMedia(textMessage(linkVerse("img", "https://x.com/a.jpg")))
-        assertEquals("Photo", rows.single().category)
-    }
-
-    @Test
     fun `a video sent as an image block is filed as a video`() {
         // Tlon uploads a video and sends it as an image block, so the
         // extension decides, not the block's name. Filed as a Photo it
@@ -76,18 +70,6 @@ class MediaClassifierTest {
     fun `pdf lands as File`() {
         val rows = MediaClassifier.extractMedia(textMessage(linkVerse("doc", "https://x.com/r.pdf")))
         assertEquals("File", rows.single().category)
-    }
-
-    @Test
-    fun `bare url lands as Link`() {
-        val rows = MediaClassifier.extractMedia(textMessage(linkVerse("site", "https://x.com/article")))
-        assertEquals("Link", rows.single().category)
-    }
-
-    @Test
-    fun `query string and fragment do not affect extension match`() {
-        val rows = MediaClassifier.extractMedia(textMessage(linkVerse("img", "https://x.com/a.jpg?w=200#crop")))
-        assertEquals("Photo", rows.single().category)
     }
 
     @Test

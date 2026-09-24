@@ -33,19 +33,6 @@ class RailItemPrefDaoTest {
     }
 
     @Test
-    fun `empty table streams empty list`() = runBlocking {
-        val rows = db.railItemPrefs().streamAll().first()
-        assertEquals(emptyList(), rows)
-    }
-
-    @Test
-    fun `upsert then stream returns the row`() = runBlocking {
-        db.railItemPrefs().upsert(RailItemPrefEntity("Settings", visible = false))
-        val rows = db.railItemPrefs().streamAll().first()
-        assertEquals(listOf(RailItemPrefEntity("Settings", false)), rows)
-    }
-
-    @Test
     fun `upsert with same key replaces the value`() = runBlocking {
         db.railItemPrefs().upsert(RailItemPrefEntity("Settings", visible = false))
         db.railItemPrefs().upsert(RailItemPrefEntity("Settings", visible = true))

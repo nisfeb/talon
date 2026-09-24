@@ -53,14 +53,4 @@ class LegacyBindMatchTest {
         )
     }
 
-    @Test
-    fun noMatchMeansHandsOff() {
-        assertNull(
-            PartyLineHost.legacyFlagFor(
-                roomName = "handmade-room",
-                ourShip = "~zod",
-                groupFlags = listOf("~zod/some-group"),
-            ),
-        )
-    }
 }

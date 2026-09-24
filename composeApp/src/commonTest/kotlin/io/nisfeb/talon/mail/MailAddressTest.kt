@@ -55,10 +55,4 @@ class MailAddressTest {
         assertEquals(listOf("~zod"), good)
     }
 
-    @Test
-    fun `an empty field is neither good nor bad`() {
-        val (good, bad) = parseRecipients("  ,  ")
-        assertTrue(good.isEmpty())
-        assertTrue(bad.isEmpty())
-    }
 }

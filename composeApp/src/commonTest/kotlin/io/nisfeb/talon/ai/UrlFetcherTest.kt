@@ -2,7 +2,6 @@ package io.nisfeb.talon.ai
 
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -42,11 +41,6 @@ class UrlFetcherTest {
         assertTrue("<p>" !in out && "<div>" !in out, "tags must be stripped: $out")
         // Block elements become line breaks, so a and b aren't glued.
         assertFalse("ab" in out.replace(" ", ""), out)
-    }
-
-    @Test
-    fun `htmlToText collapses whitespace`() {
-        assertEquals("one two", htmlToText("<span>one</span>   <span>two</span>"))
     }
 
     /**

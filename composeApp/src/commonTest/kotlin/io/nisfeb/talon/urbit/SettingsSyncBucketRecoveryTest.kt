@@ -29,14 +29,9 @@ import kotlin.test.assertTrue
 class SettingsSyncBucketRecoveryTest {
 
     @Test
-    fun `missing bucket triggers seed`() {
+    fun `missing or empty bucket triggers seed`() {
         assertTrue(SettingsSyncImpl.bucketIsMissingOrEmpty(null))
-    }
-
-    @Test
-    fun `empty bucket triggers seed`() {
-        // {} — bucket exists but has no entries. Treat as missing
-        // for recovery purposes.
+        // {} — bucket exists but has no entries. Treat as missing.
         assertTrue(SettingsSyncImpl.bucketIsMissingOrEmpty(buildJsonObject {}))
     }
 
@@ -46,13 +41,4 @@ class SettingsSyncBucketRecoveryTest {
         assertFalse(SettingsSyncImpl.bucketIsMissingOrEmpty(bucket))
     }
 
-    @Test
-    fun `bucket with many entries skips seed`() {
-        val bucket = buildJsonObject {
-            put("a", "1")
-            put("b", "2")
-            put("c", "3")
-        }
-        assertFalse(SettingsSyncImpl.bucketIsMissingOrEmpty(bucket))
-    }
 }

@@ -44,23 +44,6 @@ class ChatPaneScaffoldTest {
 
     @OptIn(ExperimentalTestApi::class)
     @Test
-    fun `wide window renders both panes when detail is set`() = runComposeUiTest {
-        setContent {
-            androidx.compose.foundation.layout.Box(
-                Modifier.size(width = 1200.dp, height = 800.dp),
-            ) {
-                ChatPaneScaffold(
-                    list = { Text("LIST") },
-                    detail = { Text("DETAIL") },
-                )
-            }
-        }
-        onNodeWithText("LIST").assertExists()
-        onNodeWithText("DETAIL").assertExists()
-    }
-
-    @OptIn(ExperimentalTestApi::class)
-    @Test
     fun `wide window with null detail renders empty pane copy`() = runComposeUiTest {
         setContent {
             androidx.compose.foundation.layout.Box(

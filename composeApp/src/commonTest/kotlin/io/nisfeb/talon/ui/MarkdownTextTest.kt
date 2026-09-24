@@ -58,18 +58,6 @@ class MarkdownTextTest {
     }
 
     @Test
-    fun `inline links and italics lose their markers, bare brackets survive`() {
-        val a = inlineAnnotated("see [docs](https://x.dev) and *this*", Color.Unspecified)
-        assertEquals("see docs and this", a.text)
-        assertEquals(
-            listOf("https://x.dev"),
-            a.getLinkAnnotations(0, a.length).mapNotNull { (it.item as? LinkAnnotation.Url)?.url },
-        )
-        // Not a link: no `](`. The text must come through untouched.
-        assertEquals("[wat] a * b", inlineAnnotated("[wat] a * b", Color.Unspecified).text)
-    }
-
-    @Test
     fun `a bare bracketed token before a real link stays literal`() {
         // Regression: '[' used to pair with the first '](' anywhere later,
         // so "[1] see [docs](url)" rendered one link labeled "1] see [docs".

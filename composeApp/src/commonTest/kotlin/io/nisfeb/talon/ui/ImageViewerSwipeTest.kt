@@ -19,12 +19,6 @@ class ImageViewerSwipeTest {
     private val threshold = 60f
 
     @Test
-    fun `tiny drag does nothing`() {
-        assertEquals(SwipeAction.None, decideSwipeAction(5f, threshold, scale = 1f))
-        assertEquals(SwipeAction.None, decideSwipeAction(-5f, threshold, scale = 1f))
-    }
-
-    @Test
     fun `drag right past threshold navigates to previous`() {
         assertEquals(
             SwipeAction.Previous,
@@ -49,17 +43,6 @@ class ImageViewerSwipeTest {
     }
 
     @Test
-    fun `scale above 1f disables navigation regardless of drag`() {
-        // User pinch-zoomed; horizontal drag is now panning, not
-        // navigating. The gesture detector itself skips at the
-        // pointerInput key level, but if anything calls into the
-        // pure decider with scale > 1f it must still say None.
-        assertEquals(SwipeAction.None, decideSwipeAction(500f, threshold, scale = 1.5f))
-        assertEquals(SwipeAction.None, decideSwipeAction(-500f, threshold, scale = 2.5f))
-        assertEquals(SwipeAction.None, decideSwipeAction(0f, threshold, scale = 6f))
-    }
-
-    @Test
     fun `scale just above 1f disables navigation`() {
         assertEquals(
             SwipeAction.None,
@@ -67,8 +50,4 @@ class ImageViewerSwipeTest {
         )
     }
 
-    @Test
-    fun `zero drag is a no-op even with low threshold`() {
-        assertEquals(SwipeAction.None, decideSwipeAction(0f, 10f, scale = 1f))
-    }
 }

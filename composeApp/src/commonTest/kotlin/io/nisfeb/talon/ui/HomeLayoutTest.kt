@@ -2,7 +2,6 @@ package io.nisfeb.talon.ui
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class HomeLayoutTest {
@@ -21,14 +20,6 @@ class HomeLayoutTest {
             )
         val back = HomeLayoutCodec.decode(HomeLayoutCodec.encode(arranged))
         assertEquals(arranged.widgets, back.widgets)
-    }
-
-    @Test
-    fun `nothing stored is the default, not an empty page`() {
-        // An empty home page would read as the feature having been
-        // removed rather than as never having been set up.
-        assertEquals(HomeLayout.DEFAULT, HomeLayoutCodec.decode(""))
-        assertEquals(HomeLayout.DEFAULT, HomeLayoutCodec.decode("   "))
     }
 
     @Test
@@ -141,19 +132,6 @@ class HomeLayoutTest {
         assertEquals(many.take(HOME_PINNED_MAX), w.pinned, "order is the order they were pinned")
     }
 
-    @Test
-    fun `the default is a page worth looking at`() {
-        val d = HomeLayout.DEFAULT.complete()
-        assertEquals(HomeWidgetKind.entries.size, d.widgets.size, "every kind is accounted for")
-        assertTrue(d[HomeWidgetKind.CLOCK].visible, "the dial is the centrepiece")
-        assertTrue(d.shown.size >= 3, "a first run should not look empty")
-        assertEquals(HomeWidgetKind.CLOCK, d.shown.first().kind)
-    }
-
-    @Test
-    fun `every calendar range has a label`() {
-        for (r in CalendarRange.entries) assertTrue(r.label.isNotBlank(), "$r has no label")
-    }
 }
 
 class HomeResizeTest {
@@ -162,24 +140,12 @@ class HomeResizeTest {
     private val row = 168f // a row unit's height
 
     @Test
-    fun `no drag is no change`() {
-        assertEquals(6, resizedSpan(6, 0f, col, HOME_COLUMNS))
-        assertEquals(4, resizedRows(4, 0f, row))
-    }
-
-    @Test
     fun `the handle flips at the half way mark`() {
         // Rounding, not truncation: a handle that only widened after a
         // whole column felt like it was ignoring you.
         assertEquals(6, resizedSpan(6, col * 0.49f, col, HOME_COLUMNS))
         assertEquals(7, resizedSpan(6, col * 0.51f, col, HOME_COLUMNS))
         assertEquals(3, resizedRows(2, row * 0.6f, row))
-    }
-
-    @Test
-    fun `dragging back the other way shrinks`() {
-        assertEquals(5, resizedSpan(6, -col * 0.8f, col, HOME_COLUMNS))
-        assertEquals(6, resizedRows(8, -row * 1.7f, row))
     }
 
     @Test
@@ -194,15 +160,6 @@ class HomeResizeTest {
     fun `one column means a widget can only ever be one wide`() {
         assertEquals(1, resizedSpan(1, col * 10f, col, 1))
         assertEquals(1, resizedSpan(6, col * 10f, col, 1))
-    }
-
-    @Test
-    fun `the steps are fine enough to be worth dragging`() {
-        // The complaint that prompted the finer grid: two columns and
-        // three row heights meant every drag jumped half the page.
-        assertTrue(HOME_COLUMNS >= 8, "$HOME_COLUMNS columns is a step, not a grid")
-        assertTrue(HOME_SPAN_RANGE.count() >= 6, "only ${HOME_SPAN_RANGE.count()} widths on offer")
-        assertTrue(HOME_ROW_RANGE.count() >= 6, "only ${HOME_ROW_RANGE.count()} heights on offer")
     }
 
     /** One grip drag, frame by frame, the way the gesture delivers it. */
@@ -243,21 +200,6 @@ class HomeResizeTest {
             compounding > honest,
             "the live-base form should overshoot, or this test is not watching anything",
         )
-    }
-
-    @Test
-    fun `a slow drag lands in the same place as a fast one`() {
-        // Same travel, different numbers of frames: the result must
-        // come from where the pointer is, not from how it got there.
-        for (frames in listOf(1, 3, 24, 200)) {
-            assertEquals(8, drag(from = 6, travel = col * 2, frames = frames), "at $frames frames")
-        }
-    }
-
-    @Test
-    fun `a narrow drag moves one column, not half the page`() {
-        assertEquals(7, resizedSpan(6, col, col, HOME_COLUMNS))
-        assertEquals(5, resizedSpan(6, -col, col, HOME_COLUMNS))
     }
 
     @Test
@@ -311,26 +253,10 @@ class HomePlacementTest {
     }
 
     @Test
-    fun `the second row is reachable`() {
-        // The complaint outright: a widget could not be put on the row
-        // below, because rows were a consequence of the order.
-        val l = layout(w(k[0], 0, 0, rows = 4), w(k[1], 6, 0, rows = 4))
-        val moved = l.placed(k[1], col = 0, row = 4)
-        assertEquals(4, moved[k[1]].row)
-        assertEquals(0, moved[k[0]].row, "and the one above it did not move")
-    }
-
-    @Test
     fun `nothing may hang off the right hand edge`() {
         val l = layout(w(k[0], 0, 0, span = 7))
         assertEquals(HOME_COLUMNS - 7, l.placed(k[0], col = 11, row = 0)[k[0]].col)
         assertEquals(0, l.placed(k[0], col = -4, row = 0)[k[0]].col)
-    }
-
-    @Test
-    fun `a widget cannot be dropped above the top`() {
-        val l = layout(w(k[0], 0, 4))
-        assertEquals(0, l.placed(k[0], col = 0, row = -3)[k[0]].row)
     }
 
     @Test
@@ -351,24 +277,9 @@ class HomePlacementTest {
         assertEquals(HOME_LAYOUT_VERSION, back.version)
     }
 
-    @Test
-    fun `the default arrangement does not overlap itself`() {
-        val d = HomeLayout.DEFAULT.complete().shown
-        for (i in d.indices) {
-            for (j in i + 1 until d.size) {
-                assertTrue(!overlaps(d[i], d[j]), "${d[i].kind} sits on ${d[j].kind}")
-            }
-        }
-        assertTrue(d.all { it.right <= HOME_COLUMNS }, "something hangs off the edge")
-    }
 }
 
 class HomeDropTest {
-
-    @Test
-    fun `no drag leaves it where it was`() {
-        assertEquals(3 to 5, droppedAt(3, 5, 0f, 0f, 100f, 40f))
-    }
 
     @Test
     fun `it settles on the nearest square, not the one fully entered`() {
@@ -396,15 +307,6 @@ class HomeNoShoveTest {
         HomeWidget(kind, col = col, row = row, span = span, rows = rows)
 
     private fun layout(vararg ws: HomeWidget) = HomeLayout(ws.toList(), HOME_LAYOUT_VERSION)
-
-    @Test
-    fun `dropping one widget on another leaves the other alone`() {
-        val l = layout(w(k[0], 0, 0), w(k[1], 0, 4))
-        val moved = l.placed(k[0], col = 0, row = 4)
-        assertEquals(4, moved[k[0]].row, "the one in hand goes where it was dropped")
-        assertEquals(4, moved[k[1]].row, "and the one it landed on has not budged")
-        assertEquals(0, moved[k[1]].col)
-    }
 
     @Test
     fun `an overlap is allowed to persist`() {

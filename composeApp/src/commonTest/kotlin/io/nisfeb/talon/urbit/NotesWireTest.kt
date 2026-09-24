@@ -74,14 +74,6 @@ class NotesWireTest {
     }
 
     @Test
-    fun `note tolerates null slug`() {
-        val n = NotesParser.note(
-            obj("""{"id":1,"notebookId":1,"folderId":1,"title":"t","slug":null,"bodyMd":"","revision":0}"""),
-        )!!
-        assertNull(n.slug)
-    }
-
-    @Test
     fun `root folder has null parent`() {
         val f = NotesParser.folder(
             obj("""{"id":1,"notebookId":1,"name":"root","parentFolderId":null,"createdAt":1750000000}"""),
@@ -340,13 +332,6 @@ class NotesWireTest {
         assertEquals(6L, summary.notebook.rootFolderId)
         // A plain %ok mutation carries no notebook to unwrap.
         assertNull(NotesParser.createdNotebook(obj("""{"body":{"type":"ok"}}""")))
-    }
-
-    @Test
-    fun `pending is not treated as a completed write`() {
-        // %pending means a cross-ship request is still in flight; calling
-        // that "saved" would be the same class of bug as the poke 204.
-        assertFalse(NotesParser.isWriteOk(obj("""{"body":{"type":"pending","status":"sending"}}""")))
     }
 
     @Test

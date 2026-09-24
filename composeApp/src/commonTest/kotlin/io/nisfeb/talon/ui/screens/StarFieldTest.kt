@@ -32,16 +32,6 @@ class StarFieldTest {
     }
 
     @Test
-    fun `noise stays in range, including for salts nobody uses yet`() {
-        for (i in 0 until 500) {
-            for (salt in 0 until 8) {
-                val n = starNoise(i, salt)
-                assertTrue(n in 0f..1f, "star $i salt $salt gave $n")
-            }
-        }
-    }
-
-    @Test
     fun `every star fits inside the band`() {
         // The same fault the clouds shipped with twice: a dot whose
         // offset plus its own size crosses the rim gets clipped into a

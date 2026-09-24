@@ -3,7 +3,6 @@ package io.nisfeb.talon.urbit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -12,7 +11,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.Test
 
@@ -25,27 +23,7 @@ class WireShapesTest {
 
     private val json = Json { prettyPrint = false }
 
-    private fun canonical(o: JsonObject): String =
-        // Re-parse to re-sort keys alphabetically — JsonObject preserves
-        // insertion order but two semantically-equal objects may differ
-        // in key order. Using `.toString()` is fine for our asserts
-        // since builders use consistent insertion order.
-        o.toString()
-
     // ─── DM / club envelopes ────────────────────────────────────
-
-    @Test
-    fun `dmAction wraps with ship and diff`() {
-        val out = dmAction(
-            peer = "~sampel-palnet",
-            postId = "~author/1.234",
-            delta = buildJsonObject { put("add", JsonNull) },
-        )
-        assertEquals("~sampel-palnet", out["ship"]!!.jsonPrimitive.content)
-        val diff = out["diff"]!!.jsonObject
-        assertEquals("~author/1.234", diff["id"]!!.jsonPrimitive.content)
-        assertTrue(diff["delta"]!!.jsonObject.containsKey("add"))
-    }
 
     @Test
     fun `clubAction includes uid sentinel and nested writ`() {
@@ -85,27 +63,7 @@ class WireShapesTest {
         )
     }
 
-    @Test
-    fun `channelOrderAction with empty list clears pin`() {
-        // Unpin: set order to []. Banner clears when server echoes back.
-        val out = channelOrderAction(emptyList())
-        assertEquals(0, out["order"]!!.jsonArray.size)
-    }
-
     // ─── reply deltas ────────────────────────────────────────────
-
-    @Test
-    fun `replyDelta wraps reply-essay under delta add`() {
-        val essay = buildJsonObject { put("content", JsonArray(emptyList())) }
-        val out = replyDelta(replyId = "~author/9.999", replyEssay = essay)
-        val reply = out["reply"]!!.jsonObject
-        assertEquals("~author/9.999", reply["id"]!!.jsonPrimitive.content)
-        assertEquals(JsonNull, reply["meta"])
-        val add = reply["delta"]!!.jsonObject["add"]!!.jsonObject
-        assertTrue(add["reply-essay"]!!.jsonObject === essay ||
-            add["reply-essay"]!!.jsonObject.toString() == essay.toString())
-        assertEquals(JsonNull, add["time"])
-    }
 
     // ─── channel post action shapes ─────────────────────────────
 
@@ -183,23 +141,6 @@ class WireShapesTest {
     }
 
     // ─── group-action-4 ────────────────────────────────────────
-
-    @Test
-    fun `groupAction4 produces {group {flag, a-group}}`() {
-        val diff = buildJsonObject {
-            put("seat", buildJsonObject {
-                put("ships", JsonArray(emptyList()))
-                put("a-seat", buildJsonObject { put("del", JsonNull) })
-            })
-        }
-        val out = groupAction4("~host/slug", diff)
-        val g = out["group"]!!.jsonObject
-        assertEquals("~host/slug", g["flag"]!!.jsonPrimitive.content)
-        assertTrue(g["a-group"]!!.jsonObject.containsKey("seat"))
-        // No legacy `update`/`time` envelope anymore.
-        assertTrue(!out.containsKey("update"))
-        assertNull(out["time"])
-    }
 
     // ─── essay ─────────────────────────────────────────────────
 

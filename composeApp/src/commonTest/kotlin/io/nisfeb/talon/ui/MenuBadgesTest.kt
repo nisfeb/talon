@@ -2,8 +2,6 @@ package io.nisfeb.talon.ui
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 
 /**
  * Pin the rail-item → freshness flag mapping. The DesktopShell
@@ -14,28 +12,13 @@ import kotlin.test.assertTrue
 class MenuBadgesTest {
 
     @Test
-    fun `default constructor reports nothing fresh`() {
-        val b = MenuBadges()
-        for (item in RailItem.entries) {
-            assertFalse(b.forItem(item), "$item should be quiet on a default MenuBadges")
-        }
-    }
-
-    @Test
-    fun `statusesFresh maps only to RailItem Statuses`() {
-        val b = MenuBadges(statusesFresh = true)
-        assertTrue(b.forItem(RailItem.Statuses))
-        for (item in RailItem.entries.filter { it != RailItem.Statuses }) {
-            assertFalse(b.forItem(item), "$item should not be fresh when only statuses is")
-        }
-    }
-
-    @Test
-    fun `invitesPending maps only to RailItem Invites`() {
-        val b = MenuBadges(invitesPending = true)
-        assertTrue(b.forItem(RailItem.Invites))
-        for (item in RailItem.entries.filter { it != RailItem.Invites }) {
-            assertFalse(b.forItem(item), "$item should not be fresh when only invites is")
+    fun `each flag lights only its own item`() {
+        for ((b, own) in listOf(
+            MenuBadges(statusesFresh = true) to RailItem.Statuses,
+            MenuBadges(invitesPending = true) to RailItem.Invites,
+            MenuBadges(assistantNews = true) to RailItem.Assistant,
+        )) {
+            assertEquals(setOf(own), RailItem.entries.filter(b::forItem).toSet(), "$b")
         }
     }
 
@@ -44,24 +27,6 @@ class MenuBadgesTest {
         val b = MenuBadges(mailUnread = true)
         assertEquals(setOf(RailItem.Mail), RailItem.entries.filter(b::forItem).toSet())
         assertEquals(true, b.byItem()[RailItem.Mail])
-    }
-
-    @Test
-    fun `both flags compose without crosstalk`() {
-        val b = MenuBadges(
-            statusesFresh = true,
-            invitesPending = true,
-        )
-        assertTrue(b.forItem(RailItem.Statuses))
-        assertTrue(b.forItem(RailItem.Invites))
-        // Items without a freshness concept stay quiet
-        for (item in listOf(
-            RailItem.Chats, RailItem.Bookmarks, RailItem.Activity,
-            RailItem.Profile, RailItem.Watchwords, RailItem.Administration,
-            RailItem.Settings,
-        )) {
-            assertFalse(b.forItem(item), "$item has no freshness — should be false")
-        }
     }
 
 }

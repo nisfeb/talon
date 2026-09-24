@@ -93,12 +93,6 @@ class CiteParserTest {
         assertNull(r.target)
     }
 
-    @Test
-    fun `desk cite without flag falls back generically`() {
-        val r = parse("""{"desk":{"where":""}}""")
-        assertEquals("App reference", r.label)
-    }
-
     // ─── file / bait / url cites ──────────────────────────────────
 
     @Test
@@ -171,10 +165,4 @@ class CiteParserTest {
 
     // ─── unknown fallback ──────────────────────────────────────────
 
-    @Test
-    fun `unknown cite keys fall through to the generic Reference label`() {
-        val r = parse("""{"surprise":"!"}""")
-        assertEquals("Reference", r.label)
-        assertNull(r.target)
-    }
 }

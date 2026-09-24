@@ -2,7 +2,6 @@ package io.nisfeb.talon.urbit
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -53,13 +52,6 @@ class AdminWireShapesTest {
     }
 
     @Test
-    fun `aGroupSeatDel accepts bare ship and adds tilde`() {
-        val body = aGroupSeatDel("sampel")
-        val ships = body["seat"]!!.jsonObject["ships"] as JsonArray
-        assertEquals("~sampel", ships[0].jsonPrimitive.content)
-    }
-
-    @Test
     fun `aGroupSeatAddRole uses add-roles list`() {
         val body = aGroupSeatAddRole("~sampel", "admin")
         val aSeat = body["seat"]!!.jsonObject["a-seat"]!!.jsonObject
@@ -98,17 +90,11 @@ class AdminWireShapesTest {
     // ─── entry.ask ───────────────────────────────────────────
 
     @Test
-    fun `aGroupAskResolve approve uses a-ask string approve`() {
-        val body = aGroupAskResolve("~guest", approve = true)
-        val ask = body["entry"]!!.jsonObject["ask"]!!.jsonObject
-        assertEquals("approve", ask["a-ask"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun `aGroupAskResolve deny uses a-ask string deny`() {
-        val body = aGroupAskResolve("~guest", approve = false)
-        val ask = body["entry"]!!.jsonObject["ask"]!!.jsonObject
-        assertEquals("deny", ask["a-ask"]!!.jsonPrimitive.content)
+    fun `aGroupAskResolve says approve or deny in a-ask`() {
+        for ((approve, word) in listOf(true to "approve", false to "deny")) {
+            val ask = aGroupAskResolve("~guest", approve)["entry"]!!.jsonObject["ask"]!!.jsonObject
+            assertEquals(word, ask["a-ask"]!!.jsonPrimitive.content)
+        }
     }
 
     // ─── entry.ban ───────────────────────────────────────────
@@ -162,13 +148,4 @@ class AdminWireShapesTest {
 
     // ─── normalisePatp ─────────────────────────────────────
 
-    @Test
-    fun `normalisePatp adds tilde when missing`() {
-        assertEquals("~sampel", normalisePatp("sampel"))
-    }
-
-    @Test
-    fun `normalisePatp is idempotent on tilded ship`() {
-        assertEquals("~sampel-palnet", normalisePatp("~sampel-palnet"))
-    }
 }

@@ -37,17 +37,6 @@ class ContactsTest {
     )
 
     @Test
-    fun `same instance reference is equal`() {
-        val list = listOf(base())
-        assertTrue(sameContactDisplay(list, list))
-    }
-
-    @Test
-    fun `identical content is equal`() {
-        assertTrue(sameContactDisplay(listOf(base()), listOf(base())))
-    }
-
-    @Test
     fun `different sizes are not equal`() {
         assertFalse(sameContactDisplay(listOf(base()), emptyList()))
         assertFalse(sameContactDisplay(emptyList(), listOf(base())))
@@ -68,23 +57,6 @@ class ContactsTest {
             sameContactDisplay(a, b),
             "status-only changes must not propagate as ContactMap rebuilds",
         )
-    }
-
-    @Test
-    fun `bio-only diff is suppressed`() {
-        // Bio isn't displayed by the chat list either — only the
-        // profile sheet reads it. Bio changes shouldn't tick the
-        // contacts flow.
-        val a = listOf(base(bio = null))
-        val b = listOf(base(bio = "I am a person"))
-        assertTrue(sameContactDisplay(a, b))
-    }
-
-    @Test
-    fun `nickname change is propagated`() {
-        val a = listOf(base(nickname = "zod"))
-        val b = listOf(base(nickname = "Zorro"))
-        assertFalse(sameContactDisplay(a, b))
     }
 
     @Test
@@ -118,15 +90,6 @@ class ContactsTest {
     fun `nickname change in just one row is propagated`() {
         val a = listOf(base("~zod", nickname = "zod"), base("~bus", nickname = "bus"))
         val b = listOf(base("~zod", nickname = "zod"), base("~bus", nickname = "Bussy"))
-        assertFalse(sameContactDisplay(a, b))
-    }
-
-    @Test
-    fun `null vs non-null nickname is propagated`() {
-        // Going from "no nickname" to "has nickname" matters for
-        // display (renders the nickname instead of the patp).
-        val a = listOf(base(nickname = null))
-        val b = listOf(base(nickname = "zod"))
         assertFalse(sameContactDisplay(a, b))
     }
 

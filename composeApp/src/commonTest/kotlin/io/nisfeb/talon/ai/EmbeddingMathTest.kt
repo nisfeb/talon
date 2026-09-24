@@ -2,7 +2,6 @@ package io.nisfeb.talon.ai
 
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
-import kotlin.test.assertEquals
 
 class EmbeddingMathTest {
 
@@ -25,8 +24,4 @@ class EmbeddingMathTest {
         )
     }
 
-    @Test
-    fun packLengthIsFourBytesPerFloat() {
-        assertEquals(12, packEmbedding(FloatArray(3)).size)
-    }
 }

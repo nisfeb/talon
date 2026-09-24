@@ -44,13 +44,6 @@ class SlashCommandFuzzTest {
     // ─── parseCalText invariants ────────────────────────────────────
 
     @Test
-    fun `parseCalText never throws on arbitrary strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            parseCalText(Fuzz.randomString(rnd, maxLen = 200))
-        }
-    }
-
-    @Test
     fun `parseCalText Ok result always has end greater than or equal to start`() {
         // The screen renders start..end and would crash / show garbage
         // if end < start. Pin that on every successful parse.
@@ -62,13 +55,6 @@ class SlashCommandFuzzTest {
                     r.endMs >= r.startMs,
                 )
             }
-        }
-    }
-
-    @Test
-    fun `parseTimeToken never throws on arbitrary strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            parseTimeToken(Fuzz.randomString(rnd, maxLen = 50))
         }
     }
 

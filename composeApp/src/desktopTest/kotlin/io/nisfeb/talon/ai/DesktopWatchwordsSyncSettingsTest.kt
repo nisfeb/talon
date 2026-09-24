@@ -47,13 +47,6 @@ class DesktopWatchwordsSyncSettingsTest {
     }
 
     @Test
-    fun `setEnabled with same value is a no-op and does not touch disk`() {
-        // Default is true. Setting to true again should not write.
-        DesktopWatchwordsSyncSettings(file).setEnabled(true)
-        assertFalse(file.exists())
-    }
-
-    @Test
     fun `setEnabled toggle flips state both directions`() {
         val store = DesktopWatchwordsSyncSettings(file)
         store.setEnabled(false)

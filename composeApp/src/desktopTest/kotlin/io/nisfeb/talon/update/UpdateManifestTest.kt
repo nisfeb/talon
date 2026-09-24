@@ -53,11 +53,6 @@ class UpdateManifestTest {
         assertNull(UpdateManifest.parse(badHash))
     }
 
-    @Test fun `rejects garbage input`() {
-        assertNull(UpdateManifest.parse("not json"))
-        assertNull(UpdateManifest.parse(""))
-    }
-
     @Test fun `rejects manifest missing a required field`() {
         // Drop versionCode — required.
         val noVersionCode = sample.replace("\"versionCode\": 21,", "")

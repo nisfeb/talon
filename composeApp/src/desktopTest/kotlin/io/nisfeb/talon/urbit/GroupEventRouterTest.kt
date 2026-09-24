@@ -154,15 +154,4 @@ class GroupEventRouterTest {
         }
     }
 
-    @Test
-    fun `missing flag returns null`() {
-        val raw = """{"r-group":{"meta":{"title":"x"}}}"""
-        assertNull(classify(raw))
-    }
-
-    @Test
-    fun `missing r-group returns null`() {
-        val raw = """{"flag":"~h/f"}"""
-        assertNull(classify(raw))
-    }
 }

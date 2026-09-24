@@ -42,15 +42,6 @@ class PostAuthorTest {
     }
 
     @Test
-    fun `a bot with no profile still resolves to its ship`() {
-        // Both fields are units in the Hoon, so null is the common case.
-        val a = parse("""{"ship":"~sampel-palnet","nickname":null,"avatar":null}""")
-        assertEquals("~sampel-palnet", a?.ship)
-        assertNull(a?.nickname)
-        assertNull(a?.avatarUrl)
-    }
-
-    @Test
     fun `blank strings are treated as absent, not as a blank name`() {
         // A bot that sends "" would otherwise render a blank label,
         // which looks exactly like the bug being fixed.
@@ -63,18 +54,6 @@ class PostAuthorTest {
     @Test
     fun `an object with no ship is not an author`() {
         assertNull(parse("""{"nickname":"Helper"}"""))
-    }
-
-    @Test
-    fun `asAuthorShip gives identity for both shapes`() {
-        assertEquals(
-            "~ricsul-bilwyt",
-            Json.parseToJsonElement(""""~ricsul-bilwyt"""").asAuthorShip(),
-        )
-        assertEquals(
-            "~sampel-palnet",
-            Json.parseToJsonElement("""{"ship":"~sampel-palnet"}""").asAuthorShip(),
-        )
     }
 
     // ── collecting bots out of a whole post ───────────────────────

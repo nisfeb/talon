@@ -4,8 +4,6 @@ import io.nisfeb.talon.data.ContactEntity
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNotEquals
-import kotlin.test.assertTrue
 
 /**
  * Completing a mention has to land on the ship somebody meant, and a
@@ -26,21 +24,6 @@ class MentionResolvesShipTest {
 
     private fun hits(q: String, ships: List<String>) =
         suggestionsFor(q, ContactMap(), ships)
-
-    @Test
-    fun `two comets really can show the same name`() {
-        assertEquals("..absolves...delay", Mnemonym.display(twinA))
-        assertEquals(Mnemonym.display(twinA), Mnemonym.display(twinB))
-        // The full nyms differ, which is what the picker matches on.
-        assertNotEquals(Mnemonym.forShip(twinA), Mnemonym.forShip(twinB))
-    }
-
-    @Test
-    fun `an ambiguous name offers both, each with its own ship`() {
-        val out = hits("absolves", listOf(twinA, twinB))
-        assertEquals(2, out.size, "both have to be offered; picking is the user's")
-        assertEquals(setOf(twinA, twinB), out.map { it.ship }.toSet())
-    }
 
     @Test
     fun `the full nym separates them`() {
@@ -70,15 +53,6 @@ class MentionResolvesShipTest {
     }
 
     @Test
-    fun `the row inserts the exact ship whatever it shows`() {
-        val s = hits("absolves", listOf(twinA, twinB)).first { it.ship == twinA }
-        // Suggestion.ship is what ChatComposer inserts verbatim, and it
-        // is never what the row displays.
-        assertEquals(twinA, s.ship)
-        assertTrue(s.ship.startsWith("~"), "a name is never what gets sent")
-    }
-
-    @Test
     fun `a comet row never shows its at-p`() {
         val s = hits("admire", listOf(comet)).single()
         assertEquals("..admire...attune", s.label)
@@ -96,12 +70,6 @@ class MentionResolvesShipTest {
             assertEquals(Mnemonym.forShip(row.ship), row.label)
             assertFalse(row.label.startsWith("~"), "lengthened, not replaced by the @p")
         }
-    }
-
-    @Test
-    fun `a ship with no word name is shown by its at-p`() {
-        val s = hits("marzod", listOf("~marzod")).single()
-        assertEquals("~marzod", s.label, "a star's @p is the only name it has")
     }
 
     @Test

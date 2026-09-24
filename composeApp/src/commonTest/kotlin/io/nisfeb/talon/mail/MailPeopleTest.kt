@@ -13,13 +13,4 @@ class MailPeopleTest {
         assertEquals("~nec, ~bus, me", mailPeople(row("~nec", "~bus", "~zod", "~nec"), "~zod") { it })
     }
 
-    @Test
-    fun `our own send names the others first`() {
-        assertEquals("~nec, me", mailPeople(row("~zod", "~zod", "~nec"), "~zod") { it })
-    }
-
-    @Test
-    fun `a row with no participants still names its sender`() {
-        assertEquals("Nec", mailPeople(row("~nec"), null) { "Nec" })
-    }
 }

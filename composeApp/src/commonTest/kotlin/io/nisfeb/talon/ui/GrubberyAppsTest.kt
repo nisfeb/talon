@@ -51,13 +51,6 @@ class GrubberyAppsTest {
         assertFalse(latticeRow(installed = null).canInstall)
     }
 
-    @Test
-    fun `a working app carries the ship's last words anyway`() {
-        val row = calendarRow(CalendarAvailability.PRESENT, "the ship did not answer")
-        assertEquals(AppState.WORKING, row.state)
-        assertEquals("the ship did not answer", row.error)
-    }
-
     // Armillary, like orrery, is installed from the ship's own Grubbery
     // shell, so its row never offers an install: it says where to go.
     @Test

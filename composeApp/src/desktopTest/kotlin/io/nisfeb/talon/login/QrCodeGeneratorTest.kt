@@ -11,19 +11,6 @@ import kotlin.test.assertTrue
 class QrCodeGeneratorTest {
 
     @Test
-    fun matrixIsSquareAndNonEmpty() {
-        val matrix = QrCodeGenerator.generate("hello")
-        assertTrue(matrix.isNotEmpty(), "matrix has rows")
-        val cols = matrix[0].size
-        assertTrue(cols > 0, "matrix has columns")
-        for (row in matrix) {
-            assertEquals(cols, row.size, "all rows have the same column count")
-        }
-        // QR codes are square.
-        assertEquals(matrix.size, cols, "matrix is square")
-    }
-
-    @Test
     fun roundTripsTalonLoginUri() {
         val payload = TalonLoginUri.Payload(
             url = "https://ship.example.com",

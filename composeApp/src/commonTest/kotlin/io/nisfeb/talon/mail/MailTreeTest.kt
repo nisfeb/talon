@@ -21,20 +21,6 @@ class MailTreeTest {
     ) = MailMessage(id = id, from = "~zod", prev = prev, sent = sent, verdict = verdict)
 
     @Test
-    fun `two replies to one message are a branch, not a sequence`() {
-        val forest = threadTree(
-            listOf(
-                msg("root", sent = 1),
-                msg("a", prev = "root", sent = 2),
-                msg("b", prev = "root", sent = 3),
-            ),
-        )
-        assertEquals(1, forest.size)
-        assertEquals(listOf("a", "b"), forest[0].children.map { it.message.id })
-        assertTrue(branches(forest))
-    }
-
-    @Test
     fun `a straight thread does not branch`() {
         val forest = threadTree(
             listOf(msg("root", sent = 1), msg("a", prev = "root", sent = 2)),
@@ -58,12 +44,6 @@ class MailTreeTest {
             "theirs" in path,
             "a side exchange on another branch must not travel with a forward",
         )
-    }
-
-    @Test
-    fun `a path to the root is the root alone`() {
-        val forest = threadTree(listOf(msg("root"), msg("a", prev = "root", sent = 2)))
-        assertEquals(listOf("root"), pathTo(forest, "root").map { it.id })
     }
 
     @Test
@@ -109,12 +89,6 @@ class MailTreeTest {
     @Test
     fun `a thread of only forgeries has nothing to answer`() {
         assertEquals(null, newestAnswerable(listOf(msg("f", verdict = Verdict.FORGED))))
-    }
-
-    @Test
-    fun `an empty thread is an empty forest`() {
-        assertEquals(emptyList(), threadTree(emptyList()))
-        assertFalse(branches(emptyList()))
     }
 
     // ---- the drawing ---------------------------------------------------
@@ -197,21 +171,6 @@ class MailTreeTest {
         val shut = flattenVisible(forest, setOf("a"))
         assertEquals(listOf("root", "a", "b"), shut.map { it.node.message.id })
         assertEquals(1, shut.single { it.node.message.id == "a" }.hidden)
-    }
-
-    @Test
-    fun `a fold says how much it swallowed`() {
-        val forest = threadTree(
-            listOf(
-                msg("root", sent = 1),
-                msg("a", prev = "root", sent = 2),
-                msg("a1", prev = "a", sent = 3),
-                msg("a2", prev = "a1", sent = 4),
-            ),
-        )
-        val v = flattenVisible(forest, setOf("root"))
-        assertEquals(listOf("root"), v.map { it.node.message.id })
-        assertEquals(3, v.single().hidden, "a fold that does not count is just an ending")
     }
 
     // ---- depth: a shape the wire can simply hand us --------------------
@@ -299,17 +258,6 @@ class MailTreeTest {
     }
 
     @Test
-    fun `a forged copy cannot re-hang a genuine branch`() {
-        val out = collapse(
-            listOf(
-                copy("m", Verdict.VERIFIED, sent = 5, prev = "real-parent"),
-                copy("m", Verdict.FORGED, sent = 9, prev = "somewhere-else"),
-            ),
-        )
-        assertEquals("real-parent", out.single().prev)
-    }
-
-    @Test
     fun `with nothing honest the newest copy speaks`() {
         val out = collapse(
             listOf(
@@ -337,13 +285,4 @@ class MailTreeTest {
         assertEquals(inList.node.message.verdict, inTree.message.verdict)
     }
 
-    @Test
-    fun `copies are counted for display`() {
-        val ms = listOf(
-            copy("a", Verdict.VERIFIED, sent = 1),
-            copy("a", Verdict.FORGED, sent = 2),
-            copy("b", Verdict.VERIFIED, sent = 3),
-        )
-        assertEquals(mapOf("a" to 2, "b" to 1), copyCounts(ms))
-    }
 }

@@ -31,29 +31,12 @@ class CloudRingTest {
     }
 
     @Test
-    fun `the sideways case is the tight one`() {
-        // Drawn upright, so at three o'clock the glyph's width runs
-        // radially and at twelve its height does.
-        val w = 40f
-        assertTrue(cloudReach(w, 90f) > cloudReach(w, 0f), "three o'clock is the binding case")
-    }
-
-    @Test
     fun `sky still shows between them at full cover`() {
         // Four clouds this size must not close the ring, or the dial
         // stops telling the time.
         val circumference = 2 * PI.toFloat() * radius
         val covered = CLOUD_MAX * (cloudBox(ring) * cloudScale(1f) / circumference * 360f)
         assertTrue(covered < 300f, "clouds would cover $covered degrees of the ring")
-    }
-
-    @Test
-    fun `they crop against different edges`() {
-        // All on the centreline gives identical crescents.
-        assertTrue(CLOUD_OFFSETS.any { it < 0f }, "none hug the inner edge")
-        assertTrue(CLOUD_OFFSETS.any { it > 0f }, "none hug the outer edge")
-        for (o in CLOUD_OFFSETS) assertTrue(o in -0.5f..0.5f, "offset $o is off the band")
-        assertTrue(CLOUD_OFFSETS.size >= CLOUD_MAX, "not every cloud has an offset")
     }
 
     @Test

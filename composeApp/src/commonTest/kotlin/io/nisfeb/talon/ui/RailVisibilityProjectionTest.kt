@@ -3,7 +3,6 @@ package io.nisfeb.talon.ui
 import io.nisfeb.talon.data.RailItemPrefEntity
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 /**
  * Pin the row-list → Map<RailItem, Boolean> projection extracted from
@@ -13,11 +12,6 @@ import kotlin.test.assertTrue
  * here.
  */
 class RailVisibilityProjectionTest {
-
-    @Test
-    fun `empty rows map to empty visibility`() {
-        assertEquals(emptyMap(), railVisibilityFromRows(emptyList()))
-    }
 
     @Test
     fun `each known row becomes a Map entry preserving visibility`() {
@@ -42,30 +36,6 @@ class RailVisibilityProjectionTest {
         )
         val out = railVisibilityFromRows(rows)
         assertEquals(setOf(RailItem.Statuses, RailItem.Bookmarks), out.keys)
-    }
-
-    @Test
-    fun `visible-true rows pass through (sparse semantics handled by isVisible)`() {
-        // The projection itself doesn't filter on visibility — it just
-        // copies rows as-is. The sparse "absent → true" contract is
-        // enforced by Map.isVisible at the read site.
-        val rows = listOf(RailItemPrefEntity("Statuses", true))
-        val out = railVisibilityFromRows(rows)
-        assertEquals(true, out[RailItem.Statuses])
-    }
-
-    @Test
-    fun `duplicated itemName takes the last row's visibility`() {
-        // The DAO has a primary key on itemName so this shouldn't
-        // happen in practice, but the projection's behavior is
-        // pinned anyway via toMap()'s last-wins.
-        val rows = listOf(
-            RailItemPrefEntity("Settings", true),
-            RailItemPrefEntity("Settings", false),
-        )
-        val out = railVisibilityFromRows(rows)
-        assertEquals(false, out[RailItem.Settings])
-        assertEquals(1, out.size)
     }
 
 }

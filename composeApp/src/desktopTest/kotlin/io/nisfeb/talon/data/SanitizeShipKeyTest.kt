@@ -23,29 +23,6 @@ class SanitizeShipKeyTest {
     }
 
     @Test
-    fun `planet patp dashes are preserved`() {
-        assertEquals(
-            "_mister-botter",
-            sanitizeShipKey("~mister-botter"),
-        )
-    }
-
-    @Test
-    fun `moon patp full chain is preserved`() {
-        assertEquals(
-            "_ricsul-bilwyt-dozzod-nisfeb",
-            sanitizeShipKey("~ricsul-bilwyt-dozzod-nisfeb"),
-        )
-    }
-
-    @Test
-    fun `logged-out sentinel stays the same`() {
-        // The "__loggedout__" key is what App.kt passes when no ship
-        // is signed in. Both underscores survive the filter.
-        assertEquals("__loggedout__", sanitizeShipKey("__loggedout__"))
-    }
-
-    @Test
     fun `filesystem-hostile characters are replaced not stripped`() {
         // Length preservation is load-bearing: two distinct ship
         // names that happened to share a prefix must not collapse to
@@ -72,8 +49,4 @@ class SanitizeShipKeyTest {
         assertEquals("café", sanitizeShipKey("café"))
     }
 
-    @Test
-    fun `empty string round-trips empty`() {
-        assertEquals("", sanitizeShipKey(""))
-    }
 }

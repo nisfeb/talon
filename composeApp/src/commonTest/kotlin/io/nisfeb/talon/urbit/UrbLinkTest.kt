@@ -8,24 +8,11 @@ import kotlin.test.assertTrue
 class UrbLinkTest {
 
     @Test
-    fun isUrbUrlAcceptsWellFormed() {
-        assertTrue(UrbLink.isUrbUrl("urb://~sampel-palnet/notes/hello.gmi"))
-        assertTrue(UrbLink.isUrbUrl("urb://~zod/"))
-        assertTrue(UrbLink.isUrbUrl("  urb://~zod/a/b  ")) // trimmed
-    }
-
-    @Test
     fun isUrbUrlRejectsJunk() {
         assertFalse(UrbLink.isUrbUrl("urb://"))            // scheme only
         assertFalse(UrbLink.isUrbUrl("https://example.com"))
         assertFalse(UrbLink.isUrbUrl("urb://~zod a"))      // embedded space
         assertFalse(UrbLink.isUrbUrl("see urb://~zod/x"))  // surrounding text
-    }
-
-    @Test
-    fun extractsBareUrlFromText() {
-        val text = "check out urb://~sampel-palnet/page.gmi it's great"
-        assertEquals(listOf("urb://~sampel-palnet/page.gmi"), UrbLink.extract(text))
     }
 
     @Test

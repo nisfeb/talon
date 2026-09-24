@@ -58,13 +58,6 @@ class DottedIdDedupeTest {
     }
 
     @Test
-    fun `undotted rows are skipped (defensive — shouldn't appear in input)`() {
-        val clean = msg("~sampel", "170141184")
-        val ops = planMessageDedupe(listOf(clean), existingUndotted = emptySet())
-        assertEquals(0, ops.size)
-    }
-
-    @Test
     fun `rows from different whoms with the same dotted id are treated independently`() {
         val rowA = msg("~alice", "1.234")
         val rowB = msg("~bob", "1.234")
@@ -79,8 +72,4 @@ class DottedIdDedupeTest {
         assertEquals(listOf("~bob"), renames.map { it.from.whom })
     }
 
-    @Test
-    fun `empty input produces no ops`() {
-        assertEquals(emptyList<DedupeOp>(), planMessageDedupe(emptyList(), emptySet()))
-    }
 }

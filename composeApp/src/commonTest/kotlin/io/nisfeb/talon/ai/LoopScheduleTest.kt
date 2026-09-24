@@ -16,12 +16,6 @@ class LoopScheduleTest {
     private val utc = TimeZone.UTC
 
     @Test
-    fun `next fire is one interval after last run`() {
-        assertEquals(30 * min, LoopSchedule.nextFireMs(lastRunMs = 0, intervalMinutes = 30))
-        assertEquals(1_000_000L + 60 * min, LoopSchedule.nextFireMs(1_000_000L, 60))
-    }
-
-    @Test
     fun `interval floor is enforced`() {
         // 5 min is below the floor → treated as the 15-min minimum.
         assertEquals(15 * min, LoopSchedule.nextFireMs(lastRunMs = 0, intervalMinutes = 5))

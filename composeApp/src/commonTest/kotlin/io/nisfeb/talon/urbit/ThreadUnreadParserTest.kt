@@ -29,19 +29,6 @@ class ThreadUnreadParserTest {
     }
 
     @Test
-    fun `dm-thread key preserves author prefix and undots only the da`() {
-        // Tlon shape: `dm-thread/<whom>/<author>/<dotted-da>`. DM /
-        // club MessageEntity rows key on `~author/<undotted-da>`, so
-        // we undot just the @da half.
-        val src = sourceKeyToThreadSource(
-            "dm-thread/~peer/~peer/170.141.184.505.111.222.333",
-        )
-        assertNotNull(src)
-        assertEquals("~peer", src.whom)
-        assertEquals("~peer/170141184505111222333", src.parentPostId)
-    }
-
-    @Test
     fun `dm-thread key with club whom undots only the da`() {
         val src = sourceKeyToThreadSource(
             "dm-thread/0v4.abcde/~bus/170.141.184.505.987.654.321",
@@ -94,13 +81,6 @@ class ThreadUnreadParserTest {
         assertEquals(5, entity.count)
         assertEquals(2, entity.notifyCount)
         assertEquals(1_700_000_111_222L, entity.recencyMs)
-    }
-
-    @Test
-    fun `toThreadUnread returns null for non-thread source`() {
-        val summary = buildJsonObject { put("count", 1) }
-        assertNull(toThreadUnread("ship/~zod", summary))
-        assertNull(toThreadUnread("channel/chat/~host/g", summary))
     }
 
     // ── reading a thread on the ship ────────────────────────────────

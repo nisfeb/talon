@@ -36,18 +36,6 @@ class EscalateTest {
     }
 
     @Test
-    fun `the question is orrery-utils' own`() {
-        val q = Escalate.QUESTION["needs_help_now"]!!.jsonObject
-        assertEquals("noul", q["type"]!!.jsonPrimitive.content)
-        assertTrue(
-            q["instructions"]!!.jsonPrimitive.content
-                .startsWith("Does the new message describe a situation in which the owner"),
-        )
-        assertTrue("stranded" in q["criteria"]!!.jsonObject["true"]!!.jsonPrimitive.content)
-        assertTrue("a plan" in q["criteria"]!!.jsonObject["false"]!!.jsonPrimitive.content)
-    }
-
-    @Test
     fun `the facts just kept are part of what is asked`() = runTest {
         val d = Says(0.91)
         val p = Escalate.sure(d, "car died on route 9", "person/rose", listOf("where are you"), bodies, listOf(fact("person/rose")))

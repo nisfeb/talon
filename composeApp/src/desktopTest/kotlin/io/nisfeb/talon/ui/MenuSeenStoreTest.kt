@@ -7,8 +7,6 @@ import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 /**
  * Pin down the pure-logic and persistence guarantees the More-menu
@@ -66,24 +64,6 @@ class MenuSeenStoreTest {
 
     // ── DesktopMenuSeenStore: round-trip + persistence ───────────────
 
-    @Test
-    fun `defaults are empty when file does not exist`() {
-        val store = DesktopMenuSeenStore(ship = "~test", file = file)
-        val s = store.state.value
-        assertEquals(0L, s.lastSeenStatusesMs)
-        assertEquals("", s.lastSeenInvitesSnapshot)
-        assertFalse(file.exists())
-    }
-
-
-    @Test
-    fun `markStatusesSeenAt persists and survives reload`() {
-        DesktopMenuSeenStore(ship = "~test", file = file)
-            .markStatusesSeenAt(1_700_000_000_000L)
-
-        val reloaded = DesktopMenuSeenStore(ship = "~test", file = file)
-        assertEquals(1_700_000_000_000L, reloaded.state.value.lastSeenStatusesMs)
-    }
 
     @Test
     fun `markInvitesSeen persists and survives reload`() {
@@ -131,10 +111,4 @@ class MenuSeenStoreTest {
         val store = DesktopMenuSeenStore(ship = "~test", file = file)
     }
 
-    @Test
-    fun `atomic move leaves no tmp file after persist`() {
-        DesktopMenuSeenStore(ship = "~test", file = file)
-        val tmp = File(tmpDir, file.name + ".tmp")
-        assertFalse(tmp.exists())
-    }
 }

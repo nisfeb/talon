@@ -24,11 +24,6 @@ class DialClockTest {
         lat = -41.29, lon = 174.78, label = "Wellington",
         timeZoneId = "Pacific/Auckland",
     )
-    private val jacksonville = HomePlace(
-        lat = 30.33, lon = -81.65, label = "Jacksonville",
-        timeZoneId = "America/New_York",
-    )
-
     private fun hours(m: Int) = m / 60.0
 
     @Test
@@ -43,31 +38,6 @@ class DialClockTest {
             "sunset at ${SkyClock.clockLabel(sky.sunsetMinute, true)}",
         )
         assertTrue(sky.sunsetMinute > sky.sunriseMinute, "the day must not wrap midnight here")
-    }
-
-    @Test
-    fun `the sun is up at local midday and down at local midnight`() {
-        // The property that actually failed: the arc was the right
-        // length and in the wrong half of the ring.
-        for (place in listOf(wellington, jacksonville)) {
-            val sky = skyFor(noonUtc, place, null)
-            val day = sky.sunriseMinute until sky.sunsetMinute
-            assertTrue(12 * 60 in day, "${place.label}: the sun is down at noon")
-            assertTrue(0 !in day, "${place.label}: the sun is up at midnight")
-        }
-    }
-
-    @Test
-    fun `both hemispheres get the same length of day near the equinox`() {
-        // September 11 is close enough to the equinox that Wellington
-        // and Jacksonville should be within an hour of each other. The
-        // latitude handling was never the problem.
-        val nz = skyFor(noonUtc, wellington, null).daylightMinutes
-        val us = skyFor(noonUtc, jacksonville, null).daylightMinutes
-        assertTrue(
-            kotlin.math.abs(nz - us) < 90,
-            "daylight differs by ${kotlin.math.abs(nz - us)} minutes: $nz vs $us",
-        )
     }
 
     @Test

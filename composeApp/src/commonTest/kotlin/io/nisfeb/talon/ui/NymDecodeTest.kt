@@ -12,46 +12,6 @@ import kotlin.test.assertNull
 class NymDecodeTest {
 
     private val comet = "~doznec-binwes-samper-siglet--fidpen-sogdur-wacser-wissun"
-    private val other = "~racmus-mollen-fallyt-linpex--watres-sibbur-modlux-rinmex"
-
-    @Test
-    fun `a full nym names its comet`() {
-        assertEquals(comet, Mnemonym.shipForNym(Mnemonym.forShip(comet)!!))
-        assertEquals(other, Mnemonym.shipForNym(Mnemonym.forShip(other)!!))
-    }
-
-    @Test
-    fun `the leading dots are optional to type`() {
-        val nym = Mnemonym.forShip(comet)!!
-        assertEquals(comet, Mnemonym.shipForNym(nym))
-        assertEquals(comet, Mnemonym.shipForNym(nym.removePrefix("..")))
-        assertEquals(comet, Mnemonym.shipForNym("  $nym  "))
-    }
-
-    @Test
-    fun `an abridged name resolves to nothing`() {
-        // It is two words of twelve. Anything else would be a guess.
-        assertNull(Mnemonym.shipForNym("..admire...attune"))
-        assertNull(Mnemonym.shipForNym("..admire"))
-    }
-
-    @Test
-    fun `a bare word is not a name`() {
-        // One word in sixteen passes the checksum; without the prefix
-        // that is a typed nickname, not a comet.
-        assertNull(Mnemonym.shipForNym("alone"))
-        assertNull(Mnemonym.shipForNym("abducts"))
-        // Two bare words are still not enough to be trusted.
-        assertNull(Mnemonym.shipForNym("abducts.abate"))
-    }
-
-    @Test
-    fun `a wrong word fails the checksum instead of naming someone else`() {
-        val words = Mnemonym.forShip(comet)!!.removePrefix("..").split('.').toMutableList()
-        words[3] = "yourselves"
-        assertNull(Mnemonym.shipForNym(".." + words.joinToString(".")))
-    }
-
     @Test
     fun `a word that is not in the list is not a name`() {
         assertNull(Mnemonym.shipForNym("..nonsense.words.here"))

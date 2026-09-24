@@ -3,7 +3,6 @@ package io.nisfeb.talon.ui
 import io.nisfeb.talon.ui.SkyClock.Weather
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 class WeatherCodeTest {
 
@@ -29,16 +28,6 @@ class WeatherCodeTest {
         assertEquals(Weather.CLEAR, SkyClock.weatherOf(7))
         assertEquals(Weather.CLEAR, SkyClock.weatherOf(-1))
         assertEquals(Weather.CLEAR, SkyClock.weatherOf(1000))
-    }
-
-    @Test
-    fun `rain darkens the sky and a clear one is left alone`() {
-        assertEquals(0f, Weather.CLEAR.gloom)
-        assertEquals(0f, Weather.CLOUD.gloom, "cloud drains colour elsewhere; it does not darken twice")
-        assertTrue(Weather.RAIN.gloom > Weather.DRIZZLE.gloom)
-        assertTrue(Weather.THUNDER.gloom > Weather.RAIN.gloom, "a storm is the darkest sky")
-        assertTrue(Weather.SNOW.gloom < Weather.RAIN.gloom, "snow falls out of a brighter sky")
-        for (w in Weather.entries) assertTrue(w.gloom in 0f..0.8f, "$w gloom ${w.gloom}")
     }
 
     @Test

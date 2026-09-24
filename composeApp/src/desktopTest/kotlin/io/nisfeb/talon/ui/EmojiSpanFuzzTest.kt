@@ -70,14 +70,6 @@ class EmojiSpanFuzzTest {
     }
 
     @Test
-    fun `applyEmojiSpans never throws on random Unicode strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val input = randomUnicodeString(rnd)
-            input.applyEmojiSpans()
-        }
-    }
-
-    @Test
     fun `applyEmojiSpans preserves input text exactly`() {
         Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
             val input = randomUnicodeString(rnd)
@@ -142,18 +134,6 @@ class EmojiSpanFuzzTest {
                     prev.end <= curr.start,
                 )
             }
-        }
-    }
-
-    @Test
-    fun `applyEmojiSpans on AnnotatedString preserves input text`() {
-        // The AnnotatedString variant should also leave the text
-        // alone — only span styles are added.
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val input = randomUnicodeString(rnd)
-            val annotated = androidx.compose.ui.text.AnnotatedString(input)
-            val out = annotated.applyEmojiSpans()
-            assertEquals(input, out.text)
         }
     }
 

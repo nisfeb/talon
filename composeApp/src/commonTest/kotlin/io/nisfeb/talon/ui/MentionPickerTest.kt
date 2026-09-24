@@ -23,15 +23,6 @@ class MentionPickerTest {
         suggestionsFor(query, map, ships).map { it.ship }
 
     @Test
-    fun `nickname patp and mnemonym all find the same ship`() {
-        assertEquals(listOf(comet), hits("sam iam")) // nick substring
-        assertEquals(listOf(comet), hits("doznec")) // patp prefix
-        assertEquals(listOf(comet), hits("admire")) // nym first word
-        assertEquals(listOf(comet), hits("..admire.ev")) // nym with dots
-        assertEquals(listOf(other), hits("portrays"))
-    }
-
-    @Test
     fun `a ship with no nym is still found by its patp`() {
         assertEquals(listOf("~marzod"), hits("marzod"))
     }

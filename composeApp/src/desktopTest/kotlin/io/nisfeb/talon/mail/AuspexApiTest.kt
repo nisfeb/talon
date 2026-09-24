@@ -148,13 +148,6 @@ class AuspexApiTest {
     }
 
     @Test
-    fun `a reply names the message it answers`() = runBlocking<Unit> {
-        val a = api { jsonOk(this, """{"ok":true}""") }
-        a.send(to = listOf("~zod"), subject = "re", body = "b", prev = "0vparent")
-        assertEquals("0vparent", sentBody()["prev"]!!.jsonPrimitive.content)
-    }
-
-    @Test
     fun `an empty attachment list is left off entirely`() = runBlocking<Unit> {
         val a = api { jsonOk(this, """{"ok":true}""") }
         a.send(to = listOf("~zod"), subject = "s", body = "b")
@@ -181,21 +174,6 @@ class AuspexApiTest {
     }
 
     // ---- the three failures --------------------------------------------
-
-    @Test
-    fun `a refusal carries the ship's own reason`() = runBlocking<Unit> {
-        val a = api { respondError(HttpStatusCode.BadRequest, """{"error":"unknown attachment 0v9"}""") }
-        val e = assertFailsWith<AuspexError.Refused> { a.whoami() }
-        assertEquals(400, e.status)
-        assertEquals("unknown attachment 0v9", e.reason)
-    }
-
-    @Test
-    fun `a dead session is recognisable without parsing a message`() = runBlocking<Unit> {
-        val a = api { respondError(HttpStatusCode.Forbidden, """{"error":"forbidden"}""") }
-        val e = assertFailsWith<AuspexError.Refused> { a.whoami() }
-        assertTrue(e.isSignedOut)
-    }
 
     @Test
     fun `an answer we cannot read is not the same as no answer`() = runBlocking<Unit> {

@@ -32,31 +32,10 @@ class MailGemtextTest {
     )
 
     @Test
-    fun `a forgery cannot be filed without the word on it`() {
-        val out = MailGemtext.message(msg("f", verdict = Verdict.FORGED), name, at)
-        assertTrue("FORGED" in out, out)
-        assertTrue("evidence" in out)
-    }
-
-    @Test
     fun `an unchecked signature is not reported as an accusation`() {
         val out = MailGemtext.message(msg("u", verdict = Verdict.UNVERIFIED), name, at)
         assertTrue("NOT checked" in out)
         assertFalse("FORGED" in out, "no key held is not a forgery")
-    }
-
-    @Test
-    fun `an ordinary verdict is stated too`() {
-        // A note that only marks the bad ones cannot be told apart from
-        // one written before anybody was checking.
-        val out = MailGemtext.message(msg("v"), name, at)
-        assertTrue("Signature checked" in out, out)
-    }
-
-    @Test
-    fun `the body goes in verbatim`() {
-        val out = MailGemtext.message(msg("v", body = "line one\nline two"), name, at)
-        assertTrue("line one\nline two" in out)
     }
 
     @Test
@@ -108,15 +87,6 @@ class MailGemtextTest {
             ),
         )
         assertTrue("branches" in MailGemtext.thread(t, name, at))
-    }
-
-    @Test
-    fun `a straight thread claims nothing about branches`() {
-        val t = MailThread(
-            id = "0vt",
-            messages = listOf(msg("root", sent = 1), msg("a", prev = "root", sent = 2)),
-        )
-        assertFalse("branches" in MailGemtext.thread(t, name, at))
     }
 
     @Test

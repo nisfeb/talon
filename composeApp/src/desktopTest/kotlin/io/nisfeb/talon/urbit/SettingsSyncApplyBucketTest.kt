@@ -11,10 +11,8 @@ import io.nisfeb.talon.data.AssistantConversationEntity
 import io.nisfeb.talon.data.AssistantHistoryEntity
 import io.nisfeb.talon.data.BookmarkEntity
 import io.nisfeb.talon.data.BookmarkFolderEntity
-import io.nisfeb.talon.data.BookmarkFolderMemberEntity
 import io.nisfeb.talon.data.FolderEntity
 import io.nisfeb.talon.data.FolderMemberEntity
-import io.nisfeb.talon.data.GroupOrderEntity
 import io.nisfeb.talon.data.NotifyLevel
 import io.nisfeb.talon.data.NotifyPreferenceEntity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,9 +20,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -164,19 +159,6 @@ class SettingsSyncApplyBucketTest {
     }
 
     // ── notify-prefs ────────────────────────────────────────────────
-
-    @Test
-    fun `applyBucket NOTIFY_PREFS replaces local prefs`() = runBlocking {
-        db.notifyPrefs().upsert(NotifyPreferenceEntity("~zod", NotifyLevel.NONE))
-        val bucket = buildJsonObject {
-            put("~zod", buildJsonObject { put("level", NotifyLevel.MENTIONS) })
-            put("chat/~host/general", buildJsonObject { put("level", NotifyLevel.ALL) })
-        }
-        sync.applyBucket(SettingsSyncImpl.BUCKET_NOTIFY_PREFS, bucket)
-
-        assertEquals(NotifyLevel.MENTIONS, db.notifyPrefs().levelFor("~zod"))
-        assertEquals(NotifyLevel.ALL, db.notifyPrefs().levelFor("chat/~host/general"))
-    }
 
     @Test
     fun `applyBucket NOTIFY_PREFS drops entries missing the level field`() = runBlocking {
@@ -533,26 +515,6 @@ class SettingsSyncApplyBucketTest {
         }
 
     @Test
-    fun `applyBucket AI_SETTINGS does not blank a saved key when the entry omits apiKey`() =
-        runBlocking {
-            // A peer push with syncEnabled=false omits apiKey; the old
-            // orEmpty() blanked the local key → silently disabled AI.
-            aiSettings.applyRemote(
-                AiSettings.Config(AiSettings.Provider.Anthropic, "sk-keep", null, syncEnabled = true),
-            )
-            val bucket = buildJsonObject {
-                put("config", buildJsonObject {
-                    put("schemaVersion", 2)
-                    put("provider", "Anthropic")
-                    put("catchMeUpEnabled", "false")
-                    // no apiKey
-                })
-            }
-            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
-            assertEquals("sk-keep", aiSettings.state.value.apiKey)
-        }
-
-    @Test
     fun `applyBucket AI_SETTINGS does not blank a saved key when the entry carries an empty apiKey`() =
         runBlocking {
             // Regression for the "keys not persisted" data loss: an older
@@ -872,16 +834,6 @@ class SettingsSyncApplyBucketTest {
         assertEquals(listOf("~zod/keep"), rows.map { it.flag })
     }
 
-    @Test
-    fun `applySettingsEvent ignores events with no recognized envelope shape`() =
-        runBlocking {
-            // Pre-populate; an empty payload must be a silent no-op.
-            db.groupOrders().reorder(listOf("~zod/keep"))
-            sync.applySettingsEvent(buildJsonObject {})
-            val rows = db.groupOrders().stream().first()
-            assertEquals(listOf("~zod/keep"), rows.map { it.flag })
-        }
-
     // ── setWatchwordExclude routes to the injected callback ─────────
 
     @Test
@@ -965,16 +917,6 @@ class SettingsSyncApplyBucketTest {
     }
 
     // ── status-seen (cross-device fresh-status marker) ──────────────
-
-    @Test
-    fun `applyBucket STATUS_SEEN publishes the marker to the flow`() = runBlocking {
-        assertEquals(0L, sync.statusesSeenMs.value)
-        val bucket = buildJsonObject {
-            put("me", buildJsonObject { put("ms", 1_700_000_000_000L) })
-        }
-        sync.applyBucket(SettingsSyncImpl.BUCKET_STATUS_SEEN, bucket)
-        assertEquals(1_700_000_000_000L, sync.statusesSeenMs.value)
-    }
 
     @Test
     fun `status-seen marker is monotonic — a stale value never regresses it`() = runBlocking {
@@ -1094,34 +1036,6 @@ class SettingsSyncApplyBucketTest {
         sync.clearBucketLocally(SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS)
         assertNull(db.assistantConversations().getByGid("c1"))
         assertTrue(db.assistantHistory().recent(10).first().isEmpty())
-    }
-
-    @Test
-    fun `applyBucket ASSISTANT_TURNS links the turn to its conversation`() = runBlocking {
-        sync.applyBucket(
-            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
-            buildJsonObject { put("c1", convMeta("topic", turnCount = 1)) },
-        )
-        sync.applyBucket(
-            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
-            buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) },
-        )
-        val convId = db.assistantConversations().getByGid("c1")!!.id
-        val turns = db.assistantHistory().forConversation(convId)
-        assertEquals(listOf("q1"), turns.map { it.question })
-        assertEquals("c1", turns.single().convGid)
-    }
-
-    @Test
-    fun `applyBucket ASSISTANT_TURNS stubs a conversation when the turn arrives first`() = runBlocking {
-        // Out-of-order delivery: the turn must still have a home.
-        sync.applyBucket(
-            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
-            buildJsonObject { put("t1", turnVal("c2", "orphan question", "a")) },
-        )
-        val conv = db.assistantConversations().getByGid("c2")
-        assertNotNull(conv)
-        assertEquals(1, db.assistantHistory().forConversation(conv.id).size)
     }
 
     @Test

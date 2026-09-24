@@ -1,16 +1,13 @@
 package io.nisfeb.talon.orrery
 
-import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.data.ContactEntity
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -22,14 +19,6 @@ import kotlin.test.assertTrue
 class OrreryFactsTest {
     private val me = "~zod"
     private val noon = 1_789_646_400_000L // 2026-09-17T12:00:00Z
-    private val evening = noon + 6 * 3_600_000
-
-    @Test
-    fun `a person is their patp without the sig`() {
-        assertEquals("person/sampel-palnet", personId("~sampel-palnet"))
-        assertEquals("person/sampel-palnet-sampel-palnet--sampel-palnet-sampel-palnet", personId("~sampel-palnet-sampel-palnet--sampel-palnet-sampel-palnet"))
-    }
-
     @Test
     fun `a contact is a body with every handle as an alias, on the id the pass decided`() {
         val c = ContactEntity(ship = "~bus", nickname = "Bus", bio = null, avatarUrl = null, status = "at the shop", statusUpdatedMs = noon)

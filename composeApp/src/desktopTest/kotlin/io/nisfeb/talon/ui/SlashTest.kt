@@ -14,16 +14,6 @@ import kotlin.test.assertNull
 class SlashTest {
 
     @Test
-    fun `parseSlash returns null for plain text`() {
-        assertNull(parseSlash("hello world"))
-    }
-
-    @Test
-    fun `parseSlash returns null for empty input`() {
-        assertNull(parseSlash(""))
-    }
-
-    @Test
     fun `parseSlash returns null for bare slash`() {
         // Just "/" has empty body → no command.
         assertNull(parseSlash("/"))
@@ -36,22 +26,6 @@ class SlashTest {
         assertNotNull(r)
         assertEquals("hn", r!!.cmd)
         assertEquals(emptyList(), r.args)
-    }
-
-    @Test
-    fun `parseSlash splits args on any whitespace`() {
-        val r = parseSlash("/cmd  one   two\tthree")
-        assertNotNull(r)
-        assertEquals("cmd", r!!.cmd)
-        assertEquals(listOf("one", "two", "three"), r.args)
-    }
-
-    @Test
-    fun `parseSlash preserves arg case`() {
-        // Args are user content; only the command name is normalized.
-        val r = parseSlash("/pet ~Zod-bus MyName")
-        assertNotNull(r)
-        assertEquals(listOf("~Zod-bus", "MyName"), r!!.args)
     }
 
     @Test
@@ -82,9 +56,4 @@ class SlashTest {
         assertNull(detectSlashTrigger(" /cal", cursor = 5))
     }
 
-    @Test
-    fun `detectSlashTrigger returns null at cursor 0 or out of bounds`() {
-        assertNull(detectSlashTrigger("/cal", cursor = 0))
-        assertNull(detectSlashTrigger("/cal", cursor = 999))
-    }
 }

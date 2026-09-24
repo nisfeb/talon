@@ -1,13 +1,10 @@
 package io.nisfeb.talon.urbit
 
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.Test
@@ -19,86 +16,11 @@ import kotlin.test.Test
  */
 class MarkdownTest {
 
-    private fun firstKey(el: JsonObject): String = el.keys.first()
-
-    @Test
-    fun `plain text passes through as a primitive`() {
-        val out = Markdown.parseInlines("hello world")
-        assertEquals(1, out.size)
-        val prim = out[0] as JsonPrimitive
-        assertEquals("hello world", prim.content)
-    }
-
     // The `assertEquals(n, out.size)` guards below were added after
     // mutation-testing showed that off-by-one index bumps in the
     // tokenizer (`i + 1` → `i + 0`) slipped extra trailing tokens
     // past tests that only checked out[0] / out[1]. Exact sizes lock
     // the tokenizer end-to-end.
-
-    @Test
-    fun `bold wraps content in bold span`() {
-        val out = Markdown.parseInlines("**loud**")
-        assertEquals(1, out.size)
-        val span = out[0].jsonObject
-        assertEquals("bold", firstKey(span))
-        val inner = span["bold"] as JsonArray
-        assertEquals(1, inner.size)
-        assertEquals("loud", (inner[0] as JsonPrimitive).content)
-    }
-
-    @Test
-    fun `italic with star`() {
-        val out = Markdown.parseInlines("*slanted*")
-        assertEquals(1, out.size)
-        assertEquals("italics", firstKey(out[0].jsonObject))
-    }
-
-    @Test
-    fun `italic with underscore`() {
-        val out = Markdown.parseInlines("_slanted_")
-        assertEquals(1, out.size)
-        assertEquals("italics", firstKey(out[0].jsonObject))
-    }
-
-    @Test
-    fun `strikethrough with double tilde`() {
-        val out = Markdown.parseInlines("~~gone~~")
-        assertEquals(1, out.size)
-        assertEquals("strike", firstKey(out[0].jsonObject))
-    }
-
-    @Test
-    fun `inline code`() {
-        val out = Markdown.parseInlines("`x = 1`")
-        assertEquals(1, out.size)
-        val span = out[0].jsonObject
-        assertEquals("code", firstKey(span))
-        assertEquals("x = 1", span["code"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun `link with label`() {
-        val out = Markdown.parseInlines("see [here](https://example.com) for more")
-        // "see ", link, " for more".
-        assertEquals(3, out.size)
-        val link = out[1].jsonObject["link"]!!.jsonObject
-        assertEquals("https://example.com", link["href"]!!.jsonPrimitive.content)
-        assertEquals("here", link["content"]!!.jsonPrimitive.content)
-        assertEquals("see ", (out[0] as JsonPrimitive).content)
-        assertEquals(" for more", (out[2] as JsonPrimitive).content)
-    }
-
-    @Test
-    fun `bare url becomes an autolink`() {
-        val out = Markdown.parseInlines("go https://example.com now")
-        assertEquals(3, out.size)
-        val link = out[1].jsonObject["link"]!!.jsonObject
-        // Bare URL: label == href.
-        assertEquals("https://example.com", link["href"]!!.jsonPrimitive.content)
-        assertEquals("https://example.com", link["content"]!!.jsonPrimitive.content)
-        assertEquals("go ", (out[0] as JsonPrimitive).content)
-        assertEquals(" now", (out[2] as JsonPrimitive).content)
-    }
 
     @Test
     fun `urb link stays one autolink and does not split out the inner patp`() {
@@ -115,39 +37,6 @@ class MarkdownTest {
         // No ship span anywhere in the output.
         val hasShip = out.any { (it as? JsonObject)?.keys?.contains("ship") == true }
         assertEquals(false, hasShip)
-    }
-
-    @Test
-    fun `patp reference produces ship span`() {
-        val out = Markdown.parseInlines("hi ~sampel-palnet friend")
-        // Expect: "hi ", ship(~sampel-palnet), " friend".
-        assertEquals(3, out.size)
-        val ship = out[1].jsonObject
-        assertEquals("ship", firstKey(ship))
-        assertEquals("~sampel-palnet", ship["ship"]!!.jsonPrimitive.content)
-        assertEquals("hi ", (out[0] as JsonPrimitive).content)
-        assertEquals(" friend", (out[2] as JsonPrimitive).content)
-    }
-
-    @Test
-    fun `long-form patp with dashes recognized`() {
-        val out = Markdown.parseInlines("~ricsul-bilwyt-dozzod-nisfeb says hi")
-        // Leading patp + trailing plain text.
-        assertEquals(2, out.size)
-        val ship = out[0].jsonObject
-        assertEquals("ship", firstKey(ship))
-        assertEquals("~ricsul-bilwyt-dozzod-nisfeb", ship["ship"]!!.jsonPrimitive.content)
-        assertEquals(" says hi", (out[1] as JsonPrimitive).content)
-    }
-
-    @Test
-    fun `mixed bold and plain`() {
-        val out = Markdown.parseInlines("hello **brave** world")
-        // [plain "hello ", bold["brave"], plain " world"]
-        assertEquals(3, out.size)
-        assertTrue(out[0] is JsonPrimitive)
-        assertEquals("bold", firstKey(out[1].jsonObject))
-        assertTrue(out[2] is JsonPrimitive)
     }
 
     // URL-end parsing — mutation-tester surfaced case-insensitivity

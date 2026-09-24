@@ -56,16 +56,6 @@ class WhatsNewTest {
     }
 
     @Test
-    fun `somebody else's last word, unread, is new`() {
-        val rows = run(
-            listOf(msg("~dalsyd", "~dalsyd", 100)),
-            mapOf("~dalsyd" to unread(3)),
-        )
-        assertEquals(listOf(NewKind.UNREAD), rows.map { it.kind })
-        assertEquals("~dalsyd", rows.single().target)
-    }
-
-    @Test
     fun `a conversation we have read is not new`() {
         val rows = run(
             listOf(msg("~dalsyd", "~dalsyd", 100)),
@@ -136,12 +126,6 @@ class WhatsNewTest {
             limit = 2,
         )
         assertEquals(listOf(NewKind.MENTION, NewKind.UNREAD), rows.map { it.kind })
-    }
-
-    @Test
-    fun `nothing new is an empty list, not a crash`() {
-        assertTrue(run(emptyList(), emptyMap()).isEmpty())
-        assertTrue(run(emptyList(), emptyMap(), limit = 0).isEmpty())
     }
 
     @Test

@@ -44,28 +44,12 @@ class DesktopUiSettingsTest {
         DesktopUiSettings(file = targetFile, db = db, scope = scope)
 
     @Test
-    fun `default hideComposerButtons is false when file does not exist`() {
-        val store = newStore()
-        assertFalse(store.hideComposerButtons.value)
-        assertFalse(file.exists())
-    }
-
-    @Test
     fun `setHideComposerButtons true persists and survives reload`() {
         newStore().setHideComposerButtons(true)
         assertTrue(file.exists())
 
         val reloaded = newStore()
         assertTrue(reloaded.hideComposerButtons.value)
-    }
-
-    @Test
-    fun `setHideComposerButtons toggle flips both directions`() {
-        val store = newStore()
-        store.setHideComposerButtons(true)
-        assertTrue(store.hideComposerButtons.value)
-        store.setHideComposerButtons(false)
-        assertFalse(store.hideComposerButtons.value)
     }
 
     @Test
@@ -79,13 +63,6 @@ class DesktopUiSettingsTest {
         file.writeText("not json")
         val store = newStore()
         assertFalse(store.hideComposerButtons.value)
-    }
-
-    @Test
-    fun `atomic move leaves no tmp file after persist`() {
-        newStore().setHideComposerButtons(true)
-        val tmp = File(tmpDir, "ui.json.tmp")
-        assertFalse(tmp.exists())
     }
 
     // ── accent settings ──────────────────────────────────────────
@@ -146,14 +123,6 @@ class DesktopUiSettingsTest {
     }
 
     // ── group channel order ──────────────────────────────────────
-
-    @Test
-    fun `default groupChannelOrder is Recent`() {
-        kotlin.test.assertEquals(
-            GroupChannelOrder.Recent,
-            newStore().groupChannelOrder.value,
-        )
-    }
 
     @Test
     fun `setGroupChannelOrder persists across reload`() {

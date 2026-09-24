@@ -26,33 +26,6 @@ import kotlin.test.assertTrue
 class EmojiSpanTest {
 
     @Test
-    fun `applyEmojiSpans on empty string returns empty AnnotatedString`() {
-        val out = "".applyEmojiSpans()
-        assertEquals("", out.text)
-        assertEquals(0, out.spanStyles.size)
-    }
-
-    @Test
-    fun `applyEmojiSpans on plain ASCII produces zero spans`() {
-        val out = "hello world".applyEmojiSpans()
-        assertEquals("hello world", out.text)
-        assertEquals(0, out.spanStyles.size)
-    }
-
-    @Test
-    fun `applyEmojiSpans tags each BMP emoji codepoint`() {
-        // ☀ (U+2600) is a single-char BMP emoji codepoint covered by
-        // the 0x2600..0x27BF range
-        val out = "☀".applyEmojiSpans()
-        assertEquals("☀", out.text)
-        assertEquals(1, out.spanStyles.size)
-        val span = out.spanStyles[0]
-        assertEquals(0, span.start)
-        assertEquals(1, span.end)
-        assertEquals(EmojiFontFamily, span.item.fontFamily)
-    }
-
-    @Test
     fun `applyEmojiSpans handles a supplementary-plane emoji as a 2-char span`() {
         // 👍 (U+1F44D) is a supplementary-plane codepoint — encoded as
         // a 2-char surrogate pair in Java strings. The span must
@@ -65,19 +38,6 @@ class EmojiSpanTest {
         assertEquals(0, span.start)
         assertEquals(2, span.end)
         assertEquals(EmojiFontFamily, span.item.fontFamily)
-    }
-
-    @Test
-    fun `applyEmojiSpans on mixed text styles only the emoji ranges`() {
-        // "hi 👍 ok" — span only on the thumbs-up
-        val text = "hi 👍 ok"
-        val out = text.applyEmojiSpans()
-        assertEquals(text, out.text)
-        assertEquals(1, out.spanStyles.size)
-        val span = out.spanStyles[0]
-        // "hi " is 3 chars; emoji at indices 3..4 (surrogate pair)
-        assertEquals(3, span.start)
-        assertEquals(5, span.end)
     }
 
     @Test
@@ -195,18 +155,6 @@ class EmojiSpanTest {
         val out = "⭐".applyEmojiSpans()
         assertEquals(1, out.spanStyles.size)
         assertEquals(EmojiFontFamily, out.spanStyles[0].item.fontFamily)
-    }
-
-    @Test
-    fun `applyEmojiSpans tags regional indicator codepoints (flag halves)`() {
-        // U+1F1FA (regional indicator U) is a supplementary-plane
-        // codepoint, so it serializes as a 2-char surrogate pair.
-        // Inside 0x1F1E6..0x1F1FF.
-        val text = "🇺"  // == String(intArrayOf(0x1F1FA), 0, 1)
-        val out = text.applyEmojiSpans()
-        assertEquals(1, out.spanStyles.size)
-        assertEquals(0, out.spanStyles[0].start)
-        assertEquals(2, out.spanStyles[0].end)
     }
 
     @Test

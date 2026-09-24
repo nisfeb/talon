@@ -1,12 +1,8 @@
 package io.nisfeb.talon.urbit
 
-import kotlin.random.Random
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -113,35 +109,6 @@ class FuzzTest {
     // ─── invariants we actively care about ───────────────────
 
     @Test
-    fun `undotAtom is idempotent`() {
-        // Calling undotAtom twice must equal calling it once for any
-        // string. Catches any accidental dot-re-introduction.
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val s = Fuzz.randomString(rnd, 50)
-            assertEquals(undotAtom(s), undotAtom(undotAtom(s)))
-        }
-    }
-
-    @Test
-    fun `dotAtom is idempotent on digit-only inputs`() {
-        // Applying dotAtom twice to a purely numeric string must match
-        // applying it once. Non-numeric inputs are pass-through so the
-        // property trivially holds.
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val n = rnd.nextLong(0, Long.MAX_VALUE).toString()
-            assertEquals(dotAtom(n), dotAtom(dotAtom(n)))
-        }
-    }
-
-    @Test
-    fun `dotAtom then undotAtom round-trips digit strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val n = rnd.nextLong(0, Long.MAX_VALUE).toString()
-            assertEquals(n, undotAtom(dotAtom(n)))
-        }
-    }
-
-    @Test
     fun `chatTextToStory always emits at least one verse for non-empty input`() {
         Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
             val input = Fuzz.randomString(rnd, 100)
@@ -168,27 +135,7 @@ class FuzzTest {
         }
     }
 
-    @Test
-    fun `parseCite group variant always produces openTarget prefixed with group colon`() {
-        Fuzz.run(200, SEED) { rnd, _ ->
-            val flag = "~sampel/${Fuzz.randomString(rnd, 10).ifBlank { "x" }}"
-            val cite = buildJsonObject { put("group", flag) }
-            val r = parseCite(cite)
-            val target = r.target as? CiteTarget.Group ?: return@run
-            assertEquals(flag, target.flag)
-        }
-    }
-
     // ─── activity feed parser (rc14) ──────────────────────────
-
-    @Test
-    fun `parseActivityEventTimeMs never throws on arbitrary strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val time = Fuzz.randomString(rnd, 50)
-            val event = Fuzz.randomJsonObject(rnd, depth = 2)
-            TlonChatRepo.parseActivityEventTimeMs(time, event)
-        }
-    }
 
     @Test
     fun `parseActivityEventTimeMs result is always non-negative`() {

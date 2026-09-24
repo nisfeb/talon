@@ -1,11 +1,8 @@
 package io.nisfeb.talon.ui.screens
 
-import io.nisfeb.talon.ui.MenuBadges
-import io.nisfeb.talon.ui.RailItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -30,8 +27,4 @@ class AssistantSessionTest {
         assertFalse(s.news.value)
     }
 
-    @Test fun `the dot is the assistant's alone`() {
-        val b = MenuBadges(assistantNews = true)
-        assertEquals(setOf(RailItem.Assistant), RailItem.entries.filter(b::forItem).toSet())
-    }
 }

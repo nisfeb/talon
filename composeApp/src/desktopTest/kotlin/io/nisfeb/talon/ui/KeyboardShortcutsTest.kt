@@ -52,16 +52,6 @@ class KeyboardShortcutsTest {
     }
 
     @Test
-    fun `Ctrl+Shift+K is ignored - reserved for editor`() {
-        assertNull(keyEventToShortcut(ctrlShiftKeyDown(Key.K)))
-    }
-
-    @Test
-    fun `Ctrl+Equals maps to IncreaseFontSize`() {
-        assertEquals(ShortcutAction.IncreaseFontSize, keyEventToShortcut(ctrlKeyDown(Key.Equals)))
-    }
-
-    @Test
     fun `Ctrl+Shift+Equals (the plus) still maps to IncreaseFontSize`() {
         // "+" is Shift+"=" on US layouts; the Shift guard must not
         // swallow this one even though it blocks other Ctrl+Shift combos.

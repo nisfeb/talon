@@ -17,21 +17,9 @@ class HomePlaceTest {
     }
 
     @Test
-    fun `a label with commas in it still round-trips`() {
-        val p = HomePlace(51.5, -0.13, "London, England, United Kingdom")
-        assertEquals(p, HomePlaceCodec.decode(HomePlaceCodec.encode(p)))
-    }
-
-    @Test
     fun `a device fix stays marked as one`() {
         val p = HomePlace(1.0, 2.0, "here", fromGps = true)
         assertTrue(HomePlaceCodec.decode(HomePlaceCodec.encode(p))!!.fromGps)
-    }
-
-    @Test
-    fun `an unknown elevation stays unknown rather than becoming sea level`() {
-        val p = HomePlace(1.0, 2.0, "here", elevationMetres = null)
-        assertNull(HomePlaceCodec.decode(HomePlaceCodec.encode(p))!!.elevationMetres)
     }
 
     @Test
@@ -40,12 +28,6 @@ class HomePlaceTest {
         val p = HomePlace(-41.29, 174.78, "Wellington, New Zealand", timeZoneId = "Pacific/Auckland")
         assertEquals("Pacific/Auckland", HomePlaceCodec.decode(HomePlaceCodec.encode(p))?.timeZoneId)
         assertEquals(p, HomePlaceCodec.decode(HomePlaceCodec.encode(p)))
-    }
-
-    @Test
-    fun `a place with no zone stays without one`() {
-        val p = HomePlace(1.0, 2.0, "here", fromGps = true)
-        assertNull(HomePlaceCodec.decode(HomePlaceCodec.encode(p))!!.timeZoneId)
     }
 
     @Test

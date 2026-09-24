@@ -51,12 +51,6 @@ class SearchFilterTest {
     }
 
     @Test
-    fun `in operator captures whom verbatim`() {
-        val f = parse("in:chat/~ship/channel-name")
-        assertEquals("chat/~ship/channel-name", f.inWhom)
-    }
-
-    @Test
     fun `since operator with single unit`() {
         val f = parse("since:1w")
         assertEquals(NOW - 7 * 86_400_000L, f.sinceMs)

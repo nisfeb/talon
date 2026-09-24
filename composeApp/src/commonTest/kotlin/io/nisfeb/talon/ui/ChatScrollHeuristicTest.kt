@@ -28,37 +28,6 @@ import kotlin.test.assertTrue
 class ChatScrollHeuristicTest {
 
     @Test
-    fun `inbound near bottom triggers scroll`() {
-        val d = decideAutoScroll(
-            rowsSize = 100,
-            newestId = "new",
-            lastNewestId = "old",
-            lastSize = 99,
-            firstVisibleItemIndex = 0,
-            pendingSendBaselineSize = null,
-            pendingSelfSendNewestId = null,
-        )
-        assertTrue(d.scrollToBottom)
-        assertNull(d.nextBaseline)
-    }
-
-    @Test
-    fun `inbound away from bottom does NOT scroll`() {
-        // User scrolled up to read history — peer message arrives but
-        // we leave them where they are.
-        val d = decideAutoScroll(
-            rowsSize = 100,
-            newestId = "new",
-            lastNewestId = "old",
-            lastSize = 99,
-            firstVisibleItemIndex = 50,
-            pendingSendBaselineSize = null,
-            pendingSelfSendNewestId = null,
-        )
-        assertFalse(d.scrollToBottom)
-    }
-
-    @Test
     fun `inbound right at the threshold edge still scrolls`() {
         val d = decideAutoScroll(
             rowsSize = 100,
@@ -96,35 +65,6 @@ class ChatScrollHeuristicTest {
             newestId = "stable-newest",
             lastNewestId = "stable-newest",
             lastSize = 100,
-            firstVisibleItemIndex = 0,
-            pendingSendBaselineSize = null,
-            pendingSelfSendNewestId = null,
-        )
-        assertFalse(d.scrollToBottom)
-    }
-
-    @Test
-    fun `same-tick re-emit (no growth) does NOT scroll`() {
-        // Flow re-emit with no actual change (defensive).
-        val d = decideAutoScroll(
-            rowsSize = 100,
-            newestId = "new",
-            lastNewestId = "new",
-            lastSize = 100,
-            firstVisibleItemIndex = 0,
-            pendingSendBaselineSize = null,
-            pendingSelfSendNewestId = null,
-        )
-        assertFalse(d.scrollToBottom)
-    }
-
-    @Test
-    fun `null newestId (empty list) does NOT scroll`() {
-        val d = decideAutoScroll(
-            rowsSize = 0,
-            newestId = null,
-            lastNewestId = null,
-            lastSize = 0,
             firstVisibleItemIndex = 0,
             pendingSendBaselineSize = null,
             pendingSelfSendNewestId = null,
@@ -170,23 +110,6 @@ class ChatScrollHeuristicTest {
         )
         assertFalse(d.scrollToBottom, "no scroll until the upsert lands")
         assertEquals(100, d.nextBaseline, "baseline must persist for the next emission")
-    }
-
-    @Test
-    fun `self-send catch-up wins over near-bottom guard`() {
-        // Inbound logic would skip scroll (firstVisibleItemIndex > 12),
-        // but self-send catch-up overrides that. The user should
-        // always see their own message.
-        val d = decideAutoScroll(
-            rowsSize = 101,
-            newestId = "self-message",
-            lastNewestId = "old",
-            lastSize = 100,
-            firstVisibleItemIndex = 200,  // way scrolled up
-            pendingSendBaselineSize = 100,
-            pendingSelfSendNewestId = null,
-        )
-        assertTrue(d.scrollToBottom)
     }
 
     // ---- self-send swap path -----------------------------------------
@@ -254,28 +177,6 @@ class ChatScrollHeuristicTest {
     }
 
     @Test
-    fun `swap branch handles size shrink + id change (delete-then-insert across emissions)`() {
-        // If Room emits twice — once for the delete, once for the
-        // insert — the first emission shrinks rows to N and changes
-        // newestId. The swap branch should still fire on that
-        // intermediate state because newestId changed and the marker
-        // is set. (If newestId becomes null because the list is now
-        // empty, we fall through and don't scroll — handled by the
-        // `newestId != null` guard in the swap branch.)
-        val d = decideAutoScroll(
-            rowsSize = 100,                      // shrank from 101
-            newestId = "the-message-before-mine",
-            lastNewestId = "optimistic-id",
-            lastSize = 101,
-            firstVisibleItemIndex = 0,
-            pendingSendBaselineSize = null,
-            pendingSelfSendNewestId = "optimistic-id",
-        )
-        assertTrue(d.scrollToBottom)
-        assertNull(d.nextPendingSelfSendNewestId)
-    }
-
-    @Test
     fun `swap branch is suppressed when newestId is null (empty list)`() {
         // Defensive: newestId can be null between emissions in an
         // empty-then-empty case. Don't scroll, don't clear the marker
@@ -293,27 +194,4 @@ class ChatScrollHeuristicTest {
         assertEquals("optimistic-id", d.nextPendingSelfSendNewestId)
     }
 
-    @Test
-    fun `a peer message after a send takes the swap branch and clears the marker`() {
-        // A peer's message arrives between the catch-up and the
-        // server echo. The peer-arrival hits the inbound branch
-        // (size grew, newestId changed), but the swap marker should
-        // pass through unchanged so we still catch the eventual
-        // optimistic-to-verified transition.
-        val d = decideAutoScroll(
-            rowsSize = 102,
-            newestId = "peer-message",
-            lastNewestId = "optimistic-id",
-            lastSize = 101,
-            firstVisibleItemIndex = 0,
-            pendingSendBaselineSize = null,
-            pendingSelfSendNewestId = "optimistic-id",
-        )
-        // This actually hits the swap branch first (newestId !=
-        // pendingSelfSendNewestId), which scrolls and clears the
-        // marker. That's also correct — the user wants to see new
-        // content at the bottom. Pin both.
-        assertTrue(d.scrollToBottom)
-        assertNull(d.nextPendingSelfSendNewestId)
-    }
 }

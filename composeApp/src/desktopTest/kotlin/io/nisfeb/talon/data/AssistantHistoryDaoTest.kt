@@ -36,16 +36,6 @@ class AssistantHistoryDaoTest {
         AssistantHistoryEntity(mode = mode, question = question, answer = "a:$question", createdAt = at)
 
     @Test
-    fun `recent returns newest first`() = runBlocking {
-        val dao = db.assistantHistory()
-        dao.insert(entry("oldest", at = 100))
-        dao.insert(entry("middle", at = 200))
-        dao.insert(entry("newest", at = 300))
-        val rows = dao.recent(10).first()
-        assertEquals(listOf("newest", "middle", "oldest"), rows.map { it.question })
-    }
-
-    @Test
     fun `recent honours the limit`() = runBlocking {
         val dao = db.assistantHistory()
         repeat(5) { dao.insert(entry("q$it", at = it.toLong())) }

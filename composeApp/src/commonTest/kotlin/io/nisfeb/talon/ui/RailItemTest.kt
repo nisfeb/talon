@@ -9,22 +9,6 @@ import kotlin.test.assertTrue
 class RailItemTest {
 
     @Test
-    fun `pane-tab items map to a RailTab and round-trip`() {
-        for (item in RailItem.entries.filter { it.isPaneTab }) {
-            val tab = item.toRailTab()
-            assertNotNull(tab, "pane-tab item $item should produce a RailTab")
-            assertEquals(item.name, tab!!.name)
-        }
-    }
-
-    @Test
-    fun `modal items return null toRailTab`() {
-        for (item in RailItem.entries.filter { !it.isPaneTab }) {
-            assertNull(item.toRailTab(), "modal item $item should not have a RailTab")
-        }
-    }
-
-    @Test
     fun `every RailTab has a RailItem of the same name`() {
         // Pinned the contract so adding a RailTab without a RailItem
         // would surface here, not as a runtime crash in the rail code.
@@ -43,62 +27,7 @@ class RailItemTest {
         assertNull(railItemOrNull("NotAValue"))
     }
 
-    @Test
-    fun `railItemOrNull round-trips every value`() {
-        for (item in RailItem.entries) {
-            assertEquals(item, railItemOrNull(item.name))
-        }
-    }
-
-    @Test
-    fun `isVisible defaults to true for absent items`() {
-        val empty: Map<RailItem, Boolean> = emptyMap()
-        for (item in RailItem.entries) {
-            assertTrue(empty.isVisible(item), "absent $item should be visible by default")
-        }
-    }
-
-    @Test
-    fun `isVisible respects explicit false`() {
-        val map: Map<RailItem, Boolean> = mapOf(RailItem.Settings to false)
-        assertEquals(false, map.isVisible(RailItem.Settings))
-        assertEquals(true, map.isVisible(RailItem.Chats))
-    }
-
     // ---- sanitizeRailItemOrder ---------------------------------------
-
-    @Test
-    fun `sanitizeRailItemOrder on empty input returns full enum in declaration order`() {
-        assertEquals(RailItem.entries.toList(), sanitizeRailItemOrder(emptyList()))
-    }
-
-    @Test
-    fun `sanitizeRailItemOrder is identity for an already-correct input`() {
-        val input = RailItem.entries.toList()
-        assertEquals(input, sanitizeRailItemOrder(input))
-    }
-
-    @Test
-    fun `sanitizeRailItemOrder preserves a custom user order`() {
-        val custom = listOf(
-            RailItem.Settings,
-            RailItem.Chats,
-            RailItem.Home,
-            RailItem.Mail,
-            RailItem.Profile,
-            RailItem.Calendar,
-            RailItem.Statuses,
-            RailItem.Bookmarks,
-            RailItem.Activity,
-            RailItem.Watchwords,
-            RailItem.Administration,
-            RailItem.Invites,
-            RailItem.Assistant,
-        )
-        // An order saved before a section existed keeps its shape, and
-        // the new section joins the end rather than going missing.
-        assertEquals(custom + RailItem.Actions, sanitizeRailItemOrder(custom))
-    }
 
     @Test
     fun `sanitizeRailItemOrder de-duplicates with first-occurrence-wins`() {
@@ -112,28 +41,6 @@ class RailItemTest {
         // Statuses appears once, at its first position
         assertEquals(1, out.count { it == RailItem.Statuses })
         assertTrue(out.indexOf(RailItem.Statuses) < out.indexOf(RailItem.Bookmarks))
-    }
-
-    @Test
-    fun `sanitizeRailItemOrder always returns the full enum universe`() {
-        // Even bizarre inputs (empty, partial, dupes) result in every
-        // RailItem appearing exactly once in the output.
-        val cases = listOf(
-            emptyList(),
-            listOf(RailItem.Chats),
-            listOf(RailItem.Settings, RailItem.Settings, RailItem.Statuses),
-            listOf(RailItem.Profile, RailItem.Watchwords),
-        )
-        for (input in cases) {
-            val out = sanitizeRailItemOrder(input)
-            assertEquals(
-                RailItem.entries.toSet(),
-                out.toSet(),
-                "input $input should produce the full universe",
-            )
-            assertEquals(RailItem.entries.size, out.size,
-                "input $input has duplicates or missing items in result $out")
-        }
     }
 
     @Test

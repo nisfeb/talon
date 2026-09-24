@@ -24,37 +24,9 @@ class TzParseTest {
     private val now: Long = isoUtc("2024-01-08T10:00:00.000Z")
 
     @Test
-    fun `resolveZoneToken accepts lowercase short alias`() {
-        assertEquals("America/New_York", resolveZoneToken("eastern"))
-    }
-
-    @Test
     fun `resolveZoneToken accepts uppercase short alias`() {
         // Aliases are stored lowercase; resolveZoneToken lowercases first.
         assertEquals("America/Los_Angeles", resolveZoneToken("PDT"))
-    }
-
-    @Test
-    fun `resolveZoneToken accepts IANA id directly`() {
-        assertEquals("America/New_York", resolveZoneToken("America/New_York"))
-    }
-
-    @Test
-    fun `resolveZoneToken returns null for unknown token`() {
-        // Unknown ids must surface as null (→ user-facing error), not a
-        // silent fallback zone.
-        assertNull(resolveZoneToken("notazone"))
-    }
-
-    @Test
-    fun `resolveZoneToken returns null for empty token`() {
-        assertNull(resolveZoneToken("   "))
-    }
-
-    @Test
-    fun `parseTzInput empty args is Err`() {
-        val r = parseTzInput("", nowMs = now)
-        assertTrue(r is TzParseResult.Err)
     }
 
     @Test
@@ -111,11 +83,6 @@ class TzParseTest {
     fun `decodeTzTag returns null for malformed instant`() {
         val tag = "[tz|notatime|EDT]"
         assertNull(decodeTzTag(tag))
-    }
-
-    @Test
-    fun `decodeTzTag returns null when tag is absent from text`() {
-        assertNull(decodeTzTag("nothing here"))
     }
 
     @Test

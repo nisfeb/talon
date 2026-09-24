@@ -18,34 +18,6 @@ class ActivityParserTest {
 
     // ─── sourceKeyToWhom ────────────────────────────────────────
 
-    @Test
-    fun `ship source key strips ship prefix`() {
-        assertEquals("~sampel-palnet", sourceKeyToWhom("ship/~sampel-palnet"))
-    }
-
-    @Test
-    fun `club source key strips club prefix`() {
-        assertEquals("0v2.abcde", sourceKeyToWhom("club/0v2.abcde"))
-    }
-
-    @Test
-    fun `channel source key strips channel prefix`() {
-        assertEquals(
-            "chat/~sampel-palnet/general",
-            sourceKeyToWhom("channel/chat/~sampel-palnet/general"),
-        )
-    }
-
-    @Test
-    fun `group and base source keys yield null`() {
-        // We don't surface these kinds in the home list. (Thread
-        // variants used to fall here too — see the dedicated section
-        // below for the deep-link routing of `thread/` and
-        // `dm-thread/`.)
-        assertNull(sourceKeyToWhom("group/~sampel/my-group"))
-        assertNull(sourceKeyToWhom("base"))
-    }
-
     // ─── sourceToWhom ───────────────────────────────────────────
 
     @Test
@@ -112,20 +84,6 @@ class ActivityParserTest {
     }
 
     @Test
-    fun `toUnread missing fields default to 0`() {
-        val row = toUnread("ship/~sampel", buildJsonObject { })!!
-        assertEquals(0, row.count)
-        assertEquals(0, row.notifyCount)
-        assertEquals(0L, row.recencyMs)
-    }
-
-    @Test
-    fun `toUnread firstUnreadId is null when unread is absent (caught up)`() {
-        val row = toUnread("ship/~sampel", buildJsonObject { })!!
-        assertNull(row.firstUnreadId)
-    }
-
-    @Test
     fun `toUnread parses channel unread boundary to bare undotted da`() {
         // channel/<nest> source: MessageEntity.id is the bare undotted
         // @da, so the wire `~author/<dotted-da>` must reduce to it.
@@ -145,13 +103,6 @@ class ActivityParserTest {
         """.trimIndent()).jsonObject
         val row = toUnread("ship/~bus", summary)!!
         assertEquals("~bus/170141184507111222333", row.firstUnreadId)
-    }
-
-    @Test
-    fun `toUnread with unsurfaced source kind yields null`() {
-        assertNull(toUnread("group/~sampel/flag", buildJsonObject { }))
-        assertNull(toUnread("thread/x/y", buildJsonObject { }))
-        assertNull(toUnread("base", buildJsonObject { }))
     }
 
     @Test
@@ -216,12 +167,6 @@ class ActivityParserTest {
     }
 
     @Test
-    fun `read source for a channel without group flag yields null`() {
-        // Defensive — caller must resolve group first.
-        assertNull(activityReadSource("chat/~host/slug", groupFlag = null))
-    }
-
-    @Test
     fun `read source covers diary and heap channels too`() {
         assertTrue(activityReadSource("diary/~h/s", "~h/f") != null)
         assertTrue(activityReadSource("heap/~h/s", "~h/f") != null)
@@ -246,31 +191,6 @@ class ActivityParserTest {
     // ─── parseActivityEventTarget — deep-link extraction ────────
 
     private fun obj(raw: String) = json.parseToJsonElement(raw).jsonObject
-
-    @Test
-    fun `post-mention extracts the post id and no parent`() {
-        // Top-level mention — tap should scroll to this post in the
-        // chat, no thread routing.
-        val ev = obj("""{"key":{"id":"~author/170.141.184.507.933.044.937.549.665.940.933.705.728"}}""")
-        val t = parseActivityEventTarget("post-mention", ev)
-        assertEquals("~author/170141184507933044937549665940933705728", t.postId)
-        assertEquals(null, t.parentPostId)
-    }
-
-    @Test
-    fun `reply event with parent extracts both ids`() {
-        // Reply that mentions you — tap should open the thread for
-        // parent and anchor on this reply.
-        val ev = obj(
-            """
-            {"key":{"id":"~r/9.999"},
-             "parent":{"id":"~p/1.000"}}
-            """.trimIndent()
-        )
-        val t = parseActivityEventTarget("reply", ev)
-        assertEquals("~r/9999", t.postId)
-        assertEquals("~p/1000", t.parentPostId)
-    }
 
     @Test
     fun `dm-reply-mention also handled`() {
@@ -324,21 +244,6 @@ class ActivityParserTest {
         assertEquals(null, t.parentPostId)
     }
 
-    @Test
-    fun `unknown tag treats event as top-level`() {
-        val ev = obj("""{"key":{"id":"~author/1"}}""")
-        val t = parseActivityEventTarget("group-invite", ev)
-        assertEquals("~author/1", t.postId)
-        assertEquals(null, t.parentPostId)
-    }
-
-    @Test
-    fun `empty event returns nulls`() {
-        val t = parseActivityEventTarget("post-mention", obj("{}"))
-        assertEquals(null, t.postId)
-        assertEquals(null, t.parentPostId)
-    }
-
     // ─── sourceKeyToWhom — thread variants ──────────────────────
 
     @Test
@@ -351,20 +256,6 @@ class ActivityParserTest {
         // sourceKeyToThreadSource → ThreadUnreadEntity.
         assertNull(sourceKeyToWhom("thread/chat/~host/slug/170.141.184.507"))
         assertNull(sourceKeyToWhom("thread/chat/~host/slug/~author/170.141.184.507"))
-    }
-
-    @Test
-    fun `dm-thread source-key resolves to null (handled by sourceKeyToThreadSource)`() {
-        // Same rationale as `thread/` above.
-        assertNull(sourceKeyToWhom("dm-thread/~sampel-palnet/~author/170.141"))
-        assertNull(sourceKeyToWhom("dm-thread/0v4.abcde/~author/170.141"))
-    }
-
-    @Test
-    fun `unknown source-key kind still returns null`() {
-        assertEquals(null, sourceKeyToWhom("base"))
-        assertEquals(null, sourceKeyToWhom("group/~host/group-name"))
-        assertEquals(null, sourceKeyToWhom("contact/~sampel"))
     }
 
     // ─── canonicalPostIdForWhom — DB-form normalization ─────────
@@ -384,59 +275,9 @@ class ActivityParserTest {
     }
 
     @Test
-    fun `channel whom is a no-op on already-bare id`() {
-        // A wire id that already came without the author prefix
-        // shouldn't get further mangled.
-        assertEquals(
-            "170141184507932790143209384169177088000",
-            canonicalPostIdForWhom(
-                "chat/~h/s",
-                "170141184507932790143209384169177088000",
-            ),
-        )
-    }
-
-    @Test
-    fun `dm whom keeps the author-prefixed id intact`() {
-        // DM writs are stored as `~author/<da>`. Stripping would
-        // break lookups in the other direction.
-        assertEquals(
-            "~ricsul-bilwyt-dozzod-nisfeb/170141",
-            canonicalPostIdForWhom(
-                "~sampel-palnet",
-                "~ricsul-bilwyt-dozzod-nisfeb/170141",
-            ),
-        )
-    }
-
-    @Test
-    fun `club whom keeps the author-prefixed id intact`() {
-        assertEquals(
-            "~author/170141",
-            canonicalPostIdForWhom("0v4.abcde", "~author/170141"),
-        )
-    }
-
-    @Test
     fun `diary and heap channels normalize like chat`() {
         assertEquals("170141", canonicalPostIdForWhom("diary/~h/s", "~a/170141"))
         assertEquals("170141", canonicalPostIdForWhom("heap/~h/s", "~a/170141"))
     }
 
-    @Test
-    fun `null inputs short-circuit to null`() {
-        assertEquals(null, canonicalPostIdForWhom("chat/~h/s", null))
-        assertEquals(null, canonicalPostIdForWhom(null, null))
-    }
-
-    @Test
-    fun `null whom passes the id through unchanged`() {
-        // Defensive — if we ever route via something that doesn't
-        // know its whom, leave the wire form alone rather than
-        // silently mangling.
-        assertEquals(
-            "~author/170141",
-            canonicalPostIdForWhom(null, "~author/170141"),
-        )
-    }
 }

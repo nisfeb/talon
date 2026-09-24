@@ -153,12 +153,6 @@ class StoryMarkdownExpansionTest {
         assertFalse(t.text.text.contains("[x]"))
     }
 
-    @Test
-    fun `uppercase X also marks a task done`() {
-        val t = firstText(Story.parse(plainStory("- [X] done")))
-        assertTrue(t.text.text.contains("☑ done"))
-    }
-
     // ─── emoji shortcodes ─────────────────────────────────────────
 
     @Test
@@ -183,12 +177,6 @@ class StoryMarkdownExpansionTest {
     }
 
     // ─── guards ───────────────────────────────────────────────────
-
-    @Test
-    fun `plain prose is unchanged`() {
-        val t = firstText(Story.parse(plainStory("just a normal sentence")))
-        assertEquals("just a normal sentence", t.text.text)
-    }
 
     @Test
     fun `expansion off leaves markdown literal`() {

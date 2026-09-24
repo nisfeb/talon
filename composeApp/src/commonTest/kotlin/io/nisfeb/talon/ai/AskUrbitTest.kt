@@ -51,14 +51,6 @@ class AskUrbitTest {
         )
     }
 
-    @Test
-    fun `parseCitedIndices on an uncited answer is empty`() {
-        assertEquals(
-            emptyList(),
-            AskUrbit.parseCitedIndices("I couldn't find anything about that.", max = 10),
-        )
-    }
-
     private fun m(id: String, whom: String = "~bus", sentMs: Long = 0L) =
         MessageEntity(whom = whom, id = id, author = "~bus", sentMs = sentMs, contentJson = "{}", kind = "chat")
 

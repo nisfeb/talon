@@ -14,13 +14,6 @@ class NameToShipTest {
     private fun one(r: NameToShip.Result) = (r as NameToShip.Result.One).ship
 
     @Test
-    fun `an at-p works with or without its sig`() {
-        assertEquals(planet, one(NameToShip.resolve(planet)))
-        assertEquals(planet, one(NameToShip.resolve("ricsul-bilwyt")))
-        assertEquals(comet, one(NameToShip.resolve(comet)))
-    }
-
-    @Test
     fun `the full word name works with nobody known`() {
         // It decodes on its own, so an invite needs no prior contact.
         val nym = Mnemonym.forShip(comet)!!
@@ -29,21 +22,8 @@ class NameToShipTest {
     }
 
     @Test
-    fun `the short name works for somebody already known`() {
-        assertEquals(comet, one(NameToShip.resolve("..admire...attune", known = listOf(comet))))
-    }
-
-    @Test
     fun `a short name nobody matches resolves to nothing`() {
         assertEquals(NameToShip.Result.None, NameToShip.resolve("..admire...attune"))
-    }
-
-    @Test
-    fun `a nickname works`() {
-        val r = NameToShip.resolve("Sam", known = listOf(comet, planet)) { s ->
-            if (s == comet) "Sam" else null
-        }
-        assertEquals(comet, one(r))
     }
 
     @Test

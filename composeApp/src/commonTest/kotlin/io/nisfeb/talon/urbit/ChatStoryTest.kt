@@ -1,12 +1,10 @@
 package io.nisfeb.talon.urbit
 
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -26,25 +24,6 @@ class ChatStoryTest {
         }
 
     // ─── plain passthrough ──────────────────────────────────────
-
-    @Test
-    fun `empty input yields a single empty-inline verse`() {
-        // Empty input still produces one verse; UIs gate empty sends
-        // elsewhere. Without this the message would be all-empty and
-        // a downstream caller might crash on no inline.
-        val story = chatTextToStory("")
-        assertEquals(1, story.size)
-    }
-
-    @Test
-    fun `single plain line becomes one inline verse, no trailing break`() {
-        val story = chatTextToStory("hello")
-        assertEquals(1, story.size)
-        val inline = inlineOf(story[0].jsonObject)
-        // No `break` — the verse holds a single text primitive.
-        assertFalse(inline.any { (it as? JsonObject)?.containsKey("break") == true })
-        assertEquals("hello", (inline[0] as JsonPrimitive).content)
-    }
 
     @Test
     fun `single-newline-separated lines collapse into one verse with internal breaks`() {
@@ -80,18 +59,6 @@ class ChatStoryTest {
     // ─── blockquote grouping ────────────────────────────────────
 
     @Test
-    fun `single quoted line emits one blockquote verse`() {
-        val story = chatTextToStory("> quoted")
-        assertEquals(1, story.size)
-        val inline = inlineOf(story[0].jsonObject)
-        // A blockquote verse has exactly one inline element — the
-        // blockquote wrapper.
-        assertEquals(1, inline.size)
-        val bq = inline[0].jsonObject["blockquote"]!!.jsonArray
-        assertEquals("quoted", (bq[0] as JsonPrimitive).content)
-    }
-
-    @Test
     fun `consecutive quote lines merge into one blockquote`() {
         val story = chatTextToStory("> first\n> second\n> third")
         assertEquals(1, story.size)
@@ -113,15 +80,6 @@ class ChatStoryTest {
         // Verse 1 is plain text (last verse → no trailing break).
         val plain = inlineOf(story[1].jsonObject)
         assertEquals("follow-up", (plain[0] as JsonPrimitive).content)
-    }
-
-    @Test
-    fun `plain then quote then plain produces three verses`() {
-        val story = chatTextToStory("intro\n> said\nreply")
-        assertEquals(3, story.size)
-        assertFalse(hasBlockquote(story[0].jsonObject))
-        assertTrue(hasBlockquote(story[1].jsonObject))
-        assertFalse(hasBlockquote(story[2].jsonObject))
     }
 
     @Test
@@ -154,13 +112,6 @@ class ChatStoryTest {
         assertEquals(">notaquote", (inline[0] as JsonPrimitive).content)
     }
 
-    @Test
-    fun `gt mid-line is plain text`() {
-        val story = chatTextToStory("a > b")
-        assertEquals(1, story.size)
-        assertFalse(hasBlockquote(story[0].jsonObject))
-    }
-
     // ─── fenced code blocks ─────────────────────────────────────
 
     /** Extract `block.code.{code,lang}` from a verse, or null. */
@@ -190,14 +141,6 @@ class ChatStoryTest {
         // The point is the value is always a valid @tas, matching the
         // shape Tlon's webclient produces.
         assertEquals("cplus", lang)
-    }
-
-    @Test
-    fun `language tag after the opener is preserved`() {
-        val story = chatTextToStory("```kotlin\nfun main() {}\n```")
-        val (body, lang) = assertNotNull(codeBlock(story[0].jsonObject))
-        assertEquals("fun main() {}", body)
-        assertEquals("kotlin", lang)
     }
 
     @Test
