@@ -1863,17 +1863,16 @@ class TlonChatRepo(
                 val dotted = dotAtom(parentId)
                 "channels" to listOf("/v5/$whom/posts/post/$dotted")
             }
+            // A DM writ id is `~author/<da>`, stored undotted; the ship
+            // parses the da as an @ud, which wants its dots back.
             whom.startsWith("~") -> {
-                // DM writ id is `~author/<dotted-da>` already.
-                "chat" to listOf(
-                    "/v4/dm/$whom/writs/writ/id/$parentId",
-                    "/v3/dm/$whom/writs/writ/id/$parentId",
-                )
+                val id = redotWritId(parentId)
+                "chat" to listOf("/v4/dm/$whom/writs/writ/id/$id", "/v3/dm/$whom/writs/writ/id/$id")
             }
-            whom.startsWith("0v") -> "chat" to listOf(
-                "/v4/club/$whom/writs/writ/id/$parentId",
-                "/v3/club/$whom/writs/writ/id/$parentId",
-            )
+            whom.startsWith("0v") -> {
+                val id = redotWritId(parentId)
+                "chat" to listOf("/v4/club/$whom/writs/writ/id/$id", "/v3/club/$whom/writs/writ/id/$id")
+            }
             else -> return
         }
         var post: JsonElement? = null

@@ -1633,14 +1633,7 @@ private fun MessageRow(
                     // renders below the body instead — grouped rows
                     // (a burst of your own sends) have no header, and
                     // a failed send must never be invisible.
-                    if (m.status == "pending") {
-                        Icon(
-                            imageVector = TalonIcons.Schedule,
-                            contentDescription = "Sending",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
+                    if (m.status == "pending") SendingIcon()
                 }
             }
             StoryRenderer(
@@ -1657,24 +1650,7 @@ private fun MessageRow(
                 // opening the menu (right-click opens it instead).
                 onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
-            if (m.status == "failed") {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(
-                        imageVector = TalonIcons.ErrorOutline,
-                        contentDescription = "Send failed",
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Text(
-                        "Not sent",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
+            if (m.status == "failed") SendFailedNote()
             val firstLink = remember(parts) { firstLinkUrl(parts) }
             if (firstLink != null) {
                 LinkPreviewCard(
@@ -2734,3 +2710,35 @@ private fun TypingIndicator(
  */
 internal fun shouldQuoteOnSwipe(setting: Boolean, whom: String, parentId: String?): Boolean =
     setting && whom.startsWith("chat/") && parentId == null
+
+/** Our own message on its way: the ship has not taken it yet. */
+@Composable
+internal fun SendingIcon() {
+    Icon(
+        imageVector = TalonIcons.Schedule,
+        contentDescription = "Sending",
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.size(14.dp),
+    )
+}
+
+/** Under a message the ship refused, or that never left. */
+@Composable
+internal fun SendFailedNote() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            imageVector = TalonIcons.ErrorOutline,
+            contentDescription = "Send failed",
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            "Not sent",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+}

@@ -747,11 +747,17 @@ private fun ThreadMessage(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             if (showHeader) {
-                Text(
-                    "$authorLabel · $stamp",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        "$authorLabel · $stamp",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (m.status == "pending") SendingIcon()
+                }
             }
             StoryRenderer(
                 parts,
@@ -765,6 +771,7 @@ private fun ThreadMessage(
                 // text rather than opening the menu (hover "⋯" opens it).
                 onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
+            if (m.status == "failed") SendFailedNote()
             if (grouped.isNotEmpty()) {
                 FlowRow(
                     modifier = Modifier.padding(top = 4.dp),
