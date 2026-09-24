@@ -98,6 +98,19 @@ class ActivityParserTest {
         assertEquals(1777000000000L, row.recencyMs)
     }
 
+    // A channel whose own messages are all read, with four notifying
+    // replies in its threads: no mentions on the channel's row. They
+    // were, for good, since reading the channel leaves its threads.
+    @Test
+    fun `toUnread counts no mentions that live only in threads`() {
+        val caughtUp = json.parseToJsonElement("""{"count":4,"notify-count":4,"notify":true,"unread":null}""").jsonObject
+        assertEquals(0, toUnread("channel/chat/~host/b", caughtUp)!!.notifyCount)
+        val quiet = json.parseToJsonElement(
+            """{"count":6,"notify-count":4,"notify":true,"unread":{"id":"~sampel/170.141","count":2,"notify":false}}""",
+        ).jsonObject
+        assertEquals(0, toUnread("channel/chat/~host/b", quiet)!!.notifyCount, "its own two do not notify")
+    }
+
     @Test
     fun `toUnread missing fields default to 0`() {
         val row = toUnread("ship/~sampel", buildJsonObject { })!!

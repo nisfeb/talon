@@ -290,9 +290,16 @@ fun DmListScreen(
         }
         val filtered = mutableListOf<UnreadEntity>()
         for (u in notifyUnreads) {
-            val recent = runCatching {
+            // Not runCatching: it caught the cancellation of a scan the
+            // next emission replaced, every row after it read as having
+            // nothing cached and so passed, and the stale list was shown.
+            val recent = try {
                 db.messages().latestAnyFor(u.whom, MENTION_SCAN_LIMIT)
-            }.getOrDefault(emptyList())
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
             val include = if (recent.isEmpty()) {
                 true
             } else {
