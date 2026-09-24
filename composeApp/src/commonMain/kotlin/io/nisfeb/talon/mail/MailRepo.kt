@@ -5,6 +5,8 @@ import io.nisfeb.talon.urbit.LatticeInstall
 import io.nisfeb.talon.urbit.jittered
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -578,6 +580,55 @@ class MailRepo(
         refresh()
         return true
     }
+
+    /** A file going out with a message, uploaded before it is sent. */
+    class Outgoing(val bytes: ByteArray, val name: String, val mime: String)
+
+    private val _sendProblem = MutableStateFlow<String?>(null)
+
+    /** A send that failed, said on the mail list until dismissed, since its composer may be gone. */
+    val sendProblem: StateFlow<String?> = _sendProblem.asStateFlow()
+
+    fun clearSendProblem() {
+        _sendProblem.value = null
+    }
+
+    /**
+     * Save, upload and send one message on the repo's scope, so that
+     * leaving the composer does not stop it: on the composer's own scope,
+     * leaving mid-send cancelled it, and the message sat in Drafts unsent.
+     * The draft is saved first, so a send that fails leaves the message
+     * in Drafts, and it is dropped once the ship takes the message.
+     * [progress] is told where it is, for whoever is still watching. The
+     * answer is null when it went, else why not, which is also left in
+     * [sendProblem] for a composer no longer there to show it.
+     */
+    fun sendMessage(draft: Draft, files: List<Outgoing>, progress: (String?) -> Unit = {}): Deferred<String?> =
+        scope.async {
+            val errorBefore = _error.value
+            fun why(fallback: String) = _error.value?.takeIf { it != errorBefore } ?: fallback
+            var kept = false
+            val problem = run {
+                if (!saveDraft(draft)) return@run why("the message did not reach the ship.")
+                kept = true
+                val refs = mutableListOf<AttachRef>()
+                for ((i, f) in files.withIndex()) {
+                    progress("Uploading ${i + 1} of ${files.size}")
+                    val hash = runCatching { uploadBlob(f.bytes) }
+                        .getOrElse { return@run "${f.name}: ${it.message ?: "the upload gave no reason"}." }
+                    refs += AttachRef(name = f.name, mime = f.mime, hash = hash)
+                }
+                progress("Sending")
+                if (!send(draft.to, draft.subject, draft.body, draft.prev, refs)) return@run why("the ship did not take it.")
+                runCatching { deleteDraft(draft.id) }
+                null
+            }
+            progress(null)
+            problem?.also {
+                val what = draft.subject.ifBlank { "A message" }.let { s -> if (s == "A message") s else "\"$s\"" }
+                _sendProblem.value = "$what was not sent: $it" + if (kept) " It is in Drafts." else ""
+            }
+        }
 
     /** Distinguishes two phantom replies minted inside one millisecond. */
     private var localSeq = 0

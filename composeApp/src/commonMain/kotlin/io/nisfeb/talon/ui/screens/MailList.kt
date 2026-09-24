@@ -78,6 +78,7 @@ fun MailList(
     val page by repo.page.collectAsState()
     val loading by repo.loading.collectAsState()
     val error by repo.error.collectAsState()
+    val sendProblem by repo.sendProblem.collectAsState()
     val drafts by repo.drafts.collectAsState()
     val labels by repo.knownLabels.collectAsState()
     val folder by repo.folder.collectAsState()
@@ -135,6 +136,8 @@ fun MailList(
                 )
                 HorizontalDivider()
                 error?.let { MailNotice(it) }
+                // A send that failed after its composer was closed.
+                sendProblem?.let { MailNotice(it, onDismiss = repo::clearSendProblem) }
                 MailBody(
                     installing = installing,
                     installProblem = installProblem,
@@ -366,13 +369,13 @@ private fun MailToolbar(
 }
 
 @Composable
-private fun MailNotice(text: String) {
+private fun MailNotice(text: String, onDismiss: (() -> Unit)? = null) {
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().then(if (onDismiss != null) Modifier.clickable(onClick = onDismiss) else Modifier),
     ) {
         Text(
-            text,
+            text + if (onDismiss != null) " Tap to dismiss." else "",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onErrorContainer,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),

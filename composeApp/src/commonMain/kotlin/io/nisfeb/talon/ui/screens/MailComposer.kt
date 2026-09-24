@@ -292,73 +292,29 @@ fun MailComposer(
                         else -> {
                             sending = true
                             problem = null
-                            val errorBefore = repo.error.value
-                            fun why(fallback: String) =
-                                repo.error.value?.takeIf { it != errorBefore } ?: fallback
+                            // The send owns the text from here, on the repo's
+                            // scope, so leaving does not stop it and the
+                            // dispose must not file it again behind it (a
+                            // draft saved after the send dropped it came back).
+                            filed = true
+                            // A copy: the list is the screen's own, and
+                            // removing a file while an upload waits threw
+                            // out of the iterator.
+                            val outgoing = files.map { io.nisfeb.talon.mail.MailRepo.Outgoing(it.bytes, it.displayName, it.mimeType) }
+                            val sent = repo.sendMessage(asDraft().copy(to = to), outgoing) { progress = it }
                             scope.launch {
-                                // The text reaches the ship before anything
-                                // else is tried. A send cut short by leaving
-                                // the screen has then left it somewhere, and
-                                // the dispose need not file it a second time.
-                                if (!repo.saveDraft(asDraft())) {
-                                    problem = why("The message did not reach the ship; nothing was sent.")
-                                    progress = null
-                                    sending = false
-                                    return@launch
-                                }
-                                filed = true
-                                val refs = mutableListOf<io.nisfeb.talon.mail.AttachRef>()
-                                var failed: String? = null
-                                // A copy: the list is the screen's own, and
-                                // removing a file while an upload waits threw
-                                // out of the iterator and left the composer
-                                // stuck on "Uploading 2 of 5" for good.
-                                val outgoing = files.toList()
-                                // One at a time, and named in the progress,
-                                // because "uploading 2 of 5" is only true if
-                                // there is one in flight.
-                                outgoing.forEachIndexed { i, f ->
-                                    if (failed != null) return@forEachIndexed
-                                    progress = "Uploading ${i + 1} of ${outgoing.size}"
-                                    val hash = runCatching { repo.uploadBlob(f.bytes) }
-                                        .getOrElse { failed = "${f.displayName}: ${it.message ?: "the upload gave no reason"}"; null }
-                                    if (hash != null) {
-                                        refs += io.nisfeb.talon.mail.AttachRef(
-                                            name = f.displayName,
-                                            mime = f.mimeType,
-                                            hash = hash,
-                                        )
-                                    }
-                                }
-                                if (failed != null) {
-                                    problem = failed
-                                    progress = null
+                                val failed = sent.await()
+                                if (failed == null) {
+                                    onSent()
+                                } else {
+                                    // Said here, so not again on the list.
+                                    repo.clearSendProblem()
+                                    // Leaving now files what is written, which
+                                    // may have changed since.
                                     filed = false
+                                    problem = failed.replaceFirstChar { it.uppercase() }
                                     sending = false
-                                    return@launch
                                 }
-                                progress = "Sending"
-                                // One send path, as auspex's own client has
-                                // since auspex 14 dropped sending a draft by
-                                // its id: the send route, then the draft
-                                // dropped once the ship took the message.
-                                val sent = repo.send(to, edits.subject, edits.body, intent.prev, refs)
-                                progress = null
-                                when (sent) {
-                                    true -> {
-                                        // Dropped on the repo's scope, so
-                                        // leaving cannot leave the husk.
-                                        repo.dropDraft(edits.draftId)
-                                        onSent()
-                                    }
-                                    false -> {
-                                        filed = false
-                                        problem = why("The ship did not take the message.")
-                                    }
-                                }
-                                // Last, so that the button cannot be pressed
-                                // again while the draft is still being dropped.
-                                sending = false
                             }
                         }
                     }

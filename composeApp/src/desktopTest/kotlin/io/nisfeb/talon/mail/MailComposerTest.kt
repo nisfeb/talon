@@ -371,4 +371,51 @@ class MailComposerTest {
         waitForIdle()
         assertTrue(onAllNodesWithText("~zod").fetchSemanticsNodes().isEmpty(), "and the cross took them off")
     }
+
+    // A send runs on the repo's scope: leaving the composer while it is
+    // out used to cancel it, and the message sat in Drafts unsent.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `leaving while a message sends does not stop it`() = runComposeUiTest {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val calls = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val http = HttpClient(
+            MockEngine { req ->
+                calls += req.url.encodedPath
+                // The ship holds the send until the composer is gone.
+                if (req.url.encodedPath.endsWith("/api/send")) gate.await()
+                val body = if (req.url.encodedPath.endsWith("/api/drafts")) "[]" else """{"ok":true,"threads":[]}"""
+                respond(ByteReadChannel(body), HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+            },
+        )
+        val repo = MailRepo(http, CoroutineScope(SupervisorJob()), pollIntervalMs = 60 * 60 * 1000L)
+            .also { it.attach("https://ship.example") }
+        val showing = androidx.compose.runtime.mutableStateOf(true)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                if (showing.value) {
+                    MailComposer(
+                        repo = repo,
+                        intent = MailIntent(prev = "0vparent", to = listOf("~zod"), subject = "Plans"),
+                        onSent = {},
+                        onCancel = {},
+                    )
+                }
+            }
+        }
+        onNodeWithText("Message").performTextInput("on my way")
+        onNodeWithText("Send").performClick()
+        waitUntil(timeoutMillis = 5_000) { calls.any { it.endsWith("/api/send") } }
+        showing.value = false
+        waitForIdle()
+        gate.complete(Unit)
+        waitUntil(timeoutMillis = 5_000) { calls.any { it.endsWith("/api/draft-delete") } }
+        // And the way out filed nothing behind the send: a draft saved
+        // after the send dropped it came back as a message still to send.
+        waitForIdle()
+        val all = calls.toList()
+        val afterDelete = all.drop(all.indexOfLast { it.endsWith("/api/draft-delete") })
+        assertTrue(afterDelete.none { it.endsWith("/api/draft") }, "$all")
+        assertEquals(1, all.count { it.endsWith("/api/draft") }, "saved once, before the send: $all")
+    }
 }
