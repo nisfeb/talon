@@ -121,15 +121,16 @@ fun ThreadList(
     io.nisfeb.talon.notify.ClearNotificationsWhileShown(whom)
     // Taken once per thread: set by whatever opened it to reply.
     val openedToReply = remember(parentId) { ThreadOpenIntent.take(parentId) }
-    val parent by remember(whom, parentId) {
-        db.messages().streamOne(whom, parentId).distinctUntilChanged()
-    }.collectAsState(initial = null)
-
-    val rows by remember(whom, parentId) {
+    // The parent and its replies are one state, changed in one write. As
+    // two, a fetch that stored both could leave the list drawn with only
+    // one of them: the second state landed in the same instant and the
+    // list's contents never caught up with it.
+    val thread by remember(whom, parentId) {
         combine(
+            db.messages().streamOne(whom, parentId).distinctUntilChanged(),
             db.messages().streamReplies(whom, parentId).distinctUntilChanged(),
             db.reactions().stream(whom).distinctUntilChanged(),
-        ) { replies, reactions ->
+        ) { parent, replies, reactions ->
             val byPost = reactions.groupBy { it.postId }
             val parentReacts = byPost[parentId].orEmpty()
             var prev: MessageEntity? = null
@@ -147,9 +148,11 @@ fun ThreadList(
                     )
                 )
             }
-            parentReacts to (replyRows as List<ReplyRow>)
+            parent to (parentReacts to (replyRows as List<ReplyRow>))
         }.flowOn(Dispatchers.Default)
-    }.collectAsState(initial = emptyList<ReactionEntity>() to emptyList<ReplyRow>())
+    }.collectAsState(initial = null to (emptyList<ReactionEntity>() to emptyList<ReplyRow>()))
+    val parent = thread.first
+    val rows = thread.second
 
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 

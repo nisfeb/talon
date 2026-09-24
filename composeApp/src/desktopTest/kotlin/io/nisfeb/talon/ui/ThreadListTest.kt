@@ -92,7 +92,7 @@ class ThreadListTest {
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
         }.onFailure {
             val screen = onAllNodes(isRoot()).printToString(maxDepth = 60).lines()
-                .filter { "Text = " in it }.joinToString(" | ") { it.substringAfter("Text = ") }
+                .filter { "Text = " in it || "ScrollAxisRange" in it }.joinToString(" | ") { it.trim() }
             error("never showed \"$text\"; the screen showed: $screen")
         }
     }
