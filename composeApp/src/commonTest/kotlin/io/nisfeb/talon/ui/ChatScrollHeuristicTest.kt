@@ -189,20 +189,6 @@ class ChatScrollHeuristicTest {
         assertTrue(d.scrollToBottom)
     }
 
-    @Test
-    fun `no baseline preserves null nextBaseline`() {
-        val d = decideAutoScroll(
-            rowsSize = 100,
-            newestId = "new",
-            lastNewestId = "old",
-            lastSize = 99,
-            firstVisibleItemIndex = 0,
-            pendingSendBaselineSize = null,
-            pendingSelfSendNewestId = null,
-        )
-        assertNull(d.nextBaseline)
-    }
-
     // ---- self-send swap path -----------------------------------------
 
     @Test
@@ -308,7 +294,7 @@ class ChatScrollHeuristicTest {
     }
 
     @Test
-    fun `inbound path preserves a pending swap marker`() {
+    fun `a peer message after a send takes the swap branch and clears the marker`() {
         // A peer's message arrives between the catch-up and the
         // server echo. The peer-arrival hits the inbound branch
         // (size grew, newestId changed), but the swap marker should

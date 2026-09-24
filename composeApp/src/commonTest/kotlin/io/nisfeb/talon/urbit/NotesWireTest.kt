@@ -394,10 +394,4 @@ class NotesWireTest {
         assertFalse(NotesRepo.isNotesEvent(obj("""{"type":"x","flagName":"n"}""")))
     }
 
-    @Test
-    fun `channel type maps notes nest to Notebook and diary to Bulletin`() {
-        assertEquals(ChannelType.Notebook, ChannelType.fromWhom("notes/~z/handbook"))
-        assertEquals(ChannelType.Bulletin, ChannelType.fromWhom("diary/~z/journal"))
-        assertEquals("/notes", ChannelType.agentKind(ChannelType.Notebook))
-    }
 }

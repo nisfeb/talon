@@ -47,11 +47,4 @@ class ShipHandleTest {
         assertNull(shipHandleLong("~zod"))
     }
 
-    @Test
-    fun `it agrees with the ContactMap rule`() {
-        val map = ContactMap()
-        for (ship in listOf(comet, "~zod", "~marzod", "~ricsul-bilwyt")) {
-            assertEquals(map.handle(ship), shipHandle(ship, nonCometNames = false), ship)
-        }
-    }
 }

@@ -20,9 +20,6 @@ object OrreryText {
     /** The owner's own body id: what the ship says, or the one it always is. */
     fun me(state: JsonObject): String = state.str("me") ?: "person/me"
 
-    /** One body of the state view by its id. */
-    fun bodyOf(state: JsonObject, id: String): JsonObject? = bodies(state).firstOrNull { it.str("id") == id }
-
     /** An attribute's current value: one, or a list of them for a multi. */
     fun value(body: JsonObject, attr: String): JsonElement? =
         when (val v = (body["attrs"] as? JsonObject)?.get(attr)) {
@@ -30,8 +27,6 @@ object OrreryText {
             is JsonArray -> JsonArray(v.mapNotNull { (it as? JsonObject)?.get("value") })
             else -> null
         }
-
-    fun text(body: JsonObject, attr: String): String? = value(body, attr).asText()
 
     fun clock(ms: Long, zone: TimeZone): String {
         val t = Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone)

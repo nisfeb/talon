@@ -12,7 +12,7 @@ import kotlinx.serialization.json.put
 /**
  * Wire types for the %notes agent — Tlon webapp v12's "Notebook" channel
  * type (Markdown documents in a folder tree). Distinct from the old
- * "Notebook", now [ChannelType.Bulletin], which lives on %channels.
+ * "Notebook", now Bulletin (a `diary/` nest), which lives on %channels.
  *
  * %notes is its OWN agent, not another `%channels` nest kind, so none of
  * the chat/bulletin/gallery plumbing applies:

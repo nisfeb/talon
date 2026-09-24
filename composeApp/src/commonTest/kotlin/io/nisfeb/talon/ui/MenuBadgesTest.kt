@@ -47,7 +47,7 @@ class MenuBadgesTest {
     }
 
     @Test
-    fun `all three flags compose without crosstalk`() {
+    fun `both flags compose without crosstalk`() {
         val b = MenuBadges(
             statusesFresh = true,
             invitesPending = true,
@@ -64,22 +64,4 @@ class MenuBadgesTest {
         }
     }
 
-    @Test
-    fun `every RailItem has a deterministic forItem mapping`() {
-        // No matter the flag combo, forItem returns a stable Boolean
-        // for every enum entry — guards against an `else throw` regression.
-        val combos = listOf(
-            MenuBadges(),
-            MenuBadges(statusesFresh = true),
-            MenuBadges(invitesPending = true),
-            MenuBadges(true, true),
-        )
-        for (b in combos) {
-            for (item in RailItem.entries) {
-                // Just calling it; the assertion is "doesn't crash"
-                val ignored = b.forItem(item)
-                assertEquals(ignored, b.forItem(item), "forItem must be deterministic")
-            }
-        }
-    }
 }

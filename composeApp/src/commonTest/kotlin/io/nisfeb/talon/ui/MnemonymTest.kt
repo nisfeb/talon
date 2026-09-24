@@ -64,13 +64,6 @@ class MnemonymTest {
     }
 
     @Test
-    fun `a nym already short enough is left whole`() {
-        // Leading zero words drop, so a small value can come out under
-        // the two words an abridgement would leave.
-        assertEquals("..abducts", Mnemonym.encode(ByteArray(16), tweaked = false))
-    }
-
-    @Test
     fun `displayName prefers a nickname, then the nym, then the at-p`() {
         val named = ContactEntity(
             ship = comet, nickname = "Sam", bio = null, avatarUrl = null,

@@ -63,7 +63,7 @@ class SanitizeShipKeyTest {
     }
 
     @Test
-    fun `unicode characters are replaced with underscores`() {
+    fun `non-ascii letters pass through`() {
         // Kotlin's Char.isLetterOrDigit returns true for non-ASCII
         // letters too (é, ç, etc.). The current implementation lets
         // those through. This test pins that behavior — change it

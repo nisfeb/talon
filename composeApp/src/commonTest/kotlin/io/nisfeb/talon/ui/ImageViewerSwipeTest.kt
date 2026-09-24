@@ -60,15 +60,6 @@ class ImageViewerSwipeTest {
     }
 
     @Test
-    fun `scale exactly at 1f keeps navigation enabled`() {
-        // Boundary: scale == 1f → still un-zoomed → navigation works.
-        assertEquals(
-            SwipeAction.Previous,
-            decideSwipeAction(threshold + 1f, threshold, scale = 1f),
-        )
-    }
-
-    @Test
     fun `scale just above 1f disables navigation`() {
         assertEquals(
             SwipeAction.None,

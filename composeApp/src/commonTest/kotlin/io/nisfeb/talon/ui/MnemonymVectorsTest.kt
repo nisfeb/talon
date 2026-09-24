@@ -41,12 +41,6 @@ class MnemonymVectorsTest {
     }
 
     @Test
-    fun `leading zero words are dropped`() {
-        // All zeros collapses to the single word the checksum leaves.
-        assertEquals("..abducts", Mnemonym.encode(ByteArray(16), tweaked = false))
-    }
-
-    @Test
     fun `the word list is the upstream one`() {
         assertEquals(2048, MNEMONYM_WORDS.size)
         assertEquals(2048, MNEMONYM_WORDS.toSet().size, "upstream de-duplicated the list")

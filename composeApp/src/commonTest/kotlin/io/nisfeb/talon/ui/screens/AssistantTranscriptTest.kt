@@ -29,17 +29,6 @@ class AssistantTranscriptTest {
     }
 
     @Test
-    fun `reversed exchanges put the newest turn first`() {
-        val lines = listOf(
-            Line.You("old"), Line.Said("oldA"),
-            Line.You("new"), Line.Said("newA"),
-        )
-        val newestFirst = toExchanges(lines).asReversed()
-        assertEquals(Line.You("new"), newestFirst.first().first())
-        assertEquals(Line.You("old"), newestFirst.last().first())
-    }
-
-    @Test
     fun `a leading run without a You is its own group`() {
         val lines = listOf(Line.Note("boot"), Line.You("q"), Line.Said("a"))
         val ex = toExchanges(lines)

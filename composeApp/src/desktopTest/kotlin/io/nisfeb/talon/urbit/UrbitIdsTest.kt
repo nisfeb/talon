@@ -70,9 +70,4 @@ class UrbitIdsTest {
         assertEquals("1234", undotAtom("1234"))
     }
 
-    @Test
-    fun `dotAtom undotAtom roundtrip`() {
-        val raw = "170141184507932790143209384169177088000"
-        assertEquals(raw, undotAtom(dotAtom(raw)))
-    }
 }

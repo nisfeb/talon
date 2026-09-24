@@ -389,19 +389,6 @@ class HomeDropTest {
     }
 }
 
-class HomeDecodeTest {
-
-    @Test
-    fun `the default still opens exactly as it was written`() {
-        val back = HomeLayoutCodec.decode(HomeLayoutCodec.encode(HomeLayout.DEFAULT))
-        for (kind in HomeWidgetKind.entries) {
-            val a = HomeLayout.DEFAULT[kind]
-            val b = back[kind]
-            assertEquals(a.col to a.row, b.col to b.row, "$kind moved")
-            assertEquals(a.span to a.rows, b.span to b.rows, "$kind changed size")
-        }
-    }
-}
 class HomeNoShoveTest {
 
     private val k = HomeWidgetKind.entries

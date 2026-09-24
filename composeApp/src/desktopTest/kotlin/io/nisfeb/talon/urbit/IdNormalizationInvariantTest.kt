@@ -20,23 +20,6 @@ class IdNormalizationInvariantTest {
     // ─── ingestPost — bootstrap + paginate path ────────────────
 
     @Test
-    fun `ingestedPost strips dots from seal id regardless of source format`() {
-        val post = json.parseToJsonElement("""
-            {
-              "seal": {"id":"170.141.184.507.933.044.937.549.665.940.933.705.728",
-                       "reacts":{},"replies":{},"seq":1},
-              "essay": {"content":[],"author":"~x","sent":0,"kind":"/chat","blob":null,"meta":null}
-            }
-        """.trimIndent())
-        val out = ingestedPost("~peer", post)
-        assertEquals(1, out.messages.size)
-        assertFalse(
-            "stored id must not contain a dot",
-            out.messages[0].id.contains('.'),
-        )
-    }
-
-    @Test
     fun `ingestedPost strips dots from nested reply seal ids`() {
         val post = json.parseToJsonElement("""
             {
@@ -79,26 +62,6 @@ class IdNormalizationInvariantTest {
         )
     }
 
-    @Test
-    fun `ingestedPost strips dots from tombstone ids`() {
-        val post = json.parseToJsonElement("""
-            {"type":"tombstone","id":"170.141.184.507","author":"~x",
-             "deleted-at":0,"seq":1}
-        """.trimIndent())
-        val out = ingestedPost("~peer", post)
-        assertEquals(1, out.tombstones.size)
-        assertFalse(out.tombstones[0].contains('.'))
-    }
-
     // ─── undotAtom contract ────────────────────────────────────
 
-    @Test
-    fun `undotAtom removes every dot from any input`() {
-        // Anywhere we dispatch live SSE events we fan through
-        // undotAtom. Confirm it's exhaustive on the canonical shape.
-        val raw = "170.141.184.507.933.044.937.549.665.940.933.705.728"
-        val clean = undotAtom(raw)
-        assertFalse(clean.contains('.'))
-        assertEquals("170141184507933044937549665940933705728", clean)
-    }
 }

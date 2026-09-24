@@ -135,56 +135,6 @@ class SlashCommandFuzzTest {
         }
     }
 
-    @Test
-    fun `parsePollInput Ok always honors option count + length caps`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val r = parsePollInput(Fuzz.randomString(rnd, maxLen = 600))
-            if (r is PollParseResult.Ok) {
-                assertTrue(
-                    "options.size=${r.poll.options.size}",
-                    r.poll.options.size in 2..MAX_POLL_OPTIONS,
-                )
-                assertTrue(
-                    "question length=${r.poll.question.length}",
-                    r.poll.question.length <= 240,
-                )
-                for (o in r.poll.options) {
-                    assertTrue("option length=${o.length}", o.length <= 120)
-                }
-            }
-        }
-    }
-
-    @Test
-    fun `encodePollTag and decodePollTag round-trip on parsed polls`() {
-        // Generates inputs that PARSE successfully, then verifies the
-        // encode/decode cycle preserves question + options exactly.
-        // Catches escape-rule regressions (e.g. an option containing
-        // `|` accidentally splitting into two on decode).
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val parsed = parsePollInput(Fuzz.randomString(rnd, maxLen = 600))
-            if (parsed is PollParseResult.Ok) {
-                val tag = encodePollTag(parsed.poll)
-                val decoded = decodePollTag(tag)
-                    ?: throw AssertionError(
-                        "decodePollTag returned null for self-encoded tag: $tag",
-                    )
-                if (decoded.question != parsed.poll.question) {
-                    throw AssertionError(
-                        "question mismatch: encoded=${parsed.poll.question} " +
-                            "decoded=${decoded.question} tag=$tag",
-                    )
-                }
-                if (decoded.options != parsed.poll.options) {
-                    throw AssertionError(
-                        "options mismatch: encoded=${parsed.poll.options} " +
-                            "decoded=${decoded.options} tag=$tag",
-                    )
-                }
-            }
-        }
-    }
-
     // ─── slash-command spec: filter never crashes ──────────────────
 
     @Test

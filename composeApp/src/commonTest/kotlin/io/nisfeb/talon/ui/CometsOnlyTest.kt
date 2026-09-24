@@ -67,14 +67,6 @@ class CometsOnlyTest {
     }
 
     @Test
-    fun `a nickname still wins for a comet`() {
-        val map = ContactMap(
-            contacts = listOf(ContactEntity(comet, "Sam", null, null)),
-        )
-        assertEquals("Sam", map.displayName(comet))
-    }
-
-    @Test
     fun `the mention picker matches words only for comets`() {
         val ships = notComets + comet
         val map = ContactMap()

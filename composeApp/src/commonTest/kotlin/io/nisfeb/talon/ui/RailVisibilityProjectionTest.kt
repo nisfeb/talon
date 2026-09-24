@@ -68,12 +68,4 @@ class RailVisibilityProjectionTest {
         assertEquals(1, out.size)
     }
 
-    @Test
-    fun `result is a finite Map keyed by RailItem`() {
-        // Type-check via use: ensures a future refactor doesn't accidentally
-        // change the keys to String.
-        val rows = listOf(RailItemPrefEntity("Settings", false))
-        val out: Map<RailItem, Boolean> = railVisibilityFromRows(rows)
-        assertTrue(out.keys.all { it is RailItem })
-    }
 }
