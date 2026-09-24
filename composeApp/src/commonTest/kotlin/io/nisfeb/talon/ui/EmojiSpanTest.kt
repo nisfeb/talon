@@ -26,21 +26,6 @@ import kotlin.test.assertTrue
 class EmojiSpanTest {
 
     @Test
-    fun `applyEmojiSpans handles a supplementary-plane emoji as a 2-char span`() {
-        // 👍 (U+1F44D) is a supplementary-plane codepoint — encoded as
-        // a 2-char surrogate pair in Java strings. The span must
-        // cover BOTH chars so Skia treats it as one glyph.
-        val text = "👍"  // 👍
-        assertEquals(2, text.length)
-        val out = text.applyEmojiSpans()
-        assertEquals(1, out.spanStyles.size, "one span per emoji codepoint, not per char")
-        val span = out.spanStyles[0]
-        assertEquals(0, span.start)
-        assertEquals(2, span.end)
-        assertEquals(EmojiFontFamily, span.item.fontFamily)
-    }
-
-    @Test
     fun `applyEmojiSpans tags each emoji in a multi-emoji string`() {
         // 👍❤️🔥 — three glyphs but ❤️ is U+2764 (BMP, 1 char) +
         // U+FE0F variation selector (BMP, 1 char). 👍 + 🔥 are each

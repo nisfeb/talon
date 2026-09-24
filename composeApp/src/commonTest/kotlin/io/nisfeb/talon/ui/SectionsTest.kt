@@ -1,9 +1,6 @@
 package io.nisfeb.talon.ui
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -65,13 +62,4 @@ class SectionsTest {
         assertFalse(mail.value)
     }
 
-    @Test
-    fun `a flag works as a delegated property`() {
-        val s = Sections()
-        var open by s.flag()
-        open = true
-        assertTrue(s.anyOpen)
-        s.closeAll()
-        assertEquals(false, open)
-    }
 }

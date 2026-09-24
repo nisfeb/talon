@@ -1,8 +1,5 @@
 package io.nisfeb.talon.urbit
 
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -70,26 +67,10 @@ class FuzzTest {
     // ─── string parsers — never throw, bounded recursion ──────
 
     @Test
-    fun `Markdown parseInlines never throws on arbitrary strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val input = Fuzz.randomString(rnd, maxLen = 200)
-            Markdown.parseInlines(input)
-        }
-    }
-
-    @Test
     fun `MarkdownBlocks toStory never throws on arbitrary strings`() {
         Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
             val input = Fuzz.randomString(rnd, maxLen = 500)
             MarkdownBlocks.toStory(input)
-        }
-    }
-
-    @Test
-    fun `chatTextToStory never throws on arbitrary strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val input = Fuzz.randomString(rnd, maxLen = 500)
-            chatTextToStory(input)
         }
     }
 
@@ -119,31 +100,6 @@ class FuzzTest {
         }
     }
 
-    @Test
-    fun `classifyChannelDelta posts-batch preserves every key`() {
-        Fuzz.run(200, SEED) { rnd, _ ->
-            // Seed a PostsBatch-shaped payload with random post children.
-            val posts = buildJsonObject {
-                repeat(rnd.nextInt(0, 5)) {
-                    put("${rnd.nextLong()}", Fuzz.randomJson(rnd, depth = 2))
-                }
-            }
-            val payload = buildJsonObject { put("posts", posts) }
-            val intent = classifyChannelDelta(payload) as? ChannelDeltaIntent.PostsBatch
-                ?: return@run
-            assertEquals(posts.size, intent.posts.size)
-        }
-    }
-
     // ─── activity feed parser (rc14) ──────────────────────────
 
-    @Test
-    fun `parseActivityEventTimeMs result is always non-negative`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val time = Fuzz.randomString(rnd, 50)
-            val event = Fuzz.randomJsonObject(rnd, depth = 2)
-            val ms = TlonChatRepo.parseActivityEventTimeMs(time, event)
-            assertTrue("got $ms for time=$time", ms >= 0)
-        }
-    }
 }

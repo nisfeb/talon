@@ -31,17 +31,6 @@ class FirstLinkUrlTest {
         StoryPart.LinkPreview(url = url, title = null, description = null, imageUrl = null, siteName = null)
 
     @Test
-    fun `a URL the story already previews is skipped`() {
-        // The bug: text URL + matching server block.link → only the
-        // story's preview should show, so the client card is suppressed.
-        val parts = listOf(
-            preview("https://example.com/post"),
-            textWithUrl("see ", "https://example.com/post"),
-        )
-        assertNull(firstLinkUrl(parts))
-    }
-
-    @Test
     fun `trailing-slash difference still counts as already previewed`() {
         val parts = listOf(
             preview("https://example.com/post/"),

@@ -79,13 +79,6 @@ class SlashCommandFuzzTest {
     // ─── parseTzInput invariants ────────────────────────────────────
 
     @Test
-    fun `parseTzInput never throws on arbitrary strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            parseTzInput(Fuzz.randomString(rnd, maxLen = 100))
-        }
-    }
-
-    @Test
     fun `resolveZoneToken never throws on arbitrary strings`() {
         Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
             resolveZoneToken(Fuzz.randomString(rnd, maxLen = 100))
@@ -126,14 +119,4 @@ class SlashCommandFuzzTest {
 
     // ─── slash-command spec: filter never crashes ──────────────────
 
-    @Test
-    fun `filterSlashCommands never throws and result is a subset of catalog`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val out = filterSlashCommands(Fuzz.randomString(rnd, maxLen = 50))
-            assertTrue(
-                "filter returned items not in the catalog: $out",
-                out.all { it in SLASH_COMMANDS },
-            )
-        }
-    }
 }

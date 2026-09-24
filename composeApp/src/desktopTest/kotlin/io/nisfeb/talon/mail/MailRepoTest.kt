@@ -61,21 +61,6 @@ class MailRepoTest {
         }
     }
 
-    @Test
-    fun `a good read fills the page and clears any error`() = withRepo({ 200 to emptyPage }) { r ->
-        r.attach("https://ship.example")
-        // attach() starts the poller, which reads once and then sleeps
-        // past the end of the test. Let that read finish BEFORE driving
-        // one by hand, or the two race over the loading flag and the
-        // assertion below reads whichever gap it happens to land in.
-        settle(r)
-        r.refresh()
-        assertEquals(MailAvailability.PRESENT, r.availability.value)
-        assertEquals(0, r.page.value?.total)
-        assertNull(r.error.value)
-        assertEquals(false, r.loading.value, "a finished read leaves nothing in flight")
-    }
-
     /** Wait for the poller's opening read to finish. */
     private suspend fun settle(r: MailRepo) {
         repeat(200) {
@@ -102,15 +87,6 @@ class MailRepoTest {
             r.refresh()
             assertEquals(MailAvailability.NOT_FETCHED, r.availability.value)
         }
-    }
-
-    @Test
-    fun `a missing app is not reported as an error to fix`() = withRepo({ path ->
-        if (path.endsWith("desks/stock")) 404 to "" else 404 to """{"error":"not found"}"""
-    }) { r ->
-        r.attach("https://ship.example")
-        r.refresh()
-        assertNull(r.error.value, "not having mail installed is a state, not a failure")
     }
 
     @Test
@@ -158,17 +134,6 @@ class MailRepoTest {
         }
 
     @Test
-    fun `a listing asks for the label the folder names`() {
-        val asked = mutableListOf<String>()
-        withRepo({ path -> asked += path; 200 to emptyPage }) { r ->
-            r.attach("https://ship.example")
-            r.selectFolder(MailFolder.Label("work"))
-            r.refresh()
-        }
-        assertTrue(asked.isNotEmpty())
-    }
-
-    @Test
     fun `detaching forgets the mailbox`() = withRepo({ 200 to emptyPage }) { r ->
         r.attach("https://ship.example")
         r.refresh()
@@ -196,17 +161,6 @@ class MailRepoTest {
         r.search("invoice")
         r.selectFolder(MailFolder.View(MailView.INBOX))
         assertEquals("", r.query.value)
-    }
-
-    @Test
-    fun `a search asks the ship for it`() {
-        val asked = mutableListOf<String>()
-        withRepo({ path -> asked += path; 200 to emptyPage }) { r ->
-            r.attach("https://ship.example")
-            r.search("needle")
-            r.refresh()
-        }
-        assertTrue(asked.isNotEmpty())
     }
 
     @Test

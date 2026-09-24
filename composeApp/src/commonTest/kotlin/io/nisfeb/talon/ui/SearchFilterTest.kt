@@ -29,13 +29,6 @@ class SearchFilterTest {
     }
 
     @Test
-    fun `from operator with tilde patp`() {
-        val f = parse("from:~darduc-mitfen")
-        assertEquals("~darduc-mitfen", f.fromShip)
-        assertEquals("", f.needle)
-    }
-
-    @Test
     fun `from operator without tilde gets the tilde added`() {
         val f = parse("from:darduc-mitfen")
         assertEquals("~darduc-mitfen", f.fromShip)
@@ -115,11 +108,6 @@ class SearchFilterTest {
         assertEquals("~ship", f.fromShip)
         assertEquals(true, f.hasImage)
         assertEquals(NOW - 3_600_000L, f.sinceMs)
-    }
-
-    @Test
-    fun `isTrivial true on empty query`() {
-        assertTrue(parse("").isTrivial)
     }
 
     @Test

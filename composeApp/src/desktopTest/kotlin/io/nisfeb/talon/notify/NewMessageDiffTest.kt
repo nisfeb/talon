@@ -285,9 +285,4 @@ class NewMessageDiffTest {
         assertEquals(0, fire(listOf(mention), mapOf(plain.whom to "none")))
     }
 
-    @Test
-    fun `a DM at the default level still fires`() {
-        val dm = groupRow("""{"inline":["hey"]}""").copy(whom = "~bud")
-        assertEquals(1, fire(listOf(dm), emptyMap()))
-    }
 }

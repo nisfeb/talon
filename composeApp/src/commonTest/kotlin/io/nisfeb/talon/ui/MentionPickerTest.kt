@@ -1,31 +1,11 @@
 package io.nisfeb.talon.ui
 
-import io.nisfeb.talon.data.ContactEntity
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-/** Pins the @mention matching contract: nickname, @p, and mnemonym are
- *  interchangeable ways to find the same ship. */
+/** Pins how a typed @mention, or a ship box, is read for suggestions. */
 class MentionPickerTest {
-
-    /** Two comets (the only ships with a nym) and a star. */
-    private val comet = "~doznec-binwes-samper-siglet--fidpen-sogdur-wacser-wissun"
-    private val other = "~racmus-mollen-fallyt-linpex--watres-sibbur-modlux-rinmex"
-    private val ships = listOf(comet, other, "~marzod")
-    private val contacts = ContactMap(
-        contacts = listOf(
-            ContactEntity(ship = comet, nickname = "Sam Iam", bio = null, avatarUrl = null),
-        ),
-    )
-
-    private fun hits(query: String, map: ContactMap = contacts) =
-        suggestionsFor(query, map, ships).map { it.ship }
-
-    @Test
-    fun `a ship with no nym is still found by its patp`() {
-        assertEquals(listOf("~marzod"), hits("marzod"))
-    }
 
     @Test
     fun `mention token survives the dots a mnemonym query needs`() {

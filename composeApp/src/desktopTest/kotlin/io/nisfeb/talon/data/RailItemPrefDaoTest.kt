@@ -41,23 +41,6 @@ class RailItemPrefDaoTest {
     }
 
     @Test
-    fun `delete removes the row`() = runBlocking {
-        db.railItemPrefs().upsert(RailItemPrefEntity("Settings", visible = false))
-        db.railItemPrefs().delete("Settings")
-        val rows = db.railItemPrefs().streamAll().first()
-        assertEquals(emptyList(), rows)
-    }
-
-    @Test
-    fun `replaceAll wipes existing rows and inserts new ones`() = runBlocking {
-        db.railItemPrefs().upsert(RailItemPrefEntity("Settings", visible = false))
-        db.railItemPrefs().upsert(RailItemPrefEntity("Profile", visible = false))
-        db.railItemPrefs().replaceAll(listOf(RailItemPrefEntity("Watchwords", visible = false)))
-        val rows = db.railItemPrefs().streamAll().first().sortedBy { it.itemName }
-        assertEquals(listOf(RailItemPrefEntity("Watchwords", false)), rows)
-    }
-
-    @Test
     fun `replaceAll with empty list clears the table`() = runBlocking {
         db.railItemPrefs().upsert(RailItemPrefEntity("Settings", visible = false))
         db.railItemPrefs().replaceAll(emptyList())

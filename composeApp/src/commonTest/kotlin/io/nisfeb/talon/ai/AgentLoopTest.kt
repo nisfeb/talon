@@ -91,10 +91,11 @@ class AgentLoopTest {
 
     @Test
     fun `unknown tool is reported, loop continues`() = runBlocking {
-        val loop = AgentLoop(
-            scripted(AgentTurn.Calls(null, listOf(call("ghost"))), AgentTurn.Final("recovered")).completer,
-            emptyList(),
-        )
+        val turns = listOf(AgentTurn.Calls(null, listOf(call("ghost"))), AgentTurn.Final("recovered"))
+        var told: List<AgentMessage> = emptyList()
+        val loop = AgentLoop(AgentLoop.Completer { _, messages, _ -> told = messages; turns[told.count { it is AgentMessage.ToolResults }] }, emptyList())
         assertEquals("recovered", loop.run("q", confirm = { _, _ -> true }))
+        val said = told.filterIsInstance<AgentMessage.ToolResults>().single().results.single().content
+        assertEquals("Error: unknown tool 'ghost'.", said)
     }
 }

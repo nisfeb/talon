@@ -3,6 +3,7 @@ package io.nisfeb.talon.ui.screens
 import io.nisfeb.talon.ui.SkyClock
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DialReadinessTest {
@@ -83,5 +84,6 @@ class DialReadinessTest {
         val sky = SkyClock.Sky(minuteOfDay = 12 * 60, condition = SkyClock.Weather.CLEAR)
         val said = dialDescription(sky, true, false)
         assertEquals(said, said.replace("Cloudy", "!"), "clear should add nothing: $said")
+        assertNull(conditionIcon(SkyClock.Weather.CLEAR))
     }
 }

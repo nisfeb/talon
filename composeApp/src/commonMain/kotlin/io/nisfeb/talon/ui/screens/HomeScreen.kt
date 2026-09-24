@@ -88,6 +88,7 @@ import io.nisfeb.talon.ui.HomeLayout
 import io.nisfeb.talon.ui.HomePlace
 import io.nisfeb.talon.ui.HomeWidget
 import io.nisfeb.talon.ui.HomeWidgetKind
+import io.nisfeb.talon.ui.columnPitch
 import io.nisfeb.talon.ui.droppedAt
 import io.nisfeb.talon.ui.keepEdgeGesture
 import io.nisfeb.talon.ui.resizedRows
@@ -241,10 +242,7 @@ fun HomeScreen(
         // zero is a widget that cannot be moved sideways at all.
         val density = LocalDensity.current
         val rowPitch = with(density) { HOME_ROW_UNIT.toPx() }
-        val colPitch = with(density) {
-            val inner = maxWidth - PAGE_PADDING * 2
-            ((inner - GRID_GAP * (HOME_COLUMNS - 1)) / HOME_COLUMNS + GRID_GAP).toPx()
-        }
+        val colPitch = with(density) { columnPitch(maxWidth.toPx(), PAGE_PADDING.toPx(), GRID_GAP.toPx()) }
         // Held rather than captured, for the same reason as everything
         // else a gesture reads: pointerInput keeps whatever it was
         // given when the node was made.

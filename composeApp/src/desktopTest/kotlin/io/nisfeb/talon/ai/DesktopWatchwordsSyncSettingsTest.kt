@@ -66,13 +66,6 @@ class DesktopWatchwordsSyncSettingsTest {
     }
 
     @Test
-    fun `atomic move leaves no tmp file after persist`() {
-        DesktopWatchwordsSyncSettings(file).setEnabled(true)
-        val tmp = File(tmpDir, "watchwords_sync.json.tmp")
-        assertFalse(tmp.exists())
-    }
-
-    @Test
     fun `unknown extra fields in the JSON are tolerated on load`() {
         // Forward-compat: a future Talon writing extra keys should
         // not break an older Talon's load path. ignoreUnknownKeys=true

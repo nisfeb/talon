@@ -109,7 +109,7 @@ class CiteParserTest {
     @Test
     fun `bait cite with url is treated like a file`() {
         val r = parse("""{"bait":{"url":"https://x/y","name":"thing"}}""")
-        assertNotNull(r.target)
+        assertEquals("https://x/y", (r.target as CiteTarget.Url).url)
     }
 
     @Test

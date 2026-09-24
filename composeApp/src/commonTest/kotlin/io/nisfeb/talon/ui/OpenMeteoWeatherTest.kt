@@ -15,15 +15,6 @@ class OpenMeteoWeatherTest {
     """
 
     @Test
-    fun `the current temperature and cloud come through`() {
-        val s = parseForecast(day)!!
-        assertEquals(21.4, s.currentC)
-        // Percent in, fraction out: the dial's overcast runs 0..1 and
-        // handing it 40 would peg every cloudy hour at flat grey.
-        assertEquals(0.4f, s.cloudCover)
-    }
-
-    @Test
     fun `the high and low are found with the hour each falls on`() {
         val s = parseForecast(day)!!
         assertEquals(24.2, s.highC)

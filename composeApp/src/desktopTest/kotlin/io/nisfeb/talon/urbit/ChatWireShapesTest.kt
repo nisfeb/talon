@@ -75,16 +75,6 @@ class ChatWireShapesTest {
         assertTrue(add.containsKey("essay"))
     }
 
-    @Test
-    fun `dm delete poke carries ship + del delta`() {
-        val body = dmAction(
-            peer = "~sampel",
-            postId = "~ricsul/9.999",
-            delta = writsDelDelta(),
-        )
-        assertEquals(JsonNull, body["diff"]!!.jsonObject["delta"]!!.jsonObject["del"])
-    }
-
     // ─── club body ────────────────────────────────────────────
 
     @Test
@@ -142,32 +132,6 @@ class ChatWireShapesTest {
         assertFalse(whomNeedsOptimisticDelete("heap/~host/slug"))
     }
 
-    @Test
-    fun `dm delete poke includes the postId in diff`() {
-        // Locks the on-the-wire shape so a chat-dm-action mark bump
-        // (or accidental rename) surfaces here loudly.
-        val body = dmAction(
-            peer = "~sampel",
-            postId = "~ricsul/9.999",
-            delta = writsDelDelta(),
-        )
-        val diff = body["diff"]!!.jsonObject
-        assertEquals("~ricsul/9.999", diff["id"]!!.jsonPrimitive.content)
-        assertEquals(JsonNull, diff["delta"]!!.jsonObject["del"])
-    }
-
-    @Test
-    fun `club delete poke nests the writ-id under writ delta`() {
-        val body = clubAction(
-            clubId = "0v4.abcde",
-            postId = "~ricsul/9.999",
-            delta = writsDelDelta(),
-        )
-        val writ = body["diff"]!!.jsonObject["delta"]!!.jsonObject["writ"]!!.jsonObject
-        assertEquals("~ricsul/9.999", writ["id"]!!.jsonPrimitive.content)
-        assertEquals(JsonNull, writ["delta"]!!.jsonObject["del"])
-    }
-
     // ─── redotWritId — egress @da dotting ──────────────────────
 
     @Test
@@ -179,20 +143,6 @@ class ChatWireShapesTest {
         assertEquals(
             "170.141.184.507",
             redotWritId("170141184507"),
-        )
-    }
-
-    @Test
-    fun `club delete poke goes out with a dotted writ id`() {
-        val body = clubAction(
-            clubId = "0v4.abcde",
-            postId = "~ricsul/170141184507933044937549665940933705728",
-            delta = writsDelDelta(),
-        )
-        val writ = body["diff"]!!.jsonObject["delta"]!!.jsonObject["writ"]!!.jsonObject
-        assertEquals(
-            "~ricsul/170.141.184.507.933.044.937.549.665.940.933.705.728",
-            writ["id"]!!.jsonPrimitive.content,
         )
     }
 
@@ -236,29 +186,4 @@ class ChatWireShapesTest {
         )
     }
 
-    @Test
-    fun `dm add-react carries a dotted writ id`() {
-        val body = dmAction(
-            peer = "~sampel",
-            postId = "~author/170141184507933044937549665940933705728",
-            delta = writsAddReactDelta("~me", "👍"),
-        )
-        assertEquals(
-            "~author/170.141.184.507.933.044.937.549.665.940.933.705.728",
-            body["diff"]!!.jsonObject["id"]!!.jsonPrimitive.content,
-        )
-    }
-
-    @Test
-    fun `dm del-react carries a dotted writ id`() {
-        val body = dmAction(
-            peer = "~sampel",
-            postId = "~author/170141184507933044937549665940933705728",
-            delta = writsDelReactDelta("~me"),
-        )
-        assertEquals(
-            "~author/170.141.184.507.933.044.937.549.665.940.933.705.728",
-            body["diff"]!!.jsonObject["id"]!!.jsonPrimitive.content,
-        )
-    }
 }

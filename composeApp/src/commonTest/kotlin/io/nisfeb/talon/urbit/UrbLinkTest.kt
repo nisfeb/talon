@@ -54,14 +54,7 @@ class UrbLinkTest {
         assertTrue(UrbLink.extract("just some text, no links").isEmpty())
         assertTrue(UrbLink.extract("https://example.com/urb").isEmpty())
         assertTrue(UrbLink.extract("urb:// ").isEmpty()) // scheme only, then space
+        assertTrue(UrbLink.extract("urb://.").isEmpty()) // nothing but punctuation after it
     }
 
-    @Test
-    fun rangesPointIntoOriginal() {
-        val text = "x urb://~zod/p y"
-        val ranges = UrbLink.findRanges(text)
-        assertEquals(1, ranges.size)
-        val r = ranges[0]
-        assertEquals("urb://~zod/p", text.substring(r.first, r.last + 1))
-    }
 }

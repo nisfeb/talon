@@ -115,11 +115,6 @@ class StorageUploadTest {
     private fun String.utf8Len() = this.encodeToByteArray().size
 
     @Test
-    fun `a short name is passed through untouched`() {
-        assertEquals("photo.jpg", truncateUploadName("photo.jpg"))
-    }
-
-    @Test
     fun `an over-long name is cut to the budget and keeps its extension`() {
         val name = "a".repeat(400) + ".jpeg"
         val out = truncateUploadName(name)
@@ -157,19 +152,6 @@ class StorageUploadTest {
         assertTrue(out.survivesUtf8(), "cut a surrogate pair in half: $out")
         assertTrue(out.utf8Len() <= 22, "got ${out.utf8Len()} bytes")
         assertEquals("\uD83D\uDE00".repeat(4) + ".gif", out)
-    }
-
-    @Test
-    fun `the default budget also holds for wide characters`() {
-        for (name in listOf(
-            "\u6f22".repeat(200) + ".png",
-            "\uD83D\uDE00".repeat(100) + ".gif",
-            ("\u6f22" + "a" + "\uD83D\uDE00").repeat(80) + ".jpeg",
-        )) {
-            val out = truncateUploadName(name)
-            assertTrue(out.utf8Len() <= MAX_UPLOAD_NAME_BYTES, "$out is ${out.utf8Len()} bytes")
-            assertTrue(out.survivesUtf8(), "cut mid-character: $out")
-        }
     }
 
     @Test

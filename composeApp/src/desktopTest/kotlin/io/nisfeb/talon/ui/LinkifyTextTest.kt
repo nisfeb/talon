@@ -20,6 +20,7 @@ class LinkifyTextTest {
     @Test
     fun `plain string with no urls returns no link annotations`() {
         assertTrue(urlsIn("just hanging out").isEmpty())
+        assertEquals("just hanging out", linkifyStatus("just hanging out").text)
         assertTrue(urlsIn("").isEmpty())
     }
 

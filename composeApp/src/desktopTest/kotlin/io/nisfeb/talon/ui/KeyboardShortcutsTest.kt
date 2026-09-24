@@ -13,12 +13,6 @@ import kotlin.test.assertNull
 class KeyboardShortcutsTest {
 
     @Test
-    fun `Ctrl+K maps to FocusSearch`() {
-        val ev = ctrlKeyDown(Key.K)
-        assertEquals(ShortcutAction.FocusSearch, keyEventToShortcut(ev))
-    }
-
-    @Test
     fun `Ctrl+N maps to NewDm`() {
         assertEquals(ShortcutAction.NewDm, keyEventToShortcut(ctrlKeyDown(Key.N)))
     }

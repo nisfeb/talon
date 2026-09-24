@@ -49,6 +49,7 @@ class PollFormatTest {
         val longQ = "?".repeat(241)
         val r = parsePollInput("$longQ | a | b")
         assertTrue(r is PollParseResult.Err)
+        assertTrue(parsePollInput("${"?".repeat(240)} | a | b") is PollParseResult.Ok, "240 is allowed")
     }
 
     @Test

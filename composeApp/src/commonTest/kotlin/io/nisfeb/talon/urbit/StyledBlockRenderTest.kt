@@ -46,5 +46,6 @@ class StyledBlockRenderTest {
             ),
         )
         assertEquals(listOf("Text"), story.map { it::class.simpleName })
+        assertTrue("quoted" in (story.single() as StoryPart.Text).text.text)
     }
 }

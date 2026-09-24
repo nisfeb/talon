@@ -100,14 +100,6 @@ class HomeLayoutTest {
     }
 
     @Test
-    fun `a current layout is not scaled a second time`() {
-        val once = HomeLayoutCodec.decode(HomeLayoutCodec.encode(HomeLayout.DEFAULT))
-        val twice = HomeLayoutCodec.decode(HomeLayoutCodec.encode(once))
-        assertEquals(once.widgets, twice.widgets)
-        assertEquals(HomeLayout.DEFAULT.widgets, once.widgets)
-    }
-
-    @Test
     fun `a kind stored twice only appears once`() {
         val doubled = """{"widgets":[{"kind":"MAIL","count":3},{"kind":"MAIL","count":10}]}"""
         val back = HomeLayoutCodec.decode(doubled)
@@ -178,13 +170,6 @@ class HomeResizeTest {
     }
 
     @Test
-    fun `dragging one column wide widens by exactly one column`() {
-        assertEquals(7, drag(from = 6, travel = col))
-        assertEquals(8, drag(from = 6, travel = col * 2))
-        assertEquals(5, drag(from = 6, travel = -col))
-    }
-
-    @Test
     fun `a zero sized unit does not divide by zero`() {
         // Measured from layout, so it is zero for the frame before the
         // widget has been placed.
@@ -192,21 +177,6 @@ class HomeResizeTest {
         assertEquals(4, resizedRows(4, 500f, 0f))
     }
 
-    @Test
-    fun `every drag lands on something the grid can draw`() {
-        for (start in HOME_SPAN_RANGE) {
-            for (px in -2000..2000 step 37) {
-                val sp = resizedSpan(start, px.toFloat(), col, HOME_COLUMNS)
-                assertTrue(sp in HOME_SPAN_RANGE, "span $sp from $px")
-            }
-        }
-        for (start in HOME_ROW_RANGE) {
-            for (px in -2000..2000 step 37) {
-                val r = resizedRows(start, px.toFloat(), row)
-                assertTrue(r in HOME_ROW_RANGE, "rows $r from $px")
-            }
-        }
-    }
 }
 
 

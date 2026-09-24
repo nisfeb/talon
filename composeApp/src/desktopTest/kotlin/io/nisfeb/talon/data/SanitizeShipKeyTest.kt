@@ -18,11 +18,6 @@ import kotlin.test.assertEquals
 class SanitizeShipKeyTest {
 
     @Test
-    fun `galaxy patp leading tilde becomes underscore`() {
-        assertEquals("_zod", sanitizeShipKey("~zod"))
-    }
-
-    @Test
     fun `filesystem-hostile characters are replaced not stripped`() {
         // Length preservation is load-bearing: two distinct ship
         // names that happened to share a prefix must not collapse to

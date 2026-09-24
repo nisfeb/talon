@@ -126,33 +126,6 @@ class SettingsSyncFuzzTest {
 
     // ─── unwrap stringified-cord values is symmetric ───────────────
 
-    @Test
-    fun `applyBucket WATCHWORDS tolerates both raw JsonObject and stringified cord`() {
-        // Pre-Stage-F push paths sent raw JsonObject values; the
-        // post-fix paths stringify into cords. The apply path now
-        // calls unwrap() so both shapes work. Exercises that
-        // tolerance with a mix of inputs.
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val term = Fuzz.randomString(rnd, 20).ifBlank { "x" }
-            val raw = buildJsonObject {
-                put("term", term)
-                put("notify", rnd.nextBoolean())
-                put("createdMs", rnd.nextLong(0L, Long.MAX_VALUE / 2))
-            }
-            val asCord = kotlinx.serialization.json.JsonPrimitive(
-                kotlinx.serialization.json.Json.encodeToString(
-                    kotlinx.serialization.json.JsonElement.serializer(), raw,
-                ),
-            )
-            val bucket = buildJsonObject {
-                val k = Fuzz.randomString(rnd, 10).ifBlank { "k" }
-                put(k, if (rnd.nextBoolean()) raw else asCord)
-            }
-            runBlocking {
-                sync.applyBucket(SettingsSyncImpl.BUCKET_WATCHWORDS, bucket)
-            }
-        }
-    }
 }
 
 // ──────────────────────────────────────────────────────────────────

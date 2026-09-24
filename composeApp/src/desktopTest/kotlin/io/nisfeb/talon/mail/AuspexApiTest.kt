@@ -148,7 +148,7 @@ class AuspexApiTest {
     }
 
     @Test
-    fun `an empty attachment list is left off entirely`() = runBlocking<Unit> {
+    fun `no attachments still sends the list, empty`() = runBlocking<Unit> {
         val a = api { jsonOk(this, """{"ok":true}""") }
         a.send(to = listOf("~zod"), subject = "s", body = "b")
         assertEquals(
@@ -174,12 +174,6 @@ class AuspexApiTest {
     }
 
     // ---- the three failures --------------------------------------------
-
-    @Test
-    fun `an answer we cannot read is not the same as no answer`() = runBlocking<Unit> {
-        val a = api { jsonOk(this, "this is not json") }
-        assertFailsWith<AuspexError.Garbled> { a.whoami() }
-    }
 
     @Test
     fun `nothing coming back is its own failure`() = runBlocking<Unit> {

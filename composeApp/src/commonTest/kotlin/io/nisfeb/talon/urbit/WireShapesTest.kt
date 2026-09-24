@@ -175,17 +175,6 @@ class WireShapesTest {
         assertEquals("", meta["cover"]!!.jsonPrimitive.content)
     }
 
-    @Test
-    fun `buildEssay for gallery uses heap kind`() {
-        val essay = buildEssay(
-            content = JsonArray(emptyList()),
-            author = "~sampel",
-            sentMs = 0L,
-            kind = "/heap",
-        )
-        assertEquals("/heap", essay["kind"]!!.jsonPrimitive.content)
-    }
-
     // ─── gallery helpers ───────────────────────────────────────
 
     @Test

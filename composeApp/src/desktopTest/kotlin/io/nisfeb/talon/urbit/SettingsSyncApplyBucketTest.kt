@@ -675,11 +675,12 @@ class SettingsSyncApplyBucketTest {
             put("config", buildJsonObject {
                 put("provider", "Anthropic")
                 put("apiKey", "key")
+                put("syncEnabled", false)
             })
         }
         sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
 
-        assertEquals(true, aiSettings.state.value.syncEnabled)
+        assertEquals(true, aiSettings.state.value.syncEnabled, "a peer's false must not switch sync off here")
     }
 
     @Test

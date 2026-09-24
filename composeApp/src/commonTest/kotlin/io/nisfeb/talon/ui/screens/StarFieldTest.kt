@@ -87,6 +87,8 @@ class StarFieldTest {
             val cap = maxOf(ring * (STAR_SIZE_MIN + STAR_SIZE_SPREAD), STAR_MIN_RADIUS_PX)
             assertTrue(r <= cap, "star $i has radius $r on a $ring band, cap $cap")
         }
+        // The cap above is made of the same constants, so it grows with them.
+        assertTrue(STAR_SIZE_MIN + STAR_SIZE_SPREAD <= 0.03f, "a star is no longer a speck")
     }
 
     @Test

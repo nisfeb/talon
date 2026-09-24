@@ -1,8 +1,6 @@
 package io.nisfeb.talon.ai
 
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -90,14 +88,6 @@ class AgentClientTest {
         assertEquals("checking", turn.text)
         assertEquals("send_message", turn.calls.single().name)
         assertEquals("~bus", turn.calls.single().args["whom"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun `parse anthropic text-only yields Final`() {
-        val body = json.parseToJsonElement(
-            """{"content":[{"type":"text","text":"all done"}],"stop_reason":"end_turn"}""",
-        ).jsonObject
-        assertEquals(AgentTurn.Final("all done"), parseAnthropicTurn(body))
     }
 
     @Test

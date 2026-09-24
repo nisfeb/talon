@@ -335,6 +335,8 @@ class AiSettingsSectionTest {
         assertEquals(listOf("five", "fifty"), topUpSizes(plans).map { it.id })
         assertEquals(5_000_000L, minTopUp(plans))
         assertEquals(5_000_000L, minTopUp(emptyList()), "five dollars where the vendor lists no size")
+        val three = Plan("three", "Three", "topup", 3_000_000L, 3_000_000L, "")
+        assertEquals(3_000_000L, minTopUp(plans + three), "the cheapest plan, not the default")
         assertEquals("Subscribe: Pro, $10.00 a month for $12.00 of credit", subscribeLabel(plans[1]))
         assertEquals("Pro, $10.00 a year for $12.00 of credit", subscriptionLine(plans[1].copy(interval = "year")))
     }

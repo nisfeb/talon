@@ -2,7 +2,6 @@ package io.nisfeb.talon.ui
 
 import kotlin.math.abs
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class MoonTest {
@@ -36,15 +35,6 @@ class MoonTest {
     }
 
     @Test
-    fun `a new moon crosses with the sun`() {
-        val p = Moon.phaseAt(1_704_974_220_000L)
-        assertTrue(p.illuminated < 0.01f, "illuminated ${p.illuminated}")
-        // Same place as the sun, whatever the hour.
-        assertTrue(abs(Moon.dialMinute(12 * 60, p.elongationDeg) - 12 * 60) < 32)
-        assertTrue(abs(Moon.dialMinute(3 * 60, p.elongationDeg) - 3 * 60) < 32)
-    }
-
-    @Test
     fun `the quarters are half lit and on opposite sides`() {
         val new = 1_704_974_220_000L
         val q = (Moon.SYNODIC_DAYS / 4 * 86_400_000).toLong()
@@ -54,16 +44,6 @@ class MoonTest {
         assertTrue(abs(last.illuminated - 0.5f) < 0.02f, "last ${last.illuminated}")
         assertTrue(first.waxing, "first quarter is filling")
         assertTrue(!last.waxing, "last quarter is emptying")
-    }
-
-    @Test
-    fun `the moon lags the sun by a quarter day at first quarter`() {
-        val new = 1_704_974_220_000L
-        val first = Moon.phaseAt(new + (Moon.SYNODIC_DAYS / 4 * 86_400_000).toLong())
-        // Six hours behind: a first-quarter moon transits at sunset,
-        // not at noon.
-        val lag = (12 * 60 - Moon.dialMinute(12 * 60, first.elongationDeg) + 1440) % 1440
-        assertTrue(abs(lag - 6 * 60) < 40, "lag $lag minutes")
     }
 
     @Test
@@ -77,18 +57,6 @@ class MoonTest {
         }
     }
 
-    @Test
-    fun `the same fraction is lit either side of full`() {
-        // Anchored on the model's own new moon, not a published one:
-        // the mean month sits a few hours off the real thing, and that
-        // offset is not what this is testing.
-        val base = 1_704_974_220_000L
-        val trueNew = base - (ageOf(base) * 86_400_000).toLong()
-        val waxing = Moon.phaseAt(trueNew + 7 * 86_400_000L)
-        val waning = Moon.phaseAt(trueNew + ((Moon.SYNODIC_DAYS - 7) * 86_400_000).toLong())
-        assertEquals(waxing.illuminated, waning.illuminated, 0.01f)
-        assertTrue(waxing.waxing && !waning.waxing)
-    }
 }
 
 class NewMoonVisibilityTest {

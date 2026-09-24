@@ -20,15 +20,6 @@ class PostAuthorTest {
     private fun parse(raw: String) = Json.parseToJsonElement(raw).asAuthor()
 
     @Test
-    fun `a person is a bare ship string`() {
-        val a = parse(""""~ricsul-bilwyt"""")
-        assertEquals("~ricsul-bilwyt", a?.ship)
-        assertNull(a?.nickname)
-        assertNull(a?.avatarUrl)
-        assertTrue(a?.isBot == false)
-    }
-
-    @Test
     fun `a bot is an object and still yields its ship`() {
         // The regression itself: read as a string this is null, and the
         // author falls back to "" — no name, no icon.

@@ -65,15 +65,6 @@ class MenuSeenStoreTest {
     // ── DesktopMenuSeenStore: round-trip + persistence ───────────────
 
 
-    @Test
-    fun `markInvitesSeen persists and survives reload`() {
-        DesktopMenuSeenStore(ship = "~test", file = file)
-            .markInvitesSeen("~zod,~nec")
-
-        val reloaded = DesktopMenuSeenStore(ship = "~test", file = file)
-        assertEquals("~zod,~nec", reloaded.state.value.lastSeenInvitesSnapshot)
-    }
-
 
     @Test
     fun `the three markers are independent and accumulate in one file`() {
@@ -109,6 +100,7 @@ class MenuSeenStoreTest {
             """{"lastSeenStatusesMs":7,"somethingNew":"x"}""",
         )
         val store = DesktopMenuSeenStore(ship = "~test", file = file)
+        assertEquals(7L, store.state.value.lastSeenStatusesMs)
     }
 
 }

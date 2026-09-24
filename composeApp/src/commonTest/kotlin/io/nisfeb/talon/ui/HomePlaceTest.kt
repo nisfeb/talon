@@ -46,6 +46,8 @@ class HomePlaceTest {
     fun `nothing stored is no place`() {
         assertNull(HomePlaceCodec.decode(""))
         assertNull(HomePlaceCodec.decode("garbage"))
+        // A v2 line cut short used to crash the widget.
+        assertNull(HomePlaceCodec.decode("v2,1.0,2.0,0,"))
     }
 
     @Test

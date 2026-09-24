@@ -171,10 +171,9 @@ class DesktopSessionStoreTest {
         // ignoreUnknownKeys=true — a future Talon adding fields to the
         // top-level blob (e.g. version) should be loadable by an older
         // Talon without crashing.
-        file.writeText(
-            """{"sessions":[],"activeShip":null,"futureFlag":42}"""
-        )
+        DesktopSessionStore(file).save(session("~zod"))
+        file.writeText(file.readText().replaceFirst("{", """{"futureFlag":42,"""))
         val store = DesktopSessionStore(file)
-        assertTrue(store.all().isEmpty())
+        assertEquals(listOf("~zod"), store.all().map { it.ship })
     }
 }

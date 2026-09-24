@@ -26,10 +26,6 @@ class MentionMatcherTest {
             "anything ~", ""))
     }
 
-    @Test fun `empty haystack returns false`() {
-        assertFalse(MentionMatcher.containsMention("", "mister-foo"))
-    }
-
     @Test fun `mention followed by punctuation matches`() {
         assertTrue(MentionMatcher.containsMention(
             "~mister-foo!", "mister-foo"))

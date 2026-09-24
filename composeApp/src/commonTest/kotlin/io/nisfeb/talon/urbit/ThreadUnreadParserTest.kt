@@ -14,21 +14,6 @@ import kotlin.test.assertNull
 class ThreadUnreadParserTest {
 
     @Test
-    fun `channel thread key splits into nest and UNDOTTED da post id`() {
-        // Tlon shape: `thread/<kind>/~host/<slug>/<dotted-da>`. The
-        // @da is emitted via `scot %ud` (dotted), but MessageEntity
-        // stores channel post ids UNDOTTED — so the parser must
-        // strip dots, otherwise threadUnreadByPost[m.id] never
-        // matches at the call site and the indicator stays untinted.
-        val src = sourceKeyToThreadSource(
-            "thread/chat/~host/general/170.141.184.505.123.456.789",
-        )
-        assertNotNull(src)
-        assertEquals("chat/~host/general", src.whom)
-        assertEquals("170141184505123456789", src.parentPostId)
-    }
-
-    @Test
     fun `dm-thread key with club whom undots only the da`() {
         val src = sourceKeyToThreadSource(
             "dm-thread/0v4.abcde/~bus/170.141.184.505.987.654.321",

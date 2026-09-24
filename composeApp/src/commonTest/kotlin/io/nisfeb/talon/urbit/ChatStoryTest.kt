@@ -167,5 +167,6 @@ class ChatStoryTest {
         val story = chatTextToStory("```\nfun main() {}\nstill writing")
         assertEquals(1, story.size)
         assertNull(codeBlock(story[0].jsonObject))
+        assertTrue("still writing" in story.toString(), "the body must not be dropped: $story")
     }
 }

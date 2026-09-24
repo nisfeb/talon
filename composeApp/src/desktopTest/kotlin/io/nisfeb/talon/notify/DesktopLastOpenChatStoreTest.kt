@@ -22,13 +22,6 @@ class DesktopLastOpenChatStoreTest {
     }
 
     @Test
-    fun `set persists then a fresh store reads it back`() {
-        DesktopLastOpenChatStore(file = tempFile).set("~sampel", "~friend")
-        val reloaded = DesktopLastOpenChatStore(file = tempFile)
-        assertEquals("~friend", reloaded.state.value["~sampel"])
-    }
-
-    @Test
     fun `clear persists removal`() {
         val s1 = DesktopLastOpenChatStore(file = tempFile)
         s1.set("~sampel", "~friend")

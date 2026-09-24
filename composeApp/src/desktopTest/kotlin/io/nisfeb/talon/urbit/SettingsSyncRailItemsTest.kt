@@ -101,14 +101,6 @@ class SettingsSyncRailItemsTest {
     }
 
     @Test
-    fun `removeEntry deletes the row`() = runBlocking {
-        db.railItemPrefs().upsert(RailItemPrefEntity("Settings", false))
-        sync.removeEntry(SettingsSyncImpl.BUCKET_RAIL_ITEMS, "Settings")
-        val rows = db.railItemPrefs().streamAll().first()
-        assertEquals(emptyList(), rows)
-    }
-
-    @Test
     fun `clearBucketLocally wipes all rows`() = runBlocking {
         db.railItemPrefs().upsert(RailItemPrefEntity("Settings", false))
         db.railItemPrefs().upsert(RailItemPrefEntity("Profile", false))

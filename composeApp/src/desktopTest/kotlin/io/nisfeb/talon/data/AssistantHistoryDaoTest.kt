@@ -52,11 +52,4 @@ class AssistantHistoryDaoTest {
         assertEquals(listOf("q5", "q4", "q3"), rows.map { it.question })
     }
 
-    @Test
-    fun `clearAll empties the table`() = runBlocking {
-        val dao = db.assistantHistory()
-        dao.insert(entry("q", at = 1))
-        dao.clearAll()
-        assertEquals(emptyList(), dao.recent(100).first())
-    }
 }

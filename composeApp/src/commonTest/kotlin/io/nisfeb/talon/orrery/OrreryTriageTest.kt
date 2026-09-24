@@ -73,6 +73,9 @@ class OrreryTriageTest {
     @Test
     fun `questions and chatter claim nothing`() {
         assertTrue(ruleFacts("are you at the shop?", "~bus", 1L, me, index).isEmpty())
+        // The same words as a statement claim a place; asked, they claim nothing.
+        assertTrue(ruleFacts("I'm at the shop", "~bus", 1L, me, index).isNotEmpty())
+        assertTrue(ruleFacts("I'm at the shop?", "~bus", 1L, me, index).isEmpty())
         assertTrue(ruleFacts("lol same", "~bus", 1L, me, index).isEmpty())
     }
 
