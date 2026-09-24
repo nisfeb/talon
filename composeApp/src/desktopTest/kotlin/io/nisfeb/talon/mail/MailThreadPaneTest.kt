@@ -273,7 +273,17 @@ class MailThreadPaneTest {
         assertEquals(listOf("""/apps/auspex/api/unfold {"thread-id":"0vt","msg-ids":["0va"]}"""), posts.filter { "fold" in it })
         onNodeWithText("~bus").performClick()
         waitUntil(timeoutMillis = 5_000) { posts.any { it.startsWith("/apps/auspex/api/fold") } }
-        assertEquals("""/apps/auspex/api/fold {"thread-id":"0vt","msg-ids":["0va"]}""", posts.last { "fold" in it })
+        // And it stays closed: on desktop the card's own click watcher saw
+        // the name's click too, and opened the card again straight after.
+        waitForIdle()
+        onNodeWithText("first line second line").assertIsDisplayed()
+        assertEquals(
+            listOf(
+                """/apps/auspex/api/unfold {"thread-id":"0vt","msg-ids":["0va"]}""",
+                """/apps/auspex/api/fold {"thread-id":"0vt","msg-ids":["0va"]}""",
+            ),
+            posts.filter { "fold" in it },
+        )
         // The other card was never closed by hand, so nothing was said of it.
         assertTrue(posts.none { "0vb" in it && "fold" in it }, "$posts")
     }

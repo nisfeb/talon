@@ -884,7 +884,10 @@ private fun Modifier.onPlainClick(onClick: () -> Unit): Modifier = pointerInput(
             val change = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id } ?: break
             if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
             if (!change.pressed) {
-                if (!moved) onClick()
+                // Not a click a control in the card took: the sender's name
+                // closed the card, and this reopened it, and every header
+                // button selected the message as well.
+                if (!moved && !change.isConsumed) onClick()
                 break
             }
         }
