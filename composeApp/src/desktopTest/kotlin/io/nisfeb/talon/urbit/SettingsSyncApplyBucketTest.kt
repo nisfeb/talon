@@ -1230,14 +1230,10 @@ class SettingsSyncApplyBucketTest {
 // Test doubles
 // ──────────────────────────────────────────────────────────────────
 
-internal class FakeAiSettings : AiSettingsRepository {
-    private val _state = MutableStateFlow(
-        AiSettings.Config(
-            provider = AiSettings.Provider.Anthropic,
-            apiKey = "",
-            model = null,
-        ),
-    )
+internal class FakeAiSettings(
+    initial: AiSettings.Config = AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "", model = null),
+) : AiSettingsRepository {
+    private val _state = MutableStateFlow(initial)
     override val state: StateFlow<AiSettings.Config> = _state.asStateFlow()
     override var onStateChange: ((AiSettings.Config, Boolean) -> Unit)? = null
     override fun update(
