@@ -637,6 +637,7 @@ fun DmChatScreen(
                 width: Int,
                 height: Int,
                 alt: String,
+                caption: String,
             ) {
                 repo.sendImage(
                     whom = whom,
@@ -644,6 +645,7 @@ fun DmChatScreen(
                     width = width,
                     height = height,
                     alt = alt,
+                    caption = caption,
                 )
             }
             override val supportsQuote: Boolean = true

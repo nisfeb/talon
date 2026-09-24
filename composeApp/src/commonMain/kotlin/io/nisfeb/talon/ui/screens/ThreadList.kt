@@ -273,8 +273,9 @@ fun ThreadList(
                 width: Int,
                 height: Int,
                 alt: String,
+                caption: String,
             ) {
-                repo.replyImage(whom, parentId, src, width, height, alt)
+                repo.replyImage(whom, parentId, src, width, height, alt, caption)
             }
             override val supportsQuote: Boolean = false
             override suspend fun sendQuote(

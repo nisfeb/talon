@@ -844,7 +844,8 @@ class TlonChatRepo(
     /**
      * Send an image message. `src` is the hosted URL returned by
      * uploadImage; width/height are the image's natural dimensions (0 if
-     * unknown); alt is a short description (often the filename).
+     * unknown); alt is a short description (often the filename); caption
+     * is text written with it, which goes under it in the same message.
      */
     suspend fun sendImage(
         whom: String,
@@ -852,7 +853,8 @@ class TlonChatRepo(
         width: Int,
         height: Int,
         alt: String,
-    ): String = postContent(whom, imageStory(src, width, height, alt))
+        caption: String = "",
+    ): String = postContent(whom, imageStory(src, width, height, alt, caption))
 
     /**
      * Post a notebook entry to a `diary/~host/slug` channel. Title is
@@ -2455,7 +2457,8 @@ class TlonChatRepo(
         width: Int,
         height: Int,
         alt: String,
-    ): String = replyContent(whom, parentId, imageStory(src, width, height, alt))
+        caption: String = "",
+    ): String = replyContent(whom, parentId, imageStory(src, width, height, alt, caption))
 
     private suspend fun replyContent(
         whom: String,
@@ -4533,9 +4536,10 @@ internal fun looksLikeGangsFact(payload: JsonObject): Boolean =
  * A one-verse story carrying a single image block — the structured form
  * both top-level posts (repo.sendImage) and thread replies
  * (repo.replyImage) use, so the image renders inline instead of as the
- * `[alt](url)` markdown link the old thread fallback produced.
+ * `[alt](url)` markdown link the old thread fallback produced. [caption],
+ * text written with the image, follows it in the same message.
  */
-internal fun imageStory(src: String, width: Int, height: Int, alt: String): JsonArray =
+internal fun imageStory(src: String, width: Int, height: Int, alt: String, caption: String = ""): JsonArray =
     buildJsonArray {
         add(buildJsonObject {
             put("block", buildJsonObject {
@@ -4547,7 +4551,7 @@ internal fun imageStory(src: String, width: Int, height: Int, alt: String): Json
                 })
             })
         })
-    }
+    }.let { if (caption.isBlank()) it else JsonArray(it + chatTextToStory(caption.trim())) }
 
 /**
  * Which of [ships] the ship now counts as DMs: `%chat /dm` lists the
