@@ -314,6 +314,12 @@ kotlin {
 // headless satisfies AWT's thread checks without requiring X11.
 tasks.withType<Test>().configureEach {
     jvmArgs("-Djava.awt.headless=true")
+    // The app keeps its data under ~/.config/talon (AppDirs). A test run
+    // must never write, or erase, the developer's real copy: the ship
+    // eraser test deletes files there, and every run logged into it.
+    val home = layout.buildDirectory.dir("test-home").get().asFile.absolutePath
+    systemProperty("user.home", home)
+    environment("XDG_CONFIG_HOME", "$home/.config")
 }
 
 // Single source of truth for the app version. `derivePackageVersion`
