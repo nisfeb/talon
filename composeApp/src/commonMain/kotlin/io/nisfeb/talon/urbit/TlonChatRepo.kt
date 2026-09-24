@@ -2838,7 +2838,8 @@ class TlonChatRepo(
             }
     }
 
-    private suspend fun applyEvent(event: JsonElement) {
+    // internal, not private: repo tests feed it eyre-shaped facts directly.
+    internal suspend fun applyEvent(event: JsonElement) {
         val outer = event as? JsonObject ?: return
         // Urbit's /~/channel/ SSE wraps each fact as:
         //   { id: N, response: "diff"|"poke"|"subscribe", mark: "...", json: {…} }
