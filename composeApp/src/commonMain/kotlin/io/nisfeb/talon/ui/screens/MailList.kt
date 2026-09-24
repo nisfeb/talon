@@ -204,30 +204,27 @@ private fun MailBody(
             }
         }
 
-        availability == MailAvailability.NO_GRUBBERY ->
+        // Mail is a stock desk of the Grubbery shell: missing with the
+        // shell, or only not fetched yet. One install does either.
+        availability == MailAvailability.NO_GRUBBERY || availability == MailAvailability.NOT_FETCHED ->
             MailAbsent(
                 when {
                     installing ->
-                        "Installing Grubbery. The desk arrives over the network, " +
-                            "which takes a moment."
+                        "Fetching Grubbery's apps. They arrive over the network, " +
+                            "which takes a few minutes."
                     installProblem != null -> installProblem
-                    else -> "Mail runs inside Grubbery, which this ship does not have yet."
+                    availability == MailAvailability.NO_GRUBBERY ->
+                        "Mail runs in Grubbery, which this ship does not have yet."
+                    else -> "Grubbery is here, but not its Mail yet."
                 },
                 actionLabel = when {
                     installing -> null
                     onInstall == null -> null
                     installProblem != null -> "Try again"
-                    else -> "Install Grubbery"
+                    availability == MailAvailability.NO_GRUBBERY -> "Install Grubbery"
+                    else -> "Fetch Mail"
                 },
                 onAction = onInstall,
-            )
-
-        availability == MailAvailability.OLD_GRUBBERY ->
-            MailAbsent(
-                "This ship's Grubbery predates Mail. It updates itself from " +
-                    "its publisher; check back shortly.",
-                actionLabel = null,
-                onAction = null,
             )
 
         page == null && loading ->

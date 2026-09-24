@@ -130,7 +130,7 @@ class MailRepoWriteTest {
                 "the answer to a 404 on a write is a re-read",
             )
             assertTrue(
-                hits.none { it.contains("manifest.webmanifest") },
+                hits.none { it.contains("desks/stock") },
                 "no install probe over a deleted thread",
             )
         }
@@ -218,13 +218,13 @@ class MailRepoWriteTest {
             r.fetchBlob("0vhash", "~nec")
             assertEquals("blob host gone", r.error.value)
             assertEquals(MailAvailability.PRESENT, r.availability.value)
-            assertTrue(hits.none { it.contains("manifest.webmanifest") }, "no probe off the inbox path")
+            assertTrue(hits.none { it.contains("desks/stock") }, "no probe off the inbox path")
         }
 
         // The same status on the inbox read itself is the one place the
         // probe runs: there a 404 does mean the nexus is gone.
         withRepo({ req ->
-            if (req.url.encodedPath.endsWith("manifest.webmanifest")) {
+            if (req.url.encodedPath.endsWith("desks/stock")) {
                 respondError(HttpStatusCode.NotFound, "")
             } else {
                 respondError(HttpStatusCode.NotFound, """{"error":"not found"}""")
@@ -238,7 +238,7 @@ class MailRepoWriteTest {
                 "the inbox path is the one place a 404 means the app is gone",
             )
             assertNull(r.error.value, "not having mail installed is a state, not a failure")
-            assertTrue(hits.any { it.contains("manifest.webmanifest") }, "and the probe did run")
+            assertTrue(hits.any { it.contains("desks/stock") }, "and the probe did run")
         }
     }
 }

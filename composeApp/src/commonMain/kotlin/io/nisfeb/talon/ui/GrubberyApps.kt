@@ -18,10 +18,6 @@ enum class AppState {
     /** Not on this ship. Installing is the fix. */
     MISSING,
 
-    /** The desk is here, but too old to carry this app. Installing does
-     *  nothing: kiln tracks the publisher, so this resolves itself. */
-    OUTDATED,
-
     /** Nothing to say about the app: the session is over. */
     SIGNED_OUT,
 
@@ -31,6 +27,7 @@ enum class AppState {
 
 /** Which desk an install would fetch, and from whom. */
 enum class AppInstall {
+    /** Grubbery where it is missing, and the stock desks its shell fetches: lattice, mail, the calendar. */
     GRUBBERY,
     GROUPS,
 
@@ -59,46 +56,37 @@ data class AppRow(
     val canInstall: Boolean get() = install != null
 }
 
-/** Mail rides inside the grubbery desk, so it can be missing two ways. */
+/** Mail is a stock desk of the Grubbery shell, so it can be missing two ways; one install fixes both. */
 fun mailRow(availability: MailAvailability, error: String?): AppRow = when (availability) {
     MailAvailability.PRESENT -> AppRow("Mail", AppState.WORKING, "Answering on this ship.", null, error)
     MailAvailability.NO_GRUBBERY ->
-        AppRow("Mail", AppState.MISSING, "Mail runs inside Grubbery, which this ship does not have.", AppInstall.GRUBBERY, error)
-    MailAvailability.OLD_GRUBBERY ->
-        AppRow("Mail", AppState.OUTDATED, "This ship's Grubbery predates Mail. It updates itself from its publisher.", null, error)
+        AppRow("Mail", AppState.MISSING, "Mail runs in Grubbery, which this ship does not have. Talon can add both.", AppInstall.GRUBBERY, error)
+    MailAvailability.NOT_FETCHED ->
+        AppRow("Mail", AppState.MISSING, "Grubbery is here, but not its Mail yet. Talon can fetch it.", AppInstall.GRUBBERY, error)
     MailAvailability.SIGNED_OUT -> AppRow("Mail", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
     MailAvailability.UNKNOWN -> AppRow("Mail", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
 
 /**
- * The calendar ships inside Grubbery now, so a calendar that does not
- * answer is a statement about Grubbery: absent where the desk is absent,
- * out of date where the desk is here and predates it. [grubbery] is
- * whether the desk answered, or null before we have asked — and before
- * we know, nothing is offered, because installing on a guess is how
- * somebody installs a desk they already have.
+ * The calendar is a stock desk of the Grubbery shell. One that does not
+ * answer is missing, whether the shell is or only the desk, and the
+ * install does what either needs, so there is nothing to tell apart.
  */
-fun calendarRow(availability: CalendarAvailability, error: String?, grubbery: Boolean?): AppRow = when {
-    availability == CalendarAvailability.PRESENT ->
-        AppRow("Calendar", AppState.WORKING, "Answering on this ship.", null, error)
-    availability == CalendarAvailability.SIGNED_OUT ->
-        AppRow("Calendar", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
-    availability == CalendarAvailability.UNKNOWN ->
-        AppRow("Calendar", AppState.UNKNOWN, "Not asked yet.", null, error)
-    grubbery == false ->
-        AppRow("Calendar", AppState.MISSING, "The calendar comes with Grubbery, which this ship does not have.", AppInstall.GRUBBERY, error)
-    grubbery == true ->
-        AppRow("Calendar", AppState.OUTDATED, "This ship's Grubbery predates the calendar. It updates itself from its publisher.", null, error)
-    else -> AppRow("Calendar", AppState.UNKNOWN, "Not answering. Checking whether Grubbery is here.", null, error)
+fun calendarRow(availability: CalendarAvailability, error: String?): AppRow = when (availability) {
+    CalendarAvailability.PRESENT -> AppRow("Calendar", AppState.WORKING, "Answering on this ship.", null, error)
+    CalendarAvailability.SIGNED_OUT -> AppRow("Calendar", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
+    CalendarAvailability.UNKNOWN -> AppRow("Calendar", AppState.UNKNOWN, "Not asked yet.", null, error)
+    CalendarAvailability.ABSENT ->
+        AppRow("Calendar", AppState.MISSING, "Not on this ship yet. Talon can fetch it with Grubbery.", AppInstall.GRUBBERY, error)
 }
 
 /**
- * Lattice is the Grubbery desk itself, probed rather than subscribed:
- * null is "not asked yet", which is not the same as absent.
+ * Lattice is a stock desk of the Grubbery shell, probed rather than
+ * subscribed: null is "not asked yet", which is not the same as absent.
  */
 fun latticeRow(installed: Boolean?, error: String? = null): AppRow = when (installed) {
     true -> AppRow("Lattice", AppState.WORKING, "Answering on this ship.", null, error)
-    false -> AppRow("Lattice", AppState.MISSING, "Grubbery is not on this ship. Lattice comes with it.", AppInstall.GRUBBERY, error)
+    false -> AppRow("Lattice", AppState.MISSING, "Not on this ship yet. Talon can fetch it with Grubbery.", AppInstall.GRUBBERY, error)
     null -> AppRow("Lattice", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
 

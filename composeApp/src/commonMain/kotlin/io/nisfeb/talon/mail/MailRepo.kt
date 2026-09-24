@@ -43,8 +43,8 @@ enum class MailAvailability {
     /** No grubbery on this ship. Offer to install it. */
     NO_GRUBBERY,
 
-    /** Grubbery is here but carries no auspex, so it wants updating. */
-    OLD_GRUBBERY,
+    /** Grubbery is here but its shell has not fetched the mail desk yet. Offer to. */
+    NOT_FETCHED,
 
     /** The session is over. Not a statement about mail. */
     SIGNED_OUT,
@@ -409,9 +409,9 @@ class MailRepo(
             }
             probeAbsentApp && e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND -> {
                 val url = shipUrl
-                val grubbery = url != null && LatticeInstall.isInstalled(http, url)
+                val grubbery = url != null && LatticeInstall.hasShell(http, url)
                 _availability.value =
-                    if (grubbery) MailAvailability.OLD_GRUBBERY else MailAvailability.NO_GRUBBERY
+                    if (grubbery) MailAvailability.NOT_FETCHED else MailAvailability.NO_GRUBBERY
                 _error.value = null
             }
             else -> {

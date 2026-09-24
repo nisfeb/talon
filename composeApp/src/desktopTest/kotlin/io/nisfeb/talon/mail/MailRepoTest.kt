@@ -85,28 +85,28 @@ class MailRepoTest {
     }
 
     @Test
-    fun `a ship with no grubbery is told apart from one with an old grubbery`() {
-        // The nexus is absent, and so is lattice's manifest: no grubbery.
+    fun `a ship with no grubbery is told apart from one whose shell has not fetched mail`() {
+        // The nexus is absent, and so is the shell: no grubbery.
         withRepo({ path ->
-            if (path.endsWith("manifest.webmanifest")) 404 to "" else 404 to """{"error":"not found"}"""
+            if (path.endsWith("desks/stock")) 404 to "" else 404 to """{"error":"not found"}"""
         }) { r ->
             r.attach("https://ship.example")
             r.refresh()
             assertEquals(MailAvailability.NO_GRUBBERY, r.availability.value)
         }
-        // The nexus is absent but lattice answers: grubbery is here and stale.
+        // The nexus is absent but the shell answers: grubbery is here, its mail desk is not.
         withRepo({ path ->
-            if (path.endsWith("manifest.webmanifest")) 200 to "{}" else 404 to """{"error":"not found"}"""
+            if (path.endsWith("desks/stock")) 200 to "{}" else 404 to """{"error":"not found"}"""
         }) { r ->
             r.attach("https://ship.example")
             r.refresh()
-            assertEquals(MailAvailability.OLD_GRUBBERY, r.availability.value)
+            assertEquals(MailAvailability.NOT_FETCHED, r.availability.value)
         }
     }
 
     @Test
     fun `a missing app is not reported as an error to fix`() = withRepo({ path ->
-        if (path.endsWith("manifest.webmanifest")) 404 to "" else 404 to """{"error":"not found"}"""
+        if (path.endsWith("desks/stock")) 404 to "" else 404 to """{"error":"not found"}"""
     }) { r ->
         r.attach("https://ship.example")
         r.refresh()

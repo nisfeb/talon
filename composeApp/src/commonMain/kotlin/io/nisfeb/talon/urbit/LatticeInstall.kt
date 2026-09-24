@@ -7,7 +7,15 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -197,19 +205,63 @@ object LatticeInstall {
     }
 
     /**
-     * Install a grubbery app: fetch the desk it lives in, and wait for
-     * the app itself to answer.
-     *
-     * A timeout where Grubbery is answering and the app is not says
-     * something worth saying: the desk is here and predates the app,
-     * so there is nothing to install and waiting will not help. It
-     * updates itself from its publisher.
+     * Whether the Grubbery shell is on [shipUrl]: its stock list answers
+     * the owner in JSON, and refuses anyone else with its own 403. Not a
+     * status alone: eyre sends a caller without a session from a path
+     * nothing serves to its login page, which a client that follows
+     * redirects reads as 200. Lattice's manifest is not this either:
+     * lattice is one of the shell's stock desks, and a ship can have the
+     * shell and not yet the desk.
      */
-    fun grubberyApp(
+    suspend fun hasShell(http: HttpClient, shipUrl: String, cookie: String? = null): Boolean = runCatching {
+        val resp = http.get("${shipUrl.trimEnd('/')}/apps/grubbery/desks/stock") {
+            cookie?.let { header(HttpHeaders.Cookie, it) }
+        }
+        resp.status.value == 403 ||
+            (resp.status.isSuccess() && resp.contentType()?.match(ContentType.Application.Json) == true)
+    }.getOrDefault(false)
+
+    /** Ask the shell to fetch its stock desks (lattice, mail, the calendar) from their repositories. Idempotent. */
+    suspend fun syncStock(http: HttpClient, shipUrl: String, cookie: String?): Result<Unit> = runCatching {
+        val resp = http.post("${shipUrl.trimEnd('/')}/apps/grubbery/desks/sync-defaults") {
+            cookie?.let { header(HttpHeaders.Cookie, it) }
+        }
+        if (!resp.status.isSuccess()) {
+            error(
+                if (resp.status.value == 401 || resp.status.value == 403) "Your ship did not accept that; sign in to it again."
+                else "Grubbery would not fetch its apps (HTTP ${resp.status.value}).",
+            )
+        }
+    }
+
+    /** Whether the shell says every stock desk has been fetched; null where it did not say. */
+    suspend fun stockSynced(http: HttpClient, shipUrl: String, cookie: String?): Boolean? = runCatching {
+        val resp = http.get("${shipUrl.trimEnd('/')}/apps/grubbery/desks/stock") {
+            cookie?.let { header(HttpHeaders.Cookie, it) }
+        }
+        val arr = (if (resp.status.isSuccess()) Json.parseToJsonElement(resp.bodyAsText()) else null) as? JsonArray
+        arr?.all { (it as? JsonObject)?.get("synced")?.jsonPrimitive?.booleanOrNull == true }
+    }.getOrNull()
+
+    /**
+     * Grubbery and the apps that come with it. Lattice, mail and the
+     * calendar are the shell's stock desks, which it fetches from their
+     * repositories only when asked, so installing grubbery again on a
+     * ship that has it changes nothing: kiln syncs it from its publisher
+     * and the apps stay missing, which is what a user saw. So grubbery by
+     * kiln only where the shell is not here, then the shell asked to
+     * fetch its stock desks, then a wait for [answers].
+     *
+     * A desk the shell has fetched still answers nothing until the owner
+     * approves what it reaches, so where approvals wait that is what this
+     * says, rather than waiting out the clock. The shell's own calls are
+     * the owner's: [cookie] is the session's.
+     */
+    fun grubbery(
         http: HttpClient,
         shipUrl: () -> String?,
-        app: String,
-        answers: suspend (String) -> Boolean,
+        cookie: () -> String?,
+        answers: suspend (String) -> Boolean = { isInstalled(http, it) },
         timeoutMs: Long = GRUBBERY_TIMEOUT_MS,
         poke: suspend (String, String, JsonElement) -> Boolean,
     ): suspend () -> Result<Unit> = {
@@ -217,22 +269,30 @@ object LatticeInstall {
         if (url == null) {
             Result.failure(IllegalStateException("Not signed in to a ship."))
         } else {
-            installAndWait(http, url, poke, timeoutMs = timeoutMs, installed = { answers(url) })
-                .recoverCatching { e ->
-                    if (isInstalled(http, url)) {
-                        // What was seen, and the two things it is. Saying
-                        // only the first would tell somebody whose session
-                        // went stale to go and wait for an update.
-                        error(
-                            "Grubbery is on this ship and its $app is not answering. " +
-                                "A Grubbery older than the $app updates itself from its publisher; " +
-                                "otherwise sign in to the ship again.",
-                        )
-                    }
-                    throw e
+            runCatching {
+                if (answers(url)) return@runCatching
+                if (!hasShell(http, url, cookie())) {
+                    installAndWait(http, url, poke, timeoutMs, installed = { hasShell(http, url, cookie()) }).getOrThrow()
                 }
+                syncStock(http, url, cookie()).getOrThrow()
+                val deadline = io.nisfeb.talon.util.nowMs() + timeoutMs
+                while (io.nisfeb.talon.util.nowMs() < deadline) {
+                    kotlinx.coroutines.delay(POLL_MS)
+                    if (answers(url)) return@runCatching
+                    if (stockSynced(http, url, cookie()) == true &&
+                        io.nisfeb.talon.ui.fetchPendingPermits(http, url, cookie()).orEmpty().isNotEmpty()
+                    ) {
+                        error(APPROVE_APPS)
+                    }
+                }
+                error("Grubbery is still fetching its apps from their repositories. Try again in a few minutes.")
+            }
         }
     }
+
+    /** What an install ends on while the fetched apps wait for the owner's approval. */
+    const val APPROVE_APPS =
+        "Grubbery has its apps now. Approve what they reach on your ship's permits page, and they will open."
 
     private const val POLL_MS = 3_000L
 

@@ -13,7 +13,7 @@ class GrubberyAppsTest {
     @Test
     fun `a missing app offers the install`() {
         assertTrue(mailRow(MailAvailability.NO_GRUBBERY, null).canInstall)
-        assertTrue(calendarRow(CalendarAvailability.ABSENT, null, grubbery = false).canInstall)
+        assertTrue(calendarRow(CalendarAvailability.ABSENT, null).canInstall)
         assertTrue(latticeRow(installed = false).canInstall)
         assertTrue(groupsRow(installed = false).canInstall)
     }
@@ -25,39 +25,27 @@ class GrubberyAppsTest {
         assertEquals(AppInstall.GROUPS, groupsRow(installed = false).install)
         assertEquals(AppInstall.GRUBBERY, latticeRow(installed = false).install)
         assertEquals(AppInstall.GRUBBERY, mailRow(MailAvailability.NO_GRUBBERY, null).install)
-        assertEquals(AppInstall.GRUBBERY, calendarRow(CalendarAvailability.ABSENT, null, grubbery = false).install)
+        assertEquals(AppInstall.GRUBBERY, calendarRow(CalendarAvailability.ABSENT, null).install)
         assertFalse(groupsRow(installed = true).canInstall)
         assertFalse(groupsRow(installed = null).canInstall)
     }
 
-    // The calendar ships inside Grubbery, so its absence is a statement
-    // about the desk, and only one of the two readings is installable.
+    // Mail and the calendar are stock desks of the Grubbery shell: a ship
+    // that has the shell and not the desk is missing it, and the install
+    // fetches it. They were called out of date and offered nothing, and
+    // the user was told to wait for an update that never came.
     @Test
-    fun `a calendar missing from a grubbery that is here is out of date`() {
-        val row = calendarRow(CalendarAvailability.ABSENT, null, grubbery = true)
-        assertEquals(AppState.OUTDATED, row.state)
-        assertFalse(row.canInstall)
-    }
-
-    @Test
-    fun `a calendar is offered nothing until we know about grubbery`() {
-        val row = calendarRow(CalendarAvailability.ABSENT, null, grubbery = null)
-        assertEquals(AppState.UNKNOWN, row.state)
-        assertFalse(row.canInstall)
-    }
-
-    @Test
-    fun `an out-of-date grubbery is not offered an install`() {
-        val row = mailRow(MailAvailability.OLD_GRUBBERY, null)
-        assertEquals(AppState.OUTDATED, row.state)
-        // Kiln tracks the publisher, so a re-install fixes nothing here.
-        assertFalse(row.canInstall)
+    fun `an app the shell has not fetched is offered the install`() {
+        val mail = mailRow(MailAvailability.NOT_FETCHED, null)
+        assertEquals(AppState.MISSING, mail.state)
+        assertEquals(AppInstall.GRUBBERY, mail.install)
+        assertEquals(AppState.MISSING, calendarRow(CalendarAvailability.ABSENT, null).state)
     }
 
     @Test
     fun `being signed out is not an app problem, and neither is silence`() {
         assertEquals(AppState.SIGNED_OUT, mailRow(MailAvailability.SIGNED_OUT, null).state)
-        assertEquals(AppState.SIGNED_OUT, calendarRow(CalendarAvailability.SIGNED_OUT, null, grubbery = true).state)
+        assertEquals(AppState.SIGNED_OUT, calendarRow(CalendarAvailability.SIGNED_OUT, null).state)
         assertEquals(AppState.UNKNOWN, latticeRow(installed = null).state)
         assertFalse(mailRow(MailAvailability.SIGNED_OUT, null).canInstall)
         assertFalse(latticeRow(installed = null).canInstall)
@@ -65,7 +53,7 @@ class GrubberyAppsTest {
 
     @Test
     fun `a working app carries the ship's last words anyway`() {
-        val row = calendarRow(CalendarAvailability.PRESENT, "the ship did not answer", grubbery = true)
+        val row = calendarRow(CalendarAvailability.PRESENT, "the ship did not answer")
         assertEquals(AppState.WORKING, row.state)
         assertEquals("the ship did not answer", row.error)
     }

@@ -932,12 +932,14 @@ fun App(
                 io.nisfeb.talon.ui.EyreAzimuthRpc(session.http, url),
             )
         }
-        // Mail lives in the same desk as the link handler's app, so the
-        // install is one thing offered from two places.
+        // Mail and the link handler's lattice are both stock desks of the
+        // Grubbery shell, so the install is one thing offered from two places.
         val grubberyInstall: (suspend () -> Result<Unit>)? = remember(session) {
-            io.nisfeb.talon.urbit.LatticeInstall.installer(http, { sessionStore.active()?.shipUrl }) {
-                app, mark, body -> runCatching { repo.pokeRaw(app, mark, body) }.isSuccess
-            }
+            io.nisfeb.talon.urbit.LatticeInstall.grubbery(
+                http,
+                { sessionStore.active()?.shipUrl },
+                cookie = { sessionStore.active()?.let { "${it.cookieName}=${it.cookieValue}" } },
+            ) { app, mark, body -> runCatching { repo.pokeRaw(app, mark, body) }.isSuccess }
         }
         val homePlaceRaw by uiSettings.homePlace.collectAsState()
         val homePlace = remember(homePlaceRaw) {
@@ -1137,15 +1139,12 @@ fun App(
             )
         }
         val calendarInstall: suspend () -> Result<Unit> = remember(session, calendarRepo) {
-            // The calendar is a grubbery app, not a desk of its own:
-            // what gets installed is Grubbery, and the calendar arrives
-            // inside it. This asked ~ricsul-bilwyt for a desk called
-            // "calendar", which it does not publish, so the poke went
-            // nowhere and the button never finished.
-            val install = io.nisfeb.talon.urbit.LatticeInstall.grubberyApp(
+            // The calendar is a stock desk of the Grubbery shell, fetched
+            // with lattice and mail; kiln does not publish it on its own.
+            val install = io.nisfeb.talon.urbit.LatticeInstall.grubbery(
                 http,
                 { sessionStore.active()?.shipUrl },
-                app = "calendar",
+                cookie = { sessionStore.active()?.let { "${it.cookieName}=${it.cookieValue}" } },
                 answers = { url ->
                     runCatching { io.nisfeb.talon.calendar.CalendarApi(session.http, url).config() }.isSuccess
                 },

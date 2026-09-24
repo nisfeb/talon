@@ -993,7 +993,7 @@ private fun MailPanel(
     Panel("Mail", Icons.Filled.MailOutline, ("Inbox" to onAll).takeIf { mail != null }) {
         when {
             mail == null || availability == MailAvailability.NO_GRUBBERY ||
-                availability == MailAvailability.OLD_GRUBBERY ->
+                availability == MailAvailability.NOT_FETCHED ->
                 Empty("This ship has no mail app yet.")
 
             availability == MailAvailability.SIGNED_OUT -> Empty("Signed out of the ship.")

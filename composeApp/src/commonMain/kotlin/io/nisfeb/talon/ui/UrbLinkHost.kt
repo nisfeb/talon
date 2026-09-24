@@ -87,7 +87,10 @@ fun rememberUrbLinkHandler(
                         installError = "Not signed in to a ship."
                         return@launch
                     }
-                    LatticeInstall.installAndWait(http, s, poke, INSTALL_TIMEOUT_MS).fold(
+                    // Lattice is a stock desk of the Grubbery shell: on a
+                    // ship that has the shell, installing grubbery again
+                    // changed nothing and this waited out the clock.
+                    LatticeInstall.grubbery(http, { s }, cookie, timeoutMs = INSTALL_TIMEOUT_MS, poke = poke)().fold(
                         onSuccess = {
                             known = true
                             installing = false

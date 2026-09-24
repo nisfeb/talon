@@ -111,7 +111,7 @@ fun AppsSettingsScreen(
 
     val rows = buildList {
         if (mailAvailability != null) add(mailRow(mailAvailability, mailError))
-        if (calendarAvailability != null) add(calendarRow(calendarAvailability, calendarError, lattice))
+        if (calendarAvailability != null) add(calendarRow(calendarAvailability, calendarError))
         add(latticeRow(lattice))
         add(groupsRow(groups))
         if (orreryAvailability != null) add(io.nisfeb.talon.ui.orreryRow(orreryAvailability, orreryError))
@@ -120,8 +120,8 @@ fun AppsSettingsScreen(
 
     /**
      * Install, then re-ask every app whether it is there now. One action:
-     * mail, the calendar and lattice all arrive in the Grubbery desk, so
-     * there is nothing else left to install.
+     * mail, the calendar and lattice are all the Grubbery shell's stock
+     * desks, which the one install fetches together.
      */
     fun install(row: AppRow) {
         val action = when (row.install) {
@@ -138,7 +138,7 @@ fun AppsSettingsScreen(
                 onSuccess = {
                     note = when (row.install) {
                         io.nisfeb.talon.ui.AppInstall.GROUPS -> "Installed Groups."
-                        io.nisfeb.talon.ui.AppInstall.GRUBBERY -> "Installed Grubbery. The apps arrive with it."
+                        io.nisfeb.talon.ui.AppInstall.GRUBBERY -> "Grubbery and its apps are here."
                         // The desk is on the ship; what it may reach is
                         // the owner's to allow, on the ship's own page.
                         else -> "Added ${row.name} to your Grubbery shell. Open it on your ship to approve what it reaches."
@@ -287,7 +287,6 @@ fun AppsSettingsScreen(
 private fun stateWord(state: AppState): String = when (state) {
     AppState.WORKING -> "working"
     AppState.MISSING -> "not installed"
-    AppState.OUTDATED -> "out of date"
     AppState.SIGNED_OUT -> "signed out"
     AppState.UNKNOWN -> "unknown"
 }

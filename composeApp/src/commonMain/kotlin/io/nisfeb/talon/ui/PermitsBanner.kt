@@ -23,7 +23,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import io.nisfeb.talon.urbit.asText
 import io.nisfeb.talon.util.nowMs
@@ -54,9 +56,11 @@ internal fun pendingPermitApps(asks: JsonArray, approved: JsonObject): List<Stri
 }
 
 /** The pending apps on [shipUrl], or null where the ship did not say (no Grubbery, signed out, no answer). */
-internal suspend fun fetchPendingPermits(http: HttpClient, shipUrl: String): List<String>? = runCatching {
+internal suspend fun fetchPendingPermits(http: HttpClient, shipUrl: String, cookie: String? = null): List<String>? = runCatching {
     suspend fun read(name: String): JsonElement? {
-        val resp = http.get(shipUrl.trimEnd('/') + "/apps/grubbery/$name")
+        val resp = http.get(shipUrl.trimEnd('/') + "/apps/grubbery/$name") {
+            cookie?.let { header(HttpHeaders.Cookie, it) }
+        }
         return if (resp.status.isSuccess()) Json.parseToJsonElement(resp.bodyAsText()) else null
     }
     val asks = read("asks.json") as? JsonArray ?: return@runCatching null

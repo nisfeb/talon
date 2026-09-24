@@ -73,7 +73,7 @@ class MailListTest {
     fun `a ship without the app offers to install rather than showing an empty inbox`() =
         runComposeUiTest {
             val repo = repoServing { path ->
-                if (path.endsWith("manifest.webmanifest")) 404 to ""
+                if (path.endsWith("desks/stock")) 404 to ""
                 else 404 to """{"error":"not found"}"""
             }
             var offered = false
@@ -108,7 +108,7 @@ class MailListTest {
     @Test
     fun `with no installer there is no button to press`() = runComposeUiTest {
         val repo = repoServing { path ->
-            if (path.endsWith("manifest.webmanifest")) 404 to ""
+            if (path.endsWith("desks/stock")) 404 to ""
             else 404 to """{"error":"not found"}"""
         }
         setContent {
@@ -119,7 +119,7 @@ class MailListTest {
         repo.attach("https://ship.example")
         waitUntil(timeoutMillis = 5_000) {
             runCatching {
-                onNodeWithText("Mail runs inside Grubbery, which this ship does not have yet.")
+                onNodeWithText("Mail runs in Grubbery, which this ship does not have yet.")
                     .assertIsDisplayed()
                 true
             }.getOrDefault(false)

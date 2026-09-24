@@ -141,23 +141,62 @@ class LatticeInstallTest {
         }
     }
 
+    /** A ship's Grubbery, with or without its shell, for [LatticeInstall.grubbery]. */
+    private class Shell(var here: Boolean, var synced: Boolean = false, var pendingAsks: Boolean = false) {
+        val posts = mutableListOf<String>()
+        val cookies = mutableListOf<String?>()
+        val http = HttpClient(MockEngine { req ->
+            val path = req.url.encodedPath
+            if (req.method == io.ktor.http.HttpMethod.Post) { posts += path; cookies += req.headers["Cookie"] }
+            when {
+                !here -> respond("", HttpStatusCode.NotFound)
+                path.endsWith("/desks/sync-defaults") -> { synced = true; respond("syncing") }
+                path.endsWith("/desks/stock") -> respond(
+                    """[{"name":"lattice","synced":$synced},{"name":"auspex","synced":$synced}]""",
+                    headers = io.ktor.http.headersOf("Content-Type", "application/json"),
+                )
+                path.endsWith("/asks.json") -> respond(if (pendingAsks) """[{"app":"/apps/x","poke":[{"road":"/sys/eyre/"}],"peek":[],"make":[]}]""" else "[]")
+                path.endsWith("/approved.json") -> respond("{}")
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        })
+    }
+
+    // A user had grubbery and none of its apps: installing grubbery again
+    // only synced it from its publisher, and the apps stayed missing.
     @Test
-    fun `installing a grubbery app fetches the desk and waits for the app`() = runTest {
-        var asked: Triple<String, String, JsonElement>? = null
-        var answers = false
-        val install = LatticeInstall.grubberyApp(
-            HttpClient(MockEngine { respond("", HttpStatusCode.NotFound) }),
-            { "https://ship" },
-            app = "calendar",
-            answers = { answers },
-        ) { app, mark, body -> asked = Triple(app, mark, body); answers = true; true }
+    fun `a ship with the shell is not given grubbery again, only its apps`() = runTest {
+        val shell = Shell(here = true)
+        var poked = false
+        val install = LatticeInstall.grubbery(shell.http, { "https://ship" }, cookie = { "session=placeholder" }, answers = { shell.synced }) { _, _, _ -> poked = true; true }
         assertTrue(install().isSuccess)
-        assertEquals("hood", asked?.first)
+        assertEquals(false, poked, "kiln was not asked for grubbery")
+        assertEquals(listOf("/apps/grubbery/desks/sync-defaults"), shell.posts)
+        assertEquals(listOf<String?>("session=placeholder"), shell.cookies, "the shell is asked as its owner")
+    }
+
+    @Test
+    fun `a ship without the shell gets grubbery first, then its apps`() = runTest {
+        val shell = Shell(here = false)
+        var asked: Triple<String, String, JsonElement>? = null
+        val install = LatticeInstall.grubbery(shell.http, { "https://ship" }, cookie = { null }, answers = { shell.synced }) { app, mark, body ->
+            asked = Triple(app, mark, body)
+            shell.here = true
+            true
+        }
+        assertTrue(install().isSuccess)
         assertEquals("kiln-install", asked?.second)
-        assertEquals(
-            LatticeInstall.DESK,
-            (asked?.third as JsonObject)["desk"]?.jsonPrimitive?.content,
-            "the desk that is fetched is grubbery, whatever app was asked for",
-        )
+        assertEquals(LatticeInstall.DESK, (asked?.third as JsonObject)["desk"]?.jsonPrimitive?.content)
+        assertEquals(listOf("/apps/grubbery/desks/sync-defaults"), shell.posts)
+    }
+
+    // A fetched desk answers nothing until the owner approves what it
+    // reaches, so waiting out the clock would only say "still waiting".
+    @Test
+    fun `apps fetched and waiting on the owner say so`() = runTest {
+        val shell = Shell(here = true, pendingAsks = true)
+        val install = LatticeInstall.grubbery(shell.http, { "https://ship" }, cookie = { null }, answers = { false }) { _, _, _ -> true }
+        val r = install()
+        assertEquals(LatticeInstall.APPROVE_APPS, r.exceptionOrNull()?.message)
     }
 }
