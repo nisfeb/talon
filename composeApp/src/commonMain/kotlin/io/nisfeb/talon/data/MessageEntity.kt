@@ -45,18 +45,14 @@ data class MessageEntity(
     val title: String? = null,
     val image: String? = null,
     /**
-     * Send-state for our own outgoing channel posts:
-     *  - null: not tracked (DM/club rows, server-echoed rows).
-     *  - "pending": optimistic insert; poke is in flight, no ack yet.
-     *  - "failed": the channels agent NACKed our poke; the message
-     *    didn't land. The local twin sticks around so the UI can offer
-     *    a retry / dismiss affordance.
+     * Send-state for our own outgoing messages:
+     *  - null: not tracked (server-echoed rows, and DMs in flight).
+     *  - "pending": an optimistic channel post; the poke is in flight.
+     *  - "failed": the ship refused the poke, or it never left; the
+     *    message didn't land. The row stays so the UI can say so.
      * "sent" isn't stored — once the server echoes the post under its
      * real id, MessageDao.reapLocalTwin removes the pending row and
      * inserts a fresh status=null row, which is the implicit "sent".
-     * Channel-chat surfaces only; DMs intentionally skip status
-     * tracking because their wire model doesn't expose a useful
-     * delivery signal beyond our own ship's ack.
      */
     val status: String? = null,
 )

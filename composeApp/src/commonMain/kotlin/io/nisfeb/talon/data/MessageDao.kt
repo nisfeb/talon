@@ -207,14 +207,16 @@ abstract class MessageDao {
     abstract suspend fun reapOldestLocalTwin(whom: String, author: String): Int
 
     /**
-     * Set the send-state column for one row. Used by the channels
-     * poke-ack listener: marks "failed" on a poke nack, or clears the
-     * pending flag if we ever want to (we don't — sent is implicit by
-     * the local twin getting reaped). Channel-chat only; DM/club rows
-     * never have status set so this is a no-op for them.
+     * Set the send-state column for one row. The send path marks a
+     * row "failed" when the ship refuses it; sent is implicit, by the
+     * local twin getting reaped. The id is undotted as [upsert] stores
+     * it, or a dotted DM id would match no row.
      */
+    open suspend fun setStatus(whom: String, id: String, status: String?) =
+        setStatusRaw(whom, id.replace(".", ""), status)
+
     @Query("UPDATE messages SET status = :status WHERE whom = :whom AND id = :id")
-    abstract suspend fun setStatus(whom: String, id: String, status: String?)
+    protected abstract suspend fun setStatusRaw(whom: String, id: String, status: String?)
 
     /**
      * Per-parent reply digest: count, most-recent reply timestamp, and

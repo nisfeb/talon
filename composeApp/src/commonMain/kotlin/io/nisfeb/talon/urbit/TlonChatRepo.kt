@@ -922,9 +922,8 @@ class TlonChatRepo(
             })
         }
         // Channel-chat posts get a status="pending" optimistic insert;
-        // DMs and clubs leave status null. The SSE poke-ack listener
-        // flips pending → failed on NACK; a successful poke leaves the
-        // pending row in place until the server-id echo reaps it.
+        // DMs and clubs leave status null. A refusal marks the row
+        // failed; an accepted post stays until its echo replaces it.
         val isChannel = whom.startsWith("chat/") ||
             whom.startsWith("diary/") ||
             whom.startsWith("heap/")
@@ -933,7 +932,7 @@ class TlonChatRepo(
             db.messageMedia(),
             toEntity(whom, id, essay).copy(status = initialStatus),
         )
-        val pokeId = when {
+        failedOnRefusal(whom, id) { when {
             whom.startsWith("~") -> ch.poke(
                 app = "chat", mark = "chat-dm-action-2",
                 payload = dmAction(whom, id, addDelta),
@@ -964,10 +963,23 @@ class TlonChatRepo(
                 }
             }
             else -> error("unsupported whom: $whom")
-        }
-        if (isChannel) pendingChannelPokes[pokeId] = whom to id
+        } }
         return id
     }
+
+    /**
+     * Run [poke] for the optimistic row [id], and mark the row failed if
+     * the ship refuses it or it never leaves, so the screen says so
+     * rather than showing it sent, or grey, for good. The poke waits for
+     * the ship's ack, so this is where a refusal is known.
+     */
+    private suspend fun <T> failedOnRefusal(whom: String, id: String, poke: suspend () -> T): T =
+        try {
+            poke()
+        } catch (t: Throwable) {
+            if (t !is kotlinx.coroutines.CancellationException) db.messages().setStatus(whom, id, "failed")
+            throw t
+        }
 
     /**
      * Update our own contact card. Any field passed as null is left
@@ -1559,19 +1571,22 @@ class TlonChatRepo(
      * %groups sends the *leaving* member no `r-group: {delete}` fact
      * (unlike a host deleting the group), so the home list would keep
      * showing a left group until the next full /v2/groups reconcile —
-     * i.e. an app restart. Register the poke id so the SSE poke-ack
-     * listener can drop the group locally the moment the ship ACKs the
-     * leave, and leave it in place (with a log line) on a NACK — the
-     * two outcomes are otherwise indistinguishable to the user.
+     * i.e. an app restart. So drop the group locally once the ship
+     * acks the leave. A refusal throws and keeps it, since it is still
+     * ours; silence keeps it too, and the next reconcile decides.
      */
     suspend fun leaveGroup(flag: String) {
         val ch = channel ?: error("not connected")
-        val id = ch.poke(
-            app = "groups",
-            mark = "group-leave",
-            payload = JsonPrimitive(flag),
-        )
-        pendingGroupLeaves[id] = flag
+        val acked = try {
+            ch.poke(app = "groups", mark = "group-leave", payload = JsonPrimitive(flag), confirm = true)
+            true
+        } catch (_: PokeUnacked) {
+            false
+        }
+        if (acked) {
+            db.groups().deleteChannelsForGroup(flag)
+            db.groups().deleteGroup(flag)
+        }
     }
 
     /**
@@ -2074,27 +2089,7 @@ class TlonChatRepo(
 
     private val paginationExhausted = ConcurrentSet<String>()
 
-    /**
-     * Tracks in-flight channel-post pokes so the SSE poke-ack listener
-     * can flip a row's status to "failed" if the channels agent
-     * NACKs. Keys are the request ids returned by [UrbitChannel.poke];
-     * values are the (whom, localId) pair pointing at the optimistic
-     * local twin that needs the update. Cleared on either ack or nack.
-     *
-     * Channel-only — DM and club sends don't populate the map (their
-     * UI doesn't render a status indicator and there's no useful
-     * delivery signal beyond our own ship's ack anyway).
-     */
-    private val pendingChannelPokes = ConcurrentMap<Long, Pair<String, String>>()
 
-    /**
-     * In-flight `group-leave` poke ids → the group flag being left.
-     * The leaver gets no delete fact from %groups, so on the poke ACK
-     * we remove the group + its channels locally (matching tlon-apps'
-     * optimistic leave); on a NACK we keep it and log — the leave
-     * didn't take, so the group is genuinely still ours.
-     */
-    private val pendingGroupLeaves = ConcurrentMap<Long, String>()
 
     /**
      * Upload an image. Tries memex first (Tlon-hosted ships with %genuine
@@ -2492,15 +2487,12 @@ class TlonChatRepo(
                     db.messageMedia(),
                     toReplyEntity(whom, parentId, replyId, replyEssay),
                 )
-                try {
+                failedOnRefusal(whom, replyId) {
                     if (whom.startsWith("~")) {
                         ch.poke(app = "chat", mark = "chat-dm-action-2", payload = dmAction(whom, parentId, replyDelta(replyId, replyEssay)))
                     } else {
                         ch.poke(app = "chat", mark = "chat-club-action-2", payload = clubAction(whom, parentId, replyDelta(replyId, replyEssay)))
                     }
-                } catch (t: Throwable) {
-                    db.messages().setStatus(whom, replyId, "failed")
-                    throw t
                 }
             }
             whom.startsWith("chat/") ||
@@ -2521,19 +2513,16 @@ class TlonChatRepo(
                     })
                 })
                 // Same pending-status pattern as postContent: optimistic
-                // insert first with status="pending", then poke, then
-                // track the pokeId so the SSE listener can flip → failed
-                // on a NACK. Server echo reaps the local twin which
-                // implicitly clears the indicator.
+                // insert first with status="pending", failed on a
+                // refusal, replaced by the server's echo otherwise.
                 db.messages().upsertWithMedia(
                     db.messageMedia(),
                     toReplyEntity(whom, parentId, replyId, replyEssay)
                         .copy(status = "pending"),
                 )
-                val pokeId = ch.poke(
-                    app = "channels", mark = "channel-action-2", payload = payload,
-                )
-                pendingChannelPokes[pokeId] = whom to replyId
+                failedOnRefusal(whom, replyId) {
+                    ch.poke(app = "channels", mark = "channel-action-2", payload = payload)
+                }
             }
             else -> error("unsupported whom: $whom")
         }
@@ -2873,39 +2862,6 @@ class TlonChatRepo(
                             runCatching { channel?.subscribe(app, path) }
                                 .onFailure { Log.e(TAG, "$app fallback subscribe failed", it) }
                         }
-                    }
-                }
-                // Channel-post NACK: flip the optimistic local twin
-                // from "pending" → "failed" so the UI surfaces the
-                // failure (small "!" indicator). DM/club rows aren't
-                // tracked here (their initial status was null).
-                if (response == "poke" && pokeIdLong != null) {
-                    pendingChannelPokes.remove(pokeIdLong)?.let { (whom, id) ->
-                        scope.launch {
-                            runCatching {
-                                db.messages().setStatus(whom, id, "failed")
-                            }.onFailure { Log.w(TAG, "setStatus(failed) failed", it) }
-                        }
-                    }
-                    // Leave rejected — keep the group; it's still ours.
-                    pendingGroupLeaves.remove(pokeIdLong)?.let { flag ->
-                        Log.w(TAG, "group-leave NACK flag=$flag err=$err — still a member")
-                    }
-                }
-            } else if (response == "poke" && pokeIdLong != null) {
-                // Successful poke — drop the tracking entry. Status is
-                // implicitly cleared when the server-id echo arrives
-                // and reapLocalTwin removes the pending row.
-                pendingChannelPokes.remove(pokeIdLong)
-                // Leave confirmed by the ship — the leaver gets no delete
-                // fact, so remove the group + channels locally now, or it
-                // lingers in the home list until the next full reconcile.
-                pendingGroupLeaves.remove(pokeIdLong)?.let { flag ->
-                    scope.launch {
-                        runCatching {
-                            db.groups().deleteChannelsForGroup(flag)
-                            db.groups().deleteGroup(flag)
-                        }.onFailure { Log.w(TAG, "local cleanup after leave failed", it) }
                     }
                 }
             }
