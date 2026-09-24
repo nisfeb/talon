@@ -233,4 +233,48 @@ class MailThreadPaneTest {
         // Folded: its two lines as one, which only the header line shows.
         onNodeWithText("first line second line").assertIsDisplayed()
     }
+
+    // Auspex 15 keeps a card the owner closed, on every client: one the
+    // ship holds closed opens closed here, and opening or closing one by
+    // hand tells the ship, with the thread named.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a message closed on another client opens closed, and a close or open here is kept`() = runComposeUiTest {
+        val posts = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val http = HttpClient(
+            MockEngine { req ->
+                if (req.method == io.ktor.http.HttpMethod.Post) {
+                    posts += req.url.encodedPath + " " + (req.body as io.ktor.http.content.TextContent).text
+                }
+                val body = if ("/api/thread/" in req.url.encodedPath) """
+                    {"id":"0vt","participants":["~bus","~nec"],"last":20,"unreadable":0,
+                     "archived":false,"labels":[],"folded":["0va"],"messages":[
+                      {"id":"0va","from":"~bus","to":["~nec"],"subject":"Plans",
+                       "body":"first line\nsecond line","sent":10,"prev":null,"verdict":"verified","read":true},
+                      {"id":"0vb","from":"~nec","to":["~bus"],"subject":"Plans",
+                       "body":"a reply","sent":20,"prev":"0va","verdict":"verified","read":true}]}
+                """.trimIndent() else """{"ok":true,"threads":[]}"""
+                respond(ByteReadChannel(body), HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+            },
+        )
+        val repo = MailRepo(http, CoroutineScope(SupervisorJob()), pollIntervalMs = 60 * 60 * 1000L)
+            .also { it.attach("https://ship.example") }
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailThreadPane(repo = repo, threadId = "0vt", contacts = ContactMap.EMPTY, ourShip = "~nec", onCompose = {})
+            }
+        }
+        // Two messages, which Talon would show open: the ship's fold wins.
+        waitUntil(timeoutMillis = 5_000) {
+            runCatching { onNodeWithText("first line second line").assertIsDisplayed(); true }.getOrDefault(false)
+        }
+        onNodeWithText("~bus").performClick()
+        waitUntil(timeoutMillis = 5_000) { posts.any { "/api/unfold" in it } }
+        assertEquals(listOf("""/apps/auspex/api/unfold {"thread-id":"0vt","msg-ids":["0va"]}"""), posts.filter { "fold" in it })
+        onNodeWithText("~bus").performClick()
+        waitUntil(timeoutMillis = 5_000) { posts.any { it.startsWith("/apps/auspex/api/fold") } }
+        assertEquals("""/apps/auspex/api/fold {"thread-id":"0vt","msg-ids":["0va"]}""", posts.last { "fold" in it })
+        // The other card was never closed by hand, so nothing was said of it.
+        assertTrue(posts.none { "0vb" in it && "fold" in it }, "$posts")
+    }
 }

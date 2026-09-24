@@ -502,6 +502,15 @@ class MailRepo(
     fun markUnread(msgIds: List<String>, threadId: String) =
         act(threadId, { readState(msgIds, threadId, read = false) }) { it.markUnread(threadId, msgIds) }
 
+    /**
+     * Close messages to their header line on every client, or open them
+     * again. A fold changes no listing row, so nothing is re-read after it.
+     */
+    fun setFolded(msgIds: List<String>, threadId: String, folded: Boolean) =
+        act(threadId, {
+            editThread(threadId) { t -> t.copy(folded = if (folded) (t.folded + msgIds).distinct() else t.folded - msgIds.toSet()) }
+        }, relist = false) { if (folded) it.fold(threadId, msgIds) else it.unfold(threadId, msgIds) }
+
     private fun readState(msgIds: List<String>, threadId: String, read: Boolean) {
         editPages { _, p -> p.editRow(threadId) { it.copy(unread = !read) } }
         editThread(threadId) { t -> t.copy(messages = t.messages.map { m -> if (m.id in msgIds) m.copy(read = read) else m }) }
@@ -608,9 +617,10 @@ class MailRepo(
      * [tid] is the one thread [local] touches, and the rollback puts
      * back only that thread and its listing rows — never a wholesale
      * snapshot, which would throw away a refresh that landed while the
-     * write was out.
+     * write was out. [relist] re-reads the listing once the write lands,
+     * which a write that changes no row can skip.
      */
-    private fun act(tid: String?, local: () -> Unit, write: suspend (AuspexApi) -> Unit) {
+    private fun act(tid: String?, local: () -> Unit, relist: Boolean = true, write: suspend (AuspexApi) -> Unit) {
         val threadBefore = tid?.let { threadCache.value[it] }
         val rowsBefore = tid?.let { id -> pageCache.value.mapValues { (_, p) -> p.rowAt(id) } }.orEmpty()
         val shownKey = pageKey()
@@ -644,7 +654,7 @@ class MailRepo(
                 onFailure(e)
                 return@launch
             }
-            refresh()
+            if (relist) refresh()
         }
     }
 

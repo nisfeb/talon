@@ -152,6 +152,9 @@ fun MailThreadPane(
             val newest = shown.maxByOrNull { it.sent }?.id
             if (shown.size >= 3) shown.map { it.id }.filter { it != newest && it !in fresh }
                 .forEach { if (it !in shut) shut += it }
+            // What the owner closed on any client opens closed here, even
+            // the newest or a new one.
+            t.folded.forEach { if (it !in shut) shut += it }
         }
         if (unread.isNotEmpty()) {
             repo.markRead(unread, threadId)
@@ -203,6 +206,21 @@ fun MailThreadPane(
     val travellingIds = remember(travelling) { travelling.mapTo(HashSet()) { it.id } }
     val visible = remember(forest, folded.toList()) {
         io.nisfeb.talon.mail.flattenVisible(forest, folded.toSet())
+    }
+
+    /**
+     * A card the owner closes or opens, kept on the ship (auspex 15) so
+     * every client opens the thread the same way. Only a change from what
+     * the ship holds is sent: closing older messages on open, and opening
+     * one of those, stay here. A fold is by message id, so a forged twin
+     * sharing it goes with it.
+     */
+    fun setShut(id: String, close: Boolean) {
+        if (close) { if (id !in shut) shut += id } else shut.remove(id)
+        if (close != (id in thread?.folded.orEmpty())) {
+            repo.setFolded(listOf(id), threadId, close)
+            thread = repo.cachedThread(threadId) ?: thread
+        }
     }
 
     val nameFor: (String) -> String = contacts::displayName
@@ -369,16 +387,14 @@ fun MailThreadPane(
                                 if (!folded.remove(node.message.id)) folded.add(node.message.id)
                             },
                             shut = node.message.id in shut,
-                            onShut = {
-                                if (!shut.remove(node.message.id)) shut.add(node.message.id)
-                            },
+                            onShut = { setShut(node.message.id, node.message.id !in shut) },
                             onPath = node.message.id in travellingIds,
                             selected = node.message.id == selected,
                             selectable = node.message.verdict != Verdict.FORGED,
                             nameFor = nameFor,
                             // A folded one opens where it is tapped, not
                             // only on the name.
-                            onSelect = { selected = node.message.id; shut.remove(node.message.id) },
+                            onSelect = { selected = node.message.id; setShut(node.message.id, false) },
                             fresh = node.message.id in fresh,
                             repo = repo,
                             imagesShown = imagesShown,

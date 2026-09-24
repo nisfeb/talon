@@ -246,6 +246,11 @@ class AuspexApi(
 
     suspend fun markUnread(threadId: String, msgIds: List<String>) = mark("/api/unread", threadId, msgIds)
 
+    /** Close messages to their header line on every client, or open them again (auspex 15). Same body as a read mark. */
+    suspend fun fold(threadId: String, msgIds: List<String>) = mark("/api/fold", threadId, msgIds)
+
+    suspend fun unfold(threadId: String, msgIds: List<String>) = mark("/api/unfold", threadId, msgIds)
+
     private suspend fun mark(path: String, threadId: String, msgIds: List<String>) {
         if (msgIds.isEmpty()) return
         request(HttpMethod.Post, path, json.encodeToString(MarkReq.serializer(), MarkReq(threadId, msgIds)))
@@ -462,6 +467,8 @@ data class MailThread(
     val unreadable: Int = 0,
     val archived: Boolean = false,
     val labels: List<String> = emptyList(),
+    /** Messages the owner closed to their header line, on any client (auspex 15). */
+    val folded: List<String> = emptyList(),
 )
 
 /** One row of a listing. The verdict is here and not only inside the
