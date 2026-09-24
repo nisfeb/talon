@@ -48,7 +48,6 @@ class AppShellTest {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
         val ship = FakeShip("~zod")
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val dbs = mutableListOf<AppDatabase>()
         try {
             runComposeUiTest {
                 setContent {
@@ -61,7 +60,7 @@ class AppShellTest {
                                 Room.databaseBuilder<AppDatabase>(File(tmp, "$key.db").absolutePath)
                                     .setDriver(BundledSQLiteDriver())
                                     .fallbackToDestructiveMigration(dropAllTables = true)
-                                    .build().also { dbs += it; runBlocking { it.seed() } }
+                                    .build().also { runBlocking { it.seed() } }
                             },
                             drafts = InMemoryDraftStore(),
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
@@ -75,7 +74,9 @@ class AppShellTest {
             }
         } finally {
             scope.cancel()
-            dbs.forEach { it.close() }
+            // The app closes its databases itself, two seconds after it
+            // goes, so work still in flight can finish. Closing them here
+            // too pulled SQLite out from under a running query.
             tmp.deleteRecursively()
         }
     }

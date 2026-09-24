@@ -6,6 +6,8 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -84,8 +86,16 @@ class ThreadListTest {
     private fun essay(author: String, text: String, sent: Long) =
         """{"content":[{"inline":["$text"]}],"author":"$author","sent":$sent,"blob":null}"""
 
-    private fun ComposeUiTest.shows(text: String) =
-        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+    /** Waits for [text]; if it never comes, says what the screen showed instead. */
+    private fun ComposeUiTest.shows(text: String) {
+        runCatching {
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+        }.onFailure {
+            val screen = onAllNodes(isRoot()).printToString(maxDepth = 60).lines()
+                .filter { "Text = " in it }.joinToString(" | ") { it.substringAfter("Text = ") }
+            error("never showed \"$text\"; the screen showed: $screen")
+        }
+    }
 
     @Test
     fun `a thread shows its parent and its replies, and nothing else`() = thread(seed = {

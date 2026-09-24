@@ -31,7 +31,9 @@ import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.urbit.FakeAiSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -93,7 +95,9 @@ class OrreryReaderRowsTest {
                 block()
             }
         } finally {
-            scope.cancel()
+            // Wait for the repo's work to stop before closing: a query still
+            // running in native SQLite when the database closes is a crash.
+            runBlocking { scope.coroutineContext.job.cancelAndJoin() }
             db.close()
             tmp.deleteRecursively()
         }
