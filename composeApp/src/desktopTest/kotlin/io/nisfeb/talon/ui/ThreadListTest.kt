@@ -108,7 +108,11 @@ class ThreadListTest {
               "replies":{"x":{"seal":{"id":"~nec/170141184507","parent-id":"$parent","reacts":{}},
                               "reply-essay":${essay("~nec", "fetched answer", 2_000)}}}},
             "essay":${essay("~bus", "the question", 1_000)}}"""
-    }) { _, _ ->
+    }) { ship, db ->
+        // Stored first, then shown: a failure here says which half broke.
+        runCatching {
+            waitUntil(timeoutMillis = 5_000) { runBlocking { db.messages().getOne("~bus", "~nec/170141184507") } != null }
+        }.onFailure { error("the fetch never stored the reply; the ship was asked ${ship.scried}") }
         shows("the question")
         shows("fetched answer")
     }
