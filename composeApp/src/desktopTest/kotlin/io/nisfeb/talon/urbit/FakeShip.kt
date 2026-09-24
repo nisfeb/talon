@@ -36,6 +36,9 @@ internal class FakeShip(val us: String = "~zod") {
     val pokes: MutableList<Poke> = Collections.synchronizedList(mutableListOf())
     val scries = ConcurrentHashMap<String, String>()
 
+    /** Every scry path asked for, answered or not, in order. */
+    val scried: MutableList<String> = Collections.synchronizedList(mutableListOf())
+
     @Volatile var refuse: (Poke) -> String? = { null }
 
     private val stream = ByteChannel(autoFlush = true)
@@ -76,7 +79,8 @@ internal class FakeShip(val us: String = "~zod") {
             req.method == HttpMethod.Get && path.startsWith("/~/channel/") ->
                 respond(stream, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
             path.startsWith("/~/scry/") ->
-                scries[path.removePrefix("/~/scry/").removeSuffix(".json")]
+                path.removePrefix("/~/scry/").removeSuffix(".json").also { scried += it }
+                    .let { scries[it] }
                     ?.let { respond(it, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
                     ?: respond("", HttpStatusCode.NotFound)
             else -> respond("", HttpStatusCode.NotFound)
