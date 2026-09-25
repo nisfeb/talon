@@ -263,10 +263,23 @@ object Story {
      * recursively.
      */
     private fun splitForWidgetTags(text: androidx.compose.ui.text.AnnotatedString): List<StoryPart> {
-        // TODO(port/wave2): wire up widget-tag parsing (TZ/Cal/Poll/Loc) once
-        // io.nisfeb.talon.ui.{TZ_TAG_RE, CAL_TAG_RE, …} are ported to commonMain.
-        // For now, return the text block as-is — widgets will render as plain text.
-        return listOf(StoryPart.Text(text))
+        // The earliest widget tag of any kind. This was a stub after the
+        // port to common code, so /poll, /cal, /tz and /loc messages
+        // showed their raw tags on every platform.
+        val tag = listOf(
+            io.nisfeb.talon.ui.TZ_TAG_RE, io.nisfeb.talon.ui.CAL_TAG_RE,
+            io.nisfeb.talon.ui.POLL_TAG_RE, io.nisfeb.talon.ui.LOC_TAG_RE,
+        ).mapNotNull { it.find(text.text) }.minByOrNull { it.range.first }?.value
+            ?: return listOf(StoryPart.Text(text))
+        val widget = io.nisfeb.talon.ui.decodeTzTag(tag)?.let { StoryPart.TzWidget(it.instantMs, it.sourceLabel) }
+            ?: io.nisfeb.talon.ui.decodeCalTag(tag)?.let { StoryPart.CalWidget(it.startMs, it.endMs, it.title) }
+            ?: io.nisfeb.talon.ui.decodePollTag(tag)?.let { StoryPart.PollWidget(it.question, it.options) }
+            ?: io.nisfeb.talon.ui.decodeLocTag(tag)?.let { StoryPart.LocWidget(it.lat, it.lng) }
+            ?: return listOf(StoryPart.Text(text))
+        // Our slash commands put a plain-text summary beside the tag for
+        // clients without widgets. Here the card is the message, and the
+        // summary would only repeat it.
+        return listOf(widget)
     }
 
     private fun trimEndBlanks(s: androidx.compose.ui.text.AnnotatedString): androidx.compose.ui.text.AnnotatedString {

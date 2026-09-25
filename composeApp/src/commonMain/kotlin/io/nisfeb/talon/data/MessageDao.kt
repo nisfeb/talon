@@ -419,7 +419,7 @@ internal fun searchTextOf(contentJson: String, title: String?): String {
             is StoryPart.Table -> (listOf(part.header) + part.rows).joinToString("\n") { row -> row.joinToString(" ") { it.text } }
             is StoryPart.LinkPreview -> listOfNotNull(part.title, part.url).joinToString(" ")
             is StoryPart.CalWidget -> part.title
-            is StoryPart.PollWidget -> part.question
+            is StoryPart.PollWidget -> (listOf(part.question) + part.options).joinToString("\n")
             else -> null
         }
     }
