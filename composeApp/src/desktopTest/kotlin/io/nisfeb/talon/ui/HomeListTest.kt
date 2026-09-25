@@ -2,6 +2,10 @@ package io.nisfeb.talon.ui
 
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -48,13 +52,17 @@ class HomeListTest {
     private val opened = mutableListOf<String>()
     private lateinit var db: AppDatabase
 
-    private fun home(seed: suspend AppDatabase.() -> Unit, block: ComposeUiTest.(FakeShip) -> Unit) {
+    /** Where the list sent the user: each menu destination by name. */
+    private val did: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
+
+    private fun home(seed: suspend AppDatabase.() -> Unit, synced: Boolean = false, block: ComposeUiTest.(FakeShip) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-home-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
         this.db = db
         val ship = FakeShip("~zod")
-        val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod") }
+        val sync = if (synced) io.nisfeb.talon.urbit.SettingsSyncImpl(db = db, aiSettings = io.nisfeb.talon.urbit.FakeAiSettings()).apply { attach(ship.channel) } else null
+        val repo = TlonChatRepo(db, settingsSync = sync).apply { attachForTest(ship.channel, "~zod") }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         ship.channel.events().launchIn(scope)
         runBlocking { db.seed() }
@@ -69,8 +77,13 @@ class HomeListTest {
                             db = db, repo = repo, drafts = InMemoryDraftStore(),
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
                             onOpenConversation = { opened += it }, onOpenSearch = {}, onNewMessage = {},
-                            onSignOut = {}, onOpenSelfProfile = {}, onOpenStatusFeed = {}, onOpenBookmarks = {},
-                            onOpenActivity = {}, onOpenSettings = {},
+                            onSignOut = { did += "Sign out" }, onOpenSelfProfile = { did += "My profile" },
+                            onOpenStatusFeed = { did += "Statuses" }, onOpenBookmarks = { did += "Bookmarks" },
+                            onOpenActivity = { did += "Activity" }, onOpenSettings = { did += "Settings" },
+                            onOpenMail = { did += "Mail" }, onOpenCalendar = { did += "Calendar" },
+                            onOpenContacts = { did += "Contacts" }, onOpenWatchwords = { did += "Watchwords" },
+                            onOpenAdministration = { did += "Administration" }, onOpenInvites = { did += "Invites" },
+                            onOpenHome = { did += "Home" },
                             activeShip = "~zod", allShips = listOf("~zod"),
                         )
                     }
@@ -223,5 +236,42 @@ class HomeListTest {
         onAllNodes(hasText("general", substring = true) and hasText("2"))[0].performClick()
         waitForIdle()
         assertEquals(listOf("chat/~nec/general"), opened)
+    }
+
+    // ─── the More menu and folders ─────────────────────────────────
+
+    @Test
+    fun `every place in the More menu opens, and signing out is last`() = home(seed = {}) {
+        val places = listOf("Home", "My profile", "Statuses", "Mail", "Bookmarks", "Activity", "Calendar", "Contacts",
+            "Watchwords", "Administration", "Invites", "Settings", "Sign out")
+        for (place in places) {
+            onNodeWithContentDescription("More").performClick()
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(place).fetchSemanticsNodes().isNotEmpty() }
+            onAllNodesWithText(place).let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
+            waitUntil(timeoutMillis = 5_000) { did.lastOrNull() == place }
+        }
+        assertEquals(places, did.toList())
+    }
+
+    @Test
+    fun `a folder is made from the plus tab, and opens saying how to fill it`() = home(seed = {}, synced = true) { ship ->
+        tap("+")
+        shows("New folder")
+        onNodeWithText("Create").assertIsNotEnabled()
+        onNode(hasSetTextAction() and hasText("Name")).performTextInput("Friends")
+        onNodeWithText("Create").performClick()
+        tap("Friends")
+        shows("This folder is empty. Long-press a chat or group to add it.")
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("settings").any { "Friends" in it.json.toString() } }
+    }
+
+    @Test
+    fun `without a settings sink no folder is made`() = home(seed = {}) {
+        tap("+")
+        onNode(hasSetTextAction() and hasText("Name")).performTextInput("Friends")
+        onNodeWithText("Create").performClick()
+        Thread.sleep(300)
+        waitForIdle()
+        assertTrue(onAllNodesWithText("Friends").fetchSemanticsNodes().isEmpty())
     }
 }
