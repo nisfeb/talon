@@ -287,6 +287,47 @@ class SettingsSyncApplyBucketTest {
             assertEquals(false, cfg.catchMeUpEnabled)
         }
 
+    private suspend fun applyAi(vararg fields: Pair<String, kotlinx.serialization.json.JsonElement>) =
+        sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, buildJsonObject {
+            put("config", buildJsonObject {
+                put("schemaVersion", 2)
+                fields.forEach { (k, v) -> put(k, v) }
+            })
+        })
+
+    @Test
+    fun `a peer's Brave key alone carries its provider, and an address it does not send keeps ours`() = runBlocking {
+        aiSettings.applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "sk-mine", model = null, baseUrl = "https://mine.example", syncEnabled = true))
+        applyAi("provider" to JsonPrimitive("OpenAi"), "braveApiKey" to JsonPrimitive("brv-2"))
+        val cfg = aiSettings.state.value
+        assertEquals(AiSettings.Provider.OpenAi to "brv-2", cfg.provider to cfg.braveApiKey)
+        assertEquals("sk-mine" to "https://mine.example", cfg.apiKey to cfg.baseUrl, "what it did not send stays")
+        applyAi("provider" to JsonPrimitive("OpenAi"), "braveApiKey" to JsonPrimitive("brv-2"), "baseUrl" to JsonPrimitive("https://theirs.example"))
+        assertEquals("https://theirs.example", aiSettings.state.value.baseUrl)
+    }
+
+    @Test
+    fun `the keys taken out anywhere arrive with the credentials, and marks it cannot read are none`() = runBlocking {
+        aiSettings.applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "", model = null, syncEnabled = true))
+        val print = io.nisfeb.talon.ai.keyPrint("sk-old")
+        applyAi(
+            "provider" to JsonPrimitive("OpenAi"), "apiKey" to JsonPrimitive("sk-new"),
+            "revokedKeys" to buildJsonObject { put(print, buildJsonObject { put("at", 5); put("revoked", true) }) },
+        )
+        assertEquals(setOf(print), aiSettings.state.value.revokedKeys.keys)
+        applyAi("provider" to JsonPrimitive("OpenAi"), "apiKey" to JsonPrimitive("sk-new"), "revokedKeys" to JsonPrimitive("garbled"))
+        assertEquals(emptySet(), aiSettings.state.value.revokedKeys.keys)
+    }
+
+    @Test
+    fun `an emptied transcription key keeps its removal time, and a real one clears it`() = runBlocking {
+        aiSettings.applyRemote(AiSettings.Config(provider = AiSettings.Provider.OpenAi, apiKey = "sk", model = null, syncEnabled = true, sttApiKey = "stt-old"))
+        applyAi("provider" to JsonPrimitive("OpenAi"), "sttApiKey" to JsonPrimitive(""), "sttApiKeyRemovedAtMs" to JsonPrimitive(50))
+        assertEquals("" to 50L, aiSettings.state.value.sttApiKey to aiSettings.state.value.sttApiKeyRemovedAtMs)
+        applyAi("provider" to JsonPrimitive("OpenAi"), "sttApiKey" to JsonPrimitive("stt-new"))
+        assertEquals("stt-new" to 0L, aiSettings.state.value.sttApiKey to aiSettings.state.value.sttApiKeyRemovedAtMs)
+    }
+
     @Test
     fun `applyBucket AI_SETTINGS preserves a locally-enabled assistant toggle the entry omits`() =
         runBlocking {

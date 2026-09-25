@@ -86,6 +86,30 @@ class SettingsSyncPushTest {
     }
 
     @Test
+    fun `every credential this device holds goes up, and none it lacks`() = live {
+        val full = config(key = "sk-secret").copy(
+            baseUrl = "https://api.example", braveApiKey = "brv-1",
+            privateBaseUrl = "http://box:1234/v1", privateModel = "qwen3", privateApiKey = "prv-1",
+            revokedKeys = mapOf(io.nisfeb.talon.ai.keyPrint("sk-old") to io.nisfeb.talon.ai.KeyMark(at = 5)),
+        )
+        sync(full).pushAiSettings()
+        val creds = put("ai-settings", "credentials")!!
+        for (k in listOf("model", "baseUrl", "braveApiKey", "privateBaseUrl", "privateModel", "privateApiKey", "revokedKeys")) {
+            assertTrue(k in creds, "$k goes up: $creds")
+        }
+        assertEquals("brv-1" to "prv-1", creds["braveApiKey"]!!.jsonPrimitive.content to creds["privateApiKey"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `a credential this device lacks is not sent, blank or zero`() = live {
+        sync(config(key = "sk-secret").copy(model = null)).pushAiSettings()
+        val creds = put("ai-settings", "credentials")!!
+        for (k in listOf("model", "baseUrl", "braveApiKey", "privateBaseUrl", "privateModel", "privateApiKey", "revokedKeys", "sttApiKey", "sttApiKeyRemovedAtMs")) {
+            assertFalse(k in creds, "$k would blank a peer's: $creds")
+        }
+    }
+
+    @Test
     fun `a removed transcription key travels as a removal, not as an empty key`() = live {
         sync(config(key = "sk-secret", sttRemovedAt = 1_234)).pushAiSettings()
         val creds = put("ai-settings", "credentials")!!
