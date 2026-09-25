@@ -94,6 +94,7 @@ class CalendarEditTest {
         ).jsonObject
         val d = draftFromEvent(imported, day)!!
         assertEquals("rrule", d.rawKind)
+        assertEquals(8 * 60 to 15, d.minuteOfDay to d.durMin, "the form shows its own hour and length")
         val b = eventBody(d.copy(name = "Standup, renamed"), "x")
         assertEquals("rrule", b["kind"]!!.jsonPrimitive.content)
         assertEquals("FREQ=WEEKLY;BYDAY=MO", b["args"]!!.jsonObject["rrule"]!!.jsonPrimitive.content)
