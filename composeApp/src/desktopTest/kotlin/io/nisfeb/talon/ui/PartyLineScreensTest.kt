@@ -312,4 +312,73 @@ class PartyLineScreensTest {
             assertFalse(shows("Party line: sfu unreachable"))
         }
     }
+
+    // ─── the bar's camera, the meeting view, and the asking row ───
+
+    private fun cameraBar(state: PartyState.Live, cameraError: Boolean = false, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                PartyLineBarContent(
+                    state = state, nameFor = { names[it] ?: it }, selfShip = "~zod",
+                    onToggleCamera = { did += "camera" }, cameraError = cameraError, partyVideoSupported = true,
+                    onOpenMeeting = { did += "meeting" },
+                )
+            }
+        }
+        waitForIdle()
+        block()
+    }
+
+    @Test
+    fun `turning the camera on opens the bar out, where your own picture is`() = cameraBar(live()) {
+        onNodeWithContentDescription("Turn the camera on").performClick()
+        waitForIdle()
+        onNodeWithContentDescription("Hide who's on the line").assertExists()
+        onNodeWithText("Meeting view").performClick()
+        waitForIdle()
+        assertEquals(listOf("camera", "meeting"), did)
+    }
+
+    @Test
+    fun `a listener has no camera to turn on, and a camera that would not start says so`() {
+        cameraBar(live(canSpeak = false)) {
+            assertTrue(onAllNodesWithContentDescription("Turn the camera on").fetchSemanticsNodes().isEmpty())
+        }
+        cameraBar(live(), cameraError = true) {
+            assertTrue(shows("The camera wouldn't start — no camera, or permission refused."))
+        }
+    }
+
+    @Test
+    fun `an admin lets someone they muted speak again`() {
+        val state = live(ops = true).let { s -> s.copy(members = s.members.map { if (it.ship == "~nec") it.copy(mutedByAdmin = true) else it }) }
+        openBar(state) {
+            onNodeWithContentDescription("Muted by an admin").assertExists()
+            onNodeWithContentDescription("Options for Nec").performClick()
+            assertTrue(!shows("Mute for everyone"), "the one already muted is offered their voice back")
+            onNodeWithText("Allow speaking").performClick()
+            waitForIdle()
+        }
+        assertEquals(listOf("restore:~nec"), did)
+    }
+
+    @Test
+    fun `asking the host can be called off`() = runComposeUiTest {
+        setContent { TalonTheme(darkTheme = false) { PartyLineAsking(onCancel = { did += "cancel" }) } }
+        assertTrue(shows("Asking the host…"))
+        onNodeWithText("Cancel").performClick()
+        waitForIdle()
+        assertEquals(listOf("cancel"), did)
+    }
+
+    @Test
+    fun `a meeting on a line that is not live closes itself`() = runComposeUiTest {
+        val line = PartyLine(HttpClient(MockEngine { error("unused") }), links = { _, _ -> error("no media") })
+        setContent {
+            TalonTheme(darkTheme = false) {
+                PartyLineMeeting(line, nameFor = { it }, selfShip = "~zod", audioDevices = AudioDevices.Noop, videoDevices = VideoDevices.Noop, onClose = { did += "close" })
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) { "close" in did }
+    }
 }
