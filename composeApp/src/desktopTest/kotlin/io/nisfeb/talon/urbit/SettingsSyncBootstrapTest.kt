@@ -3,9 +3,15 @@ package io.nisfeb.talon.urbit
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.BookmarkEntity
+import io.nisfeb.talon.data.BookmarkFolderEntity
+import io.nisfeb.talon.data.BookmarkFolderMemberEntity
 import io.nisfeb.talon.data.FolderEntity
+import io.nisfeb.talon.data.FolderMemberEntity
+import io.nisfeb.talon.data.GroupOrderEntity
 import io.nisfeb.talon.data.NotifyLevel
 import io.nisfeb.talon.data.NotifyPreferenceEntity
+import io.nisfeb.talon.data.RailItemPrefEntity
 import io.nisfeb.talon.data.WatchwordEntity
 import io.nisfeb.talon.ui.InMemoryUiSettings
 import kotlinx.coroutines.CoroutineScope
@@ -17,7 +23,9 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
@@ -32,10 +40,11 @@ import kotlin.test.assertTrue
  * go up; a preference from the ship is not sent back as if new.
  */
 class SettingsSyncBootstrapTest {
-    private val db: AppDatabase = createTempDirectory(prefix = "talon-sync-").toFile().let { dir ->
+    private fun newDb(): AppDatabase = createTempDirectory(prefix = "talon-sync-").toFile().let { dir ->
         Room.databaseBuilder<AppDatabase>(File(dir, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
     }
+    private val db: AppDatabase = newDb()
     private val ship = FakeShip("~zod")
     private val sync = SettingsSyncImpl(db = db, aiSettings = FakeAiSettings()).apply { attach(ship.channel) }
 
@@ -88,6 +97,42 @@ class SettingsSyncBootstrapTest {
     }
 
     @Test
+    fun `what one device seeds, another takes back whole`() = live {
+        db.groupOrders().insertAll(listOf(GroupOrderEntity("~bus/garden", 2)))
+        db.folders().insertFolders(listOf(FolderEntity(id = 3, name = "Work", sortOrder = 1)))
+        db.folders().insertMembers(listOf(FolderMemberEntity(3, "~bus/garden", ordinal = 4, kind = FolderMemberEntity.KIND_GROUP)))
+        db.notifyPrefs().upsert(NotifyPreferenceEntity("~bus", NotifyLevel.NONE))
+        db.railItemPrefs().insertAll(listOf(RailItemPrefEntity("Calendar", visible = false)))
+        db.bookmarks().insertAll(listOf(BookmarkEntity("chat/~bus/garden", "170.1", 1_700_000_000_000)))
+        db.bookmarkFolders().insertFolders(listOf(BookmarkFolderEntity(id = 9, name = "Recipes", sortOrder = 2)))
+        db.bookmarkFolders().insertMembers(listOf(BookmarkFolderMemberEntity(9, "chat/~bus/garden", "170.1", ordinal = 1)))
+        ship.scries["settings/desk/talon"] = """{"desk":{}}"""
+        sync.bootstrap()
+        // The ship keeps what it was sent; another device reads it back.
+        val desk = buildJsonObject {
+            ship.pokesTo("settings").mapNotNull { it.json.jsonObject["put-bucket"]?.jsonObject }
+                .forEach { put(it["bucket-key"]!!.jsonPrimitive.content, it["bucket"]!!) }
+        }
+        val otherDb = newDb()
+        val other = FakeShip("~zod").apply { scries["settings/desk/talon"] = """{"desk":$desk}""" }
+        val events = other.channel.events().launchIn(this)
+        try {
+            SettingsSyncImpl(db = otherDb, aiSettings = FakeAiSettings()).apply { attach(other.channel) }.bootstrap()
+            assertEquals(db.groupOrders().stream().first(), otherDb.groupOrders().stream().first())
+            assertEquals(db.folders().streamFolders().first(), otherDb.folders().streamFolders().first())
+            assertEquals(db.folders().streamMembers().first(), otherDb.folders().streamMembers().first())
+            assertEquals(NotifyLevel.NONE, otherDb.notifyPrefs().levelFor("~bus"))
+            assertEquals(db.railItemPrefs().streamAll().first(), otherDb.railItemPrefs().streamAll().first())
+            assertEquals(db.bookmarks().streamAll().first(), otherDb.bookmarks().streamAll().first())
+            assertEquals(db.bookmarkFolders().streamFolders().first(), otherDb.bookmarkFolders().streamFolders().first())
+            assertEquals(db.bookmarkFolders().streamMembers().first(), otherDb.bookmarkFolders().streamMembers().first())
+        } finally {
+            events.cancel()
+            otherDb.close()
+        }
+    }
+
+    @Test
     fun `without the settings app nothing is sent or changed`() = live {
         db.folders().upsert(FolderEntity(id = 1, name = "Work", sortOrder = 0))
         sync.bootstrap()
@@ -126,6 +171,54 @@ class SettingsSyncBootstrapTest {
         assertTrue(folderPokes.any { "put-entry" in it && "\"entry-key\":\"$id\"" in it && "Play" in it }, folderPokes.toString())
         assertTrue(folderPokes.any { "put-entry" in it && "\"entry-key\":\"$id:~bus/garden\"" in it })
         assertTrue(folderPokes.last().let { "del-entry" in it && "$id:~bus/garden" in it })
+    }
+
+    @Test
+    fun `a folder deleted here takes its members off the ship`() = live {
+        val id = sync.createFolder("Work", 0)
+        sync.addFolderMember(id, "~bus")
+        sync.addGroupToFolder(id, "~nec/garden")
+        val marks = sync.createBookmarkFolder("Recipes", 0)
+        sync.addBookmarkToFolder(marks, "chat/~bus/garden", "170.1")
+        sync.deleteFolder(id)
+        sync.deleteBookmarkFolder(marks)
+        val dels = sent().filter { "del-entry" in it }
+        // Left there, the next folder a new device made under this id got them.
+        for (key in listOf("$id:~bus", "$id:~nec/garden", "$marks|chat/~bus/garden|170.1")) {
+            assertTrue(dels.any { "\"entry-key\":\"$key\"" in it }, "$key in $dels")
+        }
+    }
+
+    @Test
+    fun `members the ship holds for a folder it no longer has are dropped, here and there`() = live {
+        ship.scries["settings/desk/talon"] = """{"desk":{
+            "folders":{"1":"{\"name\":\"Work\",\"sortOrder\":0}"},
+            "folder-members":{"1:~bus":"{\"ordinal\":0}","3:~nec":"{\"ordinal\":0}"},
+            "bookmark-folders":{"9":"{\"name\":\"Recipes\",\"sortOrder\":0}"},
+            "bookmark-folder-members":{"9|chat/x|1":"{\"ordinal\":0}","4|chat/x|2":"{\"ordinal\":0}"}}}"""
+        sync.bootstrap()
+        assertEquals(listOf(1L to "~bus"), db.folders().streamMembers().first().map { it.folderId to it.whom })
+        assertEquals(listOf(9L), db.bookmarkFolders().streamMembers().first().map { it.folderId })
+        val dels = sent().filter { "del-entry" in it }
+        assertTrue(dels.any { "\"entry-key\":\"3:~nec\"" in it } && dels.any { "\"entry-key\":\"4|chat/x|2\"" in it }, dels.toString())
+        assertTrue(dels.none { "1:~bus" in it || "9|chat/x|1" in it }, "a member of a folder that stands stays")
+    }
+
+    @Test
+    fun `a drag reorders here at once, and goes up when it ends`() = live {
+        db.groupOrders().insertAll(listOf(GroupOrderEntity("~bus/a", 0), GroupOrderEntity("~bus/b", 1)))
+        sync.reorderGroupOrdersLocal(listOf("~bus/b", "~bus/a"))
+        val id = sync.createFolder("Work", 0)
+        sync.addFolderMember(id, "~bus")
+        sync.addGroupToFolder(id, "~nec/garden")
+        sync.reorderFolderMembersLocal(id, listOf("~nec/garden", "~bus"))
+        val before = sent().size
+        assertEquals(listOf("~bus/b", "~bus/a"), db.groupOrders().stream().first().sortedBy { it.ordinal }.map { it.flag })
+        sync.pushGroupOrders()
+        sync.pushFolderMembersOrder(id)
+        val up = sent().drop(before)
+        assertTrue(up.any { "\"bucket-key\":\"group-orders\"" in it && "~bus/b\":\"{\\\"ordinal\\\":0}" in it }, up.toString())
+        assertTrue(up.any { "\"entry-key\":\"$id:~nec/garden\"" in it && "\\\"ordinal\\\":0" in it && "group" in it }, up.toString())
     }
 
     @Test

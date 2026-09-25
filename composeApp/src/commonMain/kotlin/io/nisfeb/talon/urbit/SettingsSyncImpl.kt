@@ -440,6 +440,7 @@ class SettingsSyncImpl(
                 val entries = deskMap!![bucket] as? JsonObject
                 if (!bucketIsMissingOrEmpty(entries)) applyBucket(bucket, entries)
             }
+            runCatching { dropOrphanedMembers() }.onFailure { Log.w(TAG, "orphaned folder members", it) }
 
             // Per-bucket recovery for the Room-backed buckets: any the
             // ship is missing (or holds empty) gets re-seeded from the
@@ -772,12 +773,6 @@ class SettingsSyncImpl(
         )
     }
 
-    /** Combined local+push. Kept for callers that aren't drag-driven. */
-    suspend fun reorderGroupOrders(flags: List<String>) {
-        reorderGroupOrdersLocal(flags)
-        pushGroupOrders()
-    }
-
     override suspend fun createFolder(name: String, sortOrder: Int): Long {
         val id = db.folders().createFolder(FolderEntity(name = name, sortOrder = sortOrder))
         pokePutEntry(
@@ -805,14 +800,14 @@ class SettingsSyncImpl(
     }
 
     override suspend fun deleteFolder(id: Long) {
+        val members = db.folders().streamMembers().first().filter { it.folderId == id }
         db.folders().deleteMembersOf(id)
         db.folders().delete(id)
         pokeDelEntry(BUCKET_FOLDERS, id.toString())
-        // Also clear any folder-members entries keyed by this folder.
-        // %settings has no wildcard del — so push a fresh bucket minus
-        // anything with this folder id prefix. Cheap because typically
-        // few folders.
-        clearFolderMembersForFolder(id)
+        // %settings has no wildcard del, so each member entry goes by
+        // name. Left behind, they were given to the next folder a new
+        // device made under this id.
+        members.forEach { pokeDelEntry(BUCKET_FOLDER_MEMBERS, folderMemberKey(id, it.whom)) }
     }
 
     override suspend fun addFolderMember(folderId: Long, whom: String) {
@@ -875,12 +870,6 @@ class SettingsSyncImpl(
                 },
             )
         }
-    }
-
-    /** Combined local+push. Kept for non-drag callers. */
-    suspend fun reorderFolderMembers(folderId: Long, whoms: List<String>) {
-        reorderFolderMembersLocal(folderId, whoms)
-        pushFolderMembersOrder(folderId)
     }
 
     /**
@@ -1342,9 +1331,12 @@ class SettingsSyncImpl(
     }
 
     override suspend fun deleteBookmarkFolder(id: Long) {
+        val members = db.bookmarkFolders().streamMembers().first().filter { it.folderId == id }
         db.bookmarkFolders().deleteMembersOf(id)
         db.bookmarkFolders().delete(id)
         pokeDelEntry(BUCKET_BOOKMARK_FOLDERS, id.toString())
+        // As with a chat folder: its members go from the ship by name.
+        members.forEach { pokeDelEntry(BUCKET_BOOKMARK_FOLDER_MEMBERS, bookmarkFolderMemberKey(id, it.whom, it.postId)) }
     }
 
     override suspend fun addBookmarkToFolder(folderId: Long, whom: String, postId: String) {
@@ -2069,11 +2061,24 @@ class SettingsSyncImpl(
         }
     }
 
-    private suspend fun clearFolderMembersForFolder(folderId: Long) {
-        db.folders().deleteMembersOf(folderId)
-        // No wildcard settings del — best-effort: we'd re-push bucket.
-        // Skipped for v1; drift tolerated because the folder itself
-        // was deleted so its members are orphaned and filtered out.
+    /**
+     * Members of a folder that is gone, dropped here and on the ship.
+     * A folder deleted before its members went with it left them on
+     * the ship, and the next folder a new device made under that id
+     * showed them. Run once the ship's buckets are applied, so a
+     * folder is judged gone by the ship's word.
+     */
+    private suspend fun dropOrphanedMembers() {
+        val folders = db.folders().streamFolders().first().map { it.id }.toSet()
+        db.folders().streamMembers().first().filter { it.folderId !in folders }.forEach {
+            db.folders().removeMember(it.folderId, it.whom)
+            pokeDelEntry(BUCKET_FOLDER_MEMBERS, folderMemberKey(it.folderId, it.whom))
+        }
+        val marks = db.bookmarkFolders().streamFolders().first().map { it.id }.toSet()
+        db.bookmarkFolders().streamMembers().first().filter { it.folderId !in marks }.forEach {
+            db.bookmarkFolders().removeMember(it.folderId, it.whom, it.postId)
+            pokeDelEntry(BUCKET_BOOKMARK_FOLDER_MEMBERS, bookmarkFolderMemberKey(it.folderId, it.whom, it.postId))
+        }
     }
 
     // ───────── poke helpers ─────────
