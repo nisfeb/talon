@@ -340,9 +340,10 @@ class TlonChatRepo(
     @Volatile var groupInviteListener: ((InviteSummary) -> Unit)? = null
 
     /** A channel and an identity without the session loop, for tests of what a write does before the ship answers. */
-    internal fun attachForTest(ch: UrbitChannel, us: String) {
+    internal fun attachForTest(ch: UrbitChannel, us: String, http: HttpClient? = null) {
         channel = ch
         ourPatp = us
+        this.http = http
     }
 
     fun start(session: UrbitSession) {
@@ -1729,18 +1730,20 @@ class TlonChatRepo(
         // reorders. (Sequencing the poke after the upsert was making
         // the status feed feel laggy on slow links.)
         val current = db.contacts().get(ourPatp)
-        val newStatus = status?.takeIf { it.isNotBlank() } ?: current?.status
+        // Null leaves a field as it was; empty clears it, here as on the
+        // ship. An emptied field used to keep its old value here.
+        fun kept(new: String?, old: String?) = if (new == null) old else new.ifBlank { null }
         val statusChanged = status != null && status != current?.status.orEmpty()
         db.contacts().upsert(
             ContactEntity(
                 ship = ourPatp,
-                nickname = nickname?.takeIf { it.isNotBlank() } ?: current?.nickname,
-                bio = bio?.takeIf { it.isNotBlank() } ?: current?.bio,
-                avatarUrl = avatarUrl?.takeIf { it.isNotBlank() } ?: current?.avatarUrl,
-                status = newStatus,
+                nickname = kept(nickname, current?.nickname),
+                bio = kept(bio, current?.bio),
+                avatarUrl = kept(avatarUrl, current?.avatarUrl),
+                status = kept(status, current?.status),
                 statusUpdatedMs = if (statusChanged) nowMs()
                     else current?.statusUpdatedMs,
-                color = color?.takeIf { it.isNotBlank() } ?: current?.color,
+                color = kept(color, current?.color),
             )
         )
         // Per tlon-apps desk/lib/contacts/json-1.hoon's `++action`:
@@ -1749,13 +1752,22 @@ class TlonChatRepo(
         // setPetName above uses `edit` because that's a kip-scoped overlay.
         // For the user's own profile, the discriminator is `self`, with the
         // contact object directly as the value (no kip / contact wrapper).
-        ch.poke(
-            app = "contacts",
-            mark = "contact-action-1",
-            payload = buildJsonObject {
-                put("self", contactFields)
-            },
-        )
+        try {
+            ch.poke(
+                app = "contacts",
+                mark = "contact-action-1",
+                payload = buildJsonObject {
+                    put("self", contactFields)
+                },
+            )
+        } catch (t: Throwable) {
+            // Refused, or never left: put back what the ship still has. An
+            // unanswered poke may have landed, and its echo will say.
+            if (t !is kotlinx.coroutines.CancellationException && t !is PokeUnacked && current != null) {
+                db.contacts().upsert(current)
+            }
+            throw t
+        }
     }
 
     /**

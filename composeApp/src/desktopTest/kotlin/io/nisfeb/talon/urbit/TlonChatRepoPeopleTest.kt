@@ -149,4 +149,42 @@ class TlonChatRepoPeopleTest {
         assertFailsWith<IllegalStateException> { repo.edit("~bus", "~zod/170141184506", "x", originalSentMs = 1) }
         assertTrue(ship.pokes.isEmpty())
     }
+
+    // ─── our own profile ──────────────────────────────────────────
+
+    @Test
+    fun `a profile edit sends only what was given, and shows here at once`() = live {
+        db.contacts().upsert(ContactEntity("~zod", "Zod", "a bio", null))
+        repo.updateProfile(nickname = "Zed", color = "#ff0000")
+        val self = ship.pokesTo("contacts").single().json.at("self").jsonObject
+        assertEquals(setOf("nickname", "color"), self.keys)
+        assertEquals("Zed", self.at("nickname", "value").jsonPrimitive.content)
+        assertEquals("ff.0000", self.at("color", "value").jsonPrimitive.content)
+        val row = db.contacts().get("~zod")!!
+        assertEquals(Triple("Zed", "a bio", "#ff0000"), Triple(row.nickname, row.bio, row.color))
+    }
+
+    @Test
+    fun `a field emptied is emptied here too`() = live {
+        db.contacts().upsert(ContactEntity("~zod", "Zod", "a bio", null, status = "out"))
+        repo.updateProfile(bio = "", status = "")
+        val self = ship.pokesTo("contacts").single().json.at("self")
+        assertEquals("", self.at("bio", "value").jsonPrimitive.content)
+        val row = db.contacts().get("~zod")!!
+        assertEquals(Triple("Zod", null, null), Triple(row.nickname, row.bio, row.status))
+    }
+
+    @Test
+    fun `an edit the ship refuses puts back what it still has`() = live {
+        db.contacts().upsert(ContactEntity("~zod", "Zod", "a bio", null))
+        ship.refuse = { if (it.app == "contacts") "no" else null }
+        assertFailsWith<PokeNacked> { repo.updateProfile(nickname = "Zed") }
+        assertEquals("Zod", db.contacts().get("~zod")?.nickname)
+    }
+
+    @Test
+    fun `nothing given sends nothing`() = live {
+        repo.updateProfile()
+        assertTrue(ship.pokes.isEmpty())
+    }
 }
