@@ -1193,6 +1193,10 @@ class TlonChatRepo(
                     // that is not a failure worth a stack in the log.
                     if (it is kotlinx.coroutines.CancellationException) throw it
                     Log.w(TAG, "refreshAdminGroups failed", it)
+                    // Every caller catches; swallowing it here left the
+                    // Administration screen spinning on a load that had
+                    // already failed, its error line unreachable.
+                    throw it
                 }
         }
     }

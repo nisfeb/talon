@@ -52,9 +52,11 @@ fun GroupAdminListScreen(
 ) {
     val cached by repo.adminGroupsFlow.collectAsState()
     val groups = cached ?: emptyList()
-    val loading = cached == null
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Nothing loaded yet and nothing gone wrong: a failed first load is
+    // an error to show, not a spinner to leave running.
+    val loading = cached == null && error == null
     var newGroupOpen by remember { mutableStateOf(false) }
     var creating by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
