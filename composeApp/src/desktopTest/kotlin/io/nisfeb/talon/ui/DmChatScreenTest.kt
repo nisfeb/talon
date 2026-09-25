@@ -216,4 +216,56 @@ class DmChatScreenTest {
         onNodeWithText("Report").performClick()
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Report message?").fetchSemanticsNodes().isNotEmpty() }
     }
+
+    // ─── pinning, in a channel of a group we host ──────────────────
+
+    private val ours = "chat/~zod/general"
+
+    private fun ourChannel(vararg posts: MessageEntity): suspend AppDatabase.() -> Unit = {
+        groups().upsertChannelGroups(listOf(io.nisfeb.talon.data.ChannelGroupEntity(ours, "~zod/crew")))
+        posts.forEach { messages().upsert(it) }
+    }
+
+    private fun post(id: String, author: String, text: String, sent: Long) =
+        MessageEntity(ours, id, author, sent, """[{"inline":["$text"]}]""", "/chat")
+
+    @Test
+    fun `a post is pinned from its menu and shown above, then unpinned`() = chat(whom = ours, seed = ourChannel(
+        post("170141184506", "~bus", "meeting at noon", 1_000), post("170141184507", "~nec", "chatter", 2_000),
+    )) { ship, _ ->
+        menuOf("meeting at noon")
+        onNodeWithText("Pin").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Pinned").fetchSemanticsNodes().isNotEmpty() }
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
+        assertTrue("170.141.184.506" in ship.pokesTo("channels").single().json.toString())
+        assertTrue(onAllNodesWithText(": meeting at noon", substring = true).fetchSemanticsNodes().isNotEmpty(), "the banner quotes it")
+
+        menuOf("chatter")
+        assertTrue(onAllNodesWithText("Pin").fetchSemanticsNodes().isNotEmpty(), "another post offers Pin, not Unpin")
+        onAllNodesWithText("Copy text")[0].performClick()
+        menuOf("meeting at noon")
+        onNodeWithText("Unpin").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Pinned").fetchSemanticsNodes().isEmpty() }
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").size == 2 }
+    }
+
+    @Test
+    fun `a pin the ship refuses is taken down and says so`() = chat(
+        whom = ours,
+        seed = ourChannel(post("170141184506", "~bus", "meeting at noon", 1_000)),
+        prepare = { refuse = { if (it.app == "channels") "not allowed" else null } },
+    ) { _, _ ->
+        menuOf("meeting at noon")
+        onNodeWithText("Pin").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("pin failed", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(onAllNodesWithContentDescription("Pinned").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `someone else's group offers no pin`() = chat(whom = "chat/~bus/general", seed = {
+        messages().upsert(MessageEntity("chat/~bus/general", "170141184506", "~bus", 1_000, """[{"inline":["their post"]}]""", "/chat"))
+    }) { _, _ ->
+        menuOf("their post")
+        assertTrue(onAllNodesWithText("Pin").fetchSemanticsNodes().isEmpty())
+    }
 }
