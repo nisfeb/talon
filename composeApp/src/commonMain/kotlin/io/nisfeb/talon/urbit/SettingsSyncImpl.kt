@@ -1359,28 +1359,6 @@ class SettingsSyncImpl(
         )
     }
 
-    /** Local-only: rewrite a folder's ordering. Caller pushes the
-     *  resulting ordinals to %settings via [pushBookmarkFolderOrder]
-     *  on drag-stop, mirroring the conversation-folder pattern. */
-    suspend fun reorderBookmarkFolderMembersLocal(
-        folderId: Long,
-        items: List<Pair<String, String>>,
-    ) {
-        db.bookmarkFolders().reorderMembers(folderId, items)
-    }
-
-    suspend fun pushBookmarkFolderOrder(folderId: Long) {
-        val members = db.bookmarkFolders().streamMembers().first()
-            .filter { it.folderId == folderId }
-        members.forEach { m ->
-            pokePutEntry(
-                BUCKET_BOOKMARK_FOLDER_MEMBERS,
-                bookmarkFolderMemberKey(folderId, m.whom, m.postId),
-                buildJsonObject { put("ordinal", m.ordinal) },
-            )
-        }
-    }
-
     override suspend fun setNotifyLevel(whom: String, level: String) {
         db.notifyPrefs().upsert(NotifyPreferenceEntity(whom, level))
         pokePutEntry(

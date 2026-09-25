@@ -56,18 +56,6 @@ interface BookmarkFolderDao {
     )
     suspend fun removeMember(folderId: Long, whom: String, postId: String)
 
-    @Query(
-        "UPDATE bookmark_folder_members SET ordinal = :ordinal " +
-            "WHERE folderId = :folderId AND whom = :whom AND postId = :postId"
-    )
-    suspend fun setOrdinal(folderId: Long, whom: String, postId: String, ordinal: Int)
-
-    /** Rewrite ordinals within a folder to match the supplied list order. */
-    @Transaction
-    suspend fun reorderMembers(folderId: Long, items: List<Pair<String, String>>) {
-        items.forEachIndexed { i, (whom, postId) -> setOrdinal(folderId, whom, postId, i) }
-    }
-
     /** Bulk replace — used by %settings inbound sync. */
     @Query("DELETE FROM bookmark_folders")
     suspend fun clearFolders()
