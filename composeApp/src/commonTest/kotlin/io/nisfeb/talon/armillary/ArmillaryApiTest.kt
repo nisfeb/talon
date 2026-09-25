@@ -172,6 +172,30 @@ class ArmillaryApiTest {
     // ── the answers that live in the status code ───────────────────
 
     @Test
+    fun `money and keys are asked for by POST with what was chosen, reads by GET`() = runTest {
+        val sent = mutableListOf<io.ktor.client.request.HttpRequestData>()
+        val a = ArmillaryApi(
+            HttpClient(MockEngine { req -> sent += req; respond("""{"url":"https://pay.example/s","nonce":"n1"}""", HttpStatusCode.OK, jsonHeaders) }),
+            "https://ship.example/",
+        )
+        fun body(r: io.ktor.client.request.HttpRequestData) = obj((r.body as io.ktor.http.content.TextContent).text)
+        a.checkout("stripe", "pro", 5_000_000L)
+        val pay = sent.last()
+        assertEquals(io.ktor.http.HttpMethod.Post to "/apps/armillary/api/checkout", pay.method to pay.url.encodedPath)
+        assertEquals(io.ktor.http.ContentType.Application.Json, pay.body.contentType?.withoutParameters())
+        assertEquals(obj("""{"rail":"stripe","plan":"pro","amount":5000000}"""), body(pay))
+        a.checkout("btcpay", "", 0)
+        assertEquals(obj("""{"rail":"btcpay"}"""), body(sent.last()), "no plan and no amount are left out, not sent empty")
+        a.mintKey("Talon")
+        assertEquals(io.ktor.http.HttpMethod.Post, sent.last().method)
+        assertEquals(obj("""{"name":"Talon"}"""), body(sent.last()))
+        a.lease()
+        assertEquals(io.ktor.http.HttpMethod.Post, sent.last().method)
+        a.probe()
+        assertEquals(io.ktor.http.HttpMethod.Get, sent.last().method)
+    }
+
+    @Test
     fun `a ship holding no key says so, and that is not the app being absent`() = runTest {
         val noKey = api { HttpStatusCode.NotFound to """{"error":{"message":"no key yet"}}""" }
         assertEquals(InferenceAnswer.NoKey, noKey.inference())
