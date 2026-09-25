@@ -3,6 +3,8 @@ package io.nisfeb.talon.ui
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
@@ -49,6 +51,7 @@ class DmChatScreenTest {
 
     private fun chat(
         seed: suspend AppDatabase.() -> Unit = {},
+        whom: String = "~bus",
         prepare: FakeShip.() -> Unit = {},
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
@@ -68,7 +71,7 @@ class DmChatScreenTest {
                         DmChatScreen(
                             db = db, repo = repo, drafts = InMemoryDraftStore(), http = createAppHttpClient(),
                             aiSettings = FakeAiSettings(), uiSettings = InMemoryUiSettings(),
-                            ourPatp = "~zod", whom = "~bus",
+                            ourPatp = "~zod", whom = whom,
                             onBack = {}, onOpenThread = { threads += it }, onOpenConversation = {},
                             onOpenImage = {}, onOpenSelfProfile = {},
                         )
@@ -137,5 +140,79 @@ class DmChatScreenTest {
         reactions().upsert(ReactionEntity("~bus", "~bus/170141184506", "~nec", "🔥"))
     }) { _, _ ->
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("🔥", substring = true).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    // ─── a message's menu ─────────────────────────────────────────
+
+    private fun ComposeUiTest.menuOf(text: String) {
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+        // Desktop's way in (a phone taps the row; the words' own selection
+        // takes a right-click): the Message actions button beside them. In
+        // a cold JVM the list is still settling and the first click can be
+        // lost, as a person's would be; they click again, and so does this.
+        val opened = { onAllNodesWithText("Copy text").fetchSemanticsNodes().isNotEmpty() }
+        for (attempt in 1..3) {
+            val y = onNodeWithText(text).fetchSemanticsNode().boundsInRoot.center.y
+            val buttons = onAllNodesWithContentDescription("Message actions")
+            buttons[buttons.fetchSemanticsNodes().indices.minBy { kotlin.math.abs(buttons[it].fetchSemanticsNode().boundsInRoot.top - y) }].performClick()
+            if (runCatching { waitUntil(timeoutMillis = 1_500) { opened() } }.isSuccess) return
+        }
+        waitUntil(timeoutMillis = 1_000) { opened() }
+    }
+
+    @Test
+    fun `from a message's menu, a thread opens and a reaction goes to the ship`() = chat(seed = {
+        messages().upsert(msg("~bus/170141184506", "~bus", "hello from bus", 1_000))
+    }) { ship, _ ->
+        menuOf("hello from bus")
+        onNodeWithText("Reply in thread").performClick()
+        assertEquals(listOf("~bus/170141184506"), threads)
+        menuOf("hello from bus")
+        onAllNodesWithText("👍")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").isNotEmpty() }
+        val react = ship.pokesTo("chat").single().json.toString()
+        assertTrue("add-react" in react && "~bus/170.141.184.506" in react, react)
+    }
+
+    @Test
+    fun `our own message is deleted after asking, and someone else's offers no delete`() = chat(seed = {
+        messages().upsert(msg("~bus/170141184506", "~bus", "theirs", 1_000))
+        messages().upsert(msg("~zod/170141184507", "~zod", "mine", 2_000))
+    }) { ship, _ ->
+        menuOf("theirs")
+        assertTrue(onAllNodesWithText("Delete").fetchSemanticsNodes().isEmpty())
+        onAllNodesWithText("Copy text")[0].performClick() // closes the menu
+        menuOf("mine")
+        onNodeWithText("Delete").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Delete message?").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("Delete").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").isNotEmpty() }
+        assertTrue("\"del\"" in ship.pokesTo("chat").single().json.toString())
+    }
+
+    @Test
+    fun `our own channel post is edited in place from its menu`() = chat(whom = "chat/~bus/general", seed = {
+        messages().upsert(MessageEntity("chat/~bus/general", "170141184507", "~zod", 2_000, """[{"inline":["first try"]}]""", "/chat"))
+    }) { ship, _ ->
+        menuOf("first try")
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 5_000) {
+            onAllNodes(hasSetTextAction()).fetchSemanticsNodes().any { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.EditableText)?.text == "first try" }
+        }
+        onNode(hasSetTextAction()).performTextReplacement("second try")
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
+        val edit = ship.pokesTo("channels").single().json.toString()
+        assertTrue("\"edit\"" in edit && "second try" in edit && "170.141.184.507" in edit, edit)
+    }
+
+    @Test
+    fun `someone else's channel post can be reported, after asking`() = chat(whom = "chat/~bus/general", seed = {
+        messages().upsert(MessageEntity("chat/~bus/general", "170141184506", "~bus", 1_000, """[{"inline":["spam spam"]}]""", "/chat"))
+    }) { _, _ ->
+        menuOf("spam spam")
+        assertTrue(onAllNodesWithText("Edit").fetchSemanticsNodes().isEmpty(), "not ours to edit")
+        onNodeWithText("Report").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Report message?").fetchSemanticsNodes().isNotEmpty() }
     }
 }
