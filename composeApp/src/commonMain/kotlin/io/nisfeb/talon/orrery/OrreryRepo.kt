@@ -871,22 +871,6 @@ class OrreryRepo(
     /** A call's words on the queue, and the turn to read from: one the model stopped answering in resumes there. */
     private data class Heard(val address: String, val lines: List<Spoken>, val from: Int = 0)
 
-    /**
-     * Whether a failure could have cost the ship: an error it answered,
-     * or a wait it timed out on while its one thread was busy. A refused
-     * connection, or a proxy answering 502 or 503 with no ship behind
-     * it, cost it nothing, and waiting longer after those left the pipe
-     * idle for hours after a restart. The first waits longer each time;
-     * the second keeps the usual ten minutes.
-     */
-    private fun costTheShip(e: Throwable): Boolean = when (e) {
-        is OrreryError.Refused -> e.status != 502 && e.status != 503
-        is OrreryError.Unreachable -> generateSequence(e.cause) { it.cause }.take(5).any {
-            it is io.ktor.client.plugins.HttpRequestTimeoutException || it is io.ktor.client.network.sockets.SocketTimeoutException
-        }
-        else -> !io.nisfeb.talon.util.isTransientNetworkError(e)
-    }
-
     /** When a key was minted, for the grace it gets while the ship stores it. */
     private suspend fun minted(s: String, clientId: String) =
         db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, "minted:$clientId", "", now()))
@@ -1645,6 +1629,22 @@ class OrreryRepo(
 
     companion object {
         private const val TAG = "OrreryRepo"
+
+        /**
+         * Whether a failure could have cost the ship: an error it answered,
+         * or a wait it timed out on while its one thread was busy. A refused
+         * connection, or a proxy answering 502 or 503 with no ship behind
+         * it, cost it nothing, and waiting longer after those left the pipe
+         * idle for hours after a restart. The first waits longer each time;
+         * the second keeps the usual ten minutes.
+         */
+        internal fun costTheShip(e: Throwable): Boolean = when (e) {
+            is OrreryError.Refused -> e.status != 502 && e.status != 503
+            is OrreryError.Unreachable -> generateSequence(e.cause) { it.cause }.take(5).any {
+                it is io.ktor.client.plugins.HttpRequestTimeoutException || it is io.ktor.client.network.sockets.SocketTimeoutException
+            }
+            else -> !io.nisfeb.talon.util.isTransientNetworkError(e)
+        }
 
         /** The attached pipe, for the places that make a fact and hold no repo. */
         @kotlin.concurrent.Volatile

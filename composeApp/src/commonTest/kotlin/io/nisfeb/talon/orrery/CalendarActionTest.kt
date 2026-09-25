@@ -48,6 +48,10 @@ class CalendarActionTest {
         assertNull(plan("Dinner", "2026-09-18T20:00:00-04:00", "we should get dinner sometime"), "no day, no hour: no plan")
         assertNull(plan("Dentist", "2026-09-18T20:00:00-04:00", "dinner Friday at 8"), "a title not in the words")
         assertNull(plan("Dinner", "2026-09-10T20:00:00-04:00", "dinner Friday at 8"), "behind the message")
+        // Earlier the same day still stands: "lunch at noon, running late".
+        assertNotNull(plan("Lunch", "2026-09-16T09:00:00-04:00", "lunch at 9 today"), "five hours before")
+        assertNull(plan("Lunch", "2026-09-16T07:00:00-04:00", "lunch at 7 today"), "seven hours before")
+        assertNull(plan("Dinner", "2026-09-18T20:00:00-04:00", "dinner Friday at 8", ""","ends":"2026-09-18T19:00:00-04:00"""")?.endMs, "an end before the start")
         assertNull(plan("Dinner", "2027-12-01T20:00:00-04:00", "dinner Friday at 8"), "beyond the year")
         assertNull(plan("Dinner", "Friday at 8", "dinner Friday at 8"), "not a time")
         assertNull(plan("Dinner", "2026-09-18T20:00:00-04:00", "dinner Friday at 8", ""","location":"Mario's"""")?.location, "a place it did not say")

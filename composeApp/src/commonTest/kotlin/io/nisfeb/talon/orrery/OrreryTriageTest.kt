@@ -27,6 +27,29 @@ class OrreryTriageTest {
         assertTrue(inScope("chat/~host/general", "~zod are you there", me, null, emptySet()))
         assertTrue(inScope("chat/~host/general", "hey Zed!", me, "Zed", emptySet()))
         assertTrue(!inScope("chat/~host/general", "the zedd thing", me, "Zed", emptySet()))
+        // The pattern is kept between posts; a new nickname is its own.
+        assertTrue(inScope("chat/~host/general", "ask Al", me, "Al", emptySet()), "two letters is a nickname")
+        assertTrue(!inScope("chat/~host/general", "hey Zed!", me, "Al", emptySet()), "not the nickname before")
+    }
+
+    @Test
+    fun `a name, alias, ship or id resolves exactly, and nothing else does`() {
+        assertEquals("person/sarah", index.resolveExact("person/sarah")?.id)
+        assertEquals("person/sarah", index.resolveExact("~sampel-palnet")?.id)
+        assertEquals("person/sarah", index.resolveExact(" sarah ")?.id)
+        assertEquals("person/sarah", index.resolveExact("Wife")?.id)
+        assertEquals("place/johns-machine-shop", index.resolveExact("John's Machine Shop")?.id)
+        assertNull(index.resolveExact("Sar"))
+        assertNull(index.resolveExact("  "))
+    }
+
+    @Test
+    fun `what the model reads is a statement of some length, and a command is not for the gate`() {
+        assertTrue(!forTheReader("ok sure"), "seven letters")
+        assertTrue(forTheReader("ok sure!"))
+        assertTrue(!forTheReader("is it done yet? "))
+        assertTrue(forTheGate("I'm at the shop"))
+        assertTrue(!forTheGate("/remind me at the shop"))
     }
 
     @Test
@@ -58,6 +81,8 @@ class OrreryTriageTest {
         assertEquals("place/home", home.value.jsonObject["ref"]!!.jsonPrimitive.content)
         val status = ruleFacts("I'm stranded, waiting for a tow", "~bus", 1L, me, index).single()
         assertEquals("status", status.attr)
+        assertEquals(1L + 6 * 3_600_000, home.untilMs)
+        assertEquals(1L + 6 * 3_600_000, status.untilMs)
         assertEquals(JsonPrimitive("stranded"), status.value)
     }
 
@@ -67,6 +92,8 @@ class OrreryTriageTest {
         val loc = out.single { it.attr == "location" }
         assertEquals("person/sarah", loc.subject)
         assertEquals(60, loc.conf)
+        assertEquals(1L + 6 * 3_600_000, loc.untilMs)
+        assertEquals(1L + 6 * 3_600_000, ruleFacts("wife is fine now", "~bus", 1L, me, index).single().untilMs)
         assertEquals(JsonPrimitive("fine"), ruleFacts("wife is fine now", "~bus", 1L, me, index).single().value)
     }
 
@@ -84,6 +111,8 @@ class OrreryTriageTest {
         val lines = listOf(Spoken("~bus", "so the car"), Spoken("~bus", " died on route 9 "), Spoken("~zod", "oh no"), Spoken("~bus", ""), Spoken("~bus", "yeah"))
         assertEquals(listOf(Spoken("~bus", "so the car died on route 9"), Spoken("~zod", "oh no"), Spoken("~bus", "yeah")), mergeSpoken(lines))
         assertEquals(2, mergeSpoken(listOf(Spoken("~bus", "a".repeat(600)), Spoken("~bus", "b".repeat(600)))).size)
+        assertEquals(1, mergeSpoken(listOf(Spoken("~bus", "hello"), Spoken("~bus", "world")), maxChars = 11).size, "exactly the cap, the space counted")
+        assertEquals(2, mergeSpoken(listOf(Spoken("~bus", "hello"), Spoken("~bus", "world!")), maxChars = 11).size)
     }
 
     @Test

@@ -61,6 +61,32 @@ class OrreryApiTest {
     }
 
     @Test
+    fun `every call made with a key carries it, and no cookie`() = runTest {
+        val sent = mutableListOf<HttpRequestData>()
+        val bare = HttpClient(MockEngine { req -> sent += req; respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) })
+        val api = OrreryApi(owner = HttpClient(MockEngine { error("a key call went on the owner's client") }), bare = bare, baseUrl = "https://ship/")
+        val t = "k1.secret"
+        val calls: List<Pair<String, suspend () -> Unit>> = listOf(
+            "state" to { api.stateJson(t) }, "keyLanded" to { api.keyLanded(t) }, "act" to { api.act(buildJsonObject { }, t) },
+            "resolve" to { api.resolve("sarah", t) }, "observationsOf" to { api.observationsOf("person/x", t) },
+            "actions" to { api.actions(t) }, "refine" to { api.refine(t, "a", "sooner") },
+            "transition" to { api.transition(t, "a", "done") }, "generate" to { api.generate(t, emptyList()) },
+            "observe" to { api.observe(buildJsonObject { }, t) },
+        )
+        for ((name, call) in calls) {
+            val before = sent.size
+            // An answer of the wrong shape is not the point here.
+            runCatching { call() }
+            val made = sent.drop(before)
+            kotlin.test.assertTrue(made.isNotEmpty(), "$name asked nothing")
+            for (r in made) {
+                assertEquals("Bearer $t", r.headers[HttpHeaders.Authorization], "$name: ${r.url}")
+                assertNull(r.headers[HttpHeaders.Cookie], name)
+            }
+        }
+    }
+
+    @Test
     fun `a body's timeline reads out with the ids only the ship can know`() = runTest {
         val rows = api(
             body = """{"id":"activity/standup","observations":[

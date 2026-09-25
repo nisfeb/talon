@@ -41,6 +41,10 @@ class OrreryHelpersTest {
         assertTrue(scopeCovers(full, full))
         assertFalse(scopeCovers(noHealth, full), "a key that may not write health")
         assertFalse(scopeCovers(noHome, full))
+        val noNote = Json.parseToJsonElement(
+            """{"kinds": {"person": {"attrs": ["status", "health"]}}, "actions": ["task", "home"]}""",
+        ).jsonObject
+        assertFalse(scopeCovers(noNote, full), "a key without a whole kind")
         assertFalse(scopeCovers(null, full))
     }
 
@@ -61,5 +65,7 @@ class OrreryHelpersTest {
         assertTrue(emoji.encodeToByteArray().size <= 500)
         assertTrue(!emoji.last().isHighSurrogate(), "no half of a pair left at the end")
         assertEquals(125, emoji.length / 2)
+        // A byte short, the cut lands inside the last pair: its first half goes too.
+        assertEquals(248, clipBytes("🦐".repeat(200), 499).length)
     }
 }
