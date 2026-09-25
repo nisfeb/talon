@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
@@ -146,5 +147,49 @@ class PartyLineScreensTest {
         bar(PartyState.Failed("garden-chat", "the host is gone")) {
             assertTrue(onAllNodesWithText("Party line: the host is gone").fetchSemanticsNodes().isNotEmpty())
         }
+    }
+
+    // ─── the bar opened out (desktop) ─────────────────────────────
+
+    private fun openBar(state: PartyState, recording: Boolean = false, recordedBy: Set<String> = emptySet(), block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                PartyLineBarContent(
+                    state = state, nameFor = { names[it] ?: it }, selfShip = "~zod",
+                    onRevokeSpeaking = { did += "revoke:$it" }, onRestoreSpeaking = { did += "restore:$it" },
+                    onMessage = { did += "message:$it" },
+                    recording = recording, recordedBy = recordedBy, onToggleRecord = { did += "record" },
+                )
+            }
+        }
+        onNodeWithContentDescription("Who's on the line").performClick()
+        waitForIdle()
+        block()
+    }
+
+    @Test
+    fun `opened out, the bar lists who is on and who is muted, with how many listen by link`() = openBar(live()) {
+        assertTrue(onAllNodesWithText("Bus").fetchSemanticsNodes().isNotEmpty() && onAllNodesWithText("Nec").fetchSemanticsNodes().isNotEmpty())
+        assertTrue(onAllNodesWithContentDescription("Muted").fetchSemanticsNodes().isNotEmpty(), "Nec is marked muted")
+        assertTrue(onAllNodesWithText("4 listening by link").fetchSemanticsNodes().isNotEmpty())
+        assertTrue(onAllNodesWithContentDescription("Options for Zod").fetchSemanticsNodes().isEmpty(), "no options on ourselves")
+    }
+
+    @Test
+    fun `an admin mutes someone for everyone from the opened bar, and anyone can message them`() = openBar(live(ops = true)) {
+        onNodeWithContentDescription("Options for Bus").performClick()
+        onNodeWithText("Mute for everyone").performClick()
+        onNodeWithContentDescription("Options for Nec").performClick()
+        onNodeWithText("Message").performClick()
+        waitForIdle()
+        assertEquals(listOf("revoke:~bus", "message:~nec"), did)
+    }
+
+    @Test
+    fun `the opened bar records, and says who else is`() = openBar(live(), recordedBy = setOf("~bus")) {
+        assertTrue(onAllNodesWithText("Recording · Bus").fetchSemanticsNodes().isNotEmpty())
+        onNodeWithText("Record").performClick()
+        waitForIdle()
+        assertEquals(listOf("record"), did)
     }
 }
