@@ -61,28 +61,48 @@ class SettingsSyncUiPrefsTest {
 
     private fun pushed(entry: String) = ship.pokesTo("settings").map { it.json.toString() }.filter { "\"entry-key\":\"$entry\"" in it }
 
-    private suspend fun settled(what: () -> Boolean) = withTimeout(5_000) { while (!what()) delay(20) }
+    private suspend fun settled(what: suspend () -> Boolean) = withTimeout(5_000) { while (!what()) delay(20) }
+
+    /** Attached, and the watchers listening: they subscribe on their own
+     *  thread, so a preference unrelated to the test is changed until one
+     *  is heard going up. Without this a "not sent back" could pass only
+     *  because nothing was listening yet. */
+    private suspend fun watching() {
+        sync.attachUiSettings(ui, watchers)
+        settled {
+            ui.setHideComposerButtons(!ui.hideComposerButtons.value)
+            delay(100)
+            pushed("hide-composer-buttons").isNotEmpty()
+        }
+    }
 
     @Test
     fun `a preference from the ship is applied here and not sent back, even one this build completes`() = live {
-        sync.attachUiSettings(ui, watchers)
+        watching()
         arrives("group-channel-order", """{"value":"HostOrder"}""")
         settled { ui.groupChannelOrder.value == GroupChannelOrder.HostOrder }
         arrives("rail-item-order", """{"order":["Mail","Chats","NotAThing"]}""")
         settled { ui.railItemOrder.value.take(2) == listOf(RailItem.Mail, RailItem.Chats) }
         delay(300)
-        assertTrue(ship.pokesTo("settings").isEmpty(), "applying is not an edit: ${ship.pokesTo("settings")}")
+        assertTrue(pushed("group-channel-order").isEmpty() && pushed("rail-item-order").isEmpty(), "applying is not an edit: ${ship.pokesTo("settings")}")
     }
 
     @Test
     fun `a preference changed here goes up once`() = live {
         sync.attachUiSettings(ui, watchers)
-        ui.setPowerFeaturesEnabled(true)
-        settled { pushed("power-features").isNotEmpty() }
-        assertTrue("enabled" in pushed("power-features").single() && "true" in pushed("power-features").single())
-        ui.setPowerFeaturesEnabled(true)
+        // The watchers subscribe on their own thread, and a change made
+        // before they do is the value they start from: change it until
+        // one is heard going up.
+        settled {
+            ui.setPowerFeaturesEnabled(!ui.powerFeaturesEnabled.value)
+            delay(100)
+            pushed("power-features").isNotEmpty()
+        }
+        assertTrue("enabled" in pushed("power-features").last())
+        val sent = pushed("power-features").size
+        ui.setPowerFeaturesEnabled(ui.powerFeaturesEnabled.value)
         delay(300)
-        assertEquals(1, pushed("power-features").size)
+        assertEquals(sent, pushed("power-features").size, "the same value again is not a change")
     }
 
     @Test
@@ -95,7 +115,7 @@ class SettingsSyncUiPrefsTest {
 
     @Test
     fun `an accent arrives whole, and an unknown mode falls back to the profile's`() = live {
-        sync.attachUiSettings(ui, watchers)
+        watching()
         arrives("accent", """{"enabled":true,"mode":"Custom","customHex":"#336699"}""")
         settled { ui.accentSettings.value.customHex == "#336699" }
         assertEquals(AccentMode.Custom, ui.accentSettings.value.mode)
