@@ -649,6 +649,10 @@ fun CalendarScreen(
                 }
             }
             val dayRows = byDay[selected].orEmpty()
+            // Read here, with the rows they changed with: read in an item,
+            // a row from before the change could meet the state after it.
+            val dayNow = selected
+            val editsNow = pendingEdits
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (rows == null) {
                     Text("Looking…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
@@ -657,7 +661,7 @@ fun CalendarScreen(
                 } else {
                     LazyColumn(Modifier.fillMaxSize()) {
                         items(dayRows, key = { "${it.id}/${it.idx}" }) { r ->
-                            val ghost = r.id.startsWith("pending-") || r.id in pendingEdits
+                            val ghost = r.id.startsWith("pending-") || r.id in editsNow
                             Row(
                                 Modifier.fillMaxWidth().clickable(enabled = !ghost) { view(r) }.alpha(if (ghost) 0.45f else 1f).padding(horizontal = 16.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -676,7 +680,7 @@ fun CalendarScreen(
                                         .filter { it.isNotBlank() }.joinToString(" · ")
                                     if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
-                                Text(if (ghost) "syncing…" else spanLabel(r, selected, zone, twentyFourHour), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(if (ghost) "syncing…" else spanLabel(r, dayNow, zone, twentyFourHour), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             HorizontalDivider(Modifier.padding(start = 36.dp))
                         }
