@@ -14,6 +14,7 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.ChannelGroupEntity
 import io.nisfeb.talon.data.GroupEntity
 import io.nisfeb.talon.data.MessageEntity
+import io.nisfeb.talon.data.OrreryNoticedEntity
 import io.nisfeb.talon.data.UnreadEntity
 import io.nisfeb.talon.ui.screens.DmListScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
@@ -45,11 +46,13 @@ import kotlin.test.assertEquals
 @OptIn(ExperimentalTestApi::class)
 class HomeListTest {
     private val opened = mutableListOf<String>()
+    private lateinit var db: AppDatabase
 
     private fun home(seed: suspend AppDatabase.() -> Unit, block: ComposeUiTest.(FakeShip) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-home-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
+        this.db = db
         val ship = FakeShip("~zod")
         val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod") }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -173,5 +176,52 @@ class HomeListTest {
         assertEquals("~bus" to "false", rsvp(ship))
         assertTrue(opened.isEmpty())
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Requests").fetchSemanticsNodes().isEmpty() }
+    }
+
+    // ─── what Orrery noticed ───────────────────────────────────────
+
+    private fun noticed(id: String, subject: String, attr: String, value: String, snippet: String, at: Long) = OrreryNoticedEntity(
+        id = id, ship = "~zod", subject = subject, attr = attr, valueJson = value, atMs = 1_000, untilMs = null, conf = 80,
+        sourceKind = "chat", sourceId = "~bus/1", bodyJson = null, whom = "~bus", postId = "1", snippet = snippet,
+        state = "pending", createdMs = at,
+    )
+
+    @Test
+    fun `claims Orrery noticed wait above the list, each confirmed or discarded`() = home(seed = {
+        orreryNoticed().insertIfNew(noticed("n1", "person/bus", "birthday", "\"12 March\"", "mine's the 12th of March", at = 2_000))
+        orreryNoticed().insertIfNew(noticed("n2", "person/me", "manager", """{"ref":"person/nec"}""", "nec runs my team now", at = 1_000))
+    }) {
+        shows("Noticed")
+        shows("~bus: birthday is 12 March")
+        shows("You: manager is ~nec")
+        shows("mine's the 12th of March")
+        // Newest first.
+        onAllNodesWithText("Confirm")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { runBlocking { db.orreryNoticed().get("n1")?.state } == "confirming" }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("~bus: birthday is 12 March").fetchSemanticsNodes().isEmpty() }
+        onNodeWithText("Discard").performClick()
+        waitUntil(timeoutMillis = 5_000) { runBlocking { db.orreryNoticed().get("n2")?.state } == "discarded" }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Noticed").fetchSemanticsNodes().isEmpty() }
+    }
+
+    // ─── mentions ──────────────────────────────────────────────────
+
+    @Test
+    fun `mentions of us are gathered, even where nothing is cached, and open on a tap`() = home(seed = {
+        messages().upsert(msg("~bus", "~bus/170141184506", "~bus", "hey ~zod look at this", 2_000))
+        messages().upsert(msg("~dev", "~dev/170141184507", "~dev", "nothing about you", 3_000))
+        unreads().upsert(UnreadEntity("~bus", count = 1, notifyCount = 1, recencyMs = 2_000))
+        unreads().upsert(UnreadEntity("~dev", count = 1, notifyCount = 1, recencyMs = 3_000))
+        unreads().upsert(UnreadEntity("chat/~nec/general", count = 2, notifyCount = 2, recencyMs = 1_000))
+    }) {
+        tap("Mentions", substring = true)
+        shows("hey ~zod look at this", substring = true)
+        onAllNodesWithText("nothing about you", substring = true).assertCountEquals(0)
+        // Nothing cached for the channel: a row made from what is known of it.
+        val placeholder = onAllNodes(hasText("general", substring = true) and hasText("2")).fetchSemanticsNodes()
+        assertTrue(placeholder.isNotEmpty(), "the channel's mention is listed with its count")
+        onAllNodes(hasText("general", substring = true) and hasText("2"))[0].performClick()
+        waitForIdle()
+        assertEquals(listOf("chat/~nec/general"), opened)
     }
 }
