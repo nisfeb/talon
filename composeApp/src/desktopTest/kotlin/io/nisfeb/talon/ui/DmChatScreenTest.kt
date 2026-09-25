@@ -294,4 +294,42 @@ class DmChatScreenTest {
         onNode(hasSetTextAction()).performKeyInput { pressKey(Key.DirectionDown); pressKey(Key.Tab) }
         waitUntil(timeoutMillis = 5_000) { draft() == "${offered[1].glyph} " }
     }
+
+    // ─── people, commands, and the last thing said ─────────────────
+
+    @Test
+    fun `an @ and a name offer people, and Enter puts in their @p`() = chat(seed = {
+        contacts().upsertAll(listOf(io.nisfeb.talon.data.ContactEntity("~sampel-palnet", "Sam", null, null)))
+        messages().upsert(msg("~bus/170141184506", "~bus", "hello", 1_000))
+    }) { ship, _ ->
+        onNode(hasSetTextAction()).performTextInput("ask @Sa")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Sam", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        waitUntil(timeoutMillis = 5_000) { draft() == "ask ~sampel-palnet " }
+        assertTrue(ship.pokesTo("chat").isEmpty())
+    }
+
+    @Test
+    fun `a slash offers commands, and Tab fills one in`() = chat { _, _ ->
+        onNode(hasSetTextAction()).performTextInput("/pol")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("poll", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Tab) }
+        waitUntil(timeoutMillis = 5_000) { draft() == "/poll " }
+    }
+
+    @Test
+    fun `Up in an empty channel composer edits the last post you made`() = chat(whom = "chat/~bus/general", seed = {
+        messages().upsert(MessageEntity("chat/~bus/general", "170141184506", "~zod", 1_000, """[{"inline":["older"]}]""", "/chat"))
+        messages().upsert(MessageEntity("chat/~bus/general", "170141184507", "~zod", 2_000, """[{"inline":["newest of mine"]}]""", "/chat"))
+        messages().upsert(MessageEntity("chat/~bus/general", "170141184508", "~bus", 3_000, """[{"inline":["theirs"]}]""", "/chat"))
+    }) { ship, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("theirs").fetchSemanticsNodes().isNotEmpty() }
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.DirectionUp) }
+        waitUntil(timeoutMillis = 5_000) { draft() == "newest of mine" }
+        onNode(hasSetTextAction()).performTextReplacement("newest, fixed")
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
+        val edit = ship.pokesTo("channels").single().json.toString()
+        assertTrue("\"edit\"" in edit && "170.141.184.507" in edit && "newest, fixed" in edit, edit)
+    }
 }
