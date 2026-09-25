@@ -196,6 +196,11 @@ fun GroupInfoPane(
         countsList.associate { mediaCategoryOrLink(it.category) to it.n }
     }
 
+    // Read here, not inside the items: the title and the level land in
+    // the same moments the group's rows are added, and a row reading
+    // them missed the change (as memberCount did, see PaneGroup).
+    val title = groupRow?.title ?: whom
+    val levelNow = notifyPref?.level ?: NotifyLevel.DEFAULT
     LazyColumn(modifier = modifier.fillMaxWidth()) {
         item {
             // Header: title + member count. Avatar is intentionally
@@ -207,7 +212,7 @@ fun GroupInfoPane(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    groupRow?.title ?: whom,
+                    title,
                     style = MaterialTheme.typography.titleLarge,
                 )
                 memberCount?.let {
@@ -232,7 +237,7 @@ fun GroupInfoPane(
             // Plus a watchword-exclusion toggle so chats the user
             // doesn't want scanned for watchword hits can opt out
             // even when the level is ALL/MENTIONS.
-            val level = notifyPref?.level ?: NotifyLevel.DEFAULT
+            val level = levelNow
             val canMutate = repo.settingsSync != null
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

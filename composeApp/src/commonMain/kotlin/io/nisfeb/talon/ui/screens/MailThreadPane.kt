@@ -368,6 +368,15 @@ fun MailThreadPane(
                             listState.scrollToItem(firstNew)
                         }
                     }
+                    // Read here, not inside the rows: a read that brings new
+                    // messages writes the thread, what is new and what is
+                    // shut together, and rows reading those states left an
+                    // already drawn message open or unmarked (the lazy list
+                    // missed one of several states changed at once; see
+                    // GroupInfoPane, ThreadList).
+                    val shutNow = shut.toSet()
+                    val freshNow = fresh.toSet()
+                    val foldedNow = folded.toSet()
                     LazyColumn(Modifier.fillMaxSize(), state = listState) {
                     items(
                         visible,
@@ -382,12 +391,12 @@ fun MailThreadPane(
                             hidden = v.hidden,
                             copies = copies[node.message.id] ?: 1,
                             foldable = node.children.isNotEmpty(),
-                            folded = node.message.id in folded,
+                            folded = node.message.id in foldedNow,
                             onFold = {
                                 if (!folded.remove(node.message.id)) folded.add(node.message.id)
                             },
-                            shut = node.message.id in shut,
-                            onShut = { setShut(node.message.id, node.message.id !in shut) },
+                            shut = node.message.id in shutNow,
+                            onShut = { setShut(node.message.id, node.message.id !in shutNow) },
                             onPath = node.message.id in travellingIds,
                             selected = node.message.id == selected,
                             selectable = node.message.verdict != Verdict.FORGED,
@@ -395,7 +404,7 @@ fun MailThreadPane(
                             // A folded one opens where it is tapped, not
                             // only on the name.
                             onSelect = { selected = node.message.id; setShut(node.message.id, false) },
-                            fresh = node.message.id in fresh,
+                            fresh = node.message.id in freshNow,
                             repo = repo,
                             imagesShown = imagesShown,
                             onShowImages = { imagesShown = true },
