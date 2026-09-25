@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.ui.test.ComposeUiTest
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.hasSetTextAction
@@ -263,6 +264,30 @@ class HomeListTest {
         tap("Friends")
         shows("This folder is empty. Long-press a chat or group to add it.")
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("settings").any { "Friends" in it.json.toString() } }
+    }
+
+    @Test
+    fun `a folder is renamed and deleted from its tab while reordering`() = home(seed = {}, synced = true) { ship ->
+        tap("+")
+        onNode(hasSetTextAction() and hasText("Name")).performTextInput("Friends")
+        onNodeWithText("Create").performClick()
+        tap("Friends")
+        onNodeWithContentDescription("Reorder").performClick()
+        onNodeWithContentDescription("Rename folder").performClick()
+        shows("Edit folder")
+        onNodeWithText("Rename").assertIsNotEnabled()
+        onNode(hasSetTextAction() and hasText("Friends")).performTextReplacement("Mates")
+        onNodeWithText("Rename").performClick()
+        shows("Mates")
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("settings").any { "put-entry" in it.json.toString() && "Mates" in it.json.toString() } }
+        onNodeWithContentDescription("Rename folder").performClick()
+        shows("Edit folder")
+        onNodeWithText("Delete").performClick()
+        // And asked again, saying the conversations stay.
+        shows("The conversations themselves stay", substring = true)
+        onNodeWithText("Delete").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Mates").fetchSemanticsNodes().isEmpty() }
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("settings").any { "del-entry" in it.json.toString() && "\"bucket-key\":\"folders\"" in it.json.toString() } }
     }
 
     @Test
