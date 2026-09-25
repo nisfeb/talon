@@ -358,11 +358,16 @@ class CallController(
                             TrunkInstall.Outdated(shipWire, TrunkWire.WIRE_VERSION)
                     }
                 }.onFailure { Log.w(TAG, "version scry failed; assuming an old desk", it) }
-                runCatching { adoptDefaultSfu(ch) }
-                    .onFailure { Log.w(TAG, "default sfu check failed", it) }
                 runCatching {
-                    _shipSfuBase.value = (ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject)
-                        ?.get("base")?.jsonPrimitive?.content.orEmpty()
+                    val sfu = ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject
+                    // Only a ship that answered it has none takes the default,
+                    // and off the connect path, like the ICE above.
+                    if (sfu != null && sfu["configured"]?.jsonPrimitive?.content != "true" && defaults.sfuBase.isNotEmpty()) {
+                        _shipSfuBase.value = defaults.sfuBase
+                        scope.launch { adoptDefaultSfu(ch) }
+                    } else {
+                        _shipSfuBase.value = sfu?.get("base")?.jsonPrimitive?.content.orEmpty()
+                    }
                 }.onFailure { Log.w(TAG, "sfu scry failed", it) }
                 runCatching {
                     val ours = session.shipName.orEmpty()
@@ -1000,20 +1005,13 @@ class CallController(
     }
 
     /**
-     * Point this ship at the build's default sidecar, but only if it
-     * has none. Never overwrites a ship that has been configured — a
+     * Point this ship, which said it has no sidecar, at the build's
+     * default. Never called for a ship that has been configured — a
      * user who set their own server keeps it.
      */
     private suspend fun adoptDefaultSfu(ch: UrbitChannel) {
-        if (defaults.sfuBase.isEmpty()) return
-        val configured = runCatching {
-            (ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject)
-                ?.get("configured")?.jsonPrimitive?.content == "true"
-        }.getOrElse { return }
-        if (configured) return
         Log.i(TAG, "no sidecar on this ship; adopting the built-in default")
-        _shipSfuBase.value = defaults.sfuBase
-        runCatching {
+        io.nisfeb.talon.util.runSuspendCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,
                 TrunkWire.setSfuAction(
@@ -1022,7 +1020,10 @@ class CallController(
                     defaults.sfuKey,
                 ),
             )
-        }.onFailure { Log.w(TAG, "set-sfu poke failed", it) }
+        }.onFailure {
+            Log.w(TAG, "set-sfu poke failed", it)
+            _shipSfuBase.compareAndSet(defaults.sfuBase, "")
+        }
     }
 
     /**
