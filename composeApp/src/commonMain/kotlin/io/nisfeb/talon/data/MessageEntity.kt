@@ -3,6 +3,9 @@ package io.nisfeb.talon.data
 import androidx.room.Entity
 import androidx.compose.runtime.Immutable
 import androidx.room.Index
+import androidx.room.migration.Migration
+import androidx.sqlite.SQLiteConnection
+import androidx.sqlite.execSQL
 
 /**
  * One Urbit post. Keyed by (whom, id) so a single author's post across
@@ -55,4 +58,18 @@ data class MessageEntity(
      * inserts a fresh status=null row, which is the implicit "sent".
      */
     val status: String? = null,
+    /**
+     * What search and watchword scans match: the title and the words as
+     * shown. [MessageDao]'s writes fill it; null only on rows from before
+     * it existed, until [TlonChatRepo] start fills those in.
+     */
+    val searchText: String? = null,
 )
+
+/** 48 to 49: [MessageEntity.searchText]. Old rows get theirs once the repo starts. */
+internal const val MESSAGE_SEARCH_TEXT_SQL = "ALTER TABLE messages ADD COLUMN searchText TEXT"
+
+/** See [MESSAGE_SEARCH_TEXT_SQL]. Android runs the same statement its own way. */
+val MESSAGE_SEARCH_TEXT_MIGRATION = object : Migration(48, 49) {
+    override fun migrate(connection: SQLiteConnection) = connection.execSQL(MESSAGE_SEARCH_TEXT_SQL)
+}

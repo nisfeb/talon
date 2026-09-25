@@ -69,6 +69,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -357,6 +358,12 @@ class TlonChatRepo(
             runCatching { dedupeDottedIds() }
                 .onFailure { Log.w(TAG, "dotted-id dedupe failed", it) }
             runSessionLoop(session)
+        }
+        // Rows stored before searchText existed get it, a batch at a
+        // time; until then search reads their JSON as it used to.
+        scope.launch {
+            runCatching { while (db.messages().fillSearchText(500) > 0) yield() }
+                .onFailure { Log.w(TAG, "search text fill failed", it) }
         }
     }
 

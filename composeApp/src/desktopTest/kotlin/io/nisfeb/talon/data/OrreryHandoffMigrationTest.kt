@@ -24,13 +24,14 @@ class OrreryHandoffMigrationTest {
         // No destructive fallback: a migration that does not match the entity fails here.
         fun db() = Room.databaseBuilder<AppDatabase>(name = path)
             .setDriver(BundledSQLiteDriver())
-            .addMigrations(ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION)
+            .addMigrations(ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION)
             .build()
         try {
             db().also { it.orreryAccounts().get("~zod"); it.close() }
             // Wind the file back to 46, as a tester's phone has it.
             BundledSQLiteDriver().open(path).also { c ->
                 c.execSQL("DROP TABLE orrery_accounts")
+                c.execSQL("ALTER TABLE messages DROP COLUMN searchText") // added at 49
                 c.execSQL(ORRERY_ACCOUNTS_SQL)
                 c.execSQL(ORRERY_CHANNELS_SQL)
                 c.execSQL("INSERT INTO orrery_accounts VALUES ('~zod', 'c1', 'c1.secret', 111, 222, 333)")

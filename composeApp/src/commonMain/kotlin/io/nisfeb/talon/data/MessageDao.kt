@@ -2,7 +2,11 @@ package io.nisfeb.talon.data
 
 import androidx.room.Dao
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
+import io.nisfeb.talon.urbit.Story
+import io.nisfeb.talon.urbit.StoryPart
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -16,11 +20,28 @@ abstract class MessageDao {
      * normalize, but if one regresses, the DAO still keeps the DB sane.
      */
     open suspend fun upsert(message: MessageEntity) {
-        upsertRaw(message.normalized())
+        upsertRaw(message.normalized().searchable())
     }
 
     open suspend fun upsertAll(messages: List<MessageEntity>) {
-        upsertAllRaw(messages.map { it.normalized() })
+        upsertAllRaw(messages.map { it.normalized().searchable() })
+    }
+
+    @Query("SELECT * FROM messages WHERE searchText IS NULL LIMIT :limit")
+    protected abstract suspend fun unsearchable(limit: Int): List<MessageEntity>
+
+    @Query("UPDATE messages SET searchText = :text WHERE whom = :whom AND id = :id")
+    protected abstract suspend fun setSearchText(whom: String, id: String, text: String)
+
+    /**
+     * Give up to [limit] rows stored before [MessageEntity.searchText]
+     * existed their text. Returns how many it did; call until 0.
+     */
+    @Transaction
+    open suspend fun fillSearchText(limit: Int): Int {
+        val rows = unsearchable(limit)
+        rows.forEach { setSearchText(it.whom, it.id, searchTextOf(it.contentJson, it.title)) }
+        return rows.size
     }
 
     @Upsert
@@ -269,10 +290,9 @@ abstract class MessageDao {
     abstract fun conversationLatest(): Flow<List<MessageEntity>>
 
     /**
-     * Substring search across all messages' content JSON. v1 matches raw
-     * JSON text — inline text spans come through directly; structural
-     * JSON keys (like "inline", "block") would also match but don't come
-     * up as realistic queries.
+     * Substring search across messages' titles and words as shown
+     * ([MessageEntity.searchText]). It matched the story JSON once, so
+     * "ship", "link" or "break" found every mention, link and line break.
      *
      * Callers MUST pre-escape the needle via [escapeLikeNeedle] — without
      * it, queries containing `%` or `_` produce wrong results (search
@@ -282,8 +302,7 @@ abstract class MessageDao {
     @Query("""
         SELECT * FROM messages
         WHERE isDeleted = 0
-          AND (contentJson LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE
-               OR title LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE)
+          AND COALESCE(searchText, contentJson) LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE
         ORDER BY sentMs DESC
         LIMIT 100
     """)
@@ -309,7 +328,7 @@ abstract class MessageDao {
         WHERE m.isDeleted = 0
           AND (
             :needle IS NULL
-            OR m.contentJson LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE
+            OR COALESCE(m.searchText, m.contentJson) LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE
           )
           AND (:fromShip IS NULL OR m.author = :fromShip)
           AND (:inWhom IS NULL OR m.whom = :inWhom)
@@ -358,7 +377,7 @@ abstract class MessageDao {
         SELECT * FROM messages
         WHERE isDeleted = 0
           AND author != :exceptAuthor
-          AND contentJson LIKE '%' || :term || '%' ESCAPE '\' COLLATE NOCASE
+          AND COALESCE(searchText, contentJson) LIKE '%' || :term || '%' ESCAPE '\' COLLATE NOCASE
         ORDER BY sentMs DESC
     """)
     abstract suspend fun candidatesForBackfill(term: String, exceptAuthor: String): List<MessageEntity>
@@ -382,6 +401,31 @@ data class ReplyCount(
  * only reads / writes undotted ids; wire payloads carry dotted @ud so
  * any ingest path that forgets to strip dots produces a phantom twin.
  */
+internal fun MessageEntity.searchable(): MessageEntity = copy(searchText = searchTextOf(contentJson, title))
+
+/**
+ * The title and the words a reader sees, for search. Not the story JSON,
+ * and not the placeholders previews use ("[image]" would match "image").
+ */
+internal fun searchTextOf(contentJson: String, title: String?): String {
+    val head = listOfNotNull(title?.trim()?.takeIf { it.isNotEmpty() })
+    val parts = runCatching { Story.parse(Json.parseToJsonElement(contentJson)) }.getOrNull()
+        ?: return (head + contentJson).joinToString("\n")
+    val words = parts.mapNotNull { part ->
+        when (part) {
+            is StoryPart.Text -> part.text.text
+            is StoryPart.Code -> part.code
+            is StoryPart.Image -> part.alt
+            is StoryPart.Table -> (listOf(part.header) + part.rows).joinToString("\n") { row -> row.joinToString(" ") { it.text } }
+            is StoryPart.LinkPreview -> listOfNotNull(part.title, part.url).joinToString(" ")
+            is StoryPart.CalWidget -> part.title
+            is StoryPart.PollWidget -> part.question
+            else -> null
+        }
+    }
+    return (head + words).joinToString("\n")
+}
+
 internal fun MessageEntity.normalized(): MessageEntity {
     val rawId = id
     val rawParent = parentId
