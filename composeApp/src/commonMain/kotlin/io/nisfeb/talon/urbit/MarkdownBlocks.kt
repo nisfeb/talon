@@ -23,7 +23,12 @@ import kotlinx.serialization.json.put
  */
 object MarkdownBlocks {
 
-    fun toStory(text: String): JsonArray = buildJsonArray {
+    /**
+     * [tables] false is the ship's form: %channels has no table block and
+     * refuses a post holding one, so a table goes as its own lines, which
+     * [Story] draws as a table again on the way in. True is for drawing.
+     */
+    fun toStory(text: String, tables: Boolean = true): JsonArray = buildJsonArray {
         val lines = text.replace("\r\n", "\n").split('\n')
         var i = 0
         val buf = StringBuilder()
@@ -101,20 +106,20 @@ object MarkdownBlocks {
                 line.contains('|') && i + 1 < lines.size && isTableSeparator(lines[i + 1]) -> {
                     // GFM table: a `| a | b |` header, a `| --- | --- |`
                     // separator, then rows until a blank / non-pipe line.
-                    // Tlon has no table block, so we emit a bespoke one
-                    // ([Story] renders it as a real grid). Cells go through
-                    // the inline parser so styling inside a cell survives.
+                    // Tlon has no table block, so for drawing we emit a
+                    // bespoke one ([Story] renders it as a real grid). Cells
+                    // go through the inline parser so styling survives.
                     flushParagraph()
-                    val header = splitTableCells(line)
-                    i += 2
-                    val rows = mutableListOf<List<String>>()
-                    while (i < lines.size && lines[i].isNotBlank() &&
-                        lines[i].contains('|') && !lines[i].startsWith("```")
-                    ) {
-                        rows.add(splitTableCells(lines[i]))
-                        i++
+                    var end = i + 2
+                    while (end < lines.size && lines[end].isNotBlank() &&
+                        lines[end].contains('|') && !lines[end].startsWith("```")
+                    ) end++
+                    if (tables) {
+                        add(tableBlock(splitTableCells(line), (i + 2 until end).map { splitTableCells(lines[it]) }))
+                    } else {
+                        add(inlineVerse(lines.subList(i, end).joinToString("\n")))
                     }
-                    add(tableBlock(header, rows))
+                    i = end
                 }
                 isListLine(line) -> {
                     // Group consecutive same-kind list lines (all bullet
@@ -139,6 +144,8 @@ object MarkdownBlocks {
                                             i++
                                         }
                                     })
+                                    // Required by the ship's parser, empty or not.
+                                    put("contents", buildJsonArray {})
                                 })
                             })
                         })
@@ -305,6 +312,7 @@ internal fun codeBlockVerse(code: String, lang: String) = buildJsonObject {
 private val codeLangSanitizer = Regex("[^a-z0-9-]")
 
 internal fun normalizeCodeLang(lang: String): String {
-    val cleaned = lang.trim().lowercase().replace(codeLangSanitizer, "")
+    // A @tas starts with a letter: `6502` or `-x` was refused as it stood.
+    val cleaned = lang.trim().lowercase().replace(codeLangSanitizer, "").dropWhile { it !in 'a'..'z' }
     return cleaned.ifEmpty { "text" }
 }

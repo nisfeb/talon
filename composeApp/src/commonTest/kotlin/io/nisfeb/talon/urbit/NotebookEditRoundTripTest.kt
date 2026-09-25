@@ -59,7 +59,7 @@ class NotebookEditRoundTripTest {
         val md = RawMarkdown.fromStory(nested)
         assertEquals("- a\n  - b\n- c", md)
         assertEquals(
-            story("""[{"block":{"listing":{"list":{"type":"unordered","items":[{"item":["a"]},{"item":["b"]},{"item":["c"]}]}}}}]"""),
+            story("""[{"block":{"listing":{"list":{"type":"unordered","items":[{"item":["a"]},{"item":["b"]},{"item":["c"]}],"contents":[]}}}}]"""),
             MarkdownBlocks.toStory(md),
         )
     }

@@ -912,7 +912,7 @@ class TlonChatRepo(
         bodyMarkdown: String,
     ): String {
         require(nest.startsWith("diary/")) { "not a diary channel: $nest" }
-        val content = MarkdownBlocks.toStory(bodyMarkdown)
+        val content = MarkdownBlocks.toStory(bodyMarkdown, tables = false)
         val meta = buildJsonObject {
             put("title", title)
             put("image", image)
@@ -2660,7 +2660,7 @@ class TlonChatRepo(
         val priorMeta = prior["meta"] as? JsonObject
         val content = MarkdownBlocks.mergeEdit(
             prior = prior["content"] as? JsonArray,
-            parsed = MarkdownBlocks.toStory(bodyMarkdown),
+            parsed = MarkdownBlocks.toStory(bodyMarkdown, tables = false),
         )
         val meta = buildJsonObject {
             put("title", title)

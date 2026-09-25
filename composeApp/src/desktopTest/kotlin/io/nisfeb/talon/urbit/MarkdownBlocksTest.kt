@@ -72,6 +72,25 @@ class MarkdownBlocksTest {
         verse["block"]!!.jsonObject["listing"]!!.jsonObject["list"]!!.jsonObject
 
     @Test
+    fun `what goes to the ship is only what its story parser reads`() {
+        // tlon-apps desk/lib/story-json.hoon: `block` is `of` over these
+        // tags, a list is `ot` over type, items AND contents, and a code
+        // block's lang is a @tas. Anything else and the post is refused.
+        val doc = "# Title\n\n- one\n- two\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n```6502\nlda #1\n```\n\n---\n"
+        val story = MarkdownBlocks.toStory(doc, tables = false)
+        val blocks = story.mapNotNull { (it as JsonObject)["block"]?.jsonObject }
+        val known = setOf("rule", "cite", "listing", "code", "header", "image", "link")
+        assertTrue("only known block tags: $blocks", blocks.all { it.keys.single() in known })
+        val list = listOf(story.first { "listing" in ((it as JsonObject)["block"]?.jsonObject?.keys ?: emptySet()) }.jsonObject)
+        assertEquals(setOf("type", "items", "contents"), list.keys)
+        assertEquals("text", blocks.single { "code" in it }["code"]!!.jsonObject["lang"]!!.jsonPrimitive.content)
+        assertEquals("x", normalizeCodeLang("-x"))
+        val tableText = story.mapNotNull { (it as JsonObject)["inline"] }.joinToString().replace("\\", "")
+        assertTrue("the table goes as its lines: $tableText", "| 1 | 2 |" in tableText)
+        assertTrue("drawn, it is still a table", MarkdownBlocks.toStory(doc).any { (it as JsonObject)["block"]?.jsonObject?.containsKey("table") == true })
+    }
+
+    @Test
     fun `asterisk and plus also start bullets`() {
         assertTrue(MarkdownBlocks.isListLine("* star"))
         assertTrue(MarkdownBlocks.isListLine("+ plus"))
