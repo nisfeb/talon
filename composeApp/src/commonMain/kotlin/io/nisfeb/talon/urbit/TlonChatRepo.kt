@@ -1854,6 +1854,9 @@ class TlonChatRepo(
             listOf("/v6/feed/init/30", "/v5/feed/init/30"),
             "activity feed",
         ) as? JsonObject
+            // No answer is not an empty feed: stored as one, a timed-out
+            // refresh replaced what was showing with "No activity yet".
+            ?: error("the ship did not answer for its activity")
         val items = parseActivityFeed(body)
         _activityFeed.value = items
         return items
