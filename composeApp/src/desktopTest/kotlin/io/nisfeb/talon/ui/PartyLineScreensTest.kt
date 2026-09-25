@@ -1,5 +1,9 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -7,13 +11,23 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.runComposeUiTest
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.nisfeb.talon.call.AudioDevice
+import io.nisfeb.talon.call.AudioDevices
+import io.nisfeb.talon.call.PartyLine
+import io.nisfeb.talon.call.TrunkTicket
+import io.nisfeb.talon.call.VideoDevice
+import io.nisfeb.talon.call.VideoDevices
 import io.nisfeb.talon.call.MediaState
 import io.nisfeb.talon.call.PartyMember
 import io.nisfeb.talon.call.PartyState
 import io.nisfeb.talon.ui.theme.TalonTheme
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -191,5 +205,111 @@ class PartyLineScreensTest {
         onNodeWithText("Record").performClick()
         waitForIdle()
         assertEquals(listOf("record"), did)
+    }
+
+    // ─── the devices, the window, and a line that failed ──────────
+
+    private class Speakers(val takes: Boolean = true) : AudioDevices {
+        var chosen: String? = null
+        override val supported = true
+        override fun outputs() = listOf(AudioDevice("spk", "Speakers"), AudioDevice("hs", "Headset"))
+        override val selectedOutput get() = chosen
+        override fun selectOutput(id: String?) { if (takes) chosen = id }
+    }
+
+    private object Cameras : VideoDevices {
+        override val supported = true
+        override fun cameras() = listOf(VideoDevice("front", "Front"), VideoDevice("back", "Back"))
+        override val selectedCamera = "front"
+    }
+
+    private inner class Window : WindowFullScreen {
+        var on by mutableStateOf(false)
+        override fun isFullScreen() = on
+        override fun set(full: Boolean) { did += "window:$full"; on = full }
+    }
+
+    private fun controls(audio: AudioDevices = AudioDevices.Noop, cameraOn: Boolean = false, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+        val window = Window()
+        setContent {
+            CompositionLocalProvider(LocalWindowFullScreen provides window) {
+                TalonTheme(darkTheme = false) {
+                    PartyLineFullScreen(
+                        state = live(), roomName = "Garden chat", nameFor = { names[it] ?: it }, selfShip = "~zod",
+                        onToggleMute = {}, onLeave = {}, onMinimize = {},
+                        audioDevices = audio, videoDevices = Cameras, onSelectCamera = { did += "source:$it" },
+                        cameraOn = cameraOn, onToggleCamera = { did += "camera" }, onSwitchCamera = { did += "flip" },
+                    )
+                }
+            }
+        }
+        waitForIdle()
+        block()
+    }
+
+    @Test
+    fun `the speaker is picked from the outputs, and the caption says what took`() {
+        val speakers = Speakers()
+        controls(speakers) {
+            assertTrue(shows("System default"), "nothing chosen is the system's choice")
+            onNodeWithText("Audio").performClick()
+            onNodeWithText("Headset").performClick()
+            waitForIdle()
+            assertTrue(shows("Headset"))
+        }
+        assertEquals("hs", speakers.chosen)
+        controls(Speakers(takes = false)) {
+            onNodeWithText("Audio").performClick()
+            onNodeWithText("Headset").performClick()
+            waitForIdle()
+            assertTrue(shows("System default") && !shows("Headset"), "a route the platform refused is not claimed")
+        }
+    }
+
+    @Test
+    fun `the camera turns on, its source is picked, and it flips only while on`() {
+        controls {
+            assertTrue(onAllNodesWithContentDescription("Flip").fetchSemanticsNodes().isEmpty())
+            onNodeWithContentDescription("Camera").performClick()
+            assertTrue(shows("Front"), "the camera in use")
+            onNodeWithText("Source").performClick()
+            onNodeWithText("Back").performClick()
+            waitForIdle()
+            onNodeWithText("Source").performClick()
+            onAllNodesWithText("Back").onLast().performClick()
+            waitForIdle()
+        }
+        assertEquals(listOf("camera", "source:back"), did.filterNot { it.startsWith("window:") }, "the camera in use picked again restarts nothing")
+        did.clear()
+        controls(cameraOn = true) {
+            onNodeWithContentDescription("Camera off").assertExists()
+            onNodeWithContentDescription("Flip").performClick()
+            waitForIdle()
+        }
+        assertEquals(listOf("flip"), did.filterNot { it.startsWith("window:") })
+    }
+
+    @Test
+    fun `full screen fills the window, and leaving the call gives it back`() {
+        controls {
+            onNodeWithContentDescription("Full screen").performClick()
+            waitForIdle()
+            onNodeWithContentDescription("Exit full screen").assertExists()
+        }
+        assertEquals(listOf("window:true", "window:false"), did)
+    }
+
+    @Test
+    fun `a join that failed says why, and Dismiss clears it on the line itself`() {
+        val line = PartyLine(HttpClient(MockEngine { throw IllegalStateException("sfu unreachable") }), links = { _, _ -> error("no media") })
+        line.join(TrunkTicket("garden-chat", "http://sfu.test/group/g/r/", "tok"), "~zod")
+        runComposeUiTest {
+            setContent { TalonTheme(darkTheme = false) { PartyLineBar(line) } }
+            waitUntil(timeoutMillis = 5_000) { shows("Party line: sfu unreachable") }
+            onNodeWithText("Dismiss").performClick()
+            waitForIdle()
+            assertEquals(PartyState.Idle, line.state.value)
+            assertFalse(shows("Party line: sfu unreachable"))
+        }
     }
 }
