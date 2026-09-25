@@ -134,7 +134,13 @@ class AiProfileTest {
             "http://172.20.1.1", "http://100.100.206.8:8081", "http://box.local:1234", "https://llm.tail1234.ts.net/v1")) {
             assertTrue(isPrivateUrl(u), u)
         }
-        for (u in listOf("https://openrouter.ai/api/v1", "https://api.openai.com/v1", "http://172.40.1.1", "http://100.200.1.1", null, "")) {
+        for (u in listOf("http://172.16.0.1", "http://172.31.255.1", "http://100.64.0.1", "http://100.127.0.1")) {
+            assertTrue(isPrivateUrl(u), "the edge of its range: $u")
+        }
+        for (u in listOf("https://openrouter.ai/api/v1", "https://api.openai.com/v1", "http://172.40.1.1", "http://100.200.1.1", null, "",
+            "http://172.15.0.1", "http://172.32.0.1", "http://100.63.0.1", "http://100.128.0.1", "http://192.169.1.1",
+            // A public name that starts like a private address.
+            "http://10.0.0.1.example.com/v1", "http://localhost.example.com")) {
             assertFalse(isPrivateUrl(u), u.toString())
         }
         assertNull(migrateProfile(cfg(key = "")).defaultModel, "no key, no default model")

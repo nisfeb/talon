@@ -335,7 +335,9 @@ fun isPrivateUrl(url: String?): Boolean {
         ?: return false
     if (host.isEmpty()) return false
     if (host == "localhost" || host == "::1" || host.endsWith(".local") || host.endsWith(".ts.net") || host.endsWith(".lan")) return true
-    val o = host.split('.').mapNotNull { it.toIntOrNull() }
+    // Every label a number: `10.0.0.1.example.com` is a public name, whose
+    // owner points it anywhere, and was taken for 10.0.0.1.
+    val o = host.split('.').map { it.toIntOrNull() ?: return false }
     if (o.size != 4) return false
     return o[0] == 127 || o[0] == 10 || (o[0] == 192 && o[1] == 168) || (o[0] == 172 && o[1] in 16..31) ||
         (o[0] == 100 && o[1] in 64..127)
