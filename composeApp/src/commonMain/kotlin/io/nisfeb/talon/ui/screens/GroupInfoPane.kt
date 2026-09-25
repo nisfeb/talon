@@ -73,14 +73,18 @@ fun GroupInfoPane(
 ) {
     val scope = rememberCoroutineScope()
 
-    // Resolve channel → group flag once per whom. Null means we
-    // either don't know the group yet or this isn't a group channel
-    // (DM/club). The leave row hides in that case.
-    var groupFlag by remember(whom) { mutableStateOf<String?>(null) }
+    // What the pane learns of the group, as one state. As three, the
+    // count landed and the header went on without it: the list's rows
+    // missed one of several states written together, as ThreadList's
+    // did (d5617e98).
+    var group by remember(whom) { mutableStateOf(PaneGroup()) }
+    // Null means we either don't know the group yet or this isn't a
+    // group channel (DM/club). The leave row hides in that case.
+    val groupFlag = group.flag
     // Null until the fetch lands (or forever if it fails) — the count
     // lines render only when we actually know the number, never "0".
-    var memberCount by remember(whom) { mutableStateOf<Int?>(null) }
-    var isPublic by remember(whom) { mutableStateOf(false) }
+    val memberCount = group.members
+    val isPublic = group.public
     var pendingLeave by remember(whom) { mutableStateOf(false) }
     var leaving by remember(whom) { mutableStateOf(false) }
     var leaveError by remember(whom) { mutableStateOf<String?>(null) }
@@ -162,11 +166,11 @@ fun GroupInfoPane(
     }
     LaunchedEffect(whom) {
         val mapping = runCatching { db.groups().channelGroupFor(whom) }.getOrNull()
-        groupFlag = mapping?.groupFlag
         val flag = mapping?.groupFlag ?: return@LaunchedEffect
+        group = PaneGroup(flag)
         runCatching { repo.fetchGroupAdmin(flag) }
             .getOrNull()
-            ?.let { memberCount = it.members.size; isPublic = it.privacy == "public" }
+            ?.let { group = PaneGroup(flag, it.members.size, it.privacy == "public") }
     }
 
     val groupRowFlow: Flow<io.nisfeb.talon.data.GroupEntity?> =
@@ -523,3 +527,6 @@ private fun NotifyLevelOption(
         )
     }
 }
+
+/** The group behind a channel as the info pane knows it: none yet, then its flag, then its count and privacy. */
+private data class PaneGroup(val flag: String? = null, val members: Int? = null, val public: Boolean = false)
