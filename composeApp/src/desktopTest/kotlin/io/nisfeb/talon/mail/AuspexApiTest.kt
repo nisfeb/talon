@@ -137,6 +137,21 @@ class AuspexApiTest {
     // ---- writes --------------------------------------------------------
 
     @Test
+    fun `an attachment goes up as its raw bytes, and one comes back by a GET`() = runBlocking<Unit> {
+        val a = api { req ->
+            if (req.method == io.ktor.http.HttpMethod.Post) jsonOk(this, """{"hash":"0vabc"}""")
+            else respond(ByteReadChannel("hi"), HttpStatusCode.OK, headersOf("Content-Type", "text/plain"))
+        }
+        assertEquals("0vabc", a.uploadBlob(byteArrayOf(1, 2, 3)))
+        val up = seen.last()
+        assertEquals(io.ktor.http.HttpMethod.Post, up.method)
+        assertEquals(io.ktor.http.ContentType.Application.OctetStream, up.body.contentType)
+        assertEquals(listOf<Byte>(1, 2, 3), (up.body as io.ktor.http.content.OutgoingContent.ByteArrayContent).bytes().toList())
+        a.blob("0vabc", "a.txt", "text/plain")
+        assertEquals(io.ktor.http.HttpMethod.Get, seen.last().method)
+    }
+
+    @Test
     fun `a compose sends its null parent rather than omitting it`() = runBlocking<Unit> {
         val a = api { jsonOk(this, """{"ok":true}""") }
         a.send(to = listOf("~zod"), subject = "s", body = "b", prev = null)

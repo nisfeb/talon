@@ -193,6 +193,38 @@ class MailRepoWriteTest {
     }
 
     @Test
+    fun `read, unread and delete show at once, and leaving a ship leaves none of its mail`() {
+        val unreadRow = row("0v1", "one").replace(""""unread":false""", """"unread":true""")
+        withRepo({ req ->
+            val path = req.url.encodedPath
+            when {
+                path.endsWith("/api/inbox") -> jsonOk(this, pageWith(unreadRow, row("0v2", "two")))
+                path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+                path.endsWith("/api/thread/0v1") -> jsonOk(this, threadJson("0v1"))
+                // Held, so what shows is the local edit and not a re-read.
+                else -> { delay(5_000); jsonOk(this, "{}") }
+            }
+        }) { r, _ ->
+            r.attach("https://ship.example")
+            settle(r)
+            r.loadThread("0v1")
+            r.markRead(listOf("0v1m1"), "0v1")
+            assertEquals(false, r.page.value!!.threads.first { it.id == "0v1" }.unread)
+            assertEquals(true, r.cachedThread("0v1")!!.messages.single().read)
+            r.markUnread(listOf("0v1m1"), "0v1")
+            assertEquals(true, r.page.value!!.threads.first { it.id == "0v1" }.unread)
+            assertEquals(false, r.cachedThread("0v1")!!.messages.single().read)
+            r.deleteThread("0v1")
+            assertEquals(listOf("0v2"), r.page.value!!.threads.map { it.id })
+            assertNull(r.cachedThread("0v1"))
+
+            r.detach()
+            assertNull(r.page.value, "a ship signed out of shows none of its mail")
+            assertEquals(MailAvailability.UNKNOWN, r.availability.value)
+        }
+    }
+
+    @Test
     fun `a 404 off the inbox path never flips availability, but the inbox probe still does`() {
         // Every route that is not the inbox read: a 404 is an ordinary
         // refusal with the ship's reason, never an install prompt.

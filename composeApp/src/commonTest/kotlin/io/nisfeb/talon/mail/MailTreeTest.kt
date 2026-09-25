@@ -113,6 +113,22 @@ class MailTreeTest {
     }
 
     @Test
+    fun `replies and roots are drawn in the order they were sent, whatever order they came in`() {
+        val l = layoutTree(
+            listOf(
+                msg("late", sent = 5),
+                msg("root", sent = 1),
+                msg("b", prev = "root", sent = 3),
+                msg("a", prev = "root", sent = 2),
+            ),
+        )
+        val by = l.nodes.associateBy { it.message.id }
+        assertEquals(listOf("a", "b", "late"), listOf("a", "b", "late").sortedBy { by.getValue(it).row })
+        assertEquals(0f, by.getValue("a").row)
+        assertEquals(2f, by.getValue("late").row, "the later root below the first")
+    }
+
+    @Test
     fun `a lit path is the edges a reply would carry`() {
         val l = layoutTree(
             listOf(
