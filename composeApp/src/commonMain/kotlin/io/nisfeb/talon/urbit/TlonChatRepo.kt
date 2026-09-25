@@ -68,6 +68,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.withContext
@@ -344,6 +345,17 @@ class TlonChatRepo(
         channel = ch
         ourPatp = us
         this.http = http
+    }
+
+    /**
+     * For tests: stop, and wait out work already running. A screen's
+     * dispose marks its chat read on [scope]; a db closed under that
+     * write crashes the native SQLite and the whole test JVM with it.
+     */
+    internal suspend fun stopAndJoinForTest() {
+        stop()
+        scope.coroutineContext[kotlinx.coroutines.Job]?.join()
+        pushScope.coroutineContext[kotlinx.coroutines.Job]?.cancelAndJoin()
     }
 
     fun start(session: UrbitSession) {

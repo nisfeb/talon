@@ -81,6 +81,7 @@ class GalleryScreensTest {
             }
         } finally {
             scope.cancel()
+            runBlocking { repo.stopAndJoinForTest() }
             db.close()
             tmp.deleteRecursively()
         }

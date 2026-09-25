@@ -82,6 +82,7 @@ class DmChatScreenTest {
             }
         } finally {
             stream.cancel()
+            runBlocking { repo.stopAndJoinForTest() }
             db.close()
             tmp.deleteRecursively()
         }
