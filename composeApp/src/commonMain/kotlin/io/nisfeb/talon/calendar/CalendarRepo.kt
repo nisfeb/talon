@@ -513,7 +513,18 @@ class CalendarRepo(
             }
             // Against the lists from before the write: taken after it, a
             // refresh that landed in between made the change look never come.
-            if (lists() != reach.before || attempt == AFTER_WRITE_READS) break
+            val now = lists()
+            if (now != reach.before) {
+                // It can land between two reads of one pass: the list read
+                // first is then the old copy. The home screen's tasks kept a
+                // moved one on today while the month showed it on Monday.
+                // What came back unchanged is read once more.
+                if (tasks && now.first == reach.before.first) refreshTasks()
+                if (reach.rows && now.second == reach.before.second) refreshWindow()
+                if (reach.rows && now.third == reach.before.third) range?.let { (f, t) -> loadRange(f, t) }
+                break
+            }
+            if (attempt == AFTER_WRITE_READS) break
             delay(pause)
             pause *= 2
         }

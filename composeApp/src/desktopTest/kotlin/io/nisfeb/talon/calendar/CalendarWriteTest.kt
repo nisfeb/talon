@@ -40,6 +40,7 @@ class CalendarWriteTest {
     private fun calendar(
         calendars: String = """[{"id":"default","name":"Personal","kind":"local"}]""",
         tasks: (Ship) -> String = { """[$undated,$dated]""" },
+        window: (Ship) -> String = { """{"rows":[]}""" },
         block: suspend (CalendarRepo, Ship) -> Unit,
     ) = runBlocking {
         val scope = CoroutineScope(SupervisorJob())
@@ -55,7 +56,7 @@ class CalendarWriteTest {
                     ship.reads += path + (req.url.encodedQuery.takeIf { it.isNotEmpty() }?.let { "?$it" } ?: "")
                     val body = when {
                         path.endsWith("/events.json") -> tasks(ship)
-                        path.endsWith("/window.json") -> """{"rows":[]}"""
+                        path.endsWith("/window.json") -> window(ship)
                         path.endsWith("/calendars.json") -> calendars
                         path.endsWith("/config.json") -> """{"title":"Calendar","zone":"UTC","ball":"abc"}"""
                         path.endsWith("/google.json") -> """{"connected":true,"linked":{}}"""
@@ -117,6 +118,29 @@ class CalendarWriteTest {
         val edited = EventDraft(name = "Buy oat milk", cat = EventCat.TODO, date = LocalDate(2026, 9, 25), cal = "default")
         assertTrue(repo.pokeEvent(eventBody(edited, "t1")))
         assertEquals("Buy oat milk", repo.tasks.value?.single()?.name, "read again until the edit showed")
+    }
+
+    @Test
+    fun `a change that lands between two reads of one pass is read into both`() {
+        // Lands as the first read after the write is answered: that read
+        // has the old task, the window read just after it has the new day.
+        val applied = java.util.concurrent.atomic.AtomicBoolean(false)
+        val monday = 1790640000000L + 3 * 86_400_000L
+        calendar(
+            tasks = { ship ->
+                val due = if (applied.get()) monday else 1790640000000L
+                if (ship.writtenAt.get() > 0) applied.set(true)
+                """[{"id":"t2","cal":"default","cat":"todo","meta":{"name":"Pay rent"},"due_ms":$due}]"""
+            },
+            window = {
+                val l = if (applied.get()) monday else 1790640000000L
+                """{"rows":[{"id":"t2","cal":"default","cat":"todo","kind":"todo","all":true,"meta":{"name":"Pay rent"},"l":$l,"r":$l}]}"""
+            },
+        ) { repo, _ ->
+            val edited = EventDraft(name = "Pay rent", cat = EventCat.TODO, date = LocalDate(2026, 10, 1), due = LocalDate(2026, 10, 1), cal = "default")
+            assertTrue(repo.pokeEvent(eventBody(edited, "t2")))
+            assertEquals(monday, repo.tasks.value?.single()?.dueMs, "the task list has the new day too, not the copy read before it landed")
+        }
     }
 
     @Test
