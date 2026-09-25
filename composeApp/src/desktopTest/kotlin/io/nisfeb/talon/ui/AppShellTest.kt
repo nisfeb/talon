@@ -161,4 +161,37 @@ class AppShellTest {
         Thread.sleep(300)
         onNode(hasSetTextAction()).assertIsFocused()
     }
+
+    @Test
+    fun `Home, Mail and Calendar take the whole area, and each says what the ship lacks`() = app {
+        onNodeWithContentDescription("Home").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Set a location") }
+        assertTrue(showing("Install the calendar") && !present("New message"), "the home page, not the list")
+        onNodeWithContentDescription("Mail").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Mail runs in Grubbery, which this ship does not have yet.") }
+        onNodeWithContentDescription("Calendar").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("The Today widget on the home page can install it.") }
+        onNodeWithContentDescription("Chats").performClick()
+        home()
+    }
+
+    @Test
+    fun `a thread opened from a message sits beside the chat`() = app(seed = {
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["shall we meet"]}]""", "/chat"))
+    }) {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("shall we meet") }
+        onNodeWithText("~bus").performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
+        // Desktop's way into a message's menu: the Message actions button beside it.
+        val opened = { onAllNodesWithText("Reply in thread").fetchSemanticsNodes().isNotEmpty() }
+        for (attempt in 1..3) {
+            onAllNodesWithContentDescription("Message actions").onFirst().performClick()
+            if (runCatching { waitUntil(timeoutMillis = 1_500) { opened() } }.isSuccess) break
+        }
+        onNodeWithText("Reply in thread").performClick()
+        // The parent, in the chat and again at the head of its thread.
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("shall we meet").fetchSemanticsNodes().size >= 2 }
+        assertTrue(onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size >= 2, "the chat's composer and the thread's, side by side")
+    }
 }
