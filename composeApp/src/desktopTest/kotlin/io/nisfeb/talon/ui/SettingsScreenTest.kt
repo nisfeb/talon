@@ -12,6 +12,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -53,6 +54,7 @@ class SettingsScreenTest {
         probe: SystemNotificationProbe = NoopSystemNotificationProbe,
         calls: CallController? = null,
         pinCandidates: List<Pair<String, String>> = emptyList(),
+        ai: FakeAiSettings = FakeAiSettings(),
         block: ComposeUiTest.() -> Unit,
     ) = runComposeUiTest {
         setContent {
@@ -64,7 +66,8 @@ class SettingsScreenTest {
             ) {
                 TalonTheme(darkTheme = false) {
                     SettingsScreen(
-                        aiSettings = FakeAiSettings(), themePreference = theme, uiSettings = ui, onBack = {},
+                        aiSettings = ai, themePreference = theme, uiSettings = ui, onBack = {},
+                        onOpenShareLoginQr = { did += "login qr" },
                         onAlwaysPatpChanged = { patpChanges += it },
                         notificationHealth = health, systemNotificationProbe = probe, callController = calls,
                         homePinCandidates = pinCandidates,
@@ -292,5 +295,66 @@ class SettingsScreenTest {
         assertTrue(shows("github.com/nisfeb/talon") && !shows("Calling (%trunk)"))
         tap("Copy version info")
         assertTrue("%trunk" !in did.single())
+    }
+
+    // ─── the AI tab's assistant extras, and Account ────────────────
+
+    private fun assistantOn() = FakeAiSettings(
+        io.nisfeb.talon.ai.AiSettings.Config(provider = io.nisfeb.talon.ai.AiSettings.Provider.Anthropic, apiKey = "sk-ant", model = null, agentEnabled = true),
+    )
+
+    @Test
+    fun `the assistant's web search key is saved, and only when it changed`() {
+        val ai = assistantOn()
+        settings(ai = ai) {
+            tap("AI")
+            onNodeWithText("Save key").performScrollTo().assertIsNotEnabled()
+            onNode(hasSetTextAction() and hasText("Brave Search API key (optional)")).performTextInput(" brv-1 ")
+            onNodeWithText("Save key").performClick()
+            waitForIdle()
+            assertEquals("brv-1", ai.state.value.braveApiKey)
+            onNodeWithText("Save key").assertIsNotEnabled()
+        }
+    }
+
+    @Test
+    fun `a system prompt is edited, saved as customized, and reset to the default saves nothing`() {
+        val ai = assistantOn()
+        settings(ai = ai) {
+            tap("AI")
+            tap("Edit Assistant prompt")
+            // The dialog's box, which comes last: the screen has key fields of its own.
+            onAllNodes(hasSetTextAction()).onLast().performTextReplacement("Be brief.")
+            onNodeWithText("Save").performClick()
+            waitForIdle()
+            assertEquals("Be brief.", ai.state.value.prompt(io.nisfeb.talon.ai.AiSettings.PromptKind.Assistant))
+            tap("Edit Assistant prompt (customized)")
+            onNodeWithText("Reset to default").performClick()
+            onNodeWithText("Save").performClick()
+            waitForIdle()
+            assertEquals("", ai.state.value.prompt(io.nisfeb.talon.ai.AiSettings.PromptKind.Assistant), "the default is kept as no override, so improvements reach it")
+        }
+    }
+
+    @Test
+    fun `syncing the AI settings is switched off where there are keys to sync`() {
+        val ai = assistantOn()
+        settings(ai = ai) {
+            tap("AI")
+            switchBeside("Sync AI settings across devices").performClick()
+            waitForIdle()
+            assertFalse(ai.state.value.syncEnabled)
+        }
+        settings {
+            tap("AI")
+            assertTrue(onAllNodesWithText("Sync AI settings across devices").fetchSemanticsNodes().isEmpty(), "nothing to sync, nothing to switch")
+        }
+    }
+
+    @Test
+    fun `the login QR generator opens from Account`() = settings {
+        tap("Account")
+        tap("Login QR generator")
+        assertEquals(listOf("login qr"), did.toList())
     }
 }
