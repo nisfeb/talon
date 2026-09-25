@@ -83,6 +83,7 @@ class AssistantActionsToolsTest {
         shares: String = """{"shares":{},"offers":{},"accepted":{}}""",
         event: String = """{}""",
         pokeSucceeds: (JsonObject) -> Boolean = { true },
+        send: (suspend (whom: String, text: String) -> Unit)? = null,
         block: (Harness) -> Unit,
     ) {
         val scope = CoroutineScope(SupervisorJob())
@@ -126,6 +127,7 @@ class AssistantActionsToolsTest {
                 mail = MailRepo(http, scope, pollIntervalMs = 60 * 60 * 1000L),
                 calendar = calendar,
                 zone = { TimeZone.UTC },
+                send = send,
             )
             block(Harness(actionTools(actions), pokes))
         } finally {
@@ -192,5 +194,61 @@ class AssistantActionsToolsTest {
         assertEquals("Standup (moved)", h.pokes[0]["meta"]!!.jsonObject["name"]!!.jsonPrimitive.content)
         assertTrue(out.startsWith("Half done"), out)
         assertTrue(out.contains("2026-09-21"), out)
+    }
+
+    // ─── finding, cards and mail refused ───────────────────────────
+
+    @Test
+    fun `a conversation is found by its group's name or its own`() = withHarness { h ->
+        runBlocking {
+            db.groups().upsertGroups(listOf(io.nisfeb.talon.data.GroupEntity("~bus/garden", "The Garden", null)))
+            db.groups().upsertChannelGroups(listOf(io.nisfeb.talon.data.ChannelGroupEntity("chat/~bus/seeds", "~bus/garden", title = "Seed swap")))
+        }
+        val byGroup = h.run("find_conversation", argsOf("name" to "garden"))
+        assertTrue("group=~bus/garden" in byGroup && "chat/~bus/seeds (Seed swap)" in byGroup, byGroup)
+        assertTrue("whom=chat/~bus/seeds" in h.run("find_conversation", argsOf("name" to "seed")))
+        assertEquals("Nothing matches \"cricket\".", h.run("find_conversation", argsOf("name" to "Cricket")))
+    }
+
+    private val posted = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
+
+    @Test
+    fun `an event from its details goes to a chat as a card`() = withHarness(send = { w, t -> posted += w to t }) { h ->
+        val out = h.run("send_event", argsOf("whom" to "~bus", "name" to "Seed swap", "date" to "2026-10-03", "time" to "14:30", "location" to "The hall"))
+        assertTrue(out.startsWith("Posted the event"), out)
+        val (whom, card) = posted.single()
+        assertEquals("~bus", whom)
+        assertTrue("Seed swap" in card && "The hall" in card, card)
+    }
+
+    @Test
+    fun `an event's details are checked before anything is posted`() = withHarness(send = { w, t -> posted += w to t }) { h ->
+        assertEquals("Error: give an event id or a name.", h.run("send_event", argsOf("whom" to "~bus")))
+        assertEquals("Error: date must be YYYY-MM-DD.", h.run("send_event", argsOf("whom" to "~bus", "name" to "x", "date" to "next friday")))
+        assertEquals("Error: time must be HH:MM.", h.run("send_event", argsOf("whom" to "~bus", "name" to "x", "date" to "2026-10-03", "time" to "half two")))
+        assertTrue(h.run("send_event", argsOf("whom" to "~bus", "event" to "nope")).startsWith("Error: no event nope"))
+        assertTrue(posted.isEmpty())
+    }
+
+    @Test
+    fun `an event already on the calendar is posted by its id`() = withHarness(
+        window = """{"rows":[{"id":"e1","cal":"default","meta":{"name":"Dentist"},"l":${System.currentTimeMillis() + 86_400_000L},"r":${System.currentTimeMillis() + 90_000_000L}}]}""",
+        send = { w, t -> posted += w to t },
+    ) { h ->
+        assertTrue(h.run("send_event", argsOf("whom" to "~bus", "event" to "e1")).startsWith("Posted"))
+        assertTrue("Dentist" in posted.single().second)
+    }
+
+    @Test
+    fun `a card that does not go says so`() = withHarness(send = { _, _ -> error("the ship is away") }) { h ->
+        val out = h.run("send_event", argsOf("whom" to "~bus", "name" to "Seed swap", "date" to "2026-10-03"))
+        assertEquals("Error: the message did not go: the ship is away", out)
+    }
+
+    @Test
+    fun `mail the ship does not send says so, and only known views are listed`() = withHarness { h ->
+        assertTrue(h.run("send_mail", argsOf("to" to "~bus", "body" to "hello")).startsWith("The ship did not send it"))
+        assertEquals("Error: view must be inbox, sent, archived or all.", h.run("list_mail", argsOf("view" to "spam")))
+        assertTrue(h.run("list_mail", argsOf()).startsWith("The mail app did not answer"))
     }
 }
