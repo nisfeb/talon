@@ -368,14 +368,20 @@ fun CalendarScreen(
             val flag = d.groups().channelGroupFor(whom)?.groupFlag ?: return@say false
             // Null: the roster could not be read, so no invites were mailed -- not the same as none.
             val members = runCatching { c.fetchGroupAdmin(flag)?.members?.map { it.ship } }.getOrNull()?.filter { it != ourShip }
-            val posted = runCatching { c.send(whom, textOf(r)) }.isSuccess
+            val posted = io.nisfeb.talon.util.runSuspendCatching { c.send(whom, textOf(r)) }.isSuccess
             val mailed = members.isNullOrEmpty() || mailEvent(r, members)
-            if (posted && mailed) status = when {
+            // Half of it done is said as that half: "could not be
+            // reached" after the post went out had people share again,
+            // and post twice.
+            status = when {
+                !posted && !mailed -> return@say false
+                !mailed -> "Posted to ${labelOf(whom)}, but the invite could not be mailed to its members."
+                !posted -> "Mailed the invite to ${members!!.size} ship${if (members.size == 1) "" else "s"}, but the post to ${labelOf(whom)} did not go."
                 members == null -> "Posted to ${labelOf(whom)}. The member list could not be read, so no invites were mailed."
                 members.isEmpty() -> "Posted to ${labelOf(whom)}."
                 else -> "Posted to ${labelOf(whom)} and mailed the invite to ${members.size} ship${if (members.size == 1) "" else "s"}."
             }
-            posted && mailed
+            true
         }
     }
     // A task shows the moment it is typed, in flight, until the
@@ -959,7 +965,10 @@ fun CalendarScreen(
                     // A new event, posted where it was asked to go.
                     val target = postTo
                     if (ok && id == null && target != null && chat != null && ghost != null) {
-                        runCatching { chat.send(target, textOf(ghost)) }
+                        // Said when it does not go: the event is made either way.
+                        if (io.nisfeb.talon.util.runSuspendCatching { chat.send(target, textOf(ghost)) }.isFailure) {
+                            status = "The event is on the calendar, but posting it to ${labelOf(target)} did not go."
+                        }
                         postTo = null
                     }
                     ok

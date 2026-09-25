@@ -329,12 +329,14 @@ class CalendarScreenTest {
     // ─── sending an event on ───────────────────────────────────────
 
     private val mailed = java.util.concurrent.CopyOnWriteArrayList<String>()
+    @Volatile private var mailRefuses = false
 
     private val mailHttp = HttpClient(MockEngine { req ->
         val path = req.url.encodedPath
         val json = { body: String -> respond(body, HttpStatusCode.OK, headersOf("Content-Type", "application/json")) }
         when {
             path.endsWith("/api/blob") -> json("""{"hash":"0vics"}""")
+            path.endsWith("/api/send") && mailRefuses -> respond("""{"error":"outbox full"}""", HttpStatusCode.InternalServerError, headersOf("Content-Type", "application/json"))
             path.endsWith("/api/send") -> { mailed += req.body.toByteArray().decodeToString(); json("{}") }
             else -> json("""{"ok":true,"threads":[]}""")
         }
@@ -404,5 +406,16 @@ class CalendarScreenTest {
         waitUntil(timeoutMillis = 5_000) { shows("The member list could not be read, so no invites were mailed.") }
         assertTrue(ship.pokesTo("channels").any { "Dentist" in it.json.toString() })
         assertTrue(mailed.isEmpty())
+    }
+
+    // "The group could not be reached" after the post had gone out had
+    // people share it again, and post it twice.
+    @Test
+    fun `a share whose post went but whose invites did not says which half went`() = sharing(roster = true) { ship ->
+        mailRefuses = true
+        shareWithGroup()
+        waitUntil(timeoutMillis = 5_000) { shows("but the invite could not be mailed") }
+        assertTrue(ship.pokesTo("channels").any { "Dentist" in it.json.toString() })
+        assertTrue(!shows("The group could not be reached."))
     }
 }
