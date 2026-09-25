@@ -32,7 +32,7 @@ class CalendarTaskInFlightTest {
     private fun withRepo(accept: Boolean, block: suspend (CalendarRepo, CompletableDeferred<Unit>) -> Unit) {
         val scope = CoroutineScope(SupervisorJob())
         val release = CompletableDeferred<Unit>()
-        var written = false
+        val written = java.util.concurrent.atomic.AtomicBoolean(false)
         val http = HttpClient(
             MockEngine { req ->
                 val path = req.url.encodedPath
@@ -40,10 +40,10 @@ class CalendarTaskInFlightTest {
                     path.startsWith("/grubbery/api/poke/") -> {
                         // Held until the test lets it through: the write in flight.
                         release.await()
-                        if (accept) { written = true; json("") } else respondError(HttpStatusCode.InternalServerError, "refused")
+                        if (accept) { written.set(true); json("") } else respondError(HttpStatusCode.InternalServerError, "refused")
                     }
                     path.endsWith("/events.json") -> json(
-                        if (written) """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"}}]""" else "[]",
+                        if (written.get()) """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"}}]""" else "[]",
                     )
                     path.endsWith("/window.json") -> json("""{"rows":[]}""")
                     path.endsWith("/calendars.json") -> json("""[{"id":"default","name":"Personal","kind":"local"}]""")

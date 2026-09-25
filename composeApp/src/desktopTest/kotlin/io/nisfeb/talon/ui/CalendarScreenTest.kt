@@ -155,12 +155,13 @@ class CalendarScreenTest {
             onAllNodesWithText("Save")[0].performClick()
             waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
             assertTrue("Buy oat milk" in writes.single().second, writes.single().second)
-            waitUntil(timeoutMillis = 5_000) { reads.any { it.endsWith("/events.json") } && reads.any { it.endsWith("/window.json") } }
+            waitUntil(timeoutMillis = 5_000) { reads.any { it.endsWith("/events.json") } }
             waitForIdle()
             assertTrue(
                 reads.none { it.endsWith("/calendars.json") || it.endsWith("/shares.json") || it.endsWith("/google.json") },
                 "a task's save reads the lists it changed, not the calendars: $reads",
             )
+            assertTrue(reads.none { it.endsWith("/window.json") }, "an undated task is in no window: $reads")
         }
     }
 

@@ -336,7 +336,7 @@ class CalendarRepo(
     }
 
     /** Tick or untick a task. */
-    suspend fun setDone(id: String, done: Boolean): Boolean = write(doneBody(id, done)).also { if (it) afterItemWrite() }
+    suspend fun setDone(id: String, done: Boolean): Boolean = pokeEvent(doneBody(id, done))
 
     /**
      * A new task, on the list at once and written behind it. The write
@@ -361,9 +361,11 @@ class CalendarRepo(
         )
         _pendingTasks.value = _pendingTasks.value + ghost
         scope.launch {
-            val ok = write(eventBody(d))
+            val body = eventBody(d)
+            val reach = reachOf(body)
+            val ok = write(body)
             if (ok) {
-                afterItemWrite()
+                afterItemWrite(reach)
                 // A tag the calendar has not seen before joins the list
                 // the editor offers; one it has is already there.
                 if (d.tags.any { it !in _tags.value }) api?.let { a -> runSuspendCatching { a.tags() }.getOrNull()?.let { _tags.value = it.map { t -> t.tag } } }
@@ -430,7 +432,33 @@ class CalendarRepo(
      * behind another on the ship's single thread, and on a busy ship the
      * edit sat greyed out for minutes. False when refused.
      */
-    suspend fun pokeEvent(body: JsonObject): Boolean = write(body).also { if (it) afterItemWrite() }
+    suspend fun pokeEvent(body: JsonObject): Boolean {
+        val reach = reachOf(body)
+        return write(body).also { if (it) afterItemWrite(reach) }
+    }
+
+    /**
+     * The lists a write can change: [tasks] the task listing, [rows] the
+     * window and the month; and all three as they were before it, so a
+     * change a routine refresh brought in first still counts as come.
+     */
+    private class Reach(val tasks: Boolean, val rows: Boolean, val before: Triple<Any?, Any?, Any?>)
+
+    /**
+     * What a write of [body] can change, judged before it goes, while the
+     * task listing still has the task as it was. The listing only for a
+     * task; the window and the month unless a task had no day before and
+     * has none after, since an undated task is in no window.
+     */
+    private fun reachOf(body: JsonObject): Reach {
+        val id = (body["id"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        val cat = (body["cat"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        val was = id?.let { i -> _tasks.value?.firstOrNull { it.id == i } }
+        // An id the listing does not have is an event, which is in the windows.
+        val wasInRows = id != null && (was == null || was.dueMs != null)
+        val isInRows = cat != null && (cat != "todo" || body["due_ms"] != null)
+        return Reach(tasks = was != null || cat == "todo", rows = wasInRows || isInRows, before = lists())
+    }
 
     /**
      * A write, then every read a refresh makes: for what changes the
@@ -460,31 +488,40 @@ class CalendarRepo(
     }
 
     /**
-     * What an event or task write can have changed, read back: the task
-     * listing, the window (the home screen's agenda reads it), and the
-     * month on screen. Not the nine reads a full refresh makes: every
+     * What an event or task write can have changed, read back ([reachOf]):
+     * the task listing for a task, the window (the home screen's agenda
+     * reads it) and the month on screen for anything with a day. Not the
+     * nine reads a full refresh makes: every
      * request into a grubbery app is about a second of its single
      * thread, one behind another, and a tick went through all nine.
      */
-    private suspend fun afterItemWrite() {
+    private suspend fun afterItemWrite(reach: Reach) {
+        // A task listing nothing has read has nothing to bring up to date.
+        val tasks = reach.tasks && _tasks.value != null
+        if (!tasks && !reach.rows) { keep(); return }
         // The ship answers a write before it applies it, and a busy one
         // applies it seconds later: read once, the old copy came back,
         // the edit's stand-in went, and the change was not shown until
         // the next poll, ten minutes on. So read until something moved,
         // a few times at most, waiting longer each time.
-        val before = Triple(_tasks.value, _rows.value, _rangeRows.value)
         var pause = 500L
         for (attempt in 1..AFTER_WRITE_READS) {
-            refreshTasks()
-            refreshWindow()
-            range?.let { (f, t) -> loadRange(f, t) }
-            if (Triple(_tasks.value, _rows.value, _rangeRows.value) != before || attempt == AFTER_WRITE_READS) break
+            if (tasks) refreshTasks()
+            if (reach.rows) {
+                refreshWindow()
+                range?.let { (f, t) -> loadRange(f, t) }
+            }
+            // Against the lists from before the write: taken after it, a
+            // refresh that landed in between made the change look never come.
+            if (lists() != reach.before || attempt == AFTER_WRITE_READS) break
             delay(pause)
             pause *= 2
         }
         // So a phone closed straight after a tick opens on the tick.
         keep()
     }
+
+    private fun lists(): Triple<Any?, Any?, Any?> = Triple(_tasks.value, _rows.value, _rangeRows.value)
 
     /** The window alone, read again. */
     private suspend fun refreshWindow() {
@@ -604,10 +641,15 @@ class CalendarRepo(
             _shares.value = runSuspendCatching { a.shares() }.getOrElse { e ->
                 if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) null else _shares.value
             }
-            _conflicts.value = runSuspendCatching { a.conflicts() }.getOrElse { _conflicts.value }
+            // Sync state and conflicts only where a calendar syncs: three
+            // reads of the ship's one queue that say nothing of local ones.
+            val syncing = _calendars.value.any { it.kind != "local" }
+            _conflicts.value = if (syncing) runSuspendCatching { a.conflicts() }.getOrElse { _conflicts.value } else emptyList()
             _sync.value = buildMap {
-                runSuspendCatching { a.google() }.getOrNull()?.linked?.forEach { (id, row) -> put(id, row) }
-                runSuspendCatching { a.caldavSubscriptions() }.getOrNull()?.forEach { put(it.id, SyncRow(it.lastMs, it.error)) }
+                if (syncing) {
+                    runSuspendCatching { a.google() }.getOrNull()?.linked?.forEach { (id, row) -> put(id, row) }
+                    runSuspendCatching { a.caldavSubscriptions() }.getOrNull()?.forEach { put(it.id, SyncRow(it.lastMs, it.error)) }
+                }
                 _shares.value?.accepted?.forEach { (id, acc) -> put(id, SyncRow(acc.lastMs, acc.error)) }
             }.ifEmpty { if (_calendars.value.any { it.kind != "local" }) _sync.value else emptyMap() }
             _tags.value = runSuspendCatching { a.tags() }.getOrNull()?.map { it.tag } ?: _tags.value

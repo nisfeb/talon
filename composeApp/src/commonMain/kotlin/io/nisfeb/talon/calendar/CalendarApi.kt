@@ -154,11 +154,15 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
 
     suspend fun calendars(): List<CalendarInfo> = decode(get("/calendars.json"))
 
-    /** The tasks, dated or not: the full listing, kept to `cat == todo`. */
-    suspend fun tasks(): List<CalendarTask> = events().filter { it.cat == "todo" }
+    /**
+     * The tasks, dated or not. The calendar keeps to them itself (`cat`):
+     * the whole listing came down for every read of the task list, every
+     * event near and far, to be thrown away here. Kept to `todo` here too,
+     * for a calendar old enough to ignore the filter.
+     */
+    suspend fun tasks(): List<CalendarTask> =
+        decode<List<CalendarTask>>(get("/events.json?cat=todo")).filter { it.cat == "todo" }
 
-    /** Every entry the calendar keeps, dated or not, near or far. */
-    suspend fun events(): List<CalendarTask> = decode(get("/events.json"))
 
     suspend fun config(): CalendarConfig = decode(get("/config.json"))
 
