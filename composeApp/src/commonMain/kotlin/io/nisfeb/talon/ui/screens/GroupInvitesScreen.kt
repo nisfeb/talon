@@ -48,9 +48,10 @@ fun GroupInvitesScreen(
 ) {
     val cached by repo.invitesFlow.collectAsState()
     val invites = cached ?: emptyList()
-    val loading = cached == null
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // A failed first load is an error to show, not a spinner to leave running.
+    val loading = cached == null && error == null
     // An accept or decline the ship refused: its own words, since it was
     // shown as "Couldn't refresh" and read as a network problem.
     var actionError by remember { mutableStateOf<String?>(null) }

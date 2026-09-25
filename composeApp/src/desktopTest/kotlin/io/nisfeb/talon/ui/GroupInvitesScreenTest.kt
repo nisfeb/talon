@@ -47,7 +47,7 @@ class GroupInvitesScreenTest {
         try {
             runComposeUiTest {
                 setContent { TalonTheme(darkTheme = false) { GroupInvitesScreen(repo = repo, onBack = {}) } }
-                waitUntil(timeoutMillis = 5_000) { shows("The Garden") || shows("No pending invites.") }
+                waitUntil(timeoutMillis = 5_000) { shows("The Garden") || shows("No pending invites.") || shows("Couldn't load invites") }
                 block(ship)
             }
         } finally {
@@ -95,5 +95,19 @@ class GroupInvitesScreenTest {
         val asked = ship.scried.count { it == "groups-ui/v7/init" }
         onNodeWithContentDescription("Refresh").performClick()
         waitUntil(timeoutMillis = 5_000) { ship.scried.count { it == "groups-ui/v7/init" } > asked }
+    }
+
+    @Test
+    fun `invites the ship will not give say so rather than spinning`() = invites(prepare = { scries.remove("groups-ui/v7/init") }) {
+        waitUntil(timeoutMillis = 5_000) { shows("Couldn't load invites") }
+        assertTrue(!shows("No pending invites."), "no answer is not no invites")
+    }
+
+    @Test
+    fun `a refresh with no answer keeps the invites shown, and says it could not refresh`() = invites { ship ->
+        ship.scries.remove("groups-ui/v7/init")
+        onNodeWithContentDescription("Refresh").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Couldn't refresh") }
+        assertTrue(shows("The Garden"), "the invite is still there")
     }
 }

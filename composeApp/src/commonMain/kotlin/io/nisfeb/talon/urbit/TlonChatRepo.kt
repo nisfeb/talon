@@ -1486,10 +1486,12 @@ class TlonChatRepo(
         // nothing", but bootstrap passes notify=false so that first load
         // stays quiet regardless.
         val known = _invites.value?.mapTo(mutableSetOf()) { it.flag } ?: mutableSetOf()
-        val body = runCatching {
-            ch.scry("groups-ui", "/v7/init") as? JsonObject
-        }.onFailure { Log.w(TAG, "scry groups-ui/v7/init failed", it) }.getOrNull()
-        if (body == null) { _invites.value = emptyList(); return }
+        // No answer is not "no invites": stored as one, a failed refresh
+        // wiped the invites being shown. Callers catch and say so.
+        val body = runCatching { ch.scry("groups-ui", "/v7/init") }
+            .onFailure { Log.w(TAG, "scry groups-ui/v7/init failed", it) }
+            .getOrThrow() as? JsonObject
+            ?: error("the ship's answer about invites was not readable")
         val foreigns = body["foreigns"] as? JsonObject
         if (foreigns == null) {
             Log.w(TAG, "refreshInvites: no foreigns in init response, keys=${body.keys}")
