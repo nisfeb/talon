@@ -64,15 +64,16 @@ class PartyLineScreensTest {
     @Test
     fun `mute, leave and minimize each ask the line`() {
         full(live(muted = false)) {
-            onNodeWithContentDescription("Mute").performClick() // the text under it is a label
-            onNodeWithContentDescription("Leave").performClick() // the text under it is a label
+            onNodeWithContentDescription("Mute").performClick()
+            // The word under a button is part of it: a click there works too.
+            onNodeWithText("Leave", useUnmergedTree = true).performClick()
             onNodeWithContentDescription("Minimize the call").performClick()
             waitForIdle()
         }
         assertEquals(listOf("mute:true", "leave", "minimize"), did)
         did.clear()
         full(live(muted = true)) {
-            onNodeWithContentDescription("Unmute").performClick() // the text under it is a label
+            onNodeWithText("Unmute", useUnmergedTree = true).performClick()
             waitForIdle()
         }
         assertEquals(listOf("mute:false"), did)
@@ -81,7 +82,7 @@ class PartyLineScreensTest {
     @Test
     fun `a recording says who records, and Stop asks the line`() = full(live(), recording = true) {
         assertTrue(shows("Recording · Bus"))
-        onNodeWithContentDescription("Stop").performClick() // the text under it is a label
+        onNodeWithContentDescription("Stop").performClick()
         waitForIdle()
         assertEquals(listOf("record"), did)
     }

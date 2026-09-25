@@ -108,7 +108,7 @@ class CallOverlayTest {
         assertEquals("c2", sent("accept"))
         engine.state.value = MediaState.Live
         showing("Bus · 00:0")
-        onAllNodesWithContentDescription("Leave the line")[0].performClick()
+        onAllNodesWithContentDescription("Hang up")[0].performClick() // a call, not a party line
         assertEquals("c2", sent("hangup"))
         waitUntil(timeoutMillis = 10_000) { !shows("Bus · 00:0") }
     }

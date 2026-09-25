@@ -269,7 +269,7 @@ fun PartyLineBarContent(
                             contentColor = MaterialTheme.colorScheme.onError,
                         ),
                     ) {
-                        Icon(TalonIcons.CallEnd, contentDescription = "Leave the line")
+                        Icon(TalonIcons.CallEnd, contentDescription = if (headline != null) "Hang up" else "Leave the line")
                     }
                 }
 
@@ -435,7 +435,7 @@ fun PartyLineBarContent(
                                 contentColor = MaterialTheme.colorScheme.onError,
                             ),
                         ) {
-                            Icon(TalonIcons.CallEnd, contentDescription = "Leave the line")
+                            Icon(TalonIcons.CallEnd, contentDescription = if (headline != null) "Hang up" else "Leave the line")
                         }
                     }
                 }

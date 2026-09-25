@@ -419,7 +419,7 @@ fun PartyLineFullScreen(
                 }
 
                 ControlButton(
-                    label = "Leave",
+                    label = if (directCall) "Hang up" else "Leave",
                     onClick = onLeave,
                     containerColor = MaterialTheme.colorScheme.errorContainer,
                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -443,22 +443,21 @@ private fun ControlButton(
     contentColor: Color,
     icon: @Composable () -> Unit,
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    // The circle and the word under it are one button: the word used to
+    // sit outside the clickable, so a click on it did nothing.
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick, role = Role.Button),
+    ) {
         Surface(
-            onClick = onClick,
             shape = CircleShape,
             color = containerColor,
             contentColor = contentColor,
-            // The icon carries no contentDescription and the label sits
-            // OUTSIDE the clickable, so every one of these announced as
-            // an unnamed button on explore-by-touch. Naming the Surface
-            // covers Mute, Camera, Flip, Record and Leave at once.
-            modifier = Modifier
-                .size(58.dp)
-                .semantics {
-                    contentDescription = label
-                    role = Role.Button
-                },
+            // The icon carries no contentDescription; naming the circle
+            // names the button on explore-by-touch.
+            modifier = Modifier.size(58.dp).semantics { contentDescription = label },
         ) {
             Box(contentAlignment = Alignment.Center) { icon() }
         }
@@ -478,10 +477,15 @@ private fun SpeakerControl(audioDevices: AudioDevices) {
     var selected by remember { mutableStateOf(audioDevices.selectedOutput) }
     LaunchedEffect(menuOpen) { if (menuOpen) selected = audioDevices.selectedOutput }
     val routeLabel = outputs.firstOrNull { it.id == selected }?.label ?: "System default"
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    // Circle and caption open the menu alike, as ControlButton's do.
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(role = Role.Button) { menuOpen = true },
+    ) {
         Box {
             Surface(
-                onClick = { menuOpen = true },
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -632,10 +636,15 @@ private fun CameraControl(videoDevices: io.nisfeb.talon.call.VideoDevices, onSel
     var selected by remember { mutableStateOf(videoDevices.selectedCamera) }
     val label = cameras.firstOrNull { it.id == selected }?.label ?: cameras.firstOrNull()?.label ?: "No camera"
     if (cameras.isEmpty()) return
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    // Circle and caption open the menu alike, as ControlButton's do.
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(role = Role.Button) { menuOpen = true },
+    ) {
         Box {
             Surface(
-                onClick = { menuOpen = true },
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
