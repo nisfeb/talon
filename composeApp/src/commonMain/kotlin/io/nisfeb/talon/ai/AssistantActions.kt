@@ -321,7 +321,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 zone = if (minute != null) zoneArg else null,
                 tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
             )
-            if (cal.poke(eventBody(draft))) {
+            if (cal.pokeEvent(eventBody(draft))) {
                 "Added \"$name\" on $date${if (time != null) " at $time${zoneArg?.let { " $it" } ?: ""}" else ""} to calendar ${calId ?: "default"}."
             } else {
                 "The calendar did not take it."
@@ -417,13 +417,13 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                     date = newDate ?: at.date,
                     minuteOfDay = newMinute ?: (at.hour * 60 + at.minute),
                 )
-                if (!cal.poke(eventBody(one))) return@Tool "The calendar did not take it."
-                if (!cal.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })) {
+                if (!cal.pokeEvent(eventBody(one))) return@Tool "The calendar did not take it."
+                if (!cal.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })) {
                     return@Tool "Half done: the changed \"${d.name}\" was added, but the original occurrence on $occ is still there too — the calendar refused the skip. Skip it by hand, or try again."
                 }
                 return@Tool "Updated \"${d.name}\" for that occurrence."
             }
-            if (cal.poke(eventBody(d, id))) "Updated \"${d.name}\"." else "The calendar did not take it."
+            if (cal.pokeEvent(eventBody(d, id))) "Updated \"${d.name}\"." else "The calendar did not take it."
         })
         add(Tool(
             spec = ToolSpec(
@@ -446,9 +446,9 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             if (occText != null && d?.repeats == true) {
                 val occ = parseDate(occText) ?: return@Tool "Error: occurrence must be YYYY-MM-DD."
                 val row = findOccurrence(cal, id, occ, a.zone()) ?: return@Tool "Error: \"$name\" has no occurrence on $occ."
-                return@Tool if (cal.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })) "Skipped \"$name\" on $occ." else "The calendar did not take it."
+                return@Tool if (cal.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })) "Skipped \"$name\" on $occ." else "The calendar did not take it."
             }
-            if (cal.poke(buildJsonObject { put("action", "del-event"); put("id", id) })) {
+            if (cal.pokeEvent(buildJsonObject { put("action", "del-event"); put("id", id) })) {
                 "Deleted \"$name\"${if (d?.repeats == true) " and every occurrence" else ""}."
             } else {
                 "The calendar did not take it."
@@ -482,7 +482,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 cat = EventCat.TODO, date = due ?: today, due = due,
                 tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
             )
-            if (cal.poke(eventBody(draft))) "Added task \"$name\"${if (due != null) " due $due" else ""}." else "The calendar did not take it."
+            if (cal.pokeEvent(eventBody(draft))) "Added task \"$name\"${if (due != null) " due $due" else ""}." else "The calendar did not take it."
         })
         add(Tool(
             spec = ToolSpec(

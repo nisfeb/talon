@@ -99,6 +99,7 @@ import io.nisfeb.talon.ui.phoneNumbersIn
 import io.nisfeb.talon.ui.telUri
 import io.nisfeb.talon.calendar.dueDate
 import io.nisfeb.talon.calendar.groupTasks
+import io.nisfeb.talon.calendar.taskDraft
 import io.nisfeb.talon.calendar.inFilter
 import io.nisfeb.talon.calendar.matches
 import io.nisfeb.talon.calendar.taskOrder
@@ -129,6 +130,8 @@ import kotlinx.datetime.plus
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import io.nisfeb.talon.ui.icons.TalonIcons
 
@@ -301,7 +304,19 @@ fun CalendarScreen(
             editingAllDay = allDay
         }
     }
-    fun openExisting(r: CalendarRow) { if (r.cal in readOnly) status = readOnlyNote else openById(r.id, r.idx, r.l, r.all) }
+    /** A task opens at once from its row; an event reads its rule first. */
+    fun openRow(r: CalendarRow) {
+        if (r.isTask) {
+            taskDraft(r, zone, selected)?.let { d ->
+                editing = r.id to d
+                editingIdx = null
+                editingStartMs = null
+                editingAllDay = r.all
+                return
+            }
+        }
+        openById(r.id, r.idx, r.l, r.all)
+    }
     fun view(r: CalendarRow) {
         viewing = r
         // Edit is a button in this sheet, and it cannot open without
@@ -813,7 +828,7 @@ fun CalendarScreen(
                             TextButton(onClick = {
                                 val idx = r.idx
                                 act("Skipping this one…", "The ship did not skip it.") {
-                                    repo.poke(buildJsonObject { put("action", "skip-event"); put("id", r.id); put("idx", idx) })
+                                    repo.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", r.id); put("idx", idx) })
                                 }
                                 viewing = null
                             }) { Text("Skip this one") }
@@ -872,7 +887,7 @@ fun CalendarScreen(
                             TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
                             TextButton(onClick = {
                                 act(if (r.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${r.name}\"; it is still there.") {
-                                    repo.poke(io.nisfeb.talon.calendar.deleteBody(r.id))
+                                    repo.pokeEvent(io.nisfeb.talon.calendar.deleteBody(r.id))
                                 }
                                 viewing = null
                             }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
@@ -885,7 +900,7 @@ fun CalendarScreen(
             // buttons above it.
             confirmButton = {
                 if (!readOnlyHere) {
-                    Button(onClick = { viewing = null; openById(r.id, r.idx.takeIf { !r.isTask }, r.l.takeIf { !r.isTask }, r.all) }) { Text("Edit") }
+                    Button(onClick = { viewing = null; openRow(r) }) { Text("Edit") }
                 }
             },
             dismissButton = { TextButton(onClick = { viewing = null }) { Text("Close") } },
@@ -953,16 +968,22 @@ fun CalendarScreen(
                 if (ghost != null) pendingRows = pendingRows + ghost
                 if (id != null) pendingEdits = pendingEdits + (id to d)
                 act(if (id == null) "Adding…" else "Saving…", "The ship did not take the change; \"${d.name.trim()}\" is as it was.") {
+                    // A ticked task opened from its row lacks when it was
+                    // done; read it here, behind the closed editor, or the
+                    // save would stamp it done now.
+                    val d = if (id != null && d.cat == EventCat.TODO && d.done && d.doneMs == null) {
+                        d.copy(doneMs = repo.eventDetail(id)?.get("done_ms")?.jsonPrimitive?.longOrNull)
+                    } else d
                     val ok = when {
                         id == null || editScope == EditScope.ALL || idx == null || occurrence == null ->
-                            repo.poke(eventBody(d, id))
+                            repo.pokeEvent(eventBody(d, id))
                         // The page's own two steps: end or skip the old, then add.
                         editScope == EditScope.FOLLOWING ->
-                            repo.poke(buildJsonObject { put("action", "cap-event"); put("id", id); put("dom", idx) }) &&
-                                repo.poke(followingBody(d, occurrence))
+                            repo.pokeEvent(buildJsonObject { put("action", "cap-event"); put("id", id); put("dom", idx) }) &&
+                                repo.pokeEvent(followingBody(d, occurrence))
                         else ->
-                            repo.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) }) &&
-                                repo.poke(onlyBody(d, occurrence))
+                            repo.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) }) &&
+                                repo.pokeEvent(onlyBody(d, occurrence))
                     }
                     if (ghost != null) pendingRows = pendingRows - ghost
                     if (id != null) pendingEdits = pendingEdits - id
@@ -981,7 +1002,7 @@ fun CalendarScreen(
             onDelete = if (id == null) null else {
                 {
                     act(if (draft.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${draft.name.trim()}\"; it is still there.") {
-                        repo.poke(io.nisfeb.talon.calendar.deleteBody(id))
+                        repo.pokeEvent(io.nisfeb.talon.calendar.deleteBody(id))
                     }
                 }
             },
@@ -989,7 +1010,7 @@ fun CalendarScreen(
                 {
                     val idx = editingIdx!!
                     act("Skipping this one…", "The ship did not skip it.") {
-                        repo.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
+                        repo.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
                     }
                 }
             },

@@ -41,12 +41,18 @@ class CalendarScreenTest {
     private val writes: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
     /** Noon today, where the device is: today's agenda whatever the hour the test runs. */
     private val HOUR = 3_600_000L
+    /** Every read the screen made, by path. */
+    private val reads: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    /** The ship's one-event read never answers: a busy ship, at its worst. */
+    @Volatile private var holdDetail = false
     @Volatile private var tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"}}]"""
     private val soon = java.time.LocalDate.now().atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     private val http = HttpClient(MockEngine { req ->
         val path = req.url.encodedPath
         val json = { body: String -> respond(body, HttpStatusCode.OK, headersOf("Content-Type", "application/json")) }
+        if (!path.startsWith("/grubbery/api/poke/")) reads += path
+        if (holdDetail && path.endsWith("/event.json")) kotlinx.coroutines.awaitCancellation()
         when {
             path.startsWith("/grubbery/api/poke/") -> {
                 writes += path to req.body.toByteArray().decodeToString()
@@ -129,6 +135,33 @@ class CalendarScreenTest {
         onAllNodes(isToggleable())[0].performClick()
         waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
         assertTrue("t1" in writes.single().second, writes.single().second)
+    }
+
+    @Test
+    fun `a task's editor opens at once, and its save reads back only what it changed`() {
+        holdDetail = true
+        calendar {
+            onNodeWithContentDescription("Tasks").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Buy milk") }
+            onNodeWithText("Buy milk").performClick()
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Edit").fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("Edit").performClick()
+            // It waited on the ship's copy of the task, which a busy ship took minutes to send.
+            waitUntil(timeoutMillis = 2_000) { shows("Edit task") }
+            field("Name").performTextReplacement("Buy oat milk")
+            // The ship will have it once written: the read-back finds it moved.
+            tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy oat milk"}}]"""
+            reads.clear()
+            onAllNodesWithText("Save")[0].performClick()
+            waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
+            assertTrue("Buy oat milk" in writes.single().second, writes.single().second)
+            waitUntil(timeoutMillis = 5_000) { reads.any { it.endsWith("/events.json") } && reads.any { it.endsWith("/window.json") } }
+            waitForIdle()
+            assertTrue(
+                reads.none { it.endsWith("/calendars.json") || it.endsWith("/shares.json") || it.endsWith("/google.json") },
+                "a task's save reads the lists it changed, not the calendars: $reads",
+            )
+        }
     }
 
     @Test

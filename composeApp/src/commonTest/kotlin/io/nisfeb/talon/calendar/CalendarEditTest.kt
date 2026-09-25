@@ -242,4 +242,19 @@ class CalendarEditTest {
         assertEquals("5", back["priority"]!!.jsonPrimitive.content, "and a field another client wrote")
         assertEquals("the description", back["note"]!!.jsonPrimitive.content)
     }
+
+    @Test fun `a task's draft comes from its row, due on the day the row is on`() {
+        val ny = TimeZone.of("America/New_York")
+        val dayStart = LocalDate(2026, 9, 30).atTime(0, 0).toInstant(ny).toEpochMilliseconds()
+        val meta = io.nisfeb.talon.mail.AuspexApi.json.parseToJsonElement("""{"name":"Buy milk","note":"oat","tags":["home"],"list":"shop"}""").jsonObject
+        val d = taskDraft(CalendarRow(id = "t1", cal = "home", meta = meta, cat = "todo", kind = "todo", all = true, l = dayStart, r = dayStart, done = true), ny, day)!!
+        assertEquals(EventCat.TODO, d.cat)
+        assertEquals("Buy milk" to "oat", d.name to d.note)
+        assertEquals(listOf("home"), d.tags)
+        assertEquals("home", d.cal)
+        assertEquals(LocalDate(2026, 9, 30), d.due)
+        assertEquals(true, d.done)
+        assertEquals(true, "list" in d.otherMeta, "meta the form does not edit is kept")
+        assertNull(taskDraft(CalendarRow(id = "t2", cat = "todo", l = 0, r = 0), ny, day)!!.due, "no day, no due")
+    }
 }

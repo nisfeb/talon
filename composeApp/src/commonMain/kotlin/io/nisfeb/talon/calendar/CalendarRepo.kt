@@ -10,6 +10,7 @@ import io.nisfeb.talon.util.nowMs
 import io.nisfeb.talon.util.runSuspendCatching
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -323,7 +324,7 @@ class CalendarRepo(
     suspend fun addShared(calId: String?, title: String, startMs: Long, endMs: Long): Boolean {
         val zoneId = _zone.value ?: TimeZone.currentSystemDefault().id
         val zone = runSuspendCatching { TimeZone.of(zoneId) }.getOrElse { TimeZone.currentSystemDefault() }
-        return poke(eventBody(sharedDraft(title, startMs, endMs, calId ?: writableDefault(), zone, zoneId)))
+        return pokeEvent(eventBody(sharedDraft(title, startMs, endMs, calId ?: writableDefault(), zone, zoneId)))
     }
 
     /** Every event in an .ics onto [calId] (else the calendar new events go to). False when refused. */
@@ -335,7 +336,7 @@ class CalendarRepo(
     }
 
     /** Tick or untick a task. */
-    suspend fun setDone(id: String, done: Boolean): Boolean = write(doneBody(id, done)).also { if (it) afterTaskWrite() }
+    suspend fun setDone(id: String, done: Boolean): Boolean = write(doneBody(id, done)).also { if (it) afterItemWrite() }
 
     /**
      * A new task, on the list at once and written behind it. The write
@@ -362,7 +363,7 @@ class CalendarRepo(
         scope.launch {
             val ok = write(eventBody(d))
             if (ok) {
-                afterTaskWrite()
+                afterItemWrite()
                 // A tag the calendar has not seen before joins the list
                 // the editor offers; one it has is already there.
                 if (d.tags.any { it !in _tags.value }) api?.let { a -> runSuspendCatching { a.tags() }.getOrNull()?.let { _tags.value = it.map { t -> t.tag } } }
@@ -377,7 +378,7 @@ class CalendarRepo(
 
     /** Any other write, carried on here whatever the screen does. */
     fun writeInBackground(body: JsonObject, onFailed: () -> Unit = {}) {
-        scope.launch { if (!poke(body)) onFailed() }
+        scope.launch { if (!pokeEvent(body)) onFailed() }
     }
 
     /**
@@ -390,7 +391,20 @@ class CalendarRepo(
      * the ship's answer is then the one that counts.
      */
     suspend fun eventDetail(id: String): JsonObject? =
-        details[id] ?: api?.let { a -> runSuspendCatching { a.event(id) }.getOrNull() }?.also { details[id] = it }
+        details[id] ?: (reading[id] ?: readDetail(id)).await()
+
+    /** One read of [id] at a time: Edit tapped while the viewer's read is out waits for that one, not a second behind it. */
+    private fun readDetail(id: String): kotlinx.coroutines.Deferred<JsonObject?> = reading.getOrPut(id) {
+        // Started once it is in the map, so the removal at its end cannot come first.
+        scope.async(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            try {
+                api?.let { a -> runSuspendCatching { a.event(id) }.getOrNull() }?.also { details[id] = it }
+            } finally {
+                reading.remove(id)
+            }
+        }
+    }.also { it.start() }
+    private val reading = io.nisfeb.talon.util.ConcurrentMap<String, kotlinx.coroutines.Deferred<JsonObject?>>()
 
     /**
      * Read one ahead of being asked for it: the viewer is the step
@@ -405,13 +419,23 @@ class CalendarRepo(
         // orrery's executor, had changed since. Taken out first, so an
         // Edit tapped during the read waits for the new copy.
         details.remove(id)
-        scope.launch { runSuspendCatching { eventDetail(id) } }
+        readDetail(id)
     }
 
     private val details = io.nisfeb.talon.util.ConcurrentMap<String, JsonObject>()
 
     /**
-     * A write, then the reads that show it. False when refused.
+     * An event or task written, then only what it can change read back
+     * ([afterItemWrite]). A save went through [poke]'s nine reads, one
+     * behind another on the ship's single thread, and on a busy ship the
+     * edit sat greyed out for minutes. False when refused.
+     */
+    suspend fun pokeEvent(body: JsonObject): Boolean = write(body).also { if (it) afterItemWrite() }
+
+    /**
+     * A write, then every read a refresh makes: for what changes the
+     * calendars themselves, their names, sharing or zone. An event or a
+     * task goes through [pokeEvent]. False when refused.
      */
     suspend fun poke(body: JsonObject): Boolean = write(body).also { ok ->
         if (ok) {
@@ -436,16 +460,28 @@ class CalendarRepo(
     }
 
     /**
-     * What a task write can have changed, read back: the listing, the
-     * window a todo also sits in (the home screen's agenda reads it),
-     * and the month on screen. Not the nine reads a full refresh makes:
-     * every request into a grubbery app is about a second of its single
+     * What an event or task write can have changed, read back: the task
+     * listing, the window (the home screen's agenda reads it), and the
+     * month on screen. Not the nine reads a full refresh makes: every
+     * request into a grubbery app is about a second of its single
      * thread, one behind another, and a tick went through all nine.
      */
-    private suspend fun afterTaskWrite() {
-        refreshTasks()
-        refreshWindow()
-        range?.let { (f, t) -> loadRange(f, t) }
+    private suspend fun afterItemWrite() {
+        // The ship answers a write before it applies it, and a busy one
+        // applies it seconds later: read once, the old copy came back,
+        // the edit's stand-in went, and the change was not shown until
+        // the next poll, ten minutes on. So read until something moved,
+        // a few times at most, waiting longer each time.
+        val before = Triple(_tasks.value, _rows.value, _rangeRows.value)
+        var pause = 500L
+        for (attempt in 1..AFTER_WRITE_READS) {
+            refreshTasks()
+            refreshWindow()
+            range?.let { (f, t) -> loadRange(f, t) }
+            if (Triple(_tasks.value, _rows.value, _rangeRows.value) != before || attempt == AFTER_WRITE_READS) break
+            delay(pause)
+            pause *= 2
+        }
         // So a phone closed straight after a tick opens on the tick.
         keep()
     }
@@ -601,5 +637,7 @@ class CalendarRepo(
         const val BEHIND_MS = 6 * 60 * 60 * 1000L
         const val AHEAD_MS = 30L * 24 * 60 * 60 * 1000L
         const val SHARE_SYNC_GAP_MS = 5 * 60 * 1000L
+        /** Read-backs after a write before taking the ship at its word: about 30s of waiting. */
+        const val AFTER_WRITE_READS = 6
     }
 }
