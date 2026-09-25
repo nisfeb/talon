@@ -41,6 +41,21 @@ class LatticeSignTest {
         assertNull(signedRecordIn(rec.armor().substringBefore("-----END")))
     }
 
+    @Test
+    fun `each number must be all digits, not only the signature`() {
+        assertNull(signedRecordIn(rec.armor().replace("life: 3", "life: 3a")), "life")
+        assertNull(signedRecordIn(rec.armor().replace(digest, "7x7")), "digest")
+        assertEquals(rec, signedRecordIn(rec.armor().trimStart()), "a record at the very start of the text")
+    }
+
+    @Test
+    fun `the algorithm and salt come from the record, and default where it names none`() {
+        val other = rec.copy(alg = "secp256k1", salt = "notes")
+        assertEquals(other, signedRecordIn(other.armor()))
+        val bare = rec.armor().lines().filterNot { it.startsWith("alg:") || it.startsWith("salt:") }.joinToString("\n")
+        assertEquals("ed25519" to "lattice", signedRecordIn(bare)!!.let { it.alg to it.salt })
+    }
+
     private fun signClient(
         body: String = "",
         status: HttpStatusCode = HttpStatusCode.OK,
