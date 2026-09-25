@@ -1,6 +1,8 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.ui.test.ComposeUiTest
+import io.ktor.client.engine.mock.toByteArray
+import io.ktor.client.engine.mock.respond
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.longClick
@@ -35,11 +37,15 @@ class HomeScreenTest {
     private var layouts = mutableListOf<HomeLayout>()
     private var invitesOpened = 0
     private var chatsOpened = 0
+    private var calendarOpened = 0
+    private val calendarWrites = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun home(
         seed: suspend AppDatabase.() -> Unit = {},
         statuses: List<ContactEntity> = emptyList(),
         invites: List<String> = emptyList(),
+        calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
+        onInstallCalendar: (suspend () -> Result<Unit>)? = null,
         block: ComposeUiTest.(AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-homepage-").toFile()
@@ -52,6 +58,7 @@ class HomeScreenTest {
                     TalonTheme(darkTheme = false) {
                         HomeScreen(
                             db = db, mail = null, contacts = ContactMap.EMPTY, ourShip = "~zod",
+                            calendar = calendar, onOpenCalendar = { calendarOpened++ }, onInstallCalendar = onInstallCalendar,
                             statuses = statuses, invites = invites,
                             onLayoutChanged = { layouts += it },
                             onOpenInvites = { invitesOpened++ },
@@ -125,5 +132,60 @@ class HomeScreenTest {
         onNodeWithText("Done").performClick()
         waitForIdle()
         assertTrue(!shows("Done"))
+    }
+
+    // ─── the Today widget ──────────────────────────────────────────
+
+    private val now = System.currentTimeMillis()
+    private val todayUtc = java.time.LocalDate.now(java.time.ZoneOffset.UTC).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+
+    /** A calendar app on the ship, or none where [present] is false. */
+    private fun calendar(present: Boolean = true, offers: String = "{}"): io.nisfeb.talon.calendar.CalendarRepo {
+        val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
+            val path = req.url.encodedPath
+            val json = { body: String -> respond(body, io.ktor.http.HttpStatusCode.OK, io.ktor.http.headersOf("Content-Type", "application/json")) }
+            when {
+                !present -> respond("", io.ktor.http.HttpStatusCode.NotFound)
+                path.startsWith("/grubbery/api/poke/") -> { calendarWrites += String(req.body.toByteArray()); json("") }
+                path.endsWith("/window.json") ->
+                    json("""{"rows":[{"id":"e1","cal":"default","meta":{"name":"Dentist"},"l":${now - 600_000},"r":${now + 600_000}}]}""")
+                path.endsWith("/events.json") ->
+                    json("""[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"},"due_ms":$todayUtc}]""")
+                path.endsWith("/calendars.json") -> json("""[{"id":"default","name":"Personal","kind":"local"}]""")
+                path.endsWith("/config.json") -> json("""{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
+                path.endsWith("/share/shares.json") -> json("""{"shares":{},"offers":$offers,"accepted":{}}""")
+                else -> json("[]")
+            }
+        })
+        return io.nisfeb.talon.calendar.CalendarRepo(http, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob()), pollIntervalMs = 60 * 60_000L)
+            .apply { attach("https://ship.test"); runBlocking { refresh(); refreshAll() } }
+    }
+
+    @Test
+    fun `today's events and tasks show, a task is ticked, and a tap opens the calendar`() = home(calendar = calendar()) {
+        waitUntil(timeoutMillis = 5_000) { shows("Dentist") && shows("Buy milk") }
+        onAllNodes(androidx.compose.ui.test.isToggleable())[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { calendarWrites.any { "t1" in it } }
+        onNodeWithText("Dentist").performClick()
+        assertEquals(1, calendarOpened)
+    }
+
+    @Test
+    fun `a calendar shared with you is mentioned, and opens the calendar`() = home(
+        calendar = calendar(offers = """{"~nec/work":{"host":"~nec","cal":"work","name":"Work","mode":"read"}}"""),
+    ) {
+        waitUntil(timeoutMillis = 5_000) { shows("A calendar was shared with you.") }
+        onNodeWithText("A calendar was shared with you.").performClick()
+        assertEquals(1, calendarOpened)
+    }
+
+    @Test
+    fun `a ship without the calendar is offered it, and a failed install says why`() = home(
+        calendar = calendar(present = false),
+        onInstallCalendar = { Result.failure(IllegalStateException("The ship would not install it.")) },
+    ) {
+        waitUntil(timeoutMillis = 5_000) { shows("Install the calendar") }
+        onNodeWithText("Install the calendar").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("The ship would not install it.") }
     }
 }
