@@ -123,14 +123,15 @@ fun AppsSettingsScreen(
      * mail, the calendar and lattice are all the Grubbery shell's stock
      * desks, which the one install fetches together.
      */
+    fun installFor(row: AppRow): (suspend () -> Result<Unit>)? = when (row.install) {
+        io.nisfeb.talon.ui.AppInstall.GROUPS -> onInstallGroups
+        io.nisfeb.talon.ui.AppInstall.GRUBBERY -> installGrubbery
+        io.nisfeb.talon.ui.AppInstall.ORRERY -> onAddOrrery
+        io.nisfeb.talon.ui.AppInstall.ARMILLARY -> onAddArmillary
+        null -> null
+    }
     fun install(row: AppRow) {
-        val action = when (row.install) {
-            io.nisfeb.talon.ui.AppInstall.GROUPS -> onInstallGroups
-            io.nisfeb.talon.ui.AppInstall.GRUBBERY -> installGrubbery
-            io.nisfeb.talon.ui.AppInstall.ORRERY -> onAddOrrery
-            io.nisfeb.talon.ui.AppInstall.ARMILLARY -> onAddArmillary
-            null -> null
-        } ?: return
+        val action = installFor(row) ?: return
         busy = row.name
         note = null
         scope.launch {
@@ -225,7 +226,8 @@ fun AppsSettingsScreen(
                     }
                     if (busy == row.name) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else if (row.canInstall && (if (row.install == io.nisfeb.talon.ui.AppInstall.GROUPS) onInstallGroups != null else installGrubbery != null)) {
+                    } else if (installFor(row) != null) {
+                        // Offered only where the tap has something to run.
                         TextButton(enabled = busy == null, onClick = { install(row) }) { Text("Install") }
                     }
                 }
