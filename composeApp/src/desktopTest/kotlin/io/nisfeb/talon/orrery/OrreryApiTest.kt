@@ -119,4 +119,13 @@ class OrreryApiTest {
         assertEquals(403, e.status)
         assertEquals("read only key", e.reason)
     }
+
+    @Test
+    fun `a refused key or schema is a refusal, not an answer that could not be read`() = runTest {
+        val mint = assertFailsWith<OrreryError.Refused> { api(HttpStatusCode.InternalServerError, """{"error":"no keys today"}""").mint("Talon on x", "talon/x") }
+        assertEquals(500 to "no keys today", mint.status to mint.reason)
+        val schema = assertFailsWith<OrreryError.Refused> { api(HttpStatusCode.ServiceUnavailable, "down").schema() }
+        assertEquals(503, schema.status, "a proxy with no ship behind it cost the ship nothing")
+        assertFailsWith<OrreryError.Garbled> { api(body = "not json").mint("Talon on x", "talon/x") }
+    }
 }

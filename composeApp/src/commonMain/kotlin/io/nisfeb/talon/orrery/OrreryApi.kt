@@ -78,7 +78,10 @@ class OrreryApi(
                 put("sensitive", "write")
             }
         }
-        val o = reading { Json.parseToJsonElement(request(owner, HttpMethod.Post, "/api/clients", body.toString())).jsonObject }
+        // The request outside [reading]: a refusal inside it was reported
+        // as an answer that could not be read, and lost the ship's reason.
+        val text = request(owner, HttpMethod.Post, "/api/clients", body.toString())
+        val o = reading { Json.parseToJsonElement(text).jsonObject }
         return MintedKey(
             id = o["id"]?.jsonPrimitive?.content ?: throw OrreryError.Garbled(IllegalStateException("no id")),
             token = o["token"]?.jsonPrimitive?.content ?: throw OrreryError.Garbled(IllegalStateException("no token")),
@@ -96,7 +99,10 @@ class OrreryApi(
     }
 
     /** The whole schema, which only the owner may read: what a key's scope is measured against. */
-    suspend fun schema(): JsonObject = reading { Json.parseToJsonElement(request(owner, HttpMethod.Get, "/api/schema")).jsonObject }
+    suspend fun schema(): JsonObject {
+        val text = request(owner, HttpMethod.Get, "/api/schema")
+        return reading { Json.parseToJsonElement(text).jsonObject }
+    }
 
     /**
      * What the on-ship generator's last pass did. The owner's route, so
