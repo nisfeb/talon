@@ -46,6 +46,12 @@ internal class FakeShip(val us: String = "~zod") {
 
     @Volatile var refuse: (Poke) -> String? = { null }
 
+    /** Requests to an app's own HTTP API, as `METHOD path body`. */
+    val api: MutableList<String> = Collections.synchronizedList(mutableListOf())
+
+    /** The answer to an API request, or null for 404. */
+    @Volatile var answerApi: (method: String, path: String, body: String) -> String? = { _, _, _ -> null }
+
     private val stream = ByteChannel(autoFlush = true)
     private var nextEventId = 1L
 
@@ -62,7 +68,7 @@ internal class FakeShip(val us: String = "~zod") {
     val http = HttpClient(MockEngine { req ->
         val path = req.url.encodedPath
         when {
-            req.method == HttpMethod.Put -> {
+            req.method == HttpMethod.Put && path.startsWith("/~/channel/") -> {
                 for (msg in Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonArray) {
                     val o = msg.jsonObject
                     val id = o["id"]!!.jsonPrimitive.long
@@ -96,6 +102,14 @@ internal class FakeShip(val us: String = "~zod") {
                     .let { scries[it] }
                     ?.let { respond(it, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
                     ?: respond("", HttpStatusCode.NotFound)
+            // An app's own HTTP API (%notes' v1, …): recorded, and answered by [answerApi].
+            req.method != HttpMethod.Get || path.startsWith("/notes/") -> {
+                val body = req.body.toByteArray().decodeToString()
+                api += "${req.method.value} $path $body"
+                answerApi(req.method.value, path, body)
+                    ?.let { respond(it, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
+                    ?: respond("", HttpStatusCode.NotFound)
+            }
             else -> respond("", HttpStatusCode.NotFound)
         }
     })
