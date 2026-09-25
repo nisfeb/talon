@@ -30,16 +30,18 @@ import io.nisfeb.talon.urbit.LatticeSign
 import io.nisfeb.talon.urbit.SignedRecord
 import io.nisfeb.talon.urbit.Verdict
 import io.nisfeb.talon.urbit.armor
+import io.nisfeb.talon.urbit.latticeDigest
 import io.nisfeb.talon.urbit.signedRecordIn
 import io.nisfeb.talon.util.rememberAnyFilePicker
 import kotlinx.coroutines.launch
 
 /**
  * Sign something with this ship's key, or check what somebody else
- * signed. The ship does both; no key is held here.
+ * signed. The ship signs and checks signatures; no key is held here.
  *
- * A file is checked by asking the ship for its digest and comparing,
- * because the hash is Urbit's and there is no copy of it in the app.
+ * A file is checked by working out its digest here ([latticeDigest]),
+ * comparing it with the signature block's, and asking the ship whether
+ * the block's signature is the signer's.
  */
 @Composable
 fun SignVerifyDialog(signer: LatticeSign, ourShip: String, onDismiss: () -> Unit) {
@@ -185,7 +187,7 @@ fun SignVerifyDialog(signer: LatticeSign, ourShip: String, onDismiss: () -> Unit
                                 scope.launch {
                                     runCatching {
                                         val f = pickFile() ?: return@runCatching null
-                                        val mine = signer.digestOf(f.bytes)
+                                        val mine = latticeDigest(f.bytes)
                                         if (mine != rec.digest) return@runCatching "No: that file is not what was signed."
                                         when (val v = signer.verify(rec)) {
                                             is Verdict.Ok -> "Signed by ${rec.ship}, and it covers ${f.displayName}."

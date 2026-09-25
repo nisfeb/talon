@@ -101,4 +101,16 @@ class LatticeSignTest {
             seen,
         )
     }
+
+    @Test
+    fun `a file's digest is worked out here, as the ship works it out`() {
+        // From ~feb's dojo: ^-(@ud (shaf %lattice (sham 'hello'))).
+        assertEquals("188307405661025176166319078927924685055", latticeDigest("hello".encodeToByteArray()))
+        assertEquals(
+            "315530320481824302728523356676665380137",
+            latticeDigest("Talon file check, with a tail".encodeToByteArray()),
+        )
+        // The bytes are an atom: a trailing zero byte is not part of it.
+        assertEquals(latticeDigest("hello".encodeToByteArray()), latticeDigest("hello".encodeToByteArray() + 0))
+    }
 }
