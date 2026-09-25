@@ -2,6 +2,8 @@ package io.nisfeb.talon.ui
 
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -41,7 +43,13 @@ class NotebookScreensTest {
     private val whom = "notes/~bus/recipes"
     private val did = mutableListOf<String>()
 
-    private fun notebook(block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit, content: @androidx.compose.runtime.Composable (TlonChatRepo) -> Unit) {
+    private val soups = """{"name":"Soups","notebookId":7,"id":9,"createdBy":"~bus","createdAt":1,"parentFolderId":8,"updatedAt":1,"updatedBy":"~bus"}"""
+
+    private fun notebook(
+        block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit,
+        moreFolders: String = "",
+        content: @androidx.compose.runtime.Composable (TlonChatRepo) -> Unit,
+    ) {
         val tmp = createTempDirectory(prefix = "talon-nbui-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
@@ -50,7 +58,7 @@ class NotebookScreensTest {
                 "createdBy":"~bus","createdAt":1784592399,"updatedAt":1784592399,"updatedBy":"~bus"},"visibility":"private"}]"""
             scries["notes/v0/folders/~bus/recipes"] = """[
                 {"name":"/","notebookId":7,"id":8,"createdBy":"~bus","createdAt":1,"parentFolderId":null,"updatedAt":1,"updatedBy":"~bus"},
-                {"name":"Soups","notebookId":7,"id":9,"createdBy":"~bus","createdAt":1,"parentFolderId":8,"updatedAt":1,"updatedBy":"~bus"}]"""
+                $soups$moreFolders]"""
             scries["notes/v0/notes/~bus/recipes"] = """[{"folderId":9,"notebookId":7,"title":"Pho","revision":3,"id":11,"createdBy":"~bus",
                 "createdAt":1784592455,"bodyMd":"Simmer **long**.","updatedAt":1784592505,"updatedBy":"~bus","slug":null}]"""
             scries["notes/v0/published"] = "[]"
@@ -71,7 +79,7 @@ class NotebookScreensTest {
         }
     }
 
-    private fun channel(block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block) { repo ->
+    private fun channel(moreFolders: String = "", block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block, moreFolders) { repo ->
         NotesChannelScreen(repo = repo, whom = whom, onBack = { did += "back" }, onOpenNote = { did += "note $it" })
     }
 
@@ -166,5 +174,57 @@ class NotebookScreensTest {
         onNodeWithText("Delete").performClick()
         waitUntil(timeoutMillis = 5_000) { did == listOf("back") }
         assertTrue("\"delete\"" in ship.pokesTo("notes").single().json.toString())
+    }
+
+    // ─── folders ──────────────────────────────────────────────────
+
+    /** [action] from the Soups folder's own menu: the actions button level with its name. */
+    private fun ComposeUiTest.folderAction(action: String) {
+        showing("Soups")
+        val y = onNodeWithText("Soups").fetchSemanticsNode().boundsInRoot.center.y
+        val menus = onAllNodesWithContentDescription("Folder actions")
+        menus[menus.fetchSemanticsNodes().indices.minBy { kotlin.math.abs(menus[it].fetchSemanticsNode().boundsInRoot.center.y - y) }].performClick()
+        onNodeWithText(action).performClick()
+    }
+
+    private fun ComposeUiTest.notesPoke(ship: FakeShip, containing: String): String {
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("notes").any { containing in it.json.toString() } }
+        return ship.pokesTo("notes").last { containing in it.json.toString() }.json.toString()
+    }
+
+    @Test
+    fun `a folder is renamed from its menu`() = channel { ship, _ ->
+        folderAction("Rename")
+        onNode(hasSetTextAction()).performTextReplacement("Broths")
+        onNodeWithText("Rename").performClick()
+        assertTrue("Broths" in notesPoke(ship, "Broths"))
+    }
+
+    @Test
+    fun `a folder moves only to somewhere that keeps the tree whole`() = channel(
+        moreFolders = """,{"name":"Mains","notebookId":7,"id":10,"createdBy":"~bus","createdAt":1,"parentFolderId":8,"updatedAt":1,"updatedBy":"~bus"}""",
+    ) { ship, _ ->
+        showing("Mains")
+        folderAction("Move…")
+        showing("Move \"Soups\" to…")
+        onAllNodesWithText("Mains", substring = true).let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
+        val moved = notesPoke(ship, "\"move\"")
+        assertTrue("\"newParent\":10" in moved, moved)
+    }
+
+    @Test
+    fun `a folder with nowhere else to go says so`() = channel { ship, _ ->
+        folderAction("Move…")
+        showing("There's nowhere else to put this folder.")
+        onNodeWithText("Cancel").performClick()
+        assertTrue(ship.pokesTo("notes").isEmpty())
+    }
+
+    @Test
+    fun `deleting a folder says what goes with it, then takes it all`() = channel { ship, _ ->
+        folderAction("Delete")
+        showing("This also deletes 1 item inside it, for everyone in the notebook.")
+        onAllNodesWithText("Delete").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
+        assertTrue("\"recursive\":true" in notesPoke(ship, "recursive"))
     }
 }
