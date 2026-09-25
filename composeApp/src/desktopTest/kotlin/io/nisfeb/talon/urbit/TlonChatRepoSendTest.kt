@@ -164,6 +164,43 @@ class TlonChatRepoSendTest {
     }
 
     @Test
+    fun `a reaction is shown at once and goes to each kind of chat in its own shape`() = live {
+        repo.react("~bus", "~bus/170141184506", ":+1:")
+        repo.react("0v4.club", "~nec/170141184507", "👍")
+        repo.react(nest, "170141184508", "👍")
+        assertEquals("👍", db.reactions().get("~bus", "~bus/170141184506", "~zod")?.emoji?.let(io.nisfeb.talon.ui.ReactionPalette::normalize))
+        val dm = ship.pokesTo("chat").first { it.mark == "chat-dm-action-2" }.json
+        assertEquals("~zod", dm.at("diff", "delta", "add-react", "author").jsonPrimitive.content)
+        assertTrue(ship.pokesTo("chat").any { it.mark == "chat-club-action-2" })
+        // %channels wants `ship`, not `author`, and the id dotted.
+        val chan = ship.pokesTo("channels").single().json.at("channel", "action", "post", "add-react")
+        assertEquals("~zod" to "170.141.184.508", chan.at("ship").jsonPrimitive.content to chan.at("id").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `a changed reaction the ship refuses goes back to the one before`() = live {
+        db.reactions().upsert(ReactionEntity("~bus", "~bus/170141184506", "~zod", "❤"))
+        refuse("chat")
+        assertFailsWith<PokeNacked> { repo.react("~bus", "~bus/170141184506", "👍") }
+        assertEquals("❤", db.reactions().get("~bus", "~bus/170141184506", "~zod")?.emoji)
+        db.reactions().delete("~bus", "~bus/170141184506", "~zod")
+        assertFailsWith<PokeNacked> { repo.react("~bus", "~bus/170141184506", "👍") }
+        assertNull(db.reactions().get("~bus", "~bus/170141184506", "~zod"), "a first reaction refused leaves none")
+    }
+
+    @Test
+    fun `a reply is deleted through its parent, in a DM, a group DM and a channel`() = live {
+        repo.delete("~bus", "~zod/170141184507", parentId = "~bus/170141184506")
+        repo.delete("0v4.club", "~zod/170141184507", parentId = "~nec/170141184506")
+        repo.delete(nest, "170141184507", parentId = "170141184506")
+        val dm = ship.pokesTo("chat").first { it.mark == "chat-dm-action-2" }.json.at("diff", "delta", "reply")
+        assertEquals("~zod/170.141.184.507", dm.at("id").jsonPrimitive.content)
+        assertTrue(ship.pokesTo("chat").any { it.mark == "chat-club-action-2" && "\"reply\"" in it.json.toString() })
+        val chan = ship.pokesTo("channels").single().json.at("channel", "action", "post", "reply")
+        assertEquals("170.141.184.506" to "170.141.184.507", chan.at("id").jsonPrimitive.content to chan.at("action", "del").jsonPrimitive.content)
+    }
+
+    @Test
     fun `deleting a DM hides it at once, a channel post waits for the ship`() = live {
         db.messages().upsert(MessageEntity("~bus", "~zod/170141184506", "~zod", 1, "[]", "/chat"))
         db.messages().upsert(MessageEntity(nest, "170141184507", "~zod", 2, "[]", "/chat"))
