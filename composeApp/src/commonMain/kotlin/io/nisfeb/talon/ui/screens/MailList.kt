@@ -79,6 +79,7 @@ fun MailList(
     val loading by repo.loading.collectAsState()
     val error by repo.error.collectAsState()
     val sendProblem by repo.sendProblem.collectAsState()
+    val problem by repo.problem.collectAsState()
     val drafts by repo.drafts.collectAsState()
     val labels by repo.knownLabels.collectAsState()
     val folder by repo.folder.collectAsState()
@@ -138,6 +139,7 @@ fun MailList(
                 error?.let { MailNotice(it) }
                 // A send that failed after its composer was closed.
                 sendProblem?.let { MailNotice(it, onDismiss = repo::clearSendProblem) }
+                problem?.let { MailNotice(it, onDismiss = repo::clearProblem) }
                 MailBody(
                     installing = installing,
                     installProblem = installProblem,

@@ -241,7 +241,7 @@ fun MailThreadPane(
             filed = "Filing…"
             filed = repo.publishToLattice(title = title, seed = seed, gemtext = gemtext)
                 ?.let { "Filed to Lattice at $it" }
-                ?: repo.error.value ?: "Could not file it."
+                ?: repo.problem.value ?: "Could not file it."
         }
     }
 

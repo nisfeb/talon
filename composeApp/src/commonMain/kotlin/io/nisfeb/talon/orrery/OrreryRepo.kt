@@ -98,6 +98,16 @@ class OrreryRepo(
     private val _enabled = MutableStateFlow(false)
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
+    /** What the last failed probe said, which the next good one may clear. */
+    private var probeSaid: String? = null
+    private val _answerProblem = MutableStateFlow<String?>(null)
+
+    /**
+     * An answer the ship refused, until the next answer. In [error] it
+     * went with the next pass, often before the person who tapped
+     * Approve had looked up.
+     */
+    val answerProblem: StateFlow<String?> = _answerProblem.asStateFlow()
     val error: StateFlow<String?> = _error.asStateFlow()
     private val _lastPushMs = MutableStateFlow<Long?>(null)
     val lastPushMs: StateFlow<Long?> = _lastPushMs.asStateFlow()
@@ -480,8 +490,14 @@ class OrreryRepo(
         // caught as one, the Actions rail went and AI settings said
         // "not asked yet" until something probed again.
         io.nisfeb.talon.util.runSuspendCatching { a.probe() }
-            .onSuccess { _availability.value = it; _error.value = null }
-            .onFailure { _availability.value = OrreryAvailability.UNKNOWN; _error.value = it.message }
+            .onSuccess {
+                _availability.value = it
+                // Only its own failure is its to clear: the reason the
+                // pipe turned itself off went with any probe that worked.
+                if (_error.value != null && _error.value == probeSaid) _error.value = null
+                probeSaid = null
+            }
+            .onFailure { _availability.value = OrreryAvailability.UNKNOWN; probeSaid = it.message; _error.value = it.message }
     }
 
     /** Mint this install's key and start the walk. */
@@ -1556,6 +1572,7 @@ class OrreryRepo(
      * as it was and says why under Orrery in Settings.
      */
     fun answer(id: String, status: String, note: String = "") {
+        _answerProblem.value = null
         val was = _actions.value.firstOrNull { it.id == id }
         _actions.value = settledActions(_actions.value, id, status)
         // Answered here: its notification goes now, not on the next read.
@@ -1563,7 +1580,7 @@ class OrreryRepo(
         scope.launch {
             setAction(id, status, note).onFailure { e ->
                 if (was != null) _actions.value = listOf(was) + _actions.value.filterNot { it.id == id }
-                _error.value = "Orrery did not take that answer: ${e.message ?: "no reason given"}"
+                _answerProblem.value = "Orrery did not take that answer: ${e.message ?: "no reason given"}"
                 Log.w(TAG, "answer $status on $id refused: ${e.message}")
             }
         }

@@ -418,14 +418,16 @@ class MailRepo(
                 _error.value = null
             }
             else -> {
-                _error.value = when (e) {
-                    is AuspexError.Refused -> e.reason
-                    is AuspexError.Garbled -> "The ship answered something we could not read."
-                    is AuspexError.Unreachable -> "No answer from the ship."
-                }
+                _error.value = said(e)
                 Log.w(TAG, "mail refresh failed", e)
             }
         }
+    }
+
+    private fun said(e: AuspexError): String = when (e) {
+        is AuspexError.Refused -> e.reason
+        is AuspexError.Garbled -> "The ship answered something we could not read."
+        is AuspexError.Unreachable -> "No answer from the ship."
     }
 
     /** True while there is more of this view than we have asked for. */
@@ -468,7 +470,7 @@ class MailRepo(
             io.nisfeb.talon.urbit.LatticePublish.publish(http, url, ship, slug, gemtext)
         }.onFailure {
             Log.w(TAG, "lattice publish failed", it)
-            _error.value = "Could not file to Lattice: ${it.message}"
+            _problem.value = "Could not file to Lattice: ${it.message}"
         }.getOrNull()
     }
 
@@ -594,6 +596,20 @@ class MailRepo(
         _sendProblem.value = null
     }
 
+    private val _problem = MutableStateFlow<String?>(null)
+
+    /**
+     * Something asked of the ship that did not happen: an archive, label
+     * or delete it refused, a draft that did not land, a thread not
+     * filed. Its own line until dismissed: in [error] it was wiped by the
+     * next read that went well, often before anyone saw it.
+     */
+    val problem: StateFlow<String?> = _problem.asStateFlow()
+
+    fun clearProblem() {
+        _problem.value = null
+    }
+
     /**
      * Save, upload and send one message on the repo's scope, so that
      * leaving the composer does not stop it: on the composer's own scope,
@@ -703,7 +719,9 @@ class MailRepo(
                     }
                     _rollbacks.update { it + 1 }
                 }
-                onFailure(e)
+                // Signed out is the whole app's state; anything else is
+                // this one write, said until dismissed.
+                if (e.isSignedOut) onFailure(e) else _problem.value = "The ship did not do that: ${said(e)}"
                 return@launch
             }
             if (relist) refresh()
@@ -794,7 +812,7 @@ class MailRepo(
             // A save that does not land is said so: silence here is a
             // message the owner believes is kept and is not.
             val ok = runSuspendCatching { saveDraft(d) }.getOrDefault(false)
-            if (!ok) _error.value = "The draft did not reach the ship; what was written is still here until Talon closes."
+            if (!ok) _problem.value = "The draft did not reach the ship; what was written is still here until Talon closes."
         }
     }
 

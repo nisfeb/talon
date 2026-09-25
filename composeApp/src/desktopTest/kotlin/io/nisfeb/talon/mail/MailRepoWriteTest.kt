@@ -181,8 +181,14 @@ class MailRepoWriteTest {
                 "a refresh that landed while the write was out is newer than the snapshot, and stays",
             )
             assertEquals(false, r.cachedThread("0v1")!!.archived, "the thread is put back too")
-            assertEquals("writer is busy", r.error.value)
+            assertEquals("The ship did not do that: writer is busy", r.problem.value)
             assertEquals(MailAvailability.PRESENT, r.availability.value)
+            // In the read's error it was gone again with the next read
+            // that went well, often before anyone saw it.
+            r.refresh()
+            assertEquals("The ship did not do that: writer is busy", r.problem.value, "a read that goes well does not wipe it")
+            r.clearProblem()
+            assertNull(r.problem.value)
         }
     }
 
