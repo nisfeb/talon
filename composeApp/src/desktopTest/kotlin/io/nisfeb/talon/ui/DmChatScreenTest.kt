@@ -153,9 +153,14 @@ class DmChatScreenTest {
         // lost, as a person's would be; they click again, and so does this.
         val opened = { onAllNodesWithText("Copy text").fetchSemanticsNodes().isNotEmpty() }
         for (attempt in 1..3) {
+            // A message's button sits at the top of its block, so it is the
+            // lowest one at or above the words: the nearest could be the next
+            // message's. Measured once the list is still, not mid-scroll.
+            waitForIdle()
             val y = onNodeWithText(text).fetchSemanticsNode().boundsInRoot.center.y
             val buttons = onAllNodesWithContentDescription("Message actions")
-            buttons[buttons.fetchSemanticsNodes().indices.minBy { kotlin.math.abs(buttons[it].fetchSemanticsNode().boundsInRoot.top - y) }].performClick()
+            buttons[buttons.fetchSemanticsNodes().indices.filter { buttons[it].fetchSemanticsNode().boundsInRoot.top <= y }
+                .maxBy { buttons[it].fetchSemanticsNode().boundsInRoot.top }].performClick()
             if (runCatching { waitUntil(timeoutMillis = 1_500) { opened() } }.isSuccess) return
         }
         waitUntil(timeoutMillis = 1_000) { opened() }
