@@ -40,6 +40,7 @@ class CalendarScreenTest {
     private val writes: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
     /** Noon today, where the device is: today's agenda whatever the hour the test runs. */
     private val HOUR = 3_600_000L
+    @Volatile private var tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"}}]"""
     private val soon = java.time.LocalDate.now().atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     private val http = HttpClient(MockEngine { req ->
@@ -60,8 +61,7 @@ class CalendarScreenTest {
             path.endsWith("/event.json") -> json(
                 """{"id":"s1","cal":"default","cat":"timed","kind":"daily","start_ms":${soon + HOUR},"dur_min":15,"args":{"at":600},"zone":"none","meta":{"name":"Standup"}}""",
             )
-            path.endsWith("/events.json") ->
-                json("""[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"}}]""")
+            path.endsWith("/events.json") -> json(tasksJson)
             path.endsWith("/calendars.json") ->
                 json("""[{"id":"default","name":"Personal","kind":"local"},{"id":"~nec/work","name":"Work","kind":"local"}]""")
             path.endsWith("/config.json") -> json("""{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
@@ -272,5 +272,56 @@ class CalendarScreenTest {
         save()
         waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
         assertTrue(sentMatching("allday") && sentMatching("span_days\\W+3") && sentMatching("music") && sentMatching("summer"), writes.toString())
+    }
+
+    // ─── tasks ─────────────────────────────────────────────────────
+
+    private val dayMs = 86_400_000L
+    private val todayUtc = java.time.LocalDate.now(java.time.ZoneOffset.UTC).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+
+    private fun ComposeUiTest.tasks() {
+        onNodeWithContentDescription("Tasks").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Open") }
+    }
+
+    @Test
+    fun `a task added in the list goes to the ship, due when asked`() = calendar {
+        tasks()
+        onNodeWithContentDescription("New task").performClick()
+        onNode(hasSetTextAction() and hasText("New task")).performTextInput("Water the plants")
+        onNodeWithContentDescription("Add task").performClick()
+        waitUntil(timeoutMillis = 5_000) { writes.any { "Water the plants" in it.second } }
+        assertTrue(sentMatching("todo"), writes.toString())
+    }
+
+    @Test
+    fun `searching narrows the tasks, and a search that finds nothing says so`() {
+        tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"}},{"id":"t2","cal":"default","cat":"todo","meta":{"name":"Call mum"}}]"""
+        calendar {
+            tasks()
+            waitUntil(timeoutMillis = 5_000) { shows("Call mum") }
+            onNodeWithContentDescription("Search tasks").performClick()
+            onNode(hasSetTextAction() and hasText("Search tasks")).performTextInput("milk")
+            waitUntil(timeoutMillis = 5_000) { !shows("Call mum") }
+            assertTrue(shows("Buy milk"))
+            onNode(hasSetTextAction() and hasText("milk")).performTextReplacement("zzz")
+            waitUntil(timeoutMillis = 5_000) { shows("Nothing matches \"zzz\".") }
+        }
+    }
+
+    @Test
+    fun `the filters count what they hold, late ones are overdue and done ones are kept apart`() {
+        tasksJson = """[
+            {"id":"t1","cal":"default","cat":"todo","meta":{"name":"File taxes"},"due_ms":${todayUtc - 3 * dayMs}},
+            {"id":"t2","cal":"default","cat":"todo","meta":{"name":"Old errand"},"done":true}]"""
+        calendar {
+            tasks()
+            waitUntil(timeoutMillis = 5_000) { shows("File taxes") }
+            assertTrue(shows("Overdue 1") && shows("Done 1"), "each chip counts its own")
+            assertTrue(!shows("Old errand"), "done is not open")
+            onNodeWithText("Done 1").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Old errand") }
+            assertTrue(!shows("File taxes"))
+        }
     }
 }
