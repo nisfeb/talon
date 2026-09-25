@@ -216,4 +216,61 @@ class CalendarScreenTest {
         assertTrue(shows("Work · shared with you, read-only"))
         for (gone in listOf("Edit", "More", "Done")) assertTrue(onAllNodesWithText(gone).fetchSemanticsNodes().isEmpty(), gone)
     }
+
+    // ─── the new event form ────────────────────────────────────────
+
+    private fun ComposeUiTest.newEvent() {
+        onAllNodesWithContentDescription("New event")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Repeats") }
+    }
+
+    private fun ComposeUiTest.chip(label: String) = onAllNodesWithText(label).let { it[it.fetchSemanticsNodes().size - 1] }.performScrollTo().performClick()
+
+    private fun ComposeUiTest.save() = onAllNodesWithText("Save")[0].performClick()
+
+    private fun sentMatching(pattern: String) = writes.any { Regex(pattern).containsMatchIn(it.second) }
+
+    @Test
+    fun `an event needs a name before it goes`() = calendar {
+        newEvent()
+        save()
+        waitUntil(timeoutMillis = 5_000) { shows("A name is needed.") }
+        assertTrue(writes.isEmpty())
+    }
+
+    @Test
+    fun `a weekly event needs its weekdays, and goes with the ones picked`() = calendar {
+        newEvent()
+        field("Name").performTextInput("Choir")
+        chip("Weekly")
+        save()
+        waitUntil(timeoutMillis = 5_000) { shows("Pick the weekdays.") }
+        assertTrue(writes.isEmpty())
+        chip("Tu")
+        save()
+        waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
+        assertTrue(sentMatching("weekly") && sentMatching("tue"), writes.toString())
+    }
+
+    @Test
+    fun `a zone the calendar does not know is refused`() = calendar {
+        newEvent()
+        field("Name").performTextInput("Call with Nec")
+        field("Zone").performScrollTo().performTextInput("Mars/Olympus")
+        save()
+        waitUntil(timeoutMillis = 5_000) { shows("That zone is not one the calendar knows.") }
+        assertTrue(writes.isEmpty())
+    }
+
+    @Test
+    fun `an all-day event spans the days asked, and carries its tags`() = calendar {
+        newEvent()
+        field("Name").performTextInput("Festival")
+        chip("All day")
+        field("Days").performScrollTo().performTextReplacement("3")
+        field("Tags, comma separated").performScrollTo().performTextInput("music, summer")
+        save()
+        waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
+        assertTrue(sentMatching("allday") && sentMatching("span_days\\W+3") && sentMatching("music") && sentMatching("summer"), writes.toString())
+    }
 }
