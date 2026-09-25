@@ -319,44 +319,47 @@ class SettingsSyncImpl(
             return
         }
         val obj = value as? JsonObject ?: return
-        applyLocal(entry, obj) {
-            when (entry) {
-                ENTRY_GROUP_CHANNEL_ORDER -> obj["value"].asStr()?.let { name ->
-                    runCatching { io.nisfeb.talon.ui.GroupChannelOrder.valueOf(name) }
-                        .onSuccess { settings.setGroupChannelOrder(it) }
+        // Noted as the watcher will encode what the store then holds,
+        // not as it arrived: a rail order from a build with fewer items
+        // came back completed, differed from the raw value, and was
+        // pushed straight back — between an older and a newer build, a
+        // loop, each dropping the other's items and re-sending.
+        when (entry) {
+            ENTRY_GROUP_CHANNEL_ORDER -> obj["value"].asStr()
+                ?.let { runCatching { io.nisfeb.talon.ui.GroupChannelOrder.valueOf(it) }.getOrNull() }
+                ?.let { applyLocal(entry, str(it.name)) { settings.setGroupChannelOrder(it) } }
+            ENTRY_FOLDER_ITEM_ORDER -> obj["value"].asStr()
+                ?.let { runCatching { io.nisfeb.talon.ui.FolderItemOrder.valueOf(it) }.getOrNull() }
+                ?.let { applyLocal(entry, str(it.name)) { settings.setFolderItemOrder(it) } }
+            ENTRY_SMART_SEARCH -> obj["enabled"].asBool()
+                ?.let { applyLocal(entry, bool(it)) { settings.setSmartSearchPreferred(it) } }
+            ENTRY_POWER_FEATURES -> obj["enabled"].asBool()
+                ?.let { applyLocal(entry, bool(it)) { settings.setPowerFeaturesEnabled(it) } }
+            ENTRY_HIDE_COMPOSER_BUTTONS -> obj["enabled"].asBool()
+                ?.let { applyLocal(entry, bool(it)) { settings.setHideComposerButtons(it) } }
+            ENTRY_RAIL_ITEM_ORDER -> {
+                val names = (obj["order"] as? JsonArray)?.mapNotNull { it.asStr() } ?: return
+                val items = names.mapNotNull { n ->
+                    runCatching { io.nisfeb.talon.ui.RailItem.valueOf(n) }.getOrNull()
                 }
-                ENTRY_FOLDER_ITEM_ORDER -> obj["value"].asStr()?.let { name ->
-                    runCatching { io.nisfeb.talon.ui.FolderItemOrder.valueOf(name) }
-                        .onSuccess { settings.setFolderItemOrder(it) }
-                }
-                ENTRY_SMART_SEARCH ->
-                    obj["enabled"].asBool()?.let { settings.setSmartSearchPreferred(it) }
-                ENTRY_POWER_FEATURES ->
-                    obj["enabled"].asBool()?.let { settings.setPowerFeaturesEnabled(it) }
-                ENTRY_HIDE_COMPOSER_BUTTONS ->
-                    obj["enabled"].asBool()?.let { settings.setHideComposerButtons(it) }
-                ENTRY_RAIL_ITEM_ORDER -> {
-                    val names = (obj["order"] as? JsonArray)?.mapNotNull { it.asStr() }
-                        ?: return@applyLocal
-                    val items = names.mapNotNull { n ->
-                        runCatching { io.nisfeb.talon.ui.RailItem.valueOf(n) }.getOrNull()
-                    }
-                    if (items.isNotEmpty()) settings.setRailItemOrder(items)
-                }
-                ENTRY_ACCENT -> settings.setAccentSettings(
-                    io.nisfeb.talon.ui.AccentSettings(
-                        enabled = obj["enabled"].asBool(),
-                        mode = obj["mode"].asStr()
-                            ?.let { m ->
-                                runCatching { io.nisfeb.talon.ui.AccentMode.valueOf(m) }.getOrNull()
-                            }
-                            ?: io.nisfeb.talon.ui.AccentMode.Profile,
-                        customHex = obj["customHex"].asStr(),
-                    ),
-                )
-                ENTRY_THEMES -> io.nisfeb.talon.ui.theme.ThemeSettings.fromJson(obj.toString())
-                    ?.let { settings.setThemeSettings(it) }
+                if (items.isEmpty()) return
+                val order = io.nisfeb.talon.ui.sanitizeRailItemOrder(items)
+                applyLocal(entry, encodeRailItemOrder(order)) { settings.setRailItemOrder(order) }
             }
+            ENTRY_ACCENT -> {
+                val accent = io.nisfeb.talon.ui.AccentSettings(
+                    enabled = obj["enabled"].asBool(),
+                    mode = obj["mode"].asStr()
+                        ?.let { m ->
+                            runCatching { io.nisfeb.talon.ui.AccentMode.valueOf(m) }.getOrNull()
+                        }
+                        ?: io.nisfeb.talon.ui.AccentMode.Profile,
+                    customHex = obj["customHex"].asStr(),
+                )
+                applyLocal(entry, encodeAccent(accent)) { settings.setAccentSettings(accent) }
+            }
+            ENTRY_THEMES -> io.nisfeb.talon.ui.theme.ThemeSettings.fromJson(obj.toString())
+                ?.let { themes -> applyLocal(entry, encodeThemes(themes)) { settings.setThemeSettings(themes) } }
         }
     }
 
