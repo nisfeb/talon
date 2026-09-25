@@ -49,6 +49,19 @@ class TlonChatRepoPeopleTest {
     // ─── contacts ─────────────────────────────────────────────────
 
     @Test
+    fun `the book is what the ship says, and a book it could not send is kept`() = live {
+        ship.scries["contacts/v1/book"] = """{"~bus":[{"nickname":{"type":"text","value":"Bus"}},{}]}"""
+        repo.bootstrapContacts(ship.channel)
+        assertEquals(setOf("~bus"), repo.bookContacts.value)
+        ship.scries.remove("contacts/v1/book")
+        repo.bootstrapContacts(ship.channel)
+        assertEquals(setOf("~bus"), repo.bookContacts.value, "no answer is not an empty book")
+        ship.scries["contacts/v1/book"] = "{}"
+        repo.bootstrapContacts(ship.channel)
+        assertEquals(emptySet(), repo.bookContacts.value, "an empty book is")
+    }
+
+    @Test
     fun `adding a contact meets them, pages them, and keeps what we knew`() = live {
         db.contacts().upsert(ContactEntity("~bus", null, "a bus", null, status = "on the road", statusUpdatedMs = 1))
         repo.addContact("~bus", nickname = "  Bus  ")

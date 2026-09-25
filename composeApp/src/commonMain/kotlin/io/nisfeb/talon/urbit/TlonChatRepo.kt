@@ -1209,7 +1209,8 @@ class TlonChatRepo(
      */
     suspend fun fetchAdminGroupsLive(): List<AdminGroup> {
         val ch = channel ?: error("not connected")
-        val body = ch.scry("groups", "/v2/groups") as? JsonObject ?: return emptyList()
+        val body = ch.scry("groups", "/v2/groups") as? JsonObject
+            ?: error("The ship's list of groups could not be read.")
         val me = ourPatp
         Log.i(TAG, "fetchAdminGroups: ${body.size} total groups, me=$me")
         // The `/v2/groups` scry can return a lightweight listing where
@@ -1235,21 +1236,24 @@ class TlonChatRepo(
                         val full = runCatching {
                             ch.scry("groups", "/v2/groups/$flag") as? JsonObject
                         }.getOrNull()
-                        if (full == null) {
-                            Log.w(TAG, "  $flag: full scry returned null, skipping")
-                            null
-                        } else {
-                            flag to full
-                        }
+                        if (full == null) Log.w(TAG, "  $flag: full scry returned null")
+                        flag to full
                     } finally {
                         gate.release()
                     }
                 }
             }.awaitAll()
-        }.filterNotNull()
+        }
+        // A group that could not be read is not one we do not run: left
+        // out, it vanished from Administration (and lost its Pin) for the
+        // five minutes the list is kept. The list we had stays instead.
+        parsed.firstOrNull { it.second == null }?.let { (flag, _) ->
+            error("$flag could not be read from the ship. Try again.")
+        }
 
         val out = ArrayList<AdminGroup>(parsed.size)
         for ((flag, full) in parsed) {
+            if (full == null) continue
             val g = parseAdminGroup(flag, full)
             val host = flag.substringBefore('/')
             val isHost = host == me
@@ -3811,7 +3815,7 @@ class TlonChatRepo(
      * book just lost its nickname. scryFirstMatching logs on total
      * failure, so the next rename is loud.
      */
-    private suspend fun bootstrapContacts(channel: UrbitChannel) = coroutineScope {
+    internal suspend fun bootstrapContacts(channel: UrbitChannel) = coroutineScope {
         // The directory (every known peer) and /v1/self (our own contact
         // card) are independent network round-trips. Run them in parallel
         // so the whole bootstrap doesn't pay both serially.
@@ -3859,7 +3863,9 @@ class TlonChatRepo(
             val merged = fresh.map { mergeContact(it) }
             db.contacts().upsertAll(merged)
         }
-        _bookContacts.value = book
+        // No answer is not an empty book: read as one, every contact
+        // left the Contacts screen until the next connect.
+        if (bookBody is JsonObject) _bookContacts.value = book
     }
 
     /**

@@ -84,6 +84,16 @@ class GroupAdminListScreenTest {
         showing("You're not an admin of any groups.")
     }
 
+    // A group that could not be read was left out, so a group we run
+    // vanished from here (and lost its Pin) for five minutes.
+    @Test
+    fun `a group the ship could not read fails the list rather than leaving it out`() =
+        admin(prepare = { scries.remove("groups/v2/groups/~nec/book-club") }) {
+            showing("Couldn't load groups")
+            assertTrue(shows("~nec/book-club could not be read"))
+            assertTrue(!shows("You're not an admin of any groups."))
+        }
+
     @Test
     fun `a list the ship will not give says it failed, rather than spinning`() = admin(prepare = { scries.remove("groups/v2/groups") }) {
         showing("Couldn't load groups")
