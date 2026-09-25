@@ -343,6 +343,7 @@ class TalonApplication : Application() {
     private fun buildShipScoped(ship: String, afterPriorClose: (() -> Unit)? = null) {
         val priorDb = if (::db.isInitialized) db else null
         val priorIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
+        val priorRepo = if (::repo.isInitialized) repo else null
 
         // A quote waiting in a chat belongs to the ship that picked it.
         io.nisfeb.talon.ui.PendingQuotes.clear()
@@ -391,29 +392,38 @@ class TalonApplication : Application() {
         }
 
         if (priorDb != null || priorIndexer != null) {
-            scheduleShipScopedTeardown(priorDb, priorIndexer, afterPriorClose)
+            scheduleShipScopedTeardown(priorDb, priorIndexer, priorRepo, afterPriorClose)
         }
     }
 
     /**
-     * Wait for the UI to drop the prior ship's collectors, then close
-     * the prior `AppDatabase` and stop the prior embedding indexer. A
-     * 2s delay covers the typical re-keying frame plus any in-flight
-     * suspend Room call returning. Running on appScope (IO supervisor)
-     * means the cleanup survives the ship-switch caller returning.
+     * Wait for the UI to drop the prior ship's collectors, then stop the
+     * prior ship's own work (its repo and embedding indexer) and wait
+     * for it, and only then close its `AppDatabase`: the indexer used to
+     * be cancelled and the pool closed the same instant, so a page it
+     * was writing ran into the close, which is a native crash (see
+     * closeAfterWork). Running on appScope (IO supervisor) means the
+     * cleanup survives the ship-switch caller returning.
      */
     private fun scheduleShipScopedTeardown(
         priorDb: AppDatabase?,
         priorIndexer: io.nisfeb.talon.ai.EmbeddingIndexer?,
+        priorRepo: TlonChatRepo?,
         /** Runs once the database is closed -- the only safe moment to
-         *  delete its file, which forgetShip needs. */
+         *  delete its file, which forgetShip needs. Not run where the
+         *  work would not stop and the database was left open: the
+         *  pending marker erases it at the next launch instead. */
         afterClose: (() -> Unit)? = null,
     ) {
         appScope.launch {
             delay(2_000)
-            runCatching { priorIndexer?.stop() }
-            runCatching { priorDb?.close() }
-            afterClose?.let { runCatching(it) }
+            val stopWork: suspend () -> Unit = {
+                priorRepo?.stopAndJoin()
+                priorIndexer?.stopAndJoin()
+            }
+            val closed = if (priorDb != null) io.nisfeb.talon.data.closeAfterWork(priorDb, stopWork = stopWork)
+            else { runCatching { stopWork() }; true }
+            if (closed) afterClose?.let { runCatching(it) }
         }
     }
 
@@ -529,6 +539,7 @@ class TalonApplication : Application() {
         if (alsoData) shipDataEraser.markPending(ship)
         val dying = db
         val dyingIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
+        val dyingRepo = if (::repo.isInitialized) repo else null
         val next = sessionStore.activeShip() ?: sessionStore.all().firstOrNull()?.ship
         if (next != null) {
             buildShipScoped(next, afterPriorClose = erase)
@@ -536,7 +547,7 @@ class TalonApplication : Application() {
             _activeShip.value = next
         } else {
             _activeShip.value = null
-            scheduleShipScopedTeardown(dying, dyingIndexer, afterClose = erase)
+            scheduleShipScopedTeardown(dying, dyingIndexer, dyingRepo, afterClose = erase)
         }
     }
 

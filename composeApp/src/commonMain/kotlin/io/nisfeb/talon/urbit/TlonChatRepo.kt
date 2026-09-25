@@ -348,15 +348,23 @@ class TlonChatRepo(
     }
 
     /**
-     * For tests: stop, and wait out work already running. A screen's
-     * dispose marks its chat read on [scope]; a db closed under that
-     * write crashes the native SQLite and the whole test JVM with it.
+     * [stop], then wait for what was already running to finish: the
+     * session and its bootstrap, and the writes on [pushScope], which get
+     * [pokeGraceMs] to land before they are cancelled too. The database
+     * closes only after this (see closeAfterWork): a query still running
+     * when it closes is a native crash, and cancelling does not stop the
+     * query a coroutine is in.
      */
-    internal suspend fun stopAndJoinForTest() {
+    suspend fun stopAndJoin(pokeGraceMs: Long = 3_000) {
         stop()
         scope.coroutineContext[kotlinx.coroutines.Job]?.join()
-        pushScope.coroutineContext[kotlinx.coroutines.Job]?.cancelAndJoin()
+        val pushes = pushScope.coroutineContext[kotlinx.coroutines.Job]
+        if (pokeGraceMs > 0) kotlinx.coroutines.withTimeoutOrNull(pokeGraceMs) { pushes?.children?.forEach { it.join() } }
+        pushes?.cancelAndJoin()
     }
+
+    /** For tests: [stopAndJoin] without waiting for pokes to land. */
+    internal suspend fun stopAndJoinForTest() = stopAndJoin(pokeGraceMs = 0)
 
     fun start(session: UrbitSession) {
         if (started) return

@@ -45,6 +45,7 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.update
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ui.parseHexColor
 import io.nisfeb.talon.ai.InMemoryWatchwordsSyncSettings
@@ -241,6 +242,10 @@ fun App(
      *  show the install prompt rather than swallowing taps. */
     urbLinkLauncher: io.nisfeb.talon.urbit.UrbLinkLauncher =
         io.nisfeb.talon.urbit.NoopUrbLinkLauncher,
+    /** Handed the way to stop the signed-in ship's work and wait for it,
+     *  or null when it goes: a host closing the database itself (quitting,
+     *  restarting for an update) runs it first. See closeAfterWork. */
+    onShipWork: ((suspend () -> Unit)?) -> Unit = {},
 ) {
     // Derive the initial logged-in ship from sessionStore.active()
     // (the joined SavedSession) rather than activeShip() (just the
@@ -656,6 +661,10 @@ fun App(
     // composes, which is the only path that doesn't permanently kill
     // repo's scope (see KDoc above).
     val shipKey = loggedInShip ?: "__loggedout__"
+    // What waits on a ship's database closing, by ship: forgetting it
+    // erases its files, which must not happen while SQLite has them open.
+    // Outside the key block, so it outlives the ship it is waiting on.
+    val afterShipClose = remember { kotlinx.coroutines.flow.MutableStateFlow<Map<String, () -> Unit>>(emptyMap()) }
     key(shipKey) {
         // Per-ship db + settingsSync. Built inside the key block so a
         // ship switch tears the prior pair down and constructs fresh
@@ -1198,20 +1207,33 @@ fun App(
         }
 
         DisposableEffect(Unit) {
+            val stopWork: suspend () -> Unit = {
+                repo.stopAndJoin()
+                searchEmbedderClient?.stop()
+            }
+            onShipWork(stopWork)
             onDispose {
+                onShipWork(null)
                 runCatching { repo.stop() }
-                // Defer db.close by 2s so any in-flight Flow collectors
-                // from the prior key composition unwind cleanly. Closing
-                // the pool synchronously here would surface as
-                // SQLiteException spam in the brief overlap window.
-                // Matches production's TalonApplication.scheduleShipScopedTeardown.
+                // Defer the close 2s so the prior composition's Flow
+                // collectors unwind, then stop the ship's own work and
+                // wait for it: the delay alone let the indexer, a
+                // bootstrap or a sync write run into the close, which is
+                // a native crash. Matches production's
+                // TalonApplication.scheduleShipScopedTeardown.
                 val dying = db
+                val dyingShip = shipKey
                 // Fire-and-forget deferred close that must outlive this
                 // composition (a re-key) — GlobalScope is deliberate, the
                 // daemon Thread this replaces had the same lifetime.
                 GlobalScope.launch(ioDispatcher) {
                     delay(2_000)
-                    runCatching { dying.close() }
+                    val closed = io.nisfeb.talon.data.closeAfterWork(dying, stopWork = stopWork)
+                    var then: (() -> Unit)? = null
+                    afterShipClose.update { waiting -> then = waiting[dyingShip]; waiting - dyingShip }
+                    // Left open, its files stay: the pending marker erases
+                    // them at the next launch instead.
+                    if (closed) then?.let { runCatching(it) }
                 }
             }
         }
@@ -1879,20 +1901,23 @@ fun App(
                     }
                     if (alsoData && removed.isSuccess) {
                         if (wasActive) {
-                            // The key block closes this database two
-                            // seconds after it re-keys. Erasing before
-                            // that deletes a file SQLite still has
-                            // open: Windows refuses, and elsewhere the
-                            // next checkpoint writes it straight back.
+                            // The key block closes this database once
+                            // its work has stopped, after it re-keys.
+                            // Erasing before that deletes a file SQLite
+                            // still has open: Windows refuses, and
+                            // elsewhere the next checkpoint writes it
+                            // straight back. So the erase waits on it.
                             // The marker is the record in case the
                             // process dies inside the window — the next
                             // launch replays it (see the takePending
                             // call near the top of App).
                             shipDataEraser.markPending(gone)
-                            GlobalScope.launch(ioDispatcher) {
-                                delay(2_500)
-                                shipDataEraser.erase(gone)
-                                    .onFailure { io.nisfeb.talon.util.Log.w("App", "forgetShip: erase failed for $gone", it) }
+                            afterShipClose.update { waiting ->
+                                waiting + (gone to {
+                                    shipDataEraser.erase(gone)
+                                        .onFailure { io.nisfeb.talon.util.Log.w("App", "forgetShip: erase failed for $gone", it) }
+                                    Unit
+                                })
                             }
                         } else {
                             shipDataEraser.erase(gone)

@@ -22,6 +22,9 @@ interface SearchEmbedderClient {
     /** Kick off catch-up indexing. No-op if already running. */
     suspend fun start()
 
+    /** Stop indexing and wait until it has: the ship's database closes next. */
+    suspend fun stop() {}
+
     /** Embed the query, run cosine-sim search, return hit messages
      *  (most-similar first). Empty on any failure or short query. */
     suspend fun semanticSearch(query: String): List<MessageEntity>
