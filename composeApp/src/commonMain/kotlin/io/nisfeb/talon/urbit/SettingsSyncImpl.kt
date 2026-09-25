@@ -406,40 +406,37 @@ class SettingsSyncImpl(
             seedFromLocal()
         } else {
             // Ship has state: treat it as authoritative, replace local.
-            applyBucket(BUCKET_GROUP_ORDERS, deskMap!![BUCKET_GROUP_ORDERS] as? JsonObject)
-            applyBucket(BUCKET_FOLDERS, deskMap[BUCKET_FOLDERS] as? JsonObject)
-            applyBucket(BUCKET_FOLDER_MEMBERS, deskMap[BUCKET_FOLDER_MEMBERS] as? JsonObject)
-            applyBucket(BUCKET_NOTIFY_PREFS, deskMap[BUCKET_NOTIFY_PREFS] as? JsonObject)
-            applyBucket(BUCKET_RAIL_ITEMS, deskMap[BUCKET_RAIL_ITEMS] as? JsonObject)
-            applyBucket(BUCKET_BOOKMARKS, deskMap[BUCKET_BOOKMARKS] as? JsonObject)
-            applyBucket(BUCKET_BOOKMARK_FOLDERS, deskMap[BUCKET_BOOKMARK_FOLDERS] as? JsonObject)
-            applyBucket(BUCKET_BOOKMARK_FOLDER_MEMBERS, deskMap[BUCKET_BOOKMARK_FOLDER_MEMBERS] as? JsonObject)
-            // AI settings: per-feature toggles always apply (they
-            // follow the user across devices). applyAiEntry itself
-            // gates the cloud-key fields on local syncEnabled so the
-            // API key only travels with explicit consent.
-            applyBucket(BUCKET_AI_SETTINGS, deskMap[BUCKET_AI_SETTINGS] as? JsonObject)
-            // UI preferences that follow the user. Bootstrap skipped this
-            // bucket entirely before, so a preference only ever reached a
-            // device that happened to be connected when it changed — a
-            // fresh login silently kept its local defaults.
-            applyBucket(BUCKET_UI_PREFS, deskMap[BUCKET_UI_PREFS] as? JsonObject)
-            // Watchwords are unconditionally applied (mirrors live
-            // subscribe semantics) so a fresh login hydrates the
-            // ship's existing terms — without this, push works but
-            // the bootstrap never pulls.
-            applyBucket(BUCKET_WATCHWORDS, deskMap[BUCKET_WATCHWORDS] as? JsonObject)
-            applyBucket(BUCKET_WATCHWORD_EXCLUDES, deskMap[BUCKET_WATCHWORD_EXCLUDES] as? JsonObject)
-            applyBucket(BUCKET_STATUS_SEEN, deskMap[BUCKET_STATUS_SEEN] as? JsonObject)
-            // Assistant history. Upsert (not replace-all) so conversations
-            // created offline on this device aren't wiped; conversations
-            // before turns so turns resolve their convGid (a stub is
-            // created either way if they arrive out of order).
-            applyBucket(BUCKET_ASSISTANT_CONVERSATIONS, deskMap[BUCKET_ASSISTANT_CONVERSATIONS] as? JsonObject)
-            applyBucket(BUCKET_ASSISTANT_TURNS, deskMap[BUCKET_ASSISTANT_TURNS] as? JsonObject)
-            // Loop definitions. Upsert (not replace-all) so loops created
-            // offline on this device survive; lastRunAt is preserved per row.
-            applyBucket(BUCKET_LOOPS, deskMap[BUCKET_LOOPS] as? JsonObject)
+            // Only what the ship has. A missing or empty bucket means this
+            // device's copy stands (see bucketIsMissingOrEmpty) and is
+            // seeded below; applying it as empty first wiped the rows the
+            // seed was about to send, so a bucket new to the ship erased
+            // that data here.
+            for (bucket in listOf(
+                BUCKET_GROUP_ORDERS, BUCKET_FOLDERS, BUCKET_FOLDER_MEMBERS,
+                BUCKET_NOTIFY_PREFS, BUCKET_RAIL_ITEMS, BUCKET_BOOKMARKS,
+                BUCKET_BOOKMARK_FOLDERS, BUCKET_BOOKMARK_FOLDER_MEMBERS,
+                // Per-feature toggles follow the user; applyAiEntry gates
+                // the cloud-key fields on local syncEnabled, so the API
+                // key only travels with explicit consent.
+                BUCKET_AI_SETTINGS,
+                // Pulled here too: a preference used to reach only a device
+                // connected when it changed, and a fresh login kept its
+                // local defaults.
+                BUCKET_UI_PREFS,
+                // Pulled so a fresh login has the ship's terms.
+                BUCKET_WATCHWORDS, BUCKET_WATCHWORD_EXCLUDES,
+                BUCKET_STATUS_SEEN,
+                // Upserted, not replaced, so conversations made offline here
+                // survive; conversations before turns, so turns resolve
+                // their convGid (a stub is made either way).
+                BUCKET_ASSISTANT_CONVERSATIONS, BUCKET_ASSISTANT_TURNS,
+                // Upserted too, so loops made offline survive; lastRunAt is
+                // kept per row.
+                BUCKET_LOOPS,
+            )) {
+                val entries = deskMap!![bucket] as? JsonObject
+                if (!bucketIsMissingOrEmpty(entries)) applyBucket(bucket, entries)
+            }
 
             // Per-bucket recovery for the Room-backed buckets: any the
             // ship is missing (or holds empty) gets re-seeded from the
@@ -2046,15 +2043,11 @@ class SettingsSyncImpl(
                 io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(false)
                 io.nisfeb.talon.ui.AzimuthNames.setEnabled(false)
             }
-            BUCKET_WATCHWORDS -> {
-                val existing = db.watchwords().streamTerms().firstOrNull().orEmpty()
-                existing.forEach { db.watchwords().deleteTermById(it.id) }
-            }
-            BUCKET_WATCHWORD_EXCLUDES -> {
-                db.watchwords().excludesAsList().forEach {
-                    db.watchwords().deleteExclude(it)
-                }
-            }
+            // Only a device switching watchword sync off deletes these
+            // buckets: it takes the ship's copy away, not anyone's terms.
+            // Mirroring it here erased every other device's terms and
+            // excludes the moment one of them opted out.
+            BUCKET_WATCHWORDS, BUCKET_WATCHWORD_EXCLUDES -> Unit
             // A peer cleared assistant history (del-bucket) — mirror it
             // locally. Either bucket's del-bucket wipes both tables; turns
             // can't outlive their conversations.
