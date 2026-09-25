@@ -17,7 +17,6 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.ChannelGroupEntity
 import io.nisfeb.talon.data.GroupEntity
 import io.nisfeb.talon.data.MessageMediaEntity
-import io.nisfeb.talon.data.WatchwordChatExcludeEntity
 import io.nisfeb.talon.urbit.MediaCategory
 import io.nisfeb.talon.ui.screens.GroupInfoPane
 import io.nisfeb.talon.ui.theme.TalonTheme
@@ -66,14 +65,7 @@ class GroupInfoPaneTest {
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
         val ship = FakeShip("~zod").apply { scries["groups/v2/groups/$flag"] = record(privacy) }
-        // Routed as Android routes it (Watchwords.excludeChat); desktop and
-        // iOS pass no router, so there the switch does nothing yet.
-        val sync = SettingsSyncImpl(
-            db = db, aiSettings = FakeAiSettings(),
-            watchwordExcludeRouter = { whom, excluded ->
-                if (excluded) db.watchwords().upsertExclude(WatchwordChatExcludeEntity(whom)) else db.watchwords().deleteExclude(whom)
-            },
-        ).apply { attach(ship.channel) }
+        val sync = SettingsSyncImpl(db = db, aiSettings = FakeAiSettings()).apply { attach(ship.channel) }
         val repo = TlonChatRepo(db, settingsSync = sync).apply { attachForTest(ship.channel, "~zod") }
         runBlocking {
             db.groups().upsertGroups(listOf(GroupEntity(flag, "The Crew", null)))
@@ -141,10 +133,11 @@ class GroupInfoPaneTest {
     }
 
     @Test
-    fun `excluding the channel from watchwords sticks`() = pane { _, _ ->
+    fun `excluding the channel from watchwords sticks and syncs`() = pane { ship, _ ->
         showing("Exclude from watchwords")
         onNode(isToggleable()).performClick()
         waitUntil(timeoutMillis = 5_000) { runCatching { onNode(isToggleable()).assertIsOn() }.isSuccess }
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("settings").any { "watchword" in it.json.toString() && nest in it.json.toString() } }
     }
 
     @Test

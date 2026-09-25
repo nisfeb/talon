@@ -288,13 +288,8 @@ fun GroupInfoPane(
                     )
                     Switch(
                         checked = isExcludedFromWatchwords,
-                        enabled = canMutate,
                         onCheckedChange = { exclude ->
-                            scope.launch {
-                                runCatching {
-                                    repo.settingsSync?.setWatchwordExclude(whom, exclude)
-                                }
-                            }
+                            scope.launch { runCatching { repo.watchwords.excludeChat(whom, exclude) } }
                         },
                     )
                 }

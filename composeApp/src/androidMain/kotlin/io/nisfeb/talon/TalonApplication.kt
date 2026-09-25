@@ -103,8 +103,6 @@ class TalonApplication : Application() {
      *  db and embeddingIndexer are ship-scoped. */
     lateinit var searchEmbedderClient: io.nisfeb.talon.ai.AndroidSearchEmbedderClient
         private set
-    lateinit var watchwords: io.nisfeb.talon.ai.Watchwords
-        private set
 
     // Both lazy so neither touches Context until after attachBaseContext()
     // / onCreate() — eager property initializers run during the
@@ -129,7 +127,6 @@ class TalonApplication : Application() {
         if (_watchwordsSyncEnabled.value == enabled) return
         watchwordsPrefs.edit().putBoolean(KEY_WATCHWORDS_SYNC, enabled).apply()
         _watchwordsSyncEnabled.value = enabled
-        watchwords.emitSyncToggled()
     }
 
     private val _activeShip = MutableStateFlow<String?>(null)
@@ -321,31 +318,6 @@ class TalonApplication : Application() {
             }
         }
 
-        watchwords.onChange = { evt, transitionedOffSync ->
-            appScope.launch {
-                runCatching {
-                    when {
-                        transitionedOffSync ->
-                            settingsSync.clearWatchwordsOnShip()
-                        _watchwordsSyncEnabled.value -> when (evt) {
-                            is io.nisfeb.talon.ai.WatchwordChange.Upsert ->
-                                settingsSync.pushWatchwordEntry(evt.term)
-                            is io.nisfeb.talon.ai.WatchwordChange.Remove ->
-                                settingsSync.deleteWatchwordEntry(evt.termText)
-                            is io.nisfeb.talon.ai.WatchwordChange.Exclude ->
-                                settingsSync.pushWatchwordExclude(evt.whom)
-                            is io.nisfeb.talon.ai.WatchwordChange.Unexclude ->
-                                settingsSync.deleteWatchwordExclude(evt.whom)
-                            is io.nisfeb.talon.ai.WatchwordChange.SyncToggled ->
-                                settingsSync.pushAllWatchwords()
-                        }
-                        else -> Unit
-                    }
-                }
-            }
-        }
-
-
         // Arm the alarm if the user has enabled it (and re-arm on every
         // app start — belt-and-suspenders against the receiver being killed
         // before it finished re-arming yesterday).
@@ -394,25 +366,12 @@ class TalonApplication : Application() {
                 // always-on and built before buildShipScoped runs.
                 runCatching { loops.reschedule() }
             },
-            watchwordExcludeRouter = { whom, excluded ->
-                // Route to Watchwords.excludeChat so backfill cleanup +
-                // onChange → %settings push both fire. `watchwords` is
-                // assigned just below in this same buildShipScoped call,
-                // so by the time the chat-screen dropdown invokes this
-                // it's safely initialized.
-                watchwords.excludeChat(whom, excluded)
-            },
         )
         repo = TlonChatRepo(
             db = db,
             settingsSync = settingsSync,
             notificationHealth = notificationHealth,
-        )
-        watchwords = io.nisfeb.talon.ai.Watchwords(
-            db = db,
-            ourPatpProvider = { ship.takeIf { it != "none" } ?: "" },
-            scope = appScope,
-            syncEnabledProvider = { _watchwordsSyncEnabled.value },
+            watchwordsSyncEnabled = watchwordsSyncEnabled,
         )
         drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
         menuSeen = io.nisfeb.talon.ui.AndroidMenuSeenStore(this, ship)

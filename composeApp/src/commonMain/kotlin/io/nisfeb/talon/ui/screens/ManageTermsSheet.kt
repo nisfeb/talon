@@ -1,5 +1,4 @@
 package io.nisfeb.talon.ui.screens
-import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -54,6 +53,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun ManageTermsSheet(
     db: AppDatabase,
+    /** Every change goes through here, so it syncs and backfills. */
+    watchwords: io.nisfeb.talon.ai.Watchwords,
     watchwordsSyncEnabled: StateFlow<Boolean>,
     onSetWatchwordsSyncEnabled: (Boolean) -> Unit,
     onDismiss: () -> Unit,
@@ -112,15 +113,8 @@ fun ManageTermsSheet(
                     onClick = {
                         val trimmed = draftText.trim()
                         if (trimmed.isNotEmpty()) {
-                            scope.launch {
-                                dao.upsertTerm(
-                                    WatchwordEntity(
-                                        term = trimmed,
-                                        notify = draftNotify,
-                                        createdMs = nowMs(),
-                                    )
-                                )
-                            }
+                            val notify = draftNotify
+                            scope.launch { runCatching { watchwords.add(trimmed, notify) } }
                             draftText = ""
                         }
                     },
@@ -156,7 +150,7 @@ fun ManageTermsSheet(
                         term = term,
                         hitCount = countsByTerm[term.term] ?: 0,
                         onNotifyChange = { on ->
-                            scope.launch { dao.setNotify(term.id, on) }
+                            scope.launch { runCatching { watchwords.setNotify(term.id, on) } }
                         },
                         onDelete = { pendingDelete = term },
                     )
@@ -187,7 +181,7 @@ fun ManageTermsSheet(
             }
 
             Text(
-                "New terms match incoming messages from now on. Older history is matched as it streams in.",
+                "A new term is matched against the history on this device, then every message that arrives.",
                 style = MaterialTheme.typography.labelSmall.copy(fontStyle = FontStyle.Italic),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -207,10 +201,7 @@ fun ManageTermsSheet(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    scope.launch {
-                        dao.clearHitsForTerm(term.term)
-                        dao.deleteTermById(term.id)
-                    }
+                    scope.launch { runCatching { watchwords.remove(term.id) } }
                     pendingDelete = null
                 }) { Text("Delete") }
             },

@@ -60,13 +60,6 @@ class SettingsSyncImpl(
      *  Android Loops facade, so the host injects this. No-op on desktop /
      *  tests (the while-open ticker re-reads loops every tick). */
     private val rearmLoops: () -> Unit = {},
-    /** Toggle a chat's watchword-exclusion through the Android-only
-     *  Watchwords class (which fires backfill cleanup + onChange →
-     *  %settings push). commonMain can't reference Watchwords directly
-     *  (it lives in androidMain), so the host injects this. Default is
-     *  a no-op for desktop and tests. */
-    private val watchwordExcludeRouter: suspend (whom: String, excluded: Boolean) -> Unit =
-        { _, _ -> },
 ) : SettingsSync {
 
     companion object {
@@ -1419,12 +1412,15 @@ class SettingsSyncImpl(
         }
     }
 
-    override suspend fun setWatchwordExclude(whom: String, excluded: Boolean) {
-        // Routes through Watchwords.excludeChat (Android-only) so the
-        // local DB write + onChange → %settings push fire correctly.
-        // Desktop builds inject a no-op router and the exclude row is
-        // only mutated through the Watchwords screen instead.
-        watchwordExcludeRouter(whom, excluded)
+    override suspend fun mirrorWatchword(change: io.nisfeb.talon.ai.WatchwordChange) {
+        when (change) {
+            is io.nisfeb.talon.ai.WatchwordChange.Upsert -> pushWatchwordEntry(change.term)
+            is io.nisfeb.talon.ai.WatchwordChange.Remove -> deleteWatchwordEntry(change.termText)
+            is io.nisfeb.talon.ai.WatchwordChange.Exclude -> pushWatchwordExclude(change.whom)
+            is io.nisfeb.talon.ai.WatchwordChange.Unexclude -> deleteWatchwordExclude(change.whom)
+            is io.nisfeb.talon.ai.WatchwordChange.SyncToggled ->
+                if (change.on) pushAllWatchwords() else clearWatchwordsOnShip()
+        }
     }
 
     /** Mirror one watchword term to the ship's settings. */

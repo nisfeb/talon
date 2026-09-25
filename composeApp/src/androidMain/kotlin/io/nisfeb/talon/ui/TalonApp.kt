@@ -1129,34 +1129,25 @@ fun TalonApp(
                             sentMs = m.sentMs,
                         )
                     }
-
-                    // ── watchword path (NEW) ───────────────────────────
-                    val ourPatp = loggedInShip ?: ""
-                    if (m.author == ourPatp) return@launch
-                    if (muted) return@launch
-                    if (m.whom in app.watchwords.excludes.value) return@launch
-                    val terms = app.watchwords.terms.value
-                    if (terms.isEmpty()) return@launch
-
-                    val plainText = StoryCache.textFor(m.id, m.contentJson)
-                    val matches = app.watchwords.evaluateLive(m, plainText)
-                    if (matches.isEmpty()) return@launch
-                    val notifiable = matches.filter { it.term.notify }
-                    if (notifiable.isEmpty()) return@launch
-
-                    val convoLabel = contactMap.conversationLabel(m.whom)
-                    Notifications.showWatchwordHit(
-                        context = context,
-                        whom = m.whom,
-                        forShip = loggedInShip,
-                        postId = m.id,
-                        parentId = m.parentId,
-                        terms = notifiable.map { it.term.term },
-                        label = convoLabel,
-                        body = plainText.take(160).replace('\n', ' '),
-                        sentMs = m.sentMs,
-                    )
                 }
+            }
+        }
+        // A live message matched watchwords set to notify. The repo
+        // did the matching and kept the hits; this only shows it.
+        app.repo.watchwordListener = { m, notice ->
+            val foreground = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            if (!(foreground && openWhomState.value == m.whom)) appScope.launch {
+                Notifications.showWatchwordHit(
+                    context = context,
+                    whom = m.whom,
+                    forShip = loggedInShip,
+                    postId = m.id,
+                    parentId = m.parentId,
+                    terms = notice.terms,
+                    label = contactMap.conversationLabel(m.whom),
+                    body = notice.text.take(160).replace('\n', ' '),
+                    sentMs = m.sentMs,
+                )
             }
         }
         // New pending DM request → notify. Always fires (there's no
@@ -1194,6 +1185,7 @@ fun TalonApp(
         }
         onDispose {
             app.repo.messageListener = null
+            app.repo.watchwordListener = null
             app.repo.dmInviteListener = null
             app.repo.groupInviteListener = null
         }
@@ -2001,6 +1993,7 @@ fun TalonApp(
 
             watchwordsOpen -> WatchwordsScreen(
                 db = app.db,
+                watchwords = app.repo.watchwords,
                 watchwordsSyncEnabled = app.watchwordsSyncEnabled,
                 onSetWatchwordsSyncEnabled = { app.setWatchwordsSyncEnabled(it) },
                 onBack = { watchwordsOpen = false },

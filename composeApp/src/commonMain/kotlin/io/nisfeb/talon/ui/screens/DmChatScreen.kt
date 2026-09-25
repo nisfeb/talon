@@ -796,7 +796,7 @@ fun DmChatScreen(
                     onToggleWatchwordExclude = {
                         scope.launch {
                             runCatching {
-                                repo.settingsSync?.setWatchwordExclude(whom, !isExcludedFromWatchwords)
+                                repo.watchwords.excludeChat(whom, !isExcludedFromWatchwords)
                             }.onFailure {
                                 composerState.sendError = "watchword toggle failed: ${it.message ?: it::class.simpleName}"
                             }

@@ -700,6 +700,7 @@ fun App(
                 db = db,
                 settingsSync = settingsSync,
                 notificationHealth = notificationHealth,
+                watchwordsSyncEnabled = watchwordsSync.enabled,
             )
         }
         // Let user-shaped preferences ride %settings to this user's
@@ -1323,9 +1324,22 @@ fun App(
                     val from = invite.inviter?.let { " from " + callContacts.displayName(it) } ?: ""
                     runCatching { notifier.notify(name, "invited you to a group$from") }
                 }
+                // A live message matched watchwords set to notify; the
+                // repo kept the hits. Quiet for the chat open in a
+                // focused window, as messages are.
+                repo.watchwordListener = { m, notice ->
+                    if (!(windowInfo.isWindowFocused && openChat == m.whom)) runCatching {
+                        notifier.notify(
+                            "${notice.terms.joinToString(", ")} in ${callContacts.conversationLabel(m.whom)}",
+                            notice.text.replace('\n', ' ').take(160),
+                            m.whom,
+                        )
+                    }
+                }
                 onDispose {
                     repo.dmInviteListener = null
                     repo.groupInviteListener = null
+                    repo.watchwordListener = null
                 }
             }
 
@@ -2332,6 +2346,7 @@ fun App(
                     ) { a -> openAction = a }
                     showWatchwords -> WatchwordsScreen(
                         db = db,
+                        watchwords = repo.watchwords,
                         watchwordsSyncEnabled = watchwordsSyncEnabled,
                         onSetWatchwordsSyncEnabled = watchwordsSync::setEnabled,
                         onBack = { showWatchwords = false },

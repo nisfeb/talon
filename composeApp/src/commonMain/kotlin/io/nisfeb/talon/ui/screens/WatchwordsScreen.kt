@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.flowOn
 @Composable
 fun WatchwordsScreen(
     db: AppDatabase,
+    watchwords: io.nisfeb.talon.ai.Watchwords,
     watchwordsSyncEnabled: StateFlow<Boolean>,
     onSetWatchwordsSyncEnabled: (Boolean) -> Unit,
     onBack: () -> Unit,
@@ -143,6 +144,7 @@ fun WatchwordsScreen(
     if (manageOpen) {
         ManageTermsSheet(
             db = db,
+            watchwords = watchwords,
             watchwordsSyncEnabled = watchwordsSyncEnabled,
             onSetWatchwordsSyncEnabled = onSetWatchwordsSyncEnabled,
             onDismiss = { manageOpen = false },

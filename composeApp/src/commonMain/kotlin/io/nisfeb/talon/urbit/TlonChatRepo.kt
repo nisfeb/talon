@@ -130,6 +130,8 @@ class TlonChatRepo(
      */
     val notificationHealth: io.nisfeb.talon.notify.NotificationHealth =
         io.nisfeb.talon.notify.NotificationHealth(),
+    /** The device's "mirror watchwords to %settings" switch. */
+    watchwordsSyncEnabled: StateFlow<Boolean> = MutableStateFlow(true),
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
@@ -305,6 +307,20 @@ class TlonChatRepo(
      * replies even if the body doesn't contain our patp.
      */
     @Volatile var messageListener: ((MessageEntity, Boolean) -> Unit)? = null
+
+    /** This ship's watchwords. Every live message goes past them. */
+    val watchwords by lazy {
+        io.nisfeb.talon.ai.Watchwords(db, { ourPatp }, scope, settingsSync, watchwordsSyncEnabled)
+    }
+
+    /** Called when a live message matches watchwords set to notify. */
+    @Volatile var watchwordListener: ((MessageEntity, io.nisfeb.talon.ai.WatchwordNotice) -> Unit)? = null
+
+    /** A live message from someone else: the listener, then the watchwords. */
+    private suspend fun heard(entity: MessageEntity, replyToUs: Boolean) {
+        messageListener?.invoke(entity, replyToUs)
+        runCatching { watchwords.heard(entity) }.getOrNull()?.let { watchwordListener?.invoke(entity, it) }
+    }
 
     /**
      * Called once per newly-arrived pending DM request (a ship that just
@@ -3039,7 +3055,7 @@ class TlonChatRepo(
             val essay = add["essay"] as? JsonObject ?: return@let
             val entity = toEntity(whom, id, essay)
             db.messages().upsertWithMedia(db.messageMedia(), entity)
-            if (entity.author != ourPatp) messageListener?.invoke(entity, false)
+            if (entity.author != ourPatp) heard(entity, false)
             return
         }
         response["del"]?.let {
@@ -3082,7 +3098,7 @@ class TlonChatRepo(
             if (entity.author != ourPatp) {
                 val parent = db.messages().getOne(whom, parentId)
                 val replyToUs = parent?.author == ourPatp
-                messageListener?.invoke(entity, replyToUs)
+                heard(entity, replyToUs)
             }
             return
         }
@@ -3168,7 +3184,7 @@ class TlonChatRepo(
                 }
                 msgs.firstOrNull { it.id == intent.id && it.parentId == null }
                     ?.takeIf { it.author != ourPatp }
-                    ?.let { messageListener?.invoke(it, false) }
+                    ?.let { heard(it, false) }
             }
             is ChannelDeltaIntent.PostTombstone, is ChannelDeltaIntent.PostDeleted -> {
                 val id = when (intent) {
@@ -3223,7 +3239,7 @@ class TlonChatRepo(
                 } else {
                     val parent = db.messages().getOne(whom, parentId)
                     val replyToUs = parent?.author == ourPatp
-                    messageListener?.invoke(entity, replyToUs)
+                    heard(entity, replyToUs)
                 }
             }
             is ReplyIntent.Tombstone, is ReplyIntent.Deleted -> {

@@ -132,12 +132,11 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
     // Default no-op for tests / hosts that don't sync.
     suspend fun setRailItemVisibility(item: io.nisfeb.talon.ui.RailItem, visible: Boolean) {}
 
-    // ───────── watchwords mutations ─────────
-    // Toggles whether a chat is excluded from watchword scanning. The
-    // Android impl routes through Watchwords.excludeChat so backfill /
-    // %settings push fire correctly; desktop default is a no-op.
+    // ───────── watchwords ─────────
+    // Mirror one watchword change to the ship. Watchwords calls it, and
+    // only while watchword sync is on (or for the switch itself).
 
-    suspend fun setWatchwordExclude(whom: String, excluded: Boolean) {}
+    suspend fun mirrorWatchword(change: io.nisfeb.talon.ai.WatchwordChange) {}
 
     // ───────── folder mutations ─────────
 
