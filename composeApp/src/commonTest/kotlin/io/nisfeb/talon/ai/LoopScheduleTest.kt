@@ -46,4 +46,21 @@ class LoopScheduleTest {
         // Thu 07:00 (past today's 06:00) → next day 06:00.
         assertEquals(day + 6 * hour, LoopSchedule.nextWeeklyFireMs(7 * hour, 360, 0, utc))
     }
+
+    @Test
+    fun `a saved loop is due by its own kind of schedule, and not before`() {
+        fun loop(kind: String, lastRun: Long) = io.nisfeb.talon.data.LoopEntity(
+            name = "l", prompt = "p", intervalMinutes = 30, createdAt = 0, updatedAt = 0, lastRunAt = lastRun,
+            scheduleKind = kind, atMinuteOfDay = 360, daysMask = 0,
+        )
+        val every = loop(LoopSchedule.KIND_INTERVAL, lastRun = 0)
+        assertEquals(30 * min, LoopSchedule.nextFireMs(every, utc))
+        assertFalse(LoopSchedule.isDue(29 * min, every, utc))
+        assertTrue(LoopSchedule.isDue(30 * min, every, utc))
+        // Weekly at 06:00, every day: run at 07:00 on day 0, next is 06:00 on day 1.
+        val weekly = loop(LoopSchedule.KIND_WEEKLY, lastRun = 7 * hour)
+        assertEquals(day + 6 * hour, LoopSchedule.nextFireMs(weekly, utc))
+        assertFalse(LoopSchedule.isDue(day + 6 * hour - 1, weekly, utc), "not a moment early")
+        assertTrue(LoopSchedule.isDue(day + 6 * hour, weekly, utc))
+    }
 }
