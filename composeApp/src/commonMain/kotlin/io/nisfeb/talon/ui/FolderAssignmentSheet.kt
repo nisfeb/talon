@@ -25,12 +25,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.FolderEntity
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,10 +45,11 @@ fun FolderAssignmentSheet(
     onDismiss: () -> Unit,
     /** When non-null, renders a "Leave group" row at the bottom of
      *  the sheet. Only the group long-press call site provides this;
-     *  per-conversation invocations leave it null. The lambda fires
+     *  per-conversation invocations leave it null. The lambda runs
      *  AFTER the user confirms in the dialog, so the host doesn't
-     *  need to put up its own confirmation. */
-    onLeaveGroup: (() -> Unit)? = null,
+     *  need to put up its own confirmation; the dialog waits for it
+     *  and shows what it throws. */
+    onLeaveGroup: (suspend () -> Unit)? = null,
     /** When non-null, renders a "Mark group as read" row above
      *  Leave group. Only the group long-press call site provides
      *  this. The lambda fires immediately on tap — no confirmation,
@@ -58,6 +61,9 @@ fun FolderAssignmentSheet(
     var creating by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var confirmLeave by remember { mutableStateOf(false) }
+    var leaving by remember { mutableStateOf(false) }
+    var leaveError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
@@ -140,26 +146,36 @@ fun FolderAssignmentSheet(
 
     if (confirmLeave && onLeaveGroup != null) {
         AlertDialog(
-            onDismissRequest = { confirmLeave = false },
+            onDismissRequest = { if (!leaving) { confirmLeave = false; leaveError = null } },
             title = { Text("Leave $conversationLabel?") },
             text = {
-                Text(
-                    "You'll stop receiving messages from this group's channels. " +
-                        "You can rejoin later if it's public, or ask for a new invite.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "You'll stop receiving messages from this group's channels. " +
+                            "You can rejoin later if it's public, or ask for a new invite.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    leaveError?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    confirmLeave = false
-                    onLeaveGroup()
-                    onDismiss()
+                TextButton(enabled = !leaving, onClick = {
+                    leaving = true
+                    leaveError = null
+                    scope.launch {
+                        runCatching { onLeaveGroup() }
+                            .onSuccess { confirmLeave = false; onDismiss() }
+                            .onFailure { leaveError = it.message ?: it::class.simpleName }
+                        leaving = false
+                    }
                 }) {
-                    Text("Leave", color = MaterialTheme.colorScheme.error)
+                    Text(if (leaving) "Leaving…" else "Leave", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { confirmLeave = false }) { Text("Cancel") }
+                TextButton(enabled = !leaving, onClick = { confirmLeave = false; leaveError = null }) { Text("Cancel") }
             },
         )
     }

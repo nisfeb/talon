@@ -1700,9 +1700,7 @@ fun DmListScreen(
                     .map { it.nest }
                 scope.launch { runCatching { repo.markAllRead(whoms) } }
             },
-            onLeaveGroup = {
-                scope.launch { runCatching { repo.leaveGroup(flag) } }
-            },
+            onLeaveGroup = { repo.leaveGroup(flag) },
         )
     }
 

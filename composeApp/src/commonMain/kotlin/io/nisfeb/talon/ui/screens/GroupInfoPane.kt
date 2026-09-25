@@ -82,6 +82,8 @@ fun GroupInfoPane(
     var memberCount by remember(whom) { mutableStateOf<Int?>(null) }
     var isPublic by remember(whom) { mutableStateOf(false) }
     var pendingLeave by remember(whom) { mutableStateOf(false) }
+    var leaving by remember(whom) { mutableStateOf(false) }
+    var leaveError by remember(whom) { mutableStateOf<String?>(null) }
     var inviteOpen by remember(whom) { mutableStateOf(false) }
     var inviteShip by remember(whom) { mutableStateOf("") }
     var inviteBusy by remember(whom) { mutableStateOf(false) }
@@ -405,20 +407,34 @@ fun GroupInfoPane(
     }
 
     if (pendingLeave) {
+        // Waits for the ship, as GroupHomeScreen's does: a refused leave
+        // used to close the dialog and leave the group there, unexplained.
         AlertDialog(
-            onDismissRequest = { pendingLeave = false },
+            onDismissRequest = { if (!leaving) { pendingLeave = false; leaveError = null } },
             title = { Text("Leave ${groupRow?.title ?: "this group"}?") },
-            text = { Text("You'll be removed from every channel in the group.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    pendingLeave = false
-                    groupFlag?.let { flag ->
-                        scope.launch { runCatching { repo.leaveGroup(flag) } }
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("You'll be removed from every channel in the group.")
+                    leaveError?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
-                }) { Text("Leave") }
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !leaving, onClick = {
+                    val flag = groupFlag ?: return@TextButton
+                    leaving = true
+                    leaveError = null
+                    scope.launch {
+                        runCatching { repo.leaveGroup(flag) }
+                            .onSuccess { pendingLeave = false }
+                            .onFailure { leaveError = it.message ?: it::class.simpleName }
+                        leaving = false
+                    }
+                }) { Text(if (leaving) "Leaving…" else "Leave") }
             },
             dismissButton = {
-                TextButton(onClick = { pendingLeave = false }) { Text("Cancel") }
+                TextButton(enabled = !leaving, onClick = { pendingLeave = false; leaveError = null }) { Text("Cancel") }
             },
         )
     }
