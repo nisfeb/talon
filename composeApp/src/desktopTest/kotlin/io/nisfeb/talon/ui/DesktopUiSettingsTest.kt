@@ -158,4 +158,61 @@ class DesktopUiSettingsTest {
         newStore().setCalendarWeekView(true)
         assertTrue(newStore().calendarWeekView.value)
     }
+
+    @Test
+    fun `every other setting survives a reload`() {
+        val theme = io.nisfeb.talon.ui.theme.ThemeSettings(
+            themes = listOf(io.nisfeb.talon.ui.theme.CustomTheme.blank(dark = true, id = "t1").copy(name = "Dusk")), activeId = "t1",
+        )
+        val decide = io.nisfeb.talon.orrery.DecideSettings(on = true, threshold = 0.25)
+        newStore().apply {
+            setThemeSettings(theme)
+            setMicProcessing(io.nisfeb.talon.call.MicProcessing(noiseSuppression = false))
+            setHomePlace("51.5,-0.1,London")
+            setHiddenCalendars(setOf("work"))
+            setDefaultCalendar("home")
+            setOrreryStandDown(false)
+            setOrreryDecide(decide)
+            setHomeFahrenheit(false)
+            setHomeTwentyFourHour(true)
+            setHomeLayout("{\"widgets\":[]}")
+            setFolderItemOrder(FolderItemOrder.Recent)
+            setSmartSearchPreferred(true)
+            setPowerFeaturesEnabled(true)
+            setSwipeQuotes(false)
+            setDensity(Density.Compact)
+            setRailItemOrder(listOf(RailItem.Mail, RailItem.Chats))
+        }
+        newStore().apply {
+            kotlin.test.assertEquals("Dusk", themeSettings.value.active?.name)
+            assertFalse(micProcessing.value.noiseSuppression)
+            kotlin.test.assertEquals("51.5,-0.1,London", homePlace.value)
+            kotlin.test.assertEquals(setOf("work"), hiddenCalendars.value)
+            kotlin.test.assertEquals("home", defaultCalendar.value)
+            assertFalse(orreryStandDown.value)
+            kotlin.test.assertEquals(decide, orreryDecide.value)
+            assertFalse(homeFahrenheit.value)
+            assertTrue(homeTwentyFourHour.value)
+            kotlin.test.assertEquals("{\"widgets\":[]}", homeLayout.value)
+            kotlin.test.assertEquals(FolderItemOrder.Recent, folderItemOrder.value)
+            assertTrue(smartSearchPreferred.value && powerFeaturesEnabled.value && !swipeQuotes.value)
+            kotlin.test.assertEquals(Density.Compact, density.value)
+            kotlin.test.assertEquals(listOf(RailItem.Mail, RailItem.Chats), railItemOrder.value.take(2))
+            kotlin.test.assertEquals(RailItem.entries.toSet(), railItemOrder.value.toSet(), "completed with the rest")
+        }
+    }
+
+    @Test
+    fun `pane sizes and the font scale are kept within bounds`() {
+        newStore().apply {
+            setChatPaneListFraction(0.9f)
+            setRightPaneWidthDp(10f)
+            setFontScale(1.234f)
+        }
+        newStore().apply {
+            kotlin.test.assertEquals(0.50f, chatPaneListFraction.value)
+            kotlin.test.assertEquals(280f, rightPaneWidthDp.value)
+            kotlin.test.assertEquals(normalizeFontScale(1.234f), fontScale.value)
+        }
+    }
 }
