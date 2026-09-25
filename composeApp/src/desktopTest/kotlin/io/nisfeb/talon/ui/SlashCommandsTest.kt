@@ -319,4 +319,51 @@ class SlashCommandsTest {
             "expected wrapped failure message, got: ${r.message}",
         )
     }
+
+    // ── the commands that make a message ────────────────────────────
+
+    private fun sent(r: CommandResult): String = (r as? CommandResult.Send)?.body ?: error("not a Send: $r")
+
+    @Test
+    fun `cal makes an event card, and says what it could not read`() {
+        val card = sent(run("/cal 2026-10-03 15:30 Seed swap"))
+        assertTrue(card.startsWith("📅 Seed swap") && "[cal|" in card, card)
+        assertTrue((run("/cal") as CommandResult.Error).message.startsWith("/cal:"))
+    }
+
+    @Test
+    fun `tz makes a time everyone reads in their own zone, and refuses a zone it does not know`() {
+        val t = sent(run("/tz 3p utc"))
+        assertTrue(t.startsWith("🕒") && "[tz|" in t, t)
+        assertTrue((run("/tz 3p notazone") as CommandResult.Error).message.startsWith("/tz:"))
+    }
+
+    @Test
+    fun `poll numbers its options, and a poll without enough of them is refused`() {
+        val p = sent(run("/poll lunch? | tacos | ramen"))
+        assertTrue(p.startsWith("📊 lunch?") && "tacos" in p && "ramen" in p && "[poll|" in p, p)
+        assertTrue((run("/poll lunch? | tacos") as CommandResult.Error).message.startsWith("/poll:"))
+    }
+
+    @Test
+    fun `nick wants a name of sensible length, and goes to the profile`() {
+        assertEquals("/nick: give a name", (run("/nick") as CommandResult.Error).message)
+        assertTrue((run("/nick " + "x".repeat(65)) as CommandResult.Error).message.contains("too long"))
+        assertTrue((run("/nick Bus") as CommandResult.Error).message.startsWith("/nick:"), "reached the repo, which is not connected here")
+    }
+
+    @Test
+    fun `hn posts the top story with its score and discussion`() {
+        val news = HttpClient(MockEngine { req ->
+            when {
+                req.url.encodedPath.endsWith("/topstories.json") -> respond("[42, 7]", HttpStatusCode.OK)
+                req.url.encodedPath.endsWith("/item/42.json") -> respond("""{"title":"Ships at sea","url":"https://a.test","score":99}""", HttpStatusCode.OK)
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        })
+        val story = sent(runBlocking { runCommand("/hn", repo, news) })
+        assertEquals("📰 Ships at sea · 99 pts\nhttps://a.test\n💬 https://news.ycombinator.com/item?id=42", story)
+        val empty = HttpClient(MockEngine { respond("[]", HttpStatusCode.OK) })
+        assertEquals("/hn: empty top-stories list", (runBlocking { runCommand("/hn", repo, empty) } as CommandResult.Error).message)
+    }
 }
