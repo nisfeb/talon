@@ -268,4 +268,30 @@ class DmChatScreenTest {
         menuOf("their post")
         assertTrue(onAllNodesWithText("Pin").fetchSemanticsNodes().isEmpty())
     }
+
+    // ─── emoji by name ─────────────────────────────────────────────
+
+    private fun ComposeUiTest.draft(): String =
+        onNode(hasSetTextAction()).fetchSemanticsNode().config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.EditableText)?.text.orEmpty()
+
+    @Test
+    fun `a colon and a name offer emoji, Enter takes the first, and the next Enter sends`() = chat { ship, _ ->
+        onNode(hasSetTextAction()).performTextInput("lunch :taco")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(":taco:").fetchSemanticsNodes().isNotEmpty() }
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        waitUntil(timeoutMillis = 5_000) { draft() == "lunch 🌮 " }
+        assertTrue(ship.pokesTo("chat").isEmpty(), "picking is not sending")
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").isNotEmpty() }
+        assertTrue("🌮" in ship.pokesTo("chat").single().json.toString())
+    }
+
+    @Test
+    fun `arrows move through the emoji offered, and Tab takes the one highlighted`() = chat { _, _ ->
+        val offered = io.nisfeb.talon.ui.EmojiCatalog.search("heart", limit = 6)
+        onNode(hasSetTextAction()).performTextInput(":heart")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(offered[1].shortcode).fetchSemanticsNodes().isNotEmpty() }
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.DirectionDown); pressKey(Key.Tab) }
+        waitUntil(timeoutMillis = 5_000) { draft() == "${offered[1].glyph} " }
+    }
 }
