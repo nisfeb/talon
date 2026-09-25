@@ -6,7 +6,10 @@ import io.ktor.client.engine.mock.respond
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -132,6 +135,49 @@ class HomeScreenTest {
         onNodeWithText("Done").performClick()
         waitForIdle()
         assertTrue(!shows("Done"))
+    }
+
+    // ─── arranging by hand ─────────────────────────────────────────
+
+    private fun ComposeUiTest.arranging() {
+        onAllNodesWithText("Mail")[0].performTouchInput { longClick() }
+        waitUntil(timeoutMillis = 5_000) { shows("Done") }
+    }
+
+    /** A press on [description]'s grip, pulled by [by] in two steps, and let go. */
+    private fun ComposeUiTest.pull(description: String, by: Offset) {
+        runCatching { onNodeWithContentDescription(description).performScrollTo() }
+        onNodeWithContentDescription(description).performTouchInput { down(center); moveBy(by / 2f); moveBy(by / 2f); up() }
+        waitForIdle()
+    }
+
+    private fun saved(kind: HomeWidgetKind) = layouts.last().shown.single { it.kind == kind }
+
+    @Test
+    fun `a grip makes a widget taller or narrower, and the page keeps it`() = home {
+        arranging()
+        pull("Height of Mail", Offset(0f, 200f))
+        waitUntil(timeoutMillis = 5_000) { layouts.isNotEmpty() && saved(HomeWidgetKind.MAIL).rows > 4 }
+        pull("Width of Mail", Offset(-200f, 0f))
+        waitUntil(timeoutMillis = 5_000) { saved(HomeWidgetKind.MAIL).span < 7 }
+    }
+
+    @Test
+    fun `the assistant stays square whichever way its corner is pulled`() = home {
+        arranging()
+        assertTrue(onAllNodesWithContentDescription("Width of Assistant").fetchSemanticsNodes().isEmpty(), "a square has no width of its own")
+        pull("Size of Assistant", Offset(0f, 200f))
+        waitUntil(timeoutMillis = 5_000) { layouts.isNotEmpty() && saved(HomeWidgetKind.ASSISTANT).rows > 3 }
+        assertTrue(saved(HomeWidgetKind.ASSISTANT).span > 3, "taller is wider too: ${saved(HomeWidgetKind.ASSISTANT)}")
+    }
+
+    @Test
+    fun `a widget dragged across the page is saved where it was dropped`() = home {
+        arranging()
+        onAllNodesWithText("Mail")[0].performTouchInput { down(center); moveBy(Offset(0f, 150f)); moveBy(Offset(0f, 150f)); up() }
+        waitUntil(timeoutMillis = 5_000) { layouts.isNotEmpty() }
+        val mail = saved(HomeWidgetKind.MAIL)
+        assertTrue(mail.row > 5, "moved down from row 5: $mail")
     }
 
     // ─── the Today widget ──────────────────────────────────────────
