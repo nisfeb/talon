@@ -493,7 +493,8 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             write = false,
         ) { args ->
             val withDone = args.text("include_done") == "true"
-            val all = taskOrder(cal.tasks.value.orEmpty().filter { withDone || !it.done })
+            val tasks = cal.tasksOrAsk() ?: return@Tool "The calendar did not answer${cal.error.value?.let { ": $it" } ?: ""}."
+            val all = taskOrder(tasks.filter { withDone || !it.done })
             // Calendar by NAME, the way list_events shows it — the raw id
             // is opaque to the model and the user alike.
             val names = cal.calendars.value.associate { it.id to it.name.ifBlank { it.id } }
@@ -514,7 +515,8 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         ) { args ->
             val q = args.text("task")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: task is required."
             val reopen = args.text("reopen") == "true"
-            val pool = cal.tasks.value.orEmpty().filter { it.done == reopen }
+            val tasks = cal.tasksOrAsk() ?: return@Tool "The calendar did not answer${cal.error.value?.let { ": $it" } ?: ""}."
+            val pool = tasks.filter { it.done == reopen }
             val hits = pool.filter { it.id == q }.ifEmpty { pool.filter { it.name.contains(q, ignoreCase = true) } }
             when {
                 hits.isEmpty() -> "No ${if (reopen) "done" else "open"} task matches \"$q\"."
@@ -665,6 +667,14 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         ) { calls.hangup(); "Hung up." })
     }
 }
+
+/**
+ * The tasks, asked for where none have been read yet, or null where the
+ * calendar still has not answered: told "no open tasks" then, a loop
+ * running unattended went on as if the user had none.
+ */
+private suspend fun CalendarRepo.tasksOrAsk(): List<io.nisfeb.talon.calendar.CalendarTask>? =
+    tasks.value ?: run { refreshTasks(); tasks.value }
 
 private fun JsonObject.text(key: String): String? = this[key]?.let { (it as? JsonPrimitive)?.contentOrNull }
 private fun JsonObject.int(key: String): Int? = this[key]?.let { (it as? JsonPrimitive)?.contentOrNull?.toIntOrNull() }

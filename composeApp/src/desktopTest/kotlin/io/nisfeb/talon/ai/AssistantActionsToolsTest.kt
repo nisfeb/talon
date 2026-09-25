@@ -266,6 +266,14 @@ class AssistantActionsToolsTest {
         assertTrue(h.run("list_mail", argsOf()).startsWith("The mail app did not answer"))
     }
 
+    // The tasks unread were "no open tasks", which a loop running on its
+    // own took for the truth.
+    @Test
+    fun `a calendar that has not sent its tasks is said to be silent, not empty`() = withHarness(events = "not the list") { h ->
+        assertTrue(h.run("list_tasks", argsOf()).startsWith("The calendar did not answer"))
+        assertTrue(h.run("complete_task", argsOf("task" to "milk")).startsWith("The calendar did not answer"))
+    }
+
     // ─── mail the ship answers ─────────────────────────────────────
 
     private val mailed = java.util.concurrent.CopyOnWriteArrayList<JsonObject>()
