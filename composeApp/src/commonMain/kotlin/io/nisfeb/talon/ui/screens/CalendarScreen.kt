@@ -320,7 +320,10 @@ fun CalendarScreen(
      *  answer, and the reads after it, take seconds on a busy ship. */
     fun say(doing: String, failed: String, body: suspend () -> Boolean) {
         status = doing
-        scope.launch { status = if (body()) null else failed }
+        // Done, only the "doing" line goes: what the body said of how it
+        // went stays. It used to be cleared too, so a group share never
+        // said whom it mailed, nor that it could mail nobody.
+        scope.launch { val ok = body(); status = if (!ok) failed else status.takeUnless { it == doing } }
     }
     fun act(doing: String, failed: String, body: suspend () -> Boolean) {
         editing = null

@@ -26,6 +26,7 @@ import io.nisfeb.talon.ui.theme.TalonTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -323,5 +324,85 @@ class CalendarScreenTest {
             waitUntil(timeoutMillis = 5_000) { shows("Old errand") }
             assertTrue(!shows("File taxes"))
         }
+    }
+
+    // ─── sending an event on ───────────────────────────────────────
+
+    private val mailed = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    private val mailHttp = HttpClient(MockEngine { req ->
+        val path = req.url.encodedPath
+        val json = { body: String -> respond(body, HttpStatusCode.OK, headersOf("Content-Type", "application/json")) }
+        when {
+            path.endsWith("/api/blob") -> json("""{"hash":"0vics"}""")
+            path.endsWith("/api/send") -> { mailed += req.body.toByteArray().decodeToString(); json("{}") }
+            else -> json("""{"ok":true,"threads":[]}""")
+        }
+    })
+
+    /** The calendar with the chats and the mail to send an event on through; [roster] is the group's, or none. */
+    private fun sharing(roster: Boolean, block: ComposeUiTest.(io.nisfeb.talon.urbit.FakeShip) -> Unit) {
+        val tmp = kotlin.io.path.createTempDirectory(prefix = "talon-cal-share-").toFile()
+        val db = androidx.room.Room.databaseBuilder<io.nisfeb.talon.data.AppDatabase>(java.io.File(tmp, "t.db").absolutePath)
+            .setDriver(androidx.sqlite.driver.bundled.BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
+        val ship = io.nisfeb.talon.urbit.FakeShip("~zod").apply {
+            if (roster) scries["groups/v2/groups/~bus/garden"] = """{"meta":{"title":"The Garden","description":"","image":"","cover":""},"admins":[],
+                "seats":{"~bus":{"roles":[],"joined":0},"~zod":{"roles":[],"joined":0},"~nec":{"roles":[],"joined":0}},
+                "admissions":{"privacy":"private","banned":{"ships":[],"ranks":[]},"invited":{},"pending":{},"requests":{}}}"""
+        }
+        val chat = io.nisfeb.talon.urbit.TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod") }
+        val scope = CoroutineScope(SupervisorJob())
+        val events = CoroutineScope(SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+        ship.channel.events().launchIn(events)
+        runBlocking {
+            db.groups().upsertGroups(listOf(io.nisfeb.talon.data.GroupEntity("~bus/garden", "The Garden", null)))
+            db.groups().upsertChannelGroups(listOf(io.nisfeb.talon.data.ChannelGroupEntity("chat/~bus/seeds", "~bus/garden", title = "Seed swap")))
+            db.messages().upsert(io.nisfeb.talon.data.MessageEntity("chat/~bus/seeds", "~bus/1", "~bus", 1_000, """[{"inline":["hello"]}]""", "/chat"))
+        }
+        val repo = CalendarRepo(http, scope, pollIntervalMs = 60 * 60_000L).apply { attach("https://ship.test") }
+        val mail = io.nisfeb.talon.mail.MailRepo(mailHttp, scope, pollIntervalMs = 60 * 60_000L).apply { attach("https://ship.test") }
+        runBlocking { repo.refresh(); repo.refreshAll() }
+        try {
+            runComposeUiTest {
+                setContent {
+                    TalonTheme(darkTheme = false) {
+                        CalendarScreen(repo = repo, twentyFourHour = true, onBack = {}, db = db, chat = chat, mail = mail, ourShip = "~zod")
+                    }
+                }
+                waitUntil(timeoutMillis = 5_000) { shows("Dentist") }
+                block(ship)
+            }
+        } finally {
+            runBlocking { chat.stopAndJoinForTest() }
+            scope.cancel()
+            events.cancel()
+            db.close()
+            tmp.deleteRecursively()
+        }
+    }
+
+    private fun ComposeUiTest.shareWithGroup() {
+        open("Dentist")
+        onNodeWithText("More").performClick()
+        onNodeWithText("Share with a group").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Seed swap") }
+        onAllNodesWithText("Seed swap", substring = true)[0].performClick()
+    }
+
+    @Test
+    fun `an event shared with a group is posted there, and its members are mailed the invite`() = sharing(roster = true) { ship ->
+        shareWithGroup()
+        waitUntil(timeoutMillis = 5_000) { shows("and mailed the invite to 2 ships.") }
+        assertTrue(ship.pokesTo("channels").any { "Dentist" in it.json.toString() })
+        val sent = mailed.single()
+        assertTrue("~bus" in sent && "~nec" in sent && "~zod" !in sent && "event.ics" in sent, sent)
+    }
+
+    @Test
+    fun `a group whose members cannot be read is posted to, and says no invites went`() = sharing(roster = false) { ship ->
+        shareWithGroup()
+        waitUntil(timeoutMillis = 5_000) { shows("The member list could not be read, so no invites were mailed.") }
+        assertTrue(ship.pokesTo("channels").any { "Dentist" in it.json.toString() })
+        assertTrue(mailed.isEmpty())
     }
 }
