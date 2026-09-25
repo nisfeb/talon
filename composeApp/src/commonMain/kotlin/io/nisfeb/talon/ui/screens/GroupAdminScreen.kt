@@ -93,9 +93,12 @@ fun GroupAdminScreen(
     // %contacts events come in.
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
-    suspend fun refresh() {
+    /** Re-read the group. [keepError] after a refused action: the
+     *  rollback's own success used to clear the refusal before anyone
+     *  could read it, so the row just came back, unexplained. */
+    suspend fun refresh(keepError: Boolean = false) {
         runCatching { repo.fetchGroupAdmin(flag) }
-            .onSuccess { group = it; error = null }
+            .onSuccess { group = it; if (!keepError) error = null }
             .onFailure { error = it.message ?: it::class.simpleName }
     }
 
@@ -211,7 +214,7 @@ fun GroupAdminScreen(
                         }.onFailure {
                             error = it.message ?: it::class.simpleName
                             // Rollback by re-fetching.
-                            refresh()
+                            refresh(keepError = true)
                         }
                     }
                 },
@@ -226,7 +229,7 @@ fun GroupAdminScreen(
                             }
                             .onFailure {
                                 error = it.message ?: it::class.simpleName
-                                refresh()
+                                refresh(keepError = true)
                             }
                     }
                 },
@@ -241,7 +244,7 @@ fun GroupAdminScreen(
                             }
                             .onFailure {
                                 error = it.message ?: it::class.simpleName
-                                refresh()
+                                refresh(keepError = true)
                             }
                     }
                 },
@@ -256,7 +259,7 @@ fun GroupAdminScreen(
                             }
                             .onFailure {
                                 error = it.message ?: it::class.simpleName
-                                refresh()
+                                refresh(keepError = true)
                             }
                     }
                 },

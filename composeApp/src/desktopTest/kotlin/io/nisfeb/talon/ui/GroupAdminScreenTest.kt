@@ -136,6 +136,22 @@ class GroupAdminScreenTest {
     }
 
     @Test
+    fun `an approval the ship refuses says why, and the request is still there`() = admin { ship ->
+        ship.refuse = { if (it.app == "groups") "not allowed" else null }
+        onAllNodesWithText("Accept")[0].performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("not allowed", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        waitUntil(timeoutMillis = 5_000) { shows("~wicrys-bortel") }
+    }
+
+    @Test
+    fun `an unban the ship refuses says why, and the ban stands`() = admin { ship ->
+        ship.refuse = { if (it.app == "groups") "not allowed" else null }
+        onAllNodesWithText("Unban")[0].performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("not allowed", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        waitUntil(timeoutMillis = 5_000) { shows("~dopzod") }
+    }
+
+    @Test
     fun `revoking takes back a link invite by its token and a direct one by name`() = admin { ship ->
         val token = pressFor(ship, "Revoke", n = 0)
         assertTrue("0v2.abc" in token, token)
