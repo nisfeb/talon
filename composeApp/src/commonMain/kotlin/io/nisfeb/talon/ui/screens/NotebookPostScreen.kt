@@ -388,12 +388,15 @@ private fun CommentRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // As threads show it: a refused comment otherwise looked posted.
+                if (reply.status == "pending") SendingIcon()
             }
             Spacer(Modifier.height(6.dp))
             val parts = remember(reply.id, reply.contentJson) {
                 StoryCache.partsFor(reply.id, reply.contentJson)
             }
             StoryRenderer(parts = parts)
+            if (reply.status == "failed") SendFailedNote()
         }
     }
 }
