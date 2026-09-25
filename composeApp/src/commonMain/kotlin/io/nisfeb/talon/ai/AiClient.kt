@@ -39,10 +39,10 @@ import kotlinx.serialization.json.putJsonArray
 class AiClient(
     /** The feature whose month spend a call adds to, or none. */
     private val feature: AiFeature? = null,
+    /** Its own by default; a test hands in one that answers for the providers. */
+    private val http: io.ktor.client.HttpClient = createAppHttpClient(),
     private val settingsProvider: () -> AiSettings.Config,
 ) {
-
-    private val http = createAppHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
 
     /** What the last call cost, where the provider says or the price is known. */
