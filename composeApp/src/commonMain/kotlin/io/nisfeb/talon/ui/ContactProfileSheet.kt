@@ -69,7 +69,9 @@ fun ContactProfileSheet(
     // Where the viewer's ship has no mail app this is null and the
     // button is simply not drawn, rather than drawn and dead.
     val mailTo = io.nisfeb.talon.mail.LocalMailTo.current
-    val sheetState = rememberModalBottomSheetState()
+    // Open all the way: half open left Message, Mail and Close below
+    // the fold on a short window, behind a drag nobody knows to make.
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val label = remember(contact, ship) { contact?.nickname ?: ship }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
