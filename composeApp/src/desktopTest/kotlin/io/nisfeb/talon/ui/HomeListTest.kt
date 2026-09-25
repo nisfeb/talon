@@ -29,6 +29,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import java.io.File
+import kotlin.test.assertTrue
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import io.nisfeb.talon.data.DmInviteEntity
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -140,5 +144,34 @@ class HomeListTest {
         tap("general")
         waitForIdle()
         assertEquals(listOf("chat/~bus/general"), opened)
+    }
+
+    // ─── DM requests ──────────────────────────────────────────────
+
+    private fun rsvp(ship: FakeShip): Pair<String, String> {
+        val j = ship.pokesTo("chat").single().json.jsonObject
+        return j["ship"]!!.jsonPrimitive.content to j["ok"]!!.jsonPrimitive.content
+    }
+
+    @Test
+    fun `a DM request is accepted from the list and opens the chat`() = home(seed = {
+        dmInvites().upsertAll(listOf(DmInviteEntity("~bus", 1)))
+    }) { ship ->
+        shows("Requests")
+        tap("Accept")
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").isNotEmpty() }
+        assertEquals("~bus" to "true", rsvp(ship))
+        assertEquals(listOf("~bus"), opened)
+    }
+
+    @Test
+    fun `a DM request declined is refused on the ship and opens nothing`() = home(seed = {
+        dmInvites().upsertAll(listOf(DmInviteEntity("~bus", 1)))
+    }) { ship ->
+        tap("Decline")
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").isNotEmpty() }
+        assertEquals("~bus" to "false", rsvp(ship))
+        assertTrue(opened.isEmpty())
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Requests").fetchSemanticsNodes().isEmpty() }
     }
 }
