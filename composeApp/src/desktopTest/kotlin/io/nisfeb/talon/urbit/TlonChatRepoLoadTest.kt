@@ -10,6 +10,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -81,10 +82,20 @@ class TlonChatRepoLoadTest {
     }
 
     @Test
-    fun `a ship that answers nothing leaves the conversation as it was`() = runBlocking<Unit> {
+    fun `a ship that answers nothing leaves the conversation as it was, and says so`() = runBlocking<Unit> {
         db.messages().upsert(MessageEntity(nest, "170141184506", "~bus", 1_000, "[]", "/chat"))
-        repo.refreshConversation(nest)
+        assertFailsWith<IllegalStateException>("not loaded is not empty") { repo.refreshConversation(nest) }
         assertEquals(listOf("170141184506"), db.messages().latestAnyFor(nest, 10).map { it.id })
+    }
+
+    @Test
+    fun `a page the ship did not send is not the bottom`() = runBlocking<Unit> {
+        db.messages().upsert(MessageEntity(nest, "170141184506", "~bus", 2_000, "[]", "/chat"))
+        assertFailsWith<IllegalStateException> { repo.loadOlder(nest) }
+        ship.scries["channels/v4/$nest/posts/older/170.141.184.506/30/post"] =
+            """{"posts":{"170141184505":{"seal":${seal("170141184505")},"essay":${essay("~bus", "earlier", 1_000)}}},"older":null}"""
+        assertFalse(repo.loadOlder(nest), "asked again, and this time the bottom")
+        assertNotNull(db.messages().getOne(nest, "170141184505"))
     }
 
     @Test

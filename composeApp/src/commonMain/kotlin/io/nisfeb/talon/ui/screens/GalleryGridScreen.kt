@@ -86,6 +86,7 @@ fun GalleryGridScreen(
     // that fails (wedged network ⇒ 6s OkHttp cap) shouldn't leave a
     // spinner running on top of content.
     var loading by remember(whom) { mutableStateOf(true) }
+    var unread by remember(whom) { mutableStateOf(false) }
     // Older pages: the newest 30 come from the refresh below; the rest
     // load as the grid nears its end, the way the chat list does.
     val gridState = androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState()
@@ -97,7 +98,8 @@ fun GalleryGridScreen(
         }.collect { (last, total) ->
             if (last == null || total == 0 || last < total - 4 || paginating || exhausted) return@collect
             paginating = true
-            exhausted = !runCatching { repo.loadOlder(whom) }.getOrDefault(false)
+            // A failed page is not the end: the next scroll asks again.
+            io.nisfeb.talon.util.runSuspendCatching { repo.loadOlder(whom) }.onSuccess { exhausted = !it }
             paginating = false
         }
     }
@@ -112,7 +114,7 @@ fun GalleryGridScreen(
         onDispose { repo.setOpenChat(null) }
     }
     LaunchedEffect(whom) {
-        runCatching { repo.refreshConversation(whom, count = 30) }
+        unread = io.nisfeb.talon.util.runSuspendCatching { repo.refreshConversation(whom, count = 30) }.isFailure
         loading = false
     }
 
@@ -142,7 +144,8 @@ fun GalleryGridScreen(
             ) { CircularProgressIndicator() }
 
             posts.isEmpty() -> Text(
-                "No posts yet — tap + to share something.",
+                if (unread) "Your ship did not send these posts. Open the channel again to retry."
+                else "No posts yet — tap + to share something.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(24.dp),

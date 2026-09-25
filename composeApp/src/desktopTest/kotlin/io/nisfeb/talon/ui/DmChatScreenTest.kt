@@ -106,6 +106,20 @@ class DmChatScreenTest {
     }
 
     @Test
+    fun `a chat the ship did not send says so, and does not call it empty`() = chat { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Messages could not be loaded").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("No messages yet").assertCountEquals(0)
+    }
+
+    @Test
+    fun `an empty chat the ship sent invites the first message`() = chat(prepare = {
+        scries["chat/v4/dm/~bus/writs/newest/500/heavy"] = """{"writs":{}}"""
+    }) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("No messages yet").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("Messages could not be loaded").assertCountEquals(0)
+    }
+
+    @Test
     fun `enter sends what was typed to the ship and shows it at once`() = chat { ship, _ ->
         send("hi bus")
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").isNotEmpty() }

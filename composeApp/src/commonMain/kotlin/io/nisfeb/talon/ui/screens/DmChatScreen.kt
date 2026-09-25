@@ -131,6 +131,7 @@ import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
+import io.nisfeb.talon.util.runSuspendCatching
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -531,11 +532,13 @@ fun DmChatScreen(
     }
 
     var refreshing by remember(whom) { mutableStateOf(false) }
+    var refreshFailed by remember(whom) { mutableStateOf(false) }
     LaunchedEffect(whom) {
         Log.i("DmChatScreen", "mount whom=$whom rows=${rows.size}")
         refreshing = true
-        runCatching { repo.refreshConversation(whom, count = 500) }
+        refreshFailed = runSuspendCatching { repo.refreshConversation(whom, count = 500) }
             .onFailure { Log.w("DmChatScreen", "refresh $whom failed: ${it.message}") }
+            .isFailure
         refreshing = false
     }
 
@@ -553,8 +556,10 @@ fun DmChatScreen(
                 !paginationExhausted
             ) {
                 paginating = true
-                val hasMore = runCatching { repo.loadOlder(whom) }.getOrDefault(false)
-                if (!hasMore) paginationExhausted = true
+                // A failed page is not the bottom: the next scroll asks again.
+                runSuspendCatching { repo.loadOlder(whom) }
+                    .onSuccess { if (!it) paginationExhausted = true }
+                    .onFailure { Log.w("DmChatScreen", "older $whom failed: ${it.message}") }
                 paginating = false
             }
         }
@@ -882,6 +887,7 @@ fun DmChatScreen(
             EmptyChatPlaceholder(
                 label = contactMap.conversationLabel(whom),
                 isDm = whom.startsWith("~"),
+                unread = refreshFailed,
                 modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp),
             )
         }
@@ -1829,6 +1835,7 @@ private fun PinnedPostBanner(
 private fun EmptyChatPlaceholder(
     label: String,
     isDm: Boolean,
+    unread: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -1837,13 +1844,16 @@ private fun EmptyChatPlaceholder(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
-            "No messages yet",
+            if (unread) "Messages could not be loaded" else "No messages yet",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
             color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
-            text = if (isDm) "Say hi to $label — your first message starts the DM."
-                else "Be the first to post in this channel.",
+            text = when {
+                unread -> "Your ship did not send this chat. Open it again to retry."
+                isDm -> "Say hi to $label — your first message starts the DM."
+                else -> "Be the first to post in this channel."
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,

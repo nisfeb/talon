@@ -1989,12 +1989,11 @@ class TlonChatRepo(
      * cursor scries as pagination, so anything that should have arrived
      * via SSE but got dropped (e.g. pre-buffer-fix events that were ACK'd
      * but never applied) gets backfilled. Idempotent upsert — no dupes.
+     * Throws when the ship did not answer, so a screen can tell a
+     * conversation it could not load from an empty one.
      */
     suspend fun refreshConversation(whom: String, count: Int = 100) {
-        val ch = channel ?: run {
-            Log.w(TAG, "refreshConversation($whom): no channel")
-            return
-        }
+        val ch = channel ?: error("not connected")
         val newest = db.messages().newestIdFor(whom)
         // In path form Urbit @ud atoms need dotted-decimal (3-digit groups).
         val dottedCursor = newest?.let {
@@ -2049,12 +2048,7 @@ class TlonChatRepo(
         }
 
         val probe = scryFirstMatching(ch, app, paths, label = "refreshConversation($whom)")
-        val body: JsonElement = probe ?: return
-        val obj = body as? JsonObject
-        if (obj == null) {
-            Log.w(TAG, "refreshConversation($whom): scry body not object: ${body::class.simpleName}")
-            return
-        }
+        val obj = probe as? JsonObject ?: error("the ship did not send $whom")
         val posts = obj[postsKey] as? JsonObject
         if (posts == null) {
             Log.w(TAG, "refreshConversation($whom): no '$postsKey' key; keys=${obj.keys}")
@@ -2085,15 +2079,15 @@ class TlonChatRepo(
     /**
      * Fetch older posts for a conversation and upsert them. Returns true
      * if the server claims more history is available below what we just
-     * loaded; false if we've hit the bottom (or the scry errored, in
-     * which case callers should stop asking).
+     * loaded; false if we've hit the bottom. Throws when the ship did not
+     * answer: that says nothing about the bottom, so callers keep asking.
      *
      *   DM:      %chat  /v4/dm/~peer/writs/older/{cursor}/{count}/light
      *   Club:    %chat  /v4/club/0v.../writs/older/{cursor}/{count}/light
      *   Channel: %channels /v5/chat/~host/name/posts/older/{cursor}/{count}/outline
      */
     suspend fun loadOlder(whom: String, count: Int = 30): Boolean {
-        val ch = channel ?: return false
+        val ch = channel ?: error("not connected")
         if (paginationExhausted.contains(whom)) return false
         val cursor = db.messages().oldestIdFor(whom) ?: return false
 
@@ -2139,7 +2133,7 @@ class TlonChatRepo(
         }
 
         val body = scryFirstMatching(ch, app, paths, label = "loadOlder $whom") as? JsonObject
-            ?: return false
+            ?: error("the ship did not send older messages of $whom")
 
         val posts = body[postsKey] as? JsonObject
         if (posts != null) {
