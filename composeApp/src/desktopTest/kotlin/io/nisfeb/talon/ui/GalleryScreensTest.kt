@@ -123,6 +123,18 @@ class GalleryScreensTest {
     }
 
     @Test
+    fun `a refused comment is marked not sent, and its text kept`() = gallery({ ship ->
+        ship.refuse = { if (it.app == "channels") "no" else null }
+        showing("Comments · 1")
+        onNode(hasSetTextAction()).performTextInput("agreed")
+        onNodeWithContentDescription("Send").performClick()
+        showing("Couldn't send")
+        showing("Not sent")
+    }) { repo, db ->
+        GalleryPostScreen(db, repo, web, ourPatp = "~zod", whom = whom, postId = "170141184500200", onBack = {})
+    }
+
+    @Test
     fun `our own post can be deleted, after asking`() = gallery({ ship ->
         showing("Comments · 1")
         onNodeWithContentDescription("More").performClick()
