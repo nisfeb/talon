@@ -172,7 +172,8 @@ class MailRepoWriteTest {
             r.refresh()
             assertEquals(listOf("one-v2", "two-v2"), r.page.value!!.threads.map { it.subject })
 
-            until("the refusal to roll back") { r.rollbacks.value == 1 }
+            // The counter moves just before the problem is said: wait for both.
+            until("the refusal to roll back and be said") { r.rollbacks.value == 1 && r.problem.value != null }
             val rows = r.page.value!!.threads.associateBy { it.id }
             assertEquals("one", rows.getValue("0v1").subject, "the acted-on row goes back to the snapshot")
             assertEquals(

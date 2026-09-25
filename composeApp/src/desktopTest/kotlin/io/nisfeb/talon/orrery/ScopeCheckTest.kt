@@ -38,12 +38,18 @@ import kotlin.test.assertTrue
 class ScopeCheckTest {
     private val full = """{"kinds":{"person":{"attrs":["status"]}},"actions":["task","message"]}"""
 
-    private class Ship(val keySchema: String, val stateStatus: HttpStatusCode = HttpStatusCode.OK, val mintStatus: HttpStatusCode = HttpStatusCode.OK) {
+    private class Ship(
+        val keySchema: String,
+        val stateStatus: HttpStatusCode = HttpStatusCode.OK,
+        val mintStatus: HttpStatusCode = HttpStatusCode.OK,
+        val ownerSchema: String? = null,
+    ) {
         val asked = CopyOnWriteArrayList<String>()
+        val observed = CopyOnWriteArrayList<String>()
         var minted: String? = null
     }
 
-    private fun run(ship: Ship, passes: Int = 1, check: suspend (AppDatabase) -> Unit) = runBlocking {
+    private fun run(ship: Ship, passes: Int = 1, seed: suspend (AppDatabase) -> Unit = {}, check: suspend (AppDatabase) -> Unit) = runBlocking {
         val dir = createTempDirectory(prefix = "talon-scope-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(name = File(dir, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
@@ -51,12 +57,17 @@ class ScopeCheckTest {
         val json = headersOf(HttpHeaders.ContentType, "application/json")
         try {
             db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "c1.secret"))
+            seed(db)
             val http = HttpClient(
                 MockEngine { req ->
                     val path = req.url.encodedPath
                     ship.asked += "${req.method.value} $path"
                     when {
-                        path.endsWith("/api/schema") -> respond(full, headers = json)
+                        path.endsWith("/api/schema") -> respond(ship.ownerSchema ?: full, headers = json)
+                        path.endsWith("/api/observe") -> {
+                            ship.observed += (req.body as TextContent).text
+                            respond("""{"bodies":[],"observations":[]}""", headers = json)
+                        }
                         path.endsWith("/api/clients") && req.method == HttpMethod.Post -> {
                             ship.minted = (req.body as TextContent).text
                             respond("""{"id":"c2","token":"c2.secret"}""", ship.mintStatus, json)
@@ -69,7 +80,9 @@ class ScopeCheckTest {
                     }
                 },
             )
-            repeat(passes) { OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod") }
+            repeat(passes) {
+                OrreryRepo(http, scope, db, "test", book = { setOf("~bus") }, bareClient = http).pass("https://ship.test", "~zod")
+            }
             check(db)
         } finally {
             scope.cancel()
@@ -114,6 +127,34 @@ class ScopeCheckTest {
         run(ship, passes = 2) { db ->
             assertEquals(1, ship.asked.count { it == "POST /apps/orrery/api/clients" })
             assertEquals("c1.secret", db.orreryAccounts().get("~zod")?.token)
+        }
+    }
+
+    // Measured two hours ago: past the hour a blind kind waits, inside the
+    // twelve the whole check waits, so only the pass's own filter runs.
+    private val measuredEarlier: suspend (AppDatabase) -> Unit = { db ->
+        val then = io.nisfeb.talon.util.nowMs() - 2 * 3_600_000L
+        db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity("~zod", "scope:checked", then.toString(), then))
+        db.contacts().upsert(io.nisfeb.talon.data.ContactEntity("~bus", "Bus", null, null))
+    }
+
+    @Test
+    fun `a kind outside the owner's vocabulary is not written, and the pass goes on`() {
+        val narrow = """{"kinds":{"note":{"attrs":[]}},"actions":[]}"""
+        val ship = Ship(keySchema = narrow, ownerSchema = narrow)
+        run(ship, seed = measuredEarlier) { db ->
+            assertTrue(ship.observed.none { "person/bus" in it }, ship.observed.toString())
+            assertEquals(null, ship.minted)
+            assertNotNull(db.orrerySent().get("~zod", "scope:checked"), "nothing to measure again")
+        }
+    }
+
+    @Test
+    fun `a kind the owner has and the key cannot see fails the pass and asks for a key that can`() {
+        val ship = Ship(keySchema = """{"kinds":{"note":{"attrs":[]}},"actions":[]}""")
+        run(ship, seed = measuredEarlier) { db ->
+            assertTrue(ship.observed.none { "person/bus" in it }, "no records for facts that never went")
+            assertEquals(null, db.orrerySent().get("~zod", "scope:checked"), "measured again next pass")
         }
     }
 }
