@@ -41,14 +41,25 @@ class MailComposerTest {
     private val seen = java.util.concurrent.CopyOnWriteArrayList<HttpRequestData>()
 
     /** A ship that takes everything. [draftsListed] is what its drafts list says. */
-    private fun repo(draftsListed: () -> String = { "[]" }): MailRepo {
+    private fun repo(
+        draftsListed: () -> String = { "[]" },
+        lists: String = "[]",
+        /** What the ship says to a send; it takes it by default. */
+        sendAnswer: Pair<HttpStatusCode, String>? = null,
+    ): MailRepo {
         val http = HttpClient(
             MockEngine { req ->
                 seen += req
-                val body = if (req.url.encodedPath.endsWith("/api/drafts")) draftsListed() else """{"ok":true,"threads":[]}"""
+                val path = req.url.encodedPath
+                val (status, body) = when {
+                    path.endsWith("/api/send") && sendAnswer != null -> sendAnswer
+                    path.endsWith("/api/drafts") -> HttpStatusCode.OK to draftsListed()
+                    path.endsWith("/api/lists") -> HttpStatusCode.OK to lists
+                    else -> HttpStatusCode.OK to """{"ok":true,"threads":[]}"""
+                }
                 respond(
                     ByteReadChannel(body),
-                    HttpStatusCode.OK,
+                    status,
                     headersOf("Content-Type", "application/json"),
                 )
             },
@@ -417,5 +428,40 @@ class MailComposerTest {
         val afterDelete = all.drop(all.indexOfLast { it.endsWith("/api/draft-delete") })
         assertTrue(afterDelete.none { it.endsWith("/api/draft") }, "$all")
         assertEquals(1, all.count { it.endsWith("/api/draft") }, "saved once, before the send: $all")
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a mailing list adds its members, and its name never travels`() = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailComposer(repo = repo(lists = """[{"name":"garden","members":["~bus","~nec"]}]"""), intent = MailIntent(), onSent = {}, onCancel = {})
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("+ garden").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("+ garden").performClick()
+        onNodeWithText("Message").performTextInput("the seeds are in")
+        onNodeWithText("Send").performClick()
+        waitUntil(timeoutMillis = 5_000) { seen.any { it.url.encodedPath.endsWith("/api/send") } }
+        assertEquals(listOf("~bus", "~nec"), sentBody()["to"]!!.jsonArray.map { it.jsonPrimitive.content })
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a send the ship refuses says why, and the message stays`() = runComposeUiTest {
+        var sent = false
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailComposer(
+                    repo = repo(sendAnswer = HttpStatusCode.InternalServerError to """{"error":"no route to ~bus"}"""),
+                    intent = MailIntent(to = listOf("~bus")), onSent = { sent = true }, onCancel = {},
+                )
+            }
+        }
+        onNodeWithText("Message").performTextInput("hello")
+        onNodeWithText("Send").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("route to ~bus", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(!sent, "still here, to try again")
+        onNodeWithText("Send").assertIsDisplayed()
     }
 }
