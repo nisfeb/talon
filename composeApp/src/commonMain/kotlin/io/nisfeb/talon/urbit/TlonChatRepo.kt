@@ -395,7 +395,7 @@ class TlonChatRepo(
      * the `LIKE '%.%'` scan is indexed by the primary key path and
      * skips the common undotted case entirely.
      */
-    private suspend fun dedupeDottedIds() {
+    internal suspend fun dedupeDottedIds() {
         val msgRows = db.messages().findDottedIdRows()
         if (msgRows.isNotEmpty()) {
             // Pre-resolve which undotted twins already exist so the
