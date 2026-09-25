@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -88,19 +90,22 @@ internal fun FolderChipWithMenu(
     onClick: () -> Unit,
     onLongPress: () -> Unit,
 ) {
-    // FilterChip doesn't have a long-press hook, so we wrap with a
-    // combinedClickable Modifier on a Row that visually mimics the chip
-    // selection state via the underlying FilterChip.
-    Row(
-        modifier = Modifier.combinedClickableWithSecondary(
-            onClick = onClick,
-            onLongClick = onLongPress,
-        ),
-    ) {
+    // FilterChip has no long-press hook, and its own click takes the
+    // press before anything around it: wrapped in a long-press Row, a
+    // phone never reached the folder menu (right-click still did). A
+    // layer on top of the chip takes the tap, the long press and the
+    // right-click instead.
+    Box {
         FilterChip(
             selected = selected,
             onClick = onClick,
             label = { Text(folder.name) },
+        )
+        Box(
+            Modifier
+                .matchParentSize()
+                .clip(FilterChipDefaults.shape)
+                .combinedClickableWithSecondary(onClick = onClick, onLongClick = onLongPress),
         )
     }
 }
