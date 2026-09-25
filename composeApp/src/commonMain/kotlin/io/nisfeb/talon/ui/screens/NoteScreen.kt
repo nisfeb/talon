@@ -81,7 +81,8 @@ fun NoteScreen(
     var confirmDelete by remember(noteId) { mutableStateOf(false) }
     /** False only while we're still waiting for the row to show up. */
     var settled by remember(noteId) { mutableStateOf(false) }
-    var published by remember(noteId) { mutableStateOf(false) }
+    /** Null until the host has said: the publish button waits for it. */
+    var published by remember(noteId) { mutableStateOf<Boolean?>(null) }
     var confirmPublish by remember(noteId) { mutableStateOf(false) }
     var publicPath by remember(noteId) { mutableStateOf<String?>(null) }
     /** In-flight save; disables the check button so a double-tap can't
@@ -96,8 +97,8 @@ fun NoteScreen(
     LaunchedEffect(noteId, flag) {
         // Matches NotesParser.publishedKeys: "<host>/<name>#<id>".
         val key = "${flag.flagString}#$noteId"
-        published = repo.notes.publishedKeys().contains(key)
-        if (published) publicPath = io.nisfeb.talon.urbit.NotesPaths.publicPath(flag, noteId)
+        published = repo.notes.publishedKeys()?.contains(key)
+        if (published == true) publicPath = io.nisfeb.talon.urbit.NotesPaths.publicPath(flag, noteId)
     }
 
     LaunchedEffect(noteId, note) {
@@ -172,8 +173,8 @@ fun NoteScreen(
                 IconButton(onClick = { editing = true }) {
                     Icon(Icons.Filled.Edit, contentDescription = "Edit")
                 }
-                IconButton(onClick = {
-                    if (published) {
+                if (published != null) IconButton(onClick = {
+                    if (published == true) {
                         actionError = null
                         scope.launch {
                             if (repo.notes.unpublishNote(flag, noteId)) {
@@ -190,8 +191,8 @@ fun NoteScreen(
                 }) {
                     Icon(
                         TalonIcons.Public,
-                        contentDescription = if (published) "Unpublish" else "Publish to web",
-                        tint = if (published) {
+                        contentDescription = if (published == true) "Unpublish" else "Publish to web",
+                        tint = if (published == true) {
                             MaterialTheme.colorScheme.primary
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
@@ -312,7 +313,7 @@ fun NoteScreen(
                     scope.launch {
                         publicPath = repo.notes.publishNote(flag, noteId)
                         published = publicPath != null
-                        if (!published) {
+                        if (publicPath == null) {
                             actionError =
                                 "Couldn't publish — check your connection and try again."
                         }

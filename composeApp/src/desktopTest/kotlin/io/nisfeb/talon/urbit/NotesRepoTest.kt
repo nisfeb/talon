@@ -81,6 +81,16 @@ class NotesRepoTest {
         assertEquals(2, reads())
     }
 
+    // An answer that is not the lists replaced every note kept here with
+    // nothing, as if the notebook had been emptied.
+    @Test
+    fun `an answer in a shape this build does not read keeps the notebook`() = live {
+        notes.bootstrap()
+        ship.scries["notes/v0/notes/~bus/recipes"] = """{"notes":"moved"}"""
+        notes.applyNotesEvent(Json.parseToJsonElement("""{"type":"note-created","host":"~bus","flagName":"recipes"}""").jsonObject)
+        assertEquals(listOf("Pho"), titles())
+    }
+
     @Test
     fun `a stream fact reads its notebook again, and a deleted notebook goes`() = live {
         notes.bootstrap()

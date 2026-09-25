@@ -156,6 +156,12 @@ class NotesRepo(
                 Log.w(TAG, "notes scry failed for $key", it)
                 return
             }
+        // An answer that is not the lists is not an empty notebook: read as
+        // one, the tree below replaced every folder and note kept here.
+        if (foldersJson !is kotlinx.serialization.json.JsonArray || notesJson !is kotlinx.serialization.json.JsonArray) {
+            Log.w(TAG, "notes for $key came back in a shape this build does not read; keeping what is here")
+            return
+        }
 
         val folders = NotesParser.folders(foldersJson).map { f ->
             NotesFolderEntity(
@@ -329,11 +335,15 @@ class NotesRepo(
     suspend fun unpublishNote(flag: NotesFlag, noteId: Long): Boolean =
         poke(NotesActions.unpublishNote(flag, noteId))
 
-    /** Note ids currently published, as `<flag>#<id>` keys. */
-    suspend fun publishedKeys(): Set<String> {
-        val ch = channel ?: return emptySet()
-        val body = runCatching { ch.scry(NotesPaths.APP, NotesPaths.PUBLISHED) }
-            .getOrElse { return emptySet() }
+    /**
+     * Note ids currently published, as `<flag>#<id>` keys, or null where
+     * the host could not be asked: read as none, a public note offered
+     * to be published and not to be taken down.
+     */
+    suspend fun publishedKeys(): Set<String>? {
+        val ch = channel ?: return null
+        val body = io.nisfeb.talon.util.runSuspendCatching { ch.scry(NotesPaths.APP, NotesPaths.PUBLISHED) }
+            .getOrElse { return null }
         return NotesParser.publishedKeys(body)
     }
 

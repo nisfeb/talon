@@ -48,6 +48,8 @@ class NotebookScreensTest {
     private fun notebook(
         block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit,
         moreFolders: String = "",
+        /** What the host says is published; null for a host that does not answer. */
+        published: String? = "[]",
         content: @androidx.compose.runtime.Composable (TlonChatRepo) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-nbui-").toFile()
@@ -61,7 +63,7 @@ class NotebookScreensTest {
                 $soups$moreFolders]"""
             scries["notes/v0/notes/~bus/recipes"] = """[{"folderId":9,"notebookId":7,"title":"Pho","revision":3,"id":11,"createdBy":"~bus",
                 "createdAt":1784592455,"bodyMd":"Simmer **long**.","updatedAt":1784592505,"updatedBy":"~bus","slug":null}]"""
-            scries["notes/v0/published"] = "[]"
+            if (published != null) scries["notes/v0/published"] = published
         }
         val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod"); notes.attach(ship.channel) }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -83,7 +85,7 @@ class NotebookScreensTest {
         NotesChannelScreen(repo = repo, whom = whom, onBack = { did += "back" }, onOpenNote = { did += "note $it" })
     }
 
-    private fun note(block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block) { repo ->
+    private fun note(published: String? = "[]", block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block, published = published) { repo ->
         NoteScreen(repo = repo, whom = whom, noteId = 11, onBack = { did += "back" })
     }
 
@@ -164,6 +166,20 @@ class NotebookScreensTest {
         assertTrue("<strong>long</strong>" in ship.pokesTo("notes").single().json.toString())
         onNodeWithContentDescription("Unpublish").performClick()
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("notes").size == 2 }
+    }
+
+    // Read as nothing published, a public note offered to be published
+    // again and never to be taken down.
+    @Test
+    fun `where the host cannot say what is published, neither is offered`() = note(published = null) { _, _ ->
+        showing("rev 3")
+        assertTrue(!shows("Publish to web") && onAllNodesWithContentDescription("Publish to web").fetchSemanticsNodes().isEmpty())
+        assertTrue(onAllNodesWithContentDescription("Unpublish").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `a published note offers to be taken down`() = note(published = """[{"host":"~bus","flagName":"recipes","noteId":11}]""") { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Unpublish").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
