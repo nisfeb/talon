@@ -10,6 +10,11 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.writeStringUtf8
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
@@ -52,17 +57,45 @@ internal class FakeShip(val us: String = "~zod") {
     /** The answer to an API request, or null for 404. */
     @Volatile var answerApi: (method: String, path: String, body: String) -> String? = { _, _, _ -> null }
 
-    private val stream = ByteChannel(autoFlush = true)
+    // One event stream per channel, as eyre keeps one per channel: the app
+    // runs several (the repo's, the call controller's), and two channels
+    // reading one stream steal each other's bytes. Readers of the SAME
+    // channel share its stream. Frames wait in an unbounded queue, pumped
+    // into the stream, so a channel nobody reads never blocks a fact meant
+    // for the others.
+    private class Pipe(val stream: ByteChannel, val queue: Channel<String>)
+    private val pipes = LinkedHashMap<String, Pipe>()
+    /** Facts put out before any channel opened, for the first to open. */
+    private val backlog = mutableListOf<String>()
+    private val pumps = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var nextEventId = 1L
 
-    // Pokes arrive on concurrent requests; the stream takes one writer at a
-    // time, or two acks interleave, one is lost, and its poke waits it out.
+    // Pokes arrive on concurrent requests; frames are numbered and queued one
+    // at a time, or two acks interleave, one is lost, and its poke waits it out.
     private val writing = Mutex()
 
-    /** Put a fact on the event stream, framed as eyre frames it. */
+    private fun frame(json: String) = "id: ${nextEventId++}\ndata: $json\n\n"
+
+    /** The pipe of the channel at [path], made on first use. Called under [writing]. */
+    private fun pipeOf(path: String): Pipe =
+        pipes.getOrPut(path.removePrefix("/~/channel/")) {
+            Pipe(ByteChannel(autoFlush = true), Channel(Channel.UNLIMITED)).also { p ->
+                backlog.forEach { p.queue.trySend(it) }
+                backlog.clear()
+                // A reader that went away closes the stream; that channel is
+                // done, and saying so as an uncaught error fails a later test.
+                pumps.launch { runCatching { for (f in p.queue) p.stream.writeStringUtf8(f) } }
+            }
+        }
+
+    /** Put a fact on every channel's event stream, framed as eyre frames it. */
     suspend fun emit(json: String) = writing.withLock {
-        stream.writeStringUtf8("id: ${nextEventId++}\ndata: $json\n\n")
+        val f = frame(json)
+        if (pipes.isEmpty()) backlog += f else pipes.values.forEach { it.queue.trySend(f) }
     }
+
+    /** An answer for the one channel that asked: a poke's or a subscription's ack. */
+    private suspend fun answer(path: String, json: String) = writing.withLock { pipeOf(path).queue.trySend(frame(json)) }
 
     /** What the app talks to the ship through; pass it as the app's client. */
     val http = HttpClient(MockEngine { req ->
@@ -82,21 +115,22 @@ internal class FakeShip(val us: String = "~zod") {
                             )
                             pokes += p
                             val err = refuse(p)
-                            emit(
+                            answer(
+                                path,
                                 if (err == null) """{"id":$id,"response":"poke","ok":"ok"}"""
                                 else """{"id":$id,"response":"poke","err":${JsonPrimitive(err)}}""",
                             )
                         }
                         "subscribe" -> {
                             subscribed += "${o["app"]?.jsonPrimitive?.content}${o["path"]?.jsonPrimitive?.content}"
-                            emit("""{"id":$id,"response":"subscribe","ok":"ok"}""")
+                            answer(path, """{"id":$id,"response":"subscribe","ok":"ok"}""")
                         }
                     }
                 }
                 respond("", HttpStatusCode.NoContent)
             }
             req.method == HttpMethod.Get && path.startsWith("/~/channel/") ->
-                respond(stream, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+                respond(writing.withLock { pipeOf(path) }.stream, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
             path.startsWith("/~/scry/") ->
                 path.removePrefix("/~/scry/").removeSuffix(".json").also { scried += it }
                     .let { scries[it] }

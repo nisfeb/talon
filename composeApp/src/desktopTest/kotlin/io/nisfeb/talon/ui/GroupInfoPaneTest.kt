@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.room.Room
@@ -101,7 +102,7 @@ class GroupInfoPaneTest {
     @Test
     fun `it names the group and counts its members from the ship`() = pane { _, _ ->
         showing("3 members")
-        assertTrue(shows("The Crew"))
+        showing("The Crew")
         onNodeWithText("View members (3)").performClick()
         assertEquals(listOf("members"), opened)
         assertTrue(!shows("Join by code"), "a private group has no join code")
@@ -148,14 +149,20 @@ class GroupInfoPaneTest {
         assertTrue(shows("🔗") && !shows("🎥"))
     }
 
+    /** The last row of a lazy list: scrolled to by the list, since it may not be composed yet. */
+    private fun ComposeUiTest.leaveRow(): androidx.compose.ui.test.SemanticsNodeInteraction {
+        onNode(androidx.compose.ui.test.hasScrollToNodeAction()).performScrollToNode(androidx.compose.ui.test.hasText("Leave group"))
+        return onNodeWithText("Leave group")
+    }
+
     @Test
     fun `leaving asks first, and goes once the ship agrees`() = pane { ship, db ->
         showing("3 members")
-        onNodeWithText("Leave group").performScrollTo().performClick()
+        leaveRow().performClick()
         showing("Leave The Crew?")
         onNodeWithText("Cancel").performClick()
         assertTrue(ship.pokesTo("groups").isEmpty())
-        onNodeWithText("Leave group").performScrollTo().performClick()
+        leaveRow().performClick()
         onNodeWithText("Leave").performClick()
         waitUntil(timeoutMillis = 5_000) { runBlocking { db.groups().getGroup(flag) } == null }
         assertEquals("group-leave", ship.pokesTo("groups").single().mark)
@@ -165,7 +172,7 @@ class GroupInfoPaneTest {
     fun `a leave the ship refuses says so, and the group stays`() = pane { ship, db ->
         ship.refuse = { if (it.mark == "group-leave") "not a member" else null }
         showing("3 members")
-        onNodeWithText("Leave group").performScrollTo().performClick()
+        leaveRow().performClick()
         onNodeWithText("Leave").performClick()
         showing("not a member")
         assertTrue(shows("Leave The Crew?"), "the dialog stays to say why")

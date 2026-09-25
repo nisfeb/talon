@@ -2,6 +2,8 @@ package io.nisfeb.talon.ui
 
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.hasSetTextAction
@@ -17,16 +19,20 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import io.nisfeb.talon.call.CallController
+import io.nisfeb.talon.call.CallEngineProvider
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.screens.GroupAdminScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.urbit.FakeShip
 import io.nisfeb.talon.urbit.TlonChatRepo
+import io.nisfeb.talon.urbit.UrbitSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -51,25 +57,39 @@ class GroupAdminScreenTest {
           "pending":{"~rallec-tadpur":[]},
           "requests":{"~wicrys-bortel":{"requestedAt":0}}}}"""
 
-    private fun admin(block: ComposeUiTest.(FakeShip) -> Unit) {
+    /** [rooms], when given, is %trunk's list of lines this ship hosts, and turns calling on. */
+    private fun admin(me: String = "~zod", rooms: String? = null, group: String = record, block: ComposeUiTest.(FakeShip) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-admin-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
-        val ship = FakeShip("~zod").apply { scries["groups/v2/groups/$flag"] = record }
+        val ship = FakeShip("~zod").apply {
+            scries["groups/v2/groups/$flag"] = group
+            scries["trunk/version"] = """{"wire":9}"""
+            scries["trunk/policy"] = "{}"
+            scries["trunk/sfu"] = """{"base":"https://sfu.zod.test","configured":"true"}"""
+            scries["trunk/rooms"] = rooms ?: "[]"
+            scries["trunk/lines"] = "[]"
+        }
         val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod"); notes.attach(ship.channel) }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         ship.channel.events().launchIn(scope)
+        val calls = rooms?.let {
+            CallController(UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") }, CallEngineProvider { error("no media") })
+                .apply { start() }
+        }
         try {
             runComposeUiTest {
+                calls?.let { c -> waitUntil(timeoutMillis = 10_000) { c.wire.value == 9 && c.shipSfuBase.value.isNotEmpty() } }
                 setContent {
                     TalonTheme(darkTheme = false) {
-                        GroupAdminScreen(db = db, repo = repo, flag = flag, onBack = {}, me = "~zod")
+                        GroupAdminScreen(db = db, repo = repo, flag = flag, onBack = {}, me = me, callController = calls)
                     }
                 }
                 waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("The Garden", substring = true).fetchSemanticsNodes().isNotEmpty() }
                 block(ship)
             }
         } finally {
+            calls?.stop()
             scope.cancel()
             db.close()
             tmp.deleteRecursively()
@@ -225,5 +245,94 @@ class GroupAdminScreenTest {
         newChannel(kind = null, title = "Seeds")
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("not an admin", substring = true).fetchSemanticsNodes().isNotEmpty() }
         assertTrue(onAllNodesWithText("Description (optional)").fetchSemanticsNodes().isNotEmpty())
+    }
+
+    // ─── the group's party line ────────────────────────────────────
+
+    /** A line this ship hosts for the group, as %trunk lists it. */
+    private fun line(listen: Boolean = false, title: String = "The Garden", sfu: String = "", bound: Boolean = false) =
+        """[{"name":"garden","title":"$title","listen":$listen,"sfu-base":"$sfu","custom-sfu":${sfu.isNotEmpty()},"members":["~zod","~nec"],"admins":["~zod"]""" +
+            (if (bound) ""","group":{"ship":"~zod","name":"garden"}""" else "") + "}]"
+
+    private fun ComposeUiTest.switchOf(label: String) {
+        onAllNodesWithText(label)[0].performScrollTo()
+        val y = onAllNodesWithText(label)[0].fetchSemanticsNode().boundsInRoot.center.y
+        val switches = onAllNodes(isToggleable())
+        switches[switches.fetchSemanticsNodes().indices.minBy { kotlin.math.abs(switches[it].fetchSemanticsNode().boundsInRoot.center.y - y) }].performClick()
+    }
+
+    private fun ComposeUiTest.trunkPoke(ship: FakeShip, containing: String): String {
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("trunk").any { containing in it.json.toString() } }
+        return ship.pokesTo("trunk").last { containing in it.json.toString() }.json.toString()
+    }
+
+    @Test
+    fun `the group's party line is switched on with its people`() = admin(rooms = "[]") {
+        waitUntil(timeoutMillis = 5_000) { shows("A voice room for the whole group. Every channel joins the same one.") }
+        switchOf("A voice room for the whole group. Every channel joins the same one.")
+        val on = trunkPoke(it, "configure-room")
+        for (part in listOf("\"host\":\"~zod\"", "\"name\":\"garden\"", "\"open\":true", "\"title\":\"The Garden\"", "\"~nec\"")) {
+            assertTrue(part in on, "$part in $on")
+        }
+    }
+
+    @Test
+    fun `a line is opened to listeners, and its topic set`() = admin(rooms = line()) {
+        waitUntil(timeoutMillis = 5_000) { shows("Only group members can join.") }
+        switchOf("Only group members can join.")
+        assertTrue("\"listen\":true" in trunkPoke(it, "\"listen\":true"))
+        onNode(hasSetTextAction() and hasText("Topic")).performScrollTo().performTextReplacement("Seed swap tonight")
+        onNodeWithText("Set").performClick()
+        assertTrue("Seed swap tonight" in trunkPoke(it, "Seed swap tonight"))
+    }
+
+    @Test
+    fun `listening on, a link is asked for`() = admin(rooms = line(listen = true)) {
+        waitUntil(timeoutMillis = 5_000) { shows("Create listen link") }
+        assertTrue(shows("A link expires on its own and can't be revoked early."))
+        onNodeWithText("Create listen link").performScrollTo().performClick()
+        assertTrue("\"name\":\"garden\"" in trunkPoke(it, "share-room"))
+    }
+
+    @Test
+    fun `the group chooses its own server, and can go back to the host's`() = admin(rooms = line(sfu = "https://ours.test")) {
+        waitUntil(timeoutMillis = 5_000) { shows("https://ours.test · chosen by this group") }
+        onNodeWithContentDescription("Server settings").performScrollTo().performClick()
+        val base = onNode(hasSetTextAction() and hasText("https://your-sidecar"))
+        base.performScrollTo().performTextInput("https://mine.test/")
+        onNodeWithText("Use this server").assertIsNotEnabled()
+        onNode(hasSetTextAction() and hasText("Shared secret")).performTextInput("s3cret")
+        onNodeWithText("Use this server").performScrollTo().performClick()
+        val chosen = trunkPoke(it, "https://mine.test")
+        assertTrue("\"base\":\"https://mine.test\"" in chosen && "\"key\":\"s3cret\"" in chosen, chosen)
+
+        onNodeWithContentDescription("Server settings").performScrollTo().performClick()
+        onNodeWithText("Use the host's").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { it.pokesTo("trunk").any { p -> "\"sfu\":null" in p.json.toString() && "\"keep-sfu\":false" in p.json.toString() } }
+    }
+
+    @Test
+    fun `a member who is not an admin is only told whether there is a line`() = admin(me = "~nec", rooms = line()) {
+        waitUntil(timeoutMillis = 5_000) { shows("This group has a party line.") }
+        assertTrue(!shows("Anyone with a link can listen"))
+    }
+
+    @Test
+    fun `a line's gates are asked of its host, then set, and a muted ship unmuted`() = admin(
+        rooms = line(bound = true),
+        group = record.replaceFirst("\"admins\":", "\"roles\":{\"gardener\":{\"meta\":{\"title\":\"Gardener\"}}},\"admins\":"),
+    ) { ship ->
+        waitUntil(timeoutMillis = 5_000) { shows("Asking the host who may join and speak…") }
+        trunkPoke(ship, "get-room-access")
+        // The host's answer, on the controller's /calls subscription.
+        runBlocking { ship.emit("""{"id":1,"response":"diff","json":{"access-state":{"from":"~zod","name":"garden","join":null,"speak":["gardener"],"muted":["~bus"]}}}""") }
+        waitUntil(timeoutMillis = 5_000) { shows("Who can join") && shows("Muted on the line") }
+        // Speaking is for gardeners already; joining opens to them too.
+        onAllNodesWithText("Only these roles")[0].performScrollTo().performClick()
+        val set = trunkPoke(ship, "set-room-access")
+        assertTrue("\"join\":[]" in set && "\"speak\":[\"gardener\"]" in set, set)
+        onNodeWithText("Unmute").performScrollTo().performClick()
+        val unmute = trunkPoke(ship, "moderate-member")
+        assertTrue("\"who\":\"~bus\"" in unmute && "\"mute\":false" in unmute, unmute)
     }
 }
