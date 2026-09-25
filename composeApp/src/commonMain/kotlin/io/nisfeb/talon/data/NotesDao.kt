@@ -51,15 +51,6 @@ interface NotesDao {
     @Query("SELECT * FROM notes_notes WHERE flag = :flag ORDER BY title COLLATE NOCASE ASC")
     fun streamNotes(flag: String): Flow<List<NotesNoteEntity>>
 
-    @Query(
-        """
-        SELECT * FROM notes_notes
-        WHERE flag = :flag AND folderId = :folderId
-        ORDER BY title COLLATE NOCASE ASC
-        """,
-    )
-    fun streamNotesInFolder(flag: String, folderId: Long): Flow<List<NotesNoteEntity>>
-
     @Query("SELECT * FROM notes_notes WHERE flag = :flag AND noteId = :noteId")
     fun streamNote(flag: String, noteId: Long): Flow<NotesNoteEntity?>
 
