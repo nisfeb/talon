@@ -1340,7 +1340,8 @@ class CallController(
      * pokes write it: a host desk that predates roles can't cast the
      * action mark and nacks, and the admin screen shows this instead
      * of a switch that silently snaps back. Cleared by
-     * [dismissRoleError] and by the next role poke that succeeds.
+     * [dismissRoleError] and by the next role change that succeeds; a
+     * read going through says nothing about a change that did not.
      */
     private val _roleError = MutableStateFlow<String?>(null)
     val roleError: StateFlow<String?> = _roleError.asStateFlow()
@@ -1365,9 +1366,9 @@ class CallController(
 
     /** Ask [host] for a room's gates; the answer lands in [roomAccess]. */
     suspend fun getRoomAccess(host: String, name: String) =
-        pokeRoles("get-room-access", TrunkWire.getRoomAccessAction(host, name))
+        pokeRoles("get-room-access", TrunkWire.getRoomAccessAction(host, name), read = true)
 
-    private suspend fun pokeRoles(what: String, action: kotlinx.serialization.json.JsonElement) {
+    private suspend fun pokeRoles(what: String, action: kotlinx.serialization.json.JsonElement, read: Boolean = false) {
         val ch = channel
         if (ch == null) {
             // A silent no-op here read as "saved" in the admin UI.
@@ -1376,7 +1377,7 @@ class CallController(
         }
         try {
             ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, action)
-            _roleError.value = null
+            if (!read) _roleError.value = null
         } catch (t: kotlinx.coroutines.CancellationException) {
             // Navigating away mid-ack says nothing about the host.
             throw t
