@@ -104,12 +104,34 @@ class NotebookDiaryScreensTest {
         NotebookComposeScreen(repo, whom, onBack = { did += "back" }, onPosted = { did += "posted" })
     }
 
+    /** The post as the ship has it, with the description and cover the composer does not show. */
+    private val onShip = """{"essay":{"content":[{"inline":["first words"]}],"author":"~bus","sent":100,"kind":"/diary",
+        "meta":{"title":"Spring","image":"","description":"A spring walk","cover":"https://img.test/cover.jpg"}}}"""
+
     @Test
     fun `an edit keeps the post's time and sends the new words`() = diary({ ship ->
+        ship.scries["channels/v5/$whom/posts/post/170.141.184.500.100"] = onShip
         onNode(hasSetTextAction() and hasText("Body (markdown)")).performTextReplacement("Rain, mostly.")
         onNodeWithText("Save").performClick()
         val edit = posted(ship)
         assertTrue("\"edit\"" in edit && "170.141.184.500.100" in edit && "Rain, mostly." in edit && "\"sent\":100" in edit, edit)
+        assertTrue("A spring walk" in edit && "https://img.test/cover.jpg" in edit, "what the composer does not show is kept: $edit")
+    }) { repo, _ ->
+        NotebookComposeScreen(
+            repo, whom, onBack = {}, onPosted = {},
+            editPostId = "170141184500100", initialTitle = "Spring", initialBody = "first words", originalSentMs = 100,
+        )
+    }
+
+    // An edit sent without the post as it stands blanked its description,
+    // cover and quotes for every reader.
+    @Test
+    fun `an edit the ship's copy cannot be read for sends nothing, and keeps the words`() = diary({ ship ->
+        onNode(hasSetTextAction() and hasText("Body (markdown)")).performTextReplacement("Rain, mostly.")
+        onNodeWithText("Save").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("nothing was changed") }
+        assertTrue(ship.pokesTo("channels").isEmpty())
+        assertTrue(shows("Rain, mostly."))
     }) { repo, _ ->
         NotebookComposeScreen(
             repo, whom, onBack = {}, onPosted = {},

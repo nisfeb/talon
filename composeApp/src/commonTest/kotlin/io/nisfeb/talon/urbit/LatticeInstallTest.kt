@@ -199,4 +199,31 @@ class LatticeInstallTest {
         val r = install()
         assertEquals(LatticeInstall.APPROVE_APPS, r.exceptionOrNull()?.message)
     }
+
+    // A probe that failed read as absent: the Apps page offered an
+    // install over a working desk, and adding a shell desk sent kiln an
+    // install of grubbery onto a ship that had it.
+    @Test
+    fun `only a 404 is absent, and a probe that could not ask is not knowing`() = runTest {
+        fun answering(status: HttpStatusCode?) = HttpClient(MockEngine {
+            if (status == null) throw IllegalStateException("offline") else respond("{}", status)
+        })
+        for ((status, want) in listOf(HttpStatusCode.OK to true, HttpStatusCode.NotFound to false,
+            HttpStatusCode.Forbidden to null, HttpStatusCode.InternalServerError to null, null to null)) {
+            assertEquals(want, LatticeInstall.installedOrUnknown(answering(status), "https://ship"), "lattice, $status")
+            assertEquals(want, GroupsInstall.installedOrUnknown(answering(status), "https://ship"), "groups, $status")
+        }
+        assertEquals(false, LatticeInstall.isInstalled(answering(HttpStatusCode.InternalServerError), "https://ship"), "the arrival poll keeps waiting")
+    }
+
+    @Test
+    fun `a shell desk asked for where the shell could not be probed installs no grubbery`() = runTest {
+        var installs = 0
+        val http = HttpClient(MockEngine { req ->
+            if (req.url.encodedPath.endsWith("manifest.webmanifest")) respond("down", HttpStatusCode.BadGateway)
+            else respond("{}", HttpStatusCode.OK)
+        })
+        LatticeInstall.shellDesk(http, { "https://ship" }, name = "calendar", answers = { true }, timeoutMs = 1_000) { _, _, _ -> installs++; true }()
+        assertEquals(0, installs)
+    }
 }

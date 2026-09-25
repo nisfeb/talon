@@ -62,11 +62,12 @@ fun rememberUrbLinkHandler(
                 open(url)
             } else {
                 scope.launch {
-                    if (LatticeInstall.isInstalled(http, s)) {
-                        known = true
-                        open(url)
-                    } else {
-                        offerUrl = url
+                    when (LatticeInstall.installedOrUnknown(http, s)) {
+                        true -> { known = true; open(url) }
+                        false -> offerUrl = url
+                        // Not knowing is no reason to offer an install
+                        // over what may well be there.
+                        null -> open(url)
                     }
                 }
             }

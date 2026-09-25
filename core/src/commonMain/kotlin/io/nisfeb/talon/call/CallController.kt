@@ -301,17 +301,32 @@ class CallController(
                 channel = ch
                 // The ship's advertised ICE servers (its sidecar / its
                 // sponsor's). Best-effort: no config means Tier 0 only.
-                runCatching { _ice.value = TrunkWire.parseIce(ch.scry(TrunkWire.AGENT, "/ice")) }
-                    .onSuccess { Log.i(TAG, "ice config: ${iceServers.size} servers") }
+                val ice = runCatching { ch.scry(TrunkWire.AGENT, "/ice") }
                     .onFailure { Log.w(TAG, "ice scry failed (Tier 0 only)", it) }
+                    .getOrNull()
+                if (ice != null) {
+                    _ice.value = TrunkWire.parseIce(ice)
+                    Log.i(TAG, "ice config: ${iceServers.size} servers")
+                }
+                // Only a ship that answered it has none takes the default:
+                // a failed read, or an answer in another shape, replaced
+                // the servers someone had set, for every device on it.
                 // Guarded like every other step here. It is internally
                 // safe today, but a throw between opening the channel
                 // and subscribing is the worst failure this loop has:
                 // `channel` is already assigned, so pokes keep working
                 // and the ship looks reachable while no fact ever
                 // arrives again.
-                runCatching { adoptDefaultIce(ch) }
-                    .onFailure { Log.w(TAG, "adopting default ice failed", it) }
+                // Off the connect path: the poke's ack comes down the event
+                // stream, which is read only once this loop subscribes
+                // below, so waiting for it here held calls up for the
+                // poke's whole 15s timeout. It reads /ice again itself.
+                if (ice is kotlinx.serialization.json.JsonArray && ice.isEmpty()) {
+                    scope.launch {
+                        runCatching { adoptDefaultIce(ch) }
+                            .onFailure { Log.w(TAG, "adopting default ice failed", it) }
+                    }
+                }
                 // No %trunk (or a desk predating policy) leaves this
                 // null, and the settings editor stays hidden.
                 runCatching { _policy.value = TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy")) }

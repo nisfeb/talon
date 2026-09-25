@@ -34,12 +34,31 @@ object LatticeInstall {
      * cookie and returns 404 cleanly when the desk is absent — unlike a
      * %gu scry, which would crash on a missing agent.
      */
-    suspend fun isInstalled(http: HttpClient, shipUrl: String): Boolean =
-        runCatching {
-            val resp: HttpResponse =
-                http.get("${shipUrl.trimEnd('/')}/apps/lattice/manifest.webmanifest")
-            resp.status.value == 200
-        }.getOrDefault(false)
+    suspend fun isInstalled(http: HttpClient, shipUrl: String): Boolean = installedOrUnknown(http, shipUrl) == true
+
+    /**
+     * Whether lattice is on [shipUrl], or null where the ship could not
+     * be asked. Only a 404 is absent: a failed probe read as absent
+     * offered an install over a desk that was there.
+     */
+    suspend fun installedOrUnknown(http: HttpClient, shipUrl: String): Boolean? =
+        probe { http.get("${shipUrl.trimEnd('/')}/apps/lattice/manifest.webmanifest") }
+
+    /** A probe's answer: 2xx is there, 404 is not, and anything else (offline, a 5xx, signed out) is not knowing. */
+    internal suspend fun probe(ask: suspend () -> HttpResponse): Boolean? {
+        val status = try {
+            ask().status
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return null
+        }
+        return when {
+            status.isSuccess() -> true
+            status.value == 404 -> false
+            else -> null
+        }
+    }
 
 /**
      * Install %grubbery and wait for it to arrive.
@@ -187,7 +206,7 @@ object LatticeInstall {
             runCatching {
                 // The shell has to be there before it can be asked for
                 // anything. Where it already is, this costs one probe.
-                if (!isInstalled(http, url)) {
+                if (installedOrUnknown(http, url) == false) {
                     installAndWait(http, url, poke, timeoutMs = timeoutMs).getOrThrow()
                 }
                 addDesk(http, url, name).getOrThrow()

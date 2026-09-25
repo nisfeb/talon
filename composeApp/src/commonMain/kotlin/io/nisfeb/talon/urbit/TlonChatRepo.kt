@@ -2676,14 +2676,16 @@ class TlonChatRepo(
         val ch = channel ?: error("not connected")
         // The post as the ship has it: cites and image dimensions have
         // no markdown form and come back from here (mergeEdit), and
-        // description / cover are not stored locally at all. A failed
-        // scry degrades to the old behaviour, not to a failed edit.
+        // description / cover are not stored locally at all. Without it
+        // the edit blanked all of those for every reader, so no answer
+        // is no edit: the words stay in the composer to try again.
         val prior = runCatching {
             ch.scry("channels", "/v5/$nest/posts/post/${dotAtom(postId)}") as? JsonObject
         }.getOrNull()?.get("essay") as? JsonObject
-        val priorMeta = prior?.get("meta") as? JsonObject
+            ?: error("The ship did not send the post as it stands, so nothing was changed. Try again.")
+        val priorMeta = prior["meta"] as? JsonObject
         val content = MarkdownBlocks.mergeEdit(
-            prior = prior?.get("content") as? JsonArray,
+            prior = prior["content"] as? JsonArray,
             parsed = MarkdownBlocks.toStory(bodyMarkdown),
         )
         val meta = buildJsonObject {

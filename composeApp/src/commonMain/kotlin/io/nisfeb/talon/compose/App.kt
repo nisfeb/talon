@@ -2094,10 +2094,10 @@ fun App(
                         orrery = orreryRepo,
                         armillary = armillaryRepo,
                         latticeInstalled = sessionStore.active()?.shipUrl?.let { url ->
-                            { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(http, url) }
+                            { io.nisfeb.talon.urbit.LatticeInstall.installedOrUnknown(http, url) ?: error("The ship could not be asked.") }
                         },
                         groupsInstalled = sessionStore.active()?.shipUrl?.let { url ->
-                            { io.nisfeb.talon.urbit.GroupsInstall.isInstalled(session.http, url) }
+                            { io.nisfeb.talon.urbit.GroupsInstall.installedOrUnknown(session.http, url) ?: error("The ship could not be asked.") }
                         },
                         onInstallGroups = io.nisfeb.talon.urbit.GroupsInstall.installer(
                             session.http,
