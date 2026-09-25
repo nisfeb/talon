@@ -51,7 +51,12 @@ class AppShellTest {
 
     private fun app(seed: suspend AppDatabase.() -> Unit = {}, block: ComposeUiTest.(FakeShip) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
-        val ship = FakeShip("~zod")
+        // A ship with nothing yet: an empty feed and no invites, which is
+        // not the same as one that does not answer.
+        val ship = FakeShip("~zod").apply {
+            scries["activity/v6/feed/init/30"] = """{"all":[]}"""
+            scries["groups-ui/v7/init"] = """{"foreigns":{}}"""
+        }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         try {
             runComposeUiTest {
