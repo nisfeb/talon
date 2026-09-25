@@ -267,7 +267,8 @@ fun ProfileEditScreen(
                                 bio = bio,
                                 avatarUrl = avatarUrl,
                                 status = status,
-                                color = color,
+                                // "—" is no colour: sent as a clear, not left as it was.
+                                color = color.orEmpty(),
                             )
                         }.onFailure { e ->
                             error = "save failed: ${e.message ?: e::class.simpleName}"

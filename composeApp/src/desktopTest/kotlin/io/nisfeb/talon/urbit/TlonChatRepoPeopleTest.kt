@@ -21,6 +21,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -178,11 +179,14 @@ class TlonChatRepoPeopleTest {
     }
 
     @Test
-    fun `a field emptied is emptied here too`() = live {
-        db.contacts().upsert(ContactEntity("~zod", "Zod", "a bio", null, status = "out"))
-        repo.updateProfile(bio = "", status = "")
-        val self = ship.pokesTo("contacts").single().json.at("self")
-        assertEquals("", self.at("bio", "value").jsonPrimitive.content)
+    fun `a field emptied is deleted on the ship and emptied here too`() = live {
+        db.contacts().upsert(ContactEntity("~zod", "Zod", "a bio", null, status = "out", color = "#ff0000"))
+        repo.updateProfile(bio = "", status = "", color = "")
+        val self = ship.pokesTo("contacts").single().json.at("self").jsonObject
+        // A null value is %contacts' delete; an empty colour went up as 0, black.
+        assertEquals(setOf("bio", "status", "color"), self.keys)
+        assertTrue(self.values.all { it is kotlinx.serialization.json.JsonNull }, self.toString())
+        assertNull(db.contacts().get("~zod")?.color)
         val row = db.contacts().get("~zod")!!
         assertEquals(Triple("Zod", null, null), Triple(row.nickname, row.bio, row.status))
     }

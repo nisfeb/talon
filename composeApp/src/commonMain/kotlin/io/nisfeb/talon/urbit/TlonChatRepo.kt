@@ -1722,36 +1722,19 @@ class TlonChatRepo(
         // `avatar`, silently nacking the whole save (HTTP 200 +
         // SSE poke-nack with `gall: poke-as cast fail`).
         val contactFields = buildJsonObject {
-            nickname?.let {
-                put("nickname", buildJsonObject {
-                    put("type", "text")
-                    put("value", it)
-                })
+            // Empty clears, and a null value is %contacts' delete: an empty
+            // colour went up as 0 and turned the profile black, and an
+            // emptied text field was kept as "".
+            fun field(name: String, type: String, value: String?, wire: (String) -> String = { it }) {
+                if (value != null) {
+                    put(name, if (value.isBlank()) JsonNull else buildJsonObject { put("type", type); put("value", wire(value)) })
+                }
             }
-            bio?.let {
-                put("bio", buildJsonObject {
-                    put("type", "text")
-                    put("value", it)
-                })
-            }
-            status?.let {
-                put("status", buildJsonObject {
-                    put("type", "text")
-                    put("value", it)
-                })
-            }
-            avatarUrl?.let {
-                put("avatar", buildJsonObject {
-                    put("type", "look")
-                    put("value", it)
-                })
-            }
-            color?.let {
-                put("color", buildJsonObject {
-                    put("type", "tint")
-                    put("value", urbitHexColor(it))
-                })
-            }
+            field("nickname", "text", nickname)
+            field("bio", "text", bio)
+            field("status", "text", status)
+            field("avatar", "look", avatarUrl)
+            field("color", "tint", color) { urbitHexColor(it) }
         }
         if (contactFields.isEmpty()) return
         // Optimistic local update FIRST so the UI reflects the edit
