@@ -1495,7 +1495,12 @@ class CallController(
             }
             is TrunkSig.Offer -> {
                 if (sig.id != callId) return
-                if (_state.value is CallUiState.Active) {
+                // Answering makes the call Active before its first offer
+                // lands (the caller gathers only once the ring is acked),
+                // so Active alone is not a restart; an offer after the
+                // first one is. A quick answer's offer taken for a
+                // restart was dropped, and the call died of "no offer".
+                if (_state.value is CallUiState.Active && pendingOffer.isCompleted) {
                     // The caller restarted ICE after a network change:
                     // answer in place on the live engine.
                     if (sdpFingerprint(sig.sdp) != sig.fpr) {

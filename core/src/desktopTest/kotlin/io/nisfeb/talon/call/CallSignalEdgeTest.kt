@@ -74,6 +74,30 @@ class CallSignalEdgeTest {
     }
 
     @Test
+    fun anOfferThatLandsAfterAQuickAnswerIsAnswered() = runBlocking {
+        val h = TrunkHarness(ship = "~zod")
+        val c = CallController(h.session, CallEngineProvider { ScriptedCallEngine() })
+        try {
+            c.start()
+            h.awaitConnected()
+            h.emitFact("""{"recv":{"from":"~dev","sig":{"ring":{"id":"q1"}}}}""")
+            withTimeout(10_000) { c.state.first { it is CallUiState.Incoming } }
+            // Answered while the caller is still gathering: its offer
+            // comes after, to a call that is already Active.
+            c.accept()
+            withTimeout(10_000) { c.state.first { it is CallUiState.Active } }
+            h.emitFact(
+                """{"recv":{"from":"~dev","sig":{"offer":{"id":"q1",""" +
+                    """"sdp":"v=0\na=fingerprint:sha-256 AA:BB\n","fpr":"sha-256 AA:BB"}}}}""",
+            )
+            val answered = h.awaitPut { TrunkHarness.sigIdIn(it, "accept") != null }
+            assertEquals("q1", TrunkHarness.sigIdIn(answered, "accept"))
+        } finally {
+            c.stop()
+        }
+    }
+
+    @Test
     fun aDuplicateAcceptIsIgnoredOnceTheCallIsActive() = runBlocking {
         val h = TrunkHarness()
         val eng = ScriptedCallEngine()
