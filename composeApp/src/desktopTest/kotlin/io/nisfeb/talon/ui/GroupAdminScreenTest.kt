@@ -152,6 +152,22 @@ class GroupAdminScreenTest {
     }
 
     @Test
+    fun `a refusal outlasts the next action's refresh, until dismissed`() = admin { ship ->
+        ship.refuse = { if (it.app == "groups") "not allowed" else null }
+        onAllNodesWithText("Accept")[0].performScrollTo().performClick()
+        val refused = { onAllNodesWithText("not allowed", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        waitUntil(timeoutMillis = 5_000, condition = refused)
+        ship.refuse = { null }
+        pressFor(ship, "Unban")
+        val reads = ship.scried.size
+        waitUntil(timeoutMillis = 5_000) { ship.scried.size > reads }
+        waitForIdle()
+        assertTrue(refused(), "the unban's refresh is not an answer to the approval")
+        onNodeWithText("Dismiss").performClick()
+        waitUntil(timeoutMillis = 5_000) { !refused() }
+    }
+
+    @Test
     fun `revoking takes back a link invite by its token and a direct one by name`() = admin { ship ->
         val token = pressFor(ship, "Revoke", n = 0)
         assertTrue("0v2.abc" in token, token)

@@ -93,13 +93,15 @@ fun GroupAdminScreen(
     // %contacts events come in.
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
-    /** Re-read the group. [keepError] after a refused action: the
-     *  rollback's own success used to clear the refusal before anyone
-     *  could read it, so the row just came back, unexplained. */
-    suspend fun refresh(keepError: Boolean = false) {
+    /** Re-read the group. It clears only a failure of its own: an
+     *  action's refusal stays until dismissed, or the refresh after it
+     *  (its rollback, or another action's) cleared it before anyone
+     *  could read it, and the row just came back, unexplained. */
+    var refreshSaid by remember { mutableStateOf<String?>(null) }
+    suspend fun refresh() {
         runCatching { repo.fetchGroupAdmin(flag) }
-            .onSuccess { group = it; if (!keepError) error = null }
-            .onFailure { error = it.message ?: it::class.simpleName }
+            .onSuccess { group = it; if (error == refreshSaid) error = null; refreshSaid = null }
+            .onFailure { e -> (e.message ?: e::class.simpleName).let { error = it; refreshSaid = it } }
     }
 
     LaunchedEffect(flag) {
@@ -214,7 +216,7 @@ fun GroupAdminScreen(
                         }.onFailure {
                             error = it.message ?: it::class.simpleName
                             // Rollback by re-fetching.
-                            refresh(keepError = true)
+                            refresh()
                         }
                     }
                 },
@@ -229,7 +231,7 @@ fun GroupAdminScreen(
                             }
                             .onFailure {
                                 error = it.message ?: it::class.simpleName
-                                refresh(keepError = true)
+                                refresh()
                             }
                     }
                 },
@@ -244,7 +246,7 @@ fun GroupAdminScreen(
                             }
                             .onFailure {
                                 error = it.message ?: it::class.simpleName
-                                refresh(keepError = true)
+                                refresh()
                             }
                     }
                 },
@@ -259,7 +261,7 @@ fun GroupAdminScreen(
                             }
                             .onFailure {
                                 error = it.message ?: it::class.simpleName
-                                refresh(keepError = true)
+                                refresh()
                             }
                     }
                 },
