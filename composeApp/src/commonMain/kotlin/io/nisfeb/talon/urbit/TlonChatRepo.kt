@@ -2319,7 +2319,7 @@ class TlonChatRepo(
      * separate chips). `ReactionPalette.display` is shortcode→glyph
      * with a passthrough fallback, so glyphs in stay glyphs out.
      */
-    suspend fun react(whom: String, postId: String, emoji: String) {
+    suspend fun react(whom: String, postId: String, emoji: String, parentId: String? = null) {
         val ch = channel ?: error("not connected")
         // Wire: the emoji-presentation glyph (FE0F-bearing), to match
         // what every other Tlon client sends. Local DB + usage: the
@@ -2341,37 +2341,21 @@ class TlonChatRepo(
         val rowId = postId.replace(".", "")
         val before = db.reactions().get(whom, rowId, ourPatp)
         db.reactions().upsert(ReactionEntity(whom, postId, ourPatp, canonical))
-        try { when {
-            whom.startsWith("~") -> ch.poke(
-                app = "chat", mark = "chat-dm-action-2",
-                payload = dmAction(whom, postId, delta),
-            )
-            whom.startsWith("0v") -> ch.poke(
-                app = "chat", mark = "chat-club-action-2",
-                payload = clubAction(whom, postId, delta),
-            )
-            whom.startsWith("chat/") ||
-                whom.startsWith("diary/") ||
-                whom.startsWith("heap/") -> ch.poke(
-                app = "channels", mark = "channel-action-2",
-                payload = channelAction(whom, buildJsonObject {
-                    put("post", buildJsonObject {
-                        put("add-react", buildJsonObject {
-                            put("id", dotAtom(postId))
-                            // %channels c-react expects `ship`, not
-                            // `author` — sending `author` produces a
-                            // poke-as cast fail on the server and the
-                            // reaction is silently dropped (only the
-                            // local optimistic upsert sticks, and
-                            // other devices never see the vote).
-                            put("ship", ourPatp)
-                            put("react", glyph)
-                        })
-                    })
-                }),
-            )
-            else -> error("unsupported whom: $whom")
-        } } catch (t: Throwable) {
+        try {
+            pokeAt(ch, whom, postId, parentId, delta, buildJsonObject {
+                put("add-react", buildJsonObject {
+                    put("id", dotAtom(postId))
+                    // %channels c-react expects `ship`, not
+                    // `author` — sending `author` produces a
+                    // poke-as cast fail on the server and the
+                    // reaction is silently dropped (only the
+                    // local optimistic upsert sticks, and
+                    // other devices never see the vote).
+                    put("ship", ourPatp)
+                    put("react", glyph)
+                })
+            })
+        } catch (t: Throwable) {
             if (before != null) db.reactions().upsert(before) else db.reactions().delete(whom, rowId, ourPatp)
             throw t
         }
@@ -2379,39 +2363,23 @@ class TlonChatRepo(
     }
 
     /** Remove our reaction from a post. */
-    suspend fun unreact(whom: String, postId: String) {
+    suspend fun unreact(whom: String, postId: String, parentId: String? = null) {
         val ch = channel ?: error("not connected")
         val delta = buildJsonObject { put("del-react", ourPatp) }
         // Gone now, as react() shows at once; a refusal brings it back.
         val rowId = postId.replace(".", "")
         val before = db.reactions().get(whom, rowId, ourPatp)
         db.reactions().delete(whom, rowId, ourPatp)
-        try { when {
-            whom.startsWith("~") -> ch.poke(
-                app = "chat", mark = "chat-dm-action-2",
-                payload = dmAction(whom, postId, delta),
-            )
-            whom.startsWith("0v") -> ch.poke(
-                app = "chat", mark = "chat-club-action-2",
-                payload = clubAction(whom, postId, delta),
-            )
-            whom.startsWith("chat/") ||
-                whom.startsWith("diary/") ||
-                whom.startsWith("heap/") -> ch.poke(
-                app = "channels", mark = "channel-action-2",
-                payload = channelAction(whom, buildJsonObject {
-                    put("post", buildJsonObject {
-                        put("del-react", buildJsonObject {
-                            put("id", dotAtom(postId))
-                            // See note on add-react above — same
-                            // schema mismatch on del-react.
-                            put("ship", ourPatp)
-                        })
-                    })
-                }),
-            )
-            else -> error("unsupported whom: $whom")
-        } } catch (t: Throwable) {
+        try {
+            pokeAt(ch, whom, postId, parentId, delta, buildJsonObject {
+                put("del-react", buildJsonObject {
+                    put("id", dotAtom(postId))
+                    // See note on add-react above — same
+                    // schema mismatch on del-react.
+                    put("ship", ourPatp)
+                })
+            })
+        } catch (t: Throwable) {
             before?.let { db.reactions().upsert(it) }
             throw t
         }
@@ -2427,7 +2395,6 @@ class TlonChatRepo(
      */
     suspend fun delete(whom: String, postId: String, parentId: String? = null) {
         val ch = channel ?: error("not connected")
-        val isReply = parentId != null
         if (whomNeedsOptimisticDelete(whom)) {
             // Mirror what react/unreact do — apply the local change
             // immediately so the message disappears regardless of
@@ -2438,62 +2405,60 @@ class TlonChatRepo(
             db.reactions().clearForPost(whom, postId)
             db.watchwords().clearHitsForPost(whom, postId)
         }
+        // Channel-action-2 `id` / `del` fields dejs through
+        // `slav %ud`, which requires dot-grouped decimals.
+        pokeAt(
+            ch, whom, postId, parentId,
+            buildJsonObject { put("del", JsonNull) },
+            buildJsonObject { put("del", JsonPrimitive(dotAtom(postId))) },
+        )
+    }
+
+    /**
+     * Poke a change to [postId]: [writDelta] in a DM or club, [postAction]
+     * in a channel. A reply's change goes through its parent, [parentId],
+     * as the ship's reply action; sent as a change to a post, it named
+     * no post, and reactions on replies landed nowhere. The chat parser
+     * requires a reply's `meta`, null or not: without it the ship
+     * refused every reply delete in a DM or club.
+     */
+    private suspend fun pokeAt(
+        ch: UrbitChannel,
+        whom: String,
+        postId: String,
+        parentId: String?,
+        writDelta: JsonObject,
+        postAction: JsonObject,
+    ) {
+        val writ = if (parentId == null) writDelta else buildJsonObject {
+            put("reply", buildJsonObject {
+                put("id", redotWritId(postId))
+                put("meta", JsonNull)
+                put("delta", writDelta)
+            })
+        }
         when {
-            whom.startsWith("~") -> {
-                val payload = if (isReply) {
-                    dmAction(whom, parentId!!, buildJsonObject {
-                        put("reply", buildJsonObject {
-                            put("id", redotWritId(postId))
-                            put("delta", buildJsonObject { put("del", JsonNull) })
-                        })
-                    })
-                } else {
-                    dmAction(whom, postId, buildJsonObject { put("del", JsonNull) })
-                }
-                ch.poke(app = "chat", mark = "chat-dm-action-2", payload = payload)
-            }
-            whom.startsWith("0v") -> {
-                val payload = if (isReply) {
-                    clubAction(whom, parentId!!, buildJsonObject {
-                        put("reply", buildJsonObject {
-                            put("id", redotWritId(postId))
-                            put("delta", buildJsonObject { put("del", JsonNull) })
-                        })
-                    })
-                } else {
-                    clubAction(whom, postId, buildJsonObject { put("del", JsonNull) })
-                }
-                ch.poke(app = "chat", mark = "chat-club-action-2", payload = payload)
-            }
+            whom.startsWith("~") -> ch.poke(
+                app = "chat", mark = "chat-dm-action-2",
+                payload = dmAction(whom, parentId ?: postId, writ),
+            )
+            whom.startsWith("0v") -> ch.poke(
+                app = "chat", mark = "chat-club-action-2",
+                payload = clubAction(whom, parentId ?: postId, writ),
+            )
             whom.startsWith("chat/") ||
                 whom.startsWith("diary/") ||
-                whom.startsWith("heap/") -> {
-                // Channel-action-2 `id` / `del` fields dejs through
-                // `slav %ud`, which requires dot-grouped decimals.
-                val inner = if (isReply) {
-                    buildJsonObject {
-                        put("post", buildJsonObject {
-                            put("reply", buildJsonObject {
-                                put("id", dotAtom(parentId!!))
-                                put("action", buildJsonObject {
-                                    put("del", JsonPrimitive(dotAtom(postId)))
-                                })
-                            })
+                whom.startsWith("heap/") -> ch.poke(
+                app = "channels", mark = "channel-action-2",
+                payload = channelAction(whom, buildJsonObject {
+                    put("post", if (parentId == null) postAction else buildJsonObject {
+                        put("reply", buildJsonObject {
+                            put("id", dotAtom(parentId))
+                            put("action", postAction)
                         })
-                    }
-                } else {
-                    // tlon-apps deletePost for channels: {post: {del: postId}}.
-                    buildJsonObject {
-                        put("post", buildJsonObject {
-                            put("del", JsonPrimitive(dotAtom(postId)))
-                        })
-                    }
-                }
-                ch.poke(
-                    app = "channels", mark = "channel-action-2",
-                    payload = channelAction(whom, inner),
-                )
-            }
+                    })
+                }),
+            )
             else -> error("unsupported whom: $whom")
         }
     }

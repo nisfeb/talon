@@ -178,6 +178,27 @@ class TlonChatRepoSendTest {
     }
 
     @Test
+    fun `a reaction on a reply goes through its parent, and so does taking it back`() = live {
+        repo.react("~bus", "~zod/170141184507", "👍", parentId = "~bus/170141184506")
+        repo.react(nest, "170141184507", "👍", parentId = "170141184506")
+        val dm = ship.pokesTo("chat").single().json.at("diff")
+        assertEquals("~bus/170.141.184.506", dm.at("id").jsonPrimitive.content)
+        val reply = dm.at("delta", "reply")
+        assertEquals("~zod/170.141.184.507", reply.at("id").jsonPrimitive.content)
+        assertTrue(reply.jsonObject.containsKey("meta"))
+        assertEquals("~zod", reply.at("delta", "add-react", "author").jsonPrimitive.content)
+        val chan = ship.pokesTo("channels").single().json.at("channel", "action", "post", "reply")
+        assertEquals("170.141.184.506", chan.at("id").jsonPrimitive.content)
+        val add = chan.at("action", "add-react")
+        assertEquals("170.141.184.507" to "~zod", add.at("id").jsonPrimitive.content to add.at("ship").jsonPrimitive.content)
+        assertEquals("👍", db.reactions().get("~bus", "~zod/170141184507", "~zod")?.emoji?.let(io.nisfeb.talon.ui.ReactionPalette::normalize))
+
+        repo.unreact(nest, "170141184507", parentId = "170141184506")
+        val back = ship.pokesTo("channels").last().json.at("channel", "action", "post", "reply", "action", "del-react")
+        assertEquals("170.141.184.507", back.at("id").jsonPrimitive.content)
+    }
+
+    @Test
     fun `a changed reaction the ship refuses goes back to the one before`() = live {
         db.reactions().upsert(ReactionEntity("~bus", "~bus/170141184506", "~zod", "❤"))
         refuse("chat")
@@ -195,6 +216,7 @@ class TlonChatRepoSendTest {
         repo.delete(nest, "170141184507", parentId = "170141184506")
         val dm = ship.pokesTo("chat").first { it.mark == "chat-dm-action-2" }.json.at("diff", "delta", "reply")
         assertEquals("~zod/170.141.184.507", dm.at("id").jsonPrimitive.content)
+        assertTrue(dm.jsonObject.containsKey("meta"), "%chat's parser requires a reply's meta; without it the delete was refused")
         assertTrue(ship.pokesTo("chat").any { it.mark == "chat-club-action-2" && "\"reply\"" in it.json.toString() })
         val chan = ship.pokesTo("channels").single().json.at("channel", "action", "post", "reply")
         assertEquals("170.141.184.506" to "170.141.184.507", chan.at("id").jsonPrimitive.content to chan.at("action", "del").jsonPrimitive.content)

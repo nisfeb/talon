@@ -316,8 +316,8 @@ fun ThreadList(
                 }
                 scope.launch {
                     runCatching {
-                        if (mineSame) repo.unreact(whom, m.id)
-                        else repo.react(whom, m.id, emoji)
+                        if (mineSame) repo.unreact(whom, m.id, m.parentId)
+                        else repo.react(whom, m.id, emoji, m.parentId)
                     }.onFailure {
                         composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}"
                     }
@@ -351,7 +351,7 @@ fun ThreadList(
             onPickReaction = { code ->
                 actionTarget = null
                 scope.launch {
-                    runCatching { repo.react(whom, target.id, code) }
+                    runCatching { repo.react(whom, target.id, code, target.parentId) }
                         .onFailure {
                             composerState.sendError =
                                 "react failed: ${it.message ?: it::class.simpleName}"
@@ -425,8 +425,8 @@ fun ThreadList(
                         ReactionPalette.normalize(mine) == ReactionPalette.normalize(emoji)
                     scope.launch {
                         runCatching {
-                            if (same) repo.unreact(whom, msg.id)
-                            else repo.react(whom, msg.id, emoji)
+                            if (same) repo.unreact(whom, msg.id, msg.parentId)
+                            else repo.react(whom, msg.id, emoji, msg.parentId)
                         }
                     }
                 }
