@@ -115,7 +115,4 @@ interface NotesDao {
 
     @Query("SELECT noteId FROM notes_notes WHERE flag = :flag AND pending = 1")
     suspend fun streamPendingIds(flag: String): List<Long>
-
-    @Query("DELETE FROM notes_notebooks")
-    suspend fun clearAllNotebooks()
 }

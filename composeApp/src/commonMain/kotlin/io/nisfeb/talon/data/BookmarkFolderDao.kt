@@ -57,12 +57,6 @@ interface BookmarkFolderDao {
     suspend fun removeMember(folderId: Long, whom: String, postId: String)
 
     @Query(
-        "SELECT folderId FROM bookmark_folder_members " +
-            "WHERE whom = :whom AND postId = :postId"
-    )
-    suspend fun foldersContaining(whom: String, postId: String): List<Long>
-
-    @Query(
         "UPDATE bookmark_folder_members SET ordinal = :ordinal " +
             "WHERE folderId = :folderId AND whom = :whom AND postId = :postId"
     )
