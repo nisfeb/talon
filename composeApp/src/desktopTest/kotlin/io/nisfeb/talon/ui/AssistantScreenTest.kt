@@ -43,14 +43,25 @@ class AssistantScreenTest {
     @Volatile private var answer = "Tuesday, at the library."
 
     @Volatile private var status = 200
+    /** A tool call the model makes before it answers, in the OpenAI wire shape. */
+    @Volatile private var toolCall: String? = null
+
+    private lateinit var ship: FakeShip
 
     private fun assistant(block: ComposeUiTest.(AppDatabase) -> Unit) {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/v1/chat/completions") { ex ->
             asked += ex.requestBody.readBytes().decodeToString()
-            val body = """{"id":"x","object":"chat.completion","choices":[{"index":0,"finish_reason":"stop",
-                "message":{"role":"assistant","content":${kotlinx.serialization.json.JsonPrimitive(answer)}}}]}"""
-                .toByteArray()
+            // A tool call waiting to be made goes first, once; then the answer.
+            val call = toolCall
+            toolCall = null
+            val body = (if (call != null) {
+                """{"id":"x","object":"chat.completion","choices":[{"index":0,"finish_reason":"tool_calls",
+                    "message":{"role":"assistant","content":null,"tool_calls":[$call]}}]}"""
+            } else {
+                """{"id":"x","object":"chat.completion","choices":[{"index":0,"finish_reason":"stop",
+                    "message":{"role":"assistant","content":${kotlinx.serialization.json.JsonPrimitive(answer)}}}]}"""
+            }).toByteArray()
             ex.responseHeaders.add("Content-Type", "application/json")
             val out = if (status == 200) body else """{"error":{"message":"the model is down for maintenance"}}""".toByteArray()
             ex.sendResponseHeaders(status, out.size.toLong())
@@ -66,7 +77,7 @@ class AssistantScreenTest {
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
         val sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val ship = FakeShip("~zod")
+        ship = FakeShip("~zod")
         val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod") }
         ship.channel.events().launchIn(sessionScope)
         try {
@@ -128,5 +139,44 @@ class AssistantScreenTest {
         waitUntil(timeoutMillis = 10_000) { shows("It is on Thursday now.") }
         val last = asked.last()
         assertTrue("when is the book club?" !in last, "a new conversation carries none of the old: ${last.take(400)}")
+    }
+
+    // ─── what it does, and what it had said ───────────────────────
+
+    private val postEvent = """{"id":"c1","type":"function","function":{"name":"send_event",""" +
+        """"arguments":"{\"whom\":\"~bus\",\"name\":\"Seed swap\",\"date\":\"2026-10-03\"}"}}"""
+
+    @Test
+    fun `an action that writes asks first, and Deny does nothing`() = assistant {
+        toolCall = postEvent
+        answer = "All right, I won't post it."
+        ask("tell bus about the seed swap")
+        waitUntil(timeoutMillis = 10_000) { shows("Allow this action?") }
+        assertTrue(shows("send_event"))
+        onNodeWithText("Deny").performClick()
+        waitUntil(timeoutMillis = 10_000) { shows("All right, I won't post it.") }
+        assertTrue(shows("declined send_event"))
+        assertTrue(ship.pokesTo("chat").isEmpty(), "nothing was posted")
+    }
+
+    @Test
+    fun `an action allowed is done, and the answer follows`() = assistant {
+        toolCall = postEvent
+        answer = "Posted it to Bus."
+        ask("tell bus about the seed swap")
+        waitUntil(timeoutMillis = 10_000) { shows("Allow this action?") }
+        onNodeWithText("Allow").performClick()
+        waitUntil(timeoutMillis = 10_000) { shows("Posted it to Bus.") }
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").any { "Seed swap" in it.json.toString() } }
+    }
+
+    @Test
+    fun `a past conversation opens with what was said`() = assistant {
+        ask("when is the book club?")
+        waitUntil(timeoutMillis = 10_000) { shows("Tuesday, at the library.") }
+        onNodeWithText("New conversation").performClick()
+        waitUntil(timeoutMillis = 5_000) { !shows("Tuesday, at the library.") }
+        onAllNodesWithText("when is the book club?", substring = true)[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Tuesday, at the library.") }
     }
 }
