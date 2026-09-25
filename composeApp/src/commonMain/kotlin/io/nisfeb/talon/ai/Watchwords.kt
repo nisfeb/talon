@@ -81,7 +81,10 @@ class Watchwords(
     private val backfills = MutableStateFlow<Map<Long, Job>>(emptyMap())
 
     init {
-        scope.launch {
+        // Subscribed now, not whenever the scope gets to it: drop(1) skips
+        // the value it starts from, and a switch flipped in between was
+        // that value, so it was dropped and never mirrored.
+        scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             syncEnabled.drop(1).collect { on ->
                 runCatching { settingsSync?.mirrorWatchword(WatchwordChange.SyncToggled(on)) }
             }

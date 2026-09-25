@@ -258,9 +258,10 @@ class SettingsSyncImpl(
         // Watch each synced preference and push changes the user makes
         // here. drop(1) skips the current value — attaching is not an
         // edit — and the last-synced value keeps an incoming change
-        // from echoing back out.
+        // from echoing back out. Subscribed before this returns: started
+        // later, a change made in between was the value skipped.
         fun <T> watch(flow: Flow<T>, entry: String, encode: (T) -> JsonElement) {
-            scope.launch {
+            scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                 flow.drop(1).collect { v ->
                     val encoded = encode(v)
                     // Our own apply coming back through the StateFlow,
