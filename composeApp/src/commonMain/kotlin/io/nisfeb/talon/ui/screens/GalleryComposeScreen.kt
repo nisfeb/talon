@@ -181,7 +181,9 @@ fun GalleryComposeScreen(
                             add(buildJsonObject {
                                 put("inline", buildJsonArray {
                                     lines.forEachIndexed { i, l ->
-                                        if (i > 0) add(buildJsonObject { put("break", buildJsonObject { }) })
+                                        // null, as every other story here writes it:
+                                        // the ship's story parser takes no object.
+                                        if (i > 0) add(buildJsonObject { put("break", kotlinx.serialization.json.JsonNull) })
                                         add(JsonPrimitive(l))
                                     }
                                 })
