@@ -31,7 +31,6 @@ import io.nisfeb.talon.urbit.DesktopSessionStore
 import io.nisfeb.talon.urbit.UrbitSession
 import java.io.File
 import java.net.ConnectException
-import java.util.Collections
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -44,7 +43,7 @@ class LoginScreenTest {
     private val store = DesktopSessionStore(File(createTempDirectory("talon-login-").toFile(), "sessions.json"))
 
     /** Each login asked for, as URL and form body. */
-    private val asked: MutableList<Pair<String, String>> = Collections.synchronizedList(mutableListOf())
+    private val asked: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
 
     private val ship = "~zod"
     private val signsIn: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData = {
@@ -63,7 +62,7 @@ class LoginScreenTest {
             asked += req.url.toString() to req.body.toByteArray().decodeToString()
             answer(req)
         })
-        val loggedIn = Collections.synchronizedList(mutableListOf<String>())
+        val loggedIn = java.util.concurrent.CopyOnWriteArrayList<String>()
         setContent {
             CompositionLocalProvider(LocalUriHandler provides object : UriHandler {
                 override fun openUri(uri: String) { opened += uri }

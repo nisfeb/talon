@@ -19,7 +19,6 @@ import io.nisfeb.talon.ui.screens.MailThreadPane
 import io.nisfeb.talon.ui.theme.TalonTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
-import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -27,7 +26,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class MailThreadActionsTest {
     /** Each write, as path and body. */
-    private val posts: MutableList<Pair<String, String>> = Collections.synchronizedList(mutableListOf())
+    private val posts: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
 
     private val thread = """{"id":"0vt","messages":[
         {"id":"0vm1","from":"~zod","to":["~nec"],"subject":"Plans","body":"hello","body-mime":"","sent":10,"prev":null,"verdict":"verified","read":true}],

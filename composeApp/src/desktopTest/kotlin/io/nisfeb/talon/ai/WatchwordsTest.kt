@@ -19,7 +19,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import java.io.File
-import java.util.Collections
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -42,7 +41,7 @@ class WatchwordsTest {
     private val sync = SettingsSyncImpl(db = db, aiSettings = FakeAiSettings()).apply { attach(ship.channel) }
     private val repo = TlonChatRepo(db, settingsSync = sync, watchwordsSyncEnabled = syncOn).apply { attachForTest(ship.channel, "~zod") }
     private val words = repo.watchwords
-    private val notices: MutableList<Pair<String, List<String>>> = Collections.synchronizedList(mutableListOf())
+    private val notices: MutableList<Pair<String, List<String>>> = java.util.concurrent.CopyOnWriteArrayList()
 
     init {
         repo.watchwordListener = { m, notice -> notices += m.id to notice.terms }

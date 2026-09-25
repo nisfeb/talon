@@ -108,6 +108,8 @@ class ThreadListTest {
         messages().upsert(msg("~nec/170141184508", "~nec", "second answer", 3_000, parentId = parent))
         messages().upsert(msg("~bus/170141184509", "~bus", "elsewhere", 4_000))
     }) { _, _ ->
+        shows("the question")
+        shows("second answer")
         onNodeWithText("the question").assertIsDisplayed()
         onNodeWithText("first answer").assertIsDisplayed()
         onNodeWithText("second answer").assertIsDisplayed()

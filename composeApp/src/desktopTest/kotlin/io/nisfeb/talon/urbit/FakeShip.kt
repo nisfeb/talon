@@ -24,7 +24,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
-import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -40,19 +39,19 @@ import java.util.concurrent.ConcurrentHashMap
 internal class FakeShip(val us: String = "~zod") {
     data class Poke(val app: String, val mark: String, val json: JsonElement, val ship: String)
 
-    val pokes: MutableList<Poke> = Collections.synchronizedList(mutableListOf())
+    val pokes: MutableList<Poke> = java.util.concurrent.CopyOnWriteArrayList()
     val scries = ConcurrentHashMap<String, String>()
 
     /** Every subscription opened, as `app/path`. */
-    val subscribed: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    val subscribed: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
     /** Every scry path asked for, answered or not, in order. */
-    val scried: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    val scried: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
     @Volatile var refuse: (Poke) -> String? = { null }
 
     /** Requests to an app's own HTTP API, as `METHOD path body`. */
-    val api: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    val api: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
     /** The answer to an API request, or null for 404. */
     @Volatile var answerApi: (method: String, path: String, body: String) -> String? = { _, _, _ -> null }

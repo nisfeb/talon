@@ -27,7 +27,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
-import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -38,7 +37,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class CalendarScreenTest {
     /** Every write the screen made: path and body. */
-    private val writes: MutableList<Pair<String, String>> = Collections.synchronizedList(mutableListOf())
+    private val writes: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
     /** Noon today, where the device is: today's agenda whatever the hour the test runs. */
     private val HOUR = 3_600_000L
     private val soon = java.time.LocalDate.now().atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()

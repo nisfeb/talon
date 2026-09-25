@@ -26,7 +26,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import java.io.File
-import java.util.Collections
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -38,7 +37,7 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class AppsSettingsScreenTest {
-    private val did: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     @Volatile private var groupsHere = false
     @Volatile private var latticeHere = true
     @Volatile private var orreryHere = false
@@ -83,7 +82,9 @@ class AppsSettingsScreenTest {
                 block()
             }
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             tmp.deleteRecursively()
         }

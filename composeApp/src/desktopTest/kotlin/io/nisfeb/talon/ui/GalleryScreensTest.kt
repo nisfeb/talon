@@ -34,7 +34,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import java.io.File
-import java.util.Collections
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -47,7 +46,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class GalleryScreensTest {
     private val whom = "heap/~bus/pics"
-    private val did: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
     /** Pages a link's preview is read from. */
     private val web = HttpClient(MockEngine { req ->

@@ -12,7 +12,6 @@ import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.ui.theme.TalonTheme
-import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -20,7 +19,7 @@ import kotlin.test.assertTrue
 /** A person's card: who they are, and what can be done from it for them or for us. */
 @OptIn(ExperimentalTestApi::class)
 class ContactProfileSheetTest {
-    private val did: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val ship = "~mitlyn-ditrel"
     private val person = ContactEntity(ship, "Mittens", "bakes on weekends", null, status = "at the market")
 

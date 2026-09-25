@@ -72,7 +72,9 @@ class IdlePassCostTest {
             // Measured with this harness: twelve requests before, two now.
             assertTrue(asked.size <= 2, "an idle pass asks the ship ${asked.size} times:\n" + asked.joinToString("\n"))
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             dir.deleteRecursively()
         }

@@ -20,7 +20,6 @@ import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.urbit.LatticeSign
 import io.nisfeb.talon.urbit.SignedRecord
 import io.nisfeb.talon.urbit.armor
-import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -30,7 +29,7 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class SignVerifyDialogTest {
-    private val asked: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val asked: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val signed = SignedRecord("~zod", "3", "ed25519", "lattice", "12345", "67890")
 
     private fun lattice(old: Boolean = false) = LatticeSign(HttpClient(MockEngine { req ->

@@ -99,7 +99,9 @@ class PassKeepsTest {
             pass()
             assertEquals(3, observed, "and a refused claim is not sent again")
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             dir.deleteRecursively()
         }
@@ -142,7 +144,9 @@ class PassKeepsTest {
             OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
             assertNull(db.orreryAccounts().get("~zod"), "the row turning off deleted stays deleted")
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             dir.deleteRecursively()
         }
@@ -198,7 +202,9 @@ class PassKeepsTest {
             assertEquals("unreadable", db.orreryNoticed().get("n4")?.state, "a claim that cannot be read is set aside")
             assertNotNull(repo.lastPushMs.value, "and the pass finished")
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             dir.deleteRecursively()
         }
@@ -243,7 +249,9 @@ class PassKeepsTest {
             OrreryRepo(http, scope, db, "test", bareClient = http).pass("https://ship.test", "~zod")
             assertNotNull(db.orreryAccounts().get("~zod"), "a 403 for scope leaves the pipe on")
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             dir.deleteRecursively()
         }
@@ -286,7 +294,9 @@ class PassKeepsTest {
             }
         } finally {
             repo.detach()
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             dir.deleteRecursively()
         }
@@ -341,7 +351,9 @@ class PassKeepsTest {
             assertEquals(2, asked, "the next pass reads it")
             assertNotNull(db.orrerySent().get("~zod", "status:~sampel-palnet"))
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             dir.deleteRecursively()
         }
@@ -393,7 +405,9 @@ class PassKeepsTest {
             assertTrue("talon://chat" !in observed, "and nothing from a chat goes up: $observed")
             assertTrue(asks.none { "/apps/calendar/" in it }, "nor is the calendar read to write its events: $asks")
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             dir.deleteRecursively()
         }
@@ -428,7 +442,9 @@ class PassKeepsTest {
             assertEquals(listOf("a1"), repo.actions.value.map { it.id }, "the approved message is shown as waiting on the ship")
             assertTrue(asked.none { it.startsWith("POST") && "/api/actions/" in it }, "and never claimed here: $asked")
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             dir.deleteRecursively()
         }
@@ -475,7 +491,9 @@ class PassKeepsTest {
             assertNotNull(second.lastPushMs.value, "the next pass runs")
             assertEquals(1, asked.count { "/api/observe" in it }, "and writes what it knows")
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             dir.deleteRecursively()
         }
@@ -513,7 +531,9 @@ class PassKeepsTest {
             assertNotNull(db.orrerySent().get("~zod", "cal:default/e1"), "and what it had written, remembered")
             repo.detach()
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             dir.deleteRecursively()
         }
@@ -560,7 +580,9 @@ class PassKeepsTest {
             assertTrue(g.enabled && g.keySet, "a key shown by its last four is a key set")
             assertEquals(emptyList(), gets.filter { it.endsWith("/api/chat") || it.endsWith("/api/mail") || it.endsWith("/api/generator") }, "nothing read back")
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             dir.deleteRecursively()
         }

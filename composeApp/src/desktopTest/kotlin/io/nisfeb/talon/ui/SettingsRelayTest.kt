@@ -25,7 +25,6 @@ import io.nisfeb.talon.ui.screens.SettingsScreen
 import io.nisfeb.talon.ui.theme.InMemoryThemePreference
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.urbit.FakeAiSettings
-import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -37,7 +36,7 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class SettingsRelayTest {
-    private val asked: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val asked: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val relaySettings = InMemoryRelaySettings("https://relay.test")
 
     private fun relay(ok: Boolean = true) = RelayClient(HttpClient(MockEngine { req ->

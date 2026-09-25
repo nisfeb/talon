@@ -23,7 +23,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
-import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -35,7 +34,7 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class MailAttachmentRowTest {
-    private val did: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     /** Whether this ship holds the bytes yet; asking the network makes it so. */
     @Volatile private var held = true
     @Volatile private var calendarTakes = true

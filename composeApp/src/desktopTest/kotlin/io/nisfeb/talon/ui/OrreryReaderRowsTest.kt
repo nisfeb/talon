@@ -55,7 +55,7 @@ class OrreryReaderRowsTest {
         "chat" to """{"enabled":true,"dms":[],"channels":[],"send_dms":false}""",
         "mail" to """{"enabled":false}""",
     ))
-    private val writes: MutableList<Pair<String, JsonObject>> = Collections.synchronizedList(mutableListOf())
+    private val writes: MutableList<Pair<String, JsonObject>> = java.util.concurrent.CopyOnWriteArrayList()
     @Volatile private var answering = true
 
     private val http = HttpClient(MockEngine { req ->

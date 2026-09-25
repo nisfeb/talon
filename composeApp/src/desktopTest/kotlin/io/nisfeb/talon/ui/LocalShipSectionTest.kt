@@ -25,7 +25,6 @@ import io.nisfeb.talon.comet.RuntimeUpdate
 import io.nisfeb.talon.ui.screens.LocalShipSection
 import io.nisfeb.talon.ui.theme.TalonTheme
 import kotlinx.coroutines.flow.MutableStateFlow
-import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -36,7 +35,7 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class LocalShipSectionTest {
-    private val did: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val comet = "~radbes-dasdul-wicsed-mislyd--dolnul-sipnyd-labmyr-marzod"
 
     private inner class FakeComet(

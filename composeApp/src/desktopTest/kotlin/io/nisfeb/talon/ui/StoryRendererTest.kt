@@ -21,7 +21,6 @@ import io.nisfeb.talon.urbit.Story
 import io.nisfeb.talon.urbit.StoryPart
 import io.nisfeb.talon.urbit.chatTextToStory
 import kotlinx.serialization.json.Json
-import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -33,7 +32,7 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class StoryRendererTest {
-    private val did: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
     private fun parts(text: String) = Story.parse(chatTextToStory(text))
     private fun parts(json: String, raw: Boolean) = Story.parse(Json.parseToJsonElement(json))

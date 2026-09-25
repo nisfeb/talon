@@ -31,7 +31,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import java.io.File
-import java.util.Collections
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -44,7 +43,7 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class OrreryActionsTest {
-    private val did: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
     private fun action(id: String, status: String = "proposed", kind: String = "message", title: String = "Tell Bus about lunch") = OrreryAction(
         id = id, kind = kind, title = title,
@@ -91,7 +90,7 @@ class OrreryActionsTest {
 
     // ─── one action ───────────────────────────────────────────────
 
-    private val posts: MutableList<Pair<String, String>> = Collections.synchronizedList(mutableListOf())
+    private val posts: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
 
     private fun opened(a: OrreryAction, refine: (String) -> String = { """{"ok":true}""" }, block: ComposeUiTest.() -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-orract-").toFile()

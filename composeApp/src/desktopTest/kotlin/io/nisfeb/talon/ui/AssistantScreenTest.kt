@@ -28,7 +28,6 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.net.InetSocketAddress
-import java.util.Collections
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -40,7 +39,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class AssistantScreenTest {
     /** Each request body the model was sent. */
-    private val asked: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val asked: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     @Volatile private var answer = "Tuesday, at the library."
 
     @Volatile private var status = 200

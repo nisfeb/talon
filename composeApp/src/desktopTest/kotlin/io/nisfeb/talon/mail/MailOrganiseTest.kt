@@ -25,7 +25,6 @@ import io.nisfeb.talon.ui.theme.TalonTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
-import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -36,7 +35,7 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class MailOrganiseTest {
-    private val posts: MutableList<Pair<String, String>> = Collections.synchronizedList(mutableListOf())
+    private val posts: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
 
     private fun organise(block: ComposeUiTest.() -> Unit) = runComposeUiTest {
         val http = HttpClient(MockEngine { req ->

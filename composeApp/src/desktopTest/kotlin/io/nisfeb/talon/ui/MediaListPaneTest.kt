@@ -34,7 +34,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import java.io.File
-import java.util.Collections
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -44,7 +43,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class MediaListPaneTest {
     private val whom = "chat/~bus/general"
-    private val did: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
     private fun pane(category: MediaCategory, block: ComposeUiTest.(AppDatabase) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-media-").toFile()

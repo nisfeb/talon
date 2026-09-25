@@ -29,7 +29,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
-import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -40,7 +39,7 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class CalendarsDialogTest {
-    private val writes: MutableList<Pair<String, String>> = Collections.synchronizedList(mutableListOf())
+    private val writes: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
 
     private val http = HttpClient(MockEngine { req ->
         val path = req.url.encodedPath

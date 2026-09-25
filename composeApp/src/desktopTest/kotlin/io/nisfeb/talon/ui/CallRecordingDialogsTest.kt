@@ -18,7 +18,6 @@ import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.call.RecordedCall
 import io.nisfeb.talon.ui.theme.TalonTheme
 import kotlinx.coroutines.awaitCancellation
-import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -30,7 +29,7 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class CallRecordingDialogsTest {
-    private val did: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     @Volatile private var hangs = false
 
     private val http = HttpClient(MockEngine { req ->

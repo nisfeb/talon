@@ -29,7 +29,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import java.io.File
-import java.util.Collections
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -45,7 +44,7 @@ class ContactsAndStatusTest {
     private val tmp = createTempDirectory(prefix = "talon-book-").toFile()
     private val db: AppDatabase = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
         .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
-    private val did: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
     init {
         runBlocking {

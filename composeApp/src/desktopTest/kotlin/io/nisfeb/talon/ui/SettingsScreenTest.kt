@@ -46,7 +46,7 @@ class SettingsScreenTest {
     private val ui = InMemoryUiSettings()
     private val theme = InMemoryThemePreference()
     private val patpChanges = mutableListOf<Boolean>()
-    private val did = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val did = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun settings(
         health: NotificationHealth? = null,

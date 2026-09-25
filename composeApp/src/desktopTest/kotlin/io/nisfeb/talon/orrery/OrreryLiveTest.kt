@@ -87,7 +87,9 @@ class OrreryLiveTest {
         try {
             runBlocking { block(owner, db, scope, url, ship) }
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             tmp.deleteRecursively()
         }
@@ -155,7 +157,9 @@ class OrreryLiveTest {
                 owner.delete("$url/apps/orrery/api/body/${personId(peer)}")
             }
         } finally {
-            scope.cancel()
+            // Joined, not just cancelled: work still running on a closed db
+            // fails a later test as an uncaught exception.
+            kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
             db.close()
             tmp.deleteRecursively()
         }

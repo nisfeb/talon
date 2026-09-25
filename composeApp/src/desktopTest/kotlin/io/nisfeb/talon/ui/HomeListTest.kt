@@ -53,7 +53,7 @@ class HomeListTest {
     private lateinit var db: AppDatabase
 
     /** Where the list sent the user: each menu destination by name. */
-    private val did: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
+    private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
     private fun home(seed: suspend AppDatabase.() -> Unit, synced: Boolean = false, block: ComposeUiTest.(FakeShip) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-home-").toFile()

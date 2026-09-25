@@ -16,7 +16,6 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runComposeUiTest
 import io.nisfeb.talon.ui.screens.ImageViewerScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
-import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -24,7 +23,7 @@ import kotlin.test.assertTrue
 /** Pictures full-screen: stepped through by button or arrow key, saved, and closed. */
 @OptIn(ExperimentalTestApi::class)
 class ImageViewerScreenTest {
-    private val did: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val urls = listOf("https://x.test/1.png", "https://x.test/2.png", "https://x.test/3.png")
 
     private fun viewer(

@@ -25,7 +25,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import java.io.File
-import java.util.Collections
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -37,7 +36,7 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class GroupAdminListScreenTest {
-    private val opened: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    private val opened: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
     private fun group(title: String, members: String) =
         """{"meta":{"title":"$title","description":"","image":"#223344","cover":""},"admins":["admin"],"seats":{$members},"admissions":{"privacy":"private"}}"""
