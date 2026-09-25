@@ -170,7 +170,7 @@ fun RecordingResultDialog(
                                 published.address,
                                 published.utterances.mapNotNull { u -> shipOf[u.speaker]?.let { io.nisfeb.talon.orrery.Spoken(it, u.text) } },
                             )
-                        }.onFailure { message = "Publish failed: ${it.message ?: "error"}" }
+                        }.onFailure { if (it !is kotlinx.coroutines.CancellationException) message = "Publish failed: ${it.message ?: "error"}" }
                         busy = false
                     }
                 },
@@ -286,7 +286,7 @@ fun RecordingResultDialog(
                             }.onSuccess { path ->
                                 if (path != null) kept = true
                                 message = if (path != null) "Saved transcript to $path" else "Couldn't save on this platform."
-                            }.onFailure { message = "Transcription failed: ${it.message ?: "error"}" }
+                            }.onFailure { if (it !is kotlinx.coroutines.CancellationException) message = "Transcription failed: ${it.message ?: "error"}" }
                             busy = false
                         }
                     },

@@ -86,14 +86,18 @@ object CallRecordingPublisher {
         for ((ship, pcm) in call.clips) {
             if (pcm.isEmpty()) continue
             val label = nameFor(ship)
-            runCatching { transcribeClip(http, stt, pcm, call.rateOf(ship)) }
-                .onSuccess { segs ->
-                    segs.forEach { utterances += TranscriptGemtext.Utterance(label, it.startMs, it.text) }
-                }
-                .onFailure {
-                    failed += label
-                    Log.w(TAG, "could not transcribe $label", it)
-                }
+            // Not runCatching: a Stop cancels this, and a cancellation
+            // counted as the speaker failing ended in "transcription
+            // failed for every speaker" over the "Stopped." it asked for.
+            try {
+                transcribeClip(http, stt, pcm, call.rateOf(ship))
+                    .forEach { utterances += TranscriptGemtext.Utterance(label, it.startMs, it.text) }
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                failed += label
+                Log.w(TAG, "could not transcribe $label", t)
+            }
         }
         if (failed.isNotEmpty() && utterances.isEmpty()) {
             error("transcription failed for every speaker (${failed.joinToString(", ")})")
