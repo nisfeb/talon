@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.zIndex
@@ -1662,7 +1663,71 @@ fun App(
             val partyFloats = !inlineCallUiShown.value &&
                 partyUi !is io.nisfeb.talon.call.PartyState.Idle && !meetingOpen
             val floats = callFloats || partyFloats
-            androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
+            // Keys are handled here, above the call strip, the party-line
+            // bar and the meeting view as well as the screens, so nothing
+            // in the window can hold focus outside it. When nothing does
+            // (the focused field went with a section closed by mouse),
+            // this takes it back, or shortcuts and Escape went dead until
+            // a click. Dialogs have their own focus, so none is taken.
+            val rootFocusRequester = remember { FocusRequester() }
+            var rootFocusLost by remember { mutableStateOf(0) }
+            LaunchedEffect(rootFocusLost) { runCatching { rootFocusRequester.requestFocus() } }
+            androidx.compose.foundation.layout.Column(
+                Modifier
+                    .fillMaxSize()
+                    .focusRequester(rootFocusRequester)
+                    .onFocusChanged { if (!it.hasFocus) rootFocusLost++ }
+                    .focusable()
+                    // Escape is taken on the way back up, after whatever has
+                    // focus: a composer drops its attachment, a viewer or a
+                    // dialog closes, and only an Escape nobody took leaves the
+                    // screen. Sections are drawn over the chat, so they close
+                    // first, the last opened first, by the registry that
+                    // knows every one of them.
+                    .onKeyEvent { event ->
+                        if (io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost) !=
+                            io.nisfeb.talon.ui.ShortcutAction.Back
+                        ) return@onKeyEvent false
+                        when {
+                            sections.anyOpen -> sections.closeLast()
+                            openThreadParent != null -> {
+                                openThreadParent = null
+                                openThreadReplyAnchor = null
+                            }
+                            openChat != null -> openChat = null
+                            else -> return@onKeyEvent false
+                        }
+                        true
+                    }
+                    .onPreviewKeyEvent { event ->
+                        val action = io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost)
+                            ?: return@onPreviewKeyEvent false
+                        when (action) {
+                            io.nisfeb.talon.ui.ShortcutAction.Back -> return@onPreviewKeyEvent false
+                            io.nisfeb.talon.ui.ShortcutAction.OpenSettings -> showSettings = true
+                            io.nisfeb.talon.ui.ShortcutAction.NewDm -> showNewDmRequest = true
+                            io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
+                            io.nisfeb.talon.ui.ShortcutAction.IncreaseFontSize ->
+                                uiSettings.setFontScale(
+                                    userFontScale + io.nisfeb.talon.ui.FONT_SCALE_STEP,
+                                )
+                            io.nisfeb.talon.ui.ShortcutAction.DecreaseFontSize ->
+                                uiSettings.setFontScale(
+                                    userFontScale - io.nisfeb.talon.ui.FONT_SCALE_STEP,
+                                )
+                            io.nisfeb.talon.ui.ShortcutAction.ResetFontSize ->
+                                uiSettings.setFontScale(1.0f)
+                            is io.nisfeb.talon.ui.ShortcutAction.SwitchShip -> {
+                                sessionStore.all().getOrNull(action.index)?.ship?.let { targetShip ->
+                                    leaveShip()
+                                    sessionStore.setActive(targetShip)
+                                    loggedInShip = targetShip
+                                }
+                            }
+                        }
+                        true
+                    },
+            ) {
                 landingProgress?.let { progress ->
                     val terminalText by localShip.terminal.collectAsState()
                     val lastLine = remember(terminalText) {
@@ -1744,62 +1809,8 @@ fun App(
                         .pointerInput(Unit) { detectTapGestures { } },
                 )
             }
-            val rootFocusRequester = remember { FocusRequester() }
-            LaunchedEffect(Unit) { rootFocusRequester.requestFocus() }
             Surface(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .focusRequester(rootFocusRequester)
-                    .focusable()
-                    // Escape is taken on the way back up, after whatever has
-                    // focus: a composer drops its attachment, a viewer or a
-                    // dialog closes, and only an Escape nobody took leaves the
-                    // screen. Sections are drawn over the chat, so they close
-                    // first, the last opened first, by the registry that
-                    // knows every one of them.
-                    .onKeyEvent { event ->
-                        if (io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost) !=
-                            io.nisfeb.talon.ui.ShortcutAction.Back
-                        ) return@onKeyEvent false
-                        when {
-                            sections.anyOpen -> sections.closeLast()
-                            openThreadParent != null -> {
-                                openThreadParent = null
-                                openThreadReplyAnchor = null
-                            }
-                            openChat != null -> openChat = null
-                            else -> return@onKeyEvent false
-                        }
-                        true
-                    }
-                    .onPreviewKeyEvent { event ->
-                        val action = io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost)
-                            ?: return@onPreviewKeyEvent false
-                        when (action) {
-                            io.nisfeb.talon.ui.ShortcutAction.Back -> return@onPreviewKeyEvent false
-                            io.nisfeb.talon.ui.ShortcutAction.OpenSettings -> showSettings = true
-                            io.nisfeb.talon.ui.ShortcutAction.NewDm -> showNewDmRequest = true
-                            io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
-                            io.nisfeb.talon.ui.ShortcutAction.IncreaseFontSize ->
-                                uiSettings.setFontScale(
-                                    userFontScale + io.nisfeb.talon.ui.FONT_SCALE_STEP,
-                                )
-                            io.nisfeb.talon.ui.ShortcutAction.DecreaseFontSize ->
-                                uiSettings.setFontScale(
-                                    userFontScale - io.nisfeb.talon.ui.FONT_SCALE_STEP,
-                                )
-                            io.nisfeb.talon.ui.ShortcutAction.ResetFontSize ->
-                                uiSettings.setFontScale(1.0f)
-                            is io.nisfeb.talon.ui.ShortcutAction.SwitchShip -> {
-                                sessionStore.all().getOrNull(action.index)?.ship?.let { targetShip ->
-                                    leaveShip()
-                                    sessionStore.setActive(targetShip)
-                                    loggedInShip = targetShip
-                                }
-                            }
-                        }
-                        true
-                    },
+                modifier = Modifier.fillMaxSize(),
             ) {
                 // Effective ship: the session's actual restored state.
                 // Using session.shipName instead of loggedInShip avoids

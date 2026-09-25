@@ -12,6 +12,11 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.withKeyDown
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
@@ -129,5 +134,31 @@ class AppShellTest {
         onNode(hasSetTextAction()).performClick() // typing in the chat
         onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Escape) }
         waitUntil(timeoutMillis = 5_000) { showing("Select a chat to begin") }
+    }
+
+    @Test
+    fun `closing a section by mouse leaves the keyboard working, and a field keeps its focus`() = app(seed = {
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat"))
+    }) {
+        onNodeWithContentDescription("My profile").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Edit profile") }
+        onNodeWithText("Edit profile").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+        onAllNodes(hasSetTextAction())[0].performClick() // typing in the section
+        onNodeWithContentDescription("Back").performClick() // closed by mouse: what had focus is gone
+        home()
+        onAllNodes(isRoot()).onFirst().performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Comma) } }
+        waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
+        onNodeWithContentDescription("Back").performClick()
+        home()
+        // Taking focus back is only for when nothing has it: a field
+        // clicked into keeps it.
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("hello there") }
+        onNodeWithText("~bus").performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
+        onNode(hasSetTextAction()).performClick()
+        Thread.sleep(300)
+        onNode(hasSetTextAction()).assertIsFocused()
     }
 }
