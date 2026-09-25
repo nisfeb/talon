@@ -113,6 +113,20 @@ class OpenRouterDecider(
     }
 }
 
+/**
+ * The answer, or why there is none. A cancellation is not a model that
+ * could not answer: caught as one, a stopped check showed as failed and
+ * a cancelled pass went on to ask the analyst.
+ */
+internal suspend fun Decider.attempt(state: JsonObject, questions: JsonObject): Result<Decision> =
+    try {
+        Result.success(ask(state, questions))
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
+    }
+
 /** How many bodies go to the decision model at most: a guard, not a budget. */
 const val MAX_KNOWN = 1000
 
@@ -177,7 +191,7 @@ object Relevance {
         val permits = kotlinx.coroutines.sync.Semaphore(atOnce)
         val answers = kotlinx.coroutines.coroutineScope {
             groups.map { g ->
-                async { permits.withPermit { runCatching { g to decider.ask(st, questions(g)) } } }
+                async { permits.withPermit { decider.attempt(st, questions(g)).map { g to it } } }
             }.map { it.await() }
         }
         val cost = answers.sumOf { r -> r.getOrNull()?.second?.costUsd ?: 0.0 }
@@ -274,7 +288,7 @@ object Gate {
      * fact.
      */
     suspend fun decide(decider: Decider, threshold: Double, text: String, from: String, earlier: List<String>, bodies: List<KnownBody>): Result {
-        val d = runCatching { decider.ask(state(text, from, earlier, bodies), QUESTION) }
+        val d = decider.attempt(state(text, from, earlier, bodies), QUESTION)
             .getOrElse { return Result(null, true, 0.0, "gate unavailable, analyst asked: ${it.message?.take(160)}") }
         val p = ((d.answers["worth_reading"] as? JsonObject)?.get("noul") as? JsonPrimitive)?.doubleOrNull ?: 1.0
         val read = p >= threshold
@@ -390,7 +404,7 @@ object StatusCheck {
     suspend fun filter(decider: Decider, message: String, from: String, rows: List<Noticed>, log: (String) -> Unit): Pair<List<Noticed>, Tally> {
         val asked = asked(rows)
         if (asked.isEmpty()) return rows to Tally()
-        val d = runCatching { decider.ask(state(message, from, rows, asked), questions(rows, asked)) }
+        val d = decider.attempt(state(message, from, rows, asked), questions(rows, asked))
             .getOrElse {
                 log("status check unavailable, ${asked.size} kept: ${it.message?.take(160)}")
                 return rows to Tally(checked = asked.size, kept = asked.size)
@@ -531,7 +545,7 @@ object Escalate {
         bodies: List<KnownBody>,
         facts: List<Noticed>,
     ): Double {
-        val d = runCatching { decider.ask(state(text, from, earlier, bodies, facts), QUESTION) }.getOrNull() ?: return 0.0
+        val d = decider.attempt(state(text, from, earlier, bodies, facts), QUESTION).getOrNull() ?: return 0.0
         return ((d.answers["needs_help_now"] as? JsonObject)?.get("noul") as? JsonPrimitive)?.doubleOrNull ?: 0.0
     }
 

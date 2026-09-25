@@ -1,5 +1,6 @@
 package io.nisfeb.talon.orrery
 
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -258,6 +259,26 @@ class DeciderTest {
         val me = KnownBody("person/me", "Me", emptyList(), null)
         val seen = Relevance.chosen(listOf(me, sam) + bodies, p, 0.5, "person/sam").map { it.id }
         assertEquals(listOf("person/me", "person/sam", "person/rose", "thing/subaru"), seen, "the picks, and always the sender and the owner")
+    }
+
+    // Stop on the gate check showed "the check failed", and a cancelled
+    // pass took the gate for unavailable and went on to the analyst.
+    @Test
+    fun `a call cancelled while the model thinks is cancelled, not a model that did not answer`() = runTest {
+        val thinking = object : Decider {
+            override suspend fun ask(state: JsonObject, questions: JsonObject): Decision = kotlinx.coroutines.awaitCancellation()
+        }
+        val after = mutableListOf<String>()
+        val calls = listOf(
+            launch { Gate.decide(thinking, 0.3, "the car is fixed", "person/sam", emptyList(), bodies); after += "gate" },
+            launch { Relevance.pick(thinking, "the car is fixed", "person/sam", emptyList(), bodies); after += "pick" },
+            launch { StatusCheck.filter(thinking, "on jury duty", "person/sam", listOf(status("on jury duty"))) {}; after += "status" },
+            launch { Escalate.sure(thinking, "car died", "person/rose", emptyList(), bodies, listOf(status("stranded", "person/rose"))); after += "escalate" },
+        )
+        testScheduler.runCurrent()
+        calls.forEach { it.cancel() }
+        calls.forEach { it.join() }
+        assertEquals(emptyList(), after.toList())
     }
 
     @Test

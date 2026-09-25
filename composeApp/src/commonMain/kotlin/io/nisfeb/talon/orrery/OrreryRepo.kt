@@ -1286,7 +1286,7 @@ class OrreryRepo(
         GateCheck(lines, settings.threshold, band, cost, failed, keptAt).also {
             Log.i(TAG, "gate check: ${it.total} messages, ${band.joinToString { (t, n) -> "$n read at $t" }}, cost ${dollars(cost)}")
         }
-    }
+    }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it } // Stop is not a failed check
 
     /** One text through the rules and the model; what it claims goes to the tray or up. */
     private suspend fun triageText(
