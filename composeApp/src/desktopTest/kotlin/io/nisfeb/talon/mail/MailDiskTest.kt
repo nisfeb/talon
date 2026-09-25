@@ -21,10 +21,11 @@ import io.nisfeb.talon.data.MESSAGE_SEARCH_TEXT_MIGRATION
 import io.nisfeb.talon.data.MAIL_ROWS_MIGRATION
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
@@ -120,7 +121,7 @@ class MailDiskTest {
             assertEquals(1, cold.page.value?.total)
             assertEquals("pay me", cold.storedThread("0v1")?.messages?.single()?.body)
         } finally {
-            scope.cancel()
+            scope.coroutineContext.job.cancelAndJoin()
             db.close()
         }
     }

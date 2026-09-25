@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.cancelAndJoin
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -73,7 +74,7 @@ class OptimisticReactTest {
             while (db.reactions().get("~bus", "170141184506", "~zod") == null) delay(20)
         }
         assertFalse(sending.isCompleted, "shown while the poke still waits for its ack")
-        sending.cancel()
+        sending.cancelAndJoin()
         db.close()
     }
 

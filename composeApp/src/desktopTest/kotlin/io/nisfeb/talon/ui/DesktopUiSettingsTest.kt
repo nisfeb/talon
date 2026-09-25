@@ -6,7 +6,9 @@ import io.nisfeb.talon.data.AppDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -35,7 +37,10 @@ class DesktopUiSettingsTest {
 
     @After
     fun tearDown() {
-        scope.cancel()
+        // Joined, not only cancelled: the rail-visibility reader starts a
+        // query at construction, and closing the db under it is a native
+        // SQLite crash that takes the whole test JVM down.
+        runBlocking { scope.coroutineContext.job.cancelAndJoin() }
         runCatching { db.close() }
         tmpDir.deleteRecursively()
     }

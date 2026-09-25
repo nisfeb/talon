@@ -15,6 +15,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -43,7 +45,7 @@ class SettingsSyncUiPrefsTest {
 
     @AfterTest
     fun close() {
-        watchers.cancel()
+        runBlocking { watchers.coroutineContext.job.cancelAndJoin() }
         db.close()
     }
 

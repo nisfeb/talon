@@ -19,9 +19,10 @@ import io.nisfeb.talon.data.ORRERY_SHIP_WORK_MIGRATION
 import io.nisfeb.talon.data.MESSAGE_SEARCH_TEXT_MIGRATION
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
@@ -95,7 +96,7 @@ class CalendarCacheTest {
             assertEquals(listOf("Dentist"), cold.rows.value?.map { it.name })
             assertEquals(listOf("Home"), cold.calendars.value.map { it.name })
         } finally {
-            scope.cancel()
+            scope.coroutineContext.job.cancelAndJoin()
             db.close()
         }
     }
@@ -128,7 +129,7 @@ class CalendarCacheTest {
             waitFor("the cold month") { cold.rangeRows.value?.isNotEmpty() == true }
             assertEquals(listOf("Sports day"), cold.rangeRows.value?.map { it.name }, "the screen's own month, from the cache")
         } finally {
-            scope.cancel()
+            scope.coroutineContext.job.cancelAndJoin()
             db.close()
         }
     }
