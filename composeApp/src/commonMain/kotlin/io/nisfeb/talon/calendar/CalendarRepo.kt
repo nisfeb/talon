@@ -7,6 +7,7 @@ import io.nisfeb.talon.mail.isSignedOut
 import io.nisfeb.talon.data.CalendarCacheEntity
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.nowMs
+import io.nisfeb.talon.util.runSuspendCatching
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -109,10 +110,10 @@ class CalendarRepo(
         zoneAdopted = true
         val z = deviceZone() ?: return
         val a = api ?: return
-        if (ball.isEmpty()) ball = runCatching { a.config().ball }.getOrDefault("")
-        if (!runCatching { a.poke(ball, buildJsonObject { put("action", "config"); put("zone", z) }) }.getOrDefault(false)) return
+        if (ball.isEmpty()) ball = runSuspendCatching { a.config().ball }.getOrDefault("")
+        if (!runSuspendCatching { a.poke(ball, buildJsonObject { put("action", "config"); put("zone", z) }) }.getOrDefault(false)) return
         delay(400)
-        runCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone }
+        runSuspendCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone }
         if (_zone.value == z) {
             _notice.value = "The calendar had no zone, so its times were read as UTC. It is now $z. An event made before this keeps its old time until it is saved again."
             Log.i(TAG, "calendar zone was unset; adopted $z")
@@ -148,7 +149,7 @@ class CalendarRepo(
         // asked for: the screen reads these rows, not the window's.
         if (_rangeRows.value == null) restore()
         val a = api ?: return
-        runCatching { a.window(fromMs, toMs) }
+        runSuspendCatching { a.window(fromMs, toMs) }
             .onSuccess { w ->
                 _rangeRows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
                 // Kept as it lands, not at the next refresh: a phone closed
@@ -163,7 +164,7 @@ class CalendarRepo(
     /** The zone names the editor can offer; read once. */
     suspend fun zones(): List<String> {
         zoneNames?.let { return it }
-        val got = api?.let { a -> runCatching { a.zones() }.getOrNull() } ?: return emptyList()
+        val got = api?.let { a -> runSuspendCatching { a.zones() }.getOrNull() } ?: return emptyList()
         zoneNames = got
         return got
     }
@@ -171,7 +172,7 @@ class CalendarRepo(
     /** Make a followed or Google calendar local; false when refused. */
     suspend fun makeLocal(calId: String): Boolean {
         val a = api ?: return false
-        val ok = runCatching { a.migrate(calId) }.getOrDefault(false)
+        val ok = runSuspendCatching { a.migrate(calId) }.getOrDefault(false)
         if (ok) refresh()
         return ok
     }
@@ -200,9 +201,9 @@ class CalendarRepo(
         val a = api ?: return false
         val kinds = _calendars.value.map { it.kind }.toSet()
         var ok = true
-        if ("google" in kinds) ok = runCatching { a.syncGoogle() }.getOrDefault(false) && ok
-        if ("caldav" in kinds) ok = runCatching { a.syncCaldav() }.getOrDefault(false) && ok
-        if (_shares.value?.accepted.orEmpty().isNotEmpty()) { lastShareSyncMs = nowMs(); ok = runCatching { a.syncShares() }.getOrDefault(false) && ok }
+        if ("google" in kinds) ok = runSuspendCatching { a.syncGoogle() }.getOrDefault(false) && ok
+        if ("caldav" in kinds) ok = runSuspendCatching { a.syncCaldav() }.getOrDefault(false) && ok
+        if (_shares.value?.accepted.orEmpty().isNotEmpty()) { lastShareSyncMs = nowMs(); ok = runSuspendCatching { a.syncShares() }.getOrDefault(false) && ok }
         delay(1500)
         refresh()
         return ok
@@ -210,7 +211,7 @@ class CalendarRepo(
 
     private suspend fun after(settleMs: Long = 0, call: suspend (CalendarApi) -> Boolean): Boolean {
         val a = api ?: return false
-        val ok = runCatching { call(a) }.getOrDefault(false)
+        val ok = runSuspendCatching { call(a) }.getOrDefault(false)
         if (ok) { if (settleMs > 0) delay(settleMs); refresh() }
         return ok
     }
@@ -225,9 +226,9 @@ class CalendarRepo(
         val c = cache ?: return
         if (_rows.value != null && _rangeRows.value != null) return
         val json = AuspexApi.json
-        suspend fun read(kind: String) = runCatching { c.read(kind) }.getOrNull().orEmpty()
+        suspend fun read(kind: String) = runSuspendCatching { c.read(kind) }.getOrNull().orEmpty()
         fun rows(kind: List<io.nisfeb.talon.data.CalendarCacheEntity>) = kind.mapNotNull { r ->
-            runCatching { json.decodeFromString(CalendarRow.serializer(), r.json) }.getOrNull()
+            runSuspendCatching { json.decodeFromString(CalendarRow.serializer(), r.json) }.getOrNull()
         }
         // Read it all, then put it up in one go: a screen that sees the
         // month must see the calendars it colours them by, and anything
@@ -235,10 +236,10 @@ class CalendarRepo(
         val window = rows(read("window"))
         val month = rows(read("range")).ifEmpty { window }
         val calendars = read("calendars").mapNotNull { r ->
-            runCatching { json.decodeFromString(CalendarInfo.serializer(), r.json) }.getOrNull()
+            runSuspendCatching { json.decodeFromString(CalendarInfo.serializer(), r.json) }.getOrNull()
         }
         val tasks = read("tasks").mapNotNull { r ->
-            runCatching { json.decodeFromString(CalendarTask.serializer(), r.json) }.getOrNull()
+            runSuspendCatching { json.decodeFromString(CalendarTask.serializer(), r.json) }.getOrNull()
         }
         val tags = read("tags").map { it.json }
         val zone = read("zone").firstOrNull()?.json
@@ -280,7 +281,7 @@ class CalendarRepo(
         val snapTags = _tags.value
         val snapZone = _zone.value
         val snapRange = _rangeRows.value
-        runCatching {
+        runSuspendCatching {
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
             c.replaceAll(
                 mapOf(
@@ -302,7 +303,7 @@ class CalendarRepo(
         keepLock.withLock {
             val c = cache ?: return
             val snap = _rangeRows.value ?: return
-            runCatching {
+            runSuspendCatching {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                     c.replace("range", snap.mapIndexed { i, r -> CalendarCacheEntity("range", i, AuspexApi.json.encodeToString(CalendarRow.serializer(), r)) })
                 }
@@ -311,7 +312,7 @@ class CalendarRepo(
     }
 
     suspend fun windowRows(fromMs: Long, toMs: Long): List<CalendarRow>? =
-        api?.let { a -> runCatching { a.window(fromMs, toMs).rows.sortedWith(compareBy({ it.l }, { it.r })) }.getOrNull() }
+        api?.let { a -> runSuspendCatching { a.window(fromMs, toMs).rows.sortedWith(compareBy({ it.l }, { it.r })) }.getOrNull() }
 
     /** The calendars an event can be added to: all but those shared with us read-only. */
     fun writable(): List<CalendarInfo> = _calendars.value.filter { it.id !in readOnly }
@@ -321,14 +322,14 @@ class CalendarRepo(
     /** An event someone shared, as moments, onto [calId] (else the calendar new events go to). False when refused. */
     suspend fun addShared(calId: String?, title: String, startMs: Long, endMs: Long): Boolean {
         val zoneId = _zone.value ?: TimeZone.currentSystemDefault().id
-        val zone = runCatching { TimeZone.of(zoneId) }.getOrElse { TimeZone.currentSystemDefault() }
+        val zone = runSuspendCatching { TimeZone.of(zoneId) }.getOrElse { TimeZone.currentSystemDefault() }
         return poke(eventBody(sharedDraft(title, startMs, endMs, calId ?: writableDefault(), zone, zoneId)))
     }
 
     /** Every event in an .ics onto [calId] (else the calendar new events go to). False when refused. */
     suspend fun importIcs(calId: String?, ics: String): Boolean {
         val a = api ?: return false
-        val ok = runCatching { a.importIcs(calId ?: writableDefault() ?: "default", ics) }.getOrDefault(false)
+        val ok = runSuspendCatching { a.importIcs(calId ?: writableDefault() ?: "default", ics) }.getOrDefault(false)
         if (ok) refreshAll()
         return ok
     }
@@ -364,7 +365,7 @@ class CalendarRepo(
                 afterTaskWrite()
                 // A tag the calendar has not seen before joins the list
                 // the editor offers; one it has is already there.
-                if (d.tags.any { it !in _tags.value }) api?.let { a -> runCatching { a.tags() }.getOrNull()?.let { _tags.value = it.map { t -> t.tag } } }
+                if (d.tags.any { it !in _tags.value }) api?.let { a -> runSuspendCatching { a.tags() }.getOrNull()?.let { _tags.value = it.map { t -> t.tag } } }
             }
             // Why first, then the stand-in goes: the other way round, a
             // screen watching the list saw it leave before it heard why.
@@ -389,7 +390,7 @@ class CalendarRepo(
      * the ship's answer is then the one that counts.
      */
     suspend fun eventDetail(id: String): JsonObject? =
-        details[id] ?: api?.let { a -> runCatching { a.event(id) }.getOrNull() }?.also { details[id] = it }
+        details[id] ?: api?.let { a -> runSuspendCatching { a.event(id) }.getOrNull() }?.also { details[id] = it }
 
     /**
      * Read one ahead of being asked for it: the viewer is the step
@@ -404,7 +405,7 @@ class CalendarRepo(
         // orrery's executor, had changed since. Taken out first, so an
         // Edit tapped during the read waits for the new copy.
         details.remove(id)
-        scope.launch { runCatching { eventDetail(id) } }
+        scope.launch { runSuspendCatching { eventDetail(id) } }
     }
 
     private val details = io.nisfeb.talon.util.ConcurrentMap<String, JsonObject>()
@@ -422,8 +423,8 @@ class CalendarRepo(
     /** A write and nothing read back: the caller knows what it changed. False when refused. */
     private suspend fun write(body: JsonObject): Boolean {
         val a = api ?: return false
-        if (ball.isEmpty()) ball = runCatching { a.config().ball }.getOrDefault("")
-        val ok = runCatching { a.poke(ball, body) }.getOrDefault(false)
+        if (ball.isEmpty()) ball = runSuspendCatching { a.config().ball }.getOrDefault("")
+        val ok = runSuspendCatching { a.poke(ball, body) }.getOrDefault(false)
         if (ok) {
             // What was read of an event the write may have changed is
             // no longer what the ship says.
@@ -453,7 +454,7 @@ class CalendarRepo(
     private suspend fun refreshWindow() {
         val a = api ?: return
         val now = nowMs()
-        runCatching { a.window(now - BEHIND_MS, now + AHEAD_MS) }
+        runSuspendCatching { a.window(now - BEHIND_MS, now + AHEAD_MS) }
             .onSuccess { w -> _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r })) }
     }
 
@@ -522,7 +523,7 @@ class CalendarRepo(
             val now = nowMs()
             if (_shares.value?.accepted.orEmpty().isNotEmpty() && now - lastShareSyncMs > SHARE_SYNC_GAP_MS) {
                 lastShareSyncMs = now
-                api?.let { a -> runCatching { a.syncShares() } }
+                api?.let { a -> runSuspendCatching { a.syncShares() } }
                 delay(1500)
             }
             refresh()
@@ -541,7 +542,7 @@ class CalendarRepo(
      */
     suspend fun refreshTasks(): Result<Unit> = gate.withLock {
         val a = api ?: return@withLock Result.failure(IllegalStateException("Not attached to a ship."))
-        runCatching {
+        runSuspendCatching {
             _tasks.value = a.tasks()
             _availability.value = CalendarAvailability.PRESENT
             _error.value = null
@@ -560,22 +561,22 @@ class CalendarRepo(
             // The ship has just said what is current, so nothing read of
             // one event before now is: the assistant reads through here too.
             details.clear()
-            _calendars.value = runCatching { a.calendars() }.getOrNull() ?: _calendars.value
-            _tasks.value = runCatching { a.tasks() }.getOrNull() ?: _tasks.value
+            _calendars.value = runSuspendCatching { a.calendars() }.getOrNull() ?: _calendars.value
+            _tasks.value = runSuspendCatching { a.tasks() }.getOrNull() ?: _tasks.value
             // Null only when the calendar has no sharing (404); a hiccup
             // keeps the last answer, and with it the read-only guard.
-            _shares.value = runCatching { a.shares() }.getOrElse { e ->
+            _shares.value = runSuspendCatching { a.shares() }.getOrElse { e ->
                 if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) null else _shares.value
             }
-            _conflicts.value = runCatching { a.conflicts() }.getOrElse { _conflicts.value }
+            _conflicts.value = runSuspendCatching { a.conflicts() }.getOrElse { _conflicts.value }
             _sync.value = buildMap {
-                runCatching { a.google() }.getOrNull()?.linked?.forEach { (id, row) -> put(id, row) }
-                runCatching { a.caldavSubscriptions() }.getOrNull()?.forEach { put(it.id, SyncRow(it.lastMs, it.error)) }
+                runSuspendCatching { a.google() }.getOrNull()?.linked?.forEach { (id, row) -> put(id, row) }
+                runSuspendCatching { a.caldavSubscriptions() }.getOrNull()?.forEach { put(it.id, SyncRow(it.lastMs, it.error)) }
                 _shares.value?.accepted?.forEach { (id, acc) -> put(id, SyncRow(acc.lastMs, acc.error)) }
             }.ifEmpty { if (_calendars.value.any { it.kind != "local" }) _sync.value else emptyMap() }
-            _tags.value = runCatching { a.tags() }.getOrNull()?.map { it.tag } ?: _tags.value
+            _tags.value = runSuspendCatching { a.tags() }.getOrNull()?.map { it.tag } ?: _tags.value
             keep()
-            runCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball }
+            runSuspendCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball }
             _availability.value = CalendarAvailability.PRESENT
             _error.value = null
             adoptZoneIfNone()

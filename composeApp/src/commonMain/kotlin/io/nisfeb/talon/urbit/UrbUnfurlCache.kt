@@ -49,7 +49,10 @@ object UrbUnfurlCache {
         lock.withLock { (results[urbUrl] as? Entry.Some)?.let { return it.unfurl } }
         lock.withLock { if (results.containsKey(urbUrl)) return null } // cached "None"
         return withContext(ioDispatcher) {
-            val fetched = runCatching { fetch(http, shipUrl, cookie, urbUrl) }.getOrNull()
+            // Only an answer is remembered: a failed or cancelled fetch
+            // (its card scrolled away) is not "nothing to show" for the run.
+            val fetched = io.nisfeb.talon.util.runSuspendCatching { fetch(http, shipUrl, cookie, urbUrl) }
+                .getOrElse { return@withContext null }
             lock.withLock {
                 results[urbUrl] = if (fetched != null) Entry.Some(fetched) else Entry.None
             }

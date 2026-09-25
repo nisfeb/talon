@@ -25,6 +25,7 @@ import kotlinx.coroutines.withContext
 import io.nisfeb.talon.util.ioDispatcher
 import io.nisfeb.talon.data.MailRowEntity
 import okio.Path.Companion.toPath
+import io.nisfeb.talon.util.runSuspendCatching
 
 /**
  * Whether this ship can do mail at all.
@@ -208,10 +209,10 @@ class MailRepo(
     private suspend fun restore(key: PageKey) {
         if (key in pageCache.value) return
         val name = key.stored ?: return
-        val stored = runCatching { rows?.listing(name) }.getOrNull().orEmpty()
+        val stored = runSuspendCatching { rows?.listing(name) }.getOrNull().orEmpty()
         if (stored.isEmpty()) return
         val threads = stored.mapNotNull { r ->
-            runCatching { AuspexApi.json.decodeFromString(InboxEntry.serializer(), r.json) }.getOrNull()
+            runSuspendCatching { AuspexApi.json.decodeFromString(InboxEntry.serializer(), r.json) }.getOrNull()
         }
         val p = InboxPage(total = stored.first().total, limit = threads.size, view = key.view.wire, threads = threads)
         pageCache.update { if (key in it) it else it + (key to p) }
@@ -220,7 +221,7 @@ class MailRepo(
 
     private suspend fun store(name: String, p: InboxPage) {
         val d = rows ?: return
-        runCatching {
+        runSuspendCatching {
             d.replace(
                 name,
                 p.threads.mapIndexed { i, t ->
@@ -233,7 +234,7 @@ class MailRepo(
     /** A thread that is gone leaves nothing of itself on disk. */
     private suspend fun forget(threadId: String) {
         files?.let { f -> withContext(ioDispatcher) { f.delete(threadId) } }
-        runCatching { rows?.dropThread(threadId) }
+        runSuspendCatching { rows?.dropThread(threadId) }
     }
 
     private fun keepThread(t: MailThread) = threadCache.update { m ->
@@ -463,7 +464,7 @@ class MailRepo(
         val url = shipUrl ?: return null
         val ship = ourShip ?: return null
         val slug = io.nisfeb.talon.urbit.LatticePublish.slug(title, seed)
-        return runCatching {
+        return runSuspendCatching {
             io.nisfeb.talon.urbit.LatticePublish.publish(http, url, ship, slug, gemtext)
         }.onFailure {
             Log.w(TAG, "lattice publish failed", it)
@@ -614,13 +615,13 @@ class MailRepo(
                 val refs = mutableListOf<AttachRef>()
                 for ((i, f) in files.withIndex()) {
                     progress("Uploading ${i + 1} of ${files.size}")
-                    val hash = runCatching { uploadBlob(f.bytes) }
+                    val hash = runSuspendCatching { uploadBlob(f.bytes) }
                         .getOrElse { return@run "${f.name}: ${it.message ?: "the upload gave no reason"}." }
                     refs += AttachRef(name = f.name, mime = f.mime, hash = hash)
                 }
                 progress("Sending")
                 if (!send(draft.to, draft.subject, draft.body, draft.prev, refs)) return@run why("the ship did not take it.")
-                runCatching { deleteDraft(draft.id) }
+                runSuspendCatching { deleteDraft(draft.id) }
                 null
             }
             progress(null)
@@ -792,14 +793,14 @@ class MailRepo(
         scope.launch {
             // A save that does not land is said so: silence here is a
             // message the owner believes is kept and is not.
-            val ok = runCatching { saveDraft(d) }.getOrDefault(false)
+            val ok = runSuspendCatching { saveDraft(d) }.getOrDefault(false)
             if (!ok) _error.value = "The draft did not reach the ship; what was written is still here until Talon closes."
         }
     }
 
     /** Drop a draft from a screen on its way out, like [keepDraft]. */
     fun dropDraft(id: String) {
-        scope.launch { runCatching { deleteDraft(id) } }
+        scope.launch { runSuspendCatching { deleteDraft(id) } }
     }
 
     suspend fun deleteDraft(id: String) = mutate(::refreshDrafts) { it.deleteDraft(id) }

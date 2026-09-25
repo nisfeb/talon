@@ -476,7 +476,10 @@ class OrreryRepo(
 
     suspend fun probe() {
         val a = api ?: return
-        runCatching { a.probe() }
+        // A probe cancelled (its screen was left) is not an absent orrery:
+        // caught as one, the Actions rail went and AI settings said
+        // "not asked yet" until something probed again.
+        io.nisfeb.talon.util.runSuspendCatching { a.probe() }
             .onSuccess { _availability.value = it; _error.value = null }
             .onFailure { _availability.value = OrreryAvailability.UNKNOWN; _error.value = it.message }
     }

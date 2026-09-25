@@ -97,7 +97,9 @@ object LocalModels {
         opened?.let { return it }
         for (r in localModelRungs()) {
             if (r.name in failed || r.name in broken || r.status() != RungStatus.Ready) continue
-            val m = runCatching { r.open() }.getOrElse { failed += r.name; null } ?: continue
+            // A pass stopped while a model loads is not a model that
+            // failed: counted as one, every later pass read without it.
+            val m = io.nisfeb.talon.util.runSuspendCatching { r.open() }.getOrElse { failed += r.name; null } ?: continue
             opened = r to m
             return opened
         }

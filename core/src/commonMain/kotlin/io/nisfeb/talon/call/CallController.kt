@@ -1418,7 +1418,8 @@ class CallController(
         _pendingJoin.value = key
         lastAskKey = key
         lastAskAtMs = nowMs()
-        runCatching {
+        // Cancelled is not declined (as peekRoom and pokeRoles have it).
+        io.nisfeb.talon.util.runSuspendCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,
                 TrunkWire.joinRoomAction(host, name),

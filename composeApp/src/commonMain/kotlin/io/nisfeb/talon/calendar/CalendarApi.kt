@@ -264,7 +264,7 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
         } catch (t: Throwable) {
             throw AuspexError.Unreachable(t)
         }
-        val text = try { resp.bodyAsText() } catch (t: Throwable) { throw AuspexError.Garbled(t) }
+        val text = try { resp.bodyAsText() } catch (c: CancellationException) { throw c } catch (t: Throwable) { throw AuspexError.Garbled(t) }
         if (!resp.status.isSuccess()) throw AuspexError.Refused(resp.status.value, text.take(200))
         return text
     }

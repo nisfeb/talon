@@ -43,6 +43,7 @@ import io.nisfeb.talon.ui.latticeRow
 import io.nisfeb.talon.ui.mailRow
 import io.nisfeb.talon.ui.permitsUrl
 import kotlinx.coroutines.launch
+import io.nisfeb.talon.util.runSuspendCatching
 
 /**
  * What this ship's Grubbery apps are doing: whether each answers, what
@@ -99,10 +100,10 @@ fun AppsSettingsScreen(
     var note by remember { mutableStateOf<String?>(null) }
 
     suspend fun probeLattice() {
-        lattice = latticeInstalled?.let { runCatching { it() }.getOrNull() }
+        lattice = latticeInstalled?.let { runSuspendCatching { it() }.getOrNull() }
     }
     suspend fun probeGroups() {
-        groups = groupsInstalled?.let { runCatching { it() }.getOrNull() }
+        groups = groupsInstalled?.let { runSuspendCatching { it() }.getOrNull() }
     }
     LaunchedEffect(latticeInstalled, groupsInstalled) {
         probeLattice()
@@ -149,10 +150,10 @@ fun AppsSettingsScreen(
             )
             probeLattice()
             probeGroups()
-            runCatching { mail?.refresh() }
-            runCatching { calendar?.refreshAll() }
-            runCatching { orrery?.probe() }
-            runCatching { armillary?.refresh() }
+            runSuspendCatching { mail?.refresh() }
+            runSuspendCatching { calendar?.refreshAll() }
+            runSuspendCatching { orrery?.probe() }
+            runSuspendCatching { armillary?.refresh() }
             busy = null
         }
     }
@@ -176,10 +177,10 @@ fun AppsSettingsScreen(
                         busy = "all"
                         probeLattice()
                         probeGroups()
-                        runCatching { mail?.refresh() }
-                        runCatching { calendar?.refreshAll() }
-                        runCatching { orrery?.probe() }
-                        runCatching { armillary?.refresh() }
+                        runSuspendCatching { mail?.refresh() }
+                        runSuspendCatching { calendar?.refreshAll() }
+                        runSuspendCatching { orrery?.probe() }
+                        runSuspendCatching { armillary?.refresh() }
                         busy = null
                     }
                 },

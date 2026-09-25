@@ -68,9 +68,12 @@ object LinkPreviewCache {
         synchronized(lock) {
             if (inFlight[url]?.isActive == true) return null
             inFlight[url] = scope.launch {
-                val fetched = runCatching { fetch(http, url) }.getOrNull()
-                record(url, fetched)
-                synchronized(lock) { inFlight.remove(url) }
+                try {
+                    // Only an answer is remembered (see [await]).
+                    io.nisfeb.talon.util.runSuspendCatching { fetch(http, url) }.onSuccess { record(url, it) }
+                } finally {
+                    synchronized(lock) { inFlight.remove(url) }
+                }
             }
         }
         return null
@@ -85,7 +88,12 @@ object LinkPreviewCache {
             return cached(url)
         }
         return withContext(ioDispatcher) {
-            val fetched = runCatching { fetch(http, url) }.getOrNull()
+            // Only an answer is remembered. A fetch that failed, or was
+            // cancelled because its row scrolled away, was recorded as a
+            // page with no preview, and the link never showed one again
+            // until the app restarted.
+            val fetched = io.nisfeb.talon.util.runSuspendCatching { fetch(http, url) }
+                .getOrElse { return@withContext null }
             record(url, fetched)
             fetched
         }

@@ -18,6 +18,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import io.nisfeb.talon.util.runSuspendCatching
 
 /**
  * Armillary on the owner's own ship: the balance, the plans, the
@@ -47,7 +48,8 @@ class ArmillaryRepo(
     private val _plans = MutableStateFlow<List<Plan>>(emptyList())
     val plans: StateFlow<List<Plan>> = _plans.asStateFlow()
     /** What the vendor offers, read for its zero-retention flags; nothing shows it. */
-    private var catalog: List<CatalogRow> = emptyList()
+    /** Null until read: which models are ZDR is not "none" before the ship has said. */
+    private var catalog: List<CatalogRow>? = null
     private val _inference = MutableStateFlow<Inference?>(null)
     val inference: StateFlow<Inference?> = _inference.asStateFlow()
     private val _refreshing = MutableStateFlow(false)
@@ -88,7 +90,7 @@ class ArmillaryRepo(
         _error.value = null
         _account.value = null
         _plans.value = emptyList()
-        catalog = emptyList()
+        catalog = null
         _inference.value = null
         _refreshing.value = false
         _payment.value = null
@@ -104,22 +106,22 @@ class ArmillaryRepo(
         val a = api ?: return Result.failure(IllegalStateException("Not attached to a ship."))
         _refreshing.value = true
         try {
-            runCatching { a.probe() }
+            runSuspendCatching { a.probe() }
                 .onSuccess { _availability.value = it; _error.value = null }
                 .onFailure { _availability.value = ArmillaryAvailability.UNKNOWN; _error.value = it.message }
             if (_availability.value != ArmillaryAvailability.PRESENT) {
                 return Result.failure(IllegalStateException(_error.value ?: "Armillary does not answer on this ship."))
             }
-            runCatching { a.inference() }
+            runSuspendCatching { a.inference() }
                 .onSuccess { if (it is InferenceAnswer.Have) _inference.value = it.inference }
                 .onFailure { Log.i(TAG, "inference skipped: ${it.message}") }
-            runCatching { a.account(fresh) }
+            runSuspendCatching { a.account(fresh) }
                 .onSuccess { _account.value = it; settle(it) }
                 .onFailure { Log.i(TAG, "account skipped: ${it.message}") }
-            runCatching { a.plans() }
+            runSuspendCatching { a.plans() }
                 .onSuccess { _plans.value = it }
                 .onFailure { Log.i(TAG, "plans skipped: ${it.message}") }
-            runCatching { a.catalog() }
+            runSuspendCatching { a.catalog() }
                 .onSuccess { catalog = it }
                 .onFailure { Log.i(TAG, "catalog skipped: ${it.message}") }
             // The catalog is what says which models are ZDR, and it is
@@ -138,20 +140,20 @@ class ArmillaryRepo(
      * for first, so a vendor that offers one is taken up on it; a
      * vendor without leases says so and the proxy key is minted instead.
      */
-    suspend fun ensureKey(deviceName: String): Result<Inference> = runCatching {
+    suspend fun ensureKey(deviceName: String): Result<Inference> = runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
         when (val first = a.inference()) {
-            is InferenceAnswer.Have -> return@runCatching took(first.inference)
+            is InferenceAnswer.Have -> return@runSuspendCatching took(first.inference)
             InferenceAnswer.Missing -> error("Armillary is not on this ship. Install it from the Grubbery shell on your ship.")
             InferenceAnswer.NoKey -> Unit
         }
         ensureVendor(a)
-        runCatching { a.lease() }.onFailure { Log.i(TAG, "lease skipped: ${it.message}") }
+        runSuspendCatching { a.lease() }.onFailure { Log.i(TAG, "lease skipped: ${it.message}") }
         a.mintKey("Talon on $deviceName")
         var waited = 0L
         while (true) {
             val next = a.inference()
-            if (next is InferenceAnswer.Have) return@runCatching took(next.inference)
+            if (next is InferenceAnswer.Have) return@runSuspendCatching took(next.inference)
             if (waited >= KEY_WAIT_MS) break
             delay(KEY_POLL_MS)
             waited += KEY_POLL_MS
@@ -167,7 +169,7 @@ class ArmillaryRepo(
             return
         }
         a.setVendor(DEFAULT_VENDOR)
-        runCatching { a.account() }.onSuccess { _account.value = it }
+        runSuspendCatching { a.account() }.onSuccess { _account.value = it }
     }
 
     /**
@@ -175,7 +177,7 @@ class ArmillaryRepo(
      * this ship included. The ship says hello to it, and the key is
      * asked for again, since a key belongs to one vendor.
      */
-    suspend fun setVendor(ship: String, deviceName: String): Result<Inference> = runCatching {
+    suspend fun setVendor(ship: String, deviceName: String): Result<Inference> = runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
         a.setVendor(ship.trim())
         refresh()
@@ -188,7 +190,7 @@ class ArmillaryRepo(
      * quarter of an hour on bitcoin, which settles after a block, so
      * the payment shows once made without anyone having to tap Refresh.
      */
-    suspend fun topUp(rail: String, plan: String?, amountMicro: Long?): Result<String> = runCatching {
+    suspend fun topUp(rail: String, plan: String?, amountMicro: Long?): Result<String> = runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
         when (val answer = a.checkout(rail, plan, amountMicro)) {
             is CheckoutAnswer.Url -> {
@@ -203,14 +205,14 @@ class ArmillaryRepo(
     }
 
     /** Ask the vendor to stop the subscription renewing. The view says when it is done. */
-    suspend fun cancelSubscription(): Result<Unit> = runCatching {
+    suspend fun cancelSubscription(): Result<Unit> = runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
         a.cancelSubscription()
         watchBalance(null)
     }
 
     /** Give a direct provider lease back, before the provider row goes. */
-    suspend fun dropLease(): Result<Unit> = runCatching {
+    suspend fun dropLease(): Result<Unit> = runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
         a.dropLease()
     }
@@ -232,7 +234,7 @@ class ArmillaryRepo(
                 delay(WATCH_EVERY_MS)
                 waited += WATCH_EVERY_MS
                 val a = api ?: return@launch
-                val acct = runCatching { a.account(fresh = true) }
+                val acct = runSuspendCatching { a.account(fresh = true) }
                     .onFailure { Log.i(TAG, "balance watch: ${it.message}") }
                     .getOrNull() ?: continue
                 _account.value = acct
@@ -284,11 +286,15 @@ class ArmillaryRepo(
      */
     private fun publish(inf: Inference) {
         val ai = aiSettings ?: return
-        val zdr = catalog.filter { it.zdr }.map { it.id }.toSet()
-        val models = inf.models.map { ModelInfo(id = it, name = it, zdr = it in zdr) }
-        val base = inf.baseUrl.trim().trimEnd('/').ifBlank { null }
         val profile: AiProfile = ai.state.value.savedProfile ?: return
         val row = profile.provider(ARMILLARY_PROVIDER) ?: return
+        // A catalog the ship has not sent keeps the marks the row had:
+        // taken as empty, every model lost its ZDR badge and the rows
+        // that read messages warned they may be kept.
+        val zdr = catalog?.filter { it.zdr }?.map { it.id }?.toSet()
+            ?: row.models.filter { it.zdr }.map { it.id }.toSet()
+        val models = inf.models.map { ModelInfo(id = it, name = it, zdr = it in zdr) }
+        val base = inf.baseUrl.trim().trimEnd('/').ifBlank { null }
         if (row.baseUrl == base && row.apiKey == inf.key && row.models == models) return
         ai.setProfile(
             profile.copy(

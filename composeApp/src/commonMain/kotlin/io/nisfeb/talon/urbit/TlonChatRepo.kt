@@ -2187,11 +2187,13 @@ class TlonChatRepo(
         // with `Filename too long (os error 36)` on the same upload.
         val safeLengthName = truncateUploadName(fileName)
 
-        val memexErr = runCatching {
+        // A cancelled upload goes on up as one: wrapped in the failure
+        // below, it defeated every caller's cancellation check.
+        val memexErr = io.nisfeb.talon.util.runSuspendCatching {
             uploadViaMemex(ch, client, bytes, contentType, safeLengthName)
         }.onSuccess { return@withContext it }.exceptionOrNull()
 
-        val storageErr = runCatching {
+        val storageErr = io.nisfeb.talon.util.runSuspendCatching {
             uploadViaStorage(ch, client, bytes, contentType, safeLengthName)
         }.onSuccess { return@withContext it }.exceptionOrNull()
 
@@ -3734,7 +3736,10 @@ class TlonChatRepo(
         if (last != null && now - last < Presence.REANNOUNCE_MS) return
         lastPresencePoke[key] = now
         val ch = channel ?: return
-        runCatching {
+        // The next keystroke cancels this while it waits for its ack:
+        // that is not an old ship, and was taken for one, switching the
+        // typing line off for a minute while the user went on typing.
+        io.nisfeb.talon.util.runSuspendCatching {
             ch.poke("presence", "presence-action-1", Presence.setAction(context, ourPatp, topic, text))
         }.onFailure {
             // Pre-v11.4.0 ship, or we're not a participant. Don't retry
@@ -4319,7 +4324,7 @@ class TlonChatRepo(
                 Log.w(TAG, "$label: ${SCRY_PROBE_BUDGET_MS}ms budget exhausted, giving up; last err: ${lastErr?.message}")
                 return null
             }
-            val attempt = runCatching { ch.scry(app, path, SCRY_PROBE_PER_CALL_SECS) }
+            val attempt = io.nisfeb.talon.util.runSuspendCatching { ch.scry(app, path, SCRY_PROBE_PER_CALL_SECS) }
             if (attempt.isSuccess) return attempt.getOrNull()
             val err = attempt.exceptionOrNull()
             lastErr = err
