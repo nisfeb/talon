@@ -1848,18 +1848,11 @@ class SettingsSyncImpl(
                     ENTRY_NON_COMET_NAMES -> io.nisfeb.talon.ui.AzimuthNames.setEnabled(false)
                 }
             }
-            BUCKET_AI_SETTINGS -> {
-                // Only the credentials entry going means the credentials
-                // went, and only the credentials go with it. Anything
-                // else vanishing is not a reason to wipe a device's
-                // provider, its prompts and its toggles as well.
-                val cfg = aiSettings.state.value
-                if (entry == AI_KEYS_ENTRY && cfg.syncEnabled) {
-                    aiSettings.applyRemote(
-                        cfg.copy(apiKey = "", braveApiKey = "", sttApiKey = "", sttApiKeyRemovedAtMs = 0L),
-                    )
-                }
-            }
+            // An AI settings entry going away takes nothing here: absent is
+            // not empty, and a deliberate removal travels as a revoke mark
+            // or as the profile the owner saved (hasCredentials). A device
+            // with keys puts the credentials entry back on its next connect.
+            BUCKET_AI_SETTINGS -> Unit
             BUCKET_WATCHWORDS -> {
                 // entry-key is sanitized form; delete by matching sanitization.
                 val terms = db.watchwords().streamTerms().firstOrNull().orEmpty()

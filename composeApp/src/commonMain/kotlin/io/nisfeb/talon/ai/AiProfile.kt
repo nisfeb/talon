@@ -83,6 +83,14 @@ data class AiProfile(
      * and one install's setting must not turn it off on another.
      */
     val jev: Boolean? = null,
+    /**
+     * When the owner saved this profile on this device, or 0 for one
+     * that arrived from the ship or was made from older settings. It
+     * never travels. While set, this device has something to say about
+     * the profile even with nothing in it: a provider taken out here is
+     * gone everywhere, until the owner puts something back.
+     */
+    val savedHereAtMs: Long = 0,
 ) {
     fun provider(id: String): AiProvider? = providers.firstOrNull { it.id == id }
 
@@ -362,6 +370,7 @@ fun AiProfile.forSync(): AiProfile = copy(
     providers = providers
         .filterNot { it.kind == ProviderKind.Armillary }
         .map { it.copy(apiKey = "", models = emptyList(), offersJev = false) },
+    savedHereAtMs = 0,
 )
 
 /**
@@ -448,7 +457,7 @@ fun AiSettings.Config.modelProblem(f: AiFeature): String? {
  * the "a blank never overwrites" rule in [legacyInto] was written for.
  */
 fun AiSettings.Config.withProfile(saved: AiProfile, now: Long): AiSettings.Config {
-    val p = saved.pinningModels()
+    val p = saved.pinningModels().copy(savedHereAtMs = now)
     val had = profile().keys().values.toSet()
     val has = p.keys().values.toSet()
     return p.legacyInto(this).copy(savedProfile = p).marking(gone = had - has, back = has - had, now = now)

@@ -3,6 +3,7 @@ package io.nisfeb.talon.urbit
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.ai.AiSettings
+import io.nisfeb.talon.ai.withProfile
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.AssistantConversationEntity
 import io.nisfeb.talon.data.AssistantHistoryEntity
@@ -14,6 +15,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import kotlin.io.path.createTempDirectory
@@ -22,6 +24,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -83,6 +86,24 @@ class SettingsSyncPushTest {
         sync(config()).pushAiSettings()
         assertNull(put("ai-settings", "credentials"))
         assertFalse("apiKey" in put("ai-settings", "config")!!)
+    }
+
+    @Test
+    fun `taking out the last provider reaches the ship, and a profile that only arrived says nothing`() = live {
+        val local = io.nisfeb.talon.ai.AiProvider("local", io.nisfeb.talon.ai.ProviderKind.OpenAiCompatible, "Local", baseUrl = "http://127.0.0.1:1234/v1")
+        val had = config().copy(savedProfile = io.nisfeb.talon.ai.AiProfile(providers = listOf(local)))
+        // Arrived, not saved here: no key and no stamp, so nothing to say.
+        sync(had).pushAiSettings()
+        assertNull(put("ai-settings", "credentials"), "an unsaved profile never overwrites the ship's")
+
+        // The owner takes it out here: the empty profile goes, so it does
+        // not come back from the ship on the next connect.
+        val emptied = had.withProfile(io.nisfeb.talon.ai.AiProfile(), now = 5_000)
+        sync(emptied).pushAiSettings()
+        val creds = assertNotNull(put("ai-settings", "credentials"))
+        val profile = creds["profile"]!!.jsonObject
+        assertTrue(profile["providers"]?.jsonArray.isNullOrEmpty(), "no providers: $profile")
+        assertFalse("savedHereAtMs" in profile, "the stamp is this device's own")
     }
 
     @Test

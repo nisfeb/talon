@@ -487,7 +487,7 @@ class SettingsSyncApplyBucketTest {
     }
 
     @Test
-    fun `the preferences entry going away does not take the credentials with it`() = runBlocking {
+    fun `an AI settings entry going away takes nothing here`() = runBlocking {
         aiSettings.applyRemote(
             AiSettings.Config(
                 provider = AiSettings.Provider.OpenAi, apiKey = "sk-mine", model = null, syncEnabled = true,
@@ -496,7 +496,7 @@ class SettingsSyncApplyBucketTest {
         sync.removeEntry(SettingsSyncImpl.BUCKET_AI_SETTINGS, "config")
         assertEquals("sk-mine", aiSettings.state.value.apiKey)
         sync.removeEntry(SettingsSyncImpl.BUCKET_AI_SETTINGS, SettingsSyncImpl.AI_KEYS_ENTRY)
-        assertEquals("", aiSettings.state.value.apiKey, "the credentials entry going does take them")
+        assertEquals("sk-mine", aiSettings.state.value.apiKey, "absent is not empty: a removal travels as a mark")
     }
 
     @Test

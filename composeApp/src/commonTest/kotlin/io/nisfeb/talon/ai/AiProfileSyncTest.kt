@@ -389,4 +389,19 @@ class AiProfileSyncTest {
         assertEquals("sk-or", phone.keepingCredentials(desktop).apiKey, "the phone takes the desktop's later word")
         assertEquals("sk-or", desktop.keepingCredentials(phone).apiKey, "and the desktop keeps what was typed")
     }
+
+    @Test
+    fun `a profile saved here is stamped, never sends the stamp, and loses it to one that arrives`() {
+        val cfg = AiSettings.Config(provider = AiSettings.Provider.OpenAi, apiKey = "", model = null, syncEnabled = true)
+        val saved = cfg.withProfile(AiProfile(), now = 7_000)
+        assertEquals(7_000L, saved.savedProfile?.savedHereAtMs)
+        assertTrue(saved.hasCredentials(), "an emptied profile saved here has something to say")
+        assertEquals(0L, saved.savedProfile!!.forSync().savedHereAtMs)
+        val entry = kotlinx.serialization.json.buildJsonObject {
+            put("profile", kotlinx.serialization.json.Json.encodeToJsonElement(AiProfile.serializer(), AiProfile().forSync()))
+        }
+        val arrived = profileAfterEntry(entry, saved, saved)
+        assertEquals(0L, arrived?.savedHereAtMs, "the ship's copy is not this device's saving")
+        assertFalse(saved.copy(savedProfile = arrived).hasCredentials())
+    }
 }

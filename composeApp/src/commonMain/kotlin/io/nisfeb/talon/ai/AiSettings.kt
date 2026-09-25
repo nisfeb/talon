@@ -165,12 +165,16 @@ object AiSettings {
         /**
          * Whether this device has anything to say about credentials. A
          * device with none never writes them to the ship, so saving a
-         * preference here cannot wipe the copy another device put there.
+         * preference here cannot wipe the copy another device put there:
+         * an empty profile does not win. One the owner saved here does,
+         * empty or not, so taking the last provider out reaches the
+         * others instead of coming back from the ship.
          */
         fun hasCredentials(): Boolean =
             apiKey.isNotBlank() || braveApiKey.isNotBlank() || sttApiKey.isNotBlank() ||
                 privateApiKey.isNotBlank() || privateBaseUrl?.isNotBlank() == true ||
-                sttApiKeyRemovedAtMs > 0L || revokedKeys.isNotEmpty() || savedProfile?.keys()?.isNotEmpty() == true
+                sttApiKeyRemovedAtMs > 0L || revokedKeys.isNotEmpty() || savedProfile?.keys()?.isNotEmpty() == true ||
+                (savedProfile?.savedHereAtMs ?: 0L) > 0L
 
         /** The unified assistant is on (current flag or the legacy one).
          *  Gates MCP + web access, which are now part of the assistant. */
