@@ -51,6 +51,9 @@ fun GroupInvitesScreen(
     val loading = cached == null
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // An accept or decline the ship refused: its own words, since it was
+    // shown as "Couldn't refresh" and read as a network problem.
+    var actionError by remember { mutableStateOf<String?>(null) }
     var pendingAction by remember { mutableStateOf<Pair<String, String>?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -117,12 +120,12 @@ fun GroupInvitesScreen(
             )
 
             else -> Column {
-                error?.let {
+                listOfNotNull(error?.let { "Couldn't refresh: $it" }, actionError).forEach {
                     Text(
-                        "Couldn't refresh: $it",
+                        it,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
-                        maxLines = 1,
+                        maxLines = 2,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     )
                 }
@@ -136,17 +139,19 @@ fun GroupInvitesScreen(
                         busy = pendingAction?.first == inv.flag,
                         onAccept = {
                             pendingAction = inv.flag to "accept"
+                            actionError = null
                             scope.launch {
                                 runCatching { repo.acceptInvite(inv.flag) }
-                                    .onFailure { error = it.message ?: it::class.simpleName }
+                                    .onFailure { actionError = "Couldn't join ${inv.title ?: inv.flag}: ${it.message ?: it::class.simpleName}" }
                                 pendingAction = null
                             }
                         },
                         onReject = {
                             pendingAction = inv.flag to "reject"
+                            actionError = null
                             scope.launch {
                                 runCatching { repo.rejectInvite(inv.flag) }
-                                    .onFailure { error = it.message ?: it::class.simpleName }
+                                    .onFailure { actionError = "Couldn't decline ${inv.title ?: inv.flag}: ${it.message ?: it::class.simpleName}" }
                                 pendingAction = null
                             }
                         },
