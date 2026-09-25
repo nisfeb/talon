@@ -1168,17 +1168,14 @@ private fun RoomAccessControls(
     }
 
     // Role id → display title, for the checkboxes. Ids go on the wire.
+    // Null until read, and where it could not be: taken as "no roles",
+    // the gate hid the roles it already had, and the next tap on it
+    // sent an empty list over them.
     var roles by remember(groupFlag) {
-        mutableStateOf<Map<String, String>>(emptyMap())
+        mutableStateOf<Map<String, String>?>(null)
     }
     LaunchedEffect(groupFlag) {
-        roles = try {
-            repo.fetchGroupRoles(groupFlag)
-        } catch (c: kotlinx.coroutines.CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            emptyMap()
-        }
+        roles = io.nisfeb.talon.util.runSuspendCatching { repo.fetchGroupRoles(groupFlag) }.getOrNull()
     }
 
     Spacer(Modifier.height(8.dp))
@@ -1265,7 +1262,8 @@ private fun RoomAccessControls(
 private fun RoleGate(
     label: String,
     selected: List<String>?,
-    roles: Map<String, String>,
+    /** Null where the group's roles could not be read. */
+    roles: Map<String, String>?,
     onChange: (List<String>?) -> Unit,
 ) {
     val everyone = selected == null
@@ -1286,14 +1284,21 @@ private fun RoleGate(
         }
     }
     if (selected != null) {
-        if (roles.isEmpty()) {
+        if (roles == null) {
+            Text(
+                "The group's roles could not be read. Those already chosen are listed by their ids.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        } else if (roles.isEmpty()) {
             Text(
                 "This group has no roles — only admins pass this gate.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        for ((id, title) in roles.toList().sortedBy { it.second.lowercase() }) {
+        val shown = roles ?: selected.associateWith { it }
+        for ((id, title) in shown.toList().sortedBy { it.second.lowercase() }) {
             val checked = id in selected
             Row(
                 modifier = Modifier.fillMaxWidth()

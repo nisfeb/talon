@@ -1291,7 +1291,8 @@ class TlonChatRepo(
      */
     suspend fun fetchGroupRoles(flag: String): Map<String, String> {
         val ch = channel ?: error("not connected")
-        val body = ch.scry("groups", "/v2/groups/$flag") as? JsonObject ?: return emptyMap()
+        val body = ch.scry("groups", "/v2/groups/$flag") as? JsonObject
+            ?: error("the group's record was not readable")
         val roles = (body["roles"] ?: body["cabals"]) as? JsonObject ?: return emptyMap()
         return roles.mapValues { (id, v) ->
             ((v as? JsonObject)?.get("meta") as? JsonObject)?.get("title").asStr()
