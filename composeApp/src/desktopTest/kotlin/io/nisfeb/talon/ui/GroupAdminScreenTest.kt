@@ -2,6 +2,8 @@ package io.nisfeb.talon.ui
 
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -54,7 +56,7 @@ class GroupAdminScreenTest {
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
         val ship = FakeShip("~zod").apply { scries["groups/v2/groups/$flag"] = record }
-        val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod") }
+        val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod"); notes.attach(ship.channel) }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         ship.channel.events().launchIn(scope)
         try {
@@ -175,5 +177,53 @@ class GroupAdminScreenTest {
         onAllNodesWithText("~zod", substring = true)[0].performScrollTo().performTouchInput { longClick() }
         waitUntil(timeoutMillis = 5_000) { shows("Roles: (none)") }
         for (t in listOf("Make admin", "Kick", "Ban")) assertTrue(!shows(t), "no $t for the host")
+    }
+
+    // ─── new channels ─────────────────────────────────────────────
+
+    private fun ComposeUiTest.newChannel(kind: String?, title: String, description: String = "") {
+        onNodeWithContentDescription("New channel").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Title").fetchSemanticsNodes().isNotEmpty() }
+        kind?.let { onNodeWithText(it).performClick() }
+        onAllNodes(hasSetTextAction() and hasText("Title")).onLast().performTextInput(title) // the dialog's, over the group's own
+        if (description.isNotEmpty()) onNode(hasSetTextAction() and hasText("Description (optional)")).performTextInput(description)
+        onNodeWithText("Create").performClick()
+    }
+
+    @Test
+    fun `a chat channel is made in the group, with its title and description`() = admin { ship ->
+        newChannel(kind = null, title = "Seeds", description = "what to plant")
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
+        val create = ship.pokesTo("channels").single().json.toString()
+        for (part in listOf("\"kind\":\"chat\"", "\"group\":\"$flag\"", "\"title\":\"Seeds\"", "\"description\":\"what to plant\"")) {
+            assertTrue(part in create, "$part in $create")
+        }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Description (optional)").fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    fun `a gallery is a heap channel`() = admin { ship ->
+        newChannel(kind = "Gallery", title = "Photos")
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
+        assertTrue("\"kind\":\"heap\"" in ship.pokesTo("channels").single().json.toString())
+    }
+
+    @Test
+    fun `a notebook is made through the notes app, named by the host`() = admin { ship ->
+        ship.answerApi = { method, path, _ ->
+            if (method == "POST" && path == "/notes/~/v1/notebooks") """{"body":{"type":"notebook","notebook":{"flagName":"plans-2","host":"~zod","notebook":{"title":"Plans","id":1,"rootFolderId":2},"visibility":"private"}}}""" else null
+        }
+        newChannel(kind = "Notebook", title = "Plans")
+        waitUntil(timeoutMillis = 5_000) { ship.api.any { it.startsWith("POST /notes/~/v1/notebooks") } }
+        assertTrue(ship.api.single().contains("\"flagName\":\"garden\""), "made in this group")
+        assertTrue(ship.pokesTo("channels").isEmpty())
+    }
+
+    @Test
+    fun `a channel the ship refuses says why in the dialog, which stays`() = admin { ship ->
+        ship.refuse = { if (it.app == "channels") "not an admin" else null }
+        newChannel(kind = null, title = "Seeds")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("not an admin", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(onAllNodesWithText("Description (optional)").fetchSemanticsNodes().isNotEmpty())
     }
 }
