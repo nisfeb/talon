@@ -7,6 +7,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
+import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
@@ -23,6 +24,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -84,6 +86,8 @@ class AssistantActionsToolsTest {
         event: String = """{}""",
         pokeSucceeds: (JsonObject) -> Boolean = { true },
         send: (suspend (whom: String, text: String) -> Unit)? = null,
+        /** The mail app's answers by path ending; given, the mail repo is attached and takes sends and files. */
+        mail: Map<String, String> = emptyMap(),
         block: (Harness) -> Unit,
     ) {
         val scope = CoroutineScope(SupervisorJob())
@@ -93,7 +97,17 @@ class AssistantActionsToolsTest {
         val http = HttpClient(
             MockEngine { req ->
                 val path = req.url.encodedPath
+                val mailAnswer = mail.entries.firstOrNull { path.endsWith(it.key) }?.value
                 when {
+                    mail.isNotEmpty() && path.endsWith("/api/send") -> {
+                        mailed += Json.parseToJsonElement((req.body as TextContent).text).jsonObject
+                        json("{}")
+                    }
+                    mail.isNotEmpty() && path.endsWith("/api/blob") -> {
+                        blobs += req.body.toByteArray().decodeToString()
+                        json("""{"hash":"0vblob"}""")
+                    }
+                    mailAnswer != null -> json(mailAnswer)
                     path.startsWith("/grubbery/api/poke/") -> {
                         val body = Json.parseToJsonElement((req.body as TextContent).text).jsonObject
                         pokes += body
@@ -124,7 +138,7 @@ class AssistantActionsToolsTest {
             val actions = AssistantActions(
                 db = db,
                 contacts = { ContactMap() },
-                mail = MailRepo(http, scope, pollIntervalMs = 60 * 60 * 1000L),
+                mail = MailRepo(http, scope, pollIntervalMs = 60 * 60 * 1000L).also { if (mail.isNotEmpty()) it.attach("https://ship.example") },
                 calendar = calendar,
                 zone = { TimeZone.UTC },
                 send = send,
@@ -250,5 +264,55 @@ class AssistantActionsToolsTest {
         assertTrue(h.run("send_mail", argsOf("to" to "~bus", "body" to "hello")).startsWith("The ship did not send it"))
         assertEquals("Error: view must be inbox, sent, archived or all.", h.run("list_mail", argsOf("view" to "spam")))
         assertTrue(h.run("list_mail", argsOf()).startsWith("The mail app did not answer"))
+    }
+
+    // ─── mail the ship answers ─────────────────────────────────────
+
+    private val mailed = java.util.concurrent.CopyOnWriteArrayList<JsonObject>()
+    private val blobs = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    private val plans = """{"id":"0vt","messages":[
+        {"id":"0vm1","from":"~bus","to":["~zod"],"subject":"Plans","body":"shall we plant garlic","body-mime":"","sent":10,"prev":null,"verdict":"verified","read":true},
+        {"id":"0vm2","from":"~zod","to":["~bus"],"subject":"Re: Plans","body":"yes, and onions","body-mime":"","sent":20,"prev":"0vm1","verdict":"verified","read":true}],
+        "participants":["~zod","~bus"],"last":20,"unreadable":0,"archived":false,"labels":[]}"""
+    private val answering = mapOf(
+        "/api/inbox" to """{"total":1,"offset":0,"limit":15,"view":"inbox","threads":[
+            {"id":"0vt","subject":"Plans","from":"~bus","snippet":"shall we plant garlic","verdict":"verified","count":2,"last":20,"unread":true}]}""",
+        "/api/thread/0vt" to plans,
+    )
+
+    @Test
+    fun `mail is listed, searched and read`() = withHarness(mail = answering) { h ->
+        val listed = h.run("list_mail", argsOf())
+        assertTrue("thread=0vt" in listed && "from=~bus" in listed && "subject=Plans unread" in listed, listed)
+        assertTrue("thread=0vt" in h.run("search_mail", argsOf("query" to "garlic")))
+        assertEquals("Error: query is required.", h.run("search_mail", argsOf("query" to " ")))
+        val read = h.run("read_mail", argsOf("thread" to "0vt"))
+        assertTrue("shall we plant garlic" in read && "message=0vm2 from=~zod" in read, read)
+        assertTrue(h.run("read_mail", argsOf("thread" to "0vnope")).startsWith("No thread 0vnope"))
+    }
+
+    @Test
+    fun `a reply takes the thread's subject and answers its last message`() = withHarness(mail = answering) { h ->
+        assertEquals("Mailed ~bus.", h.run("send_mail", argsOf("to" to "~bus", "body" to "and leeks", "thread" to "0vt")))
+        val sent = mailed.single()
+        assertEquals("Re: Plans" to "0vm2", sent["subject"]!!.jsonPrimitive.content to sent["prev"]!!.jsonPrimitive.content)
+        assertTrue(h.run("send_mail", argsOf("to" to "~bus", "body" to "x", "thread" to "0vgone")).startsWith("Error: no thread 0vgone"))
+        assertEquals(1, mailed.size, "nothing sent into a thread that is not there")
+    }
+
+    @Test
+    fun `an invitation goes along as a calendar file`() = withHarness(
+        mail = answering,
+        window = """{"rows":[{"id":"e1","cal":"default","meta":{"name":"Dentist"},"l":${System.currentTimeMillis() + 86_400_000L},"r":${System.currentTimeMillis() + 90_000_000L}}]}""",
+    ) { h ->
+        assertEquals(
+            "Mailed ~bus with the invite attached.",
+            h.run("send_mail", argsOf("to" to "~bus", "subject" to "Come along", "body" to "see you there", "event" to "e1")),
+        )
+        assertTrue("BEGIN:VCALENDAR" in blobs.single() && "Dentist" in blobs.single(), blobs.toString())
+        val file = mailed.single()["attachments"]!!.jsonArray.single().jsonObject
+        assertEquals("text/calendar" to "0vblob", file["mime"]!!.jsonPrimitive.content to file["hash"]!!.jsonPrimitive.content)
+        assertTrue(h.run("send_mail", argsOf("to" to "~bus", "body" to "x", "event" to "nope")).startsWith("Error: no event nope"))
     }
 }
