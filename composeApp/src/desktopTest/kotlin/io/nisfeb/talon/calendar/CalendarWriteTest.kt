@@ -8,6 +8,7 @@ import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -39,6 +40,8 @@ class CalendarWriteTest {
         @Volatile var holdWriteMs = 0L
         /** How long the ship takes over a read once a write is in: a busy one, seconds. */
         @Volatile var holdReadsMs = 0L
+        /** The ship refuses writes. */
+        @Volatile var refuse = false
         fun clear() = reads.clear()
     }
 
@@ -57,6 +60,7 @@ class CalendarWriteTest {
                     if (path.startsWith("/grubbery/api/poke/")) {
                         // A request cancelled while held never gets here: the write is lost.
                         if (ship.holdWriteMs > 0) kotlinx.coroutines.delay(ship.holdWriteMs)
+                        if (ship.refuse) return@MockEngine respond("", HttpStatusCode.BadRequest, json)
                         ship.writtenAt.set(System.currentTimeMillis())
                         return@MockEngine respond("", HttpStatusCode.OK, json)
                     }
@@ -183,6 +187,45 @@ class CalendarWriteTest {
         assertTrue(w.shown.isActive, "the ship's own copy is still being read")
         w.shown.join()
         assertEquals(1790899200000L, repo.tasks.value?.single()?.dueMs, "then the ship's own copy")
+    }
+
+    private val dentist = { l: Long -> """{"id":"e1","cal":"default","cat":"timed","kind":"once","all":false,"meta":{"name":"Dentist"},"l":$l,"r":${l + 3_600_000}}""" }
+
+    @Test
+    fun `a deleted event leaves every list at once, and a late ship's copy does not bring it back`() {
+        val soon = System.currentTimeMillis() + 3_600_000
+        calendar(window = { ship ->
+            // Applied a second and a half after the ship answers the write.
+            val applied = ship.writtenAt.get() > 0 && System.currentTimeMillis() - ship.writtenAt.get() > 1_500
+            """{"rows":[${if (applied) "" else dentist(soon)}]}"""
+        }) { repo, ship ->
+            repo.loadRange(soon - 86_400_000, soon + 86_400_000)
+            assertTrue(repo.rows.value.orEmpty().any { it.id == "e1" } && repo.rangeRows.value.orEmpty().any { it.id == "e1" })
+            ship.holdWriteMs = 800
+            val seen = CopyOnWriteArrayList<Boolean>()
+            val watch = CoroutineScope(SupervisorJob()).apply {
+                launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { repo.rows.collect { r -> seen += r.orEmpty().any { it.id == "e1" } } }
+            }
+            val w = watch.async { repo.writeEvent(deleteBody("e1")) }
+            // The home page's today reads the window: gone before the ship answers.
+            kotlinx.coroutines.withTimeout(500) { while (repo.rows.value.orEmpty().any { it.id == "e1" }) kotlinx.coroutines.delay(10) }
+            assertTrue(repo.rangeRows.value.orEmpty().none { it.id == "e1" }, "and from the month")
+            w.await().shown.join()
+            watch.cancel()
+            assertEquals(listOf(true, false), seen.distinct(), "never back once gone: $seen")
+            assertTrue(repo.rangeRows.value.orEmpty().none { it.id == "e1" })
+        }
+    }
+
+    @Test
+    fun `a delete the ship refuses comes back`() {
+        val soon = System.currentTimeMillis() + 3_600_000
+        calendar(window = { """{"rows":[${dentist(soon)}]}""" }) { repo, ship ->
+            repo.loadRange(soon - 86_400_000, soon + 86_400_000)
+            ship.refuse = true
+            assertTrue(!repo.writeEvent(deleteBody("e1")).ok)
+            assertTrue(repo.rows.value.orEmpty().any { it.id == "e1" } && repo.rangeRows.value.orEmpty().any { it.id == "e1" })
+        }
     }
 
     @Test

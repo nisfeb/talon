@@ -452,8 +452,9 @@ class CalendarRepo(
      */
     suspend fun writeEvent(body: JsonObject, readBack: Boolean = true): Written = carry {
         val reach = reachOf(body)
+        val putBack = dropDeleted(body)
         val ok = write(body)
-        if (ok) assumeTask(body)
+        if (ok) assumeTask(body) else putBack()
         val shown = if (ok && readBack) scope.launch { afterItemWrite(reach) } else Job().also { it.complete() }
         Written(ok, shown)
     }
@@ -481,6 +482,25 @@ class CalendarRepo(
             else -> return
         }
         _tasks.value = if (new == null) list - old else list.map { if (it.id == id) new else it }
+    }
+
+    /**
+     * A delete, gone from the window and the month before it is sent;
+     * returns what puts them back if the ship refuses it. Only the calendar
+     * screen hid a deleted event at once, and the home page's today kept
+     * it until the reading back came in, a minute and more on a busy ship.
+     */
+    private fun dropDeleted(body: JsonObject): () -> Unit {
+        val id = (body["id"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        if ((body["action"] as? kotlinx.serialization.json.JsonPrimitive)?.content != "del-event" || id == null) return {}
+        val window = _rows.value
+        val month = _rangeRows.value
+        val droppedWindow = window?.filterNot { it.id == id }
+        val droppedMonth = month?.filterNot { it.id == id }
+        _rows.value = droppedWindow
+        _rangeRows.value = droppedMonth
+        // Unless a read has put the ship's own copy in since.
+        return { _rows.compareAndSet(droppedWindow, window); _rangeRows.compareAndSet(droppedMonth, month) }
     }
 
     /**
@@ -561,31 +581,38 @@ class CalendarRepo(
         // the next poll, ten minutes on. So read until something moved,
         // a few times at most, waiting longer each time.
         var pause = 500L
-        // The task list is read aside and put in place once it has moved, or
+        // Every list is read aside and put in place once it has moved, or
         // at the end: put in on every read, the old copy of a late ship
-        // would undo the change assumeTask showed.
+        // would undo the change assumeTask and dropDeleted showed.
         val a = api
         suspend fun readTasks() = a?.let { runSuspendCatching { it.tasks() }.getOrNull() }
+        suspend fun readWindow() = nowMs().let { now -> windowRows(now - BEHIND_MS, now + AHEAD_MS) }
+        // The month on screen as the reading began: a page turned since is
+        // the screen's own to read.
+        val span = range
+        suspend fun readMonth() = span?.let { (f, t) -> windowRows(f, t) }
         var got: List<CalendarTask>? = null
+        var window: List<CalendarRow>? = null
+        var month: List<CalendarRow>? = null
         for (attempt in 1..AFTER_WRITE_READS) {
             if (tasks) got = readTasks() ?: got
             if (reach.rows) {
-                refreshWindow()
-                range?.let { (f, t) -> loadRange(f, t) }
+                window = readWindow() ?: window
+                month = readMonth() ?: month
             }
             // Against the lists from before the write: taken after it, a
             // refresh that landed in between made the change look never come.
             val tasksMoved = tasks && got != null && got != reach.before.first
-            val windowMoved = reach.rows && _rows.value != reach.before.second
-            val monthMoved = reach.rows && _rangeRows.value != reach.before.third
+            val windowMoved = reach.rows && window != null && window != reach.before.second
+            val monthMoved = reach.rows && month != null && month != reach.before.third
             if (tasksMoved || windowMoved || monthMoved) {
                 // It can land between two reads of one pass: the list read
                 // first is then the old copy. The home screen's tasks kept a
                 // moved one on today while the month showed it on Monday.
                 // What came back unchanged is read once more.
                 if (tasks && !tasksMoved) got = readTasks() ?: got
-                if (reach.rows && !windowMoved) refreshWindow()
-                if (reach.rows && !monthMoved) range?.let { (f, t) -> loadRange(f, t) }
+                if (reach.rows && !windowMoved) window = readWindow() ?: window
+                if (reach.rows && !monthMoved) month = readMonth() ?: month
                 break
             }
             if (attempt == AFTER_WRITE_READS) break
@@ -594,19 +621,13 @@ class CalendarRepo(
         }
         // The ship's own word, moved or not: a write it never applied goes.
         if (tasks) got?.let { _tasks.value = it }
+        window?.let { _rows.value = it }
+        if (range == span) month?.let { _rangeRows.value = it }
         // So a phone closed straight after a tick opens on the tick.
         keep()
     }
 
     private fun lists(): Triple<Any?, Any?, Any?> = Triple(_tasks.value, _rows.value, _rangeRows.value)
-
-    /** The window alone, read again. */
-    private suspend fun refreshWindow() {
-        val a = api ?: return
-        val now = nowMs()
-        runSuspendCatching { a.window(now - BEHIND_MS, now + AHEAD_MS) }
-            .onSuccess { w -> _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r })) }
-    }
 
     fun attach(baseUrl: String) {
         if (api != null && shipUrl == baseUrl) return
