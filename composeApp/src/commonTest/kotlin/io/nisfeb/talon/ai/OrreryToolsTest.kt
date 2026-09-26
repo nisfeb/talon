@@ -48,6 +48,54 @@ class OrreryToolsTest {
         }
         override suspend fun registration(name: String): Result<String> =
             Result.success("""{"url":"https://my.ship/apps/orrery/telegram","pending_update_count":0,"last_error_message":null}""")
+
+        var prefs = io.nisfeb.talon.orrery.OrreryPreferences("Short.", listOf("No calls before 9am", "Plain words"))
+        var changed: Triple<String?, String?, String?>? = null
+        override suspend fun preferences() = Result.success(prefs)
+        override suspend fun changePreferences(add: String?, remove: String?, style: String?): Result<io.nisfeb.talon.orrery.OrreryPreferences> {
+            changed = Triple(add, remove, style)
+            prefs = io.nisfeb.talon.orrery.OrreryPreferences(style ?: prefs.style, (prefs.list - listOfNotNull(remove)) + listOfNotNull(add))
+            return Result.success(prefs)
+        }
+        var handed: Pair<String, String?>? = null
+        var handAnswer = """{"ok":true,"id":"1790441000000-0xab12"}"""
+        override suspend fun hand(text: String, title: String?): Result<JsonObject> {
+            handed = text to title
+            return Result.success(kotlinx.serialization.json.Json.parseToJsonElement(handAnswer) as JsonObject)
+        }
+    }
+
+    // ─── preferences and handing orrery text ────────────────────────
+
+    @Test
+    fun `the owner's preferences are read out, numbered`() = runTest {
+        assertEquals("style: Short.\n1. No calls before 9am\n2. Plain words", run(Tap(), "orrery_preferences"))
+    }
+
+    @Test
+    fun `a preference is added, one taken off by its number, and the style cleared`() = runTest {
+        val t = Tap()
+        run(t, "orrery_set_preferences", buildJsonObject { put("add", "Never propose Mondays") })
+        assertEquals(Triple("Never propose Mondays", null, null), t.changed)
+        run(t, "orrery_set_preferences", buildJsonObject { put("remove", "1") })
+        assertEquals(Triple(null, "No calls before 9am", null), t.changed, "a number is the preference it names")
+        val said = run(t, "orrery_set_preferences", buildJsonObject { put("style", "") })
+        assertEquals(Triple(null, null, ""), t.changed, "an empty style is a style of none, not nothing to change")
+        assertTrue("style: (none)" in said, said)
+        assertTrue("Error" in run(t, "orrery_set_preferences"), "nothing to change is said")
+        assertTrue("no preference 9" in run(t, "orrery_set_preferences", buildJsonObject { put("remove", "9") }))
+    }
+
+    @Test
+    fun `text is handed to orrery whole, and a closed read channel is said`() = runTest {
+        val t = Tap()
+        val todos = "- buy candles\n- book the hall for Oct 3, 6pm\n- invite the Egans"
+        val said = run(t, "orrery_file_text", buildJsonObject { put("text", todos); put("title", "Todos for the party") })
+        assertEquals(todos to "Todos for the party", t.handed)
+        assertTrue("1790441000000-0xab12" in said && "Actions" in said, said)
+        t.handAnswer = """{"ok":true,"dropped":"the read channel is off"}"""
+        assertTrue("the read channel is off" in run(t, "orrery_file_text", buildJsonObject { put("text", "x") }))
+        assertTrue("Error" in run(t, "orrery_file_text"), "no text, nothing sent")
     }
 
     private fun tools(t: OrreryTap) = orreryTools(t).associateBy { it.spec.name }
@@ -134,9 +182,9 @@ class OrreryToolsTest {
     @Test
     fun `changing the ship asks first, looking does not`() {
         val byWrite = orreryTools(Tap()).groupBy({ it.write }, { it.spec.name })
-        assertEquals(setOf("orrery_observe", "orrery_configure", "orrery_register"), byWrite[true]?.toSet())
+        assertEquals(setOf("orrery_observe", "orrery_configure", "orrery_set_preferences", "orrery_file_text", "orrery_register"), byWrite[true]?.toSet())
         assertEquals(
-            setOf("orrery_guide", "orrery_find", "orrery_read", "orrery_settings"),
+            setOf("orrery_guide", "orrery_find", "orrery_read", "orrery_settings", "orrery_preferences"),
             byWrite[false]?.toSet(),
         )
     }

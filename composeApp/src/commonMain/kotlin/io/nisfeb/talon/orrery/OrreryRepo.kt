@@ -414,6 +414,9 @@ class OrreryRepo(
         said
     }
 
+    /** Text for the ship to read and file ([OrreryApi.read]); its answer. */
+    suspend fun hand(text: String, title: String?): Result<JsonObject> = runCatching { attached().read(text, title) }
+
     /** Register a settings document with the service it names; the ship's answer. */
     suspend fun register(name: String): Result<String> = runCatching { attached().register(name) }
 

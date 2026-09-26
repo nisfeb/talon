@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ai
 
 import io.nisfeb.talon.orrery.OrreryApi
+import io.nisfeb.talon.orrery.OrreryPreferences
 import io.nisfeb.talon.orrery.OrreryRepo
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -50,6 +51,13 @@ Before you write:
   being called off is not that and has no field yet.
 - health and income are kept from most keys. If the ship refuses one,
   that is its answer, not a problem to work around.
+- Something the owner hands you to keep (a list of todos for an event
+  with its details, notes, a pasted page) goes to orrery_file_text
+  whole, not fact by fact: the ship's reader files it and proposes the
+  actions it implies for the owner to approve.
+- A standing rule from the owner ("never propose calls before 9",
+  "write briefly") is a preference: orrery_set_preferences. Every
+  prompt on the ship reads them.
 
 Settings live in documents, read and written whole by name:
 
@@ -129,6 +137,12 @@ interface OrreryTap {
     suspend fun configure(name: String, body: JsonObject): Result<String>
     suspend fun register(name: String): Result<String>
     suspend fun registration(name: String): Result<String>
+    /** The owner's style and standing preferences, as the ship holds them now. */
+    suspend fun preferences(): Result<OrreryPreferences>
+    /** Style set where given ("" clears it); [add] put on and [remove] taken off the list as the ship holds it now. */
+    suspend fun changePreferences(add: String?, remove: String?, style: String?): Result<OrreryPreferences>
+    /** Text for the ship to read and file; its answer, `{ok, id}` or `{ok, dropped}`. */
+    suspend fun hand(text: String, title: String?): Result<JsonObject>
 }
 
 /** The repo as the tools see it. */
@@ -161,6 +175,23 @@ fun OrreryRepo.asTap(): OrreryTap = object : OrreryTap {
     override suspend fun register(name: String) = this@asTap.register(name)
 
     override suspend fun registration(name: String) = readRegistration(name)
+
+    override suspend fun preferences() = runCatching {
+        if (!loadPreferences()) error("the ship did not say; an orrery older than preferences has none")
+        this@asTap.preferences.value ?: error("the ship did not say")
+    }
+
+    override suspend fun changePreferences(add: String?, remove: String?, style: String?) = runCatching {
+        if (style != null) setStyle(style).getOrThrow()
+        if (add != null || remove != null) {
+            this@asTap.changePreferences { list ->
+                list.filterNot { it == remove }.let { if (add != null && add !in it) it + add else it }
+            }.getOrThrow()
+        }
+        this@asTap.preferences.value ?: error("the ship did not say what it now holds")
+    }
+
+    override suspend fun hand(text: String, title: String?) = this@asTap.hand(text, title)
 }
 
 /** Orrery's tools, where this install is attached to a ship that has it. */
@@ -282,6 +313,81 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
         orrery.configure(name, obj).fold(
             onSuccess = { "Sent to $name. The ship now holds: " + clip(it) },
             onFailure = { "Could not write $name: ${it.message}" },
+        )
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_preferences",
+            "The owner's writing style and standing preferences (\"never propose X\"), which every orrery prompt on the ship reads: the generator, the readers, the refiner and the brief. Read them before changing them.",
+            toolSchema(required = emptyList()),
+        ),
+        write = false,
+    ) { _ ->
+        orrery.preferences().fold(
+            onSuccess = { p ->
+                "style: ${p.style.ifBlank { "(none)" }}\n" +
+                    if (p.list.isEmpty()) "No standing preferences." else p.list.mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n")
+            },
+            onFailure = { "Could not read orrery's preferences: ${it.message}" },
+        )
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_set_preferences",
+            "Change the owner's standing preferences or writing style in orrery. add puts one preference on the list; remove takes one off, by its text or its number from orrery_preferences; style replaces the style, and \"\" clears it. The list is read from the ship and changed, so a change made elsewhere since stays. The ship keeps up to 30 preferences of up to 300 bytes each and a style of up to 1000 bytes, and refuses more.",
+            toolSchema(
+                "add" to ("string" to "A preference to add, in the owner's words, e.g. \"Never propose calls before 9am\"."),
+                "remove" to ("string" to "A preference to take off: its exact text, or its number from orrery_preferences."),
+                "style" to ("string" to "How the owner likes things written; replaces the style. \"\" clears it."),
+                required = emptyList(),
+            ),
+        ),
+        write = true,
+    ) { args ->
+        val add = args.str("add")
+        // "" is a style of its own (none), so it is read raw.
+        val style = (args["style"] as? JsonPrimitive)?.contentOrNull
+        var remove = args.str("remove")
+        if (add == null && remove == null && style == null) return@Tool "Error: give add, remove or style."
+        remove?.toIntOrNull()?.let { n ->
+            val list = orrery.preferences().getOrElse { return@Tool "Could not read orrery's preferences: ${it.message}" }.list
+            remove = list.getOrNull(n - 1) ?: return@Tool "Error: there is no preference $n; there are ${list.size}."
+        }
+        orrery.changePreferences(add, remove, style).fold(
+            onSuccess = { p ->
+                "Orrery now holds style: ${p.style.ifBlank { "(none)" }}\n" +
+                    if (p.list.isEmpty()) "No standing preferences." else p.list.mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n")
+            },
+            onFailure = { "Could not change orrery's preferences: ${it.message}" },
+        )
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_file_text",
+            "Hand orrery text to read and file the way it reads a message: a list of todos for an event with its details, notes from a call, something pasted. The ship's reader files the people, places, plans, dates and tasks in it and may propose actions, such as a calendar entry or a task, for the owner to approve under Actions. It is read soon after, not at once. Prefer this to writing facts one by one when the owner hands you something to keep. Keep the owner's words; give a title saying what it is.",
+            toolSchema(
+                "text" to ("string" to "The text, as the owner gave it, up to 64 KB."),
+                "title" to ("string" to "What it is, e.g. \"Todos for Linus's birthday party\"; optional."),
+                required = listOf("text"),
+            ),
+        ),
+        write = true,
+    ) { args ->
+        val text = args.str("text") ?: return@Tool "Error: text is required."
+        orrery.hand(text, args.str("title")).fold(
+            onSuccess = { said ->
+                val dropped = (said["dropped"] as? JsonPrimitive)?.contentOrNull
+                val id = (said["id"] as? JsonPrimitive)?.contentOrNull
+                when {
+                    dropped != null -> "Orrery did not take it: $dropped. The owner can turn reading on in orrery's settings on the ship (the Read card)."
+                    id != null -> "Handed to orrery to read (item $id). It files what it finds soon and may propose actions for the owner to approve under Actions."
+                    else -> "Orrery answered, but not with an item: " + clip(said.toString())
+                }
+            },
+            onFailure = { "Could not hand it to orrery: ${it.message}" },
         )
     })
 

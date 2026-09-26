@@ -186,6 +186,23 @@ class OrreryApi(
         return request(owner, HttpMethod.Put, "/api/$name", body.toString())
     }
 
+    /**
+     * Text handed to the ship to read the way it reads a message (orrery
+     * 59): a list of todos for an event, notes, a page. The ship keeps it
+     * in its read inbox and answers at once with `{ok, id}`, or with
+     * `{ok, dropped}` where its read channel is off; the read fiber files
+     * what it finds and may propose actions.
+     */
+    suspend fun read(text: String, title: String?): JsonObject {
+        val body = buildJsonObject {
+            put("text", text)
+            title?.let { put("title", it) }
+            put("source", buildJsonObject { put("kind", "talon") })
+        }
+        val said = request(owner, HttpMethod.Post, "/api/read", body.toString())
+        return reading { Json.parseToJsonElement(said).jsonObject }
+    }
+
     /** Run the ship's chat reader now; [settingsDoc] `chat/last` is its record once it is done. */
     suspend fun wakeChat() {
         request(owner, HttpMethod.Post, "/api/chat/wake")

@@ -49,6 +49,20 @@ class OrreryApiTest {
         assertEquals("true", scope["write"]!!.jsonPrimitive.content)
     }
 
+    // Checked against orrery's serve-read (version 59): text required,
+    // title and source optional, answered at once with the item's id.
+    @Test
+    fun `text to read goes up as orrery's read route takes it, on the owner's session`() = runTest {
+        val said = api(body = """{"ok":true,"id":"1790441000000-0xab12"}""").read("- buy candles\n- book the hall", "Todos for the party")
+        assertEquals("https://ship/apps/orrery/api/read", seen!!.url.toString())
+        assertEquals("POST", seen!!.method.value)
+        assertEquals(
+            """{"text":"- buy candles\n- book the hall","title":"Todos for the party","source":{"kind":"talon"}}""",
+            (seen!!.body as TextContent).text,
+        )
+        assertEquals("1790441000000-0xab12", said["id"]!!.jsonPrimitive.content)
+    }
+
     @Test
     fun `observing carries the key and reads per-item answers`() = runTest {
         val answer = api(body = """{"bodies":[{"id":"person/bus","ok":true,"existing":false}],"observations":[{"id":"1-a","ok":true,"existing":true},{"ok":false,"error":"unknown subject thing/x"}]}""")
