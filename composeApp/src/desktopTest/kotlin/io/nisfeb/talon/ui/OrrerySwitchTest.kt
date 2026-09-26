@@ -94,6 +94,7 @@ class OrrerySwitchTest {
                 json(docs.getValue(doc))
             }
             doc in docs.keys -> json(docs.getValue(doc))
+            doc == "actions" -> json("""[{"id":"a1","kind":"reply","title":"Answer Susan","status":"proposed"}]""")
             else -> json("{}")
         }
     })
@@ -202,15 +203,32 @@ class OrrerySwitchTest {
     @Test
     fun `a key the ship does not take back is kept, and given back at the next start`() = attached { repo, db ->
         revoke = HttpStatusCode.InternalServerError
+        assertEquals(true, repo.enabled.value, "fed from here until now")
         var off = false
         assertEquals(listOf("taking back this device's key"), repo.switchOff { off = true })
         assertTrue(off, "off here all the same")
+        assertEquals(false, repo.enabled.value, "and not fed from here")
         assertTrue(db.orreryAccounts().get("~zod") != null, "kept, to give back later")
         // The next start: the switch is off and a key is held.
         revoke = HttpStatusCode.OK
         settleOrreryGate(false, db, FakeAiSettings(), repo, "https://ship.test", "~zod")
         assertEquals(listOf("c1"), revoked.toList())
         assertNull(db.orreryAccounts().get("~zod"))
+    }
+
+    @Test
+    fun `off, what Orrery proposed leaves the tray and its notifications go`() = attached { repo, _ ->
+        val cleared = CopyOnWriteArrayList<Set<String>>()
+        repo.onActions = { _, clear -> cleared += clear }
+        repo.refreshWaiting()
+        assertEquals(listOf("a1"), repo.actions.value.map { it.id })
+        repo.detach()
+        assertTrue(repo.actions.value.isEmpty())
+        assertEquals(setOf("a1"), cleared.last(), "the notification for it is taken back")
+        // Nothing shown, nothing to take back.
+        cleared.clear()
+        repo.detach()
+        assertTrue(cleared.isEmpty(), cleared.toString())
     }
 
     @Test

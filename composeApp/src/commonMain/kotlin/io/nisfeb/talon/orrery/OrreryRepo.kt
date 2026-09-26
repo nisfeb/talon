@@ -488,6 +488,8 @@ class OrreryRepo(
      */
     suspend fun forget(shipUrl: String, ship: String): Result<Unit> = runCatching {
         turnOff()
+        // Not fed from here from now, whatever the ship says to the key.
+        _enabled.value = false
         db.orreryNoticed().clear(ship)
         rowLock.withLock {
             db.orreryAccounts().get(ship)?.let { row ->
@@ -498,7 +500,6 @@ class OrreryRepo(
             db.orrerySent().clear(ship)
             db.orreryAccounts().delete(ship)
         }
-        _enabled.value = false
     }
 
     /**
