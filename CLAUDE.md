@@ -115,6 +115,37 @@ Bugs that only manifest under the Room Android driver, MediaPipe
 text task, or Android activity-lifecycle won't be caught by CI —
 that's the gap to be aware of when shipping Android-specific changes.
 
+## Testing standard
+
+A feature or fix is not done until its tests cover each of these that
+applies. Do them unasked, as part of the change.
+
+1. **The promise, end to end.** Test what the user was promised through
+   the whole app (`AppShellTest`'s `app {}` against `FakeShip`), not only
+   the unit. "Off means off" is `FakeShip.requests` holding no request to
+   that app.
+2. **Every screen that shows it.** After a write, check each screen that
+   shows the data, not just the one it was written from: the home page's
+   today, not only the calendar. Optimistic state belongs in the repo,
+   where every screen reads it.
+3. **Sync.** A setting that travels is pushed from one device and applied
+   on another, and an older entry cannot undo it.
+4. **Failure.** The ship refuses, does not answer, or lacks the app. No
+   answer is not empty. Say what failed, and keep what must be retried.
+5. **Leaving midway.** Leave the screen during a write and the write
+   still finishes. Ship writes run on a repo scope (`CalendarRepo.carry`),
+   never a screen's `rememberCoroutineScope`. Test on real time: the
+   virtual clock in `runComposeUiTest` hides waits.
+6. **Wire.** Check request bodies against the ship app's own parser
+   source, and pin the exact bodies in a test.
+7. **Platform gates.** Android- or iOS-only paths call a common function
+   that has a test in `commonTest`. Say which device wiring stays untested.
+8. **Mutation.** Run PIT over the new logic, sandboxed (a read-only
+   worktree, its own `user.home`, classes copied outside it; never the
+   real tree). Kill the survivors that matter, or say why not.
+9. **Gap report.** Before calling it done, list what is covered and what
+   is not.
+
 ## Build artifacts
 
 - Android release APKs: `androidApp/build/outputs/apk/release/`
