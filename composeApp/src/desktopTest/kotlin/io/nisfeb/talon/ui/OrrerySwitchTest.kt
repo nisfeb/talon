@@ -7,7 +7,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -52,10 +57,12 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * Orrery's one switch. Off until the owner turns it on, with what it is
- * said in words for anyone; on, its settings; off again, the ship's own
- * reading and writing stop and this install's key goes back. And the
- * switch and an install that disagree are settled the switch's way.
+ * Orrery's page. Its one switch: off until the owner turns it on, with
+ * what it is said in words for anyone; on, its settings; off again, the
+ * ship's own reading and writing stop and this install's key goes back.
+ * The switch and an install that disagree are settled the switch's way.
+ * And the owner's style and standing preferences, which every orrery
+ * prompt reads, kept on the ship.
  */
 @OptIn(ExperimentalTestApi::class)
 class OrrerySwitchTest {
@@ -63,7 +70,12 @@ class OrrerySwitchTest {
         "chat" to """{"enabled":true,"dms":[],"channels":[],"send_dms":true}""",
         "mail" to """{"enabled":true}""",
         "generator" to """{"enabled":true}""",
+        "preferences" to """{"style":"Short and plain.","preferences":["No calls before 9am","Plain words"]}""",
     ))
+    /** Documents read, in order. */
+    private val reads: MutableList<String> = CopyOnWriteArrayList()
+    /** An orrery older than preferences: the route is not there. */
+    @Volatile private var noPreferences = false
     private val writes: MutableList<Pair<String, JsonObject>> = CopyOnWriteArrayList()
     private val revoked: MutableList<String> = CopyOnWriteArrayList()
     /** Settings the ship will not change. */
@@ -86,14 +98,15 @@ class OrrerySwitchTest {
                 revoked += doc.substringAfter("clients/")
                 json("{}")
             }
-            doc in refused && req.method == HttpMethod.Put -> respond("", HttpStatusCode.InternalServerError)
+            doc == "preferences" && noPreferences -> respond("", HttpStatusCode.NotFound)
+            doc in refused && req.method == HttpMethod.Put -> respond("""{"error":"$doc: refused"}""", HttpStatusCode.BadRequest)
             doc in docs.keys && req.method == HttpMethod.Put -> {
                 val sent = Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonObject
                 writes += doc to sent
                 docs[doc] = JsonObject(Json.parseToJsonElement(docs.getValue(doc)).jsonObject + sent).toString()
                 json(docs.getValue(doc))
             }
-            doc in docs.keys -> json(docs.getValue(doc))
+            doc in docs.keys -> json(docs.getValue(doc)).also { reads += doc }
             doc == "actions" -> json("""[{"id":"a1","kind":"reply","title":"Answer Susan","status":"proposed"}]""")
             else -> json("{}")
         }
@@ -138,6 +151,7 @@ class OrrerySwitchTest {
         assertTrue(shows("Turning it off stops all of it"))
         onAllNodes(isToggleable())[0].assertIsOff()
         assertTrue(!shows("Orrery triage"), "no settings while it is off")
+        assertTrue("preferences" !in reads, "nor are the owner's preferences asked for")
     }
 
     @Test
@@ -183,6 +197,77 @@ class OrrerySwitchTest {
         assertNull(runBlocking { db.orreryAccounts().get("~zod") })
     }
 
+    private fun sent(doc: String) = writes.filter { it.first == doc }.map { it.second.toString() }
+
+    private fun ComposeUiTest.field(label: String) = onNode(hasSetTextAction() and hasText(label))
+    private fun ComposeUiTest.hasField(label: String) = onAllNodes(hasSetTextAction() and hasText(label)).fetchSemanticsNodes().isNotEmpty()
+
+    private fun ComposeUiTest.add(text: String) {
+        field("Add a preference").performTextInput(text)
+        onNodeWithText("Add").performClick()
+    }
+
+    @Test
+    fun `on, the owner's style and preferences show, and each change sends only itself`() = page(orrery = true) { _, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("No calls before 9am") && shows("Plain words") }
+        add("Never book Mondays")
+        waitUntil(timeoutMillis = 5_000) { shows("Never book Mondays") }
+        onNodeWithContentDescription("Remove \"Plain words\"").performClick()
+        waitUntil(timeoutMillis = 5_000) { !shows("Plain words") }
+        field("How you like things written").performTextClearance()
+        field("How you like things written").performTextInput("Warm, and brief.")
+        onNodeWithText("Save").performClick()
+        waitUntil(timeoutMillis = 5_000) { sent("preferences").size == 3 }
+        // What orrery's parser takes: the list whole, the style alone.
+        assertEquals(
+            listOf(
+                """{"preferences":["No calls before 9am","Plain words","Never book Mondays"]}""",
+                """{"preferences":["No calls before 9am","Never book Mondays"]}""",
+                """{"style":"Warm, and brief."}""",
+            ),
+            sent("preferences"),
+        )
+    }
+
+    @Test
+    fun `a change is made to the list the ship holds now, not the one the page first read`() = page(orrery = true) { _, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("Plain words") }
+        // Another device takes one out meanwhile.
+        docs["preferences"] = """{"style":"Short and plain.","preferences":["No calls before 9am"]}"""
+        add("Never book Mondays")
+        waitUntil(timeoutMillis = 5_000) { sent("preferences").isNotEmpty() }
+        assertEquals(listOf("""{"preferences":["No calls before 9am","Never book Mondays"]}"""), sent("preferences"), "not put back")
+    }
+
+    @Test
+    fun `an Orrery that does not keep preferences says so and offers nothing to write over them`() {
+        noPreferences = true
+        page(orrery = true) { _, _, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("An older Orrery does not keep them") }
+            assertTrue(!hasField("Add a preference") && !hasField("How you like things written"), "no box to write an empty list back from")
+        }
+    }
+
+    @Test
+    fun `a preference the ship refuses is said, and not shown as kept`() = page(orrery = true) { _, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("Plain words") }
+        refused = setOf("preferences")
+        add("Never book Mondays")
+        waitUntil(timeoutMillis = 5_000) { shows("Your ship refused it: preferences: refused") }
+        assertEquals(1, onAllNodesWithText("Never book Mondays").fetchSemanticsNodes().size, "only in the box, still to send")
+    }
+
+    @Test
+    fun `leaving the page while a preference is sent still sends it, and the answer is what shows`() = attached { repo, _ ->
+        holdMs = 300
+        val page = CoroutineScope(SupervisorJob())
+        page.launch { repo.changePreferences { it + "Never book Mondays" } }
+        kotlinx.coroutines.delay(100)
+        page.coroutineContext.job.cancelAndJoin()
+        kotlinx.coroutines.withTimeout(10_000) { while (repo.preferences.value?.list?.contains("Never book Mondays") != true) kotlinx.coroutines.delay(20) }
+        assertEquals(listOf("""{"preferences":["No calls before 9am","Plain words","Never book Mondays"]}"""), sent("preferences"))
+    }
+
     /** A repo attached to the ship with this install's key, as a device that has fed Orrery is. */
     private fun attached(block: suspend (OrreryRepo, AppDatabase) -> Unit) = runBlocking {
         val (db, dir) = db()
@@ -221,9 +306,11 @@ class OrrerySwitchTest {
         val cleared = CopyOnWriteArrayList<Set<String>>()
         repo.onActions = { _, clear -> cleared += clear }
         repo.refreshWaiting()
+        assertTrue(repo.loadPreferences())
         assertEquals(listOf("a1"), repo.actions.value.map { it.id })
         repo.detach()
         assertTrue(repo.actions.value.isEmpty())
+        assertNull(repo.preferences.value, "nor this ship's preferences, for the next ship's page")
         assertEquals(setOf("a1"), cleared.last(), "the notification for it is taken back")
         // Nothing shown, nothing to take back.
         cleared.clear()

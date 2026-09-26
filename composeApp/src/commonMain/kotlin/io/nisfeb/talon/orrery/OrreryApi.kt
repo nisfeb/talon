@@ -514,7 +514,7 @@ class OrreryApi(
          * URL and a model sometimes chooses it: anything outside this
          * set is a mistake, and `../` is not a document.
          */
-        val SETTINGS = setOf("generator", "telegram", "schema", "policy", "chat", "mail")
+        val SETTINGS = setOf("generator", "telegram", "schema", "policy", "chat", "mail", "preferences")
 
         /** Read and never written: what the chat reader may pick from, and each reader's last pass. */
         val LISTS = setOf("chat/dms", "chat/channels", "chat/last", "mail/last", "telegram/last")
@@ -609,6 +609,24 @@ fun chatReaderOf(o: JsonObject) = ChatReader(
     dms = names(o["dms"]).toSet(),
     channels = names(o["channels"]).toSet(),
     sendDms = o["send_dms"]?.jsonPrimitive?.booleanOrNull == true,
+)
+
+/**
+ * The owner's own words, which every orrery prompt reads (orrery
+ * f300be7): how they like things written, and what always or never to
+ * do. The ship keeps one [list] and a write of it replaces it whole.
+ */
+data class OrreryPreferences(val style: String, val list: List<String>) {
+    companion object {
+        const val STYLE_BYTES = 1000
+        const val MAX = 30
+        const val ONE_BYTES = 300
+    }
+}
+
+fun preferencesOf(o: JsonObject) = OrreryPreferences(
+    style = o["style"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+    list = names(o["preferences"]),
 )
 
 /** A DM or channel the chat reader could read: its id, and the name a person knows it by, which may be blank. */

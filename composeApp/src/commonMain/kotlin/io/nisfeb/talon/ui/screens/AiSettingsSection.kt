@@ -19,6 +19,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -75,6 +77,7 @@ import io.nisfeb.talon.orrery.DecideControl
 import io.nisfeb.talon.orrery.DecideDay
 import io.nisfeb.talon.orrery.DecideSettings
 import io.nisfeb.talon.orrery.OrreryAvailability
+import io.nisfeb.talon.orrery.OrreryPreferences
 import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.orrery.RungStatus
 import io.nisfeb.talon.orrery.generatorLine
@@ -353,6 +356,7 @@ fun OrrerySettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?)
     if (orrery == null) Quiet("Sign in to a ship to set Orrery up.")
     if (orrery != null) TriageRow(orrery, profile, orreryHere, spend[AiFeature.OrreryTriage.name]) { ref -> setFeature(AiFeature.OrreryTriage) { it.copy(model = ref) } }
     if (orrery != null && orreryHere) GeneratorRow(orrery, profile) { ref -> setFeature(AiFeature.OrreryGenerator) { it.copy(model = ref) } }
+    if (orrery != null && orreryHere) PreferencesRows(orrery)
     Spacer(Modifier.height(12.dp))
     HorizontalDivider()
     // Until the owner flips it here, Jev is what this install had.
@@ -1462,6 +1466,78 @@ private fun GeneratorRow(orrery: OrreryRepo, profile: AiProfile, onPick: (ModelR
         ) { ref -> point(g.enabled, ref) }
         g.model?.let { Quiet("On the ship: $it" + (g.url?.let { u -> " at $u" } ?: "") + if (g.keySet) "." else ", with no key.") }
         last?.let { Quiet("Last run: " + generatorLine(it, nowMs(), kotlinx.datetime.TimeZone.currentSystemDefault())) }
+    }
+    note?.let { Quiet(it, error = true) }
+}
+
+/**
+ * The owner's own words to Orrery (orrery f300be7): how to write, and
+ * what always or never to do. Every prompt on the ship reads them. Shown
+ * only once the ship has said what they are: a list shown empty because
+ * the ship did not answer would be written back empty over the real one.
+ */
+@Composable
+private fun PreferencesRows(orrery: OrreryRepo) {
+    val prefs by orrery.preferences.collectAsState()
+    var said by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(orrery) { said = orrery.loadPreferences() }
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+    Spacer(Modifier.height(12.dp))
+    HorizontalDivider()
+    Heading("What Orrery should know")
+    Quiet("Orrery reads these every time it writes your brief or suggests something. Say how you like things written, and what it should always or never do.")
+    val p = prefs
+    if (p == null) {
+        if (said == false) Quiet("Your ship did not say what they are. An older Orrery does not keep them: update Orrery on your ship to set them here.", error = true)
+        return
+    }
+    fun write(block: suspend () -> Result<Unit>) = scope.launch {
+        busy = true
+        note = null
+        block().onFailure { e ->
+            note = (e as? io.nisfeb.talon.orrery.OrreryError.Refused)?.let { "Your ship refused it: ${it.reason}" }
+                ?: e.message ?: "The ship did not answer."
+        }
+        busy = false
+    }
+    var style by remember(p.style) { mutableStateOf(p.style) }
+    val styleTooLong = style.trim().encodeToByteArray().size > OrreryPreferences.STYLE_BYTES
+    OutlinedTextField(
+        value = style, onValueChange = { style = it }, enabled = !busy, isError = styleTooLong, minLines = 2,
+        label = { Text("How you like things written") }, placeholder = { Text("Short and plain, no exclamation marks.") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    if (styleTooLong) Quiet("Too long: at most ${OrreryPreferences.STYLE_BYTES} characters.", error = true)
+    if (style.trim() != p.style) {
+        TextButton(onClick = { write { orrery.setStyle(style.trim()) } }, enabled = !busy && !styleTooLong) { Text("Save") }
+    }
+    p.list.forEach { item ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(item, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            IconButton(onClick = { write { orrery.changePreferences { it - item } } }, enabled = !busy) {
+                Icon(Icons.Filled.Close, contentDescription = "Remove \"$item\"")
+            }
+        }
+    }
+    var adding by remember { mutableStateOf("") }
+    val oneTooLong = adding.trim().encodeToByteArray().size > OrreryPreferences.ONE_BYTES
+    if (p.list.size >= OrreryPreferences.MAX) {
+        Quiet("That is all ${OrreryPreferences.MAX} Orrery keeps. Remove one to add another.")
+    } else {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = adding, onValueChange = { adding = it }, enabled = !busy, isError = oneTooLong, singleLine = true,
+                label = { Text("Add a preference") }, placeholder = { Text("Never suggest calls before 9am") },
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                onClick = { val t = adding.trim(); write { orrery.changePreferences { if (t in it) it else it + t }.onSuccess { adding = "" } } },
+                enabled = !busy && adding.isNotBlank() && !oneTooLong,
+            ) { Text("Add") }
+        }
+        if (oneTooLong) Quiet("Too long: at most ${OrreryPreferences.ONE_BYTES} characters.", error = true)
     }
     note?.let { Quiet(it, error = true) }
 }

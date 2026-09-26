@@ -166,6 +166,36 @@ class OrreryRepo(
     /** Turn the ship's mail reader on or off; the ship's answer is the new state. */
     suspend fun setMailReader(on: Boolean): Result<Unit> = writeSettings("mail", buildJsonObject { put("enabled", on) }).map { }
 
+    private val _preferences = MutableStateFlow<OrreryPreferences?>(null)
+    /** The owner's style and standing preferences, which every orrery prompt reads; null until the ship says. */
+    val preferences: StateFlow<OrreryPreferences?> = _preferences.asStateFlow()
+
+    /** Ask the ship for them; false where it did not say, an orrery older than them among it. */
+    suspend fun loadPreferences(): Boolean {
+        val a = api ?: return false
+        return runCatching { preferencesOf(Json.parseToJsonElement(a.settingsDoc("preferences")).jsonObject) }
+            .onSuccess { _preferences.value = it }.isSuccess
+    }
+
+    /** How the owner likes things written. On this repo's scope: leaving the page does not stop it. */
+    suspend fun setStyle(style: String): Result<Unit> = scope.async {
+        writeSettings("preferences", buildJsonObject { put("style", style) }).map { }
+    }.await()
+
+    /**
+     * The standing preferences, [change]d. The ship keeps one list and a
+     * write replaces it, so it is read again first: a copy read when the
+     * page opened would put back what another device took out since.
+     */
+    suspend fun changePreferences(change: (List<String>) -> List<String>): Result<Unit> = scope.async {
+        runCatching {
+            val now = preferencesOf(Json.parseToJsonElement(attached().settingsDoc("preferences")).jsonObject)
+            val next = kotlinx.serialization.json.JsonArray(change(now.list).map { kotlinx.serialization.json.JsonPrimitive(it) })
+            writeSettings("preferences", buildJsonObject { put("preferences", next) }).getOrThrow()
+            Unit
+        }
+    }.await()
+
     /** What the chat reader may pick from: the ship's DMs, then its channels, each with a name. */
     suspend fun chatOptions(): Result<Pair<List<ChatOption>, List<ChatOption>>> = runCatching {
         val a = attached()
@@ -372,9 +402,11 @@ class OrreryRepo(
      */
     suspend fun writeSettings(name: String, body: JsonObject): Result<String> = runCatching {
         val said = attached().setSettingsDoc(name, body)
+        val answer = runCatching { Json.parseToJsonElement(said) }.getOrNull() as? JsonObject
+        if (name == "preferences" && answer != null && "preferences" in answer) _preferences.value = preferencesOf(answer)
         // Only an answer that is the document: anything else is left for
         // the next read rather than shown as everything turned off.
-        (runCatching { Json.parseToJsonElement(said) }.getOrNull() as? JsonObject)?.takeIf { "enabled" in it }?.let { doc ->
+        answer?.takeIf { "enabled" in it }?.let { doc ->
             if (name == "generator") _generatorSettings.value = generatorSettingsOf(doc)
             if (name == "chat") _chatReader.value = chatReaderOf(doc)
             if (name == "mail") _mailReader.value = mailReaderOn(doc)
@@ -439,6 +471,7 @@ class OrreryRepo(
         _error.value = null
         _chatReader.value = null
         _chatReaderRun.value = null
+        _preferences.value = null
         scopeChecked = false
         // Nothing of the ship left is waiting on the owner: with Orrery off,
         // or another ship, its proposals and their notifications go.
