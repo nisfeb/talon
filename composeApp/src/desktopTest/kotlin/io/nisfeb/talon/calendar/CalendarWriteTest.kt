@@ -9,6 +9,7 @@ import io.ktor.utils.io.ByteReadChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.LocalDate
 import java.util.concurrent.CopyOnWriteArrayList
@@ -34,6 +35,8 @@ class CalendarWriteTest {
         /** Reads, path with query, since the last [clear]. */
         val reads = CopyOnWriteArrayList<String>()
         val writtenAt = AtomicLong(0L)
+        /** How long the ship takes over a write, a busy one being slow. */
+        @Volatile var holdWriteMs = 0L
         fun clear() = reads.clear()
     }
 
@@ -50,6 +53,8 @@ class CalendarWriteTest {
                 MockEngine { req ->
                     val path = req.url.encodedPath
                     if (path.startsWith("/grubbery/api/poke/")) {
+                        // A request cancelled while held never gets here: the write is lost.
+                        if (ship.holdWriteMs > 0) kotlinx.coroutines.delay(ship.holdWriteMs)
                         ship.writtenAt.set(System.currentTimeMillis())
                         return@MockEngine respond("", HttpStatusCode.OK, json)
                     }
@@ -141,6 +146,23 @@ class CalendarWriteTest {
             assertTrue(repo.pokeEvent(eventBody(edited, "t2")))
             assertEquals(monday, repo.tasks.value?.single()?.dueMs, "the task list has the new day too, not the copy read before it landed")
         }
+    }
+
+    @Test
+    fun `leaving the screen while a write is out does not lose it`() = calendar(tasks = { ship ->
+        val due = if (ship.writtenAt.get() > 0) "1790899200000" else "1790640000000"
+        """[{"id":"t2","cal":"default","cat":"todo","meta":{"name":"Pay rent"},"due_ms":$due}]"""
+    }) { repo, ship ->
+        ship.holdWriteMs = 800
+        val edited = EventDraft(name = "Pay rent", cat = EventCat.TODO, date = LocalDate(2026, 10, 1), due = LocalDate(2026, 10, 1), cal = "default")
+        // The screen's own scope, gone when the screen is: the home page's
+        // today was where the move was being looked for.
+        val screen = kotlinx.coroutines.CoroutineScope(SupervisorJob())
+        screen.launch { repo.pokeEvent(eventBody(edited, "t2")) }
+        kotlinx.coroutines.delay(200)
+        screen.cancel()
+        kotlinx.coroutines.withTimeout(10_000) { while (repo.tasks.value?.single()?.dueMs != 1790899200000L) kotlinx.coroutines.delay(50) }
+        assertTrue(ship.writtenAt.get() > 0, "the write reached the ship")
     }
 
     @Test

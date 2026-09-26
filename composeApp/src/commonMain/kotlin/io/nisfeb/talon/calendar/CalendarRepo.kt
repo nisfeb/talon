@@ -430,12 +430,22 @@ class CalendarRepo(
      * An event or task written, then only what it can change read back
      * ([afterItemWrite]). A save went through [poke]'s nine reads, one
      * behind another on the ship's single thread, and on a busy ship the
-     * edit sat greyed out for minutes. False when refused.
+     * edit sat greyed out for minutes. [readBack] false for all but the last
+     * of a chain: the second write of an occurrence's edit waited out the
+     * first's reading, up to half a minute. False when refused.
      */
-    suspend fun pokeEvent(body: JsonObject): Boolean {
+    suspend fun pokeEvent(body: JsonObject, readBack: Boolean = true): Boolean = carry {
         val reach = reachOf(body)
-        return write(body).also { if (it) afterItemWrite(reach) }
+        write(body).also { if (it && readBack) afterItemWrite(reach) }
     }
+
+    /**
+     * [block] on this repo's scope, awaited. A write made from a screen ran
+     * on the screen's scope: leaving it, to see the home page's today, cancelled
+     * the write, so on a busy ship an edit never reached the calendar at all.
+     * The caller still waits for the answer; leaving only stops the waiting.
+     */
+    suspend fun <T> carry(block: suspend () -> T): T = scope.async { block() }.await()
 
     /**
      * The lists a write can change: [tasks] the task listing, [rows] the
@@ -465,10 +475,12 @@ class CalendarRepo(
      * calendars themselves, their names, sharing or zone. An event or a
      * task goes through [pokeEvent]. False when refused.
      */
-    suspend fun poke(body: JsonObject): Boolean = write(body).also { ok ->
-        if (ok) {
-            refresh()
-            range?.let { (f, t) -> loadRange(f, t) }
+    suspend fun poke(body: JsonObject): Boolean = carry {
+        write(body).also { ok ->
+            if (ok) {
+                refresh()
+                range?.let { (f, t) -> loadRange(f, t) }
+            }
         }
     }
 

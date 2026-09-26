@@ -417,7 +417,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                     date = newDate ?: at.date,
                     minuteOfDay = newMinute ?: (at.hour * 60 + at.minute),
                 )
-                if (!cal.pokeEvent(eventBody(one))) return@Tool "The calendar did not take it."
+                if (!cal.pokeEvent(eventBody(one), readBack = false)) return@Tool "The calendar did not take it."
                 if (!cal.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })) {
                     return@Tool "Half done: the changed \"${d.name}\" was added, but the original occurrence on $occ is still there too — the calendar refused the skip. Skip it by hand, or try again."
                 }

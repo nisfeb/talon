@@ -968,22 +968,26 @@ fun CalendarScreen(
                 if (ghost != null) pendingRows = pendingRows + ghost
                 if (id != null) pendingEdits = pendingEdits + (id to d)
                 act(if (id == null) "Adding…" else "Saving…", "The ship did not take the change; \"${d.name.trim()}\" is as it was.") {
-                    // A ticked task opened from its row lacks when it was
-                    // done; read it here, behind the closed editor, or the
-                    // save would stamp it done now.
-                    val d = if (id != null && d.cat == EventCat.TODO && d.done && d.doneMs == null) {
-                        d.copy(doneMs = repo.eventDetail(id)?.get("done_ms")?.jsonPrimitive?.longOrNull)
-                    } else d
-                    val ok = when {
-                        id == null || editScope == EditScope.ALL || idx == null || occurrence == null ->
-                            repo.pokeEvent(eventBody(d, id))
-                        // The page's own two steps: end or skip the old, then add.
-                        editScope == EditScope.FOLLOWING ->
-                            repo.pokeEvent(buildJsonObject { put("action", "cap-event"); put("id", id); put("dom", idx) }) &&
-                                repo.pokeEvent(followingBody(d, occurrence))
-                        else ->
-                            repo.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) }) &&
-                                repo.pokeEvent(onlyBody(d, occurrence))
+                    // The whole write on the repo's scope: leaving the screen
+                    // no longer cancels it partway (a series edit is two pokes).
+                    val ok = repo.carry {
+                        // A ticked task opened from its row lacks when it was
+                        // done; read it here, behind the closed editor, or the
+                        // save would stamp it done now.
+                        val d = if (id != null && d.cat == EventCat.TODO && d.done && d.doneMs == null) {
+                            d.copy(doneMs = repo.eventDetail(id)?.get("done_ms")?.jsonPrimitive?.longOrNull)
+                        } else d
+                        when {
+                            id == null || editScope == EditScope.ALL || idx == null || occurrence == null ->
+                                repo.pokeEvent(eventBody(d, id))
+                            // The page's own two steps: end or skip the old, then add.
+                            editScope == EditScope.FOLLOWING ->
+                                repo.pokeEvent(buildJsonObject { put("action", "cap-event"); put("id", id); put("dom", idx) }, readBack = false) &&
+                                    repo.pokeEvent(followingBody(d, occurrence))
+                            else ->
+                                repo.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) }, readBack = false) &&
+                                    repo.pokeEvent(onlyBody(d, occurrence))
+                        }
                     }
                     if (ghost != null) pendingRows = pendingRows - ghost
                     if (id != null) pendingEdits = pendingEdits - id
