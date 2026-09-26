@@ -108,6 +108,8 @@ fun NotesChannelScreen(
     var moveFolder by remember { mutableStateOf<NotesFolderEntity?>(null) }
     var newFolderOpen by remember { mutableStateOf(false) }
     var newNoteOpen by remember { mutableStateOf(false) }
+    // What the host said to a new folder or note it did not take.
+    var said by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier
@@ -170,6 +172,16 @@ fun NotesChannelScreen(
             }
         }
 
+        said?.let { text ->
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                androidx.compose.material3.TextButton(onClick = { said = null }) { Text("Dismiss") }
+            }
+        }
+
         if (childFolders.isEmpty() && folderNotes.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
@@ -207,7 +219,8 @@ fun NotesChannelScreen(
             onConfirm = { name ->
                 newFolderOpen = false
                 val parent = currentFolderId ?: return@NameDialog
-                scope.launch { repo.notes.createFolder(flag, parent, name) }
+                said = null
+                scope.launch { said = repo.notes.createFolder(flag, parent, name) }
             },
         )
     }
@@ -308,7 +321,8 @@ fun NotesChannelScreen(
             onConfirm = { title ->
                 newNoteOpen = false
                 val parent = currentFolderId ?: return@NameDialog
-                scope.launch { repo.notes.createNote(flag, parent, title, "") }
+                said = null
+                scope.launch { said = repo.notes.createNote(flag, parent, title, "") }
             },
         )
     }

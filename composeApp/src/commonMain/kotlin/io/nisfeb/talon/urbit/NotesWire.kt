@@ -284,6 +284,25 @@ object NotesParser {
         }.toSet()
 
     /** Error tag from a failed v1 write, when the host supplies one. */
+    /**
+     * What to tell the owner of a REST write's answer: null when it was
+     * taken, otherwise why not, in words.
+     */
+    fun writeRefusal(el: JsonElement?): String? {
+        if (isWriteOk(el)) return null
+        val body = (el as? JsonObject)?.get("body") as? JsonObject
+        if (body?.get("type").asStr() == "pending") {
+            return "Sent. The notebook's host hasn't answered yet, so it may appear in a moment."
+        }
+        return when (writeErrorType(el)) {
+            "not-authorized" -> "You can't add to this notebook. Its owner can make you an editor."
+            "not-found" -> "That notebook or folder isn't there any more."
+            "invalid-name" -> "That name isn't allowed."
+            "request-too-large" -> "That is too large to send."
+            else -> "The notebook's host didn't take it."
+        }
+    }
+
     fun writeErrorType(el: JsonElement?): String? {
         val body = (el as? JsonObject)?.get("body") as? JsonObject ?: return null
         if (body["type"].asStr() != "error") return null
@@ -379,12 +398,6 @@ object NotesActions {
             put("who", who)
         })
 
-    fun createFolder(flag: NotesFlag, parentFolderId: Long, name: String): JsonObject =
-        scoped(flag, buildJsonObject {
-            put("type", "create-folder")
-            put("parent", parentFolderId)
-            put("name", name)
-        })
 
     fun renameFolder(flag: NotesFlag, folderId: Long, name: String): JsonObject =
         scoped(flag, folderScoped(folderId, buildJsonObject {
@@ -410,13 +423,6 @@ object NotesActions {
             put("recursive", recursive)
         }))
 
-    fun createNote(flag: NotesFlag, folderId: Long, title: String, body: String): JsonObject =
-        scoped(flag, buildJsonObject {
-            put("type", "create-note")
-            put("folder", folderId)
-            put("title", title)
-            put("body", body)
-        })
 
     /**
      * Body edit. [expectedRevision] is the revision the editor started
@@ -513,6 +519,10 @@ object NotesPaths {
     const val V1_NOTEBOOKS = "/notes/~/v1/notebooks"
     fun v1Notebook(flag: NotesFlag) = "$V1_NOTEBOOKS/${flag.pathSegment}"
     fun v1Note(flag: NotesFlag, id: Long) = "${v1Notebook(flag)}/notes/$id"
+    /** POST `{folder, title, body}`: a new note. */
+    fun v1Notes(flag: NotesFlag) = "${v1Notebook(flag)}/notes"
+    /** POST `{folderName, parent}`: a new folder. `folderName`, since the path has a `name` already. */
+    fun v1Folders(flag: NotesFlag) = "${v1Notebook(flag)}/folders"
 
     /**
      * Public, unauthenticated page for a published note. %notes binds

@@ -116,15 +116,13 @@ class NotesWireTest {
     @Test
     fun `notebook-scoped action nests under type notebook with bare flag`() {
         val flag = NotesFlag("~ricsul-bilwyt", "handbook")
-        val a = NotesActions.createNote(flag, folderId = 2, title = "T", body = "B")
+        val a = NotesActions.invite(flag, "~zod")
         assertEquals("notebook", a["type"]!!.jsonPrimitive.content)
         // hoon parses `flag` as "<ship>/<name>" — no `notes/` prefix.
         assertEquals("~ricsul-bilwyt/handbook", a["flag"]!!.jsonPrimitive.content)
         val inner = a["action"] as JsonObject
-        assertEquals("create-note", inner["type"]!!.jsonPrimitive.content)
-        assertEquals(2L, inner["folder"]!!.jsonPrimitive.content.toLong())
-        assertEquals("T", inner["title"]!!.jsonPrimitive.content)
-        assertEquals("B", inner["body"]!!.jsonPrimitive.content)
+        assertEquals("invite", inner["type"]!!.jsonPrimitive.content)
+        assertEquals("~zod", inner["who"]!!.jsonPrimitive.content)
     }
 
     @Test

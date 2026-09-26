@@ -24,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -107,18 +108,94 @@ class NotebookScreensTest {
         assertEquals(listOf("note 11", "back"), did)
     }
 
+    private val laksa = """{"folderId":9,"notebookId":7,"title":"Laksa","revision":1,"id":12,"createdBy":"~zod",
+        "createdAt":1784592600,"bodyMd":"","updatedAt":1784592600,"updatedBy":"~zod","slug":null}"""
+    private val stocks = """{"name":"Stocks","notebookId":7,"id":12,"createdBy":"~zod","createdAt":1,"parentFolderId":8,"updatedAt":1,"updatedBy":"~zod"}"""
+
+    /** Add something through the "+" menu: [what] is "New note" or "New folder". */
+    private fun ComposeUiTest.add(what: String, name: String) {
+        onNodeWithContentDescription("Add").performClick()
+        onNodeWithText(what).performClick()
+        onNode(hasSetTextAction()).performTextInput(name)
+        onNodeWithText("Create").performClick()
+    }
+
+    // A create went as a channel poke, which the ship answers as soon as
+    // it has it: the host's refusal never came back, and nothing appeared.
+    // It goes to %notes' REST route now, which answers once the host has.
+
     @Test
-    fun `a new note is made in the folder being looked at`() = channel { ship, _ ->
+    fun `a new note is made in the folder being looked at, and shows once the host has it`() = channel { ship, _ ->
+        ship.answerApi = { method, path, _ ->
+            if (method == "POST" && path.endsWith("/notes")) {
+                ship.scries["notes/v0/notes/~bus/recipes"] = ship.scries.getValue("notes/v0/notes/~bus/recipes").trimEnd().removeSuffix("]") + ",$laksa]"
+                """{"body":{"type":"ok","response":{}}}"""
+            } else null
+        }
         showing("Soups")
         onNodeWithText("Soups").performClick()
         showing("Pho")
-        onNodeWithContentDescription("Add").performClick()
-        onNodeWithText("New note").performClick()
-        onNode(hasSetTextAction()).performTextInput("Laksa")
-        onNodeWithText("Create").performClick()
-        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("notes").isNotEmpty() }
-        val made = ship.pokesTo("notes").single().json.toString()
-        assertTrue("create-note" in made && "Laksa" in made && "\"folder\":9" in made, made)
+        add("New note", "Laksa")
+        showing("Laksa")
+        assertEquals(listOf("""POST /notes/~/v1/notebooks/~bus/recipes/notes {"folder":9,"title":"Laksa","body":""}"""), ship.api.toList())
+    }
+
+    @Test
+    fun `a new folder is made where it is asked for, and shows once the host has it`() = channel { ship, _ ->
+        ship.answerApi = { method, path, _ ->
+            if (method == "POST" && path.endsWith("/folders")) {
+                ship.scries["notes/v0/folders/~bus/recipes"] = ship.scries.getValue("notes/v0/folders/~bus/recipes").trimEnd().removeSuffix("]") + ",$stocks]"
+                """{"body":{"type":"ok","response":{}}}"""
+            } else null
+        }
+        showing("Soups")
+        add("New folder", "Stocks")
+        showing("Stocks")
+        // folderName, not name: the route's path has a name already.
+        assertEquals(listOf("""POST /notes/~/v1/notebooks/~bus/recipes/folders {"folderName":"Stocks","parent":8}"""), ship.api.toList())
+    }
+
+    @Test
+    fun `a folder the host will not take says why`() = channel { ship, _ ->
+        ship.answerApi = { _, _, _ -> """{"body":{"type":"error","errorType":"not-authorized","message":[]}}""" }
+        showing("Soups")
+        add("New folder", "Stocks")
+        showing("You can't add to this notebook")
+        assertTrue(!shows("Stocks"))
+    }
+
+    @Test
+    fun `a note the host has not answered for yet says so`() = channel { ship, _ ->
+        ship.answerApi = { _, _, _ -> """{"body":{"type":"pending","status":"sending"}}""" }
+        showing("Soups")
+        add("New note", "Laksa")
+        showing("hasn't answered yet")
+    }
+
+    @Test
+    fun `a ship that cannot take it says so`() = channel { _, _ ->
+        // answerApi says nothing: the route is not there (404).
+        showing("Soups")
+        add("New folder", "Stocks")
+        showing("Your ship couldn't take it")
+    }
+
+    @Test
+    fun `leaving the notebook while a folder is made still finishes it`() = channel { ship, repo ->
+        ship.answerApi = { method, path, _ ->
+            if (method == "POST" && path.endsWith("/folders")) {
+                Thread.sleep(400) // a busy host
+                ship.scries["notes/v0/folders/~bus/recipes"] = ship.scries.getValue("notes/v0/folders/~bus/recipes").trimEnd().removeSuffix("]") + ",$stocks]"
+                """{"body":{"type":"ok","response":{}}}"""
+            } else null
+        }
+        showing("Soups")
+        val screen = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        screen.launch { repo.notes.createFolder(io.nisfeb.talon.urbit.NotesFlag("~bus", "recipes"), 8, "Stocks") }
+        Thread.sleep(100)
+        screen.cancel()
+        // Read again once the host took it, though nobody was waiting.
+        showing("Stocks")
     }
 
     // ─── one note ─────────────────────────────────────────────────
