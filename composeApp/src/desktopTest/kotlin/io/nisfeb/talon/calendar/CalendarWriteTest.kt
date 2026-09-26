@@ -37,6 +37,8 @@ class CalendarWriteTest {
         val writtenAt = AtomicLong(0L)
         /** How long the ship takes over a write, a busy one being slow. */
         @Volatile var holdWriteMs = 0L
+        /** How long the ship takes over a read once a write is in: a busy one, seconds. */
+        @Volatile var holdReadsMs = 0L
         fun clear() = reads.clear()
     }
 
@@ -59,6 +61,7 @@ class CalendarWriteTest {
                         return@MockEngine respond("", HttpStatusCode.OK, json)
                     }
                     ship.reads += path + (req.url.encodedQuery.takeIf { it.isNotEmpty() }?.let { "?$it" } ?: "")
+                    if (ship.holdReadsMs > 0 && ship.writtenAt.get() > 0) kotlinx.coroutines.delay(ship.holdReadsMs)
                     val body = when {
                         path.endsWith("/events.json") -> tasks(ship)
                         path.endsWith("/window.json") -> window(ship)
@@ -163,6 +166,23 @@ class CalendarWriteTest {
         screen.cancel()
         kotlinx.coroutines.withTimeout(10_000) { while (repo.tasks.value?.single()?.dueMs != 1790899200000L) kotlinx.coroutines.delay(50) }
         assertTrue(ship.writtenAt.get() > 0, "the write reached the ship")
+    }
+
+    @Test
+    fun `a save is said once the ship takes it, and the task moves at once`() = calendar(tasks = { ship ->
+        val due = if (ship.writtenAt.get() > 0) "1790899200000" else "1790640000000"
+        """[{"id":"t2","cal":"default","cat":"todo","meta":{"name":"Pay rent"},"due_ms":$due}]"""
+    }) { repo, ship ->
+        ship.holdReadsMs = 1_500
+        val edited = EventDraft(name = "Pay rent", cat = EventCat.TODO, date = LocalDate(2026, 10, 1), due = LocalDate(2026, 10, 1), cal = "default")
+        val started = System.currentTimeMillis()
+        val w = repo.writeEvent(eventBody(edited, "t2"))
+        assertTrue(w.ok)
+        assertTrue(System.currentTimeMillis() - started < 1_400, "answered without waiting for the reading back")
+        assertEquals(1790812800000L, repo.tasks.value?.single()?.dueMs, "the task list has the new day at once")
+        assertTrue(w.shown.isActive, "the ship's own copy is still being read")
+        w.shown.join()
+        assertEquals(1790899200000L, repo.tasks.value?.single()?.dueMs, "then the ship's own copy")
     }
 
     @Test

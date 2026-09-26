@@ -233,8 +233,15 @@ fun CalendarScreen(
     // A new event shows on its day the moment it is saved, greyed,
     // until the calendar's own copy arrives; its id says so.
     var pendingRows by remember { mutableStateOf(listOf<CalendarRow>()) }
-    // An edited event wears its new words, greyed, until the refresh.
+    // An edited event wears its new words, greyed, until the ship takes it.
     var pendingEdits by remember { mutableStateOf(mapOf<String, EventDraft>()) }
+    // Taken by the ship, and shown as saved, not greyed, while the ship's
+    // own copy is read back: that reading is seconds more on a busy ship,
+    // and the save waited for it before it said saved.
+    var savedEdits by remember { mutableStateOf(mapOf<String, EventDraft>()) }
+    var savedRows by remember { mutableStateOf(listOf<CalendarRow>()) }
+    // Deleted, and gone from the screen at once rather than at the reading.
+    var removing by remember { mutableStateOf(setOf<String>()) }
     fun placeholderFor(d: EventDraft): CalendarRow? {
         val id = "pending-${nowMs()}"
         fun utcDay(day: LocalDate, days: Int = 1) = day.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds().let { it to it + days * 86_400_000L }
@@ -254,16 +261,25 @@ fun CalendarScreen(
             },
         )
     }
-    val visible = remember(rows, hidden, tagFilter, pendingTicks, pendingRows, pendingEdits) {
-        (rows.orEmpty() + pendingRows).filter { it.cal !in hidden && tagged(it.tags) }
+    val visible = remember(rows, hidden, tagFilter, pendingTicks, pendingRows, pendingEdits, savedEdits, savedRows, removing) {
+        val edits = savedEdits + pendingEdits
+        (rows.orEmpty() + pendingRows + savedRows).filter { it.cal !in hidden && tagged(it.tags) && it.id !in removing }
             .map { r -> pendingTicks[r.id]?.let { r.copy(done = it) } ?: r }
-            .map { r ->
-                pendingEdits[r.id]?.let { d ->
-                    r.copy(meta = buildJsonObject {
+            .mapNotNull { r ->
+                val d = edits[r.id] ?: return@mapNotNull r
+                // A task given no day is in no day's list.
+                if (d.cat == EventCat.TODO && d.due == null) return@mapNotNull null
+                // On the day it was moved to: it stayed on the old one until
+                // the reading came back, which read as the move not taking.
+                // A series keeps its occurrences; only its words change here.
+                val at = if (r.repeats || d.repeats) null else placeholderFor(d)
+                r.copy(
+                    meta = buildJsonObject {
                         put("name", d.name.trim()); if (d.location.isNotBlank()) put("location", d.location.trim()); if (d.note.isNotBlank()) put("note", d.note.trim())
                         r.color?.let { put("color", it) }
-                    })
-                } ?: r
+                    },
+                    l = at?.l ?: r.l, r = at?.r ?: r.r, all = at?.all ?: r.all,
+                )
             }
     }
     val byDay = remember(visible, zoneId) {
@@ -318,6 +334,8 @@ fun CalendarScreen(
         openById(r.id, r.idx, r.l, r.all)
     }
     fun view(r: CalendarRow) {
+        // A stand-in has no id the ship knows, to read or to edit.
+        if (r.id.startsWith("pending-") || r.id.startsWith("saved-")) return
         viewing = r
         // Edit is a button in this sheet, and it cannot open without
         // the event's rule breakdown. Read it now, while the owner is
@@ -343,6 +361,15 @@ fun CalendarScreen(
     fun act(doing: String, failed: String, body: suspend () -> Boolean) {
         editing = null
         say(doing, failed, body)
+    }
+    /** Delete [id]: gone from the screen now, back only if the ship refuses. */
+    fun removeNow(id: String, doing: String, failed: String) {
+        removing = removing + id
+        act(doing, failed) {
+            val w = repo.writeEvent(io.nisfeb.talon.calendar.deleteBody(id))
+            if (w.ok) scope.launch { w.shown.join(); removing = removing - id } else removing = removing - id
+            w.ok
+        }
     }
     // Sending an event on: to a chat as a message, by mail with an
     // invite file, or to a group, which is its channel and every ship
@@ -678,7 +705,7 @@ fun CalendarScreen(
                         items(dayRows, key = { "${it.id}/${it.idx}" }) { r ->
                             val ghost = r.id.startsWith("pending-") || r.id in editsNow
                             Row(
-                                Modifier.fillMaxWidth().clickable(enabled = !ghost) { view(r) }.alpha(if (ghost) 0.45f else 1f).padding(horizontal = 16.dp, vertical = 8.dp),
+                                Modifier.fillMaxWidth().clickable(enabled = !ghost && !r.id.startsWith("saved-")) { view(r) }.alpha(if (ghost) 0.45f else 1f).padding(horizontal = 16.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
@@ -886,9 +913,7 @@ fun CalendarScreen(
                             )
                             TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
                             TextButton(onClick = {
-                                act(if (r.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${r.name}\"; it is still there.") {
-                                    repo.pokeEvent(io.nisfeb.talon.calendar.deleteBody(r.id))
-                                }
+                                removeNow(r.id, if (r.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${r.name}\"; it is still there.")
                                 viewing = null
                             }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
                         }
@@ -970,7 +995,7 @@ fun CalendarScreen(
                 act(if (id == null) "Adding…" else "Saving…", "The ship did not take the change; \"${d.name.trim()}\" is as it was.") {
                     // The whole write on the repo's scope: leaving the screen
                     // no longer cancels it partway (a series edit is two pokes).
-                    val ok = repo.carry {
+                    val written = repo.carry {
                         // A ticked task opened from its row lacks when it was
                         // done; read it here, behind the closed editor, or the
                         // save would stamp it done now.
@@ -979,18 +1004,33 @@ fun CalendarScreen(
                         } else d
                         when {
                             id == null || editScope == EditScope.ALL || idx == null || occurrence == null ->
-                                repo.pokeEvent(eventBody(d, id))
+                                repo.writeEvent(eventBody(d, id))
                             // The page's own two steps: end or skip the old, then add.
                             editScope == EditScope.FOLLOWING ->
-                                repo.pokeEvent(buildJsonObject { put("action", "cap-event"); put("id", id); put("dom", idx) }, readBack = false) &&
-                                    repo.pokeEvent(followingBody(d, occurrence))
+                                if (repo.pokeEvent(buildJsonObject { put("action", "cap-event"); put("id", id); put("dom", idx) }, readBack = false)) {
+                                    repo.writeEvent(followingBody(d, occurrence))
+                                } else null
                             else ->
-                                repo.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) }, readBack = false) &&
-                                    repo.pokeEvent(onlyBody(d, occurrence))
+                                if (repo.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) }, readBack = false)) {
+                                    repo.writeEvent(onlyBody(d, occurrence))
+                                } else null
                         }
                     }
+                    val ok = written?.ok == true
                     if (ghost != null) pendingRows = pendingRows - ghost
                     if (id != null) pendingEdits = pendingEdits - id
+                    if (ok) {
+                        // Saved, and said so now; shown as saved until the
+                        // ship's own copy comes back in.
+                        val kept = ghost?.copy(id = "saved-" + ghost.id)
+                        if (kept != null) savedRows = savedRows + kept
+                        if (id != null) savedEdits = savedEdits + (id to d)
+                        scope.launch {
+                            written!!.shown.join()
+                            if (kept != null) savedRows = savedRows - kept
+                            if (id != null) savedEdits = savedEdits - id
+                        }
+                    }
                     // A new event, posted where it was asked to go.
                     val target = postTo
                     if (ok && id == null && target != null && chat != null && ghost != null) {
@@ -1005,9 +1045,7 @@ fun CalendarScreen(
             },
             onDelete = if (id == null) null else {
                 {
-                    act(if (draft.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${draft.name.trim()}\"; it is still there.") {
-                        repo.pokeEvent(io.nisfeb.talon.calendar.deleteBody(id))
-                    }
+                    removeNow(id, if (draft.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${draft.name.trim()}\"; it is still there.")
                 }
             },
             onSkip = if (id == null || editingIdx == null) null else {

@@ -434,9 +434,53 @@ class CalendarRepo(
      * of a chain: the second write of an occurrence's edit waited out the
      * first's reading, up to half a minute. False when refused.
      */
-    suspend fun pokeEvent(body: JsonObject, readBack: Boolean = true): Boolean = carry {
+    suspend fun pokeEvent(body: JsonObject, readBack: Boolean = true): Boolean =
+        writeEvent(body, readBack).let { it.shown.join(); it.ok }
+
+    /**
+     * A write the ship has taken or refused ([ok]), and [shown]: done once
+     * it has been read back into the lists, or the reading has given up.
+     */
+    class Written(val ok: Boolean, val shown: Job)
+
+    /**
+     * [pokeEvent] that answers as soon as the ship has taken the write, the
+     * reading back going on behind it. A save waited for that reading, three
+     * requests and more of seconds each on a busy ship, before it said saved;
+     * a screen now says so at once and keeps the change on show till then.
+     * A task the ship took is changed in the task list straight away.
+     */
+    suspend fun writeEvent(body: JsonObject, readBack: Boolean = true): Written = carry {
         val reach = reachOf(body)
-        write(body).also { if (it && readBack) afterItemWrite(reach) }
+        val ok = write(body)
+        if (ok) assumeTask(body)
+        val shown = if (ok && readBack) scope.launch { afterItemWrite(reach) } else Job().also { it.complete() }
+        Written(ok, shown)
+    }
+
+    /**
+     * A task write the ship has taken, in the task list at once as the ship
+     * will have it: the list, and the home page's today read from it, moved
+     * only once the reading back came in. The reading puts the ship's own
+     * copy in its place.
+     */
+    private fun assumeTask(body: JsonObject) {
+        fun str(k: String) = (body[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        val list = _tasks.value ?: return
+        val id = str("id") ?: return
+        val old = list.firstOrNull { it.id == id } ?: return
+        val new = when (str("action")) {
+            "done-event" -> old.copy(done = str("done")?.toBooleanStrictOrNull() ?: return)
+            "del-event" -> null
+            "edit-event" -> if (str("cat") != "todo") return else old.copy(
+                cal = str("cal") ?: old.cal,
+                meta = body["meta"] as? JsonObject ?: old.meta,
+                dueMs = str("due_ms")?.toLongOrNull(),
+                done = body.containsKey("done_ms"),
+            )
+            else -> return
+        }
+        _tasks.value = if (new == null) list - old else list.map { if (it.id == id) new else it }
     }
 
     /**
@@ -509,7 +553,7 @@ class CalendarRepo(
      */
     private suspend fun afterItemWrite(reach: Reach) {
         // A task listing nothing has read has nothing to bring up to date.
-        val tasks = reach.tasks && _tasks.value != null
+        val tasks = reach.tasks && reach.before.first != null
         if (!tasks && !reach.rows) { keep(); return }
         // The ship answers a write before it applies it, and a busy one
         // applies it seconds later: read once, the old copy came back,
@@ -517,29 +561,39 @@ class CalendarRepo(
         // the next poll, ten minutes on. So read until something moved,
         // a few times at most, waiting longer each time.
         var pause = 500L
+        // The task list is read aside and put in place once it has moved, or
+        // at the end: put in on every read, the old copy of a late ship
+        // would undo the change assumeTask showed.
+        val a = api
+        suspend fun readTasks() = a?.let { runSuspendCatching { it.tasks() }.getOrNull() }
+        var got: List<CalendarTask>? = null
         for (attempt in 1..AFTER_WRITE_READS) {
-            if (tasks) refreshTasks()
+            if (tasks) got = readTasks() ?: got
             if (reach.rows) {
                 refreshWindow()
                 range?.let { (f, t) -> loadRange(f, t) }
             }
             // Against the lists from before the write: taken after it, a
             // refresh that landed in between made the change look never come.
-            val now = lists()
-            if (now != reach.before) {
+            val tasksMoved = tasks && got != null && got != reach.before.first
+            val windowMoved = reach.rows && _rows.value != reach.before.second
+            val monthMoved = reach.rows && _rangeRows.value != reach.before.third
+            if (tasksMoved || windowMoved || monthMoved) {
                 // It can land between two reads of one pass: the list read
                 // first is then the old copy. The home screen's tasks kept a
                 // moved one on today while the month showed it on Monday.
                 // What came back unchanged is read once more.
-                if (tasks && now.first == reach.before.first) refreshTasks()
-                if (reach.rows && now.second == reach.before.second) refreshWindow()
-                if (reach.rows && now.third == reach.before.third) range?.let { (f, t) -> loadRange(f, t) }
+                if (tasks && !tasksMoved) got = readTasks() ?: got
+                if (reach.rows && !windowMoved) refreshWindow()
+                if (reach.rows && !monthMoved) range?.let { (f, t) -> loadRange(f, t) }
                 break
             }
             if (attempt == AFTER_WRITE_READS) break
             delay(pause)
             pause *= 2
         }
+        // The ship's own word, moved or not: a write it never applied goes.
+        if (tasks) got?.let { _tasks.value = it }
         // So a phone closed straight after a tick opens on the tick.
         keep()
     }
