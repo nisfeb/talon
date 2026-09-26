@@ -28,10 +28,13 @@ class ShipNamingTest {
     )
 
     @Test
-    fun alwaysPatpOverridesEverything() {
+    fun alwaysPatpShowsTheUrbitNameButACometsWordName() {
         val m = map(alwaysPatp = true)
-        assertEquals("~litzod", m.displayName("~litzod"))
-        assertEquals(COMET, m.displayName(COMET))
+        assertEquals("~litzod", m.displayName("~litzod"), "a nickname is set aside")
+        // A comet's @p is its key: its word name stays, the setting or not.
+        assertEquals(Mnemonym.display(COMET), m.displayName(COMET))
+        val nickedComet = ContactMap(contacts = listOf(bare.copy(nickname = "Bus")), alwaysPatp = true)
+        assertEquals(Mnemonym.display(COMET), nickedComet.displayName(COMET), "and a comet's nickname too")
     }
 
     @Test

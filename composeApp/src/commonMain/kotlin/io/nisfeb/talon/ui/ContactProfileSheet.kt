@@ -27,7 +27,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -113,13 +112,9 @@ fun ContactProfileSheet(
             // replaces, and some places still want exactly those.
             //
             // Every other ship shows its @p, which is its real name and
-            // short enough to read.
-            // Unless the reader asked for raw @p everywhere: that
-            // toggle means what it says, here as on every other screen.
-            val alwaysPatp by ShipNames.alwaysPatp.collectAsState()
-            val nym = remember(ship, alwaysPatp) {
-                if (alwaysPatp) null else Mnemonym.forShip(ship)
-            }
+            // short enough to read. "Always show ~ship names" keeps a
+            // comet's word name too: its @p is only its key.
+            val nym = remember(ship) { Mnemonym.forShip(ship) }
             Text(
                 nym ?: ship,
                 style = MaterialTheme.typography.bodyMedium,

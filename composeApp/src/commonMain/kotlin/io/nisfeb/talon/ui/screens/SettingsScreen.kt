@@ -389,9 +389,10 @@ fun SettingsScreen(
             val alwaysPatp by io.nisfeb.talon.ui.ShipNames.alwaysPatp.collectAsState()
             FeatureToggleRow(
                 label = "Always show ~ship names",
-                description = "Ignore nicknames and word-based names " +
-                    "everywhere — rows, mentions and quoted posts all " +
-                    "show the raw Urbit name.",
+                description = "Ignore nicknames and planets' word names " +
+                    "everywhere: rows, mentions and quoted posts show the " +
+                    "Urbit name. A comet keeps its word name, since its " +
+                    "Urbit name is its key.",
                 enabled = alwaysPatp,
                 onChange = { on ->
                     io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(on)

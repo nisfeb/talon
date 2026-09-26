@@ -80,7 +80,10 @@ data class ContactMap(
     fun avatar(ship: String): String? = byShip[ship]?.avatarUrl
     fun displayName(ship: String): String =
         if (alwaysPatp) {
-            ship
+            // A comet keeps its word name: its @p is its key, fifty-six
+            // characters nobody reads, and the setting is about telling
+            // ships by their own names rather than anyone's nicknames.
+            Mnemonym.display(ship) ?: ship
         } else {
             nickname(ship) ?: handle(ship)
         }

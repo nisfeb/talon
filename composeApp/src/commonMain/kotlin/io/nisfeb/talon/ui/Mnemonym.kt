@@ -202,13 +202,13 @@ object Mnemonym {
  * to see, so one person's nickname for someone never leaks into
  * another person's view. Precedence:
  *
- *   1. [alwaysPatp] on  -> the raw @p, always
+ *   1. [alwaysPatp] on  -> a comet's mnemonym, else the raw @p
  *   2. a nickname the reader has for that ship
  *   3. the mnemonym, for a comet
  *   4. the raw @p
  */
 object ShipNames {
-    /** Ignore nicknames and mnemonyms entirely; show @p everywhere. */
+    /** Ignore nicknames and planets' word names; show the @p, or a comet's mnemonym. */
     val alwaysPatp = MutableStateFlow(false)
 
     /** Wired by the platform UiSettings at startup. */
