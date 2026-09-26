@@ -192,10 +192,40 @@ class GroupAdminScreenTest {
     }
 
     @Test
-    fun `who can post is not offered where the ship cannot say`() = admin(group = withChannels) { ship ->
-        openGeneral(ship, writers = null)
-        assertTrue(says("couldn't say who can post"))
+    fun `a channel this ship has not joined says so, and posting is not offered`() = admin(group = withChannels) { ship ->
+        openGeneral(ship, writers = null) // %channels has no such channel here: 404
+        assertTrue(says("hasn't joined this channel"))
         assertTrue(onAllNodes(isToggleable() and hasText("Everyone in the group can post")).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `a ship that fails to say who can post says so, not that it has not joined`() = admin(group = withChannels) { ship ->
+        ship.failScry = { it.endsWith("/perm") }
+        openGeneral(ship, writers = null)
+        assertTrue(says("didn't say who can post"))
+        assertTrue(!says("hasn't joined"))
+        assertTrue(onAllNodes(isToggleable() and hasText("Everyone in the group can post")).fetchSemanticsNodes().isEmpty())
+    }
+
+    // A notebook is %notes', not a %channels channel: asking %channels
+    // who may post in one always failed, and said to join a notebook the
+    // owner had written in that day.
+    @Test
+    fun `a notebook says everyone who reads it writes in it, and its readers are still set`() = admin(
+        group = record.trimEnd().removeSuffix("}") + """,
+            "roles":{"admin":{"meta":{"title":"Admin","description":"","image":"","cover":""}}},
+            "channels":{"notes/~zod/journal":{"meta":{"title":"Journal","description":"","image":"","cover":""},
+                        "added":1700000000000,"section":"default","readers":[],"join":true}}}""",
+    ) { ship ->
+        onNodeWithText("Settings").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Who can post") }
+        assertTrue(says("everyone who can read it can also write in it"))
+        assertTrue(ship.scried.none { it.startsWith("channels/") }, ship.scried.toString())
+        assertTrue(onAllNodes(isToggleable() and hasText("Everyone in the group can post")).fetchSemanticsNodes().isEmpty())
+        assertEquals(
+            """{"group":{"flag":"$flag","a-group":{"channel":{"nest":"notes/~zod/journal","a-channel":{"add-readers":["admin"]}}}}}""",
+            flip(ship, "Everyone in the group can read", "groups").json.toString(),
+        )
     }
 
     @Test

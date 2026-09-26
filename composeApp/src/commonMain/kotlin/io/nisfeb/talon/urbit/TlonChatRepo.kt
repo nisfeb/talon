@@ -1396,15 +1396,31 @@ class TlonChatRepo(
         return nest
     }
 
+    /** What this ship's %channels says of who may post in a channel. */
+    sealed interface ChannelWriters {
+        /** Role ids; none means every member. */
+        data class Roles(val ids: Set<String>) : ChannelWriters
+        /** %channels has no such channel here: this ship has not joined it. */
+        data object NotJoined : ChannelWriters
+        /** The ship did not say, or said something unreadable. Not the same as everyone. */
+        data class NoAnswer(val why: String) : ChannelWriters
+    }
+
     /**
-     * Who may post in [nest], as this ship's %channels has it: role ids,
-     * none meaning every member. Null where it could not say, a channel
-     * this ship has not joined among it: not the same as everyone.
+     * Who may post in [nest]. A notebook (notes/) is not a %channels
+     * channel at all, so ask only for the others: every one read as
+     * "not joined", though the owner had written in it that day.
      */
-    suspend fun fetchChannelWriters(nest: String): Set<String>? {
-        val ch = channel ?: return null
-        val perm = runCatching { ch.scry("channels", "/v4/$nest/perm") as? JsonObject }.getOrNull() ?: return null
-        return (perm["writers"] as? JsonArray)?.mapNotNull { it.asStr() }?.toSet()
+    suspend fun fetchChannelWriters(nest: String): ChannelWriters {
+        val ch = channel ?: return ChannelWriters.NoAnswer("not connected")
+        val perm = runCatching { ch.scry("channels", "/v4/$nest/perm") }.getOrElse { e ->
+            // ponytail: the status read off our own scry error; a typed error if another caller needs it.
+            return if ("HTTP 404" in e.message.orEmpty()) ChannelWriters.NotJoined
+            else ChannelWriters.NoAnswer(e.message ?: e::class.simpleName.orEmpty())
+        }
+        val writers = ((perm as? JsonObject)?.get("writers") as? JsonArray)
+            ?: return ChannelWriters.NoAnswer("its answer had no writers")
+        return ChannelWriters.Roles(writers.mapNotNull { it.asStr() }.toSet())
     }
 
     /**

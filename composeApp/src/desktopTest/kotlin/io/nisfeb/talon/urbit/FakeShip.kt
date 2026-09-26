@@ -55,6 +55,8 @@ internal class FakeShip(val us: String = "~zod") {
 
     /** The answer to an API request, or null for 404. */
     @Volatile var answerApi: (method: String, path: String, body: String) -> String? = { _, _, _ -> null }
+    /** A scry the ship fails on (500), as a crashed or busy agent does; unlike one it has no answer for (404). */
+    @Volatile var failScry: (path: String) -> Boolean = { false }
     /** Every request, "METHOD path", whatever it was for: what an app that must say nothing did say. */
     val requests: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
@@ -133,6 +135,8 @@ internal class FakeShip(val us: String = "~zod") {
             }
             req.method == HttpMethod.Get && path.startsWith("/~/channel/") ->
                 respond(writing.withLock { pipeOf(path) }.stream, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+            path.startsWith("/~/scry/") && failScry(path.removePrefix("/~/scry/").removeSuffix(".json")) ->
+                respond("", HttpStatusCode.InternalServerError)
             path.startsWith("/~/scry/") ->
                 path.removePrefix("/~/scry/").removeSuffix(".json").also { scried += it }
                     .let { scries[it] }

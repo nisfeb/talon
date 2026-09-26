@@ -1441,14 +1441,11 @@ private fun ChannelSettingsDialog(
     var title by remember(c.nest, c.title) { mutableStateOf(c.title) }
     var description by remember(c.nest, c.description) { mutableStateOf(c.description) }
     var readers by remember(c.nest, c.readers) { mutableStateOf(c.readers) }
-    // Null until the ship says, and null if it cannot: posting is then not
-    // offered, since an empty list would read as everyone.
-    var writers by remember(c.nest) { mutableStateOf<Set<String>?>(null) }
-    var writersAsked by remember(c.nest) { mutableStateOf(false) }
-    LaunchedEffect(c.nest) {
-        writers = repo.fetchChannelWriters(c.nest)
-        writersAsked = true
-    }
+    // Null until the ship says. Posting is offered only once it has said
+    // which roles: an empty list would read as everyone.
+    val notebook = c.kind == "notes"
+    var writers by remember(c.nest) { mutableStateOf<TlonChatRepo.ChannelWriters?>(null) }
+    LaunchedEffect(c.nest) { if (!notebook) writers = repo.fetchChannelWriters(c.nest) }
     var confirmDelete by remember { mutableStateOf(false) }
     fun act(block: suspend () -> Unit, after: () -> Unit = {}) {
         scope.launch {
@@ -1487,16 +1484,23 @@ private fun ChannelSettingsDialog(
                 }
                 HorizontalDivider()
                 Text("Who can post", style = MaterialTheme.typography.titleSmall)
-                val w = writers
-                when {
-                    !writersAsked -> Text("Asking your ship…", style = MaterialTheme.typography.bodySmall)
-                    w == null -> Text(
-                        "Your ship couldn't say who can post here. Join the channel on this ship to change it.",
+                // %notes makes everyone who joins a notebook an editor, and a
+                // group notebook takes its readers from the group.
+                if (notebook) Text("In a notebook, everyone who can read it can also write in it.", style = MaterialTheme.typography.bodySmall)
+                else when (val w = writers) {
+                    null -> Text("Asking your ship…", style = MaterialTheme.typography.bodySmall)
+                    TlonChatRepo.ChannelWriters.NotJoined -> Text(
+                        "Your ship hasn't joined this channel, so it can't say who can post. Join it on this ship to change this.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
-                    else -> Audience("post", roles, w, busy) { now ->
-                        act({ repo.setChannelWriters(c.nest, w, now) }, after = { writers = now })
+                    is TlonChatRepo.ChannelWriters.NoAnswer -> Text(
+                        "Your ship didn't say who can post (${w.why}). Close this and open it again to retry.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    is TlonChatRepo.ChannelWriters.Roles -> Audience("post", roles, w.ids, busy) { now ->
+                        act({ repo.setChannelWriters(c.nest, w.ids, now) }, after = { writers = TlonChatRepo.ChannelWriters.Roles(now) })
                     }
                 }
                 HorizontalDivider()
