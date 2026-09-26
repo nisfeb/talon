@@ -26,7 +26,8 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.orrery.OrreryRepo
-import io.nisfeb.talon.ui.screens.AiSettingsSection
+import io.nisfeb.talon.ai.AiSettings
+import io.nisfeb.talon.ui.screens.OrrerySettingsSection
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.urbit.FakeAiSettings
 import kotlinx.coroutines.CoroutineScope
@@ -87,7 +88,12 @@ class OrreryReaderRowsTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
                         Column(Modifier.verticalScroll(rememberScrollState())) {
-                            AiSettingsSection(FakeAiSettings(), orrery = orrery)
+                            OrrerySettingsSection(
+                                FakeAiSettings().apply {
+                                    applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "", model = null, savedProfile = io.nisfeb.talon.ai.AiProfile(orrery = true)))
+                                },
+                                orrery = orrery,
+                            )
                         }
                     }
                 }

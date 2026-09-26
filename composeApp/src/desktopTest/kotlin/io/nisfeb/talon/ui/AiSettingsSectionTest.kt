@@ -55,7 +55,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class AiSettingsSectionTest {
     @Test
-    fun `the first change saves the profile the old settings made, and jev waits for openrouter`() = runComposeUiTest {
+    fun `the first change saves the profile the old settings made`() = runComposeUiTest {
         val ai = FakeAiSettings().apply { applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "sk-ant", model = "claude-opus-5")) }
         setContent {
             TalonTheme(darkTheme = false) {
@@ -65,12 +65,12 @@ class AiSettingsSectionTest {
         onNodeWithText("Providers").assertExists()
         onNodeWithText("claude-opus-5, Anthropic").assertExists()
         onNodeWithText("Default: claude-opus-5, Anthropic").assertExists()
-        onNodeWithText("Needs an OpenRouter provider with a key", substring = true).assertExists()
         assertNull(ai.state.value.savedProfile, "looking saves nothing")
+        // Orrery's rows, Jev with them, are on its own page now.
+        assertTrue(onAllNodesWithText("Jev gating").fetchSemanticsNodes().isEmpty())
 
-        // Rows in order: catch-up first, Jev last and greyed.
+        // Rows in order: catch-up first.
         val switches = onAllNodes(isToggleable())
-        switches[switches.fetchSemanticsNodes().size - 1].assertIsNotEnabled()
         switches[0].performClick()
         waitForIdle()
         val saved = ai.state.value.savedProfile!!

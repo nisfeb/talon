@@ -443,9 +443,17 @@ fun TalonApp(
     DisposableEffect(orreryRepo) {
         onDispose { runCatching { orreryRepo.detach() } }
     }
-    LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip) {
-        if (mailShipUrl != null && loggedInShip != null) orreryRepo.attach(mailShipUrl, loggedInShip)
+    // Orrery runs only when the owner turned it on (Settings > Orrery),
+    // for all their devices: off, nothing probes, pushes or listens.
+    val orreryGate = app.aiSettings.state.collectAsState().value.savedProfile?.orrery
+    LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip, orreryGate == true) {
+        if (orreryGate == true && mailShipUrl != null && loggedInShip != null) orreryRepo.attach(mailShipUrl, loggedInShip)
         else orreryRepo.detach()
+    }
+    LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip, orreryGate) {
+        val url = mailShipUrl ?: return@LaunchedEffect
+        val ship = loggedInShip ?: return@LaunchedEffect
+        io.nisfeb.talon.orrery.settleOrreryGate(orreryGate, app.db, app.aiSettings, orreryRepo, url, ship)
     }
     // Armillary rides the same surface again: the owner's cookie, and
     // the AI settings, where the provider row it keeps lives.
@@ -468,7 +476,7 @@ fun TalonApp(
     // Whether the pipe is on at all: the actions section is its.
     val orreryOn = orreryRepo.availability.collectAsState().value ==
         io.nisfeb.talon.orrery.OrreryAvailability.PRESENT
-    openAction?.let { action ->
+    openAction?.takeIf { orreryGate == true }?.let { action ->
         io.nisfeb.talon.ui.OrreryActionDialog(
             action = action,
             orrery = orreryRepo,
@@ -2117,7 +2125,8 @@ fun TalonApp(
             appsOpen -> io.nisfeb.talon.ui.screens.AppsSettingsScreen(
                 mail = mailRepo,
                 calendar = calendarRepo,
-                orrery = orreryRepo,
+                // Off, Orrery is nowhere in Talon, the Apps page too.
+                orrery = orreryRepo.takeIf { orreryGate == true },
                 armillary = armillaryRepo,
                 latticeInstalled = app.sessionStore.active()?.shipUrl?.let { url ->
                     { io.nisfeb.talon.urbit.LatticeInstall.installedOrUnknown(app.ktorHttp, url) ?: error("The ship could not be asked.") }
@@ -2171,7 +2180,8 @@ fun TalonApp(
                 mail = mailRepo,
                 calendar = calendarRepo,
                 calls = callController,
-                orrery = orreryRepo,
+                // No Orrery tools while Orrery is off.
+                orrery = orreryRepo.takeIf { orreryGate == true },
                 listenOnOpen = assistantListen,
                 onTopUp = openTopUp,
                 session = assistantSession,
@@ -2857,6 +2867,7 @@ fun TalonApp(
             )
 
             else -> DmListScreen(
+                orreryOn = orreryGate == true,
                 db = app.db,
                 repo = app.repo,
                 drafts = app.drafts,

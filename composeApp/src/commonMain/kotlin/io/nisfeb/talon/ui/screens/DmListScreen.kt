@@ -109,6 +109,8 @@ import io.nisfeb.talon.ui.icons.TalonIcons
 @Composable
 fun DmListScreen(
     db: AppDatabase,
+    /** Orrery is on; off, its tray of noticed claims is not shown. */
+    orreryOn: Boolean = true,
     repo: TlonChatRepo,
     drafts: DraftStore,
     updateState: UpdateState,
@@ -235,8 +237,8 @@ fun DmListScreen(
     val dmInvites by remember { db.dmInvites().stream() }
         .collectAsState(initial = emptyList())
     // What the orrery triage noticed in what people said, waiting for a word.
-    val noticed by remember(activeShip) {
-        activeShip?.let { db.orreryNoticed().pending(it) } ?: kotlinx.coroutines.flow.flowOf(emptyList())
+    val noticed by remember(activeShip, orreryOn) {
+        activeShip?.takeIf { orreryOn }?.let { db.orreryNoticed().pending(it) } ?: kotlinx.coroutines.flow.flowOf(emptyList())
     }.collectAsState(initial = emptyList())
     val rows by remember {
         combine(

@@ -208,6 +208,9 @@ fun SettingsScreen(
                 add(SettingsTab.Notifications)
             }
             add(SettingsTab.Ai)
+            // Under AI, and its own page: many will want it off, which is
+            // how it starts.
+            add(SettingsTab.Orrery)
             if (isCallsSupported && callController != null) add(SettingsTab.Calls)
             add(SettingsTab.Account)
             add(SettingsTab.About)
@@ -736,9 +739,12 @@ fun SettingsScreen(
             Spacer(Modifier.height(4.dp))
 
             }
+            if (safeTab == SettingsTab.Orrery) {
+                OrrerySettingsSection(aiSettings, orrery)
+            }
             if (safeTab == SettingsTab.Ai) {
             // Providers, the default model, a row per feature, and Jev.
-            AiSettingsSection(aiSettings, orrery, armillary)
+            AiSettingsSection(aiSettings, orrery, armillary, onOpenOrrery = { tab = SettingsTab.Orrery })
             // The assistant subsumes MCP (ship tools) and web access —
             // no separate toggles. When it's on, offer the optional
             // Brave key that powers its web search (it can open URLs
@@ -1968,6 +1974,7 @@ private enum class SettingsTab(val label: String) {
     Chats("Chats"),
     Notifications("Notifications"),
     Ai("AI"),
+    Orrery("Orrery"),
     Calls("Calls"),
     Account("Account"),
     About("About"),

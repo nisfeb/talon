@@ -280,7 +280,8 @@ class TalonApplication : Application() {
         OrreryWorker.schedule(this)
         // Where the owner is, on a move: a registration a reboot or an
         // update ended is made again here. A no-op while the switch is off.
-        runCatching { io.nisfeb.talon.orrery.LocationWatch.resume(this) }
+        // And only with Orrery on: off, where the owner is goes nowhere.
+        if (aiSettings.state.value.savedProfile?.orrery == true) runCatching { io.nisfeb.talon.orrery.LocationWatch.resume(this) }
 
 
         // User loops — headless scheduled agent runs. Ship-scoped deps

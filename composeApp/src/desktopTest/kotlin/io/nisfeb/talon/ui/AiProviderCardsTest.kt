@@ -59,17 +59,21 @@ class AiProviderCardsTest {
 
     private val home = AiProvider("srv", ProviderKind.OpenAiCompatible, "Home box")
 
-    private fun section(vararg providers: AiProvider, default: ModelRef? = null, jev: Boolean? = null, block: ComposeUiTest.(FakeAiSettings) -> Unit) {
+    private fun section(vararg providers: AiProvider, default: ModelRef? = null, jev: Boolean? = null, orreryPage: Boolean = false, block: ComposeUiTest.(FakeAiSettings) -> Unit) {
         val ai = FakeAiSettings().apply {
             applyRemote(AiSettings.Config(
                 provider = AiSettings.Provider.Anthropic, apiKey = "", model = null,
-                savedProfile = AiProfile(providers.toList(), defaultModel = default, jev = jev),
+                savedProfile = AiProfile(providers.toList(), defaultModel = default, jev = jev, orrery = orreryPage.takeIf { it }),
             ))
         }
         runComposeUiTest {
             setContent {
                 TalonTheme(darkTheme = false) {
-                    Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null) }
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        // Jev is Orrery's, on Orrery's page, with Orrery on.
+                        if (orreryPage) io.nisfeb.talon.ui.screens.OrrerySettingsSection(ai, orrery = null)
+                        else AiSettingsSection(ai, orrery = null)
+                    }
                 }
             }
             waitForIdle()
@@ -183,7 +187,7 @@ class AiProviderCardsTest {
 
     @Test
     fun `jev left on with nobody offering it says so, and can still be turned off`() =
-        section(home.copy(baseUrl = address), jev = true) { ai ->
+        section(home.copy(baseUrl = address), jev = true, orreryPage = true) { ai ->
             assertTrue(shows("No provider offers Jev any more, so nothing is being gated."))
             switchBeside("Jev gating").assertIsEnabled().performClick()
             waitForIdle()

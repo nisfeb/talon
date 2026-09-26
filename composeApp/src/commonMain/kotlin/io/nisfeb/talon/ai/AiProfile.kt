@@ -84,6 +84,14 @@ data class AiProfile(
      */
     val jev: Boolean? = null,
     /**
+     * Orrery, all of it: off (null or false) unless the owner turned it on.
+     * Many will not want it: it reads messages, calls and mail. One switch
+     * for every device, travelling with the other switches. Null is never
+     * set, false turned off, which is what tells a device to give its key
+     * back; see [orreryOn].
+     */
+    val orrery: Boolean? = null,
+    /**
      * When the owner saved this profile on this device, or 0 for one
      * that arrived from the ship or was made from older settings. It
      * never travels. While set, this device has something to say about
@@ -558,6 +566,7 @@ private val SYNCED_SWITCHES = listOf(AiFeature.CatchUp, AiFeature.Assistant)
 fun AiProfile.switches(): kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.buildJsonObject {
     SYNCED_SWITCHES.forEach { f -> put(f.name, kotlinx.serialization.json.JsonPrimitive(isOn(f))) }
     jev?.let { put("jev", kotlinx.serialization.json.JsonPrimitive(it)) }
+    orrery?.let { put("orrery", kotlinx.serialization.json.JsonPrimitive(it)) }
 }
 
 fun AiProfile.withSwitches(s: kotlinx.serialization.json.JsonObject): AiProfile = copy(
@@ -566,7 +575,14 @@ fun AiProfile.withSwitches(s: kotlinx.serialization.json.JsonObject): AiProfile 
             ?.let { on -> f to (features[f] ?: FeatureSetting()).copy(on = on) }
     },
     jev = (s["jev"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: jev,
+    orrery = (s["orrery"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: orrery,
 )
+
+/** Orrery is on: turned on by the owner, on some device. Off by default. */
+fun AiSettings.Config.orreryOn(): Boolean = savedProfile?.orrery == true
+
+/** The profile with Orrery turned [on], from the saved one or the one these settings make. */
+fun AiSettings.Config.withOrrery(on: Boolean): AiProfile = (savedProfile ?: migrateProfile(this)).copy(orrery = on)
 
 /**
  * The profile after one AI settings entry arrives from the ship, [merged]
@@ -602,7 +618,7 @@ fun profileAfterEntry(
         // it anyway, so a phone with no speech model turned it off here.
         incoming != null -> incoming.keepingLocal(local)
             .let { it.copy(features = it.features.filterKeys { f -> f != AiFeature.Transcription } + local.features.filterKeys { f -> f == AiFeature.Transcription }) }
-            .let { if (switches != null) it else it.withSwitches(local.switches()).copy(jev = local.jev) }
+            .let { if (switches != null) it else it.withSwitches(local.switches()).copy(jev = local.jev, orrery = local.orrery) }
         fromOld -> base!!.withLegacy(merged)
         else -> base
     }

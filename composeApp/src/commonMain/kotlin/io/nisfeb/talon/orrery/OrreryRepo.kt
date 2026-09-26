@@ -18,6 +18,8 @@ import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.createAppHttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import io.nisfeb.talon.ai.withOrrery
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -438,6 +440,65 @@ class OrreryRepo(
         _chatReader.value = null
         _chatReaderRun.value = null
         scopeChecked = false
+        // Nothing of the ship left is waiting on the owner: with Orrery off,
+        // or another ship, its proposals and their notifications go.
+        val shown = _actions.value.map { it.id }.toSet()
+        _actions.value = emptyList()
+        if (shown.isNotEmpty()) onActions?.invoke(emptyList(), shown)
+    }
+
+    /**
+     * Orrery turned off here: the ship's own work stops too (its chat and
+     * mail readers, the DM sender and the generator), then this install's
+     * key goes back ([forget]), and [after] (the switch) is flipped. What
+     * did not stop is returned, in words, for the page to say. On this
+     * repo's scope, so leaving the page does not stop it halfway.
+     */
+    suspend fun switchOff(after: () -> Unit = {}): List<String> = scope.async {
+        val missed = mutableListOf<String>()
+        if (_availability.value == OrreryAvailability.PRESENT) {
+            // Only what is on: a ship older than a reader has nothing to stop.
+            if (_chatReader.value == null) loadChatReader()
+            _chatReader.value?.let { r ->
+                if (r.enabled || r.sendDms) {
+                    setChatReader(buildJsonObject { put("enabled", false); put("send_dms", false) })
+                        .onFailure { missed += "reading your chats" }
+                }
+            }
+            if (_mailReader.value == null) loadMailReader()
+            if (_mailReader.value == true) setMailReader(false).onFailure { missed += "reading your mail" }
+            if (_generatorSettings.value == null) runCatching { loadGenerator() }
+            if (_generatorSettings.value?.enabled == true) setGenerator(false).onFailure { missed += "writing your brief" }
+        }
+        val u = shipUrl
+        val s = ship
+        if (u != null && s != null) forget(u, s).onFailure { missed += "taking back this device's key" }
+        // The switch itself, last and here: flipped first, the repo let go
+        // of the ship before it could stop anything on it.
+        after()
+        missed
+    }.await()
+
+    /**
+     * Orrery is off, here or by another device: nothing of it stays on this
+     * install. Location stops, the tray's claims go, and this install's
+     * key is given back on the ship, without attaching (no probe, no pipe).
+     * A ship that does not answer keeps the key's row, for the next start
+     * to try again.
+     */
+    suspend fun forget(shipUrl: String, ship: String): Result<Unit> = runCatching {
+        turnOff()
+        db.orreryNoticed().clear(ship)
+        rowLock.withLock {
+            db.orreryAccounts().get(ship)?.let { row ->
+                // Gone already is the state wanted, not a failure.
+                runCatching { OrreryApi(http, bare, shipUrl).revoke(row.clientId) }
+                    .onFailure { if (it !is OrreryError.Refused || it.status != 404) throw it }
+            }
+            db.orrerySent().clear(ship)
+            db.orreryAccounts().delete(ship)
+        }
+        _enabled.value = false
     }
 
     /**
@@ -1754,3 +1815,26 @@ class OrreryRepo(
 internal fun settledActions(list: List<OrreryAction>, id: String, status: String): List<OrreryAction> =
     if (status == "approved" || status == "claimed") list.map { if (it.id == id) it.copy(status = status) else it }
     else list.filterNot { it.id == id }
+
+/**
+ * Where Orrery's switch and this install disagree, the switch wins. Never
+ * set, with this install already feeding Orrery: it was in use before the
+ * switch existed, so the switch is turned on rather than the feed silently
+ * stopped. Turned off, here or on another device, with a key still held
+ * here: the key goes back and what Orrery left here goes ([OrreryRepo.forget]).
+ * Nothing else: a switch that is off by default stops nothing on the ship.
+ */
+suspend fun settleOrreryGate(
+    gate: Boolean?,
+    db: io.nisfeb.talon.data.AppDatabase,
+    ai: io.nisfeb.talon.ai.AiSettingsRepository,
+    repo: OrreryRepo,
+    shipUrl: String,
+    ship: String,
+) {
+    val holdsKey = db.orreryAccounts().get(ship) != null
+    when {
+        gate == null && holdsKey -> ai.setProfile(ai.state.value.withOrrery(true))
+        gate == false && holdsKey -> repo.forget(shipUrl, ship)
+    }
+}

@@ -39,7 +39,7 @@ import io.nisfeb.talon.orrery.DecideControl
 import io.nisfeb.talon.orrery.DecideSettings
 import io.nisfeb.talon.orrery.OrreryAvailability
 import io.nisfeb.talon.orrery.OrreryRepo
-import io.nisfeb.talon.ui.screens.AiSettingsSection
+import io.nisfeb.talon.ui.screens.OrrerySettingsSection
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.urbit.FakeAiSettings
 import kotlinx.coroutines.CoroutineScope
@@ -107,13 +107,14 @@ class OrreryAiRowsTest {
         val orrery = OrreryRepo(http, scope, db, "test", decide = DecideControl(decided) { decided.value = it }, bareClient = http)
             .apply { attach("https://ship.test", "~zod") }
         val ai = FakeAiSettings().apply {
-            applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "", model = null, savedProfile = profile))
+            // Orrery on: its rows are on its own page, behind its switch.
+            applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "", model = null, savedProfile = profile.copy(orrery = true)))
         }
         try {
             runComposeUiTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
-                        Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = orrery) }
+                        Column(Modifier.verticalScroll(rememberScrollState())) { OrrerySettingsSection(ai, orrery = orrery) }
                     }
                 }
                 waitUntil(timeoutMillis = 5_000) { orrery.availability.value != OrreryAvailability.UNKNOWN }

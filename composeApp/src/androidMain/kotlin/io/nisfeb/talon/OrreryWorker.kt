@@ -23,8 +23,8 @@ import java.util.concurrent.TimeUnit
  * desktop app runs its pass while open and there is no scheduler to
  * ask otherwise.
  *
- * Nothing runs unless the person turned the pipe on for the active
- * ship; then it is the same pass the app runs, once, with the model
+ * Nothing runs unless Orrery is on and the person turned the pipe on
+ * for the active ship; then it is the same pass the app runs, once, with the model
  * released afterwards.
  */
 class OrreryWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
@@ -32,6 +32,8 @@ class OrreryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val app = applicationContext as? TalonApplication ?: return Result.success()
         val session = app.sessionStore.active() ?: return Result.success()
         if (app.db.orreryAccounts().get(session.ship) == null) return Result.success()
+        // Orrery turned off (Settings > Orrery), on any device: no pass.
+        if (app.aiSettings.state.value.savedProfile?.orrery != true) return Result.success()
         // The pass talks to the ship and to OpenRouter and waits on
         // both. Dispatchers.Default has one thread per core and the
         // screens' own list building shares it, so a pass run there

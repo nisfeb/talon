@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -103,19 +104,21 @@ import kotlinx.coroutines.launch
  * first change saves it.
  */
 @Composable
-fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?, armillary: ArmillaryRepo? = null) {
+fun AiSettingsSection(
+    aiSettings: AiSettingsRepository,
+    orrery: OrreryRepo?,
+    armillary: ArmillaryRepo? = null,
+    /** Opens Settings > Orrery, where Orrery's switch and settings are. */
+    onOpenOrrery: (() -> Unit)? = null,
+) {
     val scope = rememberCoroutineScope()
     val cfg by aiSettings.state.collectAsState()
     val catalog = remember { ModelCatalog() }
     // One collection each whether or not there is a ship, so nothing moves about.
     val noFlag = remember { MutableStateFlow(false) }
-    val noDecide = remember { MutableStateFlow(DecideSettings()) }
     val noGen = remember { MutableStateFlow<io.nisfeb.talon.orrery.GeneratorSettings?>(null) }
-    val noShip = remember { MutableStateFlow(OrreryAvailability.UNKNOWN) }
     val fed by (orrery?.enabled ?: noFlag).collectAsState()
-    val decide by (orrery?.decide?.settings ?: noDecide).collectAsState()
     val gen by (orrery?.generatorSettings ?: noGen).collectAsState()
-    val availability by (orrery?.availability ?: noShip).collectAsState()
     val noInference = remember { MutableStateFlow<Inference?>(null) }
     // How an Armillary model is reached, which decides what the rows
     // that read messages warn about.
@@ -139,7 +142,6 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?, arm
     fun edit(change: (AiProfile) -> AiProfile) = aiSettings.setProfile(change(aiSettings.state.value.savedProfile ?: starting()))
     fun setFeature(f: AiFeature, change: (FeatureSetting) -> FeatureSetting) =
         edit { p -> p.copy(features = p.features + (f to change(p.features[f] ?: FeatureSetting()))) }
-    val orreryHere = orrery != null && availability == OrreryAvailability.PRESENT
     val chat = profile.providers.filter { it.kind != ProviderKind.ThisDevice }
 
     // ── Providers ──────────────────────────────────────────────
@@ -221,8 +223,6 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?, arm
             setFeature(AiFeature.Assistant) { it.copy(model = ref) }
         }
     }
-    if (orrery != null) TriageRow(orrery, profile, orreryHere, spend[AiFeature.OrreryTriage.name]) { ref -> setFeature(AiFeature.OrreryTriage) { it.copy(model = ref) } }
-    if (orrery != null && orreryHere) GeneratorRow(orrery, profile) { ref -> setFeature(AiFeature.OrreryGenerator) { it.copy(model = ref) } }
     if (isCallsSupported) {
         val speech = profile.providers.filter { it.kind == ProviderKind.OpenAi || it.kind == ProviderKind.OpenAiCompatible }
         FeatureRow(
@@ -237,11 +237,154 @@ fun AiSettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?, arm
         }
     }
 
-    // ── Jev ────────────────────────────────────────────────────
+    // ── Orrery ─────────────────────────────────────────────────
+    // Its own page, with its own switch, off unless turned on: its triage,
+    // generator and Jev rows were here, on for anyone with a ship.
+    if (onOpenOrrery != null) {
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider()
+        Row(Modifier.fillMaxWidth().clickable(onClick = onOpenOrrery), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Heading("Orrery")
+                Quiet(if (profile.orrery == true) "On. Its settings are on the Orrery page." else "Off. What it is, and its switch, are on the Orrery page.")
+            }
+            TextButton(onClick = onOpenOrrery) { Text("Open") }
+        }
+    }
+}
+
+/**
+ * Settings > Orrery: what Orrery is, in words for anyone, and one switch,
+ * off until the owner turns it on. On, the settings that were under AI.
+ * Off, nothing of Orrery runs in Talon, and turning it off stops the
+ * ship's own reading and writing too ([OrreryRepo.switchOff]).
+ */
+@Composable
+fun OrrerySettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?) {
+    val scope = rememberCoroutineScope()
+    val cfg by aiSettings.state.collectAsState()
+    val noFlag = remember { MutableStateFlow(false) }
+    val noDecide = remember { MutableStateFlow(DecideSettings()) }
+    val noGen = remember { MutableStateFlow<io.nisfeb.talon.orrery.GeneratorSettings?>(null) }
+    val noShip = remember { MutableStateFlow(OrreryAvailability.UNKNOWN) }
+    val fed by (orrery?.enabled ?: noFlag).collectAsState()
+    val decide by (orrery?.decide?.settings ?: noDecide).collectAsState()
+    val gen by (orrery?.generatorSettings ?: noGen).collectAsState()
+    val availability by (orrery?.availability ?: noShip).collectAsState()
+    val spend by AiSpend.month.collectAsState()
+    LaunchedEffect(Unit) { AiSpend.load() }
+    // Off, the generator's settings are not asked for: nothing of Orrery is.
+    if (orrery != null && cfg.savedProfile?.orrery == true) LaunchedEffect(orrery) { orrery.loadGenerator() }
+    fun starting(): AiProfile = migrateProfile(
+        aiSettings.state.value,
+        ProfileInputs(
+            orreryFed = orrery?.enabled?.value == true,
+            generatorOn = orrery?.generatorSettings?.value?.enabled == true,
+            generatorUrl = orrery?.generatorSettings?.value?.url,
+            generatorModel = orrery?.generatorSettings?.value?.model,
+        ),
+    )
+    val started = remember(cfg, fed, gen) { starting() }
+    val profile = cfg.savedProfile ?: started
+    fun edit(change: (AiProfile) -> AiProfile) = aiSettings.setProfile(change(aiSettings.state.value.savedProfile ?: starting()))
+    fun setFeature(f: AiFeature, change: (FeatureSetting) -> FeatureSetting) =
+        edit { p -> p.copy(features = p.features + (f to change(p.features[f] ?: FeatureSetting()))) }
+    val on = profile.orrery == true
+    val orreryHere = orrery != null && availability == OrreryAvailability.PRESENT
+    var busy by remember { mutableStateOf(false) }
+    var confirmOff by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+
+    OrreryAbout()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Use Orrery", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+            Quiet(
+                when {
+                    busy -> "Turning Orrery off."
+                    on -> "On, for all your devices."
+                    else -> "Off, for all your devices. Nothing of Orrery runs."
+                },
+            )
+        }
+        Switch(
+            checked = on,
+            enabled = !busy,
+            onCheckedChange = { want ->
+                note = null
+                if (want) edit { it.copy(orrery = true) } else confirmOff = true
+            },
+        )
+    }
+    note?.let { Quiet(it, error = true) }
+    if (confirmOff) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmOff = false },
+            title = { Text("Turn Orrery off?") },
+            text = {
+                Text(
+                    "On all your devices, Talon stops reading and sending, and your ship stops reading your chats " +
+                        "and email and writing your brief. This device's key to Orrery is taken back. What Orrery " +
+                        "already wrote down stays on your ship until you delete it there.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmOff = false
+                    busy = true
+                    scope.launch {
+                        val off = { edit { it.copy(orrery = false) }; Unit }
+                        val missed = orrery?.switchOff(after = off) ?: run { off(); emptyList() }
+                        note = missed.takeIf { it.isNotEmpty() }?.let {
+                            "Orrery is off, but your ship did not confirm it stopped ${it.joinToString(" and ")}. Check Orrery's own settings on your ship."
+                        }
+                        busy = false
+                    }
+                }) { Text("Turn off") }
+            },
+            dismissButton = { TextButton(onClick = { confirmOff = false }) { Text("Keep it on") } },
+        )
+    }
+    if (!on) return
+
+    Spacer(Modifier.height(12.dp))
+    HorizontalDivider()
+    Heading("Settings")
+    if (orrery == null) Quiet("Sign in to a ship to set Orrery up.")
+    if (orrery != null) TriageRow(orrery, profile, orreryHere, spend[AiFeature.OrreryTriage.name]) { ref -> setFeature(AiFeature.OrreryTriage) { it.copy(model = ref) } }
+    if (orrery != null && orreryHere) GeneratorRow(orrery, profile) { ref -> setFeature(AiFeature.OrreryGenerator) { it.copy(model = ref) } }
     Spacer(Modifier.height(12.dp))
     HorizontalDivider()
     // Until the owner flips it here, Jev is what this install had.
-    JevRow(orrery, profile, profile.jev ?: decide.on, orreryHere, spend[AiSpend.JEV]) { on -> edit { it.copy(jev = on) } }
+    JevRow(orrery, profile, profile.jev ?: decide.on, orreryHere, spend[AiSpend.JEV]) { v -> edit { it.copy(jev = v) } }
+}
+
+/** What Orrery is and what turning it on allows, for someone who has never heard of it. */
+@Composable
+private fun OrreryAbout() {
+    Heading("Orrery")
+    Text(
+        "Orrery is a private notebook about your life, kept on your own ship. When it is on, Talon and your ship " +
+            "notice things that matter in your conversations, like where someone is, a plan you made, or something " +
+            "a friend is going through, and write them down in Orrery. Orrery then helps you keep track: it can " +
+            "remind you, write you a daily brief, and suggest things to do.",
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    Text("Turning it on lets:", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
+    listOf(
+        "Your ship read the chats and email you choose, and Talon read your calls and your contacts' status " +
+            "lines, and share your contacts and, if you allow it, where you are.",
+        "An AI model do the reading. You choose which: one on this device, one on a computer of yours, or a " +
+            "service you pick. A service sees the text it reads.",
+        "Orrery keep what it finds on your ship. It is not sent to the makers of Talon or anyone else.",
+        "Orrery suggest things like a calendar entry or a message. Nothing is done until you approve it " +
+            "under Actions.",
+    ).forEach { Text("\u2022 $it", style = MaterialTheme.typography.bodyMedium) }
+    Quiet(
+        "Turning it off stops all of it, on every device: Talon stops reading and sending, your ship stops " +
+            "reading your chats and email and writing your brief, and Orrery disappears from Talon. What Orrery " +
+            "already wrote down stays on your ship until you delete it there.",
+    )
 }
 
 
