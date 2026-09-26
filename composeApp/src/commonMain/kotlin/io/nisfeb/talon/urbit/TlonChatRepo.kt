@@ -1396,6 +1396,54 @@ class TlonChatRepo(
         return nest
     }
 
+    /**
+     * Who may post in [nest], as this ship's %channels has it: role ids,
+     * none meaning every member. Null where it could not say, a channel
+     * this ship has not joined among it: not the same as everyone.
+     */
+    suspend fun fetchChannelWriters(nest: String): Set<String>? {
+        val ch = channel ?: return null
+        val perm = runCatching { ch.scry("channels", "/v4/$nest/perm") as? JsonObject }.getOrNull() ?: return null
+        return (perm["writers"] as? JsonArray)?.mapNotNull { it.asStr() }?.toSet()
+    }
+
+    /**
+     * Who may post in [nest], from [was] to [now]. Roles are added before
+     * any are taken away: the other way round, a channel going from one
+     * role to another was open to every member in between.
+     */
+    suspend fun setChannelWriters(nest: String, was: Set<String>, now: Set<String>) = carry {
+        val ch = channel ?: error("not connected")
+        (now - was).takeIf { it.isNotEmpty() }?.let {
+            ch.poke(app = "channels", mark = "channel-action-2", payload = channelWriters(nest, true, it), confirm = true)
+        }
+        (was - now).takeIf { it.isNotEmpty() }?.let {
+            ch.poke(app = "channels", mark = "channel-action-2", payload = channelWriters(nest, false, it), confirm = true)
+        }
+    }
+
+    /** Who may read [nest], from [was] to [now]; added first, as [setChannelWriters]. */
+    suspend fun setChannelReaders(flag: String, nest: String, was: Set<String>, now: Set<String>) = carry {
+        (now - was).takeIf { it.isNotEmpty() }?.let { pokeAGroup(flag, aGroupChannel(nest, aChannelReaders(true, it))) }
+        (was - now).takeIf { it.isNotEmpty() }?.let { pokeAGroup(flag, aGroupChannel(nest, aChannelReaders(false, it))) }
+    }
+
+    /** A channel's title and description; the rest of it as the group's record has it. */
+    suspend fun editChannel(flag: String, c: AdminChannel, title: String, description: String) = carry {
+        pokeAGroup(flag, aGroupChannel(c.nest, aChannelEdit(c, title, description)))
+    }
+
+    /** Take [nest] out of the group. */
+    suspend fun deleteChannel(flag: String, nest: String) = carry {
+        pokeAGroup(flag, aGroupChannel(nest, aChannelDelete()))
+    }
+
+    /**
+     * [block] on this repo's scope, awaited: an admin who leaves the screen
+     * mid-change does not stop it halfway, a role added and none taken away.
+     */
+    private suspend fun <T> carry(block: suspend () -> T): T = scope.async { block() }.await()
+
     /** Update a group's title/description/image/cover via %meta poke. */
     suspend fun updateGroupMeta(
         flag: String,

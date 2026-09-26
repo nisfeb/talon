@@ -37,6 +37,51 @@ class AdminWireShapesTest {
         assertEquals(JsonNull, body["delete"])
     }
 
+    // ─── channels ─────────────────────────────────────────────
+    // Checked against tlon-apps' parsers: groups-json dejs v7 a-channel
+    // (add-readers/del-readers take role ids, edit takes the whole
+    // channel with every key, del takes null) and channel-json dejs v10
+    // a-channel (add-writers/del-writers take role ids, as %tas).
+
+    private val general = AdminChannel(
+        nest = "chat/~zod/general", title = "General", description = "talk", image = "", cover = "#abcdef",
+        addedMs = 1_700_000_000_000, section = "default", readers = setOf("gardener"), join = true, editable = true,
+    )
+
+    @Test
+    fun `a channel's readers go to the group, wrapped for group-action-4`() {
+        assertEquals(
+            """{"group":{"flag":"~zod/garden","a-group":{"channel":{"nest":"chat/~zod/general","a-channel":{"add-readers":["admin","gardener"]}}}}}""",
+            groupAction4("~zod/garden", aGroupChannel("chat/~zod/general", aChannelReaders(true, setOf("gardener", "admin")))).toString(),
+        )
+        assertEquals("""{"del-readers":["admin"]}""", aChannelReaders(false, setOf("admin")).toString())
+    }
+
+    @Test
+    fun `a channel edit sends every key, the rest as the record had it`() {
+        assertEquals(
+            """{"edit":{"meta":{"title":"Chat","description":"all of it","image":"","cover":"#abcdef"},"added":1700000000000,"section":"default","readers":["gardener"],"join":true}}""",
+            aChannelEdit(general, "Chat", "all of it").toString(),
+        )
+    }
+
+    @Test
+    fun `a channel delete is del null`() {
+        assertEquals("""{"del":null}""", aChannelDelete().toString())
+    }
+
+    @Test
+    fun `who may post goes to channels as channel-action-2`() {
+        assertEquals(
+            """{"channel":{"nest":"chat/~zod/general","action":{"add-writers":["admin"]}}}""",
+            channelWriters("chat/~zod/general", true, setOf("admin")).toString(),
+        )
+        assertEquals(
+            """{"channel":{"nest":"chat/~zod/general","action":{"del-writers":["admin","gardener"]}}}""",
+            channelWriters("chat/~zod/general", false, setOf("gardener", "admin")).toString(),
+        )
+    }
+
     // ─── seat / member ────────────────────────────────────────
 
     @Test

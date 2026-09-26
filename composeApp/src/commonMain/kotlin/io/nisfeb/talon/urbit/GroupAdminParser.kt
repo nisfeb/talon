@@ -68,6 +68,30 @@ internal fun parseAdminGroup(flag: String, obj: JsonObject): AdminGroup {
     val pendingShips = (admissions?.get("requests") as? JsonObject)
         ?.keys?.toSet() ?: emptySet()
 
+    val channels = (obj["channels"] as? JsonObject).orEmpty().mapNotNull { (nest, v) ->
+        val c = v as? JsonObject ?: return@mapNotNull null
+        val m = c["meta"] as? JsonObject
+        val added = (c["added"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toLongOrNull()
+        val section = c["section"].asStr()
+        val join = (c["join"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull()
+        AdminChannel(
+            nest = nest,
+            title = m?.get("title").asStr().orEmpty(),
+            description = m?.get("description").asStr().orEmpty(),
+            image = m?.get("image").asStr().orEmpty(),
+            cover = m?.get("cover").asStr().orEmpty(),
+            addedMs = added ?: 0L,
+            section = section.orEmpty(),
+            readers = (c["readers"] as? JsonArray)?.mapNotNull { it.asStr() }?.toSet().orEmpty(),
+            join = join ?: false,
+            editable = m != null && listOf("title", "description", "image", "cover").all { it in m } &&
+                added != null && section != null && join != null && c["readers"] is JsonArray,
+        )
+    }.sortedBy { it.title.lowercase() }
+    val roles = ((obj["roles"] ?: obj["cabals"]) as? JsonObject).orEmpty().mapValues { (id, v) ->
+        ((v as? JsonObject)?.get("meta") as? JsonObject)?.get("title").asStr()?.takeIf { it.isNotBlank() } ?: id
+    }
+
     return AdminGroup(
         flag = flag,
         title = metaStr("title"),
@@ -82,5 +106,7 @@ internal fun parseAdminGroup(flag: String, obj: JsonObject): AdminGroup {
         directInvitedShips = directInvitedShips,
         pendingShips = pendingShips,
         adminSects = adminSects,
+        channels = channels,
+        roles = roles,
     )
 }

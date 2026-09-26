@@ -1,6 +1,8 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.ui.test.ComposeUiTest
+import kotlin.test.assertEquals
+import kotlinx.coroutines.launch
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.isToggleable
@@ -107,6 +109,135 @@ class GroupAdminScreenTest {
         node.performClick()
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo(app).size > before }
         return ship.pokesTo(app).last().json.toString()
+    }
+
+    // ─── channels ─────────────────────────────────────────────
+
+    /** The group with its roles and one channel, General, open to every member. */
+    private val withChannels = record.trimEnd().removeSuffix("}") + """,
+        "roles":{"admin":{"meta":{"title":"Admin","description":"","image":"","cover":""}},
+                 "gardener":{"meta":{"title":"Gardeners","description":"","image":"","cover":""}}},
+        "channels":{"chat/~zod/general":{"meta":{"title":"General","description":"talk","image":"","cover":""},
+                    "added":1700000000000,"section":"default","readers":[],"join":true}}}"""
+
+    private val nest = "chat/~zod/general"
+
+    /** Open General's settings; [writers] is what this ship's %channels says of who may post, null for nothing. */
+    private fun ComposeUiTest.openGeneral(ship: FakeShip, writers: String? = "[]") {
+        writers?.let { ship.scries["channels/v4/$nest/perm"] = """{"writers":$it,"group":"$flag"}""" }
+        onNodeWithText("Settings").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Who can post") }
+        waitUntil(timeoutMillis = 5_000) { !shows("Asking your ship…") }
+    }
+
+    private fun ComposeUiTest.toggle(label: String) = onNode(isToggleable() and hasText(label))
+
+    /** Toggle [label]'s switch or box and wait for the poke to [app] it sends. */
+    private fun ComposeUiTest.flip(ship: FakeShip, label: String, app: String): FakeShip.Poke {
+        val before = ship.pokesTo(app).size
+        toggle(label).performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo(app).size > before }
+        return ship.pokesTo(app).last()
+    }
+
+    private fun ComposeUiTest.says(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
+
+    @Test
+    fun `an admin decides who can post in a channel, a role at a time`() = admin(group = withChannels) { ship ->
+        openGeneral(ship)
+        val only = flip(ship, "Everyone in the group can post", "channels")
+        assertEquals("channel-action-2", only.mark)
+        assertEquals("""{"channel":{"nest":"$nest","action":{"add-writers":["admin"]}}}""", only.json.toString())
+        waitUntil(timeoutMillis = 5_000) { shows("Gardeners") }
+        assertEquals("""{"channel":{"nest":"$nest","action":{"add-writers":["gardener"]}}}""", flip(ship, "Gardeners", "channels").json.toString())
+        assertEquals("""{"channel":{"nest":"$nest","action":{"del-writers":["admin"]}}}""", flip(ship, "Admin", "channels").json.toString())
+        // The last role left cannot be unticked: none is everyone.
+        toggle("Gardeners").assertIsNotEnabled()
+        assertEquals("""{"channel":{"nest":"$nest","action":{"del-writers":["gardener"]}}}""", flip(ship, "Everyone in the group can post", "channels").json.toString())
+    }
+
+    @Test
+    fun `who can read is the group's, sent to it`() = admin(group = withChannels) { ship ->
+        openGeneral(ship)
+        assertEquals(
+            """{"group":{"flag":"$flag","a-group":{"channel":{"nest":"$nest","a-channel":{"add-readers":["admin"]}}}}}""",
+            flip(ship, "Everyone in the group can read", "groups").json.toString(),
+        )
+    }
+
+    @Test
+    fun `a new title goes with the rest of the channel as the group had it`() = admin(group = withChannels) { ship ->
+        openGeneral(ship)
+        onNode(hasSetTextAction() and hasText("General")).performTextReplacement("Chat")
+        val saved = pressFor(ship, "Save title and description")
+        assertEquals(
+            """{"group":{"flag":"$flag","a-group":{"channel":{"nest":"$nest","a-channel":{"edit":{"meta":{"title":"Chat","description":"talk","image":"","cover":""},"added":1700000000000,"section":"default","readers":[],"join":true}}}}}}""",
+            saved,
+        )
+    }
+
+    @Test
+    fun `a channel is deleted only once that is confirmed`() = admin(group = withChannels) { ship ->
+        openGeneral(ship)
+        onNodeWithText("Delete channel").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Delete General?") }
+        onNodeWithText("Cancel").performClick()
+        assertTrue(ship.pokesTo("groups").none { "del" in it.json.toString() })
+        onNodeWithText("Delete channel").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Delete General?") }
+        assertEquals(
+            """{"group":{"flag":"$flag","a-group":{"channel":{"nest":"$nest","a-channel":{"del":null}}}}}""",
+            pressFor(ship, "Delete"),
+        )
+    }
+
+    @Test
+    fun `who can post is not offered where the ship cannot say`() = admin(group = withChannels) { ship ->
+        openGeneral(ship, writers = null)
+        assertTrue(says("couldn't say who can post"))
+        assertTrue(onAllNodes(isToggleable() and hasText("Everyone in the group can post")).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `a member who is no admin is shown no channel settings`() = admin(me = "~nec", group = withChannels) {
+        assertTrue(!shows("Channels") && !shows("Settings"))
+    }
+
+    @Test
+    fun `a change the ship refuses is said`() = admin(group = withChannels) { ship ->
+        ship.refuse = { if (it.app == "channels") "not an admin" else null }
+        openGeneral(ship)
+        toggle("Everyone in the group can post").performClick()
+        waitUntil(timeoutMillis = 5_000) { says("Your ship did not take it") }
+    }
+
+    @Test
+    fun `a change of roles adds before it takes away, and finishes when the screen goes`() = runBlocking {
+        val tmp = createTempDirectory(prefix = "talon-admin-").toFile()
+        val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
+            .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
+        val ship = FakeShip("~zod")
+        val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod") }
+        val events = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        ship.channel.events().launchIn(events)
+        try {
+            // A busy ship: each poke takes a while to be answered.
+            ship.refuse = { Thread.sleep(300); null }
+            val screen = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            screen.launch { repo.setChannelWriters(nest, setOf("admin"), setOf("gardener")) }
+            kotlinx.coroutines.delay(100)
+            screen.cancel()
+            kotlinx.coroutines.withTimeout(10_000) { while (ship.pokesTo("channels").size < 2) kotlinx.coroutines.delay(20) }
+            assertEquals(
+                listOf("add-writers", "del-writers"),
+                ship.pokesTo("channels").map { it.json.toString().substringAfter("\"action\":{\"").substringBefore('"') },
+                "never open to everyone in between",
+            )
+        } finally {
+            events.cancel()
+            db.close()
+            tmp.deleteRecursively()
+        }
     }
 
     @Test
