@@ -559,6 +559,15 @@ class TalonApplication : Application() {
      * the case where the ship just became known.
      */
     fun onShipLoggedIn(ship: String) {
+        // Signed in again to the ship already open: it takes the new cookie
+        // and reconnects. Rebuilt, its new repo was never started, since
+        // the active ship did not change and nothing ran start again, and
+        // the old one was stopped: "not connected" on every screen.
+        if (ship == _activeShip.value) {
+            runCatching { session.tryRestore(ship) }
+            repo.forceReconnect()
+            return
+        }
         runCatching { repo.stop() }
         runCatching { shortcuts.stop() }
         buildShipScoped(ship)

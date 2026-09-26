@@ -1816,7 +1816,8 @@ fun TalonApp(
             )
 
             addingAnotherShip -> LoginScreen(
-                session = app.session,
+                // Its own session: the one open here stays as it is, whatever the sign-in does.
+                session = remember { io.nisfeb.talon.urbit.UrbitSession(app.ktorHttp, app.sessionStore) },
                 onLoggedIn = { ship ->
                     addingAnotherShip = false
                     app.onShipLoggedIn(ship)

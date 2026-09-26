@@ -102,7 +102,8 @@ class LoginScreenTest {
     }
 
     @Test
-    fun `a wrong code says so and leaves the form to try again`() = login(answer = { respond("", HttpStatusCode.Unauthorized) }) { loggedIn ->
+    // What eyre answers to a wrong +code: 400, with its login page.
+    fun `a wrong code says so and leaves the form to try again`() = login(answer = { respond("<html/>", HttpStatusCode.BadRequest) }) { loggedIn ->
         connect("https://zod.example.com", "wrong")
         waitUntil(timeoutMillis = 5_000) { shows("Wrong +code") }
         assertTrue(loggedIn.isEmpty())
@@ -113,7 +114,7 @@ class LoginScreenTest {
     @Test
     fun `a ship that answers without a session cookie is not a ship`() = login(answer = { respond("<html/>", HttpStatusCode.OK) }) { loggedIn ->
         connect("https://example.com", "x")
-        waitUntil(timeoutMillis = 5_000) { shows("didn't return a session cookie") }
+        waitUntil(timeoutMillis = 5_000) { shows("no ship signed you in there") }
         assertTrue(loggedIn.isEmpty())
     }
 

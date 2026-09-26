@@ -461,7 +461,8 @@ private fun ClickableLinkText(
 private fun friendlyError(err: Throwable): String {
     val msg = err.message.orEmpty()
     return when {
-        "HTTP 401" in msg || "HTTP 403" in msg -> "Wrong +code — try again"
+        // Eyre answers a wrong +code with 400.
+        "HTTP 400" in msg || "HTTP 401" in msg || "HTTP 403" in msg -> "Wrong +code. Try again."
         "UnknownHostException" in err::class.simpleName.orEmpty() ||
             "host" in msg.lowercase() && "resolve" in msg.lowercase() ->
             "Can't reach that ship URL — check it and your connection"
@@ -479,7 +480,7 @@ private fun friendlyError(err: Throwable): String {
         "Expected URL scheme" in msg ->
             "Add http:// or https:// to the ship URL"
         "no urbauth cookie" in msg ->
-            "Ship didn't return a session cookie — is the URL correct?"
+            "That address answered, but no ship signed you in there. Check the URL."
         "ConnectException" in err::class.simpleName.orEmpty() ->
             "Connection refused — is the ship running?"
         msg.isNotBlank() -> "Couldn't sign in: $msg"

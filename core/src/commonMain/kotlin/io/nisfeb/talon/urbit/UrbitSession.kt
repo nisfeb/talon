@@ -10,6 +10,7 @@ import io.ktor.http.CookieEncoding
 import io.ktor.http.Url
 import io.ktor.http.isSuccess
 import io.ktor.http.parameters
+import io.ktor.http.setCookie
 import io.nisfeb.talon.util.ioDispatcher
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
@@ -41,7 +42,7 @@ internal fun normalizeShipUrl(input: String): String {
  * Not thread-safe across login/logout, but concurrent channel use is fine.
  */
 class UrbitSession(
-    parentClient: HttpClient,
+    private val parentClient: HttpClient,
     private val store: SessionStore,
 ) {
 
@@ -73,11 +74,17 @@ class UrbitSession(
     suspend fun login(shipUrl: String, code: String): Result<String> =
         withContext(ioDispatcher) {
             runCatching {
-                cookieStorage.clear()
                 val url = normalizeShipUrl(shipUrl)
+                // Asked without this session's cookie jar, and the cookie read
+                // off this one answer. Through the jar, a sign-in to another
+                // ship from a live session wiped that session's cookie first,
+                // and eyre puts its cookie back on every answer, so the live
+                // ship's traffic refilled the jar meanwhile: a sign-in that
+                // got no cookie of its own was taken as the live ship's, and
+                // the owner landed back on it, with nothing said.
                 // Urbit's /~/login takes `password=<code>` with dashes intact.
                 // Accept a leading `+` from users who paste verbatim from +code.
-                val resp = http.submitForm(
+                val resp = parentClient.submitForm(
                     url = "$url/~/login",
                     formParameters = parameters {
                         append("password", code.trim().removePrefix("+"))
@@ -88,12 +95,15 @@ class UrbitSession(
                     resp.bodyAsText()
                     error("login HTTP ${resp.status.value}")
                 }
-                val cookie = cookieStorage.snapshot()
+                val cookie = resp.setCookie()
                     .firstOrNull { it.name.startsWith("urbauth-~") }
                     ?: error("no urbauth cookie returned")
                 // Store with the leading ~ intact so post IDs and DmAction.ship
                 // match Tlon's wire format without client reconstruction.
                 val ship = cookie.name.removePrefix("urbauth-")
+                // Only now, signed in, is this session changed.
+                cookieStorage.clear()
+                cookieStorage.add(Cookie(cookie.name, cookie.value, CookieEncoding.RAW, domain = Url(url).host, path = "/"))
                 baseUrl = url
                 shipName = ship
                 store.save(
