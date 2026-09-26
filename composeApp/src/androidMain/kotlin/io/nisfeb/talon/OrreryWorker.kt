@@ -9,6 +9,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import io.nisfeb.talon.orrery.CloudTriage
+import io.nisfeb.talon.ai.orreryOn
 import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -33,7 +34,7 @@ class OrreryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         val session = app.sessionStore.active() ?: return Result.success()
         if (app.db.orreryAccounts().get(session.ship) == null) return Result.success()
         // Orrery turned off (Settings > Orrery), on any device: no pass.
-        if (app.aiSettings.state.value.savedProfile?.orrery != true) return Result.success()
+        if (!app.aiSettings.state.value.orreryOn()) return Result.success()
         // The pass talks to the ship and to OpenRouter and waits on
         // both. Dispatchers.Default has one thread per core and the
         // screens' own list building shares it, so a pass run there

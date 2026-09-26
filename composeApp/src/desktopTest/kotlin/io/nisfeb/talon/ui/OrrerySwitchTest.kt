@@ -37,6 +37,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -65,15 +66,27 @@ class OrrerySwitchTest {
     ))
     private val writes: MutableList<Pair<String, JsonObject>> = CopyOnWriteArrayList()
     private val revoked: MutableList<String> = CopyOnWriteArrayList()
+    /** Settings the ship will not change. */
+    @Volatile private var refused = setOf<String>()
+    /** What the ship says to a key given back. */
+    @Volatile private var revoke = HttpStatusCode.OK
+    /** No Orrery on the ship: everything under it is 404. */
+    @Volatile private var missing = false
+    /** How long the ship takes over anything: a busy one. */
+    @Volatile private var holdMs = 0L
 
     private val http = HttpClient(MockEngine { req ->
         val doc = req.url.encodedPath.substringAfter("/apps/orrery/api/", "")
         val json = { body: String -> respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
+        if (holdMs > 0) kotlinx.coroutines.delay(holdMs)
         when {
+            missing -> respond("", HttpStatusCode.NotFound)
             doc.startsWith("clients/") && req.method == HttpMethod.Delete -> {
+                if (revoke != HttpStatusCode.OK) return@MockEngine respond("", revoke)
                 revoked += doc.substringAfter("clients/")
                 json("{}")
             }
+            doc in refused && req.method == HttpMethod.Put -> respond("", HttpStatusCode.InternalServerError)
             doc in docs.keys && req.method == HttpMethod.Put -> {
                 val sent = Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonObject
                 writes += doc to sent
@@ -146,13 +159,92 @@ class OrrerySwitchTest {
         waitUntil(timeoutMillis = 5_000) { shows("Turn Orrery off?") }
         onNodeWithText("Turn off").performClick()
         waitUntil(timeoutMillis = 10_000) { ai.state.value.savedProfile?.orrery == false }
-        val sent = writes.associate { (doc, body) -> doc to body.toString() }
-        assertTrue("\"enabled\":false" in sent["chat"].orEmpty() && "\"send_dms\":false" in sent["chat"].orEmpty(), sent.toString())
-        assertTrue("\"enabled\":false" in sent["mail"].orEmpty(), sent.toString())
-        assertTrue("\"enabled\":false" in sent["generator"].orEmpty(), sent.toString())
+        // Exactly these: orrery merges a partial body into what it has, so
+        // nothing else it holds (the chats it reads, the model) is touched.
+        assertEquals(
+            listOf("chat" to """{"enabled":false,"send_dms":false}""", "mail" to """{"enabled":false}""", "generator" to """{"enabled":false}"""),
+            writes.map { (doc, body) -> doc to body.toString() },
+        )
         assertEquals(listOf("c1"), revoked.toList())
         assertNull(runBlocking { db.orreryAccounts().get("~zod") }, "this install holds no key")
         waitUntil(timeoutMillis = 5_000) { !shows("Orrery triage") }
+    }
+
+    @Test
+    fun `a reader the ship does not stop is said, and Orrery is off here anyway`() = page(orrery = true) { ai, _, db ->
+        refused = setOf("chat")
+        onAllNodes(isToggleable())[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Turn Orrery off?") }
+        onNodeWithText("Turn off").performClick()
+        waitUntil(timeoutMillis = 10_000) { shows("did not confirm it stopped reading your chats") }
+        assertEquals(false, ai.state.value.savedProfile?.orrery)
+        assertEquals(listOf("c1"), revoked.toList(), "the key goes back all the same")
+        assertNull(runBlocking { db.orreryAccounts().get("~zod") })
+    }
+
+    /** A repo attached to the ship with this install's key, as a device that has fed Orrery is. */
+    private fun attached(block: suspend (OrreryRepo, AppDatabase) -> Unit) = runBlocking {
+        val (db, dir) = db()
+        val scope = CoroutineScope(SupervisorJob())
+        val repo = OrreryRepo(http, scope, db, "test", bareClient = http)
+        try {
+            db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "c1.secret"))
+            repo.attach("https://ship.test", "~zod")
+            kotlinx.coroutines.withTimeout(5_000) { while (repo.availability.value == OrreryAvailability.UNKNOWN) kotlinx.coroutines.delay(20) }
+            block(repo, db)
+        } finally {
+            scope.coroutineContext.job.cancelAndJoin()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a key the ship does not take back is kept, and given back at the next start`() = attached { repo, db ->
+        revoke = HttpStatusCode.InternalServerError
+        var off = false
+        assertEquals(listOf("taking back this device's key"), repo.switchOff { off = true })
+        assertTrue(off, "off here all the same")
+        assertTrue(db.orreryAccounts().get("~zod") != null, "kept, to give back later")
+        // The next start: the switch is off and a key is held.
+        revoke = HttpStatusCode.OK
+        settleOrreryGate(false, db, FakeAiSettings(), repo, "https://ship.test", "~zod")
+        assertEquals(listOf("c1"), revoked.toList())
+        assertNull(db.orreryAccounts().get("~zod"))
+    }
+
+    @Test
+    fun `a key the ship no longer has counts as given back`() = attached { repo, db ->
+        revoke = HttpStatusCode.NotFound
+        assertEquals(emptyList(), repo.switchOff())
+        assertNull(db.orreryAccounts().get("~zod"))
+    }
+
+    @Test
+    fun `with no Orrery on the ship, turning off asks nothing of it and still lets go`() {
+        missing = true
+        attached { repo, db ->
+            assertEquals(OrreryAvailability.MISSING, repo.availability.value)
+            var off = false
+            assertEquals(emptyList(), repo.switchOff { off = true })
+            assertTrue(off)
+            assertTrue(writes.isEmpty(), writes.toString())
+            assertNull(db.orreryAccounts().get("~zod"))
+        }
+    }
+
+    @Test
+    fun `leaving the page while it turns off still turns it off`() = attached { repo, db ->
+        holdMs = 300
+        val off = java.util.concurrent.atomic.AtomicBoolean(false)
+        val page = CoroutineScope(SupervisorJob())
+        page.launch { repo.switchOff { off.set(true) } }
+        kotlinx.coroutines.delay(100)
+        page.coroutineContext.job.cancelAndJoin()
+        kotlinx.coroutines.withTimeout(10_000) { while (!off.get()) kotlinx.coroutines.delay(20) }
+        assertEquals(listOf("chat", "mail", "generator"), writes.map { it.first })
+        assertEquals(listOf("c1"), revoked.toList())
+        assertNull(db.orreryAccounts().get("~zod"))
     }
 
     @Test

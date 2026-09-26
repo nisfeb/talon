@@ -273,6 +273,33 @@ class AiProfileSyncTest {
         assertFalse(migrateProfile(base).switches().containsKey("jev"))
     }
 
+    // Orrery's switch is the privacy promise: off on one device is off on
+    // all of them, and nothing that did not mean to can turn it back on.
+    @Test
+    fun `orrery's switch reaches every device, and only a switch moves it`() {
+        val on = migrateProfile(base).copy(orrery = true)
+        val here = base.copy(savedProfile = on)
+        // Turned off on another device: it arrives as a switch.
+        val off = profileAfterEntry(entry("schemaVersion" to "2", "switches" to on.copy(orrery = false).switches()), here, here)!!
+        assertEquals(false, off.orrery)
+        assertFalse(base.copy(savedProfile = off).orreryOn())
+        // A credentials entry from a device that had it on, written before
+        // the switch: the profile inside is older than the switch here.
+        val stale = entry("schemaVersion" to "2", "apiKey" to "sk-or", "profile" to Json.encodeToJsonElement(AiProfile.serializer(), on.forSync()) as JsonObject)
+        assertEquals(false, profileAfterEntry(stale, base.copy(savedProfile = off), base)!!.orrery, "still off")
+        // Never set is not off: it does not travel, so a device that never
+        // touched it cannot turn another's off.
+        assertFalse(migrateProfile(base).switches().containsKey("orrery"))
+        assertEquals(true, profileAfterEntry(entry("schemaVersion" to "2", "switches" to migrateProfile(base).switches()), here, here)!!.orrery)
+    }
+
+    @Test
+    fun `orrery is on only when turned on`() {
+        assertFalse(base.orreryOn(), "never set")
+        assertFalse(base.copy(savedProfile = migrateProfile(base).copy(orrery = false)).orreryOn())
+        assertTrue(base.copy(savedProfile = migrateProfile(base).copy(orrery = true)).orreryOn())
+    }
+
     // Only a device with keys rewrites the credentials entry, so the
     // switches inside its profile can be older than the ones in config,
     // which every device writes. Catch-up turned off on a phone came back

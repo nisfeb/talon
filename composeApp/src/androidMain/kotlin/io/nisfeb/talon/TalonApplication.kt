@@ -1,6 +1,7 @@
 package io.nisfeb.talon
 
 import io.nisfeb.talon.ai.forFeature
+import io.nisfeb.talon.ai.orreryOn
 import android.app.Application
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiFeatures
@@ -281,7 +282,7 @@ class TalonApplication : Application() {
         // Where the owner is, on a move: a registration a reboot or an
         // update ended is made again here. A no-op while the switch is off.
         // And only with Orrery on: off, where the owner is goes nowhere.
-        if (aiSettings.state.value.savedProfile?.orrery == true) runCatching { io.nisfeb.talon.orrery.LocationWatch.resume(this) }
+        if (aiSettings.state.value.orreryOn()) runCatching { io.nisfeb.talon.orrery.LocationWatch.resume(this) }
 
 
         // User loops — headless scheduled agent runs. Ship-scoped deps

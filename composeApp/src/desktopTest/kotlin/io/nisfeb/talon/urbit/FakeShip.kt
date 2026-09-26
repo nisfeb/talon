@@ -55,6 +55,8 @@ internal class FakeShip(val us: String = "~zod") {
 
     /** The answer to an API request, or null for 404. */
     @Volatile var answerApi: (method: String, path: String, body: String) -> String? = { _, _, _ -> null }
+    /** Every request, "METHOD path", whatever it was for: what an app that must say nothing did say. */
+    val requests: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
     // One event stream per channel, as eyre keeps one per channel: the app
     // runs several (the repo's, the call controller's), and two channels
@@ -99,6 +101,7 @@ internal class FakeShip(val us: String = "~zod") {
     /** What the app talks to the ship through; pass it as the app's client. */
     val http = HttpClient(MockEngine { req ->
         val path = req.url.encodedPath
+        requests += "${req.method.value} $path"
         when {
             req.method == HttpMethod.Put && path.startsWith("/~/channel/") -> {
                 for (msg in Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonArray) {

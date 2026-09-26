@@ -49,7 +49,11 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class AppShellTest {
 
-    private fun app(seed: suspend AppDatabase.() -> Unit = {}, block: ComposeUiTest.(FakeShip) -> Unit) {
+    private fun app(
+        seed: suspend AppDatabase.() -> Unit = {},
+        ai: FakeAiSettings = FakeAiSettings(),
+        block: ComposeUiTest.(FakeShip) -> Unit,
+    ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
         // A ship with nothing yet: an empty feed and no invites, which is
         // not the same as one that does not answer.
@@ -65,7 +69,7 @@ class AppShellTest {
                         App(
                             http = ship.http,
                             sessionStore = ship.session,
-                            aiSettings = FakeAiSettings(),
+                            aiSettings = ai,
                             createDb = { key ->
                                 Room.databaseBuilder<AppDatabase>(File(tmp, "$key.db").absolutePath)
                                     .setDriver(BundledSQLiteDriver())
@@ -114,6 +118,28 @@ class AppShellTest {
             onNodeWithContentDescription("Back").performClick()
             home()
         }
+    }
+
+    // Orrery is off unless the owner turns it on, and off means the ship's
+    // Orrery hears nothing from this device: not a probe, not a read.
+    @Test
+    fun `with Orrery off the app asks the ship nothing of it`() = app { ship ->
+        mainClock.advanceTimeBy(60_000)
+        Thread.sleep(3_000)
+        waitForIdle()
+        assertTrue(ship.requests.none { "/apps/orrery" in it }, ship.requests.filter { "/apps/orrery" in it }.toString())
+    }
+
+    @Test
+    fun `turned on, the app goes to the ship's Orrery`() = app(
+        ai = FakeAiSettings().apply {
+            applyRemote(io.nisfeb.talon.ai.AiSettings.Config(
+                provider = io.nisfeb.talon.ai.AiSettings.Provider.Anthropic, apiKey = "", model = null,
+                savedProfile = io.nisfeb.talon.ai.AiProfile(orrery = true),
+            ))
+        },
+    ) { ship ->
+        waitUntil(timeoutMillis = 10_000) { ship.requests.any { "/apps/orrery/api/state" in it } }
     }
 
     @Test

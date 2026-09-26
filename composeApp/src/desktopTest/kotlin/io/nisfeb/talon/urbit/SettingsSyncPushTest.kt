@@ -82,6 +82,17 @@ class SettingsSyncPushTest {
     }
 
     @Test
+    fun `orrery turned off on one device goes up and turns it off on the others`() = live {
+        sync(config().copy(savedProfile = io.nisfeb.talon.ai.AiProfile(orrery = false))).pushAiSettings()
+        val sent = put("ai-settings", "config")!!
+        assertEquals("false", sent["switches"]!!.jsonObject["orrery"]!!.jsonPrimitive.content)
+        // The phone, on until the entry lands.
+        val phone = FakeAiSettings(config(device = "dev-b").copy(savedProfile = io.nisfeb.talon.ai.AiProfile(orrery = true)))
+        SettingsSyncImpl(db = db, aiSettings = phone).applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, kotlinx.serialization.json.buildJsonObject { put("config", sent) })
+        assertEquals(false, phone.state.value.savedProfile?.orrery)
+    }
+
+    @Test
     fun `a device with no key says nothing of keys, so it cannot blank another's`() = live {
         sync(config()).pushAiSettings()
         assertNull(put("ai-settings", "credentials"))
