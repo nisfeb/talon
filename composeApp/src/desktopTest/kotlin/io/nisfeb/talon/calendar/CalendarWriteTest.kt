@@ -189,7 +189,9 @@ class CalendarWriteTest {
         assertEquals(1790899200000L, repo.tasks.value?.single()?.dueMs, "then the ship's own copy")
     }
 
-    private val dentist = { l: Long -> """{"id":"e1","cal":"default","cat":"timed","kind":"once","all":false,"meta":{"name":"Dentist"},"l":$l,"r":${l + 3_600_000}}""" }
+    private fun event(id: String, name: String, l: Long) =
+        """{"id":"$id","cal":"default","cat":"timed","kind":"once","all":false,"meta":{"name":"$name"},"l":$l,"r":${l + 3_600_000}}"""
+    private val dentist = { l: Long -> event("e1", "Dentist", l) }
 
     @Test
     fun `a deleted event leaves every list at once, and a late ship's copy does not bring it back`() {
@@ -197,7 +199,7 @@ class CalendarWriteTest {
         calendar(window = { ship ->
             // Applied a second and a half after the ship answers the write.
             val applied = ship.writtenAt.get() > 0 && System.currentTimeMillis() - ship.writtenAt.get() > 1_500
-            """{"rows":[${if (applied) "" else dentist(soon)}]}"""
+            """{"rows":[${listOfNotNull(dentist(soon).takeUnless { applied }, event("e2", "Swim", soon + 60_000)).joinToString(",")}]}"""
         }) { repo, ship ->
             repo.loadRange(soon - 86_400_000, soon + 86_400_000)
             assertTrue(repo.rows.value.orEmpty().any { it.id == "e1" } && repo.rangeRows.value.orEmpty().any { it.id == "e1" })
@@ -209,11 +211,34 @@ class CalendarWriteTest {
             val w = watch.async { repo.writeEvent(deleteBody("e1")) }
             // The home page's today reads the window: gone before the ship answers.
             kotlinx.coroutines.withTimeout(500) { while (repo.rows.value.orEmpty().any { it.id == "e1" }) kotlinx.coroutines.delay(10) }
-            assertTrue(repo.rangeRows.value.orEmpty().none { it.id == "e1" }, "and from the month")
+            // Only it: the rest stays on show, not a list waiting to be read.
+            assertEquals(listOf("e2"), repo.rows.value?.map { it.id })
+            assertEquals(listOf("e2"), repo.rangeRows.value?.map { it.id }, "and from the month")
             w.await().shown.join()
             watch.cancel()
             assertEquals(listOf(true, false), seen.distinct(), "never back once gone: $seen")
             assertTrue(repo.rangeRows.value.orEmpty().none { it.id == "e1" })
+        }
+    }
+
+    @Test
+    fun `an edit is read back into the window and the month, over the spans they cover`() {
+        val soon = System.currentTimeMillis() + 3_600_000
+        calendar(window = { ship ->
+            val applied = ship.writtenAt.get() > 0 && System.currentTimeMillis() - ship.writtenAt.get() > 1_500
+            """{"rows":[${event("e1", if (applied) "Dentist at 3" else "Dentist", soon)}]}"""
+        }) { repo, ship ->
+            repo.loadRange(soon - 86_400_000, soon + 86_400_000)
+            ship.clear()
+            assertTrue(repo.pokeEvent(eventBody(EventDraft(name = "Dentist at 3", date = LocalDate(2026, 9, 25), cal = "default"), "e1")))
+            assertEquals("Dentist at 3", repo.rows.value?.single()?.name, "the home page's today")
+            assertEquals("Dentist at 3", repo.rangeRows.value?.single()?.name, "the calendar's month")
+            // The window read back is the one a refresh reads, and the month the one on screen.
+            val spans = ship.reads.filter { "window.json" in it }.map { r ->
+                val q = r.substringAfter('?').split('&').associate { it.substringBefore('=') to it.substringAfter('=').toLong() }
+                q.getValue("to") - q.getValue("from")
+            }.toSet()
+            assertEquals(setOf(CalendarRepo.BEHIND_MS + CalendarRepo.AHEAD_MS, 2 * 86_400_000L), spans)
         }
     }
 
