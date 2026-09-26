@@ -88,6 +88,8 @@ class AssistantActionsToolsTest {
         send: (suspend (whom: String, text: String) -> Unit)? = null,
         /** The mail app's answers by path ending; given, the mail repo is attached and takes sends and files. */
         mail: Map<String, String> = emptyMap(),
+        /** The window as the ship answers it, given the pokes so far; [window] unless said. */
+        windowFor: ((List<JsonObject>) -> String)? = null,
         block: (Harness) -> Unit,
     ) {
         val scope = CoroutineScope(SupervisorJob())
@@ -113,7 +115,7 @@ class AssistantActionsToolsTest {
                         pokes += body
                         if (pokeSucceeds(body)) json("") else respondError(HttpStatusCode.InternalServerError, "refused")
                     }
-                    path.endsWith("/window.json") -> json(window)
+                    path.endsWith("/window.json") -> json(windowFor?.invoke(pokes.toList()) ?: window)
                     path.endsWith("/calendars.json") -> json(calendars)
                     path.endsWith("/events.json") -> json(events)
                     path.endsWith("/share/shares.json") -> json(shares)
@@ -147,6 +149,31 @@ class AssistantActionsToolsTest {
         } finally {
             scope.cancel()
         }
+    }
+
+    // "Added" went to the owner for an event they then could not find: the
+    // ship answers a write before it applies it. It is said only once the
+    // calendar shows it, and by the calendar's name, not its id.
+    private val family = """[{"id":"default","name":"Personal","kind":"local"},{"id":"c-0w1.94k9D","name":"Family","kind":"caldav"}]"""
+
+    @Test
+    fun `an event is said to be added once the calendar shows it, on the calendar named`() = withHarness(
+        calendars = family,
+        windowFor = { pokes ->
+            if (pokes.none { "add-event" in it.toString() }) """{"rows":[]}"""
+            else """{"rows":[{"id":"e1","cal":"c-0w1.94k9D","cat":"timed","kind":"once","all":false,"meta":{"name":"Dentist"},"l":1790848800000,"r":1790852400000}]}"""
+        },
+    ) { h ->
+        val out = h.run("create_event", argsOf("name" to "Dentist", "date" to "2026-10-01", "time" to "10:00", "calendar" to "Family"))
+        assertTrue(out.startsWith("Added \"Dentist\" on 2026-10-01 at 10:00 to the Family calendar."), out)
+        assertTrue("sync_calendars" in out, "a synced calendar says it goes out on the next sync: $out")
+        assertTrue("c-0w1" !in out, "no calendar id put to the owner: $out")
+    }
+
+    @Test
+    fun `an event the calendar takes but does not show is not said to be added`() = withHarness(calendars = family) { h ->
+        val out = h.run("create_event", argsOf("name" to "Dentist", "date" to "2026-10-01", "time" to "10:00", "calendar" to "Family"))
+        assertTrue(!out.startsWith("Added") && "not showing there yet" in out, out)
     }
 
     @Test

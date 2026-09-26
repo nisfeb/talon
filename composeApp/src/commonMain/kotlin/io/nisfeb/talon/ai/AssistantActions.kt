@@ -321,10 +321,24 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 zone = if (minute != null) zoneArg else null,
                 tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
             )
-            if (cal.pokeEvent(eventBody(draft))) {
-                "Added \"$name\" on $date${if (time != null) " at $time${zoneArg?.let { " $it" } ?: ""}" else ""} to calendar ${calId ?: "default"}."
-            } else {
-                "The calendar did not take it."
+            if (!cal.pokeEvent(eventBody(draft))) return@Tool "The calendar did not take it."
+            val target = cal.calendars.value.firstOrNull { it.id == calId }
+            val where = target?.let { "the ${it.name.ifBlank { it.id }} calendar" } ?: "the default calendar"
+            val whenText = "$date${if (time != null) " at $time${zoneArg?.let { " $it" } ?: ""}" else ""}"
+            // Read back before saying it is there: the ship answers a write
+            // before it applies it, and "Added" went to the owner for an
+            // event they then could not find. A repeat's first time can be
+            // weeks on (the nth weekday of the month), so look that far.
+            val zone = zoneArg?.let { TimeZone.of(it) } ?: a.zone()
+            val from = date.atTime(0, 0).toInstant(zone).toEpochMilliseconds() - 86_400_000L
+            val seen = cal.windowRows(from, from + 40 * 86_400_000L)
+            val synced = target?.kind?.takeIf { it == "google" || it == "caldav" }?.let {
+                " It is synced there: it goes out to the other side on the next sync, which sync_calendars runs now."
+            }.orEmpty()
+            when {
+                seen == null -> "The calendar took \"$name\" for $whenText on $where, but did not answer when asked whether it is there. Check with list_events before telling the owner it is." + synced
+                seen.any { it.name == name && (calId == null || it.cal == calId) } -> "Added \"$name\" on $whenText to $where." + synced
+                else -> "The calendar took \"$name\" for $whenText on $where, but it is not showing there yet. Do not tell the owner it is added: check with list_events in a moment." + synced
             }
         })
         add(Tool(
