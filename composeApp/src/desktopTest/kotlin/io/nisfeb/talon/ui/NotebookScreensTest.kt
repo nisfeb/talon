@@ -51,6 +51,8 @@ class NotebookScreensTest {
         moreFolders: String = "",
         /** What the host says is published; null for a host that does not answer. */
         published: String? = "[]",
+        /** The note's markdown. */
+        body: String = "Simmer **long**.",
         content: @androidx.compose.runtime.Composable (TlonChatRepo) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-nbui-").toFile()
@@ -63,7 +65,7 @@ class NotebookScreensTest {
                 {"name":"/","notebookId":7,"id":8,"createdBy":"~bus","createdAt":1,"parentFolderId":null,"updatedAt":1,"updatedBy":"~bus"},
                 $soups$moreFolders]"""
             scries["notes/v0/notes/~bus/recipes"] = """[{"folderId":9,"notebookId":7,"title":"Pho","revision":3,"id":11,"createdBy":"~bus",
-                "createdAt":1784592455,"bodyMd":"Simmer **long**.","updatedAt":1784592505,"updatedBy":"~bus","slug":null}]"""
+                "createdAt":1784592455,"bodyMd":${kotlinx.serialization.json.JsonPrimitive(body)},"updatedAt":1784592505,"updatedBy":"~bus","slug":null}]"""
             if (published != null) scries["notes/v0/published"] = published
         }
         val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod"); notes.attach(ship.channel) }
@@ -86,7 +88,7 @@ class NotebookScreensTest {
         NotesChannelScreen(repo = repo, whom = whom, onBack = { did += "back" }, onOpenNote = { did += "note $it" })
     }
 
-    private fun note(published: String? = "[]", block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block, published = published) { repo ->
+    private fun note(published: String? = "[]", body: String = "Simmer **long**.", block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block, published = published, body = body) { repo ->
         NoteScreen(repo = repo, whom = whom, noteId = 11, onBack = { did += "back" })
     }
 
@@ -205,6 +207,16 @@ class NotebookScreensTest {
         showing("rev 3")
         assertTrue(shows("Pho") && shows("Simmer"))
         assertTrue(!shows("**"), "the markdown is drawn, not shown")
+    }
+
+    // Drawn as chat draws a message: a notebook had a renderer of its own
+    // that drew no sub-list. Nesting as Lattice reads it.
+    @Test
+    fun `a note's sub-lists are drawn nested, as chat and Lattice draw them`() = note(
+        body = "Stock:\n\n- bones\n  - beef\n  - chicken\n- water",
+    ) { _, _ ->
+        showing("rev 3")
+        assertTrue(shows("• bones") && shows("◦ beef") && shows("◦ chicken") && shows("• water"))
     }
 
     @Test

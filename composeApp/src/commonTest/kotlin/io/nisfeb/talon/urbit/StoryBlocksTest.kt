@@ -37,6 +37,21 @@ class StoryBlocksTest {
     }
 
     @Test
+    fun `a nested list is drawn a level deeper, with the bullet of its level`() {
+        val drawn = MarkdownBlocks.toStory("- a\n  - b\n    - c\n  - d\n- e")
+            .let { Story.parse(it, expandMarkdown = false) }.joinToString("\n") { (it as StoryPart.Text).text.text }
+        assertEquals("• a\n    ◦ b\n        ▪ c\n    ◦ d\n• e", drawn)
+    }
+
+    @Test
+    fun `numbers count items, not a sub-list between them`() {
+        val drawn = MarkdownBlocks.toStory("1. one\n   - aside\n2. two")
+            .let { Story.parse(it, expandMarkdown = false) }.joinToString("\n") { (it as StoryPart.Text).text.text }
+        // A list inside any list is the second level's circle, as in HTML.
+        assertEquals("1. one\n    ◦ aside\n2. two", drawn)
+    }
+
+    @Test
     fun `an attachment of an unknown shape becomes a file link with its size`() {
         val p = assertIs<StoryPart.LinkPreview>(block("""{"file":{"url":"https://s.test/minutes.pdf?x=1","size":2048,"mime":"application/pdf"}}"""))
         assertEquals("minutes.pdf • 2.0 KB", p.title)

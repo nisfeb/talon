@@ -52,16 +52,13 @@ class NotebookEditRoundTripTest {
     }
 
     @Test
-    fun `nested list items are kept, flattened`() {
+    fun `nested list items keep their nesting`() {
         val nested = story(
-            """[{"block":{"listing":{"list":{"type":"unordered","items":[{"item":["a"]},{"list":{"type":"unordered","items":[{"item":["b"]}]}},{"item":["c"]}]}}}}]""",
+            """[{"block":{"listing":{"list":{"type":"unordered","items":[{"item":["a"]},{"list":{"type":"unordered","items":[{"item":["b"]}],"contents":[]}},{"item":["c"]}],"contents":[]}}}}]""",
         )
         val md = RawMarkdown.fromStory(nested)
         assertEquals("- a\n  - b\n- c", md)
-        assertEquals(
-            story("""[{"block":{"listing":{"list":{"type":"unordered","items":[{"item":["a"]},{"item":["b"]},{"item":["c"]}],"contents":[]}}}}]"""),
-            MarkdownBlocks.toStory(md),
-        )
+        assertEquals(nested, MarkdownBlocks.toStory(md))
     }
 
     @Test

@@ -122,34 +122,19 @@ object MarkdownBlocks {
                     i = end
                 }
                 isListLine(line) -> {
-                    // Group consecutive same-kind list lines (all bullet
-                    // or all numbered) into one `block.listing`. Mixing
-                    // markers starts a fresh list. Flat only — nested
-                    // indentation is rare in the content this handles and
-                    // the renderer flattens anyway.
+                    // One `block.listing` per run of list lines; a top-level
+                    // item of the other kind (bullets, then numbers) starts a
+                    // fresh list. Deeper items nest, as Lattice nests them.
                     flushParagraph()
                     val ordered = ORDERED_LIST_RE.matches(line)
+                    var end = i + 1
+                    while (end < lines.size && isListLine(lines[end]) &&
+                        (listDepth(lines[end]) > 1 || ORDERED_LIST_RE.matches(lines[end]) == ordered)
+                    ) end++
                     add(buildJsonObject {
-                        put("block", buildJsonObject {
-                            put("listing", buildJsonObject {
-                                put("list", buildJsonObject {
-                                    put("type", if (ordered) "ordered" else "unordered")
-                                    put("items", buildJsonArray {
-                                        while (i < lines.size && isListLine(lines[i]) &&
-                                            ORDERED_LIST_RE.matches(lines[i]) == ordered
-                                        ) {
-                                            add(buildJsonObject {
-                                                put("item", Markdown.parseInlines(stripListMarker(lines[i])))
-                                            })
-                                            i++
-                                        }
-                                    })
-                                    // Required by the ship's parser, empty or not.
-                                    put("contents", buildJsonArray {})
-                                })
-                            })
-                        })
+                        put("block", buildJsonObject { put("listing", listingOf(lines.subList(i, end))) })
                     })
+                    i = end
                 }
                 else -> {
                     if (buf.isNotEmpty()) buf.append('\n')
@@ -161,13 +146,55 @@ object MarkdownBlocks {
         flushParagraph()
     }
 
+    /**
+     * A list item's level, 1 at the margin: Lattice's rule (59-md.js), two
+     * spaces a level and a tab as four spaces, so a note reads the same in
+     * both. [RawMarkdown] writes nested items two spaces a level.
+     */
+    private fun listDepth(line: String): Int =
+        line.takeWhile { it == ' ' || it == '\t' }.replace("\t", "    ").length / 2 + 1
+
+    private class ListLevel(val ordered: Boolean) {
+        val items = ArrayList<JsonObject>()
+        fun json(): JsonObject = buildJsonObject {
+            put("list", buildJsonObject {
+                put("type", if (ordered) "ordered" else "unordered")
+                put("items", JsonArray(items))
+                // Required by the ship's parser, empty or not, at every level.
+                put("contents", buildJsonArray {})
+            })
+        }
+    }
+
+    /**
+     * A run of list lines as one listing, deeper items as a list inside
+     * the item above them, the recursive shape Tlon's listing has and
+     * [Story] draws. At the same depth, the other kind of marker ends
+     * that sub-list and starts one of its own kind.
+     */
+    private fun listingOf(run: List<String>): JsonObject {
+        val stack = ArrayList<ListLevel>()
+        fun close() {
+            val done = stack.removeAt(stack.lastIndex)
+            stack.last().items += done.json()
+        }
+        for (line in run) {
+            val depth = listDepth(line)
+            val ordered = ORDERED_LIST_RE.matches(line)
+            while (stack.size > depth) close()
+            if (stack.size == depth && depth > 1 && stack.last().ordered != ordered) close()
+            while (stack.size < depth) stack += ListLevel(ordered)
+            stack.last().items += buildJsonObject { put("item", Markdown.parseInlines(stripListMarker(line))) }
+        }
+        while (stack.size > 1) close()
+        return stack.single().json()
+    }
+
     // `- `, `* `, `+ ` bullets and `1.`/`1)` numbered, each needing at
     // least one space and a non-blank item body. The body guard keeps a
     // bare `* ` (or a `**bold**` line, which starts with `*` but not
     // `* `) from being read as a list.
-    // Leading spaces are allowed so a nested list RawMarkdown indents
-    // still parses; the composer keeps one flat list, so the nesting
-    // itself is not kept, only the items.
+    // Leading spaces are allowed: they are the nesting ([listDepth]).
     private val UNORDERED_LIST_RE = Regex("^\\s*[-*+] +\\S.*")
     private val ORDERED_LIST_RE = Regex("^\\s*\\d+[.)] +\\S.*")
     private val HEADER_RE = Regex("^(#{1,6}) (.*)")

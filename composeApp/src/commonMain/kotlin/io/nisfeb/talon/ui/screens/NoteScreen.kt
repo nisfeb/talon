@@ -39,7 +39,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import io.nisfeb.talon.ui.MarkdownText
 import io.nisfeb.talon.urbit.NotesFlag
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.launch
@@ -272,7 +271,13 @@ fun NoteScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    MarkdownText(body)
+                    // Drawn as chat draws a message: the same blocks (nested
+                    // lists, quotes, tables, images) and the same inline styles.
+                    // It had its own small renderer, which drew no sub-list.
+                    val parts = remember(body) {
+                        io.nisfeb.talon.urbit.Story.parse(io.nisfeb.talon.urbit.MarkdownBlocks.toStory(body), expandMarkdown = false)
+                    }
+                    io.nisfeb.talon.ui.StoryRenderer(parts = parts, modifier = Modifier.fillMaxWidth())
                 }
             }
         }

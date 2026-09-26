@@ -106,6 +106,34 @@ class MarkdownBlocksTest {
         assertEquals("ordered", listOf(story[1].jsonObject)["type"]!!.jsonPrimitive.content)
     }
 
+    // Nesting as Lattice reads it (59-md.js): two spaces a level, a tab
+    // as four, and deeper items a list inside the item above them.
+    @Test
+    fun `indented items nest as Lattice nests them`() {
+        fun li(t: String) = """{"item":["$t"]}"""
+        fun ul(vararg items: String) = """{"list":{"type":"unordered","items":[${items.joinToString(",")}],"contents":[]}}"""
+        fun ol(vararg items: String) = """{"list":{"type":"ordered","items":[${items.joinToString(",")}],"contents":[]}}"""
+        assertEquals(
+            """[{"block":{"listing":${ul(li("a"), ul(li("b"), ul(li("c")), li("d")), li("e"))}}}]""",
+            MarkdownBlocks.toStory("- a\n  - b\n    - c\n  - d\n- e").toString(),
+        )
+        assertEquals(
+            "a tab is four spaces, two levels, as Lattice's renderer counts it",
+            """[{"block":{"listing":${ul(li("a"), ul(ul(li("b"))))}}}]""",
+            MarkdownBlocks.toStory("- a\n\t- b").toString(),
+        )
+        assertEquals(
+            "a sub-list of the other kind, inside a numbered list",
+            """[{"block":{"listing":${ol(li("one"), ul(li("aside")), li("two"))}}}]""",
+            MarkdownBlocks.toStory("1. one\n   - aside\n2. two").toString(),
+        )
+        assertEquals(
+            "at the same depth, the other kind of marker starts its own sub-list",
+            """[{"block":{"listing":${ul(li("a"), ul(li("b")), ol(li("c")))}}}]""",
+            MarkdownBlocks.toStory("- a\n  - b\n  1. c").toString(),
+        )
+    }
+
     @Test
     fun `list item body keeps inline styling`() {
         val verse = MarkdownBlocks.toStory("- has **bold**").single().jsonObject

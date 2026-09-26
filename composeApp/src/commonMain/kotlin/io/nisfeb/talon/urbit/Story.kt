@@ -518,6 +518,8 @@ object Story {
         renderList(list, out, depth, expandMarkdown)
     }
 
+    private val BULLETS = listOf("• ", "◦ ", "▪ ")
+
     private class TaskItem(val checked: Boolean, val rest: JsonArray)
 
     private val TASK_PREFIX_RE = Regex("^\\[([ xX])]\\s+")
@@ -548,7 +550,11 @@ object Story {
         val contents = list["contents"] as? JsonArray
         val items = list["items"] as? JsonArray ?: return
 
-        val indent = "  ".repeat(depth)
+        // Four spaces a level: two were too little to see which items a
+        // sub-list hangs from in a proportional font.
+        val indent = "    ".repeat(depth)
+        // Numbers count items only: a sub-list between two items is not one.
+        var number = 0
 
         // Track whether the builder currently ends with '\n' so we can
         // skip the per-iteration `out.toString().endsWith('\n')` —
@@ -582,8 +588,8 @@ object Story {
             endsWithNewline = false
         }
 
-        items.forEachIndexed { idx, raw ->
-            val itemObj = raw as? JsonObject ?: return@forEachIndexed
+        items.forEach { raw ->
+            val itemObj = raw as? JsonObject ?: return@forEach
             (itemObj["item"] as? JsonArray)?.let { inlineArr ->
                 ensureNewline()
                 out.append(indent)
@@ -595,11 +601,12 @@ object Story {
                     out.append(if (task.checked) "☑ " else "☐ ")
                     renderInlineArray(task.rest, out, expandMarkdown)
                 } else {
-                    out.append(if (ordered) "${idx + 1}. " else "• ")
+                    // Disc, circle, square by level, as HTML (and so Lattice) draws them.
+                    out.append(if (ordered) "${++number}. " else BULLETS[depth % BULLETS.size])
                     renderInlineArray(inlineArr, out, expandMarkdown)
                 }
                 endsWithNewline = false
-                return@forEachIndexed
+                return@forEach
             }
             (itemObj["list"] as? JsonObject)?.let { nested ->
                 renderList(nested, out, depth + 1, expandMarkdown)
