@@ -55,6 +55,12 @@ class AppShellTest {
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
+        // The chat list's snapshot is per ship and outlives a test, list
+        // state and all. Every test here is ~zod, as other classes are, and
+        // one left behind by a class run before this one broke the first
+        // test's opening frame ("pending composition has not been
+        // applied"), only in the full suite. HomeListTest does the same.
+        io.nisfeb.talon.ui.screens.forgetHomeListSnapshot("~zod")
         // A ship with nothing yet: an empty feed and no invites, which is
         // not the same as one that does not answer.
         val ship = FakeShip("~zod").apply {

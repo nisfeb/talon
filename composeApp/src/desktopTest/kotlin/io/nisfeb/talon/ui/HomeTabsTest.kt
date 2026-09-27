@@ -92,6 +92,9 @@ class HomeTabsTest {
     }
 
     private fun deps(): Triple<AppDatabase, TlonChatRepo, UpdateState> {
+        // Each test from a fresh chat-list snapshot: they are per ship and
+        // outlive a test, list state and all (see AppShellTest's app).
+        listOf("~zod", "~sampel-palnet").forEach { io.nisfeb.talon.ui.screens.forgetHomeListSnapshot(it) }
         val tmp = createTempDirectory(prefix = "talon-hometabs-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver())
