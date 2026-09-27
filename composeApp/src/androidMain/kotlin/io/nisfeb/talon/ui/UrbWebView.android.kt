@@ -31,9 +31,15 @@ actual fun UrbWebView(
                 settings.javaScriptEnabled = true // programmable pages
                 settings.domStorageEnabled = true
                 webViewClient = WebViewClient() // keep navigation in-view
+                tag = url
                 loadUrl(url)
             }
         },
-        update = { it.loadUrl(url) },
+        // Only a new address loads. update runs on every recomposition, and
+        // loading there started the page over each time and twice on open:
+        // Lattice's reader, which now caches, syncs and refreshes itself,
+        // came up slowly and only partly. The tag is the address asked for,
+        // not the page's own, so following a link in it is not undone.
+        update = { if (it.tag != url) { it.tag = url; it.loadUrl(url) } },
     )
 }
