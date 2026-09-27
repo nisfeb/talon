@@ -41,6 +41,38 @@ object UrbUnfurlCache {
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** How long a stored card stands before it is read again. */
+    const val KEEP_MS = 24 * 60 * 60 * 1000L
+
+    /**
+     * The card for [urbUrl]: the one kept from last time, at once, then
+     * the page's own where the kept one is a day old or there is none.
+     * A remote page took forty seconds and more over Ames, and was read
+     * again at every start before a card showed; a day keeps that off
+     * the ship most of the time. A page read to have no card is kept as
+     * such, so it is not asked for at every start either.
+     */
+    fun cards(
+        http: HttpClient,
+        shipUrl: String,
+        cookie: String,
+        urbUrl: String,
+        kept: io.nisfeb.talon.data.UrbUnfurlDao?,
+        now: () -> Long = { io.nisfeb.talon.util.nowMs() },
+    ): kotlinx.coroutines.flow.Flow<Unfurl> = kotlinx.coroutines.flow.flow {
+        val row = kept?.let { k -> io.nisfeb.talon.util.runSuspendCatching { k.get(urbUrl) }.getOrNull() }
+        val old = row?.let { Unfurl(urbUrl, it.title, it.snippet) }
+        if (old != null && (old.title != null || old.snippet != null)) emit(old)
+        if (row != null && now() - row.fetchedAtMs < KEEP_MS) return@flow
+        val fresh = await(http, shipUrl, cookie, urbUrl)
+        // Only an answer is kept: a fetch that failed is not "no card".
+        val answered = fresh != null || lock.withLock { results[urbUrl] == Entry.None }
+        if (answered) {
+            kept?.let { k -> io.nisfeb.talon.util.runSuspendCatching { k.put(io.nisfeb.talon.data.UrbUnfurlEntity(urbUrl, fresh?.title, fresh?.snippet, now())) } }
+        }
+        if (fresh != null && fresh != old) emit(fresh)
+    }
+
     suspend fun await(
         http: HttpClient,
         shipUrl: String,

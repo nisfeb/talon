@@ -1328,14 +1328,15 @@ fun TalonApp(
             onUrb = urbLinkHandler,
         )
     }
-    val urbFetcher: suspend (String) -> io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl? =
-        remember(app) {
+    // Keyed on the ship, so the cards kept are the ship's own database's.
+    val urbFetcher: (String) -> kotlinx.coroutines.flow.Flow<io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl> =
+        remember(app, loggedInShip) {
             { urbUrl ->
                 val active = app.sessionStore.active()
                 val s = active?.shipUrl
                 val c = active?.let { "${it.cookieName}=${it.cookieValue}" }
-                if (s == null || c == null) null
-                else io.nisfeb.talon.urbit.UrbUnfurlCache.await(app.ktorHttp, s, c, urbUrl)
+                if (s == null || c == null) kotlinx.coroutines.flow.emptyFlow()
+                else io.nisfeb.talon.urbit.UrbUnfurlCache.cards(app.ktorHttp, s, c, urbUrl, app.db.urbUnfurls())
             }
         }
     // Keyed on the ship: the database and repo are rebuilt on a switch,

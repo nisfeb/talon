@@ -1584,14 +1584,15 @@ fun App(
           // Resolves a urb:// address to title+snippet for the inline
           // unfurl card, against the active ship over the authenticated
           // http client (which already carries the session cookie).
-          val urbFetcher: suspend (String) -> io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl? =
-              remember(http) {
+          // Keyed on the database, so the cards kept are this ship's.
+          val urbFetcher: (String) -> kotlinx.coroutines.flow.Flow<io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl> =
+              remember(http, db) {
                   { urbUrl ->
                       val active = sessionStore.active()
                       val s = active?.shipUrl
                       val c = active?.let { "${it.cookieName}=${it.cookieValue}" }
-                      if (s == null || c == null) null
-                      else io.nisfeb.talon.urbit.UrbUnfurlCache.await(http, s, c, urbUrl)
+                      if (s == null || c == null) kotlinx.coroutines.flow.emptyFlow()
+                      else io.nisfeb.talon.urbit.UrbUnfurlCache.cards(http, s, c, urbUrl, db.urbUnfurls())
                   }
               }
           val citeScope = rememberCoroutineScope()

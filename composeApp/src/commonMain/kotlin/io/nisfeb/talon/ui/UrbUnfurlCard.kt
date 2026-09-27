@@ -26,12 +26,13 @@ import io.nisfeb.talon.urbit.UrbUnfurlCache
 
 /**
  * Resolves a urb:// address to its title + snippet for the inline
- * preview card, or null when there's no viewer ship / lattice isn't
- * serving it. Provided at the app root over http + the active ship;
- * default returns nothing so previews/tests don't crash.
+ * preview card: the card kept from last time at once, then the page's
+ * own ([UrbUnfurlCache.cards]); nothing when there's no viewer ship or
+ * lattice isn't serving it. Provided at the app root over http + the
+ * active ship; default returns nothing so previews/tests don't crash.
  */
 val LocalUrbFetcher =
-    staticCompositionLocalOf<(suspend (String) -> UrbUnfurlCache.Unfurl?)?> { null }
+    staticCompositionLocalOf<((String) -> kotlinx.coroutines.flow.Flow<UrbUnfurlCache.Unfurl>)?> { null }
 
 /** The active ship's HTTP base, for features that build ship URLs
  *  (e.g. publishing to Lattice). Null when signed out. */
@@ -56,7 +57,7 @@ fun UrbUnfurlCard(
 ) {
     val fetcher = LocalUrbFetcher.current ?: return
     var unfurl by remember(urbUrl) { mutableStateOf<UrbUnfurlCache.Unfurl?>(null) }
-    LaunchedEffect(urbUrl) { unfurl = fetcher(urbUrl) }
+    LaunchedEffect(urbUrl) { fetcher(urbUrl).collect { unfurl = it } }
     val u = unfurl ?: return
     // "urb://~ship" caption, like a domain on a link card.
     val host = "urb://" + urbUrl.removePrefix("urb://").substringBefore('/')
