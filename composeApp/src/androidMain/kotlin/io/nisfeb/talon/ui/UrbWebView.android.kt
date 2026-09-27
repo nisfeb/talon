@@ -27,6 +27,15 @@ actual fun UrbWebView(
                 setCookie(origin, "$cookie; path=/")
             }
             WebView(ctx).apply {
+                // A fixed size, the space it is given. Left to wrap its
+                // content, the page's viewport had no height, so a page
+                // sized to 100% of it (Lattice's reader, whose iframe fills
+                // the window) fell back to an iframe's 150px: a small window
+                // scrolling a page that looked cut off.
+                layoutParams = android.view.ViewGroup.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                )
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                 settings.javaScriptEnabled = true // programmable pages
                 settings.domStorageEnabled = true
