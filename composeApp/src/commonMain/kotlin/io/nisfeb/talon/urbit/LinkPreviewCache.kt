@@ -122,25 +122,30 @@ object LinkPreviewCache {
                 if (buf.decodeToString(0, total).contains("</head>", ignoreCase = true)) break
             }
             val head = buf.decodeToString(0, total)
-            val title = META_OG_TITLE.find(head)?.groupValues?.get(1)
-                ?: META_TW_TITLE.find(head)?.groupValues?.get(1)
-                ?: TITLE_TAG.find(head)?.groupValues?.get(1)
-            val description = META_OG_DESC.find(head)?.groupValues?.get(1)
-                ?: META_TW_DESC.find(head)?.groupValues?.get(1)
-                ?: META_NAME_DESC.find(head)?.groupValues?.get(1)
+            val (title, description) = titleAndDescription(head)
             val image = META_OG_IMAGE.find(head)?.groupValues?.get(1)
                 ?: META_TW_IMAGE.find(head)?.groupValues?.get(1)
             val normalizedImage = image?.let { resolveUrl(url, it) }
             if (title.isNullOrBlank() && description.isNullOrBlank() && normalizedImage.isNullOrBlank()) {
                 return@execute null
             }
-            Preview(
-                url = url,
-                title = title?.let(::decodeHtmlEntities),
-                description = description?.let(::decodeHtmlEntities),
-                imageUrl = normalizedImage,
-            )
+            Preview(url = url, title = title, description = description, imageUrl = normalizedImage)
         }
+    }
+
+    /**
+     * A page's own title and description, from its head: Open Graph, then
+     * Twitter's, then the plain ones; entities decoded. Shared with the
+     * urb:// preview, which reads a lattice HTML page the same way.
+     */
+    internal fun titleAndDescription(head: String): Pair<String?, String?> {
+        val title = META_OG_TITLE.find(head)?.groupValues?.get(1)
+            ?: META_TW_TITLE.find(head)?.groupValues?.get(1)
+            ?: TITLE_TAG.find(head)?.groupValues?.get(1)
+        val description = META_OG_DESC.find(head)?.groupValues?.get(1)
+            ?: META_TW_DESC.find(head)?.groupValues?.get(1)
+            ?: META_NAME_DESC.find(head)?.groupValues?.get(1)
+        return title?.let(::decodeHtmlEntities) to description?.let(::decodeHtmlEntities)
     }
 
     private fun resolveUrl(base: String, ref: String): String = runCatching {

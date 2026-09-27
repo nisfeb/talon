@@ -1,5 +1,6 @@
 package io.nisfeb.talon.urbit
 
+import io.nisfeb.talon.util.decodeHtmlEntities
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -76,9 +77,54 @@ object UrbUnfurlCache {
     }
 
     /** Title (first heading) + snippet (first prose line) from a
-     *  gemtext body. Internal so the parsing is unit-tested. */
-    internal fun unfurlOf(urbUrl: String, gmi: String): Unfurl =
-        Unfurl(urbUrl, titleOf(gmi), snippetOf(gmi))
+     *  gemtext body, or a web page's own from an HTML one. Internal so
+     *  the parsing is unit-tested. */
+    internal fun unfurlOf(urbUrl: String, body: String): Unfurl =
+        if (looksLikeHtml(body)) htmlUnfurl(urbUrl, body) else Unfurl(urbUrl, titleOf(body), snippetOf(body))
+
+    /**
+     * An HTML page, whatever the mark says: lattice's fetch sends one as it
+     * is and labels it gmi. Read as gemtext, its first prose line was its
+     * style sheet, and the card read "head {display:flex". Gemtext does not
+     * open with a tag.
+     */
+    private fun looksLikeHtml(body: String): Boolean {
+        val t = body.trimStart()
+        return t.startsWith("<") && HTML_TAG.containsMatchIn(t.take(4000))
+    }
+
+    /**
+     * A web page's card: its own title and description, as a link to one
+     * on the web is read ([LinkPreviewCache.titleAndDescription]); then the
+     * title lattice's /c/ shell sets from a script, the first h1, and the
+     * first paragraph. Never a style sheet, a script or a comment.
+     */
+    private fun htmlUnfurl(urbUrl: String, html: String): Unfurl {
+        val (title, description) = LinkPreviewCache.titleAndDescription(html)
+        val visible = html.replace(COMMENT, " ").replace(STYLE_OR_SCRIPT, " ")
+        fun textOf(tag: String): String? =
+            Regex("<$tag\\b[^>]*>(.*?)</$tag>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+                .find(visible)?.groupValues?.get(1)
+                ?.let { decodeHtmlEntities(it.replace(ANY_TAG, " ")).replace(SPACES, " ").replace(SPACE_BEFORE_MARK, "$1").trim() }
+                ?.takeIf { it.isNotEmpty() }
+        return Unfurl(
+            urbUrl,
+            title = title ?: SCRIPT_TITLE.find(html)?.groupValues?.get(1)?.let(::decodeHtmlEntities) ?: textOf("h1"),
+            snippet = (description ?: textOf("p"))?.take(200),
+        )
+    }
+
+    private val HTML_TAG = Regex(
+        "<(?:!--|(?:!doctype|html|head|body|meta|style|script|link|title|div|p|h[1-6]|main|section|article|header|nav)\\b)",
+        RegexOption.IGNORE_CASE,
+    )
+    private val COMMENT = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
+    private val STYLE_OR_SCRIPT = Regex("<(style|script)\\b[^>]*>.*?</\\1>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    private val SCRIPT_TITLE = Regex("""document\.title\s*=\s*['"]([^'"]+)['"]""")
+    private val ANY_TAG = Regex("<[^>]+>")
+    private val SPACES = Regex("\\s+")
+    /** "a <b>bold</b>." stripped of its tags leaves "a bold ."; the stop goes back. */
+    private val SPACE_BEFORE_MARK = Regex(" ([.,;:!?])")
 
     /** First gemtext heading ("# …"), or null. */
     private fun titleOf(gmi: String): String? =
