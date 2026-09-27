@@ -5,6 +5,7 @@ import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 
@@ -15,7 +16,9 @@ actual fun UrbWebView(
     origin: String,
     cookie: String,
     modifier: Modifier,
+    onMissing: () -> Unit,
 ) {
+    val missing by androidx.compose.runtime.rememberUpdatedState(onMissing)
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
@@ -39,7 +42,15 @@ actual fun UrbWebView(
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                 settings.javaScriptEnabled = true // programmable pages
                 settings.domStorageEnabled = true
-                webViewClient = WebViewClient() // keep navigation in-view
+                webViewClient = object : WebViewClient() { // keep navigation in-view
+                    override fun onReceivedHttpError(
+                        view: WebView,
+                        request: android.webkit.WebResourceRequest,
+                        errorResponse: android.webkit.WebResourceResponse,
+                    ) {
+                        if (request.isForMainFrame && errorResponse.statusCode == 404) missing()
+                    }
+                }
                 tag = url
                 loadUrl(url)
             }

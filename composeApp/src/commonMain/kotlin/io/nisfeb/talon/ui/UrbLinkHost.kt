@@ -42,9 +42,6 @@ fun rememberUrbLinkHandler(
     var offerUrl by remember { mutableStateOf<String?>(null) }
     var installing by remember { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
-    // Once we've seen lattice installed this session, stop re-probing
-    // on every tap.
-    var known by remember { mutableStateOf(false) }
 
     fun open(url: String) {
         val s = shipUrl() ?: return
@@ -55,24 +52,11 @@ fun rememberUrbLinkHandler(
         }
     }
 
-    val handler: (String) -> Unit = { url ->
-        val s = shipUrl()
-        if (s != null) {
-            if (known) {
-                open(url)
-            } else {
-                scope.launch {
-                    when (LatticeInstall.installedOrUnknown(http, s)) {
-                        true -> { known = true; open(url) }
-                        false -> offerUrl = url
-                        // Not knowing is no reason to offer an install
-                        // over what may well be there.
-                        null -> open(url)
-                    }
-                }
-            }
-        }
-    }
+    // Opened at once. Asking the ship first whether lattice is there cost
+    // a round trip before anything showed, on a busy ship seconds, and the
+    // page answers that itself: the viewer offers the install on its 404.
+    // On desktop the browser shows the error; Settings > Apps installs it.
+    val handler: (String) -> Unit = { url -> open(url) }
 
     offerUrl?.let { pendingUrl ->
         LatticeInstallDialog(
@@ -93,7 +77,6 @@ fun rememberUrbLinkHandler(
                     // changed nothing and this waited out the clock.
                     LatticeInstall.grubbery(http, { s }, cookie, timeoutMs = INSTALL_TIMEOUT_MS, poke = poke)().fold(
                         onSuccess = {
-                            known = true
                             installing = false
                             offerUrl = null
                             open(pendingUrl)
@@ -118,7 +101,11 @@ fun rememberUrbLinkHandler(
         val s = shipUrl()
         val c = cookie()
         if (s != null && c != null) {
-            UrbViewerSheet(urbUrl = u, shipUrl = s, cookie = c, onDismiss = { viewUrl = null })
+            UrbViewerSheet(
+                urbUrl = u, shipUrl = s, cookie = c, onDismiss = { viewUrl = null },
+                // Lattice is not on the ship: offer it, then open the page again.
+                onMissing = { viewUrl = null; offerUrl = u },
+            )
         }
     }
 

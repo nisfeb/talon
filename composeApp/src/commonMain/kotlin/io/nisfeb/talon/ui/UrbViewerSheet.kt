@@ -47,6 +47,8 @@ fun UrbViewerSheet(
     shipUrl: String,
     cookie: String,
     onDismiss: () -> Unit,
+    /** The ship answered the page 404: lattice is not installed there. */
+    onMissing: () -> Unit = {},
 ) {
     val readerUrl = UrbHttp.readerUrl(shipUrl, urbUrl)
     val uriHandler = LocalUriHandler.current
@@ -91,6 +93,7 @@ fun UrbViewerSheet(
                     origin = shipUrl,
                     cookie = cookie,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
+                    onMissing = onMissing,
                 )
             }
         }

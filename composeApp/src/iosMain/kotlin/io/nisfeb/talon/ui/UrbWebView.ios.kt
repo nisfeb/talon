@@ -3,6 +3,7 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.interop.UIKitView
@@ -24,7 +25,11 @@ actual fun UrbWebView(
     origin: String,
     cookie: String,
     modifier: Modifier,
+    onMissing: () -> Unit,
 ) {
+    val missing by androidx.compose.runtime.rememberUpdatedState(onMissing)
+    // A WKWebView holds its navigation delegate weakly: this keeps it.
+    val delegate = androidx.compose.runtime.remember { MissingPageDelegate { missing() } }
     UIKitView(
         modifier = modifier,
         factory = {
@@ -33,6 +38,7 @@ actual fun UrbWebView(
                 frame = CGRectMake(0.0, 0.0, 0.0, 0.0),
                 configuration = config,
             )
+            web.navigationDelegate = delegate
             val request = NSURLRequest(uRL = NSURL(string = url))
             val host = NSURL(string = origin).host ?: ""
             val name = cookie.substringBefore('=')
@@ -58,4 +64,17 @@ actual fun UrbWebView(
             web
         },
     )
+}
+
+/** Calls [onMissing] when the page itself comes back 404; every response is let through. */
+private class MissingPageDelegate(private val onMissing: () -> Unit) : platform.darwin.NSObject(), platform.WebKit.WKNavigationDelegateProtocol {
+    override fun webView(
+        webView: WKWebView,
+        decidePolicyForNavigationResponse: platform.WebKit.WKNavigationResponse,
+        decisionHandler: (platform.WebKit.WKNavigationResponsePolicy) -> Unit,
+    ) {
+        val status = (decidePolicyForNavigationResponse.response as? platform.Foundation.NSHTTPURLResponse)?.statusCode
+        if (decidePolicyForNavigationResponse.forMainFrame && status == 404L) onMissing()
+        decisionHandler(platform.WebKit.WKNavigationResponsePolicy.WKNavigationResponsePolicyAllow)
+    }
 }
