@@ -96,7 +96,9 @@ class ScopeCheckTest {
         val ship = Ship(keySchema = """{"kinds":{"person":{"attrs":["status"]}},"actions":["task"]}""")
         run(ship) { db ->
             val scope = Json.parseToJsonElement(assertNotNull(ship.minted)).jsonObject["scope"]!!.jsonObject
-            assertEquals(listOf("task", "message"), scope["actions"]!!.jsonArray.map { it.jsonPrimitive.content })
+            // With the four the ship's writer carries out (orrery 60): a
+            // key without them cannot see a merge Tell Orrery filed.
+            assertEquals(listOf("task", "message", "correct", "fact", "merge", "preference"), scope["actions"]!!.jsonArray.map { it.jsonPrimitive.content })
             assertEquals("c2.secret", db.orreryAccounts().get("~zod")?.token)
             assertTrue("DELETE /apps/orrery/api/clients/c1" in ship.asked, ship.asked.toString())
         }
