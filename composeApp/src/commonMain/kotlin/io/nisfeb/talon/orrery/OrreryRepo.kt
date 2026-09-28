@@ -134,8 +134,46 @@ class OrreryRepo(
     /** The chat reader's last pass. */
     val chatReaderRun: StateFlow<ChatReaderRun?> = _chatReaderRun.asStateFlow()
 
+    /** When the page's one answer was last asked for, whether the ship gave it, and its chat lists. */
+    private var settingsAt = 0L
+    private var settingsOk = false
+    private var chatLists: JsonObject? = null
+    private val settingsGate = Mutex()
+
+    /**
+     * Everything the Orrery page shows, in one request (orrery 60): each
+     * row asks, and they share the answer for [SETTINGS_FRESH_MS]. Seven
+     * requests took the owner's ship most of a minute. False where the
+     * ship has no such route, and each row then reads its own.
+     */
+    suspend fun loadSettings(): Boolean = settingsGate.withLock {
+        if (now() - settingsAt < SETTINGS_FRESH_MS) return settingsOk
+        val a = api ?: return false
+        val o = runCatching { Json.parseToJsonElement(a.settingsDoc("settings")).jsonObject }.getOrNull()
+        settingsAt = now()
+        // An older ship answers 404; anything without the chat document
+        // is not this route either.
+        settingsOk = o?.get("chat") is JsonObject
+        if (settingsOk) took(o!!)
+        settingsOk
+    }
+
+    private fun took(o: JsonObject) {
+        fun doc(k: String) = o[k] as? JsonObject
+        doc("generator")?.let { _generatorSettings.value = generatorSettingsOf(it) }
+        doc("generator_last")?.let { _generator.value = generatorRunOf(it) }
+        doc("chat")?.let { _chatReader.value = chatReaderOf(it) }
+        doc("chat_last")?.let { _chatReaderRun.value = chatReaderRunOf(it) }
+        doc("mail")?.let { _mailReader.value = mailReaderOn(it) }
+        doc("mail_last")?.let { _mailReaderRun.value = chatReaderRunOf(it) }
+        // The preferences live in the schema, and came with this route.
+        doc("schema")?.let { _preferences.value = preferencesOf(it) }
+        chatLists = doc("chat_lists")
+    }
+
     /** Ask the ship for its chat reader's settings and last pass; false where it did not say. */
     suspend fun loadChatReader(): Boolean {
+        if (loadSettings()) return true
         val a = api ?: return false
         runCatching { lastChatRun(a) }.onSuccess { _chatReaderRun.value = it }
         return runCatching { chatReaderOf(Json.parseToJsonElement(a.settingsDoc("chat")).jsonObject) }
@@ -155,6 +193,7 @@ class OrreryRepo(
 
     /** Ask the ship whether its mail reader is on, and for its last pass; false where it did not say. */
     suspend fun loadMailReader(): Boolean {
+        if (loadSettings()) return true
         val a = api ?: return false
         runCatching { chatReaderRunOf(Json.parseToJsonElement(a.settingsDoc("mail/last")).jsonObject) }.onSuccess { _mailReaderRun.value = it }
         return runCatching { mailReaderOn(Json.parseToJsonElement(a.settingsDoc("mail")).jsonObject) }
@@ -172,6 +211,7 @@ class OrreryRepo(
 
     /** Ask the ship for them; false where it did not say, an orrery older than them among it. */
     suspend fun loadPreferences(): Boolean {
+        if (loadSettings()) return true
         val a = api ?: return false
         return runCatching { preferencesOf(Json.parseToJsonElement(a.settingsDoc("preferences")).jsonObject) }
             .onSuccess { _preferences.value = it }.isSuccess
@@ -199,10 +239,11 @@ class OrreryRepo(
     /** What the chat reader may pick from: the ship's DMs, then its channels, each with a name. */
     suspend fun chatOptions(): Result<Pair<List<ChatOption>, List<ChatOption>>> = runCatching {
         val a = attached()
+        val lists = if (loadSettings()) chatLists else null
         // An empty list comes with the ship's reason (no groups desk, a
         // road refused), which is what the picker then says.
         suspend fun list(name: String): List<ChatOption> {
-            val o = Json.parseToJsonElement(a.settingsDoc(name)).jsonObject
+            val o = lists?.get(name.substringAfter('/')) as? JsonObject ?: Json.parseToJsonElement(a.settingsDoc(name)).jsonObject
             val items = chatOptionsOf(o)
             val note = o["note"]?.jsonPrimitive?.contentOrNull
             if (items.isEmpty() && !note.isNullOrBlank()) error(note)
@@ -259,6 +300,7 @@ class OrreryRepo(
     val generatorSettings: StateFlow<GeneratorSettings?> = _generatorSettings.asStateFlow()
 
     suspend fun loadGenerator() {
+        if (loadSettings()) return
         val a = api ?: return
         a.generatorSettings()?.let { _generatorSettings.value = it }
         a.generatorLast()?.let { _generator.value = it }
@@ -475,6 +517,8 @@ class OrreryRepo(
         _chatReader.value = null
         _chatReaderRun.value = null
         _preferences.value = null
+        settingsAt = 0L
+        chatLists = null
         scopeChecked = false
         // Nothing of the ship left is waiting on the owner: with Orrery off,
         // or another ship, its proposals and their notifications go.
@@ -1757,6 +1801,8 @@ class OrreryRepo(
         const val PUSH_EVERY_MS = 10L * 60 * 1000
         /** How often what is waiting is read again while attached, as a net under the beacon: one small request. */
         const val ACTIONS_EVERY_MS = 15L * 60 * 1000
+        /** How long one answer of the page's settings serves every row that asks. */
+        const val SETTINGS_FRESH_MS = 30_000L
         private const val BEACON_PATH = "/grubbery/api/keep/apps/shell.shell/desks/orrery.desk/desk/data/orrery.orrery_app/beacon/rev"
         /** Decision calls the gate check has in flight at once. */
         const val GATE_CHECK_AT_ONCE = 6

@@ -58,11 +58,20 @@ class OrreryReaderRowsTest {
     ))
     private val writes: MutableList<Pair<String, JsonObject>> = java.util.concurrent.CopyOnWriteArrayList()
     @Volatile private var answering = true
+    /** Whether the ship answers the whole page in one request, as orrery 60 does. */
+    @Volatile private var whole = false
+    private val asked: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+
+    private fun wholePage() = """{"chat":${docs.getValue("chat")},"mail":${docs.getValue("mail")},"chat_last":{},"mail_last":{},""" +
+        """"generator":{"enabled":false},"generator_last":{},"schema":{"style":"Short.","preferences":["Never before nine"]},""" +
+        """"chat_lists":{"dms":{"items":[{"id":"~bus","name":"Bus"}],"note":""},"channels":{"items":[],"note":"no groups desk"}}}"""
 
     private val http = HttpClient(MockEngine { req ->
         val doc = req.url.encodedPath.substringAfter("/apps/orrery/api/", "")
         val json = { body: String -> respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
+        if (req.method == HttpMethod.Get) asked += doc
         when {
+            doc == "settings" && whole -> json(wholePage())
             doc in setOf("chat", "mail") && !answering -> respond("down", HttpStatusCode.InternalServerError)
             doc in setOf("chat", "mail") && req.method == HttpMethod.Put -> {
                 val sent = Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonObject
@@ -161,6 +170,19 @@ class OrreryReaderRowsTest {
         waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
         assertEquals("mail" to """{"enabled":true}""", writes.single().let { it.first to it.second.toString() })
         waitUntil(timeoutMillis = 5_000) { runCatching { switchBeside("The ship reads my mail").assertIsOn() }.isSuccess }
+    }
+
+    // Orrery 60 answers the whole page at once; a request per row took
+    // the owner's ship most of a minute.
+    @Test
+    fun `a ship with one answer for the page is asked once, and every row fills from it`() {
+        whole = true
+        settings {
+            waitUntil(timeoutMillis = 5_000) { shows("The ship reads my chats") && shows("The ship reads my mail") && shows("Never before nine") }
+            waitForIdle()
+            val routes = io.nisfeb.talon.orrery.OrreryApi.SETTINGS + io.nisfeb.talon.orrery.OrreryApi.LISTS
+            assertEquals(listOf("settings"), asked.filter { it in routes })
+        }
     }
 
     @Test

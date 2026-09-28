@@ -533,8 +533,8 @@ class OrreryApi(
          */
         val SETTINGS = setOf("generator", "telegram", "schema", "policy", "chat", "mail", "preferences")
 
-        /** Read and never written: what the chat reader may pick from, and each reader's last pass. */
-        val LISTS = setOf("chat/dms", "chat/channels", "chat/last", "mail/last", "telegram/last")
+        /** Read and never written: what the chat reader may pick from, each reader's last pass, and all of them at once. */
+        val LISTS = setOf("chat/dms", "chat/channels", "chat/last", "mail/last", "telegram/last", "settings")
 
         /**
          * The documents that register themselves with an outside
