@@ -11,6 +11,7 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runComposeUiTest
@@ -55,15 +56,20 @@ class OrreryReaderRowsTest {
     private val docs = Collections.synchronizedMap(mutableMapOf(
         "chat" to """{"enabled":true,"dms":[],"channels":[],"send_dms":false}""",
         "mail" to """{"enabled":false}""",
+        "read/settings" to """{"enabled":true}""",
+        "policy" to """{"auto":["task"],"push":"proposed","todo_calendar":"","event_calendar":"home"}""",
+        "schema" to SCHEMA_59,
     ))
+    /** Merged into on a write, as the ship does; the rest are replaced whole. */
+    private val merged = setOf("chat", "mail", "read/settings")
     private val writes: MutableList<Pair<String, JsonObject>> = java.util.concurrent.CopyOnWriteArrayList()
     @Volatile private var answering = true
     /** Whether the ship answers the whole page in one request, as orrery 60 does. */
     @Volatile private var whole = false
     private val asked: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
-    private fun wholePage() = """{"chat":${docs.getValue("chat")},"mail":${docs.getValue("mail")},"chat_last":{},"mail_last":{},""" +
-        """"generator":{"enabled":false},"generator_last":{},"schema":{"style":"Short.","preferences":["Never before nine"]},""" +
+    private fun wholePage() = """{"chat":${docs["chat"]},"mail":${docs["mail"]},"read":${docs["read/settings"]},"policy":${docs["policy"]},""" +
+        """"schema":${docs["schema"]},"chat_last":{},"mail_last":{},"read_last":{},"generator":{"enabled":false},"generator_last":{},""" +
         """"chat_lists":{"dms":{"items":[{"id":"~bus","name":"Bus"}],"note":""},"channels":{"items":[],"note":"no groups desk"}}}"""
 
     private val http = HttpClient(MockEngine { req ->
@@ -71,17 +77,19 @@ class OrreryReaderRowsTest {
         val json = { body: String -> respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
         if (req.method == HttpMethod.Get) asked += doc
         when {
+            req.url.encodedPath == "/apps/calendar/calendars.json" ->
+                json("""[{"id":"home","name":"Home","kind":"local"},{"id":"work","name":"Work","kind":"google"}]""")
             doc == "settings" && whole -> json(wholePage())
-            doc in setOf("chat", "mail") && !answering -> respond("down", HttpStatusCode.InternalServerError)
-            doc in setOf("chat", "mail") && req.method == HttpMethod.Put -> {
+            doc in docs && !answering -> respond("down", HttpStatusCode.InternalServerError)
+            doc in docs && req.method == HttpMethod.Put -> {
                 val sent = Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonObject
                 writes += doc to sent
                 // The ship takes the change and answers with the whole document.
                 val now = Json.parseToJsonElement(docs.getValue(doc)).jsonObject
-                docs[doc] = JsonObject(now + sent).toString()
+                docs[doc] = (if (doc in merged) JsonObject(now + sent) else sent).toString()
                 json(docs.getValue(doc))
             }
-            doc in setOf("chat", "mail") -> json(docs.getValue(doc))
+            doc in docs -> json(docs.getValue(doc))
             else -> json("{}")
         }
     })
@@ -178,10 +186,67 @@ class OrreryReaderRowsTest {
     fun `a ship with one answer for the page is asked once, and every row fills from it`() {
         whole = true
         settings {
-            waitUntil(timeoutMillis = 5_000) { shows("The ship reads my chats") && shows("The ship reads my mail") && shows("Never before nine") }
+            waitUntil(timeoutMillis = 5_000) {
+                shows("The ship reads my chats") && shows("The ship reads my mail") && shows("Never before nine") &&
+                    shows("The ship reads what it is handed") && shows("Events go on")
+            }
             waitForIdle()
             val routes = io.nisfeb.talon.orrery.OrreryApi.SETTINGS + io.nisfeb.talon.orrery.OrreryApi.LISTS
             assertEquals(listOf("settings"), asked.filter { it in routes })
+        }
+    }
+
+    // Orrery 59's read channel: what the assistant hands the ship is
+    // dropped while it is off, and nothing in Talon said so.
+    @Test
+    fun `the ship reading what it is handed is switched by asking the ship`() = settings {
+        waitUntil(timeoutMillis = 5_000) { shows("The ship reads what it is handed") }
+        switchBeside("The ship reads what it is handed").assertIsOn()
+        switchBeside("The ship reads what it is handed").performClick()
+        waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
+        assertEquals("read/settings" to """{"enabled":false}""", writes.single().let { it.first to it.second.toString() })
+        waitUntil(timeoutMillis = 5_000) { shows("dropped while this is off") }
+    }
+
+    // Orrery 60's executor files a todo and an event on the calendars the
+    // policy names. The ship replaces the policy whole, so it is read
+    // again before the change: a copy from when the page opened would put
+    // back what another device changed since.
+    @Test
+    fun `approved things go on the calendars picked, and the rest of the policy stays`() {
+        whole = true
+        settings {
+            waitUntil(timeoutMillis = 5_000) { shows("Events go on") && shows("Home") }
+            docs["policy"] = """{"auto":["task"],"push":"all","todo_calendar":"","event_calendar":"home"}"""
+            onAllNodesWithText("The calendar's default")[0].performScrollTo().performClick()
+            onAllNodesWithText("Work")[0].performClick()
+            waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
+            assertEquals(
+                "policy" to """{"auto":["task"],"push":"all","todo_calendar":"work","event_calendar":"home"}""",
+                writes.single().let { it.first to it.second.toString() },
+            )
+            waitUntil(timeoutMillis = 5_000) { !shows("The calendar's default") }
+        }
+    }
+
+    // Orrery 60's owner step: until the schema has the new kinds and the
+    // family attributes, the generator never proposes a fix and family
+    // ties are dropped. Said, asked, then written whole.
+    @Test
+    fun `a schema behind orrery 60 is updated whole, once the owner says so`() {
+        whole = true
+        settings {
+            waitUntil(timeoutMillis = 5_000) { shows("Your schema is behind Orrery") }
+            assertTrue(shows("Orrery may propose: correct, fact, merge, preference.") && shows("People may have: spouse, children, parents, siblings."))
+            onNodeWithText("Update the schema").performScrollTo().performClick()
+            assertTrue(writes.isEmpty(), "asked first")
+            onNodeWithText("Update").performClick()
+            waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
+            val (doc, sent) = writes.single()
+            assertEquals("schema", doc)
+            assertEquals(io.nisfeb.talon.orrery.withVersion60(Json.parseToJsonElement(SCHEMA_59).jsonObject).first, sent)
+            assertEquals("Short.", sent["style"].toString().trim('"'), "the owner's own words stay")
+            waitUntil(timeoutMillis = 5_000) { !shows("Your schema is behind Orrery") }
         }
     }
 
@@ -195,5 +260,12 @@ class OrreryReaderRowsTest {
             onAllNodesWithText("Try again")[0].performScrollTo().performClick()
             waitUntil(timeoutMillis = 5_000) { shows("The ship reads my chats") }
         }
+    }
+
+    private companion object {
+        /** A schema as a ship before orrery 60 keeps it, the owner's style and preferences in it. */
+        const val SCHEMA_59 = """{"style":"Short.","preferences":["Never before nine"],"actions":["task","message"],""" +
+            """"payloads":{"message":{"to":"required: a body id","text":"required: the message; never an exclamation mark"}},""" +
+            """"kinds":{"person":{"attrs":["name","ship"],"notes":{"ship":"their @p"}}},"multi":["likes"]}"""
     }
 }

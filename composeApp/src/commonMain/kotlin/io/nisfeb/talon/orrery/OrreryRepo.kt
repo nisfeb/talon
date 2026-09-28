@@ -167,9 +167,71 @@ class OrreryRepo(
         doc("mail")?.let { _mailReader.value = mailReaderOn(it) }
         doc("mail_last")?.let { _mailReaderRun.value = chatReaderRunOf(it) }
         // The preferences live in the schema, and came with this route.
-        doc("schema")?.let { _preferences.value = preferencesOf(it) }
+        doc("schema")?.let { _preferences.value = preferencesOf(it); _schema.value = it }
+        doc("policy")?.let { _policy.value = it }
+        doc("read")?.let { _readChannel.value = mailReaderOn(it) }
+        doc("read_last")?.let { _readChannelRun.value = chatReaderRunOf(it) }
         chatLists = doc("chat_lists")
     }
+
+    private val _policy = MutableStateFlow<JsonObject?>(null)
+    /** The ship's policy, where the executor files a todo and an event among it (orrery 60); null where the page has not read it. */
+    val policy: StateFlow<JsonObject?> = _policy.asStateFlow()
+
+    /**
+     * One field of the policy, the rest as the ship holds it now: the
+     * ship replaces the document whole, so a copy read when the page
+     * opened would put back what was changed since. On this repo's scope.
+     */
+    suspend fun setPolicy(field: String, value: String): Result<Unit> = scope.async {
+        runCatching {
+            val now = Json.parseToJsonElement(attached().settingsDoc("policy")).jsonObject
+            writeSettings("policy", JsonObject(now + (field to kotlinx.serialization.json.JsonPrimitive(value)))).getOrThrow()
+            Unit
+        }
+    }.await()
+
+    /** The ship's calendars, for the executor's picks. */
+    suspend fun calendars(): Result<List<io.nisfeb.talon.calendar.CalendarInfo>> = runCatching {
+        CalendarApi(http, shipUrl ?: error("Not attached to a ship.")).calendars()
+    }
+
+    private val _schema = MutableStateFlow<JsonObject?>(null)
+    /** The owner's whole schema, as the page last read it; null where it has not. */
+    val schema: StateFlow<JsonObject?> = _schema.asStateFlow()
+
+    /**
+     * Orrery 60's owner step ([withVersion60]) made on the schema as the
+     * ship holds it now, and written back whole. The key is measured
+     * again at the next pass: one minted before the new kinds cannot
+     * see the proposals made of them.
+     */
+    suspend fun addVersion60Schema(): Result<Unit> = scope.async {
+        runCatching {
+            val now = Json.parseToJsonElement(attached().settingsDoc("schema")).jsonObject
+            val (merged, lines) = withVersion60(now)
+            if (lines.isNotEmpty()) writeSettings("schema", merged).getOrThrow() else _schema.value = now
+            ship?.let { db.orrerySent().forget(it, SCOPE_KEY) }
+            scopeChecked = false
+        }
+    }.await()
+
+    private val _readChannel = MutableStateFlow<Boolean?>(null)
+    /** Whether the ship reads text handed to it (orrery 59): the assistant's, and anything else's. Null until it says. */
+    val readChannel: StateFlow<Boolean?> = _readChannel.asStateFlow()
+    private val _readChannelRun = MutableStateFlow<ChatReaderRun?>(null)
+    val readChannelRun: StateFlow<ChatReaderRun?> = _readChannelRun.asStateFlow()
+
+    /** Ask the ship whether it reads what it is handed; false where it did not say, an orrery older than it among it. */
+    suspend fun loadReadChannel(): Boolean {
+        if (loadSettings()) return _readChannel.value != null
+        val a = api ?: return false
+        runCatching { chatReaderRunOf(Json.parseToJsonElement(a.settingsDoc("read/last")).jsonObject) }.onSuccess { _readChannelRun.value = it }
+        return runCatching { mailReaderOn(Json.parseToJsonElement(a.settingsDoc("read/settings")).jsonObject) }
+            .onSuccess { _readChannel.value = it }.isSuccess
+    }
+
+    suspend fun setReadChannel(on: Boolean): Result<Unit> = writeSettings("read/settings", buildJsonObject { put("enabled", on) }).map { }
 
     /** Ask the ship for its chat reader's settings and last pass; false where it did not say. */
     suspend fun loadChatReader(): Boolean {
@@ -467,12 +529,16 @@ class OrreryRepo(
         val said = attached().setSettingsDoc(name, body)
         val answer = runCatching { Json.parseToJsonElement(said) }.getOrNull() as? JsonObject
         if (name == "preferences" && answer != null && "preferences" in answer) _preferences.value = preferencesOf(answer)
+        // Written whole, so the answer is the whole document.
+        if (name == "policy" && answer != null) _policy.value = answer
+        if (name == "schema" && answer != null) _schema.value = answer
         // Only an answer that is the document: anything else is left for
         // the next read rather than shown as everything turned off.
         answer?.takeIf { "enabled" in it }?.let { doc ->
             if (name == "generator") _generatorSettings.value = generatorSettingsOf(doc)
             if (name == "chat") _chatReader.value = chatReaderOf(doc)
             if (name == "mail") _mailReader.value = mailReaderOn(doc)
+            if (name == "read/settings") _readChannel.value = mailReaderOn(doc)
         }
         said
     }
@@ -560,6 +626,10 @@ class OrreryRepo(
         settingsAt = 0L
         chatLists = null
         _failed.value = emptyList()
+        _policy.value = null
+        _schema.value = null
+        _readChannel.value = null
+        _readChannelRun.value = null
         scopeChecked = false
         // Nothing of the ship left is waiting on the owner: with Orrery off,
         // or another ship, its proposals and their notifications go.
@@ -692,7 +762,7 @@ class OrreryRepo(
         val key = a.mint(
             "Talon on $platform", by(),
             full?.let(::schemaKinds) ?: OrreryApi.KINDS,
-            full?.let(::schemaActions) ?: OrreryApi.ACTIONS,
+            ((full?.let(::schemaActions) ?: OrreryApi.ACTIONS) + SHIP_APPLIES).distinct(),
         )
         scopeChecked = full != null
         // Best effort: a writer slower than this is covered by the grace
@@ -1117,7 +1187,7 @@ class OrreryRepo(
         }
         // A mint refused is measured all the same, so it is tried again in
         // twelve hours rather than on every pass.
-        val minted = runCatching { a.mint("Talon on $platform", by(), schemaKinds(full), schemaActions(full)) }
+        val minted = runCatching { a.mint("Talon on $platform", by(), schemaKinds(full), (schemaActions(full) + SHIP_APPLIES).distinct()) }
             .onFailure { Log.w(TAG, "could not mint a key with the whole scope: ${it.message}") }
             .getOrNull() ?: return measured()
         // Waited for, as far as it goes: a key the ship has not stored yet

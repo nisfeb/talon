@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import io.nisfeb.talon.urbit.asText
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -354,9 +355,11 @@ fun OrrerySettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?)
     HorizontalDivider()
     Heading("Settings")
     if (orrery == null) Quiet("Sign in to a ship to set Orrery up.")
+    if (orrery != null && orreryHere) SchemaStepRow(orrery)
     if (orrery != null) TriageRow(orrery, profile, orreryHere, spend[AiFeature.OrreryTriage.name]) { ref -> setFeature(AiFeature.OrreryTriage) { it.copy(model = ref) } }
     if (orrery != null && orreryHere) GeneratorRow(orrery, profile) { ref -> setFeature(AiFeature.OrreryGenerator) { it.copy(model = ref) } }
     if (orrery != null && orreryHere) PreferencesRows(orrery)
+    if (orrery != null && orreryHere) ExecutorRows(orrery)
     Spacer(Modifier.height(12.dp))
     HorizontalDivider()
     // Until the owner flips it here, Jev is what this install had.
@@ -1208,6 +1211,7 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
     // feeds orrery, since it is the only reader of the owner's chats and mail.
     ChatReaderRow(orrery)
     MailReaderRow(orrery)
+    ReadChannelRow(orrery)
 }
 
 /**
@@ -1297,38 +1301,164 @@ private fun ChatReaderRow(orrery: OrreryRepo) {
  * reads no mail, so none is read while it is off.
  */
 @Composable
-private fun MailReaderRow(orrery: OrreryRepo) {
+private fun MailReaderRow(orrery: OrreryRepo) = ShipSwitchRow(
+    title = "The ship reads my mail",
+    whenOn = "Your ship reads your mail and your replies to its daily brief. This install reads no mail.",
+    whenOff = "Your ship can read your mail and your replies to its daily brief. This install reads no mail, so none is read while this is off.",
+    on = orrery.mailReader.collectAsState().value,
+    run = orrery.mailReaderRun.collectAsState().value,
+    load = orrery::loadMailReader,
+    set = orrery::setMailReader,
+    silent = "Your ship did not say how its mail reader is set.",
+)
+
+/**
+ * The ship reading text handed to it (orrery 59): what the assistant
+ * files there, and what anything else hands it. Off, the ship drops it.
+ * An orrery older than it says nothing, and nothing shows.
+ */
+@Composable
+private fun ReadChannelRow(orrery: OrreryRepo) = ShipSwitchRow(
+    title = "The ship reads what it is handed",
+    whenOn = "When you or the assistant hand your ship a list, notes or a page, it reads it and files what it finds.",
+    whenOff = "What you or the assistant hand your ship to read is dropped while this is off.",
+    on = orrery.readChannel.collectAsState().value,
+    run = orrery.readChannelRun.collectAsState().value,
+    load = orrery::loadReadChannel,
+    set = orrery::setReadChannel,
+    silent = null,
+)
+
+/**
+ * One of the ship's own switches: on or off as the ship says, its last
+ * pass, and a refusal said under it. [silent] is what a ship that did
+ * not answer is told, with a way to ask again; null hides the row.
+ */
+@Composable
+private fun ShipSwitchRow(
+    title: String,
+    whenOn: String,
+    whenOff: String,
+    on: Boolean?,
+    run: io.nisfeb.talon.orrery.ChatReaderRun?,
+    load: suspend () -> Boolean,
+    set: suspend (Boolean) -> Result<Unit>,
+    silent: String?,
+) {
     val scope = rememberCoroutineScope()
     var failed by remember { mutableStateOf(false) }
-    LaunchedEffect(orrery) { failed = !orrery.loadMailReader() }
-    val on = orrery.mailReader.collectAsState().value
+    LaunchedEffect(Unit) { failed = !load() }
     if (on == null) {
-        if (failed) Row(verticalAlignment = Alignment.CenterVertically) {
-            Quiet("Your ship did not say how its mail reader is set.", error = true)
+        if (failed && silent != null) Row(verticalAlignment = Alignment.CenterVertically) {
+            Quiet(silent, error = true)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { scope.launch { failed = !orrery.loadMailReader() } }) { Text("Try again") }
+            TextButton(onClick = { scope.launch { failed = !load() } }) { Text("Try again") }
         }
         return
     }
-    val run by orrery.mailReaderRun.collectAsState()
     var said by remember { mutableStateOf<String?>(null) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
         Column(Modifier.weight(1f)) {
-            Text("The ship reads my mail", style = MaterialTheme.typography.bodyMedium)
-            Quiet(
-                if (on) "Your ship reads your mail and your replies to its daily brief. This install reads no mail."
-                else "Your ship can read your mail and your replies to its daily brief. This install reads no mail, so none is read while this is off.",
-            )
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Quiet(if (on) whenOn else whenOff)
             run?.let { Quiet(chatRunLine(it)) }
         }
         Switch(checked = on, onCheckedChange = { want ->
             said = null
-            scope.launch {
-                orrery.setMailReader(want).onFailure { said = it.message ?: "Orrery did not answer." }
-            }
+            scope.launch { set(want).onFailure { said = it.message ?: "Orrery did not answer." } }
         })
     }
     said?.let { Quiet(it, error = true) }
+}
+
+/**
+ * Where the ship's executor files what the owner approved (orrery 60):
+ * a task as a todo, an event on a calendar, each by the calendar's id.
+ * Shown where the ship said its policy.
+ */
+@Composable
+private fun ExecutorRows(orrery: OrreryRepo) {
+    LaunchedEffect(orrery) { orrery.loadSettings() }
+    val policy = orrery.policy.collectAsState().value ?: return
+    var calendars by remember { mutableStateOf<List<io.nisfeb.talon.calendar.CalendarInfo>?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(orrery) {
+        calendars = orrery.calendars().getOrElse { note = "Your ship did not list its calendars: ${it.message ?: "no answer"}"; emptyList() }
+    }
+    fun pick(field: String, id: String) {
+        note = null
+        scope.launch { orrery.setPolicy(field, id).onFailure { note = "Your ship did not take that: ${it.message ?: "no answer"}" } }
+    }
+    Spacer(Modifier.height(12.dp))
+    HorizontalDivider()
+    Heading("Where approved things go")
+    Quiet("Your ship carries out what you approve: a task becomes a todo, and an event goes on a calendar.")
+    CalendarPick("Tasks go on", policy["todo_calendar"].asText().orEmpty(), calendars) { pick("todo_calendar", it) }
+    Quiet("A todo stays on your ship whichever calendar it is on: Google and most CalDAV calendars do not show tasks.")
+    CalendarPick("Events go on", policy["event_calendar"].asText().orEmpty(), calendars) { pick("event_calendar", it) }
+    note?.let { Quiet(it, error = true) }
+}
+
+@Composable
+private fun CalendarPick(label: String, picked: String, calendars: List<io.nisfeb.talon.calendar.CalendarInfo>?, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    fun name(id: String) = if (id.isBlank()) DEFAULT_CALENDAR else calendars?.firstOrNull { it.id == id }?.name?.ifBlank { null } ?: id
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        androidx.compose.foundation.layout.Box {
+            TextButton(onClick = { open = true }, enabled = calendars != null) { Text(name(picked)) }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                DropdownMenuItem(text = { Text(DEFAULT_CALENDAR) }, onClick = { open = false; onPick("") })
+                calendars.orEmpty().forEach { c ->
+                    DropdownMenuItem(text = { Text(c.name.ifBlank { c.id }) }, onClick = { open = false; onPick(c.id) })
+                }
+            }
+        }
+    }
+}
+
+private const val DEFAULT_CALENDAR = "The calendar's default"
+
+/**
+ * Orrery 60's owner step, offered where the schema lacks it: until it
+ * is made, the generator never proposes a fix and family ties are
+ * dropped. What it adds is said, and asked, before it is written.
+ */
+@Composable
+private fun SchemaStepRow(orrery: OrreryRepo) {
+    LaunchedEffect(orrery) { orrery.loadSettings() }
+    val schema = orrery.schema.collectAsState().value ?: return
+    val lines = remember(schema) { io.nisfeb.talon.orrery.withVersion60(schema).second }
+    if (lines.isEmpty()) return
+    var asking by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    Heading("Your schema is behind Orrery")
+    Quiet("Until it is updated, Orrery never proposes a fix and drops family ties. Updating adds:")
+    lines.forEach { Quiet(it) }
+    TextButton(onClick = { asking = true }, enabled = !busy) { Text(if (busy) "Updating" else "Update the schema") }
+    note?.let { Quiet(it, error = true) }
+    if (asking) {
+        AlertDialog(
+            onDismissRequest = { asking = false },
+            title = { Text("Update Orrery's schema?") },
+            text = { Text((lines + "Nothing else in your schema changes.").joinToString("\n")) },
+            confirmButton = {
+                TextButton(onClick = {
+                    asking = false
+                    busy = true
+                    note = null
+                    scope.launch {
+                        orrery.addVersion60Schema().onFailure { note = "Your ship did not take it: ${it.message ?: "no answer"}" }
+                        busy = false
+                    }
+                }) { Text("Update") }
+            },
+            dismissButton = { TextButton(onClick = { asking = false }) { Text("Not now") } },
+        )
+    }
 }
 
 private fun plural(n: Int, one: String) = "$n $one" + if (n == 1) "" else "s"

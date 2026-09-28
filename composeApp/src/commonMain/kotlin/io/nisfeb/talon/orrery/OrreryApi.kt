@@ -587,10 +587,10 @@ class OrreryApi(
          * URL and a model sometimes chooses it: anything outside this
          * set is a mistake, and `../` is not a document.
          */
-        val SETTINGS = setOf("generator", "telegram", "schema", "policy", "chat", "mail", "preferences")
+        val SETTINGS = setOf("generator", "telegram", "schema", "policy", "chat", "mail", "preferences", "read/settings")
 
         /** Read and never written: what the chat reader may pick from, each reader's last pass, and all of them at once. */
-        val LISTS = setOf("chat/dms", "chat/channels", "chat/last", "mail/last", "telegram/last", "settings")
+        val LISTS = setOf("chat/dms", "chat/channels", "chat/last", "mail/last", "telegram/last", "read/last", "settings")
 
         /**
          * The documents that register themselves with an outside
@@ -806,6 +806,81 @@ fun scopeCovers(mine: JsonObject?, full: JsonObject): Boolean {
         names((spec as? JsonObject)?.get("attrs")).all { it in names(have["attrs"]) }
     }
     return kindsOk && schemaActions(full).all { it in schemaActions(mine) }
+}
+
+/** The kinds orrery 60's writer carries out once approved, and the payload shape of each, word for word. */
+private val V60_PAYLOADS: Map<String, Map<String, String>> = linkedMapOf(
+    "correct" to linkedMapOf(
+        "subject" to "required: the body id the wrong fact is about",
+        "attr" to "required: the attribute, as the state names it",
+        "value" to "required: the wrong value as the state shows it, a string, or {\"ref\": \"kind/slug\"}",
+        "why" to "optional: the owner's reason, short",
+    ),
+    "fact" to linkedMapOf(
+        "subject" to "required: the body id",
+        "attr" to "required: an attribute the schema lists for its kind",
+        "value" to "required: a string, a number, true or false, or {\"ref\": \"kind/slug\"}",
+    ),
+    "merge" to linkedMapOf("from" to "required: the body id folded away", "into" to "required: the body id kept"),
+    "preference" to linkedMapOf("text" to "required: the standing rule, in the owner's words, at most 300 bytes"),
+)
+
+private val V60_FAMILY = linkedMapOf(
+    "spouse" to "their husband, wife or partner, a person body as a ref; written on both of them",
+    "children" to "each of their children, a person body as a ref, one row per child; each child gets parents",
+    "parents" to "each of their parents, a person body as a ref, one row per parent; each parent gets children",
+    "siblings" to "each brother or sister, a person body as a ref, one row per sibling; written on both of them",
+)
+
+private const val V60_MESSAGE_TEXT = "required: the message, short, in the owner's own voice"
+
+/**
+ * Orrery 60's owner step, word for word (its docs/releasing.md): the four
+ * kinds the writer carries out and their shapes, the family attributes
+ * and their notes, `multi`, and the message note without its prose rules.
+ * [schema] with the step made, and a line for the owner per change; no
+ * lines where the schema has it all. Nothing else in it moves.
+ */
+fun withVersion60(schema: JsonObject): Pair<JsonObject, List<String>> {
+    fun strings(l: List<String>) = kotlinx.serialization.json.JsonArray(l.map(::JsonPrimitive))
+    val out = schema.toMutableMap()
+    val lines = mutableListOf<String>()
+
+    val actions = names(schema["actions"])
+    val payloads = (schema["payloads"] as? JsonObject).orEmpty().toMutableMap()
+    val kinds = V60_PAYLOADS.keys.filter { it !in actions || it !in payloads }
+    if (kinds.isNotEmpty()) {
+        out["actions"] = strings(actions + V60_PAYLOADS.keys.filter { it !in actions })
+        V60_PAYLOADS.forEach { (k, shape) -> if (k !in payloads) payloads[k] = JsonObject(shape.mapValues { JsonPrimitive(it.value) }) }
+        lines += "Orrery may propose: ${kinds.joinToString(", ")}."
+    }
+    (payloads["message"] as? JsonObject)?.takeIf { (it["text"] as? JsonPrimitive)?.contentOrNull != V60_MESSAGE_TEXT }?.let { m ->
+        payloads["message"] = JsonObject(m + ("text" to JsonPrimitive(V60_MESSAGE_TEXT)))
+        lines += "A message's note drops its rules on how to write; put any you want in your style."
+    }
+    if (payloads != (schema["payloads"] as? JsonObject).orEmpty()) out["payloads"] = JsonObject(payloads)
+
+    val person = (schema["kinds"] as? JsonObject)?.get("person") as? JsonObject
+    val multi = names(schema["multi"])
+    val family = mutableSetOf<String>()
+    if (person != null) {
+        val attrs = names(person["attrs"])
+        val notes = (person["notes"] as? JsonObject).orEmpty()
+        val newAttrs = V60_FAMILY.keys.filter { it !in attrs }
+        val newNotes = V60_FAMILY.filterKeys { it !in notes }
+        if (newAttrs.isNotEmpty() || newNotes.isNotEmpty()) {
+            val p = JsonObject(person + ("attrs" to strings(attrs + newAttrs)) + ("notes" to JsonObject(notes + newNotes.mapValues { JsonPrimitive(it.value) })))
+            out["kinds"] = JsonObject((schema["kinds"] as JsonObject) + ("person" to p))
+            family += newAttrs + newNotes.keys
+        }
+    }
+    val newMulti = listOf("children", "parents", "siblings").filter { it !in multi }
+    if (newMulti.isNotEmpty()) {
+        out["multi"] = strings(multi + newMulti)
+        family += newMulti
+    }
+    if (family.isNotEmpty()) lines += "People may have: ${V60_FAMILY.keys.filter { it in family }.joinToString(", ")}."
+    return JsonObject(out) to lines
 }
 
 /** [s] cut to at most [max] bytes of UTF-8, never inside a character: the ship counts bytes. */
