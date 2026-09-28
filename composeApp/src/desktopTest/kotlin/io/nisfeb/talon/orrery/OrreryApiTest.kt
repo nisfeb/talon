@@ -14,6 +14,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -61,6 +62,33 @@ class OrreryApiTest {
             (seen!!.body as TextContent).text,
         )
         assertEquals("1790441000000-0xab12", said["id"]!!.jsonPrimitive.content)
+    }
+
+    // Checked against orrery's de-correct (version 60): subject a body id,
+    // attr, value a string or {"ref"}, why optional and at most 500 bytes.
+    @Test
+    fun `a correction goes up as orrery's correct route takes it`() = runTest {
+        api(body = """{"id":"c1","subject":"person/andrea","attr":"location","value":"place/barcelona","why":"","at":"2026-09-28T00:00:00Z","by":"owner"}""")
+            .correct("person/andrea", "location", buildJsonObject { put("ref", "place/barcelona") }, "  she stayed home ")
+        assertEquals("https://ship/apps/orrery/api/correct", seen!!.url.toString())
+        assertEquals(
+            """{"subject":"person/andrea","attr":"location","value":{"ref":"place/barcelona"},"why":"she stayed home"}""",
+            (seen!!.body as TextContent).text,
+        )
+        api().correct("person/sam", "status", kotlinx.serialization.json.JsonPrimitive("on jury duty"), "")
+        assertEquals("""{"subject":"person/sam","attr":"status","value":"on jury duty"}""", (seen!!.body as TextContent).text, "no reason, no why")
+    }
+
+    // Checked against orrery's serve-instruct: 503 no model key, 429 the
+    // day's calls spent, 502 the model failed. Each is said, not thrown.
+    @Test
+    fun `an instruction's refusals are answers the owner can read`() = runTest {
+        assertEquals("Orrery has made all of today's model calls. Try again tomorrow.", api(HttpStatusCode.TooManyRequests, """{"error":"the day's model calls are spent"}""").instruct("x").note)
+        assertEquals("Orrery's model did not answer: the model answered 500", api(HttpStatusCode.BadGateway, """{"error":"the model answered 500"}""").instruct("x").note)
+        val ok = api(body = """{"ok":true,"reply":"Done.","actions":[{"id":"p1","kind":"preference","title":"Never propose calls","payload":{"text":"never propose calls"},"status":"approved","by":"owner"}],"note":""}""")
+            .instruct("never propose calls", apply = true)
+        assertEquals("Done." to listOf("p1"), ok.reply to ok.actions.map { it.id })
+        assertEquals("""{"text":"never propose calls","apply":true}""", (seen!!.body as TextContent).text)
     }
 
     @Test

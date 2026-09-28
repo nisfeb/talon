@@ -58,6 +58,13 @@ Before you write:
 - A standing rule from the owner ("never propose calls before 9",
   "write briefly") is a preference: orrery_set_preferences. Every
   prompt on the ship reads them.
+- Something orrery holds that the owner says is wrong is
+  orrery_correct, once orrery_read of the body shows the exact
+  attribute and value; the ship then refuses it from anyone. Anything
+  looser ("Sam and Samuel are one person", "she moved to Lisbon",
+  "Andrea was not in Barcelona" before you know which body) is
+  orrery_instruct with the owner's words: the ship's model works out
+  the change and files it for the owner to approve.
 
 Settings live in documents, read and written whole by name:
 
@@ -143,6 +150,10 @@ interface OrreryTap {
     suspend fun changePreferences(add: String?, remove: String?, style: String?): Result<OrreryPreferences>
     /** Text for the ship to read and file; its answer, `{ok, id}` or `{ok, dropped}`. */
     suspend fun hand(text: String, title: String?): Result<JsonObject>
+    /** The owner's words for the ship's model to act on; what it filed is proposed, or approved with [apply]. */
+    suspend fun instruct(text: String, apply: Boolean): Result<io.nisfeb.talon.orrery.Instructed>
+    /** Strike a value as wrong everywhere it is said; the ship's record of it. */
+    suspend fun correct(subject: String, attr: String, value: kotlinx.serialization.json.JsonElement, why: String): Result<JsonObject>
 }
 
 /** The repo as the tools see it. */
@@ -192,6 +203,11 @@ fun OrreryRepo.asTap(): OrreryTap = object : OrreryTap {
     }
 
     override suspend fun hand(text: String, title: String?) = this@asTap.hand(text, title)
+
+    override suspend fun instruct(text: String, apply: Boolean) = this@asTap.instruct(text, apply = apply)
+
+    override suspend fun correct(subject: String, attr: String, value: kotlinx.serialization.json.JsonElement, why: String) =
+        this@asTap.correct(subject, attr, value, why)
 }
 
 /** Orrery's tools, where this install is attached to a ship that has it. */
@@ -388,6 +404,62 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
                 }
             },
             onFailure = { "Could not hand it to orrery: ${it.message}" },
+        )
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_instruct",
+            "Tell orrery something in the owner's words for its model to act on: that a fact is wrong, that two bodies are one person, a fact to state, a standing preference, or something to do. The ship answers in words and files what it takes from them as proposals for the owner to approve under Actions. One model call on the ship, counted against its daily limit.",
+            toolSchema(
+                "text" to ("string" to "The owner's words, up to 2000 bytes."),
+                "apply" to ("boolean" to "true only when the owner said to make the change now: what is filed is approved at once."),
+                required = listOf("text"),
+            ),
+        ),
+        write = true,
+    ) { args ->
+        val text = args.str("text") ?: return@Tool "Error: text is required."
+        orrery.instruct(text, args.str("apply") == "true").fold(
+            onSuccess = { a ->
+                listOfNotNull(
+                    a.reply.takeIf { it.isNotBlank() }?.let { "Orrery says: $it" },
+                    a.actions.takeIf { it.isNotEmpty() }?.let { filed -> "Filed:\n" + filed.joinToString("\n") { "- ${it.kind}: ${it.title} (${it.status})" } },
+                    a.note.takeIf { it.isNotBlank() },
+                ).joinToString("\n").ifEmpty { "Orrery answered nothing." }
+            },
+            onFailure = { "Could not tell orrery: ${it.message}" },
+        )
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_correct",
+            "Strike a value orrery holds as wrong: it is taken back from every source that said it, and the ship refuses it from then on, whoever files it again. Read the body first with orrery_read to give the attribute and value exactly as the ship holds them. Give value for a wrong string, or ref for a wrong body, not both.",
+            toolSchema(
+                "subject" to ("string" to "The body the wrong fact is about, e.g. person/andrea."),
+                "attr" to ("string" to "The attribute, as the ship names it, e.g. location."),
+                "value" to ("string" to "The wrong value as the ship shows it."),
+                "ref" to ("string" to "Instead of value: the wrong body, e.g. place/barcelona."),
+                "why" to ("string" to "The owner's reason, short; optional."),
+                required = listOf("subject", "attr"),
+            ),
+        ),
+        write = true,
+    ) { args ->
+        val subject = args.str("subject") ?: return@Tool "Error: subject is required."
+        val attr = args.str("attr") ?: return@Tool "Error: attr is required."
+        val ref = args.str("ref")
+        val plain = args.str("value")
+        val value = when {
+            ref != null && plain != null -> return@Tool "Error: give value or ref, not both."
+            ref != null -> buildJsonObject { put("ref", ref) }
+            plain != null -> JsonPrimitive(plain)
+            else -> return@Tool "Error: give the wrong value, or ref for a wrong body."
+        }
+        orrery.correct(subject, attr, value, args.str("why").orEmpty()).fold(
+            onSuccess = { "Struck: $subject's $attr is not ${ref ?: plain}. Orrery refuses it from now on." },
+            onFailure = { "Could not strike it: ${it.message}" },
         )
     })
 

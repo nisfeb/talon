@@ -103,7 +103,12 @@ class OrreryActionsTest {
 
     private val posts: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
 
-    private fun opened(a: OrreryAction, refine: (String) -> String = { """{"ok":true}""" }, block: ComposeUiTest.() -> Unit) {
+    private fun opened(
+        a: OrreryAction,
+        refine: (String) -> String = { """{"ok":true}""" },
+        instruct: () -> Pair<HttpStatusCode, String> = { HttpStatusCode.OK to """{"ok":true,"reply":"","actions":[],"note":""}""" },
+        block: ComposeUiTest.() -> Unit,
+    ) {
         val tmp = createTempDirectory(prefix = "talon-orract-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
@@ -111,6 +116,10 @@ class OrreryActionsTest {
             val path = req.url.encodedPath
             val body = req.body.toByteArray().decodeToString()
             if (req.method == HttpMethod.Post) posts += path to body
+            if (path.endsWith("/api/instruct")) {
+                val (status, said) = instruct()
+                return@MockEngine respond(said, status, headersOf("Content-Type", "application/json"))
+            }
             val answer = when {
                 path.endsWith("/refine") -> refine(body)
                 req.method == HttpMethod.Post && "/api/actions/" in path -> """{"ok":true}"""
@@ -147,6 +156,33 @@ class OrreryActionsTest {
         assertTrue(shows("Approved, the ship makes the change itself."))
         onNodeWithText("Approve").performClick()
         assertEquals("""{"status":"approved"}""", answered("c1"))
+    }
+
+    // Orrery 60: the owner's own words about a proposal, for the ship's
+    // model to act on. What it files is proposed; a refusal is said.
+    @Test
+    fun `what the owner tells Orrery about a proposal goes with it, and the reply shows`() = opened(
+        action("a1"),
+        instruct = { HttpStatusCode.OK to """{"ok":true,"reply":"Bus is on holiday until Friday.","actions":[{"id":"t9","kind":"task","title":"Ask Bus on Friday","payload":{},"about":[],"status":"proposed","by":"owner"}],"note":""}""" },
+    ) {
+        onNodeWithText("Tell Orrery").performClick()
+        onNode(hasSetTextAction()).performTextInput("he is away this week")
+        onNodeWithText("Send").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Bus is on holiday until Friday.") }
+        assertTrue(shows("Filed: Ask Bus on Friday"))
+        val sent = Json.parseToJsonElement(posts.single { it.first.endsWith("/api/instruct") }.second).jsonObject
+        assertEquals("""{"text":"he is away this week","action":"a1","apply":false}""", sent.toString())
+    }
+
+    @Test
+    fun `an Orrery with no model key says so when told something`() = opened(
+        action("a1"),
+        instruct = { HttpStatusCode.ServiceUnavailable to """{"error":"the generator has no key"}""" },
+    ) {
+        onNodeWithText("Tell Orrery").performClick()
+        onNode(hasSetTextAction()).performTextInput("x")
+        onNodeWithText("Send").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Orrery has no model key on your ship") }
     }
 
     @Test

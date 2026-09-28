@@ -203,6 +203,56 @@ class OrreryApi(
         return reading { Json.parseToJsonElement(said).jsonObject }
     }
 
+    /**
+     * The owner's own words for the ship to act on (orrery 60): "Andrea
+     * was not in Barcelona", "Sam and Samuel are one person", "remove
+     * her". One model call on the ship, counted like a refine. [action]
+     * is the proposal being answered, where there is one. What the words
+     * ask for is filed as proposals, or approved at once with [apply].
+     * A refusal (no model key, the day's calls spent, the model failing)
+     * is an answer the owner reads, as a refine's is.
+     */
+    suspend fun instruct(text: String, action: String? = null, apply: Boolean = false): Instructed {
+        val body = buildJsonObject {
+            put("text", clipBytes(text.trim(), 2000))
+            action?.let { put("action", it) }
+            put("apply", apply)
+        }
+        val said = io.nisfeb.talon.util.runSuspendCatching { request(owner, HttpMethod.Post, "/api/instruct", body.toString(), instructTimeout) }
+            .getOrElse { e ->
+                val refused = e as? OrreryError.Refused
+                return Instructed(note = when (refused?.status) {
+                    503 -> "Orrery has no model key on your ship, so nothing read that. Set one for its generator under Orrery in Settings."
+                    429 -> "Orrery has made all of today's model calls. Try again tomorrow."
+                    502 -> "Orrery's model did not answer: ${refused.reason}"
+                    else -> refused?.reason ?: e.message ?: "The ship did not answer."
+                })
+            }
+        val o = reading { Json.parseToJsonElement(said).jsonObject }
+        return Instructed(
+            reply = o["reply"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            actions = (o["actions"] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.let(::actionOf) },
+            note = o["note"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+        )
+    }
+
+    /**
+     * Strike a value as wrong (orrery 60): retracted from every source
+     * that said it, and refused whoever files it again. [value] is a
+     * string, or `{"ref": "kind/slug"}` for another body. The ship's
+     * record of the correction.
+     */
+    suspend fun correct(subject: String, attr: String, value: kotlinx.serialization.json.JsonElement, why: String): JsonObject {
+        val body = buildJsonObject {
+            put("subject", subject)
+            put("attr", attr)
+            put("value", value)
+            if (why.isNotBlank()) put("why", clipBytes(why.trim(), 500))
+        }
+        val said = request(owner, HttpMethod.Post, "/api/correct", body.toString())
+        return reading { Json.parseToJsonElement(said).jsonObject }
+    }
+
     /** Run the ship's chat reader now; [settingsDoc] `chat/last` is its record once it is done. */
     suspend fun wakeChat() {
         request(owner, HttpMethod.Post, "/api/chat/wake")
@@ -524,6 +574,8 @@ class OrreryApi(
          * here is not the one every other route gets.
          */
         private const val refineTimeout = 45_000L
+        /** The ship gives an instruction's model call two minutes. */
+        private const val instructTimeout = 150_000L
 
         /** A settle's reads and first pause: 200 ms doubling, about six seconds in all. */
         const val SETTLE_READS = 6
@@ -609,6 +661,13 @@ data class OrreryAction(
 data class Refined(
     val action: OrreryAction?,
     val extras: List<OrreryAction> = emptyList(),
+    val note: String = "",
+)
+
+/** What an instruction answered: the ship's reply, what it filed, and what it would not do. */
+data class Instructed(
+    val reply: String = "",
+    val actions: List<OrreryAction> = emptyList(),
     val note: String = "",
 )
 

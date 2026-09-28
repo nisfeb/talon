@@ -51,6 +51,10 @@ fun OrreryActionDialog(
     var refining by remember(action.id) { mutableStateOf(false) }
     var refined by remember(action.id) { mutableStateOf<String?>(null) }
     var saying by remember(action.id) { mutableStateOf(Saying.NOTHING) }
+    // The owner's words about it for the ship's model (orrery 60): "she
+    // moved to Lisbon", "never propose these". What it files is proposed.
+    var telling by remember(action.id) { mutableStateOf("") }
+    var told by remember(action.id) { mutableStateOf<String?>(null) }
     var shown by remember(action.id) { mutableStateOf(action) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val action = shown
@@ -137,10 +141,52 @@ fun OrreryActionDialog(
                                 io.nisfeb.talon.ui.FitText("Say what it should be")
                             }
                         }
+                        TextButton(onClick = { saying = if (saying == Saying.TELL) Saying.NOTHING else Saying.TELL }) {
+                            io.nisfeb.talon.ui.FitText("Tell Orrery")
+                        }
                         TextButton(onClick = { saying = if (saying == Saying.DISMISS) Saying.NOTHING else Saying.DISMISS }) {
                             Text("Not this", color = MaterialTheme.colorScheme.error)
                         }
                     }
+                }
+                if (saying == Saying.TELL) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = telling,
+                        onValueChange = { telling = it },
+                        label = { Text("Tell Orrery") },
+                        placeholder = { Text("she moved to Lisbon") },
+                        enabled = !refining,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "Orrery's model reads it with this proposal and files what it asks for, for you to approve.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(
+                        enabled = !refining && telling.isNotBlank(),
+                        onClick = {
+                            refining = true
+                            told = null
+                            val said = telling
+                            scope.launch {
+                                told = orrery.instruct(said, action.id).fold(
+                                    onSuccess = { a ->
+                                        if (a.reply.isNotBlank() || a.actions.isNotEmpty()) telling = ""
+                                        listOfNotNull(
+                                            a.reply.takeIf { it.isNotBlank() },
+                                            a.actions.takeIf { it.isNotEmpty() }?.let { f -> "Filed: " + f.joinToString { it.title.ifBlank { it.kind } } },
+                                            a.note.takeIf { it.isNotBlank() },
+                                        ).joinToString(" ").ifEmpty { "Orrery answered nothing." }
+                                    },
+                                    onFailure = { it.message ?: "The ship did not answer." },
+                                )
+                                refining = false
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.End),
+                    ) { Text(if (refining) "Asking" else "Send") }
+                    told?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
                 if (proposed && action.kind in REFINABLE && saying == Saying.REFINE) {
                     androidx.compose.material3.OutlinedTextField(
@@ -245,8 +291,8 @@ fun OrreryActionDialog(
  */
 private val REFINABLE = setOf("task", "calendar", "message")
 
-/** Which of the two things that are not approving the owner is doing. */
-private enum class Saying { NOTHING, REFINE, DISMISS }
+/** Which of the things that are not approving the owner is doing. */
+private enum class Saying { NOTHING, REFINE, TELL, DISMISS }
 
 /** The reasons the client guide gives as examples, one tap each; the owner's own words go in the field. */
 val DISMISS_REASONS = listOf("just the event", "I always do this")

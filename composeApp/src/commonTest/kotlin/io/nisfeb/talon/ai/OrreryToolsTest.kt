@@ -63,6 +63,50 @@ class OrreryToolsTest {
             handed = text to title
             return Result.success(kotlinx.serialization.json.Json.parseToJsonElement(handAnswer) as JsonObject)
         }
+        var told: Pair<String, Boolean>? = null
+        var instructed = io.nisfeb.talon.orrery.Instructed(reply = "Noted.")
+        override suspend fun instruct(text: String, apply: Boolean): Result<io.nisfeb.talon.orrery.Instructed> {
+            told = text to apply
+            return Result.success(instructed)
+        }
+        var struck: String? = null
+        override suspend fun correct(subject: String, attr: String, value: kotlinx.serialization.json.JsonElement, why: String): Result<JsonObject> {
+            struck = "$subject $attr $value $why".trim()
+            return Result.success(buildJsonObject { put("id", "c1") })
+        }
+    }
+
+    // ─── telling orrery, and striking what it holds ─────────────────
+
+    @Test
+    fun `the owner's words go to the ship, and what it filed is read back`() = runTest {
+        val t = Tap()
+        t.instructed = io.nisfeb.talon.orrery.Instructed(
+            reply = "Sam and Samuel look like one person.",
+            actions = listOf(io.nisfeb.talon.orrery.OrreryAction("m1", "merge", "Fold Samuel into Sam", JsonObject(emptyMap()), emptyList(), null, "proposed", "owner")),
+            note = "",
+        )
+        val said = run(t, "orrery_instruct", buildJsonObject { put("text", "Sam and Samuel are one person") })
+        assertEquals("Sam and Samuel are one person" to false, t.told, "filed for the owner to approve, not applied")
+        assertEquals("Orrery says: Sam and Samuel look like one person.\nFiled:\n- merge: Fold Samuel into Sam (proposed)", said)
+        run(t, "orrery_instruct", buildJsonObject { put("text", "never propose calls"); put("apply", true) })
+        assertEquals("never propose calls" to true, t.told)
+        t.instructed = io.nisfeb.talon.orrery.Instructed(note = "Orrery has made all of today's model calls. Try again tomorrow.")
+        assertTrue("today's model calls" in run(t, "orrery_instruct", buildJsonObject { put("text", "x") }), "a refusal is said")
+    }
+
+    @Test
+    fun `a wrong value is struck as a string or a body, never both`() = runTest {
+        val t = Tap()
+        val said = run(t, "orrery_correct", buildJsonObject { put("subject", "person/andrea"); put("attr", "location"); put("ref", "place/barcelona"); put("why", "she stayed home") })
+        assertEquals("""person/andrea location {"ref":"place/barcelona"} she stayed home""", t.struck)
+        assertTrue("Struck" in said, said)
+        run(t, "orrery_correct", buildJsonObject { put("subject", "person/sam"); put("attr", "status"); put("value", "on jury duty") })
+        assertEquals("""person/sam status "on jury duty"""", t.struck)
+        t.struck = null
+        assertTrue("not both" in run(t, "orrery_correct", buildJsonObject { put("subject", "a/b"); put("attr", "c"); put("value", "x"); put("ref", "d/e") }))
+        assertTrue("Error" in run(t, "orrery_correct", buildJsonObject { put("subject", "a/b"); put("attr", "c") }))
+        assertEquals(null, t.struck, "nothing half-said reached the ship")
     }
 
     // ─── preferences and handing orrery text ────────────────────────
@@ -182,7 +226,7 @@ class OrreryToolsTest {
     @Test
     fun `changing the ship asks first, looking does not`() {
         val byWrite = orreryTools(Tap()).groupBy({ it.write }, { it.spec.name })
-        assertEquals(setOf("orrery_observe", "orrery_configure", "orrery_set_preferences", "orrery_file_text", "orrery_register"), byWrite[true]?.toSet())
+        assertEquals(setOf("orrery_observe", "orrery_configure", "orrery_set_preferences", "orrery_file_text", "orrery_register", "orrery_instruct", "orrery_correct"), byWrite[true]?.toSet())
         assertEquals(
             setOf("orrery_guide", "orrery_find", "orrery_read", "orrery_settings", "orrery_preferences"),
             byWrite[false]?.toSet(),

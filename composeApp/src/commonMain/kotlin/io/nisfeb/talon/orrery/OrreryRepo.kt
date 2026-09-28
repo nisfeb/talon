@@ -477,6 +477,25 @@ class OrreryRepo(
         said
     }
 
+    /**
+     * The owner's words for the ship to act on ([OrreryApi.instruct]).
+     * What it filed joins the list at once, and is not news: the owner
+     * asked for it.
+     */
+    suspend fun instruct(text: String, action: String? = null, apply: Boolean = false): Result<Instructed> = runCatching {
+        val answer = attached().instruct(text, action, apply)
+        val open = answer.actions.filter { it.status in OPEN_STATUSES }
+        if (open.isNotEmpty()) {
+            _actions.value = (_actions.value + open).distinctBy { it.id }
+            seenProposals = seenProposals?.plus(open.map { it.id })
+        }
+        answer
+    }
+
+    /** A value struck as wrong everywhere it is said ([OrreryApi.correct]); the ship's record of it. */
+    suspend fun correct(subject: String, attr: String, value: kotlinx.serialization.json.JsonElement, why: String): Result<JsonObject> =
+        runCatching { attached().correct(subject, attr, value, why) }
+
     /** Text for the ship to read and file ([OrreryApi.read]); its answer. */
     suspend fun hand(text: String, title: String?): Result<JsonObject> = runCatching { attached().read(text, title) }
 
