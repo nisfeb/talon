@@ -1906,6 +1906,9 @@ class OrreryRepo(
         @kotlin.concurrent.Volatile
         private var current: OrreryRepo? = null
 
+        /** The attached pipe, for what holds none: a payment for Armillary pointing the generator. */
+        fun attached(): OrreryRepo? = current
+
         /**
          * A call, whose facts are made inside the next pass: that is where
          * the ship is asked who each speaker is, so a person it keeps under

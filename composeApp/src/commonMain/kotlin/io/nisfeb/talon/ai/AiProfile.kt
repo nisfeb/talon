@@ -103,8 +103,11 @@ data class AiProfile(
     fun provider(id: String): AiProvider? = providers.firstOrNull { it.id == id }
 
     /** What [f] runs on, whether or not it is on: its own model, else the default. */
-    fun resolve(f: AiFeature): Resolved? {
-        val ref = features[f]?.model ?: defaultModel ?: return null
+    fun resolve(f: AiFeature): Resolved? = resolve(features[f]?.model ?: defaultModel)
+
+    /** What [ref] runs on, or null where it names no provider this profile has. */
+    fun resolve(ref: ModelRef?): Resolved? {
+        ref ?: return null
         val p = provider(ref.provider) ?: return null
         // Armillary and a server of your own have no default model: the
         // list is all there is, so a blank ref takes the first of it
@@ -185,6 +188,25 @@ fun AiProfile.pinningModels(): AiProfile {
 /** A feature's provider and model. */
 data class Resolved(val provider: AiProvider, val model: String) {
     val private: Boolean get() = provider.isPrivate
+
+    /**
+     * Why a chat client cannot call this, as a sentence, or null when it
+     * can. One answer for the gate and for the screens that say why:
+     * they disagreed, and a server with no address was told it lacked a
+     * key.
+     */
+    fun problem(): String? {
+        val p = provider
+        return when {
+            providerOf(p.kind) == null -> "${p.label} runs no chat model."
+            p.kind == ProviderKind.OpenAiCompatible && p.baseUrl.isNullOrBlank() -> "${p.label} has no address."
+            p.kind != ProviderKind.OpenAiCompatible && p.apiKey.isBlank() -> "${p.label} has no key."
+            // A server of your own, or Armillary, before a model is picked
+            // or listed: every call failed with "requires a model name".
+            model.isBlank() && (p.kind == ProviderKind.OpenAiCompatible || p.kind == ProviderKind.Armillary) -> "${p.label} has no model chosen."
+            else -> null
+        }
+    }
 }
 
 /** What the settings alone do not say, for the migration: whether this install feeds orrery, and so on. */
@@ -432,24 +454,10 @@ fun AiProfile.keepingLocal(local: AiProfile?): AiProfile {
  */
 fun AiSettings.Config.hasModelFor(f: AiFeature): Boolean = modelProblem(f) == null
 
-/**
- * Why [f] has no model a chat client can call, as a sentence, or null
- * when it has one. One answer for the gate and for the screens that
- * say why: they disagreed, and a server with no address was told it
- * lacked a key.
- */
+/** Why [f] has no model a chat client can call, as a sentence, or null when it has one ([Resolved.problem]). */
 fun AiSettings.Config.modelProblem(f: AiFeature): String? {
     val r = profile().resolve(f) ?: return "No model is set."
-    val p = r.provider
-    return when {
-        providerOf(p.kind) == null -> "${p.label} runs no chat model."
-        p.kind == ProviderKind.OpenAiCompatible && p.baseUrl.isNullOrBlank() -> "${p.label} has no address."
-        p.kind != ProviderKind.OpenAiCompatible && p.apiKey.isBlank() -> "${p.label} has no key."
-        // A server of your own, or Armillary, before a model is picked
-        // or listed: every call failed with "requires a model name".
-        r.model.isBlank() && (p.kind == ProviderKind.OpenAiCompatible || p.kind == ProviderKind.Armillary) -> "${p.label} has no model chosen."
-        else -> null
-    }
+    return r.problem()
 }
 
 /**

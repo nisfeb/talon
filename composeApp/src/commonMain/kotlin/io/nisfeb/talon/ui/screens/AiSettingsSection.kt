@@ -584,6 +584,8 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     val refreshing by (repo?.refreshing ?: noBusy).collectAsState()
     val noPayment = remember { MutableStateFlow<Payment?>(null) }
     val payment by (repo?.payment ?: noPayment).collectAsState()
+    val noOffer = remember { MutableStateFlow<String?>(null) }
+    val offer by (repo?.offer ?: noOffer).collectAsState()
     var note by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var buying by remember { mutableStateOf(false) }
     var subscribing by remember { mutableStateOf<Plan?>(null) }
@@ -663,6 +665,18 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             IntroducingLine()
         }
     }
+    // Paid for, and set up to run on it: the two features that read
+    // messages wait for the owner's own word (their rule, 2026-09-28).
+    offer?.let { model ->
+        Text(
+            readingOfferLine(model, p.models.firstOrNull { it.id == model }?.zdr == true, inference?.mode, isAssistantSupported),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { repo?.acceptOffer() }) { Text("Turn on") }
+            TextButton(onClick = { repo?.declineOffer() }) { Text("Not now") }
+        }
+    }
     Quiet(armillaryModeLine(inference?.mode, account))
     Quiet(providerSummary(p))
     note?.let { (text, bad) -> Quiet(text, error = bad) }
@@ -726,6 +740,23 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         },
         dismissButton = { TextButton(onClick = { confirmCancel = false }) { Text("Keep it") } },
     )
+}
+
+/**
+ * What turning on catch-up and the assistant after a payment means, in
+ * a sentence: the messages the owner asks about go to [model], and
+ * whether anything keeps them, as [readingWarning] says of a row.
+ */
+internal fun readingOfferLine(model: String, zdr: Boolean, mode: String?, withAssistant: Boolean): String {
+    val what = if (withAssistant) "Catch-up and the assistant are" else "Catch-up is"
+    val asked = if (withAssistant) "When you ask for a summary or ask the assistant something" else "When you ask for a summary"
+    val kept = when {
+        mode == "proxy" && zdr -> " through the vendor's ship. The model does not keep them, and the ship does not store them."
+        mode == "proxy" -> " through the vendor's ship, and the model may keep them."
+        zdr -> ", which keeps nothing (zero data retention)."
+        else -> ", which may keep them."
+    }
+    return "$what set up on $model. Turn ${if (withAssistant) "them" else "it"} on? $asked, the messages involved go to $model$kept"
 }
 
 /**
