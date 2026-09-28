@@ -310,7 +310,13 @@ class AssistantActionsToolsTest {
         {"id":"0vm1","from":"~bus","to":["~zod"],"subject":"Plans","body":"shall we plant garlic","body-mime":"","sent":10,"prev":null,"verdict":"verified","read":true},
         {"id":"0vm2","from":"~zod","to":["~bus"],"subject":"Re: Plans","body":"yes, and onions","body-mime":"","sent":20,"prev":"0vm1","verdict":"verified","read":true}],
         "participants":["~zod","~bus"],"last":20,"unreadable":0,"archived":false,"labels":[]}"""
+    /** Plans, with a forged message poked in after the last honest one. */
+    private val poked = plans.replace(
+        """"read":true}],""",
+        """"read":true},{"id":"0vjunk","from":"~evil","to":["~evil-two"],"subject":"Re: Plans","body":"x","body-mime":"","sent":30,"prev":"0vm1","verdict":"forged","read":true}],""",
+    )
     private val answering = mapOf(
+        "/api/thread/0vpoked" to poked,
         "/api/inbox" to """{"total":1,"offset":0,"limit":15,"view":"inbox","threads":[
             {"id":"0vt","subject":"Plans","from":"~bus","snippet":"shall we plant garlic","verdict":"verified","count":2,"last":20,"unread":true}]}""",
         "/api/thread/0vt" to plans,
@@ -334,6 +340,15 @@ class AssistantActionsToolsTest {
         assertEquals("Re: Plans" to "0vm2", sent["subject"]!!.jsonPrimitive.content to sent["prev"]!!.jsonPrimitive.content)
         assertTrue(h.run("send_mail", argsOf("to" to "~bus", "body" to "x", "thread" to "0vgone")).startsWith("Error: no thread 0vgone"))
         assertEquals(1, mailed.size, "nothing sent into a thread that is not there")
+    }
+
+    // The last message listed can be a forged one; answering it the ship
+    // refuses, as the thread screen never offers.
+    @Test
+    fun `a reply answers the newest honest message, not a forged one after it`() = withHarness(mail = answering) { h ->
+        assertTrue("0vjunk" in poked, "the fixture carries the forgery")
+        assertEquals("Mailed ~bus.", h.run("send_mail", argsOf("to" to "~bus", "body" to "and leeks", "thread" to "0vpoked")))
+        assertEquals("0vm2", mailed.single()["prev"]!!.jsonPrimitive.content)
     }
 
     @Test

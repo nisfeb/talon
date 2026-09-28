@@ -82,7 +82,9 @@ class MailRepo(
 
     /** Our own @p, learned from the nexus on the first good read. It is
      *  what a published note's address is built from. */
-    private var ourShip: String? = null
+    /** The ship this mail is read on. */
+    var ourShip: String? = null
+        private set
     private var poller: Job? = null
     private var foreground = true
     private val gate = Mutex()

@@ -156,7 +156,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         add(Tool(
             spec = ToolSpec(
                 "send_mail",
-                "Send a signed mail from the user. Recipients are ships (@p); resolve names with find_person first. To answer a thread, give thread and write to its other participants. To mail an invitation, give event: the invite goes along as an .ics file the recipient can add to their calendar.",
+                "Send a signed mail from the user. Recipients are ships (@p); resolve names with find_person first. To answer a thread, give thread and write to the reply_to that read_mail shows for it: the sender and recipients of its newest message, so someone taken off it stays off. To mail an invitation, give event: the invite goes along as an .ics file the recipient can add to their calendar.",
                 toolSchema(
                     "to" to ("string" to "Recipient ships, comma-separated."),
                     "subject" to ("string" to "The subject line; for a reply, the thread's own subject is used when this is blank."),
@@ -189,7 +189,9 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                     .getOrElse { return@Tool "Error: the invite could not be stored: ${it.message}" }
                 attachments += io.nisfeb.talon.mail.AttachRef("event.ics", "text/calendar", hash)
             }
-            if (mail.send(to, subject, body, thread?.messages?.lastOrNull()?.id, attachments)) {
+            // The newest honest message, as the thread screen answers: the
+            // last in the list could be a forged copy, which the ship refuses.
+            if (mail.send(to, subject, body, thread?.let { io.nisfeb.talon.mail.newestAnswerable(it.messages)?.id }, attachments)) {
                 "Mailed ${to.joinToString()}${if (attachments.isNotEmpty()) " with the invite attached" else ""}."
             } else {
                 "The ship did not send it: ${mail.error.value ?: "unknown reason"}."
@@ -235,14 +237,14 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         add(Tool(
             spec = ToolSpec(
                 "read_mail",
-                "Read one mail thread: each message with who sent it to whom, when, the subject, the body and its attachments, plus the thread's participants and a link that opens it.",
+                "Read one mail thread: each message with who sent it to whom, when, the subject, the body and its attachments, plus the thread's participants, who a reply goes to (reply_to), and a link that opens it.",
                 toolSchema("thread" to ("string" to "The thread id from list_mail or search_mail."), required = listOf("thread")),
             ),
             write = false,
         ) { args ->
             val id = args.text("thread")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: thread is required."
             val t = mail.loadThread(id) ?: return@Tool "No thread $id${mail.error.value?.let { ": $it" } ?: ""}."
-            formatThread(t, a.zone())
+            formatThread(t, a.zone(), mail.ourShip)
         })
     }
     a.calendar?.let { cal ->
@@ -704,12 +706,16 @@ internal const val READ_MAIL_MAX_MESSAGES = 20
 /** One mail thread as the model reads it: header, then the last
  *  [READ_MAIL_MAX_MESSAGES] messages, each body capped. Older messages
  *  are summarized as a count so the model knows they exist. */
-internal fun formatThread(t: io.nisfeb.talon.mail.MailThread, zone: TimeZone): String {
+internal fun formatThread(t: io.nisfeb.talon.mail.MailThread, zone: TimeZone, us: String? = null): String {
     fun two(n: Int) = n.toString().padStart(2, '0')
     val shown = t.messages.takeLast(READ_MAIL_MAX_MESSAGES)
     val earlier = t.messages.size - shown.size
     return buildString {
         append("thread=${t.id} link=${io.nisfeb.talon.urbit.TalonLink.forMail(t.id)} participants=${t.participants.joinToString(", ")}")
+        // Who a reply goes to, worked out here rather than left to the
+        // model: from the participants it put back whoever was taken off.
+        val answering = io.nisfeb.talon.mail.newestAnswerable(t.messages)
+        if (answering != null) append(" reply_to=${io.nisfeb.talon.mail.replyAudience(t.messages, answering.id, us).joinToString(", ")}")
         if (t.labels.isNotEmpty()) append(" labels=${t.labels.joinToString(", ")}")
         if (earlier > 0) append("\n\n… and $earlier earlier message${if (earlier == 1) "" else "s"} in this thread, not shown; these are the ${shown.size} most recent.")
         shown.forEach { m ->

@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import io.ktor.client.HttpClient
@@ -286,5 +287,37 @@ class MailThreadPaneTest {
         )
         // The other card was never closed by hand, so nothing was said of it.
         assertTrue(posts.none { "0vb" in it && "fold" in it }, "$posts")
+    }
+
+    /** ~bus was on the root, and taken off the reply to it. */
+    private val takenOff = """
+        {"id":"0vt","participants":["~zod","~nec","~bus"],"last":20,"unreadable":0,
+         "archived":false,"labels":[],"messages":[
+          {"id":"0vroot","from":"~zod","to":["~nec","~bus"],"subject":"Plans",
+           "body":"the root","sent":10,"prev":null,"verdict":"verified","read":true},
+          {"id":"0vnobus","from":"~nec","to":["~zod"],"subject":"Plans",
+           "body":"without bus","sent":20,"prev":"0vroot","verdict":"verified","read":true}]}
+    """.trimIndent()
+
+    // A reply was addressed to everyone the thread had ever held, so
+    // someone taken off a message was back on every reply after it.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `someone taken off a message is not on a reply to it`() = runComposeUiTest {
+        val repo = repoServing(takenOff)
+        val asked = mutableListOf<io.nisfeb.talon.ui.screens.MailIntent>()
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailThreadPane(repo = repo, threadId = "0vt", contacts = ContactMap.EMPTY, ourShip = "~nec", onCompose = { asked += it })
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) {
+            runCatching { onNodeWithText("without bus").assertIsDisplayed(); true }.getOrDefault(false)
+        }
+        val replies = onAllNodesWithContentDescription("Reply")
+        (0 until replies.fetchSemanticsNodes().size).forEach { replies[it].performClick() }
+        val to = asked.associate { it.prev to it.to }
+        assertEquals(listOf("~zod"), to["0vnobus"], "~bus was taken off it")
+        assertEquals(listOf("~zod", "~bus"), to["0vroot"], "the root still went to ~bus")
     }
 }

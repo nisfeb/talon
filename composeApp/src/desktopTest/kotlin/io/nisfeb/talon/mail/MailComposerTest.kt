@@ -5,6 +5,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
@@ -46,6 +48,8 @@ class MailComposerTest {
         lists: String = "[]",
         /** What the ship says to a send; it takes it by default. */
         sendAnswer: Pair<HttpStatusCode, String>? = null,
+        /** Thread 0vt, where a test has one. */
+        thread: String? = null,
     ): MailRepo {
         val http = HttpClient(
             MockEngine { req ->
@@ -53,6 +57,7 @@ class MailComposerTest {
                 val path = req.url.encodedPath
                 val (status, body) = when {
                     path.endsWith("/api/send") && sendAnswer != null -> sendAnswer
+                    path.endsWith("/api/thread/0vt") && thread != null -> HttpStatusCode.OK to thread
                     path.endsWith("/api/drafts") -> HttpStatusCode.OK to draftsListed()
                     path.endsWith("/api/lists") -> HttpStatusCode.OK to lists
                     else -> HttpStatusCode.OK to """{"ok":true,"threads":[]}"""
@@ -463,5 +468,32 @@ class MailComposerTest {
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("route to ~bus", substring = true).fetchSemanticsNodes().isNotEmpty() }
         assertTrue(!sent, "still here, to try again")
         onNodeWithText("Send").assertIsDisplayed()
+    }
+
+    // Who has seen what travels is whom it was sent to. The thread's
+    // participants counted the names a forged message poked into it
+    // gave, so adding one of them said nothing.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a name a forged message gave is still somebody who has not seen it`() = runComposeUiTest {
+        val thread = """{"id":"0vt","participants":["~zod","~nec","~wex","~feb"],"last":30,"unreadable":0,
+            "archived":false,"labels":[],"messages":[
+            {"id":"0vroot","from":"~zod","to":["~nec"],"subject":"Plans","body":"the root","sent":10,"prev":null,"verdict":"verified","read":true},
+            {"id":"0vjunk","from":"~wex","to":["~feb"],"subject":"Plans","body":"junk","sent":30,"prev":"0vroot","verdict":"forged","read":true}]}"""
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailComposer(
+                    repo = repo(thread = thread),
+                    intent = MailIntent(prev = "0vroot", threadId = "0vt", to = listOf("~zod"), subject = "Plans", travels = 1),
+                    onSent = {},
+                    onCancel = {},
+                )
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Replying to", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        onAllNodes(hasSetTextAction())[0].performTextReplacement("~zod ~wex")
+        onNodeWithText("Add recipient").performClick()
+        waitForIdle()
+        onNodeWithText("This signed message goes to people who have not seen it.").assertIsDisplayed()
     }
 }

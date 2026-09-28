@@ -229,7 +229,7 @@ fun MailThreadPane(
     fun intent(forwarding: Boolean, id: String? = answering) = MailIntent(
         prev = id,
         threadId = threadId,
-        to = if (forwarding) emptyList() else thread?.participants.orEmpty().filter { it != ourShip },
+        to = if (forwarding) emptyList() else io.nisfeb.talon.mail.replyAudience(thread?.messages.orEmpty(), id, ourShip),
         subject = answerSubject(thread?.messages?.firstOrNull()?.subject.orEmpty(), forwarding),
         travels = if (id == answering) travelling.size else id?.let { pathTo(forest, it).size } ?: 0,
         forwarding = forwarding,

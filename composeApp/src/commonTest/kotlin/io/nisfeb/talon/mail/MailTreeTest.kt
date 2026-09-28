@@ -301,4 +301,23 @@ class MailTreeTest {
         assertEquals(inList.node.message.verdict, inTree.message.verdict)
     }
 
+
+    // A reply goes to the people on the message it answers. It went to
+    // everyone the thread had ever held, so someone taken off a message
+    // was put back on every reply after it.
+    @Test
+    fun `a reply goes to the answered message's people, and someone taken off stays off`() {
+        val msgs = listOf(
+            MailMessage(id = "root", from = "~zod", to = listOf("~nec", "~bus"), sent = 1),
+            MailMessage(id = "nobus", from = "~nec", to = listOf("~zod"), prev = "root", sent = 2),
+            MailMessage(id = "junk", from = "~evil", to = listOf("~evil-two"), prev = "root", sent = 3, verdict = Verdict.FORGED),
+        )
+        assertEquals(listOf("~zod"), replyAudience(msgs, "nobus", "~nec"), "~bus was taken off, and ~nec is us")
+        assertEquals(listOf("~nec"), replyAudience(msgs, "nobus", "~zod"), "answering it from the other side")
+        assertEquals(listOf("~zod", "~bus"), replyAudience(msgs, "root", "~nec"), "the message before still had ~bus")
+        // What a reply answers by default is the newest honest message, so
+        // a forged one poked into the thread adds nobody.
+        assertEquals(listOf("~zod"), replyAudience(msgs, newestAnswerable(msgs)?.id, "~nec"))
+        assertEquals(emptyList(), replyAudience(msgs, "gone", "~nec"))
+    }
 }

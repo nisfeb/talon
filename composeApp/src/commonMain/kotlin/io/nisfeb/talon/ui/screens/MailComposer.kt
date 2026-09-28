@@ -360,7 +360,11 @@ fun MailComposer(
                 if (thread == null || id == null) emptyList()
                 else io.nisfeb.talon.mail.pathTo(io.nisfeb.talon.mail.threadTree(thread!!.messages), id)
             }
-            val seenIt = thread?.participants.orEmpty().toSet()
+            // Seen by those the path was sent to. Not the thread's
+            // participants, which a forged message poked into the thread
+            // could fill with its own names, so they went unwarned about.
+            val seenIt = if (path.isNotEmpty()) path.flatMap { listOf(it.from) + it.to }.toSet()
+            else thread?.participants.orEmpty().toSet()
             val strangers = recipients.count { it !in seenIt }
             // Until the thread is in hand (loading, or a draft whose thread
             // this install no longer holds) what travels is said from the
