@@ -130,6 +130,21 @@ class OrreryReaderRowsTest {
         switchBeside("The ship reads my mail").assertIsOff()
     }
 
+    // Orrery 58: a chat reader with no DM picked reads every DM. Saying it
+    // read "the chats picked below" when none were picked hid that.
+    @Test
+    fun `a reader with no DM picked is said to read every DM, and one with some only those`() {
+        settings {
+            waitUntil(timeoutMillis = 5_000) { shows("The ship reads my chats") }
+            assertTrue(shows("Your ship reads every DM, since none are picked"))
+        }
+        docs["chat"] = """{"enabled":true,"dms":["~bus"],"channels":[],"send_dms":false}"""
+        settings {
+            waitUntil(timeoutMillis = 5_000) { shows("The ship reads my chats") }
+            assertTrue(shows("Your ship reads the DMs and channels picked below") && !shows("every DM, since none"))
+        }
+    }
+
     @Test
     fun `sending approved DMs is asked of the ship, and its answer shows`() = settings {
         waitUntil(timeoutMillis = 5_000) { shows("The ship sends my approved DMs") }

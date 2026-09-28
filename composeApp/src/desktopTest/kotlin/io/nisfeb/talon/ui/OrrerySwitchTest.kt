@@ -148,6 +148,8 @@ class OrrerySwitchTest {
     @Test
     fun `off until turned on, what it is is said, and none of it shows`() = page(orrery = null) { _, _, _ ->
         assertTrue(shows("a private notebook about your life"))
+        // What turning it on allows, as orrery 58 reads: every DM by default.
+        assertTrue(shows("every direct message unless you pick which ones"))
         assertTrue(shows("Turning it off stops all of it"))
         onAllNodes(isToggleable())[0].assertIsOff()
         assertTrue(!shows("Orrery triage"), "no settings while it is off")

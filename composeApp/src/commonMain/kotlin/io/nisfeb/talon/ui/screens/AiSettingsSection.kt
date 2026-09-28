@@ -376,8 +376,13 @@ private fun OrreryAbout() {
     )
     Text("Turning it on lets:", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
     listOf(
-        "Your ship read the chats and email you choose, and Talon read your calls and your contacts' status " +
-            "lines, and share your contacts and, if you allow it, where you are.",
+        // Orrery 58 turned every reader on from the start, and its chat
+        // reader reads every DM until some are picked: "the chats you
+        // choose" undersold what the switch allows.
+        "Your ship read your chats and email: every direct message unless you pick which ones, the group " +
+            "channels you pick, and your mail. You can turn each of these off here.",
+        "Talon read your calls and your contacts' status lines, and share your contacts and, if you allow it, " +
+            "where you are.",
         "An AI model do the reading. You choose which: one on this device, one on a computer of yours, or a " +
             "service you pick. A service sees the text it reads.",
         "Orrery keep what it finds on your ship. It is not sent to the makers of Talon or anyone else.",
@@ -1233,8 +1238,13 @@ private fun ChatReaderRow(orrery: OrreryRepo) {
         Column(Modifier.weight(1f)) {
             Text("The ship reads my chats", style = MaterialTheme.typography.bodyMedium)
             Quiet(
-                if (reader.enabled) "Your ship reads the chats picked below, with the generator's model and key. This install reads no chats."
-                else "Your ship can read the chats you pick, with the generator's model and key. This install reads no chats, so none are read while this is off.",
+                when {
+                    // No DM picked is every DM (orrery 58), not none.
+                    reader.enabled && reader.dms.isEmpty() ->
+                        "Your ship reads every DM, since none are picked, and the channels picked below, with the generator's model and key. Pick DMs below to read only those. This install reads no chats."
+                    reader.enabled -> "Your ship reads the DMs and channels picked below, with the generator's model and key. This install reads no chats."
+                    else -> "Your ship can read your chats: every DM unless you pick some, and the channels you pick, with the generator's model and key. This install reads no chats, so none are read while this is off."
+                },
             )
             run?.let { Quiet(chatRunLine(it)) }
         }
