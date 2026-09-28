@@ -60,6 +60,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -1173,6 +1174,8 @@ class TlonChatRepo(
         val memberCount: Int?,
         /** "public" / "private" / "secret", when the preview said. */
         val privacy: String? = null,
+        /** The ship's last try at joining it failed (its join progress is %error). */
+        val failed: Boolean = false,
     )
 
     /**
@@ -1543,6 +1546,16 @@ class TlonChatRepo(
     private val _invites = MutableStateFlow<List<InviteSummary>?>(null)
     val invitesFlow: StateFlow<List<InviteSummary>?> = _invites.asStateFlow()
 
+    private val _joining = MutableStateFlow<List<InviteSummary>>(emptyList())
+
+    /**
+     * Groups the ship is joining and has not got into: an accepted
+     * invite waiting on its host. Not invites to answer. %groups does
+     * nothing with another join while one is under way, and listed as an
+     * invite one came back after every refresh, to be accepted again.
+     */
+    val joiningFlow: StateFlow<List<InviteSummary>> = _joining.asStateFlow()
+
     /**
      * Try a series of candidate scry paths to find inbound invites.
      * The renamed agent dropped `/gangs` (404); the new path is
@@ -1573,20 +1586,28 @@ class TlonChatRepo(
         if (foreigns == null) {
             Log.w(TAG, "refreshInvites: no foreigns in init response, keys=${body.keys}")
             _invites.value = emptyList()
+            _joining.value = emptyList()
             return
         }
         Log.i(TAG, "refreshInvites: ${foreigns.size} foreigns")
+        val joined = (body["groups"] as? JsonObject)?.keys.orEmpty()
         val out = mutableListOf<InviteSummary>()
+        val joining = mutableListOf<InviteSummary>()
         for ((flag, foreign) in foreigns) {
             val f = foreign as? JsonObject ?: continue
-            // invites is an array of {ship, token, valid, ...}; keep
-            // only foreigns with at least one valid invite.
-            val invites = f["invites"] as? JsonArray ?: continue
-            val firstValid = invites.asSequence()
+            if (flag in joined) continue
+            // Where the ship is with joining it: a join under way was
+            // answered already, and one that is done is a group.
+            val progress = f["progress"].asStr()
+            if (progress == "done") continue
+            val under = progress == "join" || progress == "watch"
+            // invites is an array of {ship, token, valid, ...}; an
+            // invite to answer needs at least one still valid.
+            val firstValid = (f["invites"] as? JsonArray).orEmpty().asSequence()
                 .mapNotNull { it as? JsonObject }
                 .firstOrNull { (it["valid"] as? JsonPrimitive)?.content == "true" }
-                ?: continue
-            val inviter = firstValid["ship"].asStr()
+            if (firstValid == null && !under) continue
+            val inviter = firstValid?.get("ship").asStr()
             val preview = f["preview"] as? JsonObject
             val meta = preview?.get("meta") as? JsonObject
             fun metaStr(k: String) = meta?.get(k).asStr()
@@ -1596,7 +1617,7 @@ class TlonChatRepo(
             // count `count`; either way it's a plain JSON number.
             val memberCount = (preview?.get("member-count") ?: preview?.get("count"))
                 ?.let { (it as? JsonPrimitive)?.content?.toIntOrNull() }
-            out += InviteSummary(
+            val summary = InviteSummary(
                 flag = flag,
                 inviter = inviter,
                 title = metaStr("title"),
@@ -1605,8 +1626,11 @@ class TlonChatRepo(
                 cover = metaStr("cover"),
                 memberCount = memberCount,
                 privacy = preview?.get("privacy").asStr()?.takeIf { it.isNotBlank() },
+                failed = progress == "error",
             )
+            if (under) joining += summary else out += summary
         }
+        _joining.value = joining.sortedBy { (it.title ?: it.flag).lowercase() }
         _invites.value = out.sortedBy { (it.title ?: it.flag).lowercase() }
         if (notify) {
             out.filter { it.flag !in known }
@@ -1614,10 +1638,23 @@ class TlonChatRepo(
         }
     }
 
-    /** Accept an inbound group invite: join it, and drop it from the list. */
+    /** Accept an inbound group invite: join it, and move it to the groups being joined. */
     suspend fun acceptInvite(flag: String) {
         joinGroup(flag)
+        val accepted = _invites.value?.firstOrNull { it.flag == flag }
         _invites.value = _invites.value?.filterNot { it.flag == flag }
+        accepted?.let { a -> _joining.update { list -> list.filterNot { it.flag == flag } + a.copy(failed = false) } }
+    }
+
+    /**
+     * Stop a join its host has not answered (%groups `group-cancel`). An
+     * invite it came from is back to be answered, or declined.
+     */
+    suspend fun cancelJoin(flag: String) {
+        val ch = channel ?: error("not connected")
+        ch.poke(app = "groups", mark = "group-cancel", payload = JsonPrimitive(flag))
+        _joining.update { list -> list.filterNot { it.flag == flag } }
+        runCatching { refreshInvites() }.onFailure { Log.w(TAG, "invites not read after a cancelled join", it) }
     }
 
     /**
@@ -1648,7 +1685,10 @@ class TlonChatRepo(
         var wait = 2_000L
         repeat(6) {
             delay(wait)
-            if (runCatching { db.groups().getGroup(flag) }.getOrNull() != null) return
+            if (runCatching { db.groups().getGroup(flag) }.getOrNull() != null) {
+                _joining.update { list -> list.filterNot { it.flag == flag } }
+                return
+            }
             runCatching { refreshGroups() }
                 .onFailure { Log.w(TAG, "post-join group refresh failed", it) }
             wait = (wait * 2).coerceAtMost(20_000L)

@@ -48,6 +48,7 @@ fun GroupInvitesScreen(
 ) {
     val cached by repo.invitesFlow.collectAsState()
     val invites = cached ?: emptyList()
+    val joining by repo.joiningFlow.collectAsState()
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     // A failed first load is an error to show, not a spinner to leave running.
@@ -106,14 +107,14 @@ fun GroupInvitesScreen(
 
             // Full-screen error only when the cache has nothing to show;
             // a failed refresh over a populated list becomes a banner.
-            error != null && invites.isEmpty() -> Text(
+            error != null && invites.isEmpty() && joining.isEmpty() -> Text(
                 "Couldn't load invites: $error",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(24.dp),
             )
 
-            invites.isEmpty() -> Text(
+            invites.isEmpty() && joining.isEmpty() -> Text(
                 "No pending invites.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -134,6 +135,33 @@ fun GroupInvitesScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 4.dp),
             ) {
+                // Accepted and not got into yet: accepting again does
+                // nothing while the ship waits, so the way out is to stop.
+                if (joining.isNotEmpty()) {
+                    item(key = "joining-head") {
+                        Text(
+                            "Joining",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+                        )
+                    }
+                    items(items = joining, key = { "j-" + it.flag }) { j ->
+                        JoiningRow(
+                            invite = j,
+                            busy = pendingAction?.first == j.flag,
+                            onCancel = {
+                                pendingAction = j.flag to "cancel"
+                                actionError = null
+                                scope.launch {
+                                    runCatching { repo.cancelJoin(j.flag) }
+                                        .onFailure { actionError = "Couldn't stop joining ${j.title ?: j.flag}: ${it.message ?: it::class.simpleName}" }
+                                    pendingAction = null
+                                }
+                            },
+                        )
+                        HorizontalDivider()
+                    }
+                }
                 items(items = invites, key = { it.flag }) { inv ->
                     InviteRow(
                         invite = inv,
@@ -165,6 +193,26 @@ fun GroupInvitesScreen(
     }
 }
 
+/** A group the ship is joining: whose answer it waits on, and a way to stop. */
+@Composable
+private fun JoiningRow(invite: TlonChatRepo.InviteSummary, busy: Boolean, onCancel: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(invite.title ?: invite.flag, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold))
+            Text(
+                "Your ship is waiting for ${invite.flag.substringBefore('/')} to let it in.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        OutlinedButton(enabled = !busy, onClick = onCancel) { Text("Stop joining") }
+    }
+}
+
 @Composable
 private fun InviteRow(
     invite: TlonChatRepo.InviteSummary,
@@ -193,6 +241,13 @@ private fun InviteRow(
                     fontWeight = FontWeight.SemiBold,
                 ),
             )
+            if (invite.failed) {
+                Text(
+                    "Joining it failed last time. Accept tries again.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             invite.inviter?.let {
                 Text(
                     "from $it",
