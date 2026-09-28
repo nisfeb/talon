@@ -355,6 +355,10 @@ class OrreryApi(
         due = a["due"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() && it != "null" },
         status = a["status"]?.jsonPrimitive?.contentOrNull ?: "proposed",
         by = a["by"]?.jsonPrimitive?.contentOrNull ?: "",
+        note = a["note"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+        movedMs = ((a["history"] as? kotlinx.serialization.json.JsonArray)?.lastOrNull() as? JsonObject)
+            ?.get("at")?.jsonPrimitive?.contentOrNull
+            ?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
     )
 
     /**
@@ -591,6 +595,10 @@ data class OrreryAction(
     val due: String?,
     val status: String,
     val by: String,
+    /** The ship's word on the last move: why it failed, or why the owner said no. */
+    val note: String = "",
+    /** When it last moved, from its history. */
+    val movedMs: Long? = null,
 )
 
 /**

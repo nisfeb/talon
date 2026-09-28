@@ -76,6 +76,19 @@ fun diffActionNotifications(open: List<OrreryAction>, lastSeen: Set<String>?, ca
     return ActionNews(raise, lastSeen - seen, seen)
 }
 
+/** What the ship could not do in the last week, newest first: the last section of Actions. */
+fun recentFailures(failed: List<OrreryAction>, nowMs: Long): List<OrreryAction> =
+    failed.filter { (it.movedMs ?: 0L) > nowMs - FAILURES_SHOWN_MS }.sortedByDescending { it.movedMs }.take(20)
+
+const val FAILURES_SHOWN_MS = 7L * 24 * 60 * 60 * 1000
+
+/** An approved action the ship could not carry out, as a notification. */
+fun failureNotification(a: OrreryAction) = ActionNotification(
+    "failed:${a.id}",
+    "Did not go through: ${a.title.ifBlank { a.kind }}",
+    a.note.ifBlank { "The ship gave no reason." },
+)
+
 /**
  * Orrery's change beacon, read a line at a time off its event stream:
  * [feed] answers the revision each time an event carrying one ends. The

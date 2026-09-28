@@ -344,10 +344,31 @@ class OrreryRepo(
 
     /** The open list as the ship just said it, and what that means for notifications. */
     private fun published(list: List<OrreryAction>) {
+        // Approved and gone with no answer from here: the ship carried it
+        // out, or could not. Only the second is news, and it said so
+        // nowhere Talon looked.
+        val left = _actions.value.filter { it.status == "approved" || it.status == "claimed" }
+            .map { it.id }.filter { id -> list.none { it.id == id } }
         _actions.value = list
         val news = diffActionNotifications(list, seenProposals)
         seenProposals = news.seen
         if (news.raise.isNotEmpty() || news.clear.isNotEmpty()) onActions?.invoke(news.raise, news.clear)
+        if (left.isNotEmpty()) scope.launch {
+            loadFailed()
+            val failed = _failed.value.filter { it.id in left }.map(::failureNotification)
+            if (failed.isNotEmpty()) onActions?.invoke(failed, emptySet())
+        }
+    }
+
+    private val _failed = MutableStateFlow<List<OrreryAction>>(emptyList())
+    /** What the ship tried and could not do in the last week, newest first, each with the ship's note. */
+    val failed: StateFlow<List<OrreryAction>> = _failed.asStateFlow()
+
+    suspend fun loadFailed() {
+        val a = api ?: return
+        runCatching { a.actions(keyToken(), status = "failed") }
+            .onSuccess { _failed.value = recentFailures(it, now()) }
+            .onFailure { Log.i(TAG, "failures skipped: ${it.message}") }
     }
 
     fun attach(shipUrl: String, ship: String) {
@@ -519,6 +540,7 @@ class OrreryRepo(
         _preferences.value = null
         settingsAt = 0L
         chatLists = null
+        _failed.value = emptyList()
         scopeChecked = false
         // Nothing of the ship left is waiting on the owner: with Orrery off,
         // or another ship, its proposals and their notifications go.

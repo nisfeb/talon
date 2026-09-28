@@ -100,6 +100,7 @@ fun OrreryActionDialog(
                         proposed && event != null -> "Waiting for you. Approved, the ship puts it on your calendar at that time; move it there if it is wrong."
                         proposed && how != null -> "Waiting for you. Approved, the ship sends it $how."
                         proposed -> "Waiting for you."
+                        action.status == "failed" -> "It did not go through. " + action.note.ifBlank { "The ship gave no reason." }
                         // The ship carries it out on its own executor, the
                         // moment the owner approves.
                         event != null -> "Approved. The ship puts it on your calendar."
@@ -215,8 +216,8 @@ fun OrreryActionDialog(
                     Text(if (message != null) "Approve and send" else "Approve")
                 }
                 // What the ship carries out reports itself; marking it
-                // done here would skip the doing.
-                event != null || message != null -> Unit
+                // done here would skip the doing. Nothing leaves failed.
+                event != null || message != null || action.status == "failed" -> Unit
                 else -> androidx.compose.material3.Button(onClick = { move("done") }) { Text("Mark done") }
             }
         },

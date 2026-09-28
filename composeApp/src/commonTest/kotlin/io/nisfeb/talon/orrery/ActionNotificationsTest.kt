@@ -57,4 +57,20 @@ class ActionNotificationsTest {
         r.feed("event: /rev"); r.feed("data: 1789826790001")
         assertEquals("1789826790001", r.feed(""))
     }
+
+    @Test
+    fun `failures from the last week show newest first, and older ones do not`() {
+        val day = 24L * 60 * 60 * 1000
+        val now = 100 * day
+        fun f(id: String, ago: Long?) = a(id, status = "failed").copy(movedMs = ago?.let { now - it })
+        val shown = recentFailures(listOf(f("old", 8 * day), f("mid", 3 * day), f("new", day), f("when?", null)), now)
+        assertEquals(listOf("new", "mid"), shown.map { it.id })
+    }
+
+    @Test
+    fun `a failure notifies with the ship's reason, or says it gave none`() {
+        val n = failureNotification(a("x1", status = "failed").copy(note = "no calendar called Work"))
+        assertEquals(ActionNotification("failed:x1", "Did not go through: Buy swim goggles", "no calendar called Work"), n)
+        assertEquals("The ship gave no reason.", failureNotification(a("x2", status = "failed")).body)
+    }
 }

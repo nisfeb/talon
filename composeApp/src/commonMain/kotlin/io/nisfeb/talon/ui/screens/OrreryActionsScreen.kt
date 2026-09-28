@@ -62,6 +62,8 @@ fun OrreryActionsScreen(
     problem: String? = null,
     /** The owner's clock, from the 12 or 24 hour setting. */
     twentyFourHour: Boolean = false,
+    /** What the ship tried lately and could not do, with its reason. */
+    failed: List<OrreryAction> = emptyList(),
     onOpen: (OrreryAction) -> Unit,
 ) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -114,20 +116,21 @@ fun OrreryActionsScreen(
             )
         }
         HorizontalDivider()
-        Body(actions, onOpen, onDecide, twentyFourHour)
+        Body(actions, failed, onOpen, onDecide, twentyFourHour)
     }
 }
 
 @Composable
 private fun Body(
     actions: List<OrreryAction>,
+    failed: List<OrreryAction>,
     onOpen: (OrreryAction) -> Unit,
     onDecide: (OrreryAction, String, String) -> Unit,
     twentyFourHour: Boolean,
 ) {
     val waiting = actions.filter { it.status == "proposed" }
     val settled = actions.filter { it.status != "proposed" }
-    if (actions.isEmpty()) {
+    if (actions.isEmpty() && failed.isEmpty()) {
         Column(
             Modifier.fillMaxSize().padding(24.dp),
             verticalArrangement = Arrangement.Center,
@@ -199,6 +202,30 @@ private fun Body(
                         a.title.ifBlank { a.kind },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        detail(a, twentyFourHour),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            }
+        }
+        // Approved, and the ship could not carry it out: said nowhere
+        // else, so here with the ship's reason, for a week.
+        if (failed.isNotEmpty()) {
+            item(key = "failed-head") { Heading("Did not go through", accent = false) }
+            items(failed, key = { "f-" + it.id }) { a ->
+                Column(
+                    Modifier.fillMaxWidth().clickable { onOpen(a) }
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    Text(a.title.ifBlank { a.kind }, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        a.note.ifBlank { "The ship gave no reason." },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
                     )
                     Text(
                         detail(a, twentyFourHour),

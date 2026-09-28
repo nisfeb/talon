@@ -53,11 +53,11 @@ class OrreryActionsTest {
 
     // ─── the list ─────────────────────────────────────────────────
 
-    private fun list(actions: List<OrreryAction>, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+    private fun list(actions: List<OrreryAction>, failed: List<OrreryAction> = emptyList(), block: ComposeUiTest.() -> Unit) = runComposeUiTest {
         setContent {
             TalonTheme(darkTheme = false) {
                 OrreryActionsScreen(
-                    actions = actions, onBack = {},
+                    actions = actions, onBack = {}, failed = failed,
                     onShown = { did += "shown" },
                     generator = "Read 4 chats an hour ago",
                     onDecide = { a, status, why -> did += "${a.id} $status $why".trim() },
@@ -87,6 +87,17 @@ class OrreryActionsTest {
         onNodeWithText("Tell Bus about lunch").performClick()
         assertEquals(listOf("a1 approved", "a1 dismissed", "open a1"), did.filter { it != "shown" })
     }
+
+    // An approved action the ship could not carry out left the list like
+    // one done, and nothing said it had not happened.
+    @Test
+    fun `what did not go through is listed with the ship's reason, and opens`() =
+        list(emptyList(), failed = listOf(action("f1", status = "failed").copy(note = "no DM with ~bus"))) {
+            waitUntil(timeoutMillis = 5_000) { shows("Did not go through") }
+            assertTrue(shows("no DM with ~bus") && !shows("Nothing to answer"))
+            onNodeWithText("Tell Bus about lunch").performClick()
+            assertEquals(listOf("open f1"), did.filter { it != "shown" })
+        }
 
     // ─── one action ───────────────────────────────────────────────
 
@@ -124,6 +135,12 @@ class OrreryActionsTest {
             db.close()
             tmp.deleteRecursively()
         }
+    }
+
+    @Test
+    fun `one that failed says why, and offers nothing to do`() = opened(action("f1", status = "failed").copy(note = "no DM with ~bus")) {
+        assertTrue(shows("It did not go through. no DM with ~bus"))
+        assertTrue(!shows("Mark done") && !shows("Approve") && !shows("Not this"))
     }
 
     private fun ComposeUiTest.answered(id: String): String {
