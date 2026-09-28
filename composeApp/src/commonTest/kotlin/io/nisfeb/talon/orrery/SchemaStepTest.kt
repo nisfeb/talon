@@ -55,4 +55,15 @@ class SchemaStepTest {
         assertEquals(null, s["payloads"]!!.jsonObject["message"])
         assertEquals(listOf("Orrery may propose: correct, fact, merge, preference.", "People may have: children, parents, siblings."), lines)
     }
+
+    @Test
+    fun `family attributes already there still get the notes they lack, and no more`() {
+        val some = o("""{"kinds":{"person":{"attrs":["spouse","children","parents","siblings"],"notes":{"spouse":"mine"}}},"multi":["children","parents","siblings"]}""")
+        val (s, lines) = withVersion60(some)
+        val person = s["kinds"]!!.jsonObject["person"]!!.jsonObject
+        assertEquals("""["spouse","children","parents","siblings"]""", person["attrs"].toString())
+        assertEquals("mine", person["notes"]!!.jsonObject["spouse"].toString().trim('"'), "the owner's own note stays")
+        assertEquals(setOf("spouse", "children", "parents", "siblings"), person["notes"]!!.jsonObject.keys)
+        assertTrue("People may have: children, parents, siblings." in lines, lines.toString())
+    }
 }

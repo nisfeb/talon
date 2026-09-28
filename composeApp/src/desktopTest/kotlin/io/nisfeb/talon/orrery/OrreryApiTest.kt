@@ -19,6 +19,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** The wire half: what goes up, on which client, and how the answers read. */
 class OrreryApiTest {
@@ -75,7 +76,8 @@ class OrreryApiTest {
             """{"subject":"person/andrea","attr":"location","value":{"ref":"place/barcelona"},"why":"she stayed home"}""",
             (seen!!.body as TextContent).text,
         )
-        api().correct("person/sam", "status", kotlinx.serialization.json.JsonPrimitive("on jury duty"), "")
+        val record = api(body = """{"id":"c7"}""").correct("person/sam", "status", kotlinx.serialization.json.JsonPrimitive("on jury duty"), "")
+        assertEquals("c7", record["id"]!!.jsonPrimitive.content, "the ship's record comes back")
         assertEquals("""{"subject":"person/sam","attr":"status","value":"on jury duty"}""", (seen!!.body as TextContent).text, "no reason, no why")
     }
 
@@ -85,10 +87,28 @@ class OrreryApiTest {
     fun `an instruction's refusals are answers the owner can read`() = runTest {
         assertEquals("Orrery has made all of today's model calls. Try again tomorrow.", api(HttpStatusCode.TooManyRequests, """{"error":"the day's model calls are spent"}""").instruct("x").note)
         assertEquals("Orrery's model did not answer: the model answered 500", api(HttpStatusCode.BadGateway, """{"error":"the model answered 500"}""").instruct("x").note)
+        assertTrue(api(HttpStatusCode.ServiceUnavailable, """{"error":"the generator has no key"}""").instruct("x").note.startsWith("Orrery has no model key"))
+        assertEquals("text: over 2000 bytes", api(HttpStatusCode.BadRequest, """{"error":"text: over 2000 bytes"}""").instruct("x").note, "any other refusal in the ship's words")
+        assertEquals("Could not find Samuel.", api(body = """{"ok":true,"reply":"","actions":[],"note":"Could not find Samuel."}""").instruct("x").note)
         val ok = api(body = """{"ok":true,"reply":"Done.","actions":[{"id":"p1","kind":"preference","title":"Never propose calls","payload":{"text":"never propose calls"},"status":"approved","by":"owner"}],"note":""}""")
             .instruct("never propose calls", apply = true)
         assertEquals("Done." to listOf("p1"), ok.reply to ok.actions.map { it.id })
         assertEquals("""{"text":"never propose calls","apply":true}""", (seen!!.body as TextContent).text)
+    }
+
+    // An approved action the executor could not carry out: status
+    // failed, the reason in its note, and when in its last history step.
+    @Test
+    fun `a failed action reads out with its reason and when it failed`() = runTest {
+        val row = { history: String -> """{"id":"m1","kind":"message","title":"Tell Bus","payload":{},"about":[],"status":"failed","by":"generator","note":"no DM with ~bus","history":$history}""" }
+        val steps = """[{"at":"2026-09-27T09:00:00Z","status":"approved","by":"owner"},{"at":"2026-09-28T09:00:00Z","status":"failed","by":"executor"}]"""
+        val failed = api(body = "[" + row(steps) + "]").actions(null, "failed").single()
+        assertEquals("no DM with ~bus", failed.note)
+        assertEquals(kotlinx.datetime.Instant.parse("2026-09-28T09:00:00Z").toEpochMilliseconds(), failed.movedMs, "the last step, not the first")
+        assertEquals(null, api(body = "[" + row("[]") + "]").actions(null, "failed").single().movedMs)
+        val garbled = """[{"at":"soon","status":"failed","by":"executor"}]"""
+        assertEquals(null, api(body = "[" + row(garbled) + "]").actions(null, "failed").single().movedMs)
+        assertEquals("https://ship/apps/orrery/api/actions?status=failed", seen!!.url.toString())
     }
 
     @Test

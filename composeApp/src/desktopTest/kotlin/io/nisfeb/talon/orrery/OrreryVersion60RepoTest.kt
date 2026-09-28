@@ -17,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
@@ -34,6 +35,8 @@ class OrreryVersion60RepoTest {
     private val schema = """{"style":"Short.","actions":["task"],"payloads":{},"kinds":{"person":{"attrs":["name"],"notes":{}}},"multi":[]}"""
     private val asked = CopyOnWriteArrayList<String>()
     private val put = CopyOnWriteArrayList<String>()
+    /** How long the ship takes over a write, so a screen can be left while it does. */
+    @Volatile private var holdMs = 0L
 
     private fun proposal(id: String, title: String) =
         """{"id":"$id","kind":"merge","title":"$title","payload":{"from":"person/samuel","into":"person/sam"},"about":[],"status":"proposed","by":"owner"}"""
@@ -49,7 +52,8 @@ class OrreryVersion60RepoTest {
             asked += "${req.method.value} $path"
             val json = { body: String -> respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
             when {
-                path == "instruct" -> json("""{"ok":true,"reply":"They look like one person.","actions":[${proposal("p9", "Fold Samuel into Sam")}],"note":""}""")
+                path == "instruct" -> { delay(holdMs); json("""{"ok":true,"reply":"They look like one person.","actions":[${proposal("p9", "Fold Samuel into Sam")}],"note":""}""") }
+                path == "read/settings" && req.method == HttpMethod.Put -> { delay(holdMs); req.body.toByteArray().decodeToString().let { put += it; json(it) } }
                 path == "actions" -> json(open)
                 path == "schema" && req.method == HttpMethod.Put -> req.body.toByteArray().decodeToString().let { put += it; json(it) }
                 path == "schema" -> json(schema)
@@ -93,5 +97,29 @@ class OrreryVersion60RepoTest {
         assertEquals(withVersion60(Json.parseToJsonElement(schema).jsonObject).first, Json.parseToJsonElement(put.single()).jsonObject)
         assertEquals(null, db.orrerySent().get("~zod", "scope:checked"))
         assertTrue(withVersion60(repo.schema.value!!).second.isEmpty(), "the page reads the answer, which needs nothing more")
+    }
+
+    // A write from a screen runs on the repo's scope: Tell Orrery waits
+    // up to two minutes on the ship's model, and closing the dialog
+    // meanwhile cancelled the request and lost what the ship filed.
+    @Test
+    fun `leaving the dialog while Orrery reads what it was told still files it`() = attached { repo, _, _ ->
+        holdMs = 300
+        val dialog = CoroutineScope(SupervisorJob())
+        dialog.launch { repo.instruct("Sam and Samuel are one person", "a1") }
+        delay(100)
+        dialog.coroutineContext.job.cancelAndJoin()
+        withTimeout(10_000) { while (repo.actions.value.none { it.id == "p9" }) delay(20) }
+    }
+
+    @Test
+    fun `leaving the page while a switch is sent still sends it`() = attached { repo, _, _ ->
+        holdMs = 300
+        val page = CoroutineScope(SupervisorJob())
+        page.launch { repo.setReadChannel(false) }
+        delay(100)
+        page.coroutineContext.job.cancelAndJoin()
+        withTimeout(10_000) { while (repo.readChannel.value != false) delay(20) }
+        assertEquals(listOf("""{"enabled":false}"""), put.toList())
     }
 }

@@ -279,10 +279,9 @@ class OrreryRepo(
             .onSuccess { _preferences.value = it }.isSuccess
     }
 
-    /** How the owner likes things written. On this repo's scope: leaving the page does not stop it. */
-    suspend fun setStyle(style: String): Result<Unit> = scope.async {
+    /** How the owner likes things written. */
+    suspend fun setStyle(style: String): Result<Unit> =
         writeSettings("preferences", buildJsonObject { put("style", style) }).map { }
-    }.await()
 
     /**
      * The standing preferences, [change]d. The ship keeps one list and a
@@ -523,9 +522,10 @@ class OrreryRepo(
      * as null is cleared, and a blank credential keeps the stored one.
      * The ship answers with the document as stored once the write has
      * landed, and that answer is what the screens then show: a write
-     * from anywhere, the assistant included, reaches them.
+     * from anywhere, the assistant included, reaches them. On this
+     * repo's scope: a screen left while the ship answers does not stop it.
      */
-    suspend fun writeSettings(name: String, body: JsonObject): Result<String> = runCatching {
+    suspend fun writeSettings(name: String, body: JsonObject): Result<String> = scope.async { runCatching {
         val said = attached().setSettingsDoc(name, body)
         val answer = runCatching { Json.parseToJsonElement(said) }.getOrNull() as? JsonObject
         if (name == "preferences" && answer != null && "preferences" in answer) _preferences.value = preferencesOf(answer)
@@ -541,26 +541,29 @@ class OrreryRepo(
             if (name == "read/settings") _readChannel.value = mailReaderOn(doc)
         }
         said
-    }
+    } }.await()
 
     /**
      * The owner's words for the ship to act on ([OrreryApi.instruct]).
      * What it filed joins the list at once, and is not news: the owner
-     * asked for it.
+     * asked for it. On this repo's scope: the model call takes up to two
+     * minutes, and closing the dialog meanwhile does not stop it.
      */
-    suspend fun instruct(text: String, action: String? = null, apply: Boolean = false): Result<Instructed> = runCatching {
-        val answer = attached().instruct(text, action, apply)
-        val open = answer.actions.filter { it.status in OPEN_STATUSES }
-        if (open.isNotEmpty()) {
-            _actions.value = (_actions.value + open).distinctBy { it.id }
-            seenProposals = seenProposals?.plus(open.map { it.id })
+    suspend fun instruct(text: String, action: String? = null, apply: Boolean = false): Result<Instructed> = scope.async {
+        runCatching {
+            val answer = attached().instruct(text, action, apply)
+            val open = answer.actions.filter { it.status in OPEN_STATUSES }
+            if (open.isNotEmpty()) {
+                _actions.value = (_actions.value + open).distinctBy { it.id }
+                seenProposals = seenProposals?.plus(open.map { it.id })
+            }
+            answer
         }
-        answer
-    }
+    }.await()
 
     /** A value struck as wrong everywhere it is said ([OrreryApi.correct]); the ship's record of it. */
     suspend fun correct(subject: String, attr: String, value: kotlinx.serialization.json.JsonElement, why: String): Result<JsonObject> =
-        runCatching { attached().correct(subject, attr, value, why) }
+        scope.async { runCatching { attached().correct(subject, attr, value, why) } }.await()
 
     /** Text for the ship to read and file ([OrreryApi.read]); its answer. */
     suspend fun hand(text: String, title: String?): Result<JsonObject> = runCatching { attached().read(text, title) }
