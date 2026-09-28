@@ -23,6 +23,8 @@ import io.nisfeb.talon.orrery.OrreryAction
 import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.orrery.eventToAdd
 import io.nisfeb.talon.orrery.messageToSend
+import io.nisfeb.talon.orrery.shipChange
+import io.nisfeb.talon.urbit.asText
 import kotlinx.datetime.toLocalDateTime
 
 /**
@@ -55,6 +57,7 @@ fun OrreryActionDialog(
     val message = remember(action) { action.messageToSend() }
     val event = remember(action) { action.eventToAdd() }
     val how = message?.let { if (it.via == "chat") "as a DM" else "by ${it.via}" }
+    val change = remember(action) { action.shipChange() }
 
     // Taken at once: the dialog closes and the ship is told behind it.
     fun move(status: String, why: String = "") {
@@ -89,6 +92,14 @@ fun OrreryActionDialog(
                     Spacer(Modifier.height(8.dp))
                     Text(whenLine(it), style = MaterialTheme.typography.bodyMedium)
                 }
+                change?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, style = MaterialTheme.typography.bodyMedium)
+                }
+                action.payload["why"].asText()?.takeIf { it.isNotBlank() }?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Why: $it", style = MaterialTheme.typography.bodySmall)
+                }
                 if (action.about.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
                     Text("About " + action.about.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -99,12 +110,14 @@ fun OrreryActionDialog(
                         proposed && action.kind == "task" -> "Waiting for you. Approved, the ship puts it on your calendar's task list."
                         proposed && event != null -> "Waiting for you. Approved, the ship puts it on your calendar at that time; move it there if it is wrong."
                         proposed && how != null -> "Waiting for you. Approved, the ship sends it $how."
+                        proposed && change != null -> "Waiting for you. Approved, the ship makes the change itself."
                         proposed -> "Waiting for you."
                         action.status == "failed" -> "It did not go through. " + action.note.ifBlank { "The ship gave no reason." }
                         // The ship carries it out on its own executor, the
                         // moment the owner approves.
                         event != null -> "Approved. The ship puts it on your calendar."
                         how != null -> "Approved. The ship sends it $how."
+                        change != null -> "Approved. The ship makes the change itself."
                         action.kind == "task" -> "Approved, and on your task list. Tick it there, or mark it done here."
                         else -> "Approved. Talon cannot carry this kind out; mark it done once you have."
                     },
@@ -217,7 +230,7 @@ fun OrreryActionDialog(
                 }
                 // What the ship carries out reports itself; marking it
                 // done here would skip the doing. Nothing leaves failed.
-                event != null || message != null || action.status == "failed" -> Unit
+                event != null || message != null || change != null || action.status == "failed" -> Unit
                 else -> androidx.compose.material3.Button(onClick = { move("done") }) { Text("Mark done") }
             }
         },

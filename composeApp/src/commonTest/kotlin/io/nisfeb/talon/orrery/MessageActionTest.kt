@@ -27,4 +27,16 @@ class MessageActionTest {
         assertEquals("lacks text", checkPayload(JsonObject(ok - "text"), shape, setOf("person/rose")).second)
         assertEquals("to names no body the ship has: person/rose", checkPayload(ok, shape, emptySet()).second)
     }
+
+    // Orrery 60: four kinds the ship carries out itself once approved.
+    @Test
+    fun `a change the ship makes itself reads as that change`() {
+        fun action(kind: String, p: String) = OrreryAction("c", kind, "", Json.parseToJsonElement(p).jsonObject, emptyList(), null, "proposed", "instruct")
+        assertEquals("Not true: person/andrea's location is place/barcelona",
+            action("correct", """{"subject":"person/andrea","attr":"location","value":{"ref":"place/barcelona"},"why":"she stayed home"}""").shipChange())
+        assertEquals("True: person/sam's age is 41", action("fact", """{"subject":"person/sam","attr":"age","value":41}""").shipChange())
+        assertEquals("person/samuel and person/sam are one, kept as person/sam", action("merge", """{"from":"person/samuel","into":"person/sam"}""").shipChange())
+        assertEquals("From now on: never propose calls", action("preference", """{"text":"never propose calls"}""").shipChange())
+        assertNull(action("task", """{"title":"x"}""").shipChange())
+    }
 }

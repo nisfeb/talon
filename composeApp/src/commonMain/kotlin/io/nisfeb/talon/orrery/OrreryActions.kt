@@ -76,6 +76,25 @@ fun diffActionNotifications(open: List<OrreryAction>, lastSeen: Set<String>?, ca
     return ActionNews(raise, lastSeen - seen, seen)
 }
 
+/** The kinds the ship's writer carries out itself once approved (orrery 60): nothing for Talon to do. */
+val SHIP_APPLIES = setOf("correct", "fact", "merge", "preference")
+
+/**
+ * The change one of [SHIP_APPLIES] asks for, in a line: what is struck,
+ * stated, folded or kept. A value is a string, a number, a flag or a
+ * `{"ref": "kind/slug"}` to another body. Null for any other kind.
+ */
+fun OrreryAction.shipChange(): String? {
+    val value = (payload["value"] as? kotlinx.serialization.json.JsonObject)?.get("ref").asText() ?: payload["value"].asText()
+    return when (kind) {
+        "correct" -> "Not true: ${str("subject")}'s ${str("attr")} is $value"
+        "fact" -> "True: ${str("subject")}'s ${str("attr")} is $value"
+        "merge" -> "${str("from")} and ${str("into")} are one, kept as ${str("into")}"
+        "preference" -> "From now on: ${str("text")}"
+        else -> null
+    }
+}
+
 /** What the ship could not do in the last week, newest first: the last section of Actions. */
 fun recentFailures(failed: List<OrreryAction>, nowMs: Long): List<OrreryAction> =
     failed.filter { (it.movedMs ?: 0L) > nowMs - FAILURES_SHOWN_MS }.sortedByDescending { it.movedMs }.take(20)

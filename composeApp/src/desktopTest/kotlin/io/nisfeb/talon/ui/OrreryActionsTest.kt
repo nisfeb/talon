@@ -138,6 +138,18 @@ class OrreryActionsTest {
     }
 
     @Test
+    fun `a correction shows what is struck and why, and the ship makes it once approved`() = opened(
+        action("c1", kind = "correct", title = "Andrea was not in Barcelona").copy(
+            payload = Json.parseToJsonElement("""{"subject":"person/andrea","attr":"location","value":{"ref":"place/barcelona"},"why":"she stayed home"}""").jsonObject,
+        ),
+    ) {
+        assertTrue(shows("Not true: person/andrea's location is place/barcelona") && shows("Why: she stayed home"))
+        assertTrue(shows("Approved, the ship makes the change itself."))
+        onNodeWithText("Approve").performClick()
+        assertEquals("""{"status":"approved"}""", answered("c1"))
+    }
+
+    @Test
     fun `one that failed says why, and offers nothing to do`() = opened(action("f1", status = "failed").copy(note = "no DM with ~bus")) {
         assertTrue(shows("It did not go through. no DM with ~bus"))
         assertTrue(!shows("Mark done") && !shows("Approve") && !shows("Not this"))
