@@ -45,7 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -863,8 +863,8 @@ private fun MailMessageCard(
                 var copied by remember(m.id) { mutableStateOf(false) }
                 Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (onAnswer != null) {
-                        androidx.compose.material3.OutlinedButton(onClick = { onAnswer(false) }) { io.nisfeb.talon.ui.FitText("Reply") }
-                        androidx.compose.material3.OutlinedButton(onClick = { onAnswer(true) }) { io.nisfeb.talon.ui.FitText("Forward") }
+                        io.nisfeb.talon.ui.OutlinedButton(onClick = { onAnswer(false) }) { io.nisfeb.talon.ui.FitText("Reply") }
+                        io.nisfeb.talon.ui.OutlinedButton(onClick = { onAnswer(true) }) { io.nisfeb.talon.ui.FitText("Forward") }
                     }
                     TextButton(onClick = {
                         clipboard.setText(androidx.compose.ui.text.AnnotatedString(m.body))

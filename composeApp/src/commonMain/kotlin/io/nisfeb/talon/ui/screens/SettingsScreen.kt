@@ -25,14 +25,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.Button
+import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
@@ -44,7 +44,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.luminance
@@ -340,14 +340,14 @@ fun SettingsScreen(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                androidx.compose.material3.OutlinedButton(onClick = {
+                io.nisfeb.talon.ui.OutlinedButton(onClick = {
                     themeDraft = io.nisfeb.talon.ui.theme.CustomTheme.blank(
                         dark = darkNow,
                         id = kotlin.random.Random.nextLong().toString(36).trimStart('-'),
                     )
                 }) { Text("New theme") }
                 themeSettings.active?.let { t ->
-                    androidx.compose.material3.OutlinedButton(onClick = { themeDraft = t }) { Text("Edit") }
+                    io.nisfeb.talon.ui.OutlinedButton(onClick = { themeDraft = t }) { Text("Edit") }
                     TextButton(onClick = {
                         uiSettings.setThemeSettings(
                             themeSettings.copy(
@@ -1927,9 +1927,10 @@ private fun SystemPromptEditorDialog(
         // multi-paragraph prompt. Let the Surface size itself instead.
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        // The corners and colour every popup has (TalonShapes, and the
+        // surface colour): a tonal elevation tinted this one grey.
         Surface(
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 6.dp,
+            shape = MaterialTheme.shapes.extraLarge,
             modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.9f),
         ) {
             Column(
@@ -2124,7 +2125,7 @@ private fun CustomThemeEditor(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            androidx.compose.material3.Button(onClick = {}) { Text("Primary") }
+                            io.nisfeb.talon.ui.Button(onClick = {}) { Text("Primary") }
                             FilterChip(true, {}, { Text("Selected") })
                             Text("Tertiary", color = MaterialTheme.colorScheme.tertiary)
                         }
@@ -2132,7 +2133,7 @@ private fun CustomThemeEditor(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                androidx.compose.material3.Button(onClick = onSave, enabled = draft.valid) { Text("Save and use") }
+                io.nisfeb.talon.ui.Button(onClick = onSave, enabled = draft.valid) { Text("Save and use") }
                 TextButton(onClick = onCancel) { Text("Cancel") }
             }
         }

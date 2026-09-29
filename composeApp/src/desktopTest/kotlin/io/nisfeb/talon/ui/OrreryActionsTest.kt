@@ -243,4 +243,31 @@ class OrreryActionsTest {
         onNodeWithText("Mark done").performClick()
         assertEquals("""{"status":"done"}""", answered("t1"))
     }
+
+    // Three of them did not fit across a phone's dialog, and the last was
+    // squeezed to a column one letter wide.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `on a phone, the dialog's choices wrap rather than squeeze`() {
+        val tmp = createTempDirectory(prefix = "talon-orract-phone-").toFile()
+        val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
+            .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
+        val http = HttpClient(MockEngine { respond("[]", HttpStatusCode.OK, headersOf("Content-Type", "application/json")) })
+        val scope = CoroutineScope(SupervisorJob())
+        val orrery = OrreryRepo(http, scope, db, "test", bareClient = http)
+        try {
+            androidx.compose.ui.test.runDesktopComposeUiTest(width = 412, height = 915) {
+                setContent { TalonTheme(darkTheme = false) { io.nisfeb.talon.ui.OrreryActionDialog(action("a1"), orrery, onClose = {}) } }
+                waitUntil(timeoutMillis = 5_000) { shows("Not this") }
+                val line = onNodeWithText("Say what it should be").fetchSemanticsNode().boundsInRoot.height
+                val not = onNodeWithText("Not this").fetchSemanticsNode().boundsInRoot
+                assertTrue(not.height <= line * 1.5f, "one line, not a column: ${not.height} against ${line}")
+                assertTrue(not.width > not.height, "wider than tall: $not")
+            }
+        } finally {
+            runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.cancelAndJoin() }
+            db.close()
+            tmp.deleteRecursively()
+        }
+    }
 }

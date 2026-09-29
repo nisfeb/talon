@@ -25,7 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.fillMaxSize
@@ -481,7 +481,7 @@ fun PartyLineBarContent(
         // a thing you do once, not something worth a permanent row over
         // the conversation. Renders nothing where the OS owns routing.
         if (onOpenMeeting != null && !immersive && partyVideoSupported && headline == null) {
-            androidx.compose.material3.TextButton(
+            io.nisfeb.talon.ui.TextButton(
                 onClick = onOpenMeeting,
                 modifier = Modifier.padding(horizontal = 8.dp),
             ) { Text("Meeting view") }

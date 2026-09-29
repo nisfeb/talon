@@ -19,7 +19,8 @@ class PaletteTest {
             assertNotEquals(baseline.surfaceTint, ours.surfaceTint)
             assertNotEquals(ours.primary, ours.surfaceTint, "elevation must not wash surfaces in the accent")
         }
-        assertEquals(Color(0xFFF5F5F4), light.surfaceContainer)
+        // Popups are drawn in the surface colour (PopupColorsTest).
+        assertEquals(Color(0xFFFFFFFF), light.surfaceContainer)
         assertEquals(Color(0xFFFAFAF9), light.background)
     }
 }

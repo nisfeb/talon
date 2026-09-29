@@ -25,7 +25,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -123,7 +123,7 @@ fun LoginQrShareScreen(
             // Form card — same visual idiom as LoginScreen so the
             // pages feel related when the user toggles between them.
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.large,
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                 modifier = Modifier.widthIn(max = 440.dp).fillMaxWidth(),
             ) {
@@ -161,7 +161,7 @@ fun LoginQrShareScreen(
             // theme users still see a high-contrast QR (cameras look
             // for dark-on-light by convention).
             Surface(
-                shape = RoundedCornerShape(20.dp),
+                shape = MaterialTheme.shapes.large,
                 color = Color.White,
                 modifier = Modifier
                     .widthIn(max = 320.dp)

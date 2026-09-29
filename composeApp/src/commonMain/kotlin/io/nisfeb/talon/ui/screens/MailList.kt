@@ -251,7 +251,7 @@ private fun MailBody(
             }
             if (hasMore) {
                 item(key = "__more") {
-                    androidx.compose.material3.TextButton(
+                    io.nisfeb.talon.ui.TextButton(
                         onClick = onMore,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Show more") }
@@ -356,7 +356,7 @@ private fun MailToolbar(
             }
         }
         if (onCompose != null) {
-            androidx.compose.material3.TextButton(onClick = onCompose) { Text("New") }
+            io.nisfeb.talon.ui.TextButton(onClick = onCompose) { Text("New") }
         }
         // The reader always knows better than a ten-minute timer, so the
         // manual ask is a control and not a hidden gesture.
@@ -396,7 +396,7 @@ internal fun MailAbsent(text: String, actionLabel: String? = null, onAction: (()
             )
             if (actionLabel != null && onAction != null) {
                 Spacer(Modifier.size(12.dp))
-                androidx.compose.material3.TextButton(onClick = onAction) { Text(actionLabel) }
+                io.nisfeb.talon.ui.TextButton(onClick = onAction) { Text(actionLabel) }
             }
         }
     }

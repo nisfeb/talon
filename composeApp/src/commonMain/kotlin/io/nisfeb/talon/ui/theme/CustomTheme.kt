@@ -99,9 +99,10 @@ fun customScheme(t: CustomTheme): ColorScheme {
         surfaceDim = if (t.dark) background else lerp(surface, Color.Black, 0.08f),
         surfaceBright = if (t.dark) lerp(surface, Color.White, 0.12f) else Color.White,
         surfaceContainerLowest = if (t.dark) lerp(surface, Color.Black, 0.3f) else Color.White,
-        surfaceContainerLow = lerp(surface, toward, 0.03f),
-        surfaceContainer = lerp(surface, toward, 0.06f),
-        surfaceContainerHigh = lerp(surface, toward, 0.09f),
+        // Popups in the surface colour, as the built-in palettes draw them.
+        surfaceContainerLow = surface,
+        surfaceContainer = surface,
+        surfaceContainerHigh = surface,
         surfaceContainerHighest = lerp(surface, toward, 0.12f),
         inverseSurface = if (t.dark) paper else ink,
         inverseOnSurface = if (t.dark) ink else paper,

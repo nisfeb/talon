@@ -761,7 +761,7 @@ private fun LocWidgetBlock(
             }
             val uriHandlerLoc = androidx.compose.ui.platform.LocalUriHandler.current
             val mapsLauncher = LocalMapsLauncher.current
-            androidx.compose.material3.TextButton(onClick = {
+            io.nisfeb.talon.ui.TextButton(onClick = {
                 runCatching {
                     // Android: Intent(geo:) hands off to Google Maps /
                     // OsmAnd / etc. directly. Desktop / unset: browser
@@ -834,7 +834,7 @@ private fun CalWidgetBlock(
             }
             androidx.compose.foundation.layout.Box {
                 // The ship's own calendars first; another calendar app after.
-                androidx.compose.material3.TextButton(
+                io.nisfeb.talon.ui.TextButton(
                     onClick = {
                         if (shipCalendar != null && shipCalendars.isNotEmpty()) menuOpen = true else toAnotherApp()
                     },

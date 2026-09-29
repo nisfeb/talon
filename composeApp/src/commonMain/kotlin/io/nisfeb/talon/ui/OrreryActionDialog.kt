@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.Alignment
@@ -135,7 +135,11 @@ fun OrreryActionDialog(
                 // is a window that scrolls before it says anything.
                 if (proposed || action.status == "approved") {
                     Spacer(Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // Wrapping, not a Row: three of them do not fit across a
+                    // phone's dialog, and the last was squeezed to a column
+                    // one letter wide.
+                    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (proposed && action.kind in REFINABLE) {
                             TextButton(onClick = { saying = if (saying == Saying.REFINE) Saying.NOTHING else Saying.REFINE }) {
                                 io.nisfeb.talon.ui.FitText("Say what it should be")
@@ -145,7 +149,7 @@ fun OrreryActionDialog(
                             io.nisfeb.talon.ui.FitText("Tell Orrery")
                         }
                         TextButton(onClick = { saying = if (saying == Saying.DISMISS) Saying.NOTHING else Saying.DISMISS }) {
-                            Text("Not this", color = MaterialTheme.colorScheme.error)
+                            Text("Not this", color = MaterialTheme.colorScheme.error, maxLines = 1)
                         }
                     }
                 }
@@ -271,13 +275,13 @@ fun OrreryActionDialog(
                 // Held while a note is being applied: an approval that
                 // lands mid-refinement is refused by the ship and files
                 // nothing, so the tap would be a tap that did nothing.
-                proposed -> androidx.compose.material3.Button(enabled = !refining, onClick = { move("approved") }) {
+                proposed -> io.nisfeb.talon.ui.Button(enabled = !refining, onClick = { move("approved") }) {
                     Text(if (message != null) "Approve and send" else "Approve")
                 }
                 // What the ship carries out reports itself; marking it
                 // done here would skip the doing. Nothing leaves failed.
                 event != null || message != null || change != null || action.status == "failed" -> Unit
-                else -> androidx.compose.material3.Button(onClick = { move("done") }) { Text("Mark done") }
+                else -> io.nisfeb.talon.ui.Button(onClick = { move("done") }) { Text("Mark done") }
             }
         },
         dismissButton = { TextButton(onClick = onClose) { Text("Close") } },

@@ -26,7 +26,9 @@ class CustomThemeTest {
         assertTrue(contrast(s.onBackground, s.background) > 7f)
         assertTrue(contrast(s.onPrimaryContainer, s.primaryContainer) > 3f)
         assertEquals(Color(0xFF38BDF8), s.primary)
-        assertFalse(s.surfaceContainerHigh == s.surface, "the surface ramp must step")
+        // Popups share the surface (PopupColorsTest); the ramp steps
+        // where a track or a field needs it to show against it.
+        assertFalse(s.surfaceContainerHighest == s.surface, "the surface ramp must step")
     }
 
     @Test

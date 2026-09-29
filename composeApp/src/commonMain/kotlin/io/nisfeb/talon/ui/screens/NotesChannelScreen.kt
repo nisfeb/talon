@@ -26,7 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -178,7 +178,7 @@ fun NotesChannelScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                androidx.compose.material3.TextButton(onClick = { said = null }) { Text("Dismiss") }
+                io.nisfeb.talon.ui.TextButton(onClick = { said = null }) { Text("Dismiss") }
             }
         }
 
