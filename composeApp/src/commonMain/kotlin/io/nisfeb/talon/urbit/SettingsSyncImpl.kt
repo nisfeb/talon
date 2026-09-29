@@ -359,7 +359,10 @@ class SettingsSyncImpl(
                 )
                 applyLocal(entry, encodeAccent(accent)) { settings.setAccentSettings(accent) }
             }
+            // A theme from a writer that does not know the extras keeps
+            // this device's: absent is not a choice to clear one.
             ENTRY_THEMES -> io.nisfeb.talon.ui.theme.ThemeSettings.fromJson(obj.toString())
+                ?.keepingLocalExtras(settings.themeSettings.value)
                 ?.let { themes -> applyLocal(entry, encodeThemes(themes)) { settings.setThemeSettings(themes) } }
         }
     }

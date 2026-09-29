@@ -111,7 +111,7 @@ internal fun SelfStatusRow(
             // is sniffed for "no status yet" patterns and breaks).
             if (status != null) {
                 Text(
-                    text = linkifyStatus(status),
+                    text = linkifyStatus(status, io.nisfeb.talon.ui.theme.LocalLinkColor.current),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -211,7 +211,7 @@ internal fun StatusRow(c: ContactEntity, onClick: () -> Unit) {
             }
             c.status?.let {
                 Text(
-                    text = linkifyStatus(it),
+                    text = linkifyStatus(it, io.nisfeb.talon.ui.theme.LocalLinkColor.current),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )

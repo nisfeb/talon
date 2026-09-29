@@ -139,9 +139,26 @@ fun TalonTheme(
         colorScheme = effective,
         typography = TalonTypography,
         shapes = TalonShapes,
-        content = content,
-    )
+    ) {
+        // The two extras a theme may set that Material has no role for.
+        val selection = customTheme?.selectionColor()
+        val provided = listOfNotNull(
+            LocalLinkColor provides customTheme?.linkColor(),
+            selection?.let {
+                androidx.compose.foundation.text.selection.LocalTextSelectionColors provides
+                    androidx.compose.foundation.text.selection.TextSelectionColors(handleColor = it, backgroundColor = it.copy(alpha = 0.4f))
+            },
+        )
+        androidx.compose.runtime.CompositionLocalProvider(*provided.toTypedArray(), content = content)
+    }
 }
+
+/**
+ * The link colour the theme sets, for links and mentions in messages,
+ * statuses and markdown; null keeps the standard link blue they are
+ * drawn in, whatever the theme. See [CustomTheme.link].
+ */
+val LocalLinkColor = androidx.compose.runtime.staticCompositionLocalOf<Color?> { null }
 
 /**
  * The app's own corners.

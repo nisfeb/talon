@@ -115,6 +115,32 @@ class SettingsSyncUiPrefsTest {
         settled { ui.powerFeaturesEnabled.value }
     }
 
+    // An older Talon, or the Omarchy plugin, writes a theme with the five
+    // alone. Absent is not a choice: the colours set here stay.
+    @Test
+    fun `a theme from a writer that knows only the five keeps this device's extras`() = live {
+        val mine = io.nisfeb.talon.ui.theme.CustomTheme("a1", "Ocean", true, "#38BDF8", "#A78BFA", "#34D399", "#0B1120", "#111827")
+            .explicit().copy(link = "#FF0000", text = "#EEEEEE")
+        ui.setThemeSettings(io.nisfeb.talon.ui.theme.ThemeSettings(listOf(mine), activeId = "a1"))
+        watching()
+        arrives("themes", """{"themes":[{"id":"a1","name":"Ocean","dark":true,"primary":"#123456","secondary":"#A78BFA",
+            "tertiary":"#34D399","background":"#0B1120","surface":"#111827"}],"activeId":"a1"}""")
+        settled { ui.themeSettings.value.active?.primary == "#123456" }
+        assertEquals("#FF0000" to "#EEEEEE", ui.themeSettings.value.active!!.let { it.link to it.text })
+        arrives("themes", """{"themes":[{"id":"a1","name":"Ocean","dark":true,"primary":"#123456","secondary":"#A78BFA",
+            "tertiary":"#34D399","background":"#0B1120","surface":"#111827","text":"","muted":"","raised":"","error":"",
+            "selection":"","link":""}],"activeId":"a1"}""")
+        settled { ui.themeSettings.value.active?.link == "" }
+        delay(300)
+        assertTrue(pushed("themes").isEmpty(), "what arrived, as it was kept, is not sent back: ${pushed("themes")}")
+
+        // Changed here, it goes up with every extra written.
+        ui.setThemeSettings(ui.themeSettings.value.copy(themes = listOf(ui.themeSettings.value.active!!.copy(link = "#00FF00"))))
+        settled { pushed("themes").isNotEmpty() }
+        val up = pushed("themes").last()
+        assertTrue("#00FF00" in up && "selection" in up, up)
+    }
+
     @Test
     fun `an accent arrives whole, and an unknown mode falls back to the profile's`() = live {
         watching()

@@ -194,6 +194,20 @@ fun mediaInStory(parts: List<StoryPart>): List<Pair<String, MediaKind>> {
 }
 
 /**
+ * [this] with its links and mentions in [color], the theme's link colour,
+ * over the blues they were parsed in; unchanged where the theme sets none.
+ */
+internal fun AnnotatedString.withLinkColor(color: androidx.compose.ui.graphics.Color?): AnnotatedString {
+    if (color == null) return this
+    val spans = getStringAnnotations(0, length).filter { it.tag == URL_TAG || it.tag == MENTION_TAG }
+    if (spans.isEmpty()) return this
+    return androidx.compose.ui.text.buildAnnotatedString {
+        append(this@withLinkColor)
+        spans.forEach { addStyle(androidx.compose.ui.text.SpanStyle(color = color), it.start, it.end) }
+    }
+}
+
+/**
  * The link or mention under [pos]: the glyph the pointer is on, not the
  * caret nearest it, so blank space past the end of a line is not the
  * link that ends it. Tap and hover both ask this, so the hand shows
@@ -264,6 +278,7 @@ fun StoryRenderer(
     // inside text. The action menu is reached by tapping the row on
     // touch (onMessageTap) and by the row's hover "⋯" on desktop —
     // right-click can't be used here, this SelectionContainer eats it.
+    val linkColor = io.nisfeb.talon.ui.theme.LocalLinkColor.current
     SelectionContainer(modifier = modifier) {
     Column(
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -285,7 +300,7 @@ fun StoryRenderer(
                     } else {
                         val layout = remember { mutableStateOf<TextLayoutResult?>(null) }
                         Text(
-                            text = part.text.applyEmojiSpans(),
+                            text = part.text.withLinkColor(linkColor).applyEmojiSpans(),
                             style = MaterialTheme.typography.bodyMedium,
                             onTextLayout = { layout.value = it },
                             modifier = if (hasAnnotations) {

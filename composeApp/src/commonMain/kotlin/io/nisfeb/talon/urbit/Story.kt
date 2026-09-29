@@ -787,7 +787,7 @@ object Story {
     // ───────── style constants ─────────
 
     private val MENTION_COLOR = Color(0xFF4F63D2)
-    private val LINK_COLOR = Color(0xFF2962FF)
+    private val LINK_COLOR = io.nisfeb.talon.ui.theme.LINK_BLUE
     private val MONO_SPAN = SpanStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
 }
 

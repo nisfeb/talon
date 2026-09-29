@@ -1,4 +1,6 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ui.theme.LINK_BLUE
+import io.nisfeb.talon.ui.theme.linkColor
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.background
@@ -365,7 +367,9 @@ fun SettingsScreen(
                     onCancel = { themeDraft = null },
                     onSave = {
                         val others = themeSettings.themes.filter { it.id != d.id }
-                        uiSettings.setThemeSettings(themeSettings.copy(themes = others + d, activeId = d.id))
+                        // All six extras written, "" for Auto: a key left out
+                        // reads as a writer that did not know it.
+                        uiSettings.setThemeSettings(themeSettings.copy(themes = others + d.explicit(), activeId = d.id))
                         themeDraft = null
                     },
                 )
@@ -2079,7 +2083,49 @@ private fun ColorRow(label: String, value: String, onValue: (String) -> Unit) {
     }
 }
 
-/** Name, light or dark, five colors, and a live preview of the derived scheme. */
+/**
+ * The six colours a theme may set beyond its five, closed until asked
+ * for: each reads Auto (derived) until set, and goes back to Auto.
+ */
+@Composable
+private fun MoreColors(
+    draft: io.nisfeb.talon.ui.theme.CustomTheme,
+    onDraft: (io.nisfeb.talon.ui.theme.CustomTheme) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val set = listOf(draft.text, draft.muted, draft.raised, draft.error, draft.selection, draft.link).count { !it.isNullOrEmpty() }
+    TextButton(onClick = { open = !open }) {
+        Text(if (open) "Fewer colours" else if (set > 0) "More colours ($set set)" else "More colours")
+    }
+    if (!open) return
+    // Set starts from what Auto was drawing.
+    val now = io.nisfeb.talon.ui.theme.customScheme(draft)
+    OptionalColorRow("Text", draft.text, now.onSurface) { onDraft(draft.copy(text = it)) }
+    OptionalColorRow("Muted text", draft.muted, now.onSurfaceVariant) { onDraft(draft.copy(muted = it)) }
+    OptionalColorRow("Raised", draft.raised, now.surfaceVariant) { onDraft(draft.copy(raised = it)) }
+    OptionalColorRow("Error", draft.error, now.error) { onDraft(draft.copy(error = it)) }
+    OptionalColorRow("Selection", draft.selection, now.primary) { onDraft(draft.copy(selection = it)) }
+    OptionalColorRow("Links", draft.link, LINK_BLUE) { onDraft(draft.copy(link = it)) }
+}
+
+/** A colour that is Auto (derived) until set, with the way back to Auto. */
+@Composable
+private fun OptionalColorRow(label: String, value: String?, auto: androidx.compose.ui.graphics.Color, onValue: (String) -> Unit) {
+    if (value.isNullOrEmpty()) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(label, Modifier.width(88.dp), style = MaterialTheme.typography.bodyMedium)
+            Text("Auto", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = { onValue(auto.hex()) }) { Text("Set") }
+        }
+    } else {
+        Row(verticalAlignment = Alignment.Top) {
+            Box(Modifier.weight(1f)) { ColorRow(label, value, onValue) }
+            TextButton(onClick = { onValue("") }) { Text("Auto") }
+        }
+    }
+}
+
+/** Name, light or dark, five colors, six optional ones, and a live preview of the derived scheme. */
 @Composable
 private fun CustomThemeEditor(
     draft: io.nisfeb.talon.ui.theme.CustomTheme,
@@ -2105,6 +2151,7 @@ private fun CustomThemeEditor(
             ColorRow("Tertiary", draft.tertiary) { onDraft(draft.copy(tertiary = it)) }
             ColorRow("Background", draft.background) { onDraft(draft.copy(background = it)) }
             ColorRow("Surface", draft.surface) { onDraft(draft.copy(surface = it)) }
+            MoreColors(draft, onDraft)
             MaterialTheme(colorScheme = io.nisfeb.talon.ui.theme.customScheme(draft)) {
                 androidx.compose.material3.Surface(
                     color = MaterialTheme.colorScheme.background,
@@ -2119,7 +2166,15 @@ private fun CustomThemeEditor(
                             contentColor = MaterialTheme.colorScheme.onSurface,
                             shape = RoundedCornerShape(8.dp),
                         ) {
-                            Text("A message on a surface.", Modifier.padding(8.dp))
+                            Column(Modifier.padding(8.dp)) {
+                                Text("A message on a surface.")
+                                Text(
+                                    "a link, and a ~mention",
+                                    color = draft.linkColor() ?: LINK_BLUE,
+                                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                                )
+                                Text("Sent 2m ago", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),

@@ -169,6 +169,29 @@ class SettingsScreenTest {
     }
 
     @Test
+    fun `more colours start Auto, set from what was drawn, go back to Auto, and save whole`() = settings {
+        tap("New theme")
+        onNode(hasSetTextAction() and hasText("Theme name")).performTextInput("Dusk")
+        tap("More colours")
+        assertEquals(6, onAllNodesWithText("Auto").fetchSemanticsNodes().size, "all six derived")
+        // Set Links: it starts from the standard blue.
+        val autoRows = onAllNodesWithText("Set")
+        autoRows[5].performScrollTo().performClick()
+        waitForIdle()
+        onNodeWithText("#2962FF").assertExists()
+        tap("Save and use")
+        val saved = ui.themeSettings.value.active!!
+        assertEquals("#2962FF" to "", saved.link to saved.text, "set, and the others written as Auto")
+
+        tap("Edit")
+        tap("More colours (1 set)")
+        onAllNodesWithText("Auto")[5].performScrollTo().performClick()
+        waitForIdle()
+        tap("Save and use")
+        assertEquals("", ui.themeSettings.value.active!!.link, "back to Auto")
+    }
+
+    @Test
     fun `a custom accent is applied only as a real colour`() = settings {
         switchBeside("Custom accent color").performClick()
         tap("Custom hex")

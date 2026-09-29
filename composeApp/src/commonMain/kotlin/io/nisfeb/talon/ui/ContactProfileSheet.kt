@@ -147,7 +147,7 @@ fun ContactProfileSheet(
             }
             if (!contact?.status.isNullOrBlank()) {
                 Text(
-                    text = linkifyStatus(contact!!.status!!),
+                    text = linkifyStatus(contact!!.status!!, io.nisfeb.talon.ui.theme.LocalLinkColor.current),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Medium,
                     ),

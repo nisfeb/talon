@@ -792,14 +792,14 @@ private fun MailMessageCard(
                                         .background(MaterialTheme.colorScheme.outlineVariant),
                                 )
                                 Text(
-                                    io.nisfeb.talon.ui.linkifyStatus(text),
+                                    io.nisfeb.talon.ui.linkifyStatus(text, io.nisfeb.talon.ui.theme.LocalLinkColor.current),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(start = 8.dp),
                                 )
                             }
                         } else {
-                            Text(io.nisfeb.talon.ui.linkifyStatus(text), style = MaterialTheme.typography.bodyMedium)
+                            Text(io.nisfeb.talon.ui.linkifyStatus(text, io.nisfeb.talon.ui.theme.LocalLinkColor.current), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
