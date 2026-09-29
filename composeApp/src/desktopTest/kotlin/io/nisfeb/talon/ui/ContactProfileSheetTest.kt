@@ -8,6 +8,8 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import io.nisfeb.talon.data.ContactEntity
@@ -21,9 +23,8 @@ import kotlin.test.assertTrue
 class ContactProfileSheetTest {
     private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val ship = "~mitlyn-ditrel"
-    private val person = ContactEntity(ship, "Mittens", "bakes on weekends", null, status = "at the market")
-
-    private fun card(self: Boolean = false, inBook: Boolean = true, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+    private fun card(self: Boolean = false, inBook: Boolean = true, bio: String = "bakes on weekends", block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+        val person = ContactEntity(ship, "Mittens", bio, null, status = "at the market")
         setContent {
             CompositionLocalProvider(
                 LocalClipboardManager provides object : ClipboardManager {
@@ -46,6 +47,30 @@ class ContactProfileSheetTest {
     }
 
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
+
+    // "users need to be able to select text in the user's bio ... to copy
+    // and paste". The copy itself goes to the system clipboard: the sheet
+    // is its own window layer, and gives its text the platform's clipboard.
+    @Test
+    fun `a bio's text is selectable`() = card {
+        waitForIdle() // the sheet done sliding up
+        onNodeWithText("bakes on weekends").performMouseInput {
+            moveTo(centerLeft); press(); moveTo(centerRight); release()
+            rightClick(center)
+        }
+        waitForIdle()
+        assertTrue(shows("Copy") && !shows("Copy link"), "a selection's menu, with no link in it")
+    }
+
+    // "right clicking on a link should have the option to copy the link".
+    @Test
+    fun `a link in a bio can be copied from its menu`() = card(bio = "see https://bakes.test/menu for more") {
+        waitForIdle()
+        // On the address itself: the line is narrower than the sheet.
+        onNodeWithText("see https://bakes.test/menu for more").performMouseInput { rightClick(centerLeft + androidx.compose.ui.geometry.Offset(100f, 0f)) }
+        waitForIdle()
+        assertTrue(shows("Copy link"))
+    }
 
     @Test
     fun `someone in the book shows name, status and bio, and can be messaged, mailed or removed`() = card {

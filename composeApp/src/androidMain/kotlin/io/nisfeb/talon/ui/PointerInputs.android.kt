@@ -1,5 +1,9 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.foundation.text.contextmenu.modifier.appendTextContextMenuComponents
+import androidx.compose.foundation.text.contextmenu.builder.item
+import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.ui.Modifier
 
@@ -13,3 +17,15 @@ actual fun Modifier.onSecondaryClick(onClick: () -> Unit): Modifier = this
  */
 actual fun Modifier.keepEdgeGesture(): Modifier =
     systemGestureExclusion()
+
+@Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+internal actual fun LinkMenuItems(url: () -> String?, copy: (String) -> Unit, modifier: Modifier, content: @Composable () -> Unit) =
+    Box(
+        modifier.appendTextContextMenuComponents {
+            val u = url() ?: return@appendTextContextMenuComponents
+            separator()
+            item(key = CopyLinkKey, label = "Copy link", onClick = { copy(u); close() })
+        },
+        propagateMinConstraints = true,
+    ) { content() }

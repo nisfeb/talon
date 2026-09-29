@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerButton
@@ -42,3 +44,9 @@ actual fun Modifier.onSecondaryClick(onClick: () -> Unit): Modifier =
 
 /** Nothing to exclude: a desktop window's edges belong to the window. */
 actual fun Modifier.keepEdgeGesture(): Modifier = this
+
+@Composable
+internal actual fun LinkMenuItems(url: () -> String?, copy: (String) -> Unit, modifier: Modifier, content: @Composable () -> Unit) =
+    androidx.compose.foundation.ContextMenuDataProvider(
+        items = { url()?.let { u -> listOf(androidx.compose.foundation.ContextMenuItem("Copy link") { copy(u) }) }.orEmpty() },
+    ) { Box(modifier, propagateMinConstraints = true) { content() } }

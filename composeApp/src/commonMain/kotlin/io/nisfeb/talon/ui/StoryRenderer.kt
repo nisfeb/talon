@@ -214,9 +214,7 @@ internal fun AnnotatedString.withLinkColor(color: androidx.compose.ui.graphics.C
  * exactly where a click opens something.
  */
 internal fun TextLayoutResult.spanAt(text: AnnotatedString, pos: Offset): AnnotatedString.Range<String>? {
-    val caret = getOffsetForPosition(pos)
-    val char = listOf(caret, caret - 1)
-        .firstOrNull { it in text.indices && getBoundingBox(it).contains(pos) } ?: return null
+    val char = glyphAt(text, pos) ?: return null
     return text.getStringAnnotations(char, char + 1).firstOrNull { it.tag == URL_TAG || it.tag == MENTION_TAG }
 }
 
@@ -279,7 +277,9 @@ fun StoryRenderer(
     // touch (onMessageTap) and by the row's hover "⋯" on desktop —
     // right-click can't be used here, this SelectionContainer eats it.
     val linkColor = io.nisfeb.talon.ui.theme.LocalLinkColor.current
-    SelectionContainer(modifier = modifier) {
+    val link = rememberLinkUnder()
+    CopyLinkMenu(link, modifier) {
+    SelectionContainer {
     Column(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -304,7 +304,7 @@ fun StoryRenderer(
                             style = MaterialTheme.typography.bodyMedium,
                             onTextLayout = { layout.value = it },
                             modifier = if (hasAnnotations) {
-                                Modifier.handOverSpans(part.text, layout).pointerInput(part.text) {
+                                Modifier.handOverSpans(part.text, layout).pressedLink(part.text, { layout.value }, link).pointerInput(part.text) {
                                     // No onLongPress here — long-press is
                                     // owned by SelectionContainer (text
                                     // selection start). Tap stays bound to
@@ -450,6 +450,7 @@ fun StoryRenderer(
         }
     }
     } // SelectionContainer
+    } // CopyLinkMenu
 }
 
 /**

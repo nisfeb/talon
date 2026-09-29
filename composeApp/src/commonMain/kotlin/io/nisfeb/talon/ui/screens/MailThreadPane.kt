@@ -782,7 +782,8 @@ private fun MailMessageCard(
             // A quote, lines taken from an earlier message with "> ",
             // is set off with a rule beside it and quieter text: what
             // somebody else said, inside what this sender says.
-            SelectionContainer {
+            val link = io.nisfeb.talon.ui.rememberLinkUnder()
+            io.nisfeb.talon.ui.CopyLinkMenu(link) { SelectionContainer {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     quoteBlocks(m.body).forEach { (quoted, text) ->
                         if (quoted) {
@@ -791,19 +792,20 @@ private fun MailMessageCard(
                                     Modifier.width(3.dp).fillMaxHeight()
                                         .background(MaterialTheme.colorScheme.outlineVariant),
                                 )
-                                Text(
+                                io.nisfeb.talon.ui.LinkedText(
                                     io.nisfeb.talon.ui.linkifyStatus(text, io.nisfeb.talon.ui.theme.LocalLinkColor.current),
+                                    link,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(start = 8.dp),
                                 )
                             }
                         } else {
-                            Text(io.nisfeb.talon.ui.linkifyStatus(text, io.nisfeb.talon.ui.theme.LocalLinkColor.current), style = MaterialTheme.typography.bodyMedium)
+                            io.nisfeb.talon.ui.LinkedText(io.nisfeb.talon.ui.linkifyStatus(text, io.nisfeb.talon.ui.theme.LocalLinkColor.current), link, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
-            }
+            } }
             val images = remember(m.body) { io.nisfeb.talon.ui.imageUrlsIn(m.body) }
             if (images.isNotEmpty()) {
                 if (!imagesShown) {

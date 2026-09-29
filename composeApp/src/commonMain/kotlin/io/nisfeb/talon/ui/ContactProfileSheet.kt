@@ -145,22 +145,32 @@ fun ContactProfileSheet(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
+            // Status and bio are selectable, to copy out of, and a link
+            // in either can be copied from the right-click menu.
+            val link = rememberLinkUnder()
+            val linkColor = io.nisfeb.talon.ui.theme.LocalLinkColor.current
             if (!contact?.status.isNullOrBlank()) {
-                Text(
-                    text = linkifyStatus(contact!!.status!!, io.nisfeb.talon.ui.theme.LocalLinkColor.current),
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.Medium,
-                    ),
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                CopyLinkMenu(link) { androidx.compose.foundation.text.selection.SelectionContainer {
+                    LinkedText(
+                        linkifyStatus(contact!!.status!!, linkColor),
+                        link,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.Medium,
+                        ),
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } }
             }
             if (!contact?.bio.isNullOrBlank()) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                Text(
-                    contact!!.bio!!,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                CopyLinkMenu(link) { androidx.compose.foundation.text.selection.SelectionContainer {
+                    LinkedText(
+                        linkifyStatus(contact!!.bio!!, linkColor),
+                        link,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } }
             }
             Spacer(Modifier.height(4.dp))
             // Contact-book state for a peer (never for self):
