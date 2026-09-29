@@ -128,6 +128,25 @@ object Markdown {
                 }
             }
 
+            // A comet's full word name, typed or pasted as the name reads
+            // everywhere else, is a mention of that comet, as its @p is.
+            // Full only, ten words or more: its checksum is four bits, so
+            // a short dotted phrase would name some near-empty comet by
+            // chance one time in sixteen.
+            if (c == '.' && (i == 0 || text[i - 1].isWhitespace())) {
+                val nym = FULL_NYM.matchAt(text, i)
+                val end = nym?.let { it.range.last + 1 }
+                val after = end?.let { text.getOrNull(it) }
+                val bounded = after == null || !(after.isLetter() || (after == '.' && text.getOrNull(end + 1)?.isLetter() == true))
+                val ship = if (nym != null && bounded) io.nisfeb.talon.ui.Mnemonym.shipForNym(nym.value) else null
+                if (ship != null && end != null) {
+                    flushPlain()
+                    out.add(Token.Ship(ship))
+                    i = end
+                    continue
+                }
+            }
+
             // Link: [label](url)
             if (c == '[') {
                 val closeBracket = text.indexOf(']', i + 1)
@@ -251,3 +270,6 @@ object Markdown {
         return end
     }
 }
+
+/** A comet's full word name: one or two dots, then ten to twelve words. */
+private val FULL_NYM = Regex("""\.{1,2}[a-z]+(?:\.[a-z]+){9,11}""")

@@ -138,4 +138,27 @@ class MarkdownTest {
         assertTrue(isValidPatp("~wisper"))
         assertFalse(isValidPatp("~zodzod"))
     }
+
+    // A comet's full word name, pasted as it reads, went out as text,
+    // where its @p goes out as a mention of it.
+    @Test
+    fun `a comet's full word name is a mention of that comet, with one dot or two`() {
+        val full = "..renewed.erupt.prepare.ablate.outdid.demote.disburse.ensures.perfects.imbue.defames.involve"
+        val ship = io.nisfeb.talon.ui.Mnemonym.shipForNym(full)!!
+        for (name in listOf(full, full.removePrefix("."))) {
+            val out = Markdown.parseInlines("hi $name, how are you")
+            val mention = out.mapNotNull { (it as? kotlinx.serialization.json.JsonObject)?.get("ship") }.single()
+            assertEquals(ship, mention.jsonPrimitive.content, name)
+        }
+        val atEnd = Markdown.parseInlines("ask $full.")
+        assertEquals(1, atEnd.count { (it as? kotlinx.serialization.json.JsonObject)?.containsKey("ship") == true }, "a sentence can end on one")
+    }
+
+    @Test
+    fun `dotted prose and short word names stay text`() {
+        for (text in listOf("wait...and then", "e.g. this", "..able", ".net framework", "..one.two.three.four")) {
+            val out = Markdown.parseInlines(text)
+            assertEquals(0, out.count { (it as? kotlinx.serialization.json.JsonObject)?.containsKey("ship") == true }, text)
+        }
+    }
 }

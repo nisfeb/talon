@@ -143,6 +143,29 @@ class DmChatScreenTest {
             assertTrue(onAllNodesWithText("Not sent").fetchSemanticsNodes().isEmpty())
         }
 
+    // A comet's name typed as it reads opened no picker, where its @p
+    // did: "I want autocomplete like a normal @p gets".
+    @Test
+    fun `the start of a comet's word name is picked like an @p, and goes as a mention`() {
+        val them = io.nisfeb.talon.ui.Mnemonym.shipForNym(
+            "..bespoke.unnerved.describe.convince.inhale.charade.relieve.obey.reword.dislodge.hereby.kazoo",
+        )!!
+        // Known as a contact, as someone you would mention is.
+        chat(whom = them, seed = {
+            contacts().upsertAll(listOf(io.nisfeb.talon.data.ContactEntity(them, null, null, null)))
+        }) { ship, _ ->
+            onNode(hasSetTextAction()).performTextInput("hi ..besp")
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("..bespoke...kazoo", substring = true).fetchSemanticsNodes().size > 1 }
+            onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) } // takes the pick
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("hi $them", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            waitForIdle()
+            onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) } // sends
+            waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").isNotEmpty() }
+            val sent = ship.pokesTo("chat").single().json.toString()
+            assertTrue("\"ship\":\"$them\"" in sent, sent)
+        }
+    }
+
     @Test
     fun `a message the ship refuses says it failed`() = chat(prepare = { refuse = { if (it.app == "chat") "nope" else null } }) { _, _ ->
         send("will not land")

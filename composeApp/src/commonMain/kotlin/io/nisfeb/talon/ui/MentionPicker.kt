@@ -159,14 +159,17 @@ data class Suggestion(
 
 /**
  * Inspect the composer text + caret position for an active mention
- * trigger — either `@query` or `~query`. Returns the query portion (no
- * trigger char) and the start index of the trigger if the caret is
- * inside such a token; null otherwise.
+ * trigger — `@query`, `~query`, or a comet's word name typed bare,
+ * `.words` or `..words`, as the name reads everywhere else. Returns the
+ * query portion (no `@`/`~`; a bare name keeps its dots) and the start
+ * index of the trigger if the caret is inside such a token; null
+ * otherwise.
  *
  * Rules: the trigger must be word-initial (preceded by start-of-text or
  * whitespace) and the query chars so far must be patp-shaped
  * (lowercase letters + dashes) or mnemonym-shaped (words joined by
- * dots — see [Mnemonym]).
+ * dots — see [Mnemonym]). A bare name needs a letter after its one or
+ * two dots, so an ellipsis is never one.
  */
 fun detectMentionQuery(text: String, cursor: Int): Pair<String, Int>? {
     if (cursor == 0 || cursor > text.length) return null
@@ -174,16 +177,24 @@ fun detectMentionQuery(text: String, cursor: Int): Pair<String, Int>? {
     while (i >= 0) {
         val c = text[i]
         if (c == '@' || c == '~') break
-        if (c == ' ' || c == '\n' || c == '\t') return null
+        if (c == ' ' || c == '\n' || c == '\t') break
         if (!(c.isLetter() || c == '-' || c == '.')) return null
         i--
     }
-    if (i < 0) return null
+    if (i < 0 || text[i] == ' ' || text[i] == '\n' || text[i] == '\t') {
+        // No @ or ~: a word name typed bare, whose dots are the trigger.
+        val start = i + 1
+        val token = text.substring(start, cursor)
+        return if (BARE_NYM.matches(token)) token to start else null
+    }
     val before = if (i == 0) ' ' else text[i - 1]
     if (!(before == ' ' || before == '\n' || before == '\t')) return null
     val query = text.substring(i + 1, cursor)
     return query to i
 }
+
+/** A word name being typed with no @ or ~: one or two dots, then words. */
+private val BARE_NYM = Regex("""\.{1,2}[a-z][a-z.]*""")
 
 /**
  * Shortlist contacts matching a query (case-insensitive). Matches
