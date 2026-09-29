@@ -274,13 +274,15 @@ class ArmillaryRepo(
      * account for any ship that asks it anything.
      */
     suspend fun deleteAccount(): Result<DeleteAnswer> = scope.async {
-        runSuspendCatching {
+        // Under the refresh's lock: a refresh in flight finishing after
+        // forget() put the deleted account back on the screen.
+        lock.withLock { runSuspendCatching {
             val a = api ?: error("Not attached to a ship.")
             val vendor = _account.value?.vendor.orEmpty()
             val answer = a.deleteAccount()
             if (answer.taken) forget(Deletion(vendor, answer))
             answer
-        }
+        } }
     }.await()
 
     private fun forget(d: Deletion) {
