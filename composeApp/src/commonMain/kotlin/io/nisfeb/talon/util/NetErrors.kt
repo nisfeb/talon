@@ -32,3 +32,20 @@ fun isTransientNetworkError(t: Throwable?): Boolean {
     }
     return false
 }
+
+/**
+ * Whether [t] says the ship was slow or out of reach, rather than that it
+ * refused: timed out, lost the connection, answered with a 5xx, or was not
+ * connected at all. A write that failed so is not the ship saying no; it
+ * can go again when the ship is back, and is said calmly.
+ */
+fun isShipSlow(t: Throwable): Boolean =
+    t !is io.nisfeb.talon.urbit.PokeNacked && (
+        isTransientNetworkError(t) ||
+            t is io.nisfeb.talon.urbit.PokeUnacked ||
+            t.message.orEmpty().let { it.startsWith("channel PUT: HTTP 5") || it.startsWith("not connected") }
+        )
+
+/** A failure whole, causes and all, for "Copy error details". */
+fun errorDetailsOf(t: Throwable): String =
+    generateSequence(t) { it.cause }.take(4).joinToString("\ncaused by: ") { "${it::class.simpleName}: ${it.message}" }

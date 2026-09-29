@@ -129,6 +129,20 @@ class DmChatScreenTest {
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("hi bus").fetchSemanticsNodes().isNotEmpty() }
     }
 
+    // During an app release the ship timed writes out and the phone said
+    // "send failed: … The network connection was lost." in red, and the
+    // message never went.
+    @Test
+    fun `a message sent while the connection drops is queued and said calmly, not as an error`() =
+        chat(prepare = { lose = { if (it.app == "chat") kotlinx.io.IOException("The network connection was lost.") else null } }) { _, _ ->
+            send("while it drops")
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Queued · sends when your ship is back").fetchSemanticsNodes().isNotEmpty() }
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Your ship is slow. 1 queued for when it's back.").fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("Copy error details").assertExists()
+            assertTrue(onAllNodesWithText("send failed", substring = true).fetchSemanticsNodes().isEmpty(), "not an error")
+            assertTrue(onAllNodesWithText("Not sent").fetchSemanticsNodes().isEmpty())
+        }
+
     @Test
     fun `a message the ship refuses says it failed`() = chat(prepare = { refuse = { if (it.app == "chat") "nope" else null } }) { _, _ ->
         send("will not land")

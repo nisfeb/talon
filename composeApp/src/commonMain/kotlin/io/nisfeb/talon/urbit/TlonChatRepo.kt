@@ -62,6 +62,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -639,6 +640,9 @@ class TlonChatRepo(
         } finally {
             if (firstRun) _bootstrapping.value = false
         }
+        // The ship is back: what waited for it goes, now that the reading
+        // above has reaped any queued channel post that landed after all.
+        pushScope.launch { runCatching { drainQueue() }.onFailure { Log.w(TAG, "queue not sent", it) } }
 
         // Stage two: deep history fill-out. Fires on firstRun only —
         // reconnects already pulled the same window via the small
@@ -943,7 +947,6 @@ class TlonChatRepo(
         kind: String = "/chat",
         meta: JsonObject? = null,
     ): String {
-        val ch = channel ?: error("not connected")
         val sent = nowMs()
         val da = UrbitTime.unixMsToDa(sent)
         // %channels mints post ids with its own entropy (not purely a
@@ -960,71 +963,253 @@ class TlonChatRepo(
         ) "local_${da}"
         else UrbitTime.formatPostId(ourPatp, da)
         val essay = buildEssay(content, sent, kind = kind, meta = meta)
+        val out = postPoke(whom, id, essay)
+        // Channel-chat posts get a status="pending" optimistic insert;
+        // DMs and clubs leave status null. A refusal marks the row
+        // failed, a ship out of reach queues it; an accepted post stays
+        // until its echo replaces it.
+        val initialStatus = if (isChannelNest(whom)) "pending" else null
+        db.messages().upsertWithMedia(
+            db.messageMedia(),
+            toEntity(whom, id, essay).copy(status = initialStatus),
+        )
+        sendOrQueue(whom, id, out)
+        return id
+    }
+
+    /** One poke as it goes to the ship; what a queued message is sent again as. */
+    private data class Outgoing(val app: String, val mark: String, val payload: JsonObject)
+
+    private fun isChannelNest(whom: String) =
+        whom.startsWith("chat/") || whom.startsWith("diary/") || whom.startsWith("heap/")
+
+    /** A top-level post: the poke [postContent] sends, and [drainQueue] sends again. */
+    private fun postPoke(whom: String, id: String, essay: JsonObject): Outgoing {
         val addDelta = buildJsonObject {
             put("add", buildJsonObject {
                 put("essay", essay)
                 put("time", JsonNull)
             })
         }
-        // Channel-chat posts get a status="pending" optimistic insert;
-        // DMs and clubs leave status null. A refusal marks the row
-        // failed; an accepted post stays until its echo replaces it.
-        val isChannel = whom.startsWith("chat/") ||
-            whom.startsWith("diary/") ||
-            whom.startsWith("heap/")
-        val initialStatus = if (isChannel) "pending" else null
-        db.messages().upsertWithMedia(
-            db.messageMedia(),
-            toEntity(whom, id, essay).copy(status = initialStatus),
-        )
-        failedOnRefusal(whom, id) { when {
-            whom.startsWith("~") -> ch.poke(
-                app = "chat", mark = "chat-dm-action-2",
-                payload = dmAction(whom, id, addDelta),
+        return when {
+            whom.startsWith("~") -> Outgoing("chat", "chat-dm-action-2", dmAction(whom, id, addDelta))
+            whom.startsWith("0v") -> Outgoing("chat", "chat-club-action-2", clubAction(whom, id, addDelta))
+            isChannelNest(whom) -> Outgoing(
+                "channels", "channel-action-2",
+                channelAction(whom, buildJsonObject { put("post", buildJsonObject { put("add", essay) }) }),
             )
-            whom.startsWith("0v") -> ch.poke(
-                app = "chat", mark = "chat-club-action-2",
-                payload = clubAction(whom, id, addDelta),
-            )
-            isChannel -> {
-                // Time the poke's HTTP PUT (returns when eyre accepts it,
-                // before %channels processes it). Splits the round-trip:
-                // putMs = network + eyre-accept; the reap's latencyMs minus
-                // this = ship poke-processing + SSE echo delivery. Tells us
-                // whether the ~2s is on our wire or the ship's compute.
-                val putStart = nowMs()
-                ch.poke(
-                    app = "channels", mark = "channel-action-2",
-                    payload = channelAction(whom, buildJsonObject {
-                        put("post", buildJsonObject { put("add", essay) })
-                    }),
-                ).also {
-                    // eyre holds the channel PUT until %channels finishes
-                    // processing the post, so this is the ship's compute
-                    // time (network RTT to the ship is ~150ms). A slow
-                    // number here means a heavy/loaded ship, not our wire.
-                    val putMs = nowMs() - putStart
-                    if (putMs > 1_000) Log.w(TAG, "slow poke PUT whom=$whom putMs=$putMs (ship busy)")
-                }
-            }
             else -> error("unsupported whom: $whom")
-        } }
-        return id
+        }
+    }
+
+    /** A reply: the poke [replyContent] sends, and [drainQueue] sends again. */
+    private fun replyPoke(whom: String, parentId: String, replyId: String, replyEssay: JsonObject): Outgoing = when {
+        whom.startsWith("~") -> Outgoing("chat", "chat-dm-action-2", dmAction(whom, parentId, replyDelta(replyId, replyEssay)))
+        whom.startsWith("0v") -> Outgoing("chat", "chat-club-action-2", clubAction(whom, parentId, replyDelta(replyId, replyEssay)))
+        // channels c-reply shape nests under action:, not c-reply:
+        // Channel-action-2's `reply.id` dejs is `(se %ud)`; the agent
+        // runs `slav %ud` which demands dot-grouped decimals for
+        // values ≥ 1000.
+        isChannelNest(whom) -> Outgoing(
+            "channels", "channel-action-2",
+            channelAction(whom, buildJsonObject {
+                put("post", buildJsonObject {
+                    put("reply", buildJsonObject {
+                        put("id", dotAtom(parentId))
+                        put("action", buildJsonObject { put("add", replyEssay) })
+                    })
+                })
+            }),
+        )
+        else -> error("unsupported whom: $whom")
+    }
+
+    /** A queued message's poke, from its row: what was sent, as it was sent. Null where the row cannot say. */
+    private fun resendPoke(row: MessageEntity): Outgoing? = runCatching {
+        val content = Json.parseToJsonElement(row.contentJson) as JsonArray
+        val parent = row.parentId
+        if (parent == null) {
+            val meta = if (row.kind == "/diary") buildJsonObject {
+                put("title", row.title.orEmpty())
+                put("image", row.image.orEmpty())
+                put("description", "")
+                put("cover", "")
+            } else null
+            postPoke(row.whom, row.id, buildEssay(content, row.sentMs, kind = row.kind, meta = meta))
+        } else {
+            replyPoke(row.whom, parent, row.id, buildJsonObject {
+                put("content", content)
+                put("author", ourPatp)
+                put("sent", row.sentMs)
+                put("blob", JsonNull)
+            })
+        }
+    }.getOrNull()
+
+    /**
+     * Send [out] for our message [id], on the repo's scope: leaving the
+     * screen cancelled a send half done. The ship's refusal marks the row
+     * failed and is thrown. A ship that is slow or out of reach has not
+     * refused anything: the message is queued, and goes when it answers
+     * again ([drainQueue]). A timed-out write has often landed anyway,
+     * and the resend makes sure of it without a second copy.
+     */
+    private suspend fun sendOrQueue(whom: String, id: String, out: Outgoing) = pushScope.async {
+        val ch = channel ?: return@async queueMessage(whom, id, IllegalStateException("not connected to the ship"))
+        try {
+            val start = nowMs()
+            ch.poke(app = out.app, mark = out.mark, payload = out.payload)
+            // eyre holds the PUT until the agent has taken the poke, so a
+            // slow number here is the ship's compute, not our wire.
+            val putMs = nowMs() - start
+            if (putMs > 1_000) Log.w(TAG, "slow poke PUT whom=$whom putMs=$putMs (ship busy)")
+            shipAnswered()
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            if (t is PokeNacked) {
+                db.messages().setStatus(whom, id, "failed")
+                throw t
+            }
+            queueMessage(whom, id, t)
+        }
+    }.await()
+
+    private suspend fun queueMessage(whom: String, id: String, why: Throwable) {
+        db.messages().setStatus(whom, id, "queued")
+        stillSlow(why)
+    }
+
+    // ── Queued writes: a slow ship is not a refusal ─────────────────
+
+    /** A reaction, or taking ours off ([glyph] null), waiting for the ship. */
+    private data class QueuedReact(val whom: String, val postId: String, val parentId: String?, val glyph: String?) {
+        val key get() = "$whom|$postId|${parentId.orEmpty()}"
+    }
+
+    /** The newest intention per post: a reaction queued, then taken off, sends the taking off. */
+    private val queuedReacts = MutableStateFlow<Map<String, QueuedReact>>(emptyMap())
+
+    /** What the last write that could not reach the ship said, for "Copy error details"; null once the queue is empty. */
+    private val slowDetails = MutableStateFlow<String?>(null)
+
+    /** The ship is slow: [queued] writes wait for it, and [details] is what the last try said. */
+    data class ShipSlow(val queued: Int, val details: String)
+
+    /**
+     * Whether writes are waiting for the ship, for the calm line in a
+     * chat: messages queued there and reactions queued here. Null while
+     * the ship is keeping up.
+     */
+    val shipSlow: Flow<ShipSlow?> = combine(db.messages().queuedCount(), queuedReacts, slowDetails) { messages, reacts, details ->
+        val queued = messages + reacts.size
+        if (queued == 0) null else ShipSlow(queued, details ?: "Waiting for the ship.")
+    }
+
+    private val drainLock = Mutex()
+    @Volatile private var drainJob: Job? = null
+    @Volatile private var drainPauseMs = FIRST_DRAIN_PAUSE_MS
+
+    /** The ship took a write: whatever waited can go now. */
+    private fun shipAnswered() {
+        drainPauseMs = FIRST_DRAIN_PAUSE_MS
+        if (queuedReacts.value.isNotEmpty() || slowDetails.value != null) scheduleDrain(0)
+    }
+
+    /** A write did not reach the ship: say why, and try again later, a little later each time. */
+    private fun stillSlow(why: Throwable) {
+        slowDetails.value = errorDetails(why)
+        val pause = drainPauseMs
+        drainPauseMs = (pause * 2).coerceAtMost(MAX_DRAIN_PAUSE_MS)
+        scheduleDrain(pause)
+    }
+
+    private fun scheduleDrain(afterMs: Long) {
+        if (drainJob?.isActive == true) return
+        drainJob = pushScope.launch {
+            delay(if (afterMs == 0L) 0L else jittered(afterMs))
+            drainQueue()
+        }
     }
 
     /**
-     * Run [poke] for the optimistic row [id], and mark the row failed if
-     * the ship refuses it or it never leaves, so the screen says so
-     * rather than showing it sent, or grey, for good. The poke waits for
-     * the ship's ack, so this is where a refusal is known.
+     * Send what waited for the ship, oldest first: queued messages, then
+     * queued reactions. Stops at the first write the ship still does not
+     * take, to try again later. Runs after every reconnect and on a timer
+     * while the ship is slow.
+     *
+     * A channel post is sent again only once the ship has been asked for
+     * its newest posts and has none of ours from that moment: a %channels
+     * post id is the ship's own, so a second send of one that timed out
+     * but landed would post it twice. A DM or club message carries its own
+     * id, which the ship takes once.
      */
-    private suspend fun <T> failedOnRefusal(whom: String, id: String, poke: suspend () -> T): T =
-        try {
-            poke()
-        } catch (t: Throwable) {
-            if (t !is kotlinx.coroutines.CancellationException) db.messages().setStatus(whom, id, "failed")
-            throw t
+    internal suspend fun drainQueue() = drainLock.withLock {
+        val ch = channel ?: return@withLock
+        for (row in db.messages().queued()) {
+            val now = db.messages().getOne(row.whom, row.id) ?: continue
+            if (now.status != "queued") continue
+            val out = resendPoke(now)
+            if (out == null) {
+                db.messages().setStatus(now.whom, now.id, "failed")
+                continue
+            }
+            try {
+                if (isChannelNest(now.whom) && landedAlready(now)) continue
+                db.messages().setStatus(now.whom, now.id, if (isChannelNest(now.whom)) "pending" else null)
+                ch.poke(app = out.app, mark = out.mark, payload = out.payload)
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                db.messages().setStatus(now.whom, now.id, "queued")
+                throw c
+            } catch (t: Throwable) {
+                if (t is PokeNacked) {
+                    db.messages().setStatus(now.whom, now.id, "failed")
+                    continue
+                }
+                db.messages().setStatus(now.whom, now.id, "queued")
+                drainJob = null
+                stillSlow(t)
+                return@withLock
+            }
         }
+        for (r in queuedReacts.value.values) {
+            try {
+                sendReact(ch, r)
+                queuedReacts.update { m -> if (m[r.key] == r) m - r.key else m }
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                // Refused now: dropped, and the post's next reading shows the ship's word.
+                if (t is PokeNacked) {
+                    queuedReacts.update { m -> if (m[r.key] == r) m - r.key else m }
+                    continue
+                }
+                drainJob = null
+                stillSlow(t)
+                return@withLock
+            }
+        }
+        slowDetails.value = null
+        drainPauseMs = FIRST_DRAIN_PAUSE_MS
+    }
+
+    /**
+     * Whether our queued channel [row] is on the ship already: its newest
+     * posts (or the thread) read, and a copy of ours from that moment found.
+     * Its local twin goes, as an echo would have taken it.
+     */
+    private suspend fun landedAlready(row: MessageEntity): Boolean {
+        val parent = row.parentId
+        if (parent == null) refreshConversation(row.whom, count = LANDED_CHECK_COUNT) else fetchThread(row.whom, parent)
+        if (db.messages().shipCopyCount(row.whom, ourPatp, row.sentMs) == 0) return false
+        db.messages().reapLocalTwin(row.whom, ourPatp, row.sentMs)
+        db.messageMedia().reapLocalTwinMedia(row.whom, ourPatp, row.sentMs)
+        return true
+    }
+
+    /** What a failed write said, whole, for "Copy error details". */
+    private fun errorDetails(t: Throwable): String =
+        generateSequence(t) { it.cause }.take(4).joinToString("\ncaused by: ") { "${it::class.simpleName}: ${it.message}" }
 
     /**
      * Update our own contact card. Any field passed as null is left
@@ -2411,7 +2596,6 @@ class TlonChatRepo(
      * with a passthrough fallback, so glyphs in stay glyphs out.
      */
     suspend fun react(whom: String, postId: String, emoji: String, parentId: String? = null) {
-        val ch = channel ?: error("not connected")
         // Wire: the emoji-presentation glyph (FE0F-bearing), to match
         // what every other Tlon client sends. Local DB + usage: the
         // variation-selector-stripped canonical form so our optimistic
@@ -2419,23 +2603,43 @@ class TlonChatRepo(
         // (and with the ship's echo of this very poke).
         val glyph = ReactionPalette.display(emoji)
         val canonical = ReactionPalette.normalize(glyph)
-        val delta = buildJsonObject {
-            put("add-react", buildJsonObject {
-                put("author", ourPatp)
-                put("react", glyph)
-            })
-        }
         // Shown now, and the ship told after: a poke waits for the ship's
         // ack, up to fifteen seconds, and since pokes began waiting the
-        // reaction waited with it. A refusal puts back what was there.
+        // reaction waited with it. A refusal puts back what was there; a
+        // ship out of reach leaves it shown, queued.
         // Rows are keyed on the undotted id (ReactionDao.upsert normalizes); look them up the same way.
         val rowId = postId.replace(".", "")
         val before = db.reactions().get(whom, rowId, ourPatp)
         db.reactions().upsert(ReactionEntity(whom, postId, ourPatp, canonical))
         try {
-            pokeAt(ch, whom, postId, parentId, delta, buildJsonObject {
+            sendReactOrQueue(QueuedReact(whom, postId, parentId, glyph))
+        } catch (t: Throwable) {
+            if (before != null) db.reactions().upsert(before) else db.reactions().delete(whom, rowId, ourPatp)
+            throw t
+        }
+        runCatching { db.reactionUsage().bump(canonical) }
+    }
+
+    /** A reaction's poke, or its taking off's ([QueuedReact.glyph] null). */
+    private suspend fun sendReact(ch: UrbitChannel, r: QueuedReact) {
+        val glyph = r.glyph
+        if (glyph == null) {
+            pokeAt(ch, r.whom, r.postId, r.parentId, buildJsonObject { put("del-react", ourPatp) }, buildJsonObject {
+                put("del-react", buildJsonObject {
+                    put("id", dotAtom(r.postId))
+                    // See note on add-react below: same schema mismatch.
+                    put("ship", ourPatp)
+                })
+            })
+        } else {
+            pokeAt(ch, r.whom, r.postId, r.parentId, buildJsonObject {
                 put("add-react", buildJsonObject {
-                    put("id", dotAtom(postId))
+                    put("author", ourPatp)
+                    put("react", glyph)
+                })
+            }, buildJsonObject {
+                put("add-react", buildJsonObject {
+                    put("id", dotAtom(r.postId))
                     // %channels c-react expects `ship`, not
                     // `author` — sending `author` produces a
                     // poke-as cast fail on the server and the
@@ -2446,30 +2650,43 @@ class TlonChatRepo(
                     put("react", glyph)
                 })
             })
-        } catch (t: Throwable) {
-            if (before != null) db.reactions().upsert(before) else db.reactions().delete(whom, rowId, ourPatp)
-            throw t
         }
-        runCatching { db.reactionUsage().bump(canonical) }
     }
+
+    /**
+     * Send [r] on the repo's scope; the ship's refusal is thrown, and a
+     * ship out of reach queues it, the newest intention per post, for
+     * [drainQueue].
+     */
+    private suspend fun sendReactOrQueue(r: QueuedReact) = pushScope.async {
+        val ch = channel
+        if (ch == null) {
+            queuedReacts.update { it + (r.key to r) }
+            return@async stillSlow(IllegalStateException("not connected to the ship"))
+        }
+        try {
+            sendReact(ch, r)
+            // Sent: an older intention for this post is no longer the one.
+            queuedReacts.update { it - r.key }
+            shipAnswered()
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            if (t is PokeNacked) throw t
+            queuedReacts.update { it + (r.key to r) }
+            stillSlow(t)
+        }
+    }.await()
 
     /** Remove our reaction from a post. */
     suspend fun unreact(whom: String, postId: String, parentId: String? = null) {
-        val ch = channel ?: error("not connected")
-        val delta = buildJsonObject { put("del-react", ourPatp) }
-        // Gone now, as react() shows at once; a refusal brings it back.
+        // Gone now, as react() shows at once; a refusal brings it back,
+        // and a ship out of reach leaves it gone, queued.
         val rowId = postId.replace(".", "")
         val before = db.reactions().get(whom, rowId, ourPatp)
         db.reactions().delete(whom, rowId, ourPatp)
         try {
-            pokeAt(ch, whom, postId, parentId, delta, buildJsonObject {
-                put("del-react", buildJsonObject {
-                    put("id", dotAtom(postId))
-                    // See note on add-react above — same
-                    // schema mismatch on del-react.
-                    put("ship", ourPatp)
-                })
-            })
+            sendReactOrQueue(QueuedReact(whom, postId, parentId, glyph = null))
         } catch (t: Throwable) {
             before?.let { db.reactions().upsert(it) }
             throw t
@@ -2580,7 +2797,6 @@ class TlonChatRepo(
         parentId: String,
         content: JsonArray,
     ): String {
-        val ch = channel ?: error("not connected")
         val sent = nowMs()
         val da = UrbitTime.unixMsToDa(sent)
         // Same local-sentinel id rule as postContent — %channels assigns
@@ -2597,55 +2813,18 @@ class TlonChatRepo(
             put("blob", JsonNull)
         }
 
-        when {
-            // In the thread now, and the ship told after, the way a
-            // channel reply already was: the poke waits for the ship's
-            // ack, and the reply used to wait with it. A refusal marks
-            // it failed; the echo, which carries the same id, replaces it.
-            whom.startsWith("~") || whom.startsWith("0v") -> {
-                db.messages().upsertWithMedia(
-                    db.messageMedia(),
-                    toReplyEntity(whom, parentId, replyId, replyEssay),
-                )
-                failedOnRefusal(whom, replyId) {
-                    if (whom.startsWith("~")) {
-                        ch.poke(app = "chat", mark = "chat-dm-action-2", payload = dmAction(whom, parentId, replyDelta(replyId, replyEssay)))
-                    } else {
-                        ch.poke(app = "chat", mark = "chat-club-action-2", payload = clubAction(whom, parentId, replyDelta(replyId, replyEssay)))
-                    }
-                }
-            }
-            whom.startsWith("chat/") ||
-                whom.startsWith("diary/") ||
-                whom.startsWith("heap/") -> {
-                // channels c-reply shape nests under action:, not c-reply:
-                // Channel-action-2's `reply.id` dejs is `(se %ud)`; the
-                // agent runs `slav %ud` which demands dot-grouped
-                // decimals for values ≥ 1000.
-                val payload = channelAction(whom, buildJsonObject {
-                    put("post", buildJsonObject {
-                        put("reply", buildJsonObject {
-                            put("id", dotAtom(parentId))
-                            put("action", buildJsonObject {
-                                put("add", replyEssay)
-                            })
-                        })
-                    })
-                })
-                // Same pending-status pattern as postContent: optimistic
-                // insert first with status="pending", failed on a
-                // refusal, replaced by the server's echo otherwise.
-                db.messages().upsertWithMedia(
-                    db.messageMedia(),
-                    toReplyEntity(whom, parentId, replyId, replyEssay)
-                        .copy(status = "pending"),
-                )
-                failedOnRefusal(whom, replyId) {
-                    ch.poke(app = "channels", mark = "channel-action-2", payload = payload)
-                }
-            }
-            else -> error("unsupported whom: $whom")
-        }
+        val out = replyPoke(whom, parentId, replyId, replyEssay)
+        // In the thread now, and the ship told after: the poke waits for
+        // the ship's ack, and the reply used to wait with it. A channel
+        // reply is pending until its echo, which replaces it; a DM or
+        // club reply's echo carries the same id. A refusal marks it
+        // failed, a ship out of reach queues it.
+        db.messages().upsertWithMedia(
+            db.messageMedia(),
+            toReplyEntity(whom, parentId, replyId, replyEssay)
+                .let { if (isChannelNest(whom)) it.copy(status = "pending") else it },
+        )
+        sendOrQueue(whom, replyId, out)
         return replyId
     }
 
@@ -4389,6 +4568,12 @@ class TlonChatRepo(
     }
 
     companion object {
+        /** The first wait before a queued write is tried again; it doubles to [MAX_DRAIN_PAUSE_MS]. */
+        private const val FIRST_DRAIN_PAUSE_MS = 2_000L
+        private const val MAX_DRAIN_PAUSE_MS = 60_000L
+        /** How many of a channel's newest posts are read to see whether a queued one landed. */
+        private const val LANDED_CHECK_COUNT = 30
+
         /**
          * `#FF5050` → `ff.5050` for a profile tint.
          *

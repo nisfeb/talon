@@ -319,7 +319,7 @@ fun ThreadList(
                         if (mineSame) repo.unreact(whom, m.id, m.parentId)
                         else repo.react(whom, m.id, emoji, m.parentId)
                     }.onFailure {
-                        composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}"
+                        composerState.failed("react", it)
                     }
                 }
                 Unit
@@ -353,8 +353,7 @@ fun ThreadList(
                 scope.launch {
                     runCatching { repo.react(whom, target.id, code, target.parentId) }
                         .onFailure {
-                            composerState.sendError =
-                                "react failed: ${it.message ?: it::class.simpleName}"
+                            composerState.failed("react", it)
                         }
                 }
             },
@@ -527,7 +526,7 @@ fun ThreadList(
                         runCatching {
                             repo.delete(whom, t.id, parentId = t.parentId)
                         }.onFailure {
-                            composerState.sendError = "delete failed: ${it.message ?: it::class.simpleName}"
+                            composerState.failed("delete", it)
                         }
                     }
                 }) {
@@ -569,8 +568,7 @@ fun ThreadList(
                             }.onSuccess {
                                 composerState.sendError = "Reported to the group's admins"
                             }.onFailure {
-                                composerState.sendError =
-                                    "report failed: ${it.message ?: it::class.simpleName}"
+                                composerState.failed("report", it)
                             }
                         }
                     }
@@ -613,8 +611,7 @@ fun ThreadList(
                             originalContentJson = target.contentJson,
                         )
                     }.onFailure {
-                        composerState.sendError =
-                            "edit failed: ${it.message ?: it::class.simpleName}"
+                        composerState.failed("edit", it)
                     }
                 }
             },
@@ -774,7 +771,7 @@ private fun ThreadMessage(
                 // text rather than opening the menu (hover "⋯" opens it).
                 onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
-            if (m.status == "failed") SendFailedNote()
+            SendStateNote(m.status)
             if (grouped.isNotEmpty()) {
                 FlowRow(
                     modifier = Modifier.padding(top = 4.dp),

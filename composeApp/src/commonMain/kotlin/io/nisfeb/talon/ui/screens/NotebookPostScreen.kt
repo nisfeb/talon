@@ -396,7 +396,7 @@ private fun CommentRow(
                 StoryCache.partsFor(reply.id, reply.contentJson)
             }
             StoryRenderer(parts = parts)
-            if (reply.status == "failed") SendFailedNote()
+            SendStateNote(reply.status)
         }
     }
 }

@@ -171,8 +171,27 @@ abstract class MessageDao {
      * echo arrived under a different id. Safe because %channels never
      * assigns author-prefixed ids.
      */
-    @Query("DELETE FROM messages WHERE whom = :whom AND (id LIKE '~%' OR id LIKE 'local_%')")
+    // Never a queued row: it is waiting for the ship, and this runs on
+    // every refresh of the conversation, opening it included.
+    @Query("DELETE FROM messages WHERE whom = :whom AND (id LIKE '~%' OR id LIKE 'local_%') AND (status IS NULL OR status != 'queued')")
     abstract suspend fun purgeStaleLocalIds(whom: String)
+
+    /** Our messages waiting for the ship (status "queued"), oldest first, the order they go out in. */
+    @Query("SELECT * FROM messages WHERE status = 'queued' ORDER BY sentMs ASC")
+    abstract suspend fun queued(): List<MessageEntity>
+
+    /** How many messages are waiting for the ship. */
+    @Query("SELECT COUNT(*) FROM messages WHERE status = 'queued'")
+    abstract fun queuedCount(): Flow<Int>
+
+    /**
+     * Whether the ship's own copy of our post sent at [sentMs] is here: a
+     * row by [author] at that time under an id the ship gave it. A queued
+     * channel post that has one got there, whatever the write that timed
+     * out said, and is not sent again.
+     */
+    @Query("SELECT COUNT(*) FROM messages WHERE whom = :whom AND author = :author AND sentMs = :sentMs AND id NOT LIKE 'local_%' AND isDeleted = 0")
+    abstract suspend fun shipCopyCount(whom: String, author: String, sentMs: Long): Int
 
     /**
      * Find every (whom, id) whose id contains a dot. Used by the

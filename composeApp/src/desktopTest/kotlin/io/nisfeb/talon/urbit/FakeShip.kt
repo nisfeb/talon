@@ -50,6 +50,23 @@ internal class FakeShip(val us: String = "~zod") {
 
     @Volatile var refuse: (Poke) -> String? = { null }
 
+    /**
+     * A poke the wire loses before the ship sees it, as a PUT that timed
+     * out or a connection that dropped: what the request fails with, or
+     * null to deliver it. Lost pokes are in [attempted], not [pokes].
+     */
+    @Volatile var lose: (Poke) -> Throwable? = { null }
+
+    /**
+     * A poke the ship takes and acks whose PUT fails anyway, as on a busy
+     * ship that answers after the client gave up: it is in [pokes], and
+     * the request fails with this.
+     */
+    @Volatile var landThenFail: (Poke) -> Throwable? = { null }
+
+    /** Every poke sent, lost or not. */
+    val attempted: MutableList<Poke> = java.util.concurrent.CopyOnWriteArrayList()
+
     /** Requests to an app's own HTTP API, as `METHOD path body`. */
     val api: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
@@ -117,6 +134,8 @@ internal class FakeShip(val us: String = "~zod") {
                                 o["json"]!!,
                                 o["ship"]!!.jsonPrimitive.content,
                             )
+                            attempted += p
+                            lose(p)?.let { throw it }
                             pokes += p
                             val err = refuse(p)
                             answer(
@@ -124,6 +143,7 @@ internal class FakeShip(val us: String = "~zod") {
                                 if (err == null) """{"id":$id,"response":"poke","ok":"ok"}"""
                                 else """{"id":$id,"response":"poke","err":${JsonPrimitive(err)}}""",
                             )
+                            landThenFail(p)?.let { throw it }
                         }
                         "subscribe" -> {
                             subscribed += "${o["app"]?.jsonPrimitive?.content}${o["path"]?.jsonPrimitive?.content}"

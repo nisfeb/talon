@@ -706,7 +706,7 @@ fun DmChatScreen(
                         if (mineSame) repo.unreact(m.whom, m.id)
                         else repo.react(m.whom, m.id, emoji)
                     }.onFailure {
-                        composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}"
+                        composerState.failed("react", it)
                     }
                 }
                 Unit
@@ -795,7 +795,7 @@ fun DmChatScreen(
                     onSelect = { level ->
                         scope.launch {
                             runCatching { repo.settingsSync?.setNotifyLevel(whom, level) }
-                                .onFailure { composerState.sendError = "notify failed: ${it.message ?: it::class.simpleName}" }
+                                .onFailure { composerState.failed("notify", it) }
                         }
                     },
                     onToggleWatchwordExclude = {
@@ -803,7 +803,7 @@ fun DmChatScreen(
                             runCatching {
                                 repo.watchwords.excludeChat(whom, !isExcludedFromWatchwords)
                             }.onFailure {
-                                composerState.sendError = "watchword toggle failed: ${it.message ?: it::class.simpleName}"
+                                composerState.failed("watchword toggle", it)
                             }
                         }
                     },
@@ -937,8 +937,7 @@ fun DmChatScreen(
                     scope.launch {
                         runCatching { repo.react(whom, target.id, emoji) }
                             .onFailure {
-                                composerState.sendError =
-                                    "react failed: ${it.message ?: it::class.simpleName}"
+                                composerState.failed("react", it)
                             }
                     }
                 },
@@ -1027,8 +1026,7 @@ fun DmChatScreen(
                             if (wasPinned) repo.unpinPost(whom)
                             else repo.pinPost(whom, target.id)
                         }.onFailure {
-                            composerState.sendError =
-                                "pin failed: ${it.message ?: it::class.simpleName}"
+                            composerState.failed("pin", it)
                         }
                     }
                 },
@@ -1167,8 +1165,7 @@ fun DmChatScreen(
                             originalContentJson = target.originalContentJson,
                         )
                     }.onFailure {
-                        composerState.sendError =
-                            "edit failed: ${it.message ?: it::class.simpleName}"
+                        composerState.failed("edit", it)
                     }
                 }
             },
@@ -1307,7 +1304,7 @@ fun DmChatScreen(
                     confirmingDelete = null
                     scope.launch {
                         runCatching { repo.delete(whom, toDelete.id, toDelete.parentId) }
-                            .onFailure { composerState.sendError = "delete failed: ${it.message ?: it::class.simpleName}" }
+                            .onFailure { composerState.failed("delete", it) }
                     }
                 }) { Text("Delete") }
             },
@@ -1341,8 +1338,7 @@ fun DmChatScreen(
                             }.onSuccess {
                                 composerState.sendError = "Reported to the group's admins"
                             }.onFailure {
-                                composerState.sendError =
-                                    "report failed: ${it.message ?: it::class.simpleName}"
+                                composerState.failed("report", it)
                             }
                         }
                     }
@@ -1656,7 +1652,7 @@ private fun MessageRow(
                 // opening the menu (right-click opens it instead).
                 onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
-            if (m.status == "failed") SendFailedNote()
+            SendStateNote(m.status)
             val firstLink = remember(parts) { firstLinkUrl(parts) }
             if (firstLink != null) {
                 LinkPreviewCard(
@@ -2741,7 +2737,41 @@ internal fun SendingIcon() {
     )
 }
 
-/** Under a message the ship refused, or that never left. */
+/**
+ * Under our own message, where it has not gone: refused by the ship
+ * ("failed"), or waiting for a ship that is slow or out of reach
+ * ("queued"), which is not an error and is not drawn as one.
+ */
+@Composable
+internal fun SendStateNote(status: String?) {
+    when (status) {
+        "failed" -> SendFailedNote()
+        "queued" -> QueuedNote()
+    }
+}
+
+/** Under a message waiting for the ship: it goes when the ship answers again. */
+@Composable
+internal fun QueuedNote() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            imageVector = TalonIcons.Schedule,
+            contentDescription = "Queued",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            "Queued · sends when your ship is back",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Under a message the ship refused. */
 @Composable
 internal fun SendFailedNote() {
     Row(

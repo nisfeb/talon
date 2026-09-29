@@ -131,7 +131,53 @@ class ComposerState(initialDraftText: String) {
     var pendingQuote by mutableStateOf<MessageEntity?>(null)
     var pendingVoice by mutableStateOf<PendingVoice?>(null)
     var pendingAttachment by mutableStateOf<PendingAttachment?>(null)
-    var sendError by mutableStateOf<String?>(null)
+    private var shownError by mutableStateOf<String?>(null)
+
+    /** The line over the composer: what went wrong, in words. Setting it clears [sendErrorDetails]. */
+    var sendError: String?
+        get() = shownError
+        set(value) {
+            shownError = value
+            sendErrorDetails = null
+            sendErrorCalm = false
+        }
+
+    /** The failure whole, behind "Copy error details"; null where the line says it all. */
+    var sendErrorDetails by mutableStateOf<String?>(null)
+        private set
+
+    /** The line is a slow ship, not a refusal: drawn quietly, not in the error colour. */
+    var sendErrorCalm by mutableStateOf(false)
+        private set
+
+    /**
+     * [what] did not go through. A ship that was only slow or out of reach
+     * is said calmly, as something to try again when it is back; a refusal
+     * is said as one. Either way the error whole is behind Copy error
+     * details, not in the line: "Request timeout has expired [url=…]" was
+     * the line.
+     */
+    fun failed(what: String, err: Throwable) {
+        val slow = io.nisfeb.talon.util.isShipSlow(err)
+        sendError = if (slow) {
+            "Your ship is slow, so the ${noun(what)} didn't go through. Try again when it's back."
+        } else {
+            "$what failed: " + ((err as? io.nisfeb.talon.urbit.PokeNacked)?.let { "the ship refused it" }
+                ?: (err.message ?: err::class.simpleName).orEmpty().lineSequence().first().take(120))
+        }
+        sendErrorDetails = io.nisfeb.talon.util.errorDetailsOf(err)
+        sendErrorCalm = slow
+    }
+
+    private fun noun(what: String) = when (what) {
+        "send" -> "message"
+        "react" -> "reaction"
+        "notify" -> "notification setting"
+        "watchword toggle" -> "watchword change"
+        "voice send" -> "voice message"
+        else -> what
+    }
+
     var uploading by mutableStateOf(false)
 
     /**
@@ -404,7 +450,7 @@ fun ChatComposer(
                     }
                 }.onFailure { err ->
                     val kind = if (pending.isImage) "image" else "file"
-                    state.sendError = "$kind failed: ${err.message ?: err::class.simpleName}"
+                    state.failed(kind, err)
                 }
                 state.uploading = false
             }
@@ -445,7 +491,7 @@ fun ChatComposer(
                     strategy.sendText(hostedUrl)
                 }
             }.onFailure { err ->
-                state.sendError = "upload failed: ${err.message ?: err::class.simpleName}"
+                state.failed("upload", err)
             }
             state.uploading = false
     }
@@ -620,17 +666,20 @@ fun ChatComposer(
                 }
             },
     ) {
-        if (state.sendError != null) {
-            val clipboard = LocalClipboardManager.current
-            val err = state.sendError!!
-            Text(
-                "$err · tap to copy",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier
-                    .clickable { clipboard.setText(AnnotatedString(err)) }
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+        val clipboard = LocalClipboardManager.current
+        // Writes waiting for a slow ship: said once, quietly, with what
+        // the last try said behind the button.
+        val slow = repo.shipSlow.collectAsState(initial = null).value
+        if (slow != null) {
+            NoteLine(
+                "Your ship is slow. ${slow.queued} queued for when it's back.",
+                calm = true,
+                details = slow.details,
+                onCopy = { clipboard.setText(AnnotatedString(it)) },
             )
+        }
+        state.sendError?.let { err ->
+            NoteLine(err, calm = state.sendErrorCalm, details = state.sendErrorDetails, onCopy = { clipboard.setText(AnnotatedString(it)) })
         }
         if (slashSuggestions.isNotEmpty() && slashTrigger != null) {
             SlashPicker(
@@ -811,7 +860,7 @@ fun ChatComposer(
                     }
                 }.onFailure { err ->
                     Log.e("ChatComposer", "send failed", err)
-                    state.sendError = "send failed: ${err.message ?: err::class.simpleName}"
+                    state.failed("send", err)
                 }
             }
             true
@@ -902,8 +951,7 @@ fun ChatComposer(
                             deleteFile(pv.path)
                         }.onFailure { err ->
                             Log.e("ChatComposer", "voice send failed", err)
-                            state.sendError =
-                                "voice send failed: ${err.message ?: err::class.simpleName}"
+                            state.failed("voice send", err)
                         }
                         state.uploading = false
                     }
@@ -1373,6 +1421,27 @@ private fun VoicePreviewRow(
                     modifier = Modifier.size(22.dp),
                     tint = if (!sending) sendAccent else LocalContentColor.current,
                 )
+            }
+        }
+    }
+}
+
+/** A line over the composer, with the error whole behind "Copy error details" where there is one. */
+@Composable
+private fun NoteLine(text: String, calm: Boolean, details: String?, onCopy: (String) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (calm) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+            modifier = Modifier.weight(1f).padding(vertical = 4.dp),
+        )
+        if (details != null) {
+            TextButton(onClick = { onCopy(details) }) {
+                Text("Copy error details", style = MaterialTheme.typography.labelSmall)
             }
         }
     }

@@ -51,8 +51,11 @@ data class MessageEntity(
      * Send-state for our own outgoing messages:
      *  - null: not tracked (server-echoed rows, and DMs in flight).
      *  - "pending": an optimistic channel post; the poke is in flight.
-     *  - "failed": the ship refused the poke, or it never left; the
-     *    message didn't land. The row stays so the UI can say so.
+     *  - "queued": the ship was slow or out of reach, not refusing; the
+     *    message waits and goes when it answers again
+     *    (TlonChatRepo.drainQueue). Kept across restarts.
+     *  - "failed": the ship refused the poke; the message didn't land.
+     *    The row stays so the UI can say so.
      * "sent" isn't stored — once the server echoes the post under its
      * real id, MessageDao.reapLocalTwin removes the pending row and
      * inserts a fresh status=null row, which is the implicit "sent".

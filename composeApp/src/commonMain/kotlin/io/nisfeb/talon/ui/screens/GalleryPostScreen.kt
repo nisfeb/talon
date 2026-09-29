@@ -237,7 +237,7 @@ fun GalleryPostScreen(
                             StoryCache.partsFor(r.id, r.contentJson)
                         }
                         StoryRenderer(parts = rParts)
-                        if (r.status == "failed") SendFailedNote()
+                        SendStateNote(r.status)
                     }
                 }
             }
