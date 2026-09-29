@@ -32,7 +32,7 @@ package io.nisfeb.talon.ui
  *  - isUrbWebViewSupported — A, i (in-app webview popover); D: hands off to the system browser.
  *  - isLocalTriageSupported — D (llama.cpp on the JVM, or a local Ollama), A (MediaPipe LLM Inference), i (Apple's system model on iOS 26, else llama.cpp).
  *  - isLocationSharingSupported — A (LocationManager wakes a receiver on a significant move). D: a computer does not move with you. i: port pending (CLLocationManager significant-change monitoring, Always authorization, Info.plist strings).
- *  - isArmillaryPurchaseSupported — A, D, i today. The card, the balance and the history do not depend on it; buying credit does. An app store that will not have an outside checkout inside its app is one line here, not a rebuild.
+ *  - isArmillaryPurchaseSupported — A, D; i on the US App Store storefront only. Apple allows a button to an outside checkout there and nowhere else (guideline 3.1.1(a)), so elsewhere buying, its pitch and every "top up" go. The card, the balance and the history do not depend on it.
  *
  * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
  * below too — a display name and a per-feature predicate, not flags.
@@ -333,10 +333,18 @@ expect val isLocationSharingSupported: Boolean
  * Whether credit can be bought from inside the app.
  *
  * Armillary's card shows the balance, the warning, the history and the
- * vendor either way; this is the buying. Apple may not have an outside
- * checkout in an app on its store, and the day that is decided this
- * goes false on iOS and the sheet, the two buttons and the Top up on an
- * empty balance all go with it, leaving the card saying where to top up
- * instead. True everywhere today.
+ * vendor either way; this is the buying. Off, the sheet, the buttons,
+ * the Top up on an empty balance and the pitch for Armillary all go,
+ * and nothing says where else to pay: outside the US, Apple counts
+ * even that as steering away from in-app purchase. Off only on iOS
+ * outside the US storefront; see [outsideCheckoutAllowedOnAppStore].
  */
 expect val isArmillaryPurchaseSupported: Boolean
+
+/**
+ * Whether an App Store storefront allows a button to a checkout outside
+ * Apple's in-app purchase: the United States one only (App Review
+ * guideline 3.1.1(a)). [storefrontCountry] is StoreKit's ISO 3166-1
+ * alpha-3 code, null when StoreKit has none, which counts as not.
+ */
+fun outsideCheckoutAllowedOnAppStore(storefrontCountry: String?): Boolean = storefrontCountry == "USA"

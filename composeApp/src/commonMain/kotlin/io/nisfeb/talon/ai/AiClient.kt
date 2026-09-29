@@ -268,13 +268,14 @@ internal fun claudePrice(model: String): Pair<Double, Double>? {
 
 /**
  * A 402 is the one failure the person can fix themselves: the Armillary
- * balance ran out. Say so, and where to go, instead of the raw line.
+ * balance ran out. Say so, and where to go where this app can take the
+ * payment ([canBuy]), instead of the raw line.
  */
-internal fun outOfCredit(host: String, msg: String): String =
-    "$OUT_OF_CREDIT ($host 402: $msg)"
+internal fun outOfCredit(host: String, msg: String, canBuy: Boolean = io.nisfeb.talon.ui.isArmillaryPurchaseSupported): String =
+    OUT_OF_CREDIT + (if (canBuy) " Top up under Settings, AI." else "") + " ($host 402: $msg)"
 
 /** The words every empty-balance failure starts with, which the error surfaces look for. */
-const val OUT_OF_CREDIT = "Your Armillary balance is empty. Top up under Settings, AI."
+const val OUT_OF_CREDIT = "Your Armillary balance is empty."
 
 /** Whether a failure's message is the empty balance, so a Top up action belongs beside it. */
 fun isOutOfCredit(message: String?): Boolean = message?.contains(OUT_OF_CREDIT) == true

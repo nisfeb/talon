@@ -350,20 +350,20 @@ class AiSettingsSectionTest {
         assertEquals("Almost out: top up before your next request fails.", balanceWarning(acct(999_999)))
         assertEquals("Empty: requests fail until you top up.", balanceWarning(acct(0)))
         assertEquals("Empty: requests fail until you top up.", balanceWarning(acct(-137)))
-        // A build that cannot take a payment says where to make one
-        // instead of naming a button that is not on the screen.
+        // An app that cannot take a payment (iOS off the US storefront)
+        // names no button that is not there, and no other place to pay.
         assertEquals(
-            "Empty: requests fail until you top up from another device.",
+            "Empty: requests fail until there is credit on the account.",
             balanceWarning(acct(0), canBuy = false),
         )
-        assertEquals("Almost out: top up from another device.", balanceWarning(acct(999_999), canBuy = false))
+        assertEquals("Almost out: requests fail once it runs out.", balanceWarning(acct(999_999), canBuy = false))
         assertEquals(null, balanceWarning(acct(5_000_000), canBuy = false), "a full balance warns either way")
     }
 
     @Test
     fun `the mode line says where a request actually goes`() {
         val empty = Account(true, 0, "", false, null, "~wex", 0, leaseHeld = true, leaseDisabled = true, checkouts = emptyList())
-        assertEquals("Balance is empty: requests go through the vendor's ship until you top up.", armillaryModeLine("lease", empty))
+        assertEquals("Balance is empty: requests go through the vendor's ship until there is credit again.", armillaryModeLine("lease", empty))
         assertEquals("Talon talks to the model provider directly with a key your ship holds.", armillaryModeLine("lease", null))
         assertEquals("Requests go through the vendor's ship.", armillaryModeLine("proxy", null))
         assertEquals("Your ship has not said yet how it reaches the model.", armillaryModeLine(null, null))
@@ -416,7 +416,7 @@ class AiSettingsSectionTest {
                 onAllNodesWithText("Top up").fetchSemanticsNodes().isEmpty(),
                 "nothing to press where credit cannot be bought",
             )
-            onNodeWithText("Empty: requests fail until you top up from another device.").assertExists()
+            onNodeWithText("Empty: requests fail until there is credit on the account.").assertExists()
         }
     }
 

@@ -158,7 +158,9 @@ fun AiSettingsSection(
     // Not providers.isEmpty(): this device is always a provider, since
     // every platform has a local rung, so that is never true. What is
     // meant is nothing the owner had to go and set up.
-    if (chat.isEmpty()) StartWithArmillary(
+    // Not where credit cannot be bought here: a pitch for a service paid
+    // for somewhere else is what the store forbids.
+    if (chat.isEmpty() && io.nisfeb.talon.ui.isArmillaryPurchaseSupported) StartWithArmillary(
         onStart = {
             // And make it the default, where there is none: the card says
             // there is nothing more to set up, and with no default model
@@ -945,20 +947,20 @@ internal const val LOW_BALANCE_MICRO = 1_000_000L
  * A warning under the balance, or null when there is enough. Empty means
  * the next request fails with a 402; low means it soon will.
  *
- * [canBuy] false is a build that cannot take a payment, so the line says
- * where to do it instead of naming a button that is not on the screen.
+ * [canBuy] false is an app that cannot take a payment, so the line names
+ * no button that is not on the screen, and no other place to pay.
  */
 internal fun balanceWarning(a: Account, canBuy: Boolean = true): String? = when {
     a.balanceMicro <= 0 ->
-        if (canBuy) "Empty: requests fail until you top up." else "Empty: requests fail until you top up from another device."
+        if (canBuy) "Empty: requests fail until you top up." else "Empty: requests fail until there is credit on the account."
     a.balanceMicro < LOW_BALANCE_MICRO ->
-        if (canBuy) "Almost out: top up before your next request fails." else "Almost out: top up from another device."
+        if (canBuy) "Almost out: top up before your next request fails." else "Almost out: requests fail once it runs out."
     else -> null
 }
 
 /** How Talon reaches the model, in the owner's terms. */
 internal fun armillaryModeLine(mode: String?, account: Account?): String = when {
-    account?.leaseDisabled == true -> "Balance is empty: requests go through the vendor's ship until you top up."
+    account?.leaseDisabled == true -> "Balance is empty: requests go through the vendor's ship until there is credit again."
     mode == "lease" -> "Talon talks to the model provider directly with a key your ship holds."
     mode == "proxy" -> "Requests go through the vendor's ship."
     else -> "Your ship has not said yet how it reaches the model."

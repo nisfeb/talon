@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import platform.StoreKit.SKPaymentQueue
 import platform.UIKit.UIDevice
 
 // iOS capability matrix. On-device AI (MediaPipe / DJL-ONNX) has no iOS
@@ -65,5 +66,6 @@ actual val isTouchPrimary: Boolean = true
 // Port pending: CLLocationManager significant-change monitoring.
 actual val isLocationSharingSupported: Boolean = false
 
-/** Nothing here forbids an outside checkout. */
-actual val isArmillaryPurchaseSupported: Boolean = true
+/** The US storefront only. Read each time: the storefront follows the Apple ID's country. */
+actual val isArmillaryPurchaseSupported: Boolean
+    get() = outsideCheckoutAllowedOnAppStore(SKPaymentQueue.defaultQueue().storefront?.countryCode)
