@@ -32,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +43,10 @@ import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.urbit.StoryCache
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
@@ -188,6 +193,41 @@ fun mediaInStory(parts: List<StoryPart>): List<Pair<String, MediaKind>> {
     return out
 }
 
+/**
+ * The link or mention under [pos]: the glyph the pointer is on, not the
+ * caret nearest it, so blank space past the end of a line is not the
+ * link that ends it. Tap and hover both ask this, so the hand shows
+ * exactly where a click opens something.
+ */
+internal fun TextLayoutResult.spanAt(text: AnnotatedString, pos: Offset): AnnotatedString.Range<String>? {
+    val caret = getOffsetForPosition(pos)
+    val char = listOf(caret, caret - 1)
+        .firstOrNull { it in text.indices && getBoundingBox(it).contains(pos) } ?: return null
+    return text.getStringAnnotations(char, char + 1).firstOrNull { it.tag == URL_TAG || it.tag == MENTION_TAG }
+}
+
+/**
+ * The hand over a link or mention (an @p, a mnemonym, a nickname), as
+ * over any link. These spans are string annotations with their own tap
+ * handling, which Compose gives no cursor. Over a span it overrides
+ * the I-beam the selectable text sets for itself; elsewhere it defers.
+ */
+@Composable
+private fun Modifier.handOverSpans(text: AnnotatedString, layout: State<TextLayoutResult?>): Modifier {
+    var over by remember(text) { mutableStateOf(false) }
+    return pointerInput(text) {
+        awaitPointerEventScope {
+            while (true) {
+                val e = awaitPointerEvent()
+                val pos = e.changes.firstOrNull()?.position ?: continue
+                over = e.type != PointerEventType.Exit && layout.value?.spanAt(text, pos) != null
+            }
+        }
+    // Always attached: adding and removing it moved the tap detector in
+    // the chain, which reset it between a press and its release.
+    }.pointerHoverIcon(if (over) PointerIcon.Hand else PointerIcon.Text, overrideDescendants = over)
+}
+
 @Composable
 fun StoryRenderer(
     parts: List<StoryPart>,
@@ -249,19 +289,14 @@ fun StoryRenderer(
                             style = MaterialTheme.typography.bodyMedium,
                             onTextLayout = { layout.value = it },
                             modifier = if (hasAnnotations) {
-                                Modifier.pointerInput(part.text) {
+                                Modifier.handOverSpans(part.text, layout).pointerInput(part.text) {
                                     // No onLongPress here — long-press is
                                     // owned by SelectionContainer (text
                                     // selection start). Tap stays bound to
                                     // URL / mention navigation.
                                     detectTapGestures(
                                         onTap = { pos ->
-                                            val l = layout.value
-                                            val ann = l?.let {
-                                                val offset = it.getOffsetForPosition(pos)
-                                                part.text.getStringAnnotations(offset, offset)
-                                                    .firstOrNull()
-                                            }
+                                            val ann = layout.value?.spanAt(part.text, pos)
                                             when (ann?.tag) {
                                                 URL_TAG -> onLinkTap(ann.item)
                                                 MENTION_TAG -> onMentionTap(ann.item)

@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import io.nisfeb.talon.ui.Button
@@ -45,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,7 +52,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -409,10 +411,9 @@ fun LoginScreen(
 }
 
 /**
- * Minimal styled-link text. ClickableText doesn't inherit the
- * surrounding theme color the way a plain Text does, so we re-stamp
- * the link span's color from the call site (where MaterialTheme is
- * accessible) before handing the AnnotatedString down.
+ * Minimal styled-link text. The link span's color is re-stamped from
+ * the call site (where MaterialTheme is accessible). Links are
+ * LinkAnnotations, so a mouse over one shows the hand.
  */
 @Composable
 private fun ClickableLinkText(
@@ -424,31 +425,27 @@ private fun ClickableLinkText(
     // Re-build the AnnotatedString so the URL-tagged span gets the
     // theme's primary color. Avoids hard-coding a brand hex into the
     // composable that built the AnnotatedString upstream.
+    val tap by rememberUpdatedState(onLinkTap)
     val themed = remember(text, primaryColor, baseColor) {
         buildAnnotatedString {
             withStyle(SpanStyle(color = baseColor)) {
                 append(text.text)
             }
             text.getStringAnnotations("URL", 0, text.length).forEach { ann ->
-                addStyle(
-                    style = SpanStyle(
-                        color = primaryColor,
-                        fontWeight = FontWeight.Medium,
-                    ),
+                addLink(
+                    LinkAnnotation.Clickable(
+                        tag = ann.item,
+                        styles = TextLinkStyles(SpanStyle(color = primaryColor, fontWeight = FontWeight.Medium)),
+                    ) { tap(ann.item) },
                     start = ann.start,
                     end = ann.end,
                 )
-                addStringAnnotation("URL", ann.item, ann.start, ann.end)
             }
         }
     }
-    ClickableText(
+    Text(
         text = themed,
         style = MaterialTheme.typography.bodyMedium.copy(textAlign = TextAlign.Center),
-        onClick = { offset ->
-            themed.getStringAnnotations("URL", offset, offset)
-                .firstOrNull()?.let { onLinkTap(it.item) }
-        },
         modifier = Modifier.fillMaxWidth(),
     )
 }
