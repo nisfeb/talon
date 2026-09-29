@@ -69,6 +69,8 @@ import io.nisfeb.talon.armillary.Account
 import io.nisfeb.talon.armillary.ArmillaryAvailability
 import io.nisfeb.talon.armillary.ArmillaryRepo
 import io.nisfeb.talon.armillary.Checkout
+import io.nisfeb.talon.armillary.DeleteAnswer
+import io.nisfeb.talon.armillary.Deletion
 import io.nisfeb.talon.armillary.Inference
 import io.nisfeb.talon.armillary.LedgerRow
 import io.nisfeb.talon.armillary.Payment
@@ -160,7 +162,10 @@ fun AiSettingsSection(
     // meant is nothing the owner had to go and set up.
     // Not where credit cannot be bought here: a pitch for a service paid
     // for somewhere else is what the store forbids.
-    if (chat.isEmpty() && io.nisfeb.talon.ui.isArmillaryPurchaseSupported) StartWithArmillary(
+    val noDeletion = remember { MutableStateFlow<Deletion?>(null) }
+    val deletion by (armillary?.deletion ?: noDeletion).collectAsState()
+    deletion?.let { Quiet(deletionLine(it)) }
+    if (chat.isEmpty() && deletion == null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported) StartWithArmillary(
         onStart = {
             // And make it the default, where there is none: the card says
             // there is nothing more to set up, and with no default model
@@ -592,6 +597,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     var buying by remember { mutableStateOf(false) }
     var subscribing by remember { mutableStateOf<Plan?>(null) }
     var confirmCancel by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     var changingVendor by remember { mutableStateOf(false) }
     var history by remember { mutableStateOf(false) }
     var vendorTyped by remember { mutableStateOf("") }
@@ -705,6 +711,11 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             scope.launch { repo?.refresh(fresh = true)?.onFailure { note = (it.message ?: "The ship did not answer.") to true } }
         }) { Text("Refresh") }
         if (account?.hasView == true) TextButton(onClick = { history = !history }) { Text("History") }
+        // Not gated on buying: the account is deletable wherever it is
+        // held (App Review guideline 5.1.1(v)).
+        if (here && account?.vendor?.isNotBlank() == true) {
+            TextButton(onClick = { confirmDelete = true }) { Text("Delete account", color = MaterialTheme.colorScheme.error) }
+        }
     }
     // The only receipt inside the app: Stripe and BTCPay send their
     // own by email.
@@ -742,6 +753,53 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         },
         dismissButton = { TextButton(onClick = { confirmCancel = false }) { Text("Keep it") } },
     )
+    if (confirmDelete) account?.let { a ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete your Armillary account?") },
+            text = { Text(deleteAccountWarning(a)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    note = null
+                    // A deletion the ship took takes this card with it; the
+                    // Providers heading says how it went from the repo.
+                    scope.launch {
+                        repo?.deleteAccount()
+                            ?.onSuccess { answer -> deleteRefusedLine(answer, a.vendor)?.let { note = it to true } }
+                            ?.onFailure { note = (it.message ?: "The ship did not answer.") to true }
+                    }
+                }) { Text("Delete account", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Keep it") } },
+        )
+    }
+}
+
+/** What deleting the account at its vendor costs, said before it is done. */
+internal fun deleteAccountWarning(a: Account): String = buildString {
+    append("${a.vendor} deletes everything it holds for your ship: the account, its ledger, its checkouts and its keys.")
+    if (a.subscriptionActive) append(" Your subscription stops now.")
+    if (a.balanceMicro > 0) append(" The ${money(a.balanceMicro)} left on it is lost.")
+    append(" Stripe and BTCPay Server keep their own records of your payments. This cannot be undone.")
+}
+
+/** A deletion the ship did not take, said on the card that is still there; null when it took it. */
+internal fun deleteRefusedLine(answer: DeleteAnswer, vendor: String): String? = when (answer) {
+    DeleteAnswer.Unsupported ->
+        "Armillary on your ship cannot delete accounts yet. Update it from the Grubbery shell on your ship, or message $vendor to ask."
+    is DeleteAnswer.Refused -> "$vendor did not delete it: ${answer.reason}"
+    else -> null
+}
+
+/** What a deletion the ship took did, under Providers once the card is gone. */
+internal fun deletionLine(d: Deletion): String {
+    val vendor = d.vendor.ifBlank { "the vendor" }
+    return when (d.answer) {
+        DeleteAnswer.Queued -> "Your ship has asked $vendor to delete your Armillary account, and keeps asking until it answers."
+        DeleteAnswer.NothingHeld -> "Your ship bought from no vendor, so there was no Armillary account to delete."
+        else -> "Your Armillary account at $vendor is deleted. It holds nothing for your ship now."
+    }
 }
 
 /**

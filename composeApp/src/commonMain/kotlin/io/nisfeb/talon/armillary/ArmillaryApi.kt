@@ -161,6 +161,26 @@ class ArmillaryApi(
         request(HttpMethod.Post, "/api/cancel-subscription")
     }
 
+    /**
+     * Delete this ship's account at its vendor, everything the vendor
+     * holds for it (App Review guideline 5.1.1(v)). The ship forgets the
+     * vendor as it asks, so nothing it sends after opens the account
+     * again. It waits thirty seconds for the vendor to say it is done;
+     * past that it keeps asking, which is [DeleteAnswer.Queued].
+     */
+    suspend fun deleteAccount(): DeleteAnswer {
+        val resp = send("/api/delete-account") { method = HttpMethod.Post }
+        val text = reading { resp.bodyAsText() }
+        return when {
+            resp.status.value == ACCEPTED -> DeleteAnswer.Queued
+            resp.status.isSuccess() -> DeleteAnswer.Deleted
+            resp.status.value == CONFLICT && VENDOR_NOT_SET in armillaryReason(text) -> DeleteAnswer.NothingHeld
+            resp.status.value == NOT_FOUND || resp.status.value == NOT_IMPLEMENTED -> DeleteAnswer.Unsupported
+            resp.status.value == BAD_GATEWAY -> DeleteAnswer.Refused(armillaryReason(text))
+            else -> throw ArmillaryError.Refused(resp.status.value, armillaryReason(text))
+        }
+    }
+
     private suspend fun request(
         method: HttpMethod,
         path: String,
@@ -200,7 +220,9 @@ class ArmillaryApi(
     companion object {
         const val APP_PATH = "/apps/armillary"
         private const val NO_KEY = "no key yet"
+        private const val VENDOR_NOT_SET = "vendor: not set"
         private const val ACCEPTED = 202
+        private const val CONFLICT = 409
         private const val NOT_FOUND = 404
         private const val FORBIDDEN = 403
         private const val BAD_GATEWAY = 502
@@ -320,6 +342,27 @@ data class CatalogRow(
     val tags: List<String>,
 ) {
     val zdr: Boolean get() = tags.any { it.equals("zdr", ignoreCase = true) }
+}
+
+/** How a ship answered `POST /api/delete-account`. */
+sealed class DeleteAnswer {
+    /** The vendor holds nothing for the ship now. */
+    data object Deleted : DeleteAnswer()
+
+    /** The ship has asked and forgotten the vendor; it keeps asking until the vendor answers. */
+    data object Queued : DeleteAnswer()
+
+    /** The ship buys from no vendor, so there was no account to delete. */
+    data object NothingHeld : DeleteAnswer()
+
+    /** A desk from before the route: nothing was asked, and nothing changed. */
+    data object Unsupported : DeleteAnswer()
+
+    /** The vendor would not, and said why. Nothing changed. */
+    data class Refused(val reason: String) : DeleteAnswer()
+
+    /** Whether the ship took the request, after which this device keeps no Armillary row. */
+    val taken: Boolean get() = this is Deleted || this is Queued || this is NothingHeld
 }
 
 sealed class CheckoutAnswer {

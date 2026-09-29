@@ -15,6 +15,7 @@ import io.nisfeb.talon.ai.armillaryBest
 import io.nisfeb.talon.ai.filledWithArmillary
 import io.nisfeb.talon.ai.shipBase
 import io.nisfeb.talon.ai.wantsArmillaryRow
+import io.nisfeb.talon.ai.without
 import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.ui.isAssistantSupported
 import io.nisfeb.talon.ui.platformLabel
@@ -25,6 +26,7 @@ import io.nisfeb.talon.notify.NoopNotifier
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -88,6 +90,14 @@ class ArmillaryRepo(
      */
     val offer: StateFlow<String?> = _offer.asStateFlow()
 
+    private val _deletion = MutableStateFlow<Deletion?>(null)
+
+    /**
+     * The account deletion the ship took this session. The card goes
+     * with the row, so the screen says what happened from this instead.
+     */
+    val deletion: StateFlow<Deletion?> = _deletion.asStateFlow()
+
     private var api: ArmillaryApi? = null
     private var shipUrl: String? = null
     private var ship: String? = null
@@ -136,6 +146,7 @@ class ArmillaryRepo(
         _inference.value = null
         _refreshing.value = false
         _payment.value = null
+        _deletion.value = null
     }
 
     /**
@@ -184,6 +195,7 @@ class ArmillaryRepo(
      */
     suspend fun ensureKey(deviceName: String): Result<Inference> = runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
+        _deletion.value = null
         when (val first = a.inference()) {
             is InferenceAnswer.Have -> return@runSuspendCatching took(first.inference)
             InferenceAnswer.Missing -> error("Armillary is not on this ship. Install it from the Grubbery shell on your ship.")
@@ -251,6 +263,38 @@ class ArmillaryRepo(
         val a = api ?: error("Not attached to a ship.")
         a.cancelSubscription()
         watchBalance(null)
+    }
+
+    /**
+     * Delete this ship's account at its vendor, on the repo's scope, so
+     * leaving the screen does not stop it half done. Once the ship has
+     * taken it, this device drops the Armillary row and every model on
+     * it. The profile travels: left pointing at Armillary, another device
+     * would adopt the row and ask for a key, and the vendor opens an
+     * account for any ship that asks it anything.
+     */
+    suspend fun deleteAccount(): Result<DeleteAnswer> = scope.async {
+        runSuspendCatching {
+            val a = api ?: error("Not attached to a ship.")
+            val vendor = _account.value?.vendor.orEmpty()
+            val answer = a.deleteAccount()
+            if (answer.taken) forget(Deletion(vendor, answer))
+            answer
+        }
+    }.await()
+
+    private fun forget(d: Deletion) {
+        watching?.cancel()
+        watching = null
+        _payment.value = null
+        _offer.value = null
+        _account.value = null
+        _inference.value = null
+        _plans.value = emptyList()
+        catalog = null
+        _deletion.value = d
+        val ai = aiSettings ?: return
+        ai.state.value.savedProfile?.let { ai.setProfile(it.without(ARMILLARY_PROVIDER)) }
     }
 
     /** Give a direct provider lease back, before the provider row goes. */
@@ -497,3 +541,6 @@ data class Payment(
         ENDED,
     }
 }
+
+/** An account deletion the ship took: from which vendor, and how it answered. */
+data class Deletion(val vendor: String, val answer: DeleteAnswer)

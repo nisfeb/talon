@@ -25,9 +25,10 @@ locally stored credentials and cache. The Urbit ship belongs to the
 user independently of Talon, like an IMAP mailbox belongs to the user
 independently of a mail client. The one account involved is optional:
 adding the Armillary AI provider opens a credit account for the
-user's ship at a vendor ship. The user can ask the default vendor,
-~nisfeb, to delete it by messaging ~nisfeb from inside Talon, as the
-privacy policy describes.
+user's ship at a vendor ship. The user deletes it in the app:
+Settings > AI > the Armillary card > Delete account. The vendor then
+deletes the account, its ledger, checkouts and keys, and cancels any
+subscription.
 
 USER-GENERATED CONTENT (Guideline 1.2)
 All content lives on users' own private servers; there is no public

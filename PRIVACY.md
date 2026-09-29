@@ -58,9 +58,11 @@ ship's name with Stripe and BTCPay Server, to tie a payment to your
 account, and with OpenRouter, where it names the capped key it makes
 for you in lease mode. None of it is used for advertising or sold.
 
-The account is kept until it is deleted. To have it deleted, with its
-ledger, checkouts and keys, message ~nisfeb from your ship and ask: a
-request from your ship is how we know the account is yours.
+The account is kept until it is deleted. To delete it, with its
+ledger, checkouts and keys, tap Delete account on the Armillary card in
+Talon's AI settings: your ship asks ~nisfeb, which deletes all of it and
+cancels any subscription. You can also message ~nisfeb from your ship
+and ask.
 
 ## Third parties
 
