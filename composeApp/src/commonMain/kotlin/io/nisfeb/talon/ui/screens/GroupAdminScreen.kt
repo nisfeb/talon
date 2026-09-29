@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.foundation.ExperimentalFoundationApi
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
@@ -875,9 +876,9 @@ private fun AdminBody(
             MemberRow(
                 member = m,
                 contactMap = contactMap,
-                // Kick and ban live behind this. A non-admin gets no
-                // sheet rather than one whose every action is refused.
-                onLongPress = { if (mayAdminister) onMemberLongPress(m) },
+                // Make admin, kick and ban live behind this. A non-admin
+                // gets no sheet rather than one whose every action is refused.
+                onManage = if (mayAdminister) ({ onMemberLongPress(m) }) else null,
             )
         }
         val remaining = group.members.size - visible.size
@@ -1589,13 +1590,18 @@ private fun SectionHeader(label: String) {
 private fun MemberRow(
     member: AdminMember,
     contactMap: ContactMap,
-    onLongPress: () -> Unit,
+    /**
+     * Opens the member's actions (make admin, kick, ban), or null where
+     * this ship may do none of them. Behind a long-press alone, nobody
+     * found them: there was "no way to make someone an admin".
+     */
+    onManage: (() -> Unit)?,
 ) {
     val nickname = contactMap.nickname(member.ship)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickableWithSecondary(onClick = {}, onLongClick = onLongPress)
+            .combinedClickableWithSecondary(onClick = { onManage?.invoke() }, onLongClick = { onManage?.invoke() })
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1642,6 +1648,15 @@ private fun MemberRow(
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
+            }
+        }
+        if (onManage != null) {
+            androidx.compose.material3.IconButton(onClick = onManage, modifier = Modifier.size(32.dp)) {
+                androidx.compose.material3.Icon(
+                    androidx.compose.material.icons.Icons.Filled.MoreVert,
+                    contentDescription = "Manage ${member.ship}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

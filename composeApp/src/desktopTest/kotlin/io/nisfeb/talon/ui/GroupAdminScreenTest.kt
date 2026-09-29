@@ -278,6 +278,31 @@ class GroupAdminScreenTest {
         assertTrue(shows("Private — members must be invited or request access."))
     }
 
+    // Making someone an admin was behind a long-press alone, and nobody
+    // found it: "there's no way to make someone an admin".
+    @Test
+    fun `a member's Manage button makes them an admin, by role, and only them`() = admin { ship ->
+        onNodeWithContentDescription("Manage ~nec").performScrollTo().performClick()
+        waitForIdle()
+        val made = pressFor(ship, "Make admin")
+        assertTrue("\"~nec\"" in made && "add-roles" in made && "[\"admin\"]" in made, made)
+        assertTrue("~zod" !in made.substringAfter("ships"), "not the host: $made")
+    }
+
+    @Test
+    fun `tapping a member opens the same actions`() = admin {
+        onNodeWithText("~nec").performScrollTo().performClick()
+        waitForIdle()
+        assertTrue(shows("Make admin") && shows("Kick") && shows("Ban"))
+    }
+
+    @Test
+    fun `a member who is no admin is offered no Manage button`() = admin(me = "~nec") {
+        assertTrue(
+            onAllNodes(androidx.compose.ui.test.hasContentDescription("Manage", substring = true)).fetchSemanticsNodes().isEmpty(),
+        )
+    }
+
     @Test
     fun `accepting a request lets them in by name`() = admin { ship ->
         val yes = pressFor(ship, "Accept")
