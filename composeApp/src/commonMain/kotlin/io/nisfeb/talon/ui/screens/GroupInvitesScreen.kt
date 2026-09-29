@@ -203,8 +203,19 @@ private fun JoiningRow(invite: TlonChatRepo.InviteSummary, busy: Boolean, onCanc
     ) {
         Column(Modifier.weight(1f)) {
             Text(invite.title ?: invite.flag, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold))
+            invite.inviter?.let {
+                Text("from $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            // The join is a poke to the host's own ship, not the
+            // inviter's. Unanswered, ames resends it until the host
+            // acks, which an offline host never does: say so, or the
+            // row sits there with no reason given.
+            val host = invite.flag.substringBefore('/')
             Text(
-                "Your ship is waiting for ${invite.flag.substringBefore('/')} to let it in.",
+                if (invite.hostAnswered) "$host let your ship in. Getting the group."
+                else "Waiting for $host, which hosts the group, to answer your ship. " +
+                    "If this lasts, $host is likely offline; your ship keeps asking. " +
+                    "Stop joining puts it back as an invite you can reject.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

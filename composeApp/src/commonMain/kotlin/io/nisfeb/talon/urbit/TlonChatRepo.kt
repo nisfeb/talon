@@ -1176,6 +1176,8 @@ class TlonChatRepo(
         val privacy: String? = null,
         /** The ship's last try at joining it failed (its join progress is %error). */
         val failed: Boolean = false,
+        /** Joining, and the host took the join (%watch): only the group is still to come. */
+        val hostAnswered: Boolean = false,
     )
 
     /**
@@ -1601,13 +1603,14 @@ class TlonChatRepo(
             val progress = f["progress"].asStr()
             if (progress == "done") continue
             val under = progress == "join" || progress == "watch"
-            // invites is an array of {ship, token, valid, ...}; an
-            // invite to answer needs at least one still valid.
+            // invites is an array of {from, token, valid, ...}
+            // (lib/groups-json +invite); an invite to answer needs at
+            // least one still valid.
             val firstValid = (f["invites"] as? JsonArray).orEmpty().asSequence()
                 .mapNotNull { it as? JsonObject }
                 .firstOrNull { (it["valid"] as? JsonPrimitive)?.content == "true" }
             if (firstValid == null && !under) continue
-            val inviter = firstValid?.get("ship").asStr()
+            val inviter = firstValid?.get("from").asStr()
             val preview = f["preview"] as? JsonObject
             val meta = preview?.get("meta") as? JsonObject
             fun metaStr(k: String) = meta?.get(k).asStr()
@@ -1627,6 +1630,7 @@ class TlonChatRepo(
                 memberCount = memberCount,
                 privacy = preview?.get("privacy").asStr()?.takeIf { it.isNotBlank() },
                 failed = progress == "error",
+                hostAnswered = progress == "watch",
             )
             if (under) joining += summary else out += summary
         }
