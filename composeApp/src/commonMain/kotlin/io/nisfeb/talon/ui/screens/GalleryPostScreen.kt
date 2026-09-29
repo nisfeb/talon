@@ -178,13 +178,13 @@ fun GalleryPostScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Avatar(
-                    label = contactMap.nickname(p.author) ?: p.author,
+                    label = contactMap.displayName(p.author),
                     url = contactMap.avatar(p.author),
                     colorHex = contactMap.shipColor(p.author),
                     size = 28.dp,
                 )
                 Text(
-                    contactMap.nickname(p.author) ?: p.author,
+                    contactMap.displayName(p.author),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Medium,
                     ),
@@ -213,13 +213,13 @@ fun GalleryPostScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Avatar(
-                                label = contactMap.nickname(r.author) ?: r.author,
+                                label = contactMap.displayName(r.author),
                                 url = contactMap.avatar(r.author),
                                 colorHex = contactMap.shipColor(r.author),
                                 size = 24.dp,
                             )
                             Text(
-                                contactMap.nickname(r.author) ?: r.author,
+                                contactMap.displayName(r.author),
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.Medium,
                                 ),

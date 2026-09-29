@@ -2191,7 +2191,7 @@ private fun DmRequestRow(
     onAccept: () -> Unit,
     onDecline: () -> Unit,
 ) {
-    val label = remember(ship, contactMap) { contactMap.nickname(ship) ?: ship }
+    val label = remember(ship, contactMap) { contactMap.displayName(ship) }
     Row(
         modifier = Modifier
             .fillMaxWidth()

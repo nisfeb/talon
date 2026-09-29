@@ -289,6 +289,23 @@ class GroupAdminScreenTest {
         assertTrue("~zod" !in made.substringAfter("ships"), "not the host: $made")
     }
 
+    // A comet's @p is the fifty-six characters its word name replaces:
+    // "administration member lists both still show comet @p".
+    @Test
+    fun `a comet member is shown by its word name, its actions too`() {
+        val comet = Mnemonym.shipForNym(
+            "..bespoke.unnerved.describe.convince.inhale.charade.relieve.obey.reword.dislodge.hereby.kazoo",
+        )!!
+        admin(group = record.replace("\"~nec\":{", "\"$comet\":{")) {
+            // One dot or two: another test may have marked it Groundwire.
+            waitUntil(timeoutMillis = 5_000) { says("bespoke...kazoo") }
+            onNodeWithContentDescription("bespoke...kazoo", substring = true).performScrollTo().performClick()
+            waitForIdle()
+            assertTrue(shows("Make admin"))
+            assertTrue(!shows(comet), "no @p on screen")
+        }
+    }
+
     @Test
     fun `tapping a member opens the same actions`() = admin {
         onNodeWithText("~nec").performScrollTo().performClick()

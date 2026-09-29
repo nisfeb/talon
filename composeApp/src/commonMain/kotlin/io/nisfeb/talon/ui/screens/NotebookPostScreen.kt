@@ -235,14 +235,14 @@ fun NotebookPostScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Avatar(
-                    label = contactMap.nickname(p.author) ?: p.author,
+                    label = contactMap.displayName(p.author),
                     url = contactMap.avatar(p.author),
                     colorHex = contactMap.shipColor(p.author),
                     size = 32.dp,
                 )
                 Column {
                     Text(
-                        contactMap.nickname(p.author) ?: p.author,
+                        contactMap.displayName(p.author),
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontWeight = FontWeight.Medium,
                         ),
@@ -372,13 +372,13 @@ private fun CommentRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Avatar(
-                    label = contactMap.nickname(reply.author) ?: reply.author,
+                    label = contactMap.displayName(reply.author),
                     url = contactMap.avatar(reply.author),
                     colorHex = contactMap.shipColor(reply.author),
                     size = 24.dp,
                 )
                 Text(
-                    contactMap.nickname(reply.author) ?: reply.author,
+                    contactMap.displayName(reply.author),
                     style = MaterialTheme.typography.labelMedium.copy(
                         fontWeight = FontWeight.Medium,
                     ),

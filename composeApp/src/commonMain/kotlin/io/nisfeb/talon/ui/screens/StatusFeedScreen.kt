@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ui.shipHandle
 import io.nisfeb.talon.util.formatMonthDay
 import io.nisfeb.talon.util.formatTime24
 import io.nisfeb.talon.util.nowMs
@@ -179,7 +180,7 @@ internal fun EditStatusDialog(
 
 @Composable
 internal fun StatusRow(c: ContactEntity, onClick: () -> Unit) {
-    val label = c.nickname ?: c.ship
+    val label = c.nickname ?: shipHandle(c.ship)
     val stamp = remember(c.statusUpdatedMs) {
         c.statusUpdatedMs?.let { formatRelative(it) }
     }
@@ -203,7 +204,7 @@ internal fun StatusRow(c: ContactEntity, onClick: () -> Unit) {
                 )
                 if (!c.nickname.isNullOrBlank()) {
                     Text(
-                        c.ship,
+                        shipHandle(c.ship),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

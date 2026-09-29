@@ -200,7 +200,7 @@ private fun NotebookCard(
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 )
                 Spacer(Modifier.height(6.dp))
-                val authorName = contactMap.nickname(post.author) ?: post.author
+                val authorName = contactMap.displayName(post.author)
                 Text(
                     "$authorName · ${formatDate(post.sentMs)}",
                     style = MaterialTheme.typography.labelMedium,

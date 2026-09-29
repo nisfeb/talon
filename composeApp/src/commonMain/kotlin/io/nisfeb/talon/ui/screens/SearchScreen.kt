@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ui.shipHandle
 import io.nisfeb.talon.util.formatMonthDayTime
 import io.nisfeb.talon.util.nowMs
 
@@ -431,7 +432,7 @@ private fun PersonRow(
     hasChatHistory: Boolean,
     onClick: () -> Unit,
 ) {
-    val label = contact.nickname?.takeIf { it.isNotBlank() } ?: contact.ship
+    val label = contact.nickname?.takeIf { it.isNotBlank() } ?: shipHandle(contact.ship)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -463,7 +464,7 @@ private fun PersonRow(
                 !contact.nickname.isNullOrBlank() && contact.nickname != contact.ship
             when {
                 showShipSubtitle -> Text(
-                    contact.ship,
+                    shipHandle(contact.ship),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

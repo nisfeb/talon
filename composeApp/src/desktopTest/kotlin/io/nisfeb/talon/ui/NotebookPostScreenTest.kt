@@ -40,7 +40,7 @@ class NotebookPostScreenTest {
     private val whom = "diary/~bus/blog"
     private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
-    private fun post(author: String, block: ComposeUiTest.(FakeShip) -> Unit) {
+    private fun post(author: String, commenter: String = "~nec", block: ComposeUiTest.(FakeShip) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-diary-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
@@ -50,7 +50,7 @@ class NotebookPostScreenTest {
             db.messages().upsertAll(listOf(
                 MessageEntity(whom, "170141184500100", author, 100, """[{"inline":["Hello ",{"bold":["world"]}]}]""", "/diary",
                     title = "Spring", image = "https://x.test/cover.png"),
-                MessageEntity(whom, "170141184500200", "~nec", 200, """[{"inline":["lovely"]}]""", "/diary", parentId = "170141184500100"),
+                MessageEntity(whom, "170141184500200", commenter, 200, """[{"inline":["lovely"]}]""", "/diary", parentId = "170141184500100"),
             ))
         }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -84,6 +84,19 @@ class NotebookPostScreenTest {
     fun `a post reads with its title, body and comments`() = post("~bus") { _ ->
         assertTrue(shows("Spring") && shows("Hello world") && shows("lovely"))
         assertTrue(onAllNodesWithText("More").fetchSemanticsNodes().isEmpty(), "someone else's post has no menu")
+    }
+
+    // "notebook comments ... still show comet @p instead of mnemonym".
+    @Test
+    fun `a comet's post and comment are shown by its word name`() {
+        val comet = Mnemonym.shipForNym(
+            "..bespoke.unnerved.describe.convince.inhale.charade.relieve.obey.reword.dislodge.hereby.kazoo",
+        )!!
+        post(comet, commenter = comet) { _ ->
+            // One dot or two: another test may have marked it Groundwire.
+            assertEquals(2, onAllNodesWithText("bespoke...kazoo", substring = true).fetchSemanticsNodes().size)
+            assertTrue(!shows(comet), "no @p on screen")
+        }
     }
 
     @Test

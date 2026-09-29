@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.shipHandle
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -211,7 +212,7 @@ private fun ContactRow(c: ContactEntity, onClick: () -> Unit, onRemove: () -> Un
                 )
             }
             Text(
-                c.ship,
+                shipHandle(c.ship),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

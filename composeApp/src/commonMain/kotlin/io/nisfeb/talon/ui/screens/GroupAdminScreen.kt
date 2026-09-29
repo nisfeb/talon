@@ -283,7 +283,7 @@ fun GroupAdminScreen(
         val hasAdminRole = "admin" in m.sects
         AlertDialog(
             onDismissRequest = { memberActionTarget = null },
-            title = { Text(m.ship) },
+            title = { Text(contactMap.displayName(m.ship)) },
             text = {
                 Text(
                     "Roles: ${if (m.sects.isEmpty()) "(none)" else m.sects.joinToString(", ")}",
@@ -827,7 +827,7 @@ private fun AdminBody(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Avatar(
-                        label = contactMap.nickname(ship) ?: ship,
+                        label = contactMap.displayName(ship),
                         url = contactMap.avatar(ship),
                         colorHex = contactMap.shipColor(ship),
                         size = 32.dp,
@@ -1391,7 +1391,7 @@ private fun ShipRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Avatar(
-            label = contactMap.nickname(ship) ?: ship,
+            label = contactMap.displayName(ship),
             url = contactMap.avatar(ship),
             colorHex = contactMap.shipColor(ship),
             size = 32.dp,
@@ -1607,7 +1607,7 @@ private fun MemberRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Avatar(
-            label = nickname ?: member.ship,
+            label = contactMap.displayName(member.ship),
             url = contactMap.avatar(member.ship),
             colorHex = contactMap.shipColor(member.ship),
             size = 32.dp,
@@ -1621,13 +1621,13 @@ private fun MemberRow(
                     ),
                 )
                 Text(
-                    member.ship,
+                    contactMap.handle(member.ship),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
                 Text(
-                    member.ship,
+                    contactMap.handle(member.ship),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -1654,7 +1654,7 @@ private fun MemberRow(
             androidx.compose.material3.IconButton(onClick = onManage, modifier = Modifier.size(32.dp)) {
                 androidx.compose.material3.Icon(
                     androidx.compose.material.icons.Icons.Filled.MoreVert,
-                    contentDescription = "Manage ${member.ship}",
+                    contentDescription = "Manage ${contactMap.displayName(member.ship)}",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

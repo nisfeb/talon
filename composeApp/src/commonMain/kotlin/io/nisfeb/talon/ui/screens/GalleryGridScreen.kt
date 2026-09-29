@@ -300,7 +300,7 @@ private fun GalleryTile(
                 when {
                     failed -> "Not posted"
                     pending -> "Sending…"
-                    else -> contactMap.nickname(post.author) ?: post.author
+                    else -> contactMap.displayName(post.author)
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
