@@ -74,6 +74,18 @@ import io.nisfeb.talon.ui.icons.TalonIcons
 
 private const val GETTING_STARTED_URL = "https://urbit.org/overview/running-urbit"
 
+/**
+ * What the form holds, kept while the form is off screen: the login-QR
+ * screen and the scanner both take its place, and coming back from
+ * either without a sign-in must not mean typing it all again. Emptied
+ * by a sign-in that works.
+ */
+internal object LoginDraft {
+    val url = mutableStateOf("")
+    val code = mutableStateOf("")
+    fun clear() { url.value = ""; code.value = "" }
+}
+
 @Composable
 fun LoginScreen(
     session: UrbitSession,
@@ -124,8 +136,8 @@ fun LoginScreen(
      *  Null on a first sign-in, which has nowhere to go back to. */
     onCancel: (() -> Unit)? = null,
 ) {
-    var shipUrl by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf("") }
+    var shipUrl by LoginDraft.url
+    var code by LoginDraft.code
     var status by remember { mutableStateOf<String?>(null) }
     // Failures render in error red; info/progress text stays neutral.
     var statusIsError by remember { mutableStateOf(false) }
@@ -279,12 +291,9 @@ fun LoginScreen(
                             statusIsError = false
                         } else {
                             // null = backed out of the scanner, or the QR
-                            // wasn't a talon:// login. Either way no login
-                            // came of it, so the form starts over rather
-                            // than keeping what was there before the scan.
-                            shipUrl = ""
-                            code = ""
-                            status = null
+                            // wasn't a talon:// login. The form keeps what
+                            // was typed: a scanner opened by mistake must
+                            // not cost typing it all again.
                         }
                     }
                     if (triggerScan != null) {
@@ -317,6 +326,7 @@ fun LoginScreen(
                                         // login() keeps the leading ~ on the
                                         // ship name — don't prepend another.
                                         status = "Connected as $ship"
+                                        LoginDraft.clear()
                                         onLoggedIn(ship)
                                     }
                                     .onFailure { err ->

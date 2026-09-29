@@ -1,5 +1,9 @@
 package io.nisfeb.talon.ui
 
+import io.ktor.client.engine.mock.respondOk
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
@@ -25,6 +29,7 @@ import io.ktor.client.request.HttpResponseData
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.nisfeb.talon.login.TalonLoginUri
+import io.nisfeb.talon.ui.screens.LoginDraft
 import io.nisfeb.talon.ui.screens.LoginScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.urbit.DesktopSessionStore
@@ -61,6 +66,7 @@ class LoginScreenTest {
         opened: MutableList<String> = mutableListOf(),
         block: ComposeUiTest.(loggedIn: List<String>) -> Unit,
     ) = runComposeUiTest {
+        LoginDraft.clear() // it outlives a screen, and so a test
         val http = HttpClient(MockEngine { req ->
             asked += req.url.toString() to req.body.toByteArray().decodeToString()
             answer(req)
@@ -93,19 +99,49 @@ class LoginScreenTest {
         onNodeWithText("Connect").performClick()
     }
 
-    // "when you go to a qr code and then back out without scanning the
-    // ship login fields should be cleared".
+    // "backing out of the qr scanner should leave the fields populated. if
+    // I fill those in and then accidentally tap the qr scanner I don't want
+    // to type them again".
     @Test
-    fun `backing out of the scanner clears the form`() = login(scanCancels = true) { _ ->
+    fun `backing out of the scanner keeps what was typed`() = login(scanCancels = true) { _ ->
         onNodeWithText("Ship URL").performTextInput("zod.example.com")
         onNodeWithText("+code").performTextInput("lidlut-tabwed")
         onNodeWithText("Scan QR").performClick()
         waitForIdle()
-        for (field in listOf("Ship URL", "+code")) {
-            val typed = onNodeWithText(field).fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text
-            assertEquals("", typed, "$field is empty")
+        assertEquals("zod.example.com", typed("Ship URL"))
+        // Shown as dots; the field still holds the code.
+        assertEquals("•".repeat("lidlut-tabwed".length), typed("+code"))
+        assertEquals("lidlut-tabwed", LoginDraft.code.value)
+    }
+
+    // The login-QR screen takes the form's place; back from it, the form
+    // still holds what was typed. A sign-in that works empties it.
+    @Test
+    fun `the form outlives leaving it, until a sign-in works`() {
+        var shown by mutableStateOf(true)
+        LoginDraft.clear()
+        runComposeUiTest {
+            setContent {
+                TalonTheme(darkTheme = false) {
+                    if (shown) LoginScreen(session = UrbitSession(HttpClient(MockEngine { respondOk() }), store), onLoggedIn = {})
+                }
+            }
+            onNodeWithText("Ship URL").performTextInput("zod.example.com")
+            shown = false
+            waitForIdle()
+            shown = true
+            waitForIdle()
+            assertEquals("zod.example.com", typed("Ship URL"))
+        }
+        login { loggedIn ->
+            connect("zod.example.com", "lidlut-tabwed")
+            waitUntil(timeoutMillis = 5_000) { loggedIn.isNotEmpty() }
+            assertEquals("" to "", LoginDraft.url.value to LoginDraft.code.value)
         }
     }
+
+    private fun ComposeUiTest.typed(field: String) =
+        onNodeWithText(field).fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text
 
     @Test
     fun `a first sign-in has no Cancel, and one from Add ship goes back`() {
