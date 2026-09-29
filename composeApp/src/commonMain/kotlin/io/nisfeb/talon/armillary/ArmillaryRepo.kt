@@ -299,7 +299,15 @@ class ArmillaryRepo(
         ai.state.value.savedProfile?.let { ai.setProfile(it.without(ARMILLARY_PROVIDER)) }
     }
 
-    /** Give a direct provider lease back, before the provider row goes. */
+    /**
+     * Give the lease back as the provider row goes, on this repo's scope:
+     * the row goes at once, and leaving the screen does not stop it.
+     */
+    fun giveLeaseBack() {
+        scope.launch { dropLease().onFailure { Log.i(TAG, "lease not given back: ${it.message}") } }
+    }
+
+    /** Give a direct provider lease back. */
     suspend fun dropLease(): Result<Unit> = runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
         a.dropLease()

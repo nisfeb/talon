@@ -466,17 +466,13 @@ private fun ProviderCard(
                 if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 onRemove?.let { remove ->
                     TextButton(onClick = {
-                        // A lease is the vendor's key on loan. Give it
-                        // back before the row goes, or it sits out there
-                        // held by a device that has forgotten it.
-                        if (p.kind == ProviderKind.Armillary && armillary != null) {
-                            scope.launch {
-                                armillary.dropLease()
-                                remove()
-                            }
-                        } else {
-                            remove()
-                        }
+                        // A lease is the vendor's key on loan: give it back,
+                        // or it sits out there held by a device that has
+                        // forgotten it. Not first: the row waited on the
+                        // ship's answer, and on a busy ship Remove did
+                        // nothing anyone could see.
+                        if (p.kind == ProviderKind.Armillary) armillary?.giveLeaseBack()
+                        remove()
                     }) { Text("Remove") }
                 }
             }
