@@ -15,6 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -335,8 +336,25 @@ class CalendarRepo(
         return ok
     }
 
-    /** Tick or untick a task. */
-    suspend fun setDone(id: String, done: Boolean): Boolean = pokeEvent(doneBody(id, done))
+    private val _ticking = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+
+    /**
+     * Ticks on their way to the ship, by task: done or not, as every screen
+     * shows the box until the list has the ship's own word. Each screen
+     * kept its own, and leaving it lost them: back on the home page a
+     * ticked task stood unticked until the write came through and it went.
+     */
+    val ticking: StateFlow<Map<String, Boolean>> = _ticking.asStateFlow()
+
+    /** Tick or untick a task: in [ticking] at once, and till the list has the ship's word. */
+    suspend fun setDone(id: String, done: Boolean): Boolean = carry {
+        _ticking.update { it + (id to done) }
+        try {
+            pokeEvent(doneBody(id, done))
+        } finally {
+            _ticking.update { it - id }
+        }
+    }
 
     /**
      * A new task, on the list at once and written behind it. The write

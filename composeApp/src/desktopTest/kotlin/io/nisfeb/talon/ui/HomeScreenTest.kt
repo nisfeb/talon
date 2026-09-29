@@ -1,5 +1,9 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ComposeUiTest
 import io.ktor.client.engine.mock.toByteArray
 import io.ktor.client.engine.mock.respond
@@ -186,17 +190,21 @@ class HomeScreenTest {
     private val todayUtc = java.time.LocalDate.now(java.time.ZoneOffset.UTC).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
 
     /** A calendar app on the ship, or none where [present] is false. */
-    private fun calendar(present: Boolean = true, offers: String = "{}"): io.nisfeb.talon.calendar.CalendarRepo {
+    private fun calendar(present: Boolean = true, offers: String = "{}", writeTakesMs: Long = 0): io.nisfeb.talon.calendar.CalendarRepo {
         val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
             val path = req.url.encodedPath
             val json = { body: String -> respond(body, io.ktor.http.HttpStatusCode.OK, io.ktor.http.headersOf("Content-Type", "application/json")) }
             when {
                 !present -> respond("", io.ktor.http.HttpStatusCode.NotFound)
-                path.startsWith("/grubbery/api/poke/") -> { calendarWrites += String(req.body.toByteArray()); json("") }
+                path.startsWith("/grubbery/api/poke/") -> {
+                    kotlinx.coroutines.delay(writeTakesMs)
+                    calendarWrites += String(req.body.toByteArray()); json("")
+                }
                 path.endsWith("/window.json") ->
                     json("""{"rows":[{"id":"e1","cal":"default","meta":{"name":"Dentist"},"l":${now - 600_000},"r":${now + 600_000}}]}""")
+                // Done once written: the ship's own word after the tick.
                 path.endsWith("/events.json") ->
-                    json("""[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"},"due_ms":$todayUtc}]""")
+                    json("""[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"},"due_ms":$todayUtc${if (calendarWrites.any { "t1" in it }) ""","done":true""" else ""}}]""")
                 path.endsWith("/calendars.json") -> json("""[{"id":"default","name":"Personal","kind":"local"}]""")
                 path.endsWith("/config.json") -> json("""{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
                 path.endsWith("/share/shares.json") -> json("""{"shares":{},"offers":$offers,"accepted":{}}""")
@@ -214,6 +222,50 @@ class HomeScreenTest {
         waitUntil(timeoutMillis = 5_000) { calendarWrites.any { "t1" in it } }
         onNodeWithText("Dentist").performClick()
         assertEquals(1, calendarOpened)
+    }
+
+    // Ticked, then off to the chats and back while the ship was still at
+    // it: the box stood unticked for seconds, then the task went.
+    @Test
+    fun `a tick outlasts going to another section and back, and the task goes once the ship has it`() {
+        val cal = calendar(writeTakesMs = 2_000)
+        val tmp = createTempDirectory(prefix = "talon-homepage-").toFile()
+        val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
+            .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
+        try {
+            runComposeUiTest {
+                var here by androidx.compose.runtime.mutableStateOf(true)
+                setContent {
+                    TalonTheme(darkTheme = false) {
+                        if (here) {
+                            HomeScreen(
+                                db = db, mail = null, contacts = ContactMap.EMPTY, ourShip = "~zod",
+                                calendar = cal, onOpenCalendar = {}, onInstallCalendar = null,
+                                statuses = emptyList(), invites = emptyList(), onLayoutChanged = {},
+                                onOpenInvites = {}, onOpenConversation = {}, onOpenChats = {},
+                                onOpenMailThread = {}, onOpenMail = {},
+                            )
+                        } else {
+                            Text("The chats")
+                        }
+                    }
+                }
+                waitUntil(timeoutMillis = 5_000) { shows("Buy milk") }
+                onAllNodes(androidx.compose.ui.test.isToggleable())[0].performClick()
+                here = false
+                waitForIdle()
+                here = true
+                waitUntil(timeoutMillis = 5_000) { shows("Buy milk") }
+                onAllNodes(androidx.compose.ui.test.isToggleable())[0].assertIsOn()
+                // Real time: the write is held on the ship, not on this clock.
+                val until = System.currentTimeMillis() + 15_000
+                while (shows("Buy milk") && System.currentTimeMillis() < until) { Thread.sleep(50); waitForIdle() }
+                assertTrue(!shows("Buy milk"), "the task goes once the ship has it done")
+            }
+        } finally {
+            db.close()
+            tmp.deleteRecursively()
+        }
     }
 
     @Test

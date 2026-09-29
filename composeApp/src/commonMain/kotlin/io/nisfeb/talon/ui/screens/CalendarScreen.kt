@@ -229,7 +229,8 @@ fun CalendarScreen(
     }
     // A tick shows at once and holds until the calendar answers; the
     // rows only learn of it on the refresh after the poke.
-    var pendingTicks by remember { mutableStateOf(mapOf<String, Boolean>()) }
+    // Ticks on their way to the ship: the repo's, so leaving this screen keeps them.
+    val pendingTicks by repo.ticking.collectAsState()
     // A new event shows on its day the moment it is saved, greyed,
     // until the calendar's own copy arrives; its id says so.
     var pendingRows by remember { mutableStateOf(listOf<CalendarRow>()) }
@@ -343,10 +344,8 @@ fun CalendarScreen(
         if (r.cal !in readOnly) repo.prefetchEvent(r.id)
     }
     fun tick(id: String, done: Boolean) {
-        pendingTicks = pendingTicks + (id to done)
         scope.launch {
             if (!repo.setDone(id, done)) status = "The ship did not take the change."
-            pendingTicks = pendingTicks - id
         }
     }
     /** Closes the editor and says what is happening; the calendar's

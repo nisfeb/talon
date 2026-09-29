@@ -172,6 +172,33 @@ class CalendarWriteTest {
         assertTrue(ship.writtenAt.get() > 0, "the write reached the ship")
     }
 
+    // Each screen kept its own ticks, and leaving it lost them: back on the
+    // home page a ticked task stood unticked until the write came through.
+    @Test
+    fun `a tick is in ticking at once, stays past a screen leaving, and goes with the ship's word`() = calendar(tasks = { ship ->
+        if (ship.writtenAt.get() > 0) """[${undated.dropLast(1)},"done":true},$dated]""" else """[$undated,$dated]"""
+    }) { repo, ship ->
+        ship.holdWriteMs = 800
+        val screen = CoroutineScope(SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+        val tap = screen.launch { repo.setDone("t1", true) }
+        kotlinx.coroutines.delay(100)
+        assertEquals(mapOf("t1" to true), repo.ticking.value, "shown ticked before the ship has answered")
+        tap.cancel()
+        screen.cancel()
+        kotlinx.coroutines.delay(300)
+        assertEquals(mapOf("t1" to true), repo.ticking.value, "the screen that ticked it is gone; the tick is not")
+        kotlinx.coroutines.withTimeout(10_000) { while (repo.ticking.value.isNotEmpty()) kotlinx.coroutines.delay(20) }
+        assertEquals(true, repo.tasks.value?.first { it.id == "t1" }?.done, "the ship's word is in the list when the tick goes")
+    }
+
+    @Test
+    fun `a tick the ship refuses goes from ticking, and the task is as it was`() = calendar { repo, ship ->
+        ship.refuse = true
+        assertEquals(false, repo.setDone("t1", true))
+        assertEquals(emptyMap(), repo.ticking.value)
+        assertEquals(false, repo.tasks.value?.first { it.id == "t1" }?.done)
+    }
+
     @Test
     fun `a save is said once the ship takes it, and the task moves at once`() = calendar(tasks = { ship ->
         val due = if (ship.writtenAt.get() > 0) "1790899200000" else "1790640000000"

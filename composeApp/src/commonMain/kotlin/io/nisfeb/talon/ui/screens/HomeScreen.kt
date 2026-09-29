@@ -1272,15 +1272,9 @@ private fun CalendarPanel(
     val shares = calendar?.shares?.collectAsState()?.value
     val offers = shares?.offers?.size ?: 0
     val readOnly = shares?.readOnly.orEmpty()
-    // Ticked here, until the refresh after the poke drops the line.
-    var ticked by remember { mutableStateOf(setOf<String>()) }
-    // Reconcile, don't clear: a tick the ship has caught up with (done,
-    // or dropped from the list) is its truth now; one it hasn't stays
-    // optimistic instead of flickering off on any unrelated refresh.
-    LaunchedEffect(rawTasks) {
-        val byId = rawTasks.associateBy { it.id }
-        ticked = ticked.filter { byId[it]?.done == false }.toSet()
-    }
+    // Ticks on their way to the ship, kept by the calendar, not here:
+    // kept here, they were lost by going to another section and back.
+    val ticking = calendar?.ticking?.collectAsState()?.value.orEmpty()
     val scope = rememberCoroutineScope()
     var installing by remember { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
@@ -1346,15 +1340,8 @@ private fun CalendarPanel(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             androidx.compose.material3.Checkbox(
-                                checked = t.id in ticked,
-                                onCheckedChange = { done ->
-                                    ticked = if (done) ticked + t.id else ticked - t.id
-                                    scope.launch {
-                                        if (!calendar!!.setDone(t.id, done)) {
-                                            ticked = if (done) ticked - t.id else ticked + t.id
-                                        }
-                                    }
-                                },
+                                checked = ticking[t.id] ?: t.done,
+                                onCheckedChange = { done -> scope.launch { calendar!!.setDone(t.id, done) } },
                                 enabled = t.cal !in readOnly,
                                 modifier = Modifier.size(32.dp),
                             )
