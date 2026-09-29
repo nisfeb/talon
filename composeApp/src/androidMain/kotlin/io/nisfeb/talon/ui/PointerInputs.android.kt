@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.foundation.text.contextmenu.modifier.appendTextContextMenuComponents
 import androidx.compose.foundation.text.contextmenu.builder.item
 import androidx.compose.runtime.Composable
@@ -29,3 +30,7 @@ internal actual fun LinkMenuItems(url: () -> String?, copy: (String) -> Unit, mo
         },
         propagateMinConstraints = true,
     ) { content() }
+
+actual val ResizeLeftRightIcon: PointerIcon = PointerIcon(android.view.PointerIcon.TYPE_HORIZONTAL_DOUBLE_ARROW)
+actual val ResizeUpDownIcon: PointerIcon = PointerIcon(android.view.PointerIcon.TYPE_VERTICAL_DOUBLE_ARROW)
+actual val ResizeCornerIcon: PointerIcon = PointerIcon(android.view.PointerIcon.TYPE_TOP_LEFT_DIAGONAL_DOUBLE_ARROW)

@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -50,3 +51,7 @@ internal actual fun LinkMenuItems(url: () -> String?, copy: (String) -> Unit, mo
     androidx.compose.foundation.ContextMenuDataProvider(
         items = { url()?.let { u -> listOf(androidx.compose.foundation.ContextMenuItem("Copy link") { copy(u) }) }.orEmpty() },
     ) { Box(modifier, propagateMinConstraints = true) { content() } }
+
+actual val ResizeLeftRightIcon: PointerIcon = PointerIcon(java.awt.Cursor(java.awt.Cursor.E_RESIZE_CURSOR))
+actual val ResizeUpDownIcon: PointerIcon = PointerIcon(java.awt.Cursor(java.awt.Cursor.S_RESIZE_CURSOR))
+actual val ResizeCornerIcon: PointerIcon = PointerIcon(java.awt.Cursor(java.awt.Cursor.SE_RESIZE_CURSOR))

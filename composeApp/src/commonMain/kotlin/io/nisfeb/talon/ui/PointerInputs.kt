@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.Modifier
@@ -43,3 +44,13 @@ fun Modifier.combinedClickableWithSecondary(
     val base = this.combinedClickable(onClick = onClick, onLongClick = onLongClick)
     return if (onLongClick != null) base.onSecondaryClick(onLongClick) else base
 }
+
+/**
+ * The pointer over something dragged to resize it: the platform's
+ * two-headed arrow, left–right, up–down, or corner to corner. Compose
+ * has none of its own, and the hand it does have says "click".
+ * The plain pointer on iOS, which has no resize cursor.
+ */
+expect val ResizeLeftRightIcon: PointerIcon
+expect val ResizeUpDownIcon: PointerIcon
+expect val ResizeCornerIcon: PointerIcon

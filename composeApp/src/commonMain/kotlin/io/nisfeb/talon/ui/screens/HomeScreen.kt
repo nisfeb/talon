@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -607,6 +608,7 @@ private fun BoxScope.ResizeHandles(
             Modifier.align(Alignment.CenterEnd),
             grip,
             label = "Width of ${title(widget.kind)}",
+            cursor = io.nisfeb.talon.ui.ResizeLeftRightIcon,
             onStart = ::freeze,
         ) { total ->
             resize(widget.copy(span = resizedSpan(startSpan, total.x, startCell, HOME_COLUMNS)))
@@ -616,6 +618,7 @@ private fun BoxScope.ResizeHandles(
         Modifier.align(Alignment.BottomCenter),
         grip,
         label = "Height of ${title(widget.kind)}",
+        cursor = io.nisfeb.talon.ui.ResizeUpDownIcon,
         onStart = ::freeze,
     ) { total ->
         val rows = resizedRows(startRows, total.y, rowUnitPx)
@@ -626,6 +629,7 @@ private fun BoxScope.ResizeHandles(
         grip,
         corner = true,
         label = "Size of ${title(widget.kind)}",
+        cursor = io.nisfeb.talon.ui.ResizeCornerIcon,
         onStart = ::freeze,
     ) { total ->
         if (square) {
@@ -684,6 +688,7 @@ private fun Grip(
     modifier: Modifier,
     color: androidx.compose.ui.graphics.Color,
     label: String,
+    cursor: androidx.compose.ui.input.pointer.PointerIcon,
     corner: Boolean = false,
     onStart: () -> Unit = {},
     onDrag: (Offset) -> Unit,
@@ -698,6 +703,7 @@ private fun Grip(
             // which makes it a grip that leaves the app instead of
             // being dragged.
             .keepEdgeGesture()
+            .pointerHoverIcon(cursor)
             .semantics { contentDescription = label }
             .pointerInput(Unit) {
                 var total = Offset.Zero
