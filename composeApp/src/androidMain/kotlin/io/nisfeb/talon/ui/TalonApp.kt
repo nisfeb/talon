@@ -1823,6 +1823,8 @@ fun TalonApp(
                     addingAnotherShip = false
                     app.onShipLoggedIn(ship)
                 },
+                // The ship open underneath was never left.
+                onCancel = { addingAnotherShip = false },
                 usernameAutofill = { onFill ->
                     rememberAutofillModifier(
                         types = listOf(

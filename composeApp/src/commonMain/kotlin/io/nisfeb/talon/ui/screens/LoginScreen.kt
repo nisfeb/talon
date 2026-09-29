@@ -120,6 +120,9 @@ fun LoginScreen(
      *  the post-login home list before this. Android passes the
      *  real instance; desktop passes null (no checker wired). */
     updateState: UpdateState? = null,
+    /** Back to the ship this was opened from, when "Add ship" opened it.
+     *  Null on a first sign-in, which has nowhere to go back to. */
+    onCancel: (() -> Unit)? = null,
 ) {
     var shipUrl by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
@@ -130,6 +133,7 @@ fun LoginScreen(
     var codeVisible by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
+    io.nisfeb.talon.ui.PlatformBackHandler(enabled = onCancel != null && !connecting) { onCancel?.invoke() }
 
     // Outer Column holds the update banner above the centered form.
     // Without it, the banner would sit inside the form column and
@@ -274,13 +278,13 @@ fun LoginScreen(
                             status = "QR scanned — tap Connect to sign in."
                             statusIsError = false
                         } else {
-                            // null = user cancelled OR the QR wasn't a
-                            // talon:// login URI. Keep silent on cancel
-                            // (common path) — the manual fields stay
-                            // editable. A surface'd hint here on bad
-                            // format would help, but distinguishing
-                            // cancel from "wrong QR" would require a
-                            // sentinel from the scanner; defer.
+                            // null = backed out of the scanner, or the QR
+                            // wasn't a talon:// login. Either way no login
+                            // came of it, so the form starts over rather
+                            // than keeping what was there before the scan.
+                            shipUrl = ""
+                            code = ""
+                            status = null
                         }
                     }
                     if (triggerScan != null) {
@@ -337,6 +341,11 @@ fun LoginScreen(
                             Text("Connecting…")
                         } else {
                             Text("Connect")
+                        }
+                    }
+                    onCancel?.let { cancel ->
+                        TextButton(onClick = cancel, enabled = !connecting, modifier = Modifier.fillMaxWidth()) {
+                            Text("Cancel")
                         }
                     }
                     status?.let {

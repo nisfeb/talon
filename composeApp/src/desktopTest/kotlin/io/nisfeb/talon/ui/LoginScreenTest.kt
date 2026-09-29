@@ -54,7 +54,10 @@ class LoginScreenTest {
         answer: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData = signsIn,
         notice: String? = null,
         qr: TalonLoginUri.Payload? = null,
+        /** The scanner is backed out of: it answers nothing. */
+        scanCancels: Boolean = false,
         onRunLocalShip: (() -> Unit)? = null,
+        onCancel: (() -> Unit)? = null,
         opened: MutableList<String> = mutableListOf(),
         block: ComposeUiTest.(loggedIn: List<String>) -> Unit,
     ) = runComposeUiTest {
@@ -72,8 +75,9 @@ class LoginScreenTest {
                         session = UrbitSession(http, store),
                         onLoggedIn = { loggedIn += it },
                         notice = notice,
-                        qrScanIntegration = qr?.let { payload -> { onResult -> { onResult(payload) } } },
+                        qrScanIntegration = if (qr != null || scanCancels) { onResult -> { onResult(qr) } } else null,
                         onRunLocalShip = onRunLocalShip,
+                        onCancel = onCancel,
                     )
                 }
             }
@@ -87,6 +91,30 @@ class LoginScreenTest {
         onNodeWithText("Ship URL").performTextInput(url)
         onNodeWithText("+code").performTextInput(code)
         onNodeWithText("Connect").performClick()
+    }
+
+    // "when you go to a qr code and then back out without scanning the
+    // ship login fields should be cleared".
+    @Test
+    fun `backing out of the scanner clears the form`() = login(scanCancels = true) { _ ->
+        onNodeWithText("Ship URL").performTextInput("zod.example.com")
+        onNodeWithText("+code").performTextInput("lidlut-tabwed")
+        onNodeWithText("Scan QR").performClick()
+        waitForIdle()
+        for (field in listOf("Ship URL", "+code")) {
+            val typed = onNodeWithText(field).fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text
+            assertEquals("", typed, "$field is empty")
+        }
+    }
+
+    @Test
+    fun `a first sign-in has no Cancel, and one from Add ship goes back`() {
+        login { _ -> assertTrue(!shows("Cancel"), "nowhere to go back to") }
+        val cancelled = mutableListOf<String>()
+        login(onCancel = { cancelled += "cancel" }) { _ ->
+            onNodeWithText("Cancel").performClick()
+            assertEquals(listOf("cancel"), cancelled)
+        }
     }
 
     @Test

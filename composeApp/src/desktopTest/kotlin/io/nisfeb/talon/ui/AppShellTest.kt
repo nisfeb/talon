@@ -126,6 +126,20 @@ class AppShellTest {
         }
     }
 
+    // "once you tap add ship there is no way to cancel and return to a
+    // working ship".
+    @Test
+    fun `Add ship can be cancelled, back to the ship that was open`() = app {
+        onNodeWithContentDescription("Switch ship").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Add ship") }
+        onNodeWithText("Add ship").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Connect") }
+        assertTrue(!present("New message"), "the login form, not the ship")
+        onNodeWithText("Cancel").performClick()
+        home()
+        assertTrue(!showing("Connect"))
+    }
+
     // Orrery is off unless the owner turns it on, and off means the ship's
     // Orrery hears nothing from this device: not a probe, not a read.
     @Test

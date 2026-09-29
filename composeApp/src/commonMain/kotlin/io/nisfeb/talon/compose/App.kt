@@ -255,6 +255,9 @@ fun App(
     // tryRestore() returns null while loggedInShip stays non-null
     // and repo.start crashes on session.ourPatp ("not logged in").
     var loggedInShip by remember { mutableStateOf(sessionStore.active()?.ship) }
+    // The ship "Add ship" left, which the login form's Cancel goes back
+    // to. Null when there was none: a first sign-in has nowhere to return.
+    var addingFrom by remember { mutableStateOf<String?>(null) }
     // Local comet: the setup screen replaces the login form, and a
     // first login lands in the public Nisfeb Software group.
     var localShipSetupOpen by remember { mutableStateOf(false) }
@@ -1939,6 +1942,7 @@ fun App(
                     }
                 }
                 val addShip: () -> Unit = {
+                    addingFrom = loggedInShip
                     leaveShip()
                     loggedInShip = null
                 }
@@ -2096,7 +2100,8 @@ fun App(
                     )
                     ship == null -> LoginScreen(
                         session = session,
-                        onLoggedIn = { loggedInShip = it },
+                        onLoggedIn = { addingFrom = null; loggedInShip = it },
+                        onCancel = addingFrom?.let { from -> { addingFrom = null; switchShip(from) } },
                         notice = loginNotice,
                         onRunLocalShip = if (io.nisfeb.talon.ui.isLocalCometSupported) {
                             { localShipSetupOpen = true }
