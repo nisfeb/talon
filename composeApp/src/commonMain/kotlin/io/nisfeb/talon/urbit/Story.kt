@@ -315,7 +315,12 @@ object Story {
 
     private fun appendLinkifyingUrb(raw: String, out: androidx.compose.ui.text.AnnotatedString.Builder) {
         val text = replaceEmojiShortcodes(raw)
-        val ranges = UrbLink.findRanges(text)
+        // And furum's f/~host/board shorthand, which no server linkifies
+        // either: its href is the shorthand, which the tap site knows.
+        var last = -1
+        val ranges = (UrbLink.findRanges(text) + FurumLink.findRanges(text))
+            .sortedBy { it.first }
+            .filter { r -> (r.first > last).also { if (it) last = r.last } }
         if (ranges.isEmpty()) {
             out.append(text)
             return

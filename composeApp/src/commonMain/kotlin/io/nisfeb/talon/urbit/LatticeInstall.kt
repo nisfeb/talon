@@ -160,12 +160,15 @@ object LatticeInstall {
         shipUrl: String,
         name: String,
         publisher: String = PUBLISHER,
+        /** For a client without the session's cookie store, as the link host's is. */
+        cookie: String? = null,
     ): Result<Unit> = runCatching {
         val body = buildJsonObject {
             put("name", name)
             put("code", "$publisher/apps/shell.shell/desks/$name.desk/desk/code")
         }
         val resp = http.post("${shipUrl.trimEnd('/')}/apps/grubbery/desks/add") {
+            cookie?.let { header(HttpHeaders.Cookie, it) }
             contentType(ContentType.Application.Json)
             setBody(body.toString())
         }
@@ -197,6 +200,7 @@ object LatticeInstall {
         name: String,
         answers: suspend (String) -> Boolean,
         timeoutMs: Long = GRUBBERY_TIMEOUT_MS,
+        cookie: String? = null,
         poke: suspend (String, String, JsonElement) -> Boolean,
     ): suspend () -> Result<Unit> = {
         val url = shipUrl()
@@ -209,7 +213,7 @@ object LatticeInstall {
                 if (installedOrUnknown(http, url) == false) {
                     installAndWait(http, url, poke, timeoutMs = timeoutMs).getOrThrow()
                 }
-                addDesk(http, url, name).getOrThrow()
+                addDesk(http, url, name, cookie = cookie).getOrThrow()
                 val deadline = io.nisfeb.talon.util.nowMs() + timeoutMs
                 while (io.nisfeb.talon.util.nowMs() < deadline) {
                     kotlinx.coroutines.delay(POLL_MS)

@@ -226,4 +226,16 @@ class LatticeInstallTest {
         LatticeInstall.shellDesk(http, { "https://ship" }, name = "calendar", answers = { true }, timeoutMs = 1_000) { _, _, _ -> installs++; true }()
         assertEquals(0, installs)
     }
+
+    // The link host's client has no cookie store: furum is added from it.
+    @Test
+    fun `adding a desk from a client without the session carries the cookie it is given`() = runTest {
+        val sent = mutableListOf<String>()
+        val http = HttpClient(MockEngine { req ->
+            sent += "${req.method.value} ${req.url.encodedPath} ${req.headers["Cookie"]}"
+            respond("{}", HttpStatusCode.OK)
+        })
+        LatticeInstall.addDesk(http, "https://ship", "furum", cookie = "session=x").getOrThrow()
+        assertEquals(listOf("POST /apps/grubbery/desks/add session=x"), sent)
+    }
 }

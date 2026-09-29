@@ -24,12 +24,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import io.nisfeb.talon.urbit.UrbHttp
 import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
- * Full-screen in-app viewer for a `urb://` link (Android/iOS). A
- * webview loads the lattice reader URL on the viewer's ship with the
+ * Full-screen in-app viewer for a link that opens on the viewer's own
+ * ship (Android/iOS): a `urb://` address in lattice's reader, or a
+ * furum board or post in furum. A webview loads [pageUrl] with the
  * session cookie injected. The header shows the canonical address and
  * an "open in browser" escape hatch; the system back button and the
  * back arrow both dismiss.
@@ -43,14 +43,16 @@ import io.nisfeb.talon.ui.icons.TalonIcons
  */
 @Composable
 fun UrbViewerSheet(
-    urbUrl: String,
+    /** What the header shows: the urb:// address, or furum's f/ shorthand. */
+    address: String,
+    /** The page on [shipUrl] that renders it. */
+    pageUrl: String,
     shipUrl: String,
     cookie: String,
     onDismiss: () -> Unit,
-    /** The ship answered the page 404: lattice is not installed there. */
+    /** The ship answered the page 404: the app that reads it is not installed there. */
     onMissing: () -> Unit = {},
 ) {
-    val readerUrl = UrbHttp.readerUrl(shipUrl, urbUrl)
     val uriHandler = LocalUriHandler.current
     Dialog(
         onDismissRequest = onDismiss,
@@ -76,20 +78,20 @@ fun UrbViewerSheet(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close")
                     }
                     Text(
-                        urbUrl,
+                        address,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    IconButton(onClick = { runCatching { uriHandler.openUri(readerUrl) } }) {
+                    IconButton(onClick = { runCatching { uriHandler.openUri(pageUrl) } }) {
                         Icon(TalonIcons.Public, contentDescription = "Open in browser")
                     }
                 }
                 HorizontalDivider()
                 UrbWebView(
-                    url = readerUrl,
+                    url = pageUrl,
                     origin = shipUrl,
                     cookie = cookie,
                     modifier = Modifier.weight(1f).fillMaxWidth(),

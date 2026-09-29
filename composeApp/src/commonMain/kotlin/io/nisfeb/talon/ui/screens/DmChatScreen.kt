@@ -1674,6 +1674,15 @@ private fun MessageRow(
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
+            val firstFurum = remember(parts) { io.nisfeb.talon.ui.firstFurumLink(parts) }
+            if (firstFurum != null) {
+                io.nisfeb.talon.ui.FurumCard(
+                    link = firstFurum,
+                    http = http,
+                    onOpen = onLinkTap,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
             if (grouped.isNotEmpty()) {
                 FlowRow(
                     modifier = Modifier.padding(top = 4.dp),

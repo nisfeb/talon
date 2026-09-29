@@ -163,6 +163,14 @@ class StoryRendererTest {
         }
     }
 
+    @Test
+    fun `a furum shorthand in a message is a link like any other`() {
+        render(parts("see f/~zod/cats for more")) {
+            clickWord("f/~zod/cats")
+            assertEquals(listOf("link f/~zod/cats"), did)
+        }
+    }
+
     // spanAt decides both the hand a mouse shows and where a tap goes.
     @Test
     fun `the hand is over a link or a mention's glyphs and nowhere past them`() {

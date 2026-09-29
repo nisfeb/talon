@@ -115,6 +115,19 @@ object Markdown {
                 }
             }
 
+            // Furum's f/~host/board shorthand stays text, whole: its ~host
+            // made a mention below, which notified the host of a board it
+            // hosts. No other client knows it as a link, so it goes out
+            // as text and Talon links it when it is shown.
+            if (c == 'f') {
+                val end = FurumLink.shorthandAt(text, i)
+                if (end != null) {
+                    plain.append(text, i, end)
+                    i = end
+                    continue
+                }
+            }
+
             // Link: [label](url)
             if (c == '[') {
                 val closeBracket = text.indexOf(']', i + 1)

@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
+import io.nisfeb.talon.urbit.FurumLink
 import io.nisfeb.talon.urbit.UrbLink
 import io.nisfeb.talon.urbit.UrbLinkLauncher
 
@@ -24,7 +25,7 @@ import io.nisfeb.talon.urbit.UrbLinkLauncher
 val LocalUrbLinkHandler = staticCompositionLocalOf<(String) -> Unit> { {} }
 
 /**
- * Open a link the way a message does: an urb:// one through
+ * Open a link the way a message does: an urb:// or furum one through
  * [LocalUrbLinkHandler], anything else through the platform's handler.
  * The default for every rendered story, so a screen that shows one
  * cannot leave its links dead by not passing a handler.
@@ -35,7 +36,7 @@ fun rememberLinkOpener(): (String) -> Unit {
     val urbLinkHandler = LocalUrbLinkHandler.current
     return androidx.compose.runtime.remember(uriHandler, urbLinkHandler) {
         { url ->
-            if (UrbLink.isUrbUrl(url)) urbLinkHandler(url)
+            if (opensOnShip(url)) urbLinkHandler(url)
             else runCatching { uriHandler.openUri(url) }
         }
     }
@@ -63,38 +64,47 @@ class UrbAwareUriHandler(
     override fun openUri(uri: String) {
         when {
             io.nisfeb.talon.urbit.TalonLink.isTalonUrl(uri) -> if (onTalon?.invoke(uri) != true) delegate.openUri(uri)
-            UrbLink.isUrbUrl(uri) -> onUrb(uri)
+            opensOnShip(uri) -> onUrb(uri)
             else -> delegate.openUri(uri)
         }
     }
 }
 
 /**
- * Offered when a tapped urb:// link can't resolve because lattice
- * (the %grubbery desk) isn't installed on the user's own ship.
- * Installing pulls %grubbery from ~ricsul-bilwyt via kiln.
+ * Whether [url] opens through the reader's own ship: an urb:// address,
+ * or a furum board or post, whose page the sharer's ship would refuse
+ * the reader.
+ */
+fun opensOnShip(url: String): Boolean = UrbLink.isUrbUrl(url) || FurumLink.parse(url) != null
+
+/**
+ * Offered when a tapped link can't resolve because the app that reads
+ * it, Lattice or furum, isn't on the user's own ship. Both come from
+ * ~ricsul-bilwyt: Lattice with the Grubbery shell, furum into it.
  */
 @Composable
-fun LatticeInstallDialog(
+fun ShipAppInstallDialog(
+    app: String,
+    /** Why the link needs it, before anything is installed. */
+    pitch: String,
     installing: Boolean,
     error: String?,
     onInstall: () -> Unit,
     onDismiss: () -> Unit,
+    /** Where the link has a page of its own elsewhere, opening that instead. */
+    onOpenElsewhere: (() -> Unit)? = null,
 ) {
     AlertDialog(
         onDismissRequest = { if (!installing) onDismiss() },
-        title = { Text("Install Lattice?") },
+        title = { Text("Install $app?") },
         text = {
             Text(
                 error
                     ?: if (installing) {
-                        "Installing Lattice on your ship… this can take a " +
+                        "Installing $app on your ship… this can take a " +
                             "moment while the software arrives over the network."
                     } else {
-                        "This is a urb:// link — an address on the Urbit " +
-                            "network. Opening it needs Lattice, which isn't " +
-                            "installed on your ship yet. Install it from " +
-                            "~ricsul-bilwyt?"
+                        pitch
                     },
             )
         },
@@ -104,7 +114,10 @@ fun LatticeInstallDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !installing) { Text("Not now") }
+            androidx.compose.foundation.layout.Row {
+                onOpenElsewhere?.let { TextButton(onClick = it, enabled = !installing) { Text("Open in browser") } }
+                TextButton(onClick = onDismiss, enabled = !installing) { Text("Not now") }
+            }
         },
     )
 }
