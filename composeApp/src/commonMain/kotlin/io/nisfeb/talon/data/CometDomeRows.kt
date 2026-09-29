@@ -25,6 +25,10 @@ interface CometDomeDao {
 
     @Upsert
     suspend fun put(row: CometDomeEntity)
+
+    /** Every comet a registry attests, to name as it should from the start. */
+    @Query("SELECT comet FROM comet_domes WHERE registry != ''")
+    suspend fun attested(): List<String>
 }
 
 internal const val COMET_DOMES_SQL =

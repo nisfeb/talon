@@ -7,6 +7,8 @@ import io.ktor.client.statement.readRawBytes
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.CometDomeEntity
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Whether a comet is on Groundwire, as the signed-in ship's Jael knows
@@ -28,15 +30,44 @@ class CometDomes(
     private val http: HttpClient,
     private val baseUrl: String,
     private val db: AppDatabase,
+    private val scope: kotlinx.coroutines.CoroutineScope =
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + io.nisfeb.talon.util.ioDispatcher),
 ) {
-    private var noDome = false
+    @kotlin.concurrent.Volatile private var noDome = false
+
+    /** Comets asked about, or being asked about, this session. */
+    private val asked = HashSet<String>()
+    private val askedLock = kotlinx.atomicfu.locks.SynchronizedObject()
+
+    /** One question at a time: a busy ship meets one scry, not a list's worth. */
+    private val oneAtATime = kotlinx.coroutines.sync.Mutex()
+
+    init {
+        // Names ask this, the first time they draw a comet; the answers
+        // already kept name theirs from the start.
+        Mnemonym.onComet = ::check
+        scope.launch {
+            runCatching { db.cometDomes().attested() }.getOrNull()?.forEach { Mnemonym.markGroundwire(it) }
+        }
+    }
+
+    /**
+     * Whether [comet] is on Groundwire, asked in the background and once:
+     * what a comet's name asks the first time it is drawn, so it wears
+     * the single dot without its profile being opened first.
+     */
+    fun check(comet: String) {
+        if (noDome || !isComet(comet)) return
+        val fresh = kotlinx.atomicfu.locks.synchronized(askedLock) { asked.add(comet) }
+        if (fresh) scope.launch { oneAtATime.withLock { registry(comet) } }
+    }
 
     /** The registry attesting [comet] (`gw-btc` for Groundwire), "" when
      *  none, or null when it is not a comet or the ship can't tell. */
     suspend fun registry(comet: String): String? {
         if (!isComet(comet)) return null
         return try {
-            db.cometDomes().get(comet)?.let { return it.registry }
+            db.cometDomes().get(comet)?.let { return it.registry.also { r -> if (r.isNotEmpty()) Mnemonym.markGroundwire(comet) } }
             if (noDome) return null
             // Eyre's scry of Jael: care `j`, path `/dome/<ship>`.
             val resp = http.get("${baseUrl.trimEnd('/')}/_~_/=/dome/=/j/$comet")
@@ -48,6 +79,7 @@ class CometDomes(
             if (resp.status.value != 200) return null
             val answer = registryOf(resp.readRawBytes()) ?: run { noDome = true; return null }
             db.cometDomes().put(CometDomeEntity(comet, answer))
+            if (answer.isNotEmpty()) Mnemonym.markGroundwire(comet)
             answer
         } catch (e: CancellationException) {
             throw e

@@ -36,9 +36,33 @@ object Mnemonym {
     fun forShip(ship: String): String? = synchronized(nymLock) {
         nymCache.getOrPut(ship) {
             val bytes = patpBytes(ship) ?: return@getOrPut ""
-            encode(bytes, tweaked = false)
+            encode(bytes, tweaked = ship in groundwire)
         }
     }.takeIf { it.isNotEmpty() }
+
+    /**
+     * Comets known to be on Groundwire ([CometDomes]). Their name is the
+     * scheme's tweaked form: the same words, one dot where a comet no one
+     * has attested has two. Every comet read as untweaked, Groundwire's
+     * own included, so the signed-in comet and the one it looked at both
+     * wore `..`.
+     */
+    private val groundwire = HashSet<String>()
+
+    /**
+     * Asked the first time a comet's name is drawn, to find out whether
+     * it is on Groundwire ([CometDomes.check]); null asks nothing.
+     */
+    @Volatile var onComet: ((String) -> Unit)? = null
+
+    /** [ship] is a Groundwire comet: its name is the single-dot form from now on, everywhere it shows. */
+    fun markGroundwire(ship: String) {
+        val added = synchronized(nymLock) {
+            groundwire.add(ship).also { if (it) { nymCache.remove(ship); abridgedCache.remove(ship) } }
+        }
+        // Names are rendered from the ContactMap, rebuilt on this.
+        if (added) AzimuthNames.generation.value = AzimuthNames.generation.value + 1
+    }
 
     /** Display form: the scheme's own abridgement, `..first...last`,
      *  which is two words however long the nym is -- the same shape as
@@ -48,7 +72,11 @@ object Mnemonym {
     fun display(ship: String): String? = forShip(ship)?.let { full ->
         // Abridged beside the full name, so a row's name is a map read
         // and not three allocations per recomposition.
-        synchronized(nymLock) { abridgedCache.getOrPut(ship) { abridge(full) } }
+        var first = false
+        val shown = synchronized(nymLock) { abridgedCache.getOrPut(ship) { first = true; abridge(full) } }
+        // The first time it is drawn: is it on Groundwire? Asked outside the lock.
+        if (first) onComet?.invoke(ship)
+        shown
     }
 
     /**
@@ -74,8 +102,9 @@ object Mnemonym {
     /** The scheme's own abridgement: two words, however many there
      *  were. A nym already that short is left alone. */
     private fun abridge(nym: String): String {
-        val words = nym.removePrefix("..").split('.')
-        return if (words.size <= 2) nym else "..${words.first()}...${words.last()}"
+        val dots = if (nym.startsWith("..")) ".." else "."
+        val words = nym.removePrefix(dots).split('.')
+        return if (words.size <= 2) nym else "$dots${words.first()}...${words.last()}"
     }
 
     private val nymLock = SynchronizedObject()
