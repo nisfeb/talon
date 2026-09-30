@@ -561,6 +561,48 @@ class OrreryRepo(
         }
     }.await()
 
+    private val _told = MutableStateFlow<String?>(null)
+    /**
+     * What came of the owner's last Tell Orrery, for the Actions page:
+     * Send closes the dialog, and the model takes up to two minutes.
+     * Null before any, once the page is left ([toldSeen]), or when a
+     * refusal has said why under [answerProblem].
+     */
+    val told: StateFlow<String?> = _told.asStateFlow()
+
+    /**
+     * [instruct], taken at once like [answer]: the dialog closes on Send
+     * and what the ship says lands in [told]. A refusal quotes what was
+     * said, since the box it was typed in is gone.
+     */
+    fun tell(text: String, action: String?) {
+        _answerProblem.value = null
+        _told.value = "Orrery is reading what you told it."
+        scope.launch {
+            instruct(text, action).fold(
+                onSuccess = { a ->
+                    if (a.reply.isBlank() && a.actions.isEmpty()) {
+                        _told.value = null
+                        _answerProblem.value = "Orrery did not take \u201c$text\u201d: " + a.note.ifBlank { "it answered nothing" }
+                    } else {
+                        _told.value = listOfNotNull(
+                            a.reply.takeIf { it.isNotBlank() },
+                            "Filed: ".takeIf { a.actions.isNotEmpty() }?.plus(a.actions.joinToString { it.title.ifBlank { it.kind } }),
+                            a.note.takeIf { it.isNotBlank() },
+                        ).joinToString(" ")
+                    }
+                },
+                onFailure = { e ->
+                    _told.value = null
+                    _answerProblem.value = "Orrery did not take \u201c$text\u201d: " + (e.message ?: "the ship did not answer")
+                },
+            )
+        }
+    }
+
+    /** The Actions page was left: what Orrery said has been seen. */
+    fun toldSeen() { _told.value = null }
+
     /** A value struck as wrong everywhere it is said ([OrreryApi.correct]); the ship's record of it. */
     suspend fun correct(subject: String, attr: String, value: kotlinx.serialization.json.JsonElement, why: String): Result<JsonObject> =
         scope.async { runCatching { attached().correct(subject, attr, value, why) } }.await()
@@ -636,6 +678,7 @@ class OrreryRepo(
         ship = null
         _availability.value = OrreryAvailability.UNKNOWN
         _error.value = null
+        _told.value = null
         _chatReader.value = null
         _chatReaderRun.value = null
         _preferences.value = null

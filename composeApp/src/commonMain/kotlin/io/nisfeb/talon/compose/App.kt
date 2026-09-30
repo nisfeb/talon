@@ -2388,6 +2388,8 @@ fun App(
                         actions = orreryActions,
                         onBack = { showActions = false },
                         onShown = { orreryRepo.opened() },
+                        told = orreryRepo.told.collectAsState().value,
+                        onLeave = { orreryRepo.toldSeen() },
                         failed = orreryRepo.failed.collectAsState().value,
                         onDecide = { a, status, why -> orreryRepo.answer(a.id, status, why) },
                         problem = orreryRepo.answerProblem.collectAsState().value ?: orreryRepo.error.collectAsState().value,

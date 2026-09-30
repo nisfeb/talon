@@ -71,6 +71,25 @@ class OrreryActionsTest {
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
 
     @Test
+    fun `what Orrery said to the last Tell shows on the page until it is left`() {
+        val here = androidx.compose.runtime.mutableStateOf(true)
+        runComposeUiTest {
+            setContent {
+                TalonTheme(darkTheme = false) {
+                    if (here.value) OrreryActionsScreen(
+                        actions = emptyList(), onBack = {}, onOpen = {},
+                        told = "Bus is on holiday until Friday.", onLeave = { did += "left" },
+                    )
+                }
+            }
+            waitUntil(timeoutMillis = 5_000) { shows("Bus is on holiday until Friday.") }
+            here.value = false
+            waitForIdle()
+            assertEquals(listOf("left"), did.toList())
+        }
+    }
+
+    @Test
     fun `nothing waiting says so, and says what the generator last did`() = list(emptyList()) {
         waitUntil(timeoutMillis = 5_000) { shows("Nothing to answer") }
         assertTrue(shows("Read 4 chats an hour ago"))
@@ -102,6 +121,9 @@ class OrreryActionsTest {
     // ─── one action ───────────────────────────────────────────────
 
     private val posts: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
+    /** How long the ship's model takes to answer what it is told. */
+    @Volatile private var holdInstruct = 0L
+    private lateinit var repo: OrreryRepo
 
     private fun opened(
         a: OrreryAction,
@@ -117,6 +139,7 @@ class OrreryActionsTest {
             val body = req.body.toByteArray().decodeToString()
             if (req.method == HttpMethod.Post) posts += path to body
             if (path.endsWith("/api/instruct")) {
+                kotlinx.coroutines.delay(holdInstruct)
                 val (status, said) = instruct()
                 return@MockEngine respond(said, status, headersOf("Content-Type", "application/json"))
             }
@@ -131,6 +154,7 @@ class OrreryActionsTest {
         })
         val scope = CoroutineScope(SupervisorJob())
         val orrery = OrreryRepo(http, scope, db, "test", bareClient = http).apply { attach("https://ship.test", "~zod") }
+        repo = orrery
         try {
             runComposeUiTest {
                 setContent {
@@ -160,16 +184,23 @@ class OrreryActionsTest {
 
     // Orrery 60: the owner's own words about a proposal, for the ship's
     // model to act on. What it files is proposed; a refusal is said.
+    // "doing tell orrery and hitting send doesn't immediately dismiss the
+    // popup": the model takes up to two minutes, and the dialog waited.
     @Test
-    fun `what the owner tells Orrery about a proposal goes with it, and the reply shows`() = opened(
+    fun `what the owner tells Orrery goes with the proposal, the dialog closes at once, and the reply follows`() = opened(
         action("a1"),
         instruct = { HttpStatusCode.OK to """{"ok":true,"reply":"Bus is on holiday until Friday.","actions":[{"id":"t9","kind":"task","title":"Ask Bus on Friday","payload":{},"about":[],"status":"proposed","by":"owner"}],"note":""}""" },
     ) {
+        holdInstruct = 2_000
         onNodeWithText("Tell Orrery").performClick()
         onNode(hasSetTextAction()).performTextInput("he is away this week")
         onNodeWithText("Send").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Bus is on holiday until Friday.") }
-        assertTrue(shows("Filed: Ask Bus on Friday"))
+        waitForIdle()
+        assertEquals(listOf("closed"), did.toList(), "closed before the ship answered")
+        assertEquals("Orrery is reading what you told it.", repo.told.value)
+        waitUntil(timeoutMillis = 10_000) { repo.told.value != "Orrery is reading what you told it." }
+        assertEquals("Bus is on holiday until Friday. Filed: Ask Bus on Friday", repo.told.value)
+        assertEquals(listOf("t9"), repo.actions.value.map { it.id }, "what it filed is in the list")
         val sent = Json.parseToJsonElement(posts.single { it.first.endsWith("/api/instruct") }.second).jsonObject
         assertEquals("""{"text":"he is away this week","action":"a1","apply":false}""", sent.toString())
     }
@@ -180,9 +211,15 @@ class OrreryActionsTest {
         instruct = { HttpStatusCode.ServiceUnavailable to """{"error":"the generator has no key"}""" },
     ) {
         onNodeWithText("Tell Orrery").performClick()
-        onNode(hasSetTextAction()).performTextInput("x")
+        onNode(hasSetTextAction()).performTextInput("she moved to Lisbon")
         onNodeWithText("Send").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Orrery has no model key on your ship") }
+        waitForIdle()
+        assertEquals(listOf("closed"), did.toList())
+        // Said where Actions shows problems, with the words to say again.
+        waitUntil(timeoutMillis = 5_000) { repo.answerProblem.value != null }
+        val said = repo.answerProblem.value!!
+        assertTrue("\u201cshe moved to Lisbon\u201d" in said && "Orrery has no model key on your ship" in said, said)
+        assertEquals(null, repo.told.value)
     }
 
     @Test

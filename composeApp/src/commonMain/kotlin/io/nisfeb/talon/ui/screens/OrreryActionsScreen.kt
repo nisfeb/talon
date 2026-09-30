@@ -64,6 +64,10 @@ fun OrreryActionsScreen(
     twentyFourHour: Boolean = false,
     /** What the ship tried lately and could not do, with its reason. */
     failed: List<OrreryAction> = emptyList(),
+    /** What came of the owner's last Tell Orrery ([io.nisfeb.talon.orrery.OrreryRepo.told]). */
+    told: String? = null,
+    /** The page is left: [told] has been seen. */
+    onLeave: () -> Unit = {},
     onOpen: (OrreryAction) -> Unit,
 ) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -74,6 +78,7 @@ fun OrreryActionsScreen(
         scope.launch { runCatching { onShown() }; refreshing = false }
     }
     androidx.compose.runtime.LaunchedEffect(Unit) { refresh() }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { onLeave() } }
     Column(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -105,6 +110,13 @@ fun OrreryActionsScreen(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+            )
+        }
+        told?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
         problem?.let {

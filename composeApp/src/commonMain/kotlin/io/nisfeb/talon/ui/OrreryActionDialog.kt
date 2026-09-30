@@ -54,7 +54,6 @@ fun OrreryActionDialog(
     // The owner's words about it for the ship's model (orrery 60): "she
     // moved to Lisbon", "never propose these". What it files is proposed.
     var telling by remember(action.id) { mutableStateOf("") }
-    var told by remember(action.id) { mutableStateOf<String?>(null) }
     var shown by remember(action.id) { mutableStateOf(action) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val action = shown
@@ -167,30 +166,17 @@ fun OrreryActionDialog(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // Taken at once, like Approve: the model can take two
+                    // minutes, and the dialog waited on it. What it says
+                    // comes up on the Actions page.
                     TextButton(
                         enabled = !refining && telling.isNotBlank(),
                         onClick = {
-                            refining = true
-                            told = null
-                            val said = telling
-                            scope.launch {
-                                told = orrery.instruct(said, action.id).fold(
-                                    onSuccess = { a ->
-                                        if (a.reply.isNotBlank() || a.actions.isNotEmpty()) telling = ""
-                                        listOfNotNull(
-                                            a.reply.takeIf { it.isNotBlank() },
-                                            a.actions.takeIf { it.isNotEmpty() }?.let { f -> "Filed: " + f.joinToString { it.title.ifBlank { it.kind } } },
-                                            a.note.takeIf { it.isNotBlank() },
-                                        ).joinToString(" ").ifEmpty { "Orrery answered nothing." }
-                                    },
-                                    onFailure = { it.message ?: "The ship did not answer." },
-                                )
-                                refining = false
-                            }
+                            orrery.tell(telling, action.id)
+                            onClose()
                         },
                         modifier = Modifier.align(Alignment.End),
-                    ) { Text(if (refining) "Asking" else "Send") }
-                    told?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    ) { Text("Send") }
                 }
                 if (proposed && action.kind in REFINABLE && saying == Saying.REFINE) {
                     androidx.compose.material3.OutlinedTextField(
