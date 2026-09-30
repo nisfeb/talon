@@ -294,9 +294,9 @@ class ArmillaryRepo(
         _inference.value = null
         _plans.value = emptyList()
         catalog = null
+        aiSettings?.let { ai -> ai.state.value.savedProfile?.let { ai.setProfile(it.without(ARMILLARY_PROVIDER)) } }
+        // Last: whoever sees the deletion finds the provider already gone.
         _deletion.value = d
-        val ai = aiSettings ?: return
-        ai.state.value.savedProfile?.let { ai.setProfile(it.without(ARMILLARY_PROVIDER)) }
     }
 
     /**
