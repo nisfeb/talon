@@ -101,6 +101,24 @@ class CalendarRepo(
     /** Set the calendar's own zone: the one its times are read in. */
     suspend fun setZone(zone: String): Boolean = poke(buildJsonObject { put("action", "config"); put("zone", zone) })
 
+    private val _leadMin = MutableStateFlow<Int?>(null)
+    /** Minutes of the heads-up the ship sends before every timed event, 0 for none; null from a calendar too old to say. */
+    val leadMin: StateFlow<Int?> = _leadMin.asStateFlow()
+    private val _remindersKnown = MutableStateFlow(false)
+    /**
+     * Whether the calendar reads and takes reminders: its config or its
+     * rows say so. An older one says neither, and then the editor shows
+     * none, since a reminder set there would go nowhere.
+     */
+    val remindersKnown: StateFlow<Boolean> = _remindersKnown.asStateFlow()
+    private fun noteReminders(rows: List<CalendarRow>) {
+        if (!_remindersKnown.value && (_leadMin.value != null || rows.any { it.alarms != null })) _remindersKnown.value = true
+    }
+
+    /** Set the heads-up before every timed event, in minutes; 0 turns it off. */
+    suspend fun setLeadMin(min: Int): Boolean =
+        poke(buildJsonObject { put("action", "config"); put("lead_min", min) }).also { if (it) _leadMin.value = min }
+
     /**
      * A calendar with no zone reads every wall clock as UTC, so an
      * event made for 4pm shows at 4pm UTC on every clock but the
@@ -154,6 +172,7 @@ class CalendarRepo(
         runSuspendCatching { a.window(fromMs, toMs) }
             .onSuccess { w ->
                 _rangeRows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
+                noteReminders(w.rows)
                 // Kept as it lands, not at the next refresh: a phone closed
                 // on a month it has just read opens on that month again.
                 // Only the month: nothing else changed by turning a page.
@@ -682,6 +701,8 @@ class CalendarRepo(
         _shares.value = null
         _tags.value = emptyList()
         _zone.value = null
+        _leadMin.value = null
+        _remindersKnown.value = false
         _conflicts.value = emptyList()
         _sync.value = emptyMap()
         _error.value = null
@@ -770,7 +791,8 @@ class CalendarRepo(
             }.ifEmpty { if (_calendars.value.any { it.kind != "local" }) _sync.value else emptyMap() }
             _tags.value = runSuspendCatching { a.tags() }.getOrNull()?.map { it.tag } ?: _tags.value
             keep()
-            runSuspendCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball }
+            runSuspendCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball; _leadMin.value = it.leadMin }
+            noteReminders(w.rows)
             _availability.value = CalendarAvailability.PRESENT
             _error.value = null
             adoptZoneIfNone()

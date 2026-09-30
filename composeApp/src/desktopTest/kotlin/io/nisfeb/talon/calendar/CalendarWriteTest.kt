@@ -70,7 +70,7 @@ class CalendarWriteTest {
                         path.endsWith("/events.json") -> tasks(ship)
                         path.endsWith("/window.json") -> window(ship)
                         path.endsWith("/calendars.json") -> calendars
-                        path.endsWith("/config.json") -> """{"title":"Calendar","zone":"UTC","ball":"abc"}"""
+                        path.endsWith("/config.json") -> """{"title":"Calendar","zone":"UTC","ball":"abc","lead_min":30}"""
                         path.endsWith("/google.json") -> """{"connected":true,"linked":{}}"""
                         else -> "[]"
                     }
@@ -92,6 +92,20 @@ class CalendarWriteTest {
     }
 
     private fun Ship.asked(path: String) = reads.any { it.substringBefore('?').endsWith(path) }
+
+    // The heads-up before every timed event: set, it is what the page
+    // shows; refused, the page keeps showing what the ship still has.
+    @Test
+    fun `a refused heads-up change leaves the ship's own on show`() = calendar { repo, ship ->
+        assertEquals(30, repo.leadMin.value)
+        assertTrue(repo.remindersKnown.value, "the config says so, with no rows to say it")
+        ship.refuse = true
+        assertTrue(!repo.setLeadMin(0))
+        assertEquals(30, repo.leadMin.value)
+        ship.refuse = false
+        assertTrue(repo.setLeadMin(10))
+        assertEquals(10, repo.leadMin.value)
+    }
 
     @Test
     fun `the task list asks for tasks, not every event there is`() = calendar { repo, ship ->

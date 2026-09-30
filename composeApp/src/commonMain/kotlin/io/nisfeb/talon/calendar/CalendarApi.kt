@@ -41,6 +41,8 @@ data class CalendarRow(
     val r: Long,
     /** A task's tick; false for events. */
     val done: Boolean = false,
+    /** Its reminders ([CalAlarm]); null from a calendar too old to say. */
+    val alarms: kotlinx.serialization.json.JsonArray? = null,
 ) {
     /** One of a series: timed or all-day with a repeating kind. */
     val repeats: Boolean get() = (cat == "timed" || cat == "allday") && kind != "once"
@@ -134,7 +136,13 @@ data class GoogleStatus(val connected: Boolean = false, val linked: Map<String, 
 data class CaldavSubscription(val id: String, val url: String = "", @SerialName("last_ms") val lastMs: Long = 0, val error: String = "")
 
 @Serializable
-data class CalendarConfig(val title: String = "", val zone: String? = null, val ball: String = "")
+data class CalendarConfig(
+    val title: String = "",
+    val zone: String? = null,
+    val ball: String = "",
+    /** Minutes of the heads-up the ship sends before every timed event, 0 for none; null from a calendar too old to say. */
+    @SerialName("lead_min") val leadMin: Int? = null,
+)
 
 /**
  * The calendar nexus on the user's ship, at /apps/calendar, over the
