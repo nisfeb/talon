@@ -1665,7 +1665,8 @@ private fun CalendarsDialog(
                     // timed event, on top of each event's reminders.
                     Text("Heads-up before every timed event", style = MaterialTheme.typography.labelMedium)
                     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                        listOf(0, 5, 10, 15, 30, 60).forEach { m ->
+                        // Plus whatever the ship holds, set elsewhere (it takes up to a week).
+                        (listOf(0, 5, 10, 15, 30, 60) + leadMin).distinct().sorted().forEach { m ->
                             FilterChip(
                                 selected = leadMin == m,
                                 onClick = { if (leadMin != m) onSetLeadMin(m) },

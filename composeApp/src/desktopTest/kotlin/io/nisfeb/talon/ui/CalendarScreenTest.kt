@@ -47,6 +47,8 @@ class CalendarScreenTest {
     @Volatile private var holdDetail = false
     /** The ship's calendar keeps reminders: its rows, its event read and its config say so. */
     @Volatile private var reminders = false
+    /** The heads-up the ship holds, where it keeps reminders. */
+    @Volatile private var leadMin = 30
     private fun alarms(json: String) = if (reminders) ",\"alarms\":$json" else ""
     @Volatile private var tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"}}]"""
     private val soon = java.time.LocalDate.now().atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
@@ -74,7 +76,7 @@ class CalendarScreenTest {
             path.endsWith("/events.json") -> json(tasksJson)
             path.endsWith("/calendars.json") ->
                 json("""[{"id":"default","name":"Personal","kind":"local"},{"id":"~nec/work","name":"Work","kind":"local"}]""")
-            path.endsWith("/config.json") -> json(if (reminders) """{"title":"Calendar","zone":"UTC","ball":"abc123","lead_min":30}""" else """{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
+            path.endsWith("/config.json") -> json(if (reminders) """{"title":"Calendar","zone":"UTC","ball":"abc123","lead_min":$leadMin}""" else """{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
             path.endsWith("/share/shares.json") ->
                 json("""{"shares":{},"offers":{},"accepted":{"~nec/work":{"key":"~nec/work","mode":"read"}}}""")
             path.endsWith("/google.json") -> json("""{"connected":false,"linked":{}}""")
@@ -335,6 +337,18 @@ class CalendarScreenTest {
         onNodeWithContentDescription("Calendars").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("New calendar") }
         assertTrue(!shows("Heads-up before every timed event"))
+    }
+
+    // Set elsewhere to a value this page does not offer, it still shows as the one chosen.
+    @Test
+    fun `a heads-up set elsewhere shows as chosen`() {
+        reminders = true
+        leadMin = 120
+        calendar {
+            onNodeWithContentDescription("Calendars").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Heads-up before every timed event") }
+            assertTrue(onAllNodes(hasText("120 min") and androidx.compose.ui.test.isSelected()).fetchSemanticsNodes().size == 1)
+        }
     }
 
     @Test
