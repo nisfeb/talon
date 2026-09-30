@@ -130,7 +130,7 @@ class MailRepoWriteTest {
                 "the answer to a 404 on a write is a re-read",
             )
             assertTrue(
-                hits.none { it.contains("manifest.webmanifest") },
+                hits.none { it.contains("desks/stock") },
                 "no install probe over a deleted thread",
             )
         }
@@ -172,7 +172,8 @@ class MailRepoWriteTest {
             r.refresh()
             assertEquals(listOf("one-v2", "two-v2"), r.page.value!!.threads.map { it.subject })
 
-            until("the refusal to roll back") { r.rollbacks.value == 1 }
+            // The counter moves just before the problem is said: wait for both.
+            until("the refusal to roll back and be said") { r.rollbacks.value == 1 && r.problem.value != null }
             val rows = r.page.value!!.threads.associateBy { it.id }
             assertEquals("one", rows.getValue("0v1").subject, "the acted-on row goes back to the snapshot")
             assertEquals(
@@ -181,8 +182,46 @@ class MailRepoWriteTest {
                 "a refresh that landed while the write was out is newer than the snapshot, and stays",
             )
             assertEquals(false, r.cachedThread("0v1")!!.archived, "the thread is put back too")
-            assertEquals("writer is busy", r.error.value)
+            assertEquals("The ship did not do that: writer is busy", r.problem.value)
             assertEquals(MailAvailability.PRESENT, r.availability.value)
+            // In the read's error it was gone again with the next read
+            // that went well, often before anyone saw it.
+            r.refresh()
+            assertEquals("The ship did not do that: writer is busy", r.problem.value, "a read that goes well does not wipe it")
+            r.clearProblem()
+            assertNull(r.problem.value)
+        }
+    }
+
+    @Test
+    fun `read, unread and delete show at once, and leaving a ship leaves none of its mail`() {
+        val unreadRow = row("0v1", "one").replace(""""unread":false""", """"unread":true""")
+        withRepo({ req ->
+            val path = req.url.encodedPath
+            when {
+                path.endsWith("/api/inbox") -> jsonOk(this, pageWith(unreadRow, row("0v2", "two")))
+                path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+                path.endsWith("/api/thread/0v1") -> jsonOk(this, threadJson("0v1"))
+                // Held, so what shows is the local edit and not a re-read.
+                else -> { delay(5_000); jsonOk(this, "{}") }
+            }
+        }) { r, _ ->
+            r.attach("https://ship.example")
+            settle(r)
+            r.loadThread("0v1")
+            r.markRead(listOf("0v1m1"), "0v1")
+            assertEquals(false, r.page.value!!.threads.first { it.id == "0v1" }.unread)
+            assertEquals(true, r.cachedThread("0v1")!!.messages.single().read)
+            r.markUnread(listOf("0v1m1"), "0v1")
+            assertEquals(true, r.page.value!!.threads.first { it.id == "0v1" }.unread)
+            assertEquals(false, r.cachedThread("0v1")!!.messages.single().read)
+            r.deleteThread("0v1")
+            assertEquals(listOf("0v2"), r.page.value!!.threads.map { it.id })
+            assertNull(r.cachedThread("0v1"))
+
+            r.detach()
+            assertNull(r.page.value, "a ship signed out of shows none of its mail")
+            assertEquals(MailAvailability.UNKNOWN, r.availability.value)
         }
     }
 
@@ -218,13 +257,13 @@ class MailRepoWriteTest {
             r.fetchBlob("0vhash", "~nec")
             assertEquals("blob host gone", r.error.value)
             assertEquals(MailAvailability.PRESENT, r.availability.value)
-            assertTrue(hits.none { it.contains("manifest.webmanifest") }, "no probe off the inbox path")
+            assertTrue(hits.none { it.contains("desks/stock") }, "no probe off the inbox path")
         }
 
         // The same status on the inbox read itself is the one place the
         // probe runs: there a 404 does mean the nexus is gone.
         withRepo({ req ->
-            if (req.url.encodedPath.endsWith("manifest.webmanifest")) {
+            if (req.url.encodedPath.endsWith("desks/stock")) {
                 respondError(HttpStatusCode.NotFound, "")
             } else {
                 respondError(HttpStatusCode.NotFound, """{"error":"not found"}""")
@@ -238,7 +277,7 @@ class MailRepoWriteTest {
                 "the inbox path is the one place a 404 means the app is gone",
             )
             assertNull(r.error.value, "not having mail installed is a state, not a failure")
-            assertTrue(hits.any { it.contains("manifest.webmanifest") }, "and the probe did run")
+            assertTrue(hits.any { it.contains("desks/stock") }, "and the probe did run")
         }
     }
 }

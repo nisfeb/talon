@@ -23,7 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -73,19 +73,39 @@ fun GroupInfoPane(
 ) {
     val scope = rememberCoroutineScope()
 
-    // Resolve channel → group flag once per whom. Null means we
-    // either don't know the group yet or this isn't a group channel
-    // (DM/club). The leave row hides in that case.
-    var groupFlag by remember(whom) { mutableStateOf<String?>(null) }
+    // What the pane learns of the group, as one state. As three, the
+    // count landed and the header went on without it: the list's rows
+    // missed one of several states written together, as ThreadList's
+    // did (d5617e98).
+    var group by remember(whom) { mutableStateOf(PaneGroup()) }
+    // Null means we either don't know the group yet or this isn't a
+    // group channel (DM/club). The leave row hides in that case.
+    val groupFlag = group.flag
     // Null until the fetch lands (or forever if it fails) — the count
     // lines render only when we actually know the number, never "0".
-    var memberCount by remember(whom) { mutableStateOf<Int?>(null) }
-    var isPublic by remember(whom) { mutableStateOf(false) }
+    val memberCount = group.members
+    val isPublic = group.public
     var pendingLeave by remember(whom) { mutableStateOf(false) }
+    var leaving by remember(whom) { mutableStateOf(false) }
+    var leaveError by remember(whom) { mutableStateOf<String?>(null) }
     var inviteOpen by remember(whom) { mutableStateOf(false) }
     var inviteShip by remember(whom) { mutableStateOf("") }
     var inviteBusy by remember(whom) { mutableStateOf(false) }
     var inviteResult by remember(whom) { mutableStateOf<String?>(null) }
+    // Whatever name they were given: a @p, the twelve-word name, or a
+    // short name or nickname of somebody already known. The box used to
+    // put a sig on the front of anything and send that, so a word name
+    // went out as a ship, the host refused it, and Talon blamed the
+    // group's permissions.
+    val inviteContacts by remember { db.contacts().stream() }.collectAsState(initial = emptyList())
+    val inviteNames by io.nisfeb.talon.ui.AzimuthNames.generation.collectAsState()
+    val invited = remember(inviteShip, inviteContacts, inviteNames) {
+        io.nisfeb.talon.ui.NameToShip.resolve(
+            typed = inviteShip.trim(),
+            known = inviteContacts.map { it.ship },
+            nicknameOf = { ship -> inviteContacts.firstOrNull { it.ship == ship }?.nickname },
+        )
+    }
     if (inviteOpen) {
         AlertDialog(
             onDismissRequest = { if (!inviteBusy) { inviteOpen = false; inviteResult = null } },
@@ -102,11 +122,20 @@ fun GroupInfoPane(
                     androidx.compose.material3.OutlinedTextField(
                         value = inviteShip,
                         onValueChange = { inviteShip = it; inviteResult = null },
-                        label = { Text("~ship") },
-                        singleLine = true,
+                        label = { Text("~ship, or a word name") },
+                        // Room for all twelve words of a name: what does
+                        // not fit has to scroll inside the box, which on a
+                        // phone fights the screen and loses.
+                        singleLine = false,
+                        maxLines = 6,
                         enabled = !inviteBusy,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    io.nisfeb.talon.ui.ShipSuggestions(inviteShip, onPick = { inviteShip = it; inviteResult = null }, Modifier.padding(top = 4.dp))
+                    val landed = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
+                    (io.nisfeb.talon.ui.NameToShip.hint(invited, inviteShip.trim())
+                        ?: landed?.takeIf { it != inviteShip.trim() }?.let { "Invites ${io.nisfeb.talon.ui.shipHandle(it)}." })
+                        ?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     inviteResult?.let {
                         Spacer(Modifier.size(8.dp))
                         Text(it, style = MaterialTheme.typography.bodySmall)
@@ -114,25 +143,17 @@ fun GroupInfoPane(
                 }
             },
             confirmButton = {
-                val ship = inviteShip.trim().let { if (it.isNotEmpty() && !it.startsWith("~")) "~$it" else it }
+                val ship = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
                 TextButton(
-                    enabled = !inviteBusy && ship.length > 1 && groupFlag != null,
+                    enabled = !inviteBusy && ship != null && groupFlag != null,
                     onClick = {
                         val flag = groupFlag ?: return@TextButton
+                        if (ship == null) return@TextButton
                         inviteBusy = true
                         inviteResult = null
                         scope.launch {
                             inviteResult = runCatching { repo.inviteToGroup(flag, ship) }
-                                .fold(
-                                    onSuccess = { "Invited $ship." },
-                                    onFailure = { e ->
-                                        if (e is io.nisfeb.talon.urbit.PokeNacked) {
-                                            "Invites are not permitted for members in this group; ask an admin."
-                                        } else {
-                                            "Could not send the invite: ${e.message ?: "no answer from your ship"}"
-                                        }
-                                    },
-                                )
+                                .fold({ "Invited ${io.nisfeb.talon.ui.shipHandle(ship)}." }, { e -> io.nisfeb.talon.ui.inviteFailure(e) })
                             inviteBusy = false
                         }
                     },
@@ -145,11 +166,11 @@ fun GroupInfoPane(
     }
     LaunchedEffect(whom) {
         val mapping = runCatching { db.groups().channelGroupFor(whom) }.getOrNull()
-        groupFlag = mapping?.groupFlag
         val flag = mapping?.groupFlag ?: return@LaunchedEffect
+        group = PaneGroup(flag)
         runCatching { repo.fetchGroupAdmin(flag) }
             .getOrNull()
-            ?.let { memberCount = it.members.size; isPublic = it.privacy == "public" }
+            ?.let { group = PaneGroup(flag, it.members.size, it.privacy == "public") }
     }
 
     val groupRowFlow: Flow<io.nisfeb.talon.data.GroupEntity?> =
@@ -175,6 +196,11 @@ fun GroupInfoPane(
         countsList.associate { mediaCategoryOrLink(it.category) to it.n }
     }
 
+    // Read here, not inside the items: the title and the level land in
+    // the same moments the group's rows are added, and a row reading
+    // them missed the change (as memberCount did, see PaneGroup).
+    val title = groupRow?.title ?: whom
+    val levelNow = notifyPref?.level ?: NotifyLevel.DEFAULT
     LazyColumn(modifier = modifier.fillMaxWidth()) {
         item {
             // Header: title + member count. Avatar is intentionally
@@ -186,7 +212,7 @@ fun GroupInfoPane(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    groupRow?.title ?: whom,
+                    title,
                     style = MaterialTheme.typography.titleLarge,
                 )
                 memberCount?.let {
@@ -211,7 +237,7 @@ fun GroupInfoPane(
             // Plus a watchword-exclusion toggle so chats the user
             // doesn't want scanned for watchword hits can opt out
             // even when the level is ALL/MENTIONS.
-            val level = notifyPref?.level ?: NotifyLevel.DEFAULT
+            val level = levelNow
             val canMutate = repo.settingsSync != null
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -271,13 +297,8 @@ fun GroupInfoPane(
                     )
                     Switch(
                         checked = isExcludedFromWatchwords,
-                        enabled = canMutate,
                         onCheckedChange = { exclude ->
-                            scope.launch {
-                                runCatching {
-                                    repo.settingsSync?.setWatchwordExclude(whom, exclude)
-                                }
-                            }
+                            scope.launch { runCatching { repo.watchwords.excludeChat(whom, exclude) } }
                         },
                     )
                 }
@@ -390,20 +411,34 @@ fun GroupInfoPane(
     }
 
     if (pendingLeave) {
+        // Waits for the ship, as GroupHomeScreen's does: a refused leave
+        // used to close the dialog and leave the group there, unexplained.
         AlertDialog(
-            onDismissRequest = { pendingLeave = false },
+            onDismissRequest = { if (!leaving) { pendingLeave = false; leaveError = null } },
             title = { Text("Leave ${groupRow?.title ?: "this group"}?") },
-            text = { Text("You'll be removed from every channel in the group.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    pendingLeave = false
-                    groupFlag?.let { flag ->
-                        scope.launch { runCatching { repo.leaveGroup(flag) } }
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("You'll be removed from every channel in the group.")
+                    leaveError?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
-                }) { Text("Leave") }
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !leaving, onClick = {
+                    val flag = groupFlag ?: return@TextButton
+                    leaving = true
+                    leaveError = null
+                    scope.launch {
+                        runCatching { repo.leaveGroup(flag) }
+                            .onSuccess { pendingLeave = false }
+                            .onFailure { leaveError = it.message ?: it::class.simpleName }
+                        leaving = false
+                    }
+                }) { Text(if (leaving) "Leaving…" else "Leave") }
             },
             dismissButton = {
-                TextButton(onClick = { pendingLeave = false }) { Text("Cancel") }
+                TextButton(enabled = !leaving, onClick = { pendingLeave = false; leaveError = null }) { Text("Cancel") }
             },
         )
     }
@@ -497,3 +532,6 @@ private fun NotifyLevelOption(
         )
     }
 }
+
+/** The group behind a channel as the info pane knows it: none yet, then its flag, then its count and privacy. */
+private data class PaneGroup(val flag: String? = null, val members: Int? = null, val public: Boolean = false)

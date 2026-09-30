@@ -172,6 +172,9 @@ kotlin {
             // MediaPipe text tasks back the on-device Embedder used by
             // the SmartFeatures suite + EmbeddingIndexer.
             implementation(libs.mediapipe.tasks.text)
+            // The orrery triage's Android rung: MediaPipe LLM Inference,
+            // GPU where the phone has it (orrery/LocalModels.android.kt).
+            implementation(libs.mediapipe.tasks.genai)
             // ZXing scanner Activity for the LoginScreen "Scan QR"
             // button. Pure FOSS; works on degoogled Android (GrapheneOS,
             // LineageOS without GApps) since it doesn't depend on Play
@@ -218,6 +221,10 @@ kotlin {
             // installed the player reports itself absent and the row
             // falls back to the link (VoiceMessages.desktop.kt).
             implementation(libs.vlcj)
+            // The orrery triage's floor: llama.cpp on the JVM, CPU natives
+            // for Linux, macOS and Windows, loaded behind a child-process
+            // probe (orrery/LocalModels.desktop.kt).
+            implementation("de.kherud:llama:4.2.0")
             // Trunkline call engine: libwebrtc via JNI. The base jar is
             // pure API; the natives ship per-platform. Bundle only the
             // host's natives (matches the slimReleaseDistributable
@@ -270,6 +277,7 @@ kotlin {
         // app/src/test/ runs against the composeApp/commonMain copy
         // on every supported target.
         commonTest.dependencies {
+            implementation(libs.kotlinx.coroutines.test)
             implementation(kotlin("test"))
             implementation(libs.ktor.client.mock)
         }
@@ -306,6 +314,12 @@ kotlin {
 // headless satisfies AWT's thread checks without requiring X11.
 tasks.withType<Test>().configureEach {
     jvmArgs("-Djava.awt.headless=true")
+    // The app keeps its data under ~/.config/talon (AppDirs). A test run
+    // must never write, or erase, the developer's real copy: the ship
+    // eraser test deletes files there, and every run logged into it.
+    val home = layout.buildDirectory.dir("test-home").get().asFile.absolutePath
+    systemProperty("user.home", home)
+    environment("XDG_CONFIG_HOME", "$home/.config")
 }
 
 // Single source of truth for the app version. `derivePackageVersion`

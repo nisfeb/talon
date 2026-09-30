@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.util.formatMonthDay
 import io.nisfeb.talon.util.ConcurrentMap
 import io.nisfeb.talon.util.formatMonthDayTime
@@ -76,7 +77,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -130,6 +131,7 @@ import io.nisfeb.talon.ui.StoryRenderer
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.util.Log
+import io.nisfeb.talon.util.runSuspendCatching
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -139,6 +141,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.ui.icons.TalonIcons
+import io.nisfeb.talon.ai.hasModelFor
 
 @OptIn(
     ExperimentalFoundationApi::class,
@@ -173,6 +176,12 @@ fun DmChatScreen(
         onRecorded: (path: String, durationMs: Long) -> Unit,
     ) -> Unit)? = null,
     locationProvider: io.nisfeb.talon.ui.LocationProvider? = null,
+    /** The calendar, where this ship has one: what lets a message
+     *  become an event or a task without leaving the conversation. */
+    calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
+    /** Opens Settings, AI on the top-up sheet, for a failure that was
+     *  the empty Armillary balance. Null where the shell has no way there. */
+    onTopUp: (() -> Unit)? = null,
     /** Inline play/pause control for the voice preview row. Android
      *  wires an ExoPlayer-backed control; desktop passes null and
      *  the preview row hides the play button (still allows send/cancel). */
@@ -230,7 +239,7 @@ fun DmChatScreen(
     val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val aiFeatures = remember(aiSettings) {
-        AiFeatures(AiClient { aiSettings.state.value })
+        AiFeatures(AiClient(io.nisfeb.talon.ai.AiFeature.CatchUp) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.CatchUp) })
     }
     var catchUpSummary by remember(whom) { mutableStateOf<String?>(null) }
     var catchingUp by remember(whom) { mutableStateOf(false) }
@@ -523,11 +532,13 @@ fun DmChatScreen(
     }
 
     var refreshing by remember(whom) { mutableStateOf(false) }
+    var refreshFailed by remember(whom) { mutableStateOf(false) }
     LaunchedEffect(whom) {
         Log.i("DmChatScreen", "mount whom=$whom rows=${rows.size}")
         refreshing = true
-        runCatching { repo.refreshConversation(whom, count = 500) }
+        refreshFailed = runSuspendCatching { repo.refreshConversation(whom, count = 500) }
             .onFailure { Log.w("DmChatScreen", "refresh $whom failed: ${it.message}") }
+            .isFailure
         refreshing = false
     }
 
@@ -545,8 +556,10 @@ fun DmChatScreen(
                 !paginationExhausted
             ) {
                 paginating = true
-                val hasMore = runCatching { repo.loadOlder(whom) }.getOrDefault(false)
-                if (!hasMore) paginationExhausted = true
+                // A failed page is not the bottom: the next scroll asks again.
+                runSuspendCatching { repo.loadOlder(whom) }
+                    .onSuccess { if (!it) paginationExhausted = true }
+                    .onFailure { Log.w("DmChatScreen", "older $whom failed: ${it.message}") }
                 paginating = false
             }
         }
@@ -566,6 +579,43 @@ fun DmChatScreen(
     var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
     var confirmingReport by remember { mutableStateOf<MessageEntity?>(null) }
     var publishTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    // What was said, on its way to becoming an event or a task.
+    var calendarTarget by remember { mutableStateOf<Pair<FromMessage, MessageEntity>?>(null) }
+    // The repo is always handed in, so whether the ship has a calendar
+    // is its availability, not whether there is a repo: without this
+    // New event was offered on ships with no calendar and failed on Add.
+    val calendarHere = calendar?.availability?.collectAsState()?.value == io.nisfeb.talon.calendar.CalendarAvailability.PRESENT
+    calendarTarget?.let { (kind, target) ->
+        val cal = calendar
+        if (cal == null) {
+            calendarTarget = null
+        } else {
+            val zoneId by cal.zone.collectAsState()
+            MessageToCalendarDialog(
+                kind = kind,
+                initialTitle = titleFromMessage(StoryCache.textFor(target.id, target.contentJson)),
+                initialNote = StoryCache.textFor(target.id, target.contentJson).let { said ->
+                    descriptionFromMessage(said, titleFromMessage(said))
+                },
+                zone = runCatching { kotlinx.datetime.TimeZone.of(zoneId ?: "") }
+                    .getOrElse { kotlinx.datetime.TimeZone.currentSystemDefault() },
+                nowMs = io.nisfeb.talon.util.nowMs(),
+                twentyFourHour = uiSettings.homeTwentyFourHour.collectAsState().value,
+                onDismiss = { calendarTarget = null },
+                onSave = { draft ->
+                    calendarTarget = null
+                    // Written by the calendar's repo, not this screen: the
+                    // task is on the list at once, and leaving the chat
+                    // does not lose the write.
+                    if (draft.cat == io.nisfeb.talon.calendar.EventCat.TODO) {
+                        cal.addTask(draft) { composerState.sendError = "The calendar did not take it." }
+                    } else {
+                        cal.writeInBackground(io.nisfeb.talon.calendar.eventBody(draft)) { composerState.sendError = "The calendar did not take it." }
+                    }
+                },
+            )
+        }
+    }
 
     val canSend = remember(whom) {
         whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
@@ -592,6 +642,7 @@ fun DmChatScreen(
                 width: Int,
                 height: Int,
                 alt: String,
+                caption: String,
             ) {
                 repo.sendImage(
                     whom = whom,
@@ -599,6 +650,7 @@ fun DmChatScreen(
                     width = width,
                     height = height,
                     alt = alt,
+                    caption = caption,
                 )
             }
             override val supportsQuote: Boolean = true
@@ -637,14 +689,7 @@ fun DmChatScreen(
     val onAvatarTap: (String) -> Unit = remember {
         { patp -> profileSheetShip = patp }
     }
-    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-    val urbLinkHandler = io.nisfeb.talon.ui.LocalUrbLinkHandler.current
-    val onLinkTap: (String) -> Unit = remember(uriHandler, urbLinkHandler) {
-        { url ->
-            if (io.nisfeb.talon.urbit.UrbLink.isUrbUrl(url)) urbLinkHandler(url)
-            else runCatching { uriHandler.openUri(url) }
-        }
-    }
+    val onLinkTap: (String) -> Unit = io.nisfeb.talon.ui.rememberLinkOpener()
     val onReactionForMessage: (MessageEntity, List<ReactionEntity>, String) -> Unit =
         remember(ourPatp) {
             { m, reactions, emoji ->
@@ -661,7 +706,7 @@ fun DmChatScreen(
                         if (mineSame) repo.unreact(m.whom, m.id)
                         else repo.react(m.whom, m.id, emoji)
                     }.onFailure {
-                        composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}"
+                        composerState.failed("react", it)
                     }
                 }
                 Unit
@@ -750,15 +795,15 @@ fun DmChatScreen(
                     onSelect = { level ->
                         scope.launch {
                             runCatching { repo.settingsSync?.setNotifyLevel(whom, level) }
-                                .onFailure { composerState.sendError = "notify failed: ${it.message ?: it::class.simpleName}" }
+                                .onFailure { composerState.failed("notify", it) }
                         }
                     },
                     onToggleWatchwordExclude = {
                         scope.launch {
                             runCatching {
-                                repo.settingsSync?.setWatchwordExclude(whom, !isExcludedFromWatchwords)
+                                repo.watchwords.excludeChat(whom, !isExcludedFromWatchwords)
                             }.onFailure {
-                                composerState.sendError = "watchword toggle failed: ${it.message ?: it::class.simpleName}"
+                                composerState.failed("watchword toggle", it)
                             }
                         }
                     },
@@ -774,7 +819,7 @@ fun DmChatScreen(
                     .height(2.dp),
             )
         }
-        val showCatchUp = aiConfigured.hasKey() &&
+        val showCatchUp = aiConfigured.hasModelFor(io.nisfeb.talon.ai.AiFeature.CatchUp) &&
             aiConfigured.catchMeUpEnabled &&
             (unreadSnapshot ?: 0) >= CATCH_UP_MIN_UNREAD &&
             catchUpSummary == null &&
@@ -842,6 +887,7 @@ fun DmChatScreen(
             EmptyChatPlaceholder(
                 label = contactMap.conversationLabel(whom),
                 isDm = whom.startsWith("~"),
+                unread = refreshFailed,
                 modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp),
             )
         }
@@ -891,8 +937,7 @@ fun DmChatScreen(
                     scope.launch {
                         runCatching { repo.react(whom, target.id, emoji) }
                             .onFailure {
-                                composerState.sendError =
-                                    "react failed: ${it.message ?: it::class.simpleName}"
+                                composerState.failed("react", it)
                             }
                     }
                 },
@@ -967,6 +1012,12 @@ fun DmChatScreen(
                     actionTarget = null
                     publishTarget = target
                 },
+                onMakeEvent = calendar?.takeIf { calendarHere }?.let {
+                    { actionTarget = null; calendarTarget = FromMessage.Event to target }
+                },
+                onMakeTask = calendar?.takeIf { calendarHere }?.let {
+                    { actionTarget = null; calendarTarget = FromMessage.Task to target }
+                },
                 onTogglePin = {
                     val wasPinned = pinnedPostId == target.id
                     actionTarget = null
@@ -975,8 +1026,7 @@ fun DmChatScreen(
                             if (wasPinned) repo.unpinPost(whom)
                             else repo.pinPost(whom, target.id)
                         }.onFailure {
-                            composerState.sendError =
-                                "pin failed: ${it.message ?: it::class.simpleName}"
+                            composerState.failed("pin", it)
                         }
                     }
                 },
@@ -1115,8 +1165,7 @@ fun DmChatScreen(
                             originalContentJson = target.originalContentJson,
                         )
                     }.onFailure {
-                        composerState.sendError =
-                            "edit failed: ${it.message ?: it::class.simpleName}"
+                        composerState.failed("edit", it)
                     }
                 }
             },
@@ -1232,6 +1281,9 @@ fun DmChatScreen(
             confirmButton = {
                 TextButton(onClick = { catchUpError = null }) { Text("OK") }
             },
+            dismissButton = if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(err)) ({
+                TextButton(onClick = { catchUpError = null; onTopUp() }) { Text("Top up") }
+            }) else null,
         )
     }
 
@@ -1252,7 +1304,7 @@ fun DmChatScreen(
                     confirmingDelete = null
                     scope.launch {
                         runCatching { repo.delete(whom, toDelete.id, toDelete.parentId) }
-                            .onFailure { composerState.sendError = "delete failed: ${it.message ?: it::class.simpleName}" }
+                            .onFailure { composerState.failed("delete", it) }
                     }
                 }) { Text("Delete") }
             },
@@ -1286,8 +1338,7 @@ fun DmChatScreen(
                             }.onSuccess {
                                 composerState.sendError = "Reported to the group's admins"
                             }.onFailure {
-                                composerState.sendError =
-                                    "report failed: ${it.message ?: it::class.simpleName}"
+                                composerState.failed("report", it)
                             }
                         }
                     }
@@ -1584,14 +1635,7 @@ private fun MessageRow(
                     // renders below the body instead — grouped rows
                     // (a burst of your own sends) have no header, and
                     // a failed send must never be invisible.
-                    if (m.status == "pending") {
-                        Icon(
-                            imageVector = TalonIcons.Schedule,
-                            contentDescription = "Sending",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
+                    if (m.status == "pending") SendingIcon()
                 }
             }
             StoryRenderer(
@@ -1608,24 +1652,7 @@ private fun MessageRow(
                 // opening the menu (right-click opens it instead).
                 onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
-            if (m.status == "failed") {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(
-                        imageVector = TalonIcons.ErrorOutline,
-                        contentDescription = "Send failed",
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Text(
-                        "Not sent",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
+            SendStateNote(m.status)
             val firstLink = remember(parts) { firstLinkUrl(parts) }
             if (firstLink != null) {
                 LinkPreviewCard(
@@ -1639,6 +1666,15 @@ private fun MessageRow(
             if (firstUrb != null) {
                 io.nisfeb.talon.ui.UrbUnfurlCard(
                     urbUrl = firstUrb,
+                    onOpen = onLinkTap,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            val firstFurum = remember(parts) { io.nisfeb.talon.ui.firstFurumLink(parts) }
+            if (firstFurum != null) {
+                io.nisfeb.talon.ui.FurumCard(
+                    link = firstFurum,
+                    http = http,
                     onOpen = onLinkTap,
                     modifier = Modifier.padding(top = 6.dp),
                 )
@@ -1804,6 +1840,7 @@ private fun PinnedPostBanner(
 private fun EmptyChatPlaceholder(
     label: String,
     isDm: Boolean,
+    unread: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -1812,13 +1849,16 @@ private fun EmptyChatPlaceholder(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
-            "No messages yet",
+            if (unread) "Messages could not be loaded" else "No messages yet",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
             color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
-            text = if (isDm) "Say hi to $label — your first message starts the DM."
-                else "Be the first to post in this channel.",
+            text = when {
+                unread -> "Your ship did not send this chat. Open it again to retry."
+                isDm -> "Say hi to $label — your first message starts the DM."
+                else -> "Be the first to post in this channel."
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -2156,6 +2196,9 @@ private fun MessageActionMenu(
     onReport: () -> Unit,
     onPublish: () -> Unit,
     onTogglePin: () -> Unit,
+    /** Make an event or a task of what was said. Null where the ship has no calendar. */
+    onMakeEvent: (() -> Unit)? = null,
+    onMakeTask: (() -> Unit)? = null,
 ) {
     val isMine = message.author == ourPatp
     val canReply = message.parentId == null
@@ -2315,6 +2358,8 @@ private fun MessageActionMenu(
             if (canReply) {
                 ActionRow(onClick = onReply, label = "Reply in thread")
             }
+            onMakeEvent?.let { ActionRow(onClick = it, label = "New event") }
+            onMakeTask?.let { ActionRow(onClick = it, label = "New task") }
             if (canQuote) {
                 ActionRow(onClick = onQuote, label = "Quote")
             }
@@ -2680,3 +2725,69 @@ private fun TypingIndicator(
  */
 internal fun shouldQuoteOnSwipe(setting: Boolean, whom: String, parentId: String?): Boolean =
     setting && whom.startsWith("chat/") && parentId == null
+
+/** Our own message on its way: the ship has not taken it yet. */
+@Composable
+internal fun SendingIcon() {
+    Icon(
+        imageVector = TalonIcons.Schedule,
+        contentDescription = "Sending",
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.size(14.dp),
+    )
+}
+
+/**
+ * Under our own message, where it has not gone: refused by the ship
+ * ("failed"), or waiting for a ship that is slow or out of reach
+ * ("queued"), which is not an error and is not drawn as one.
+ */
+@Composable
+internal fun SendStateNote(status: String?) {
+    when (status) {
+        "failed" -> SendFailedNote()
+        "queued" -> QueuedNote()
+    }
+}
+
+/** Under a message waiting for the ship: it goes when the ship answers again. */
+@Composable
+internal fun QueuedNote() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            imageVector = TalonIcons.Schedule,
+            contentDescription = "Queued",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            "Queued · sends when your ship is back",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Under a message the ship refused. */
+@Composable
+internal fun SendFailedNote() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            imageVector = TalonIcons.ErrorOutline,
+            contentDescription = "Send failed",
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            "Not sent",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+}

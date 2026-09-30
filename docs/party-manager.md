@@ -1,7 +1,7 @@
 # Party Manager
 
 The Party Manager is a desktop window that runs the Talon bridge and
-manages a party: which app is the X Space, what the party and the
+manages a party: which app is the Space, what the party and the
 Space hear, how loud each source is, ducking under speech, presets,
 a soundboard, a show recording, and a host microphone. It lives in
 the `bridge/` module and is Linux only, because everything audio is
@@ -38,7 +38,7 @@ the repo: it holds a `+code`.
 ## The window
 
 **Header.** The party line (title once known, else host/room) with a
-status pill, the X Space with its app and a pill (Not wired, One-way,
+status pill, the Space with its app and a pill (Not wired, One-way,
 Two-way, or Wired with the bridge off), what a media player is
 playing right now, and red watchdog banners.
 
@@ -49,7 +49,7 @@ reach, hosted or invited, by title. Join the line, Leave the line
 Mute chip per member (host moderation, live and persisted on the
 host), a chip for the bridge's own mute, and a Listen link button.
 
-**X Space.** Apps using a microphone. Mark the browser running the
+**Space.** Apps using a microphone. Mark the browser running the
 Space as the Space app: its microphone becomes the party and its
 sound goes to the party. Two meters show audio moving Party → Space
 (everything the Space app's microphone gets) and Space → Party (the
@@ -85,7 +85,7 @@ switch Talk on.
 1. Start the manager. It connects with the saved ship.
 2. Pick the party line and click Join the line.
 3. Open the Space in a browser and join it with the microphone on.
-4. In the X Space panel, click Space app next to that browser. The
+4. In the Space panel, click Space app next to that browser. The
    header pill goes Two-way once the bridge is on the line.
 5. Talk on the party: the top meter moves and the Space hears it.
    Have the Space talk: the bottom meter moves and the party hears
@@ -94,6 +94,26 @@ switch Talk on.
 
 Music: play it in any app, click Party, Space or Both on its row,
 set its slider, and turn on ducking.
+
+## Gather, Meet, anything else in a browser
+
+Nothing in the wiring is specific to X. A Space app is just "the app
+whose microphone is the party line", so any room that runs in a
+browser works the same way: open it, click **Space app** on that
+browser's row, done.
+
+For Gather, park the avatar on a Spotlight tile (it broadcasts to the
+whole room rather than to whoever walks past) and set the space's
+spawn tile there, so the browser comes back to the same spot. Gather
+applies its own microphone processing to what the party sends, the
+same caveat as "The Space sounds processed" below.
+
+There is no way to do this without the browser. Gather's HTTP API
+covers spaces and maps, and its websocket game client covers
+movement, chat and events — neither carries audio. The audio is the
+web client's own WebRTC session, so a bot on the websocket has a
+presence in the room but no voice. Something has to run the page; the
+most that can be taken out of the loop is the person driving it.
 
 ## What it writes
 

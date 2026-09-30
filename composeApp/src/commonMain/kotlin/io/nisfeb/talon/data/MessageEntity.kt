@@ -3,6 +3,9 @@ package io.nisfeb.talon.data
 import androidx.room.Entity
 import androidx.compose.runtime.Immutable
 import androidx.room.Index
+import androidx.room.migration.Migration
+import androidx.sqlite.SQLiteConnection
+import androidx.sqlite.execSQL
 
 /**
  * One Urbit post. Keyed by (whom, id) so a single author's post across
@@ -45,18 +48,31 @@ data class MessageEntity(
     val title: String? = null,
     val image: String? = null,
     /**
-     * Send-state for our own outgoing channel posts:
-     *  - null: not tracked (DM/club rows, server-echoed rows).
-     *  - "pending": optimistic insert; poke is in flight, no ack yet.
-     *  - "failed": the channels agent NACKed our poke; the message
-     *    didn't land. The local twin sticks around so the UI can offer
-     *    a retry / dismiss affordance.
+     * Send-state for our own outgoing messages:
+     *  - null: not tracked (server-echoed rows, and DMs in flight).
+     *  - "pending": an optimistic channel post; the poke is in flight.
+     *  - "queued": the ship was slow or out of reach, not refusing; the
+     *    message waits and goes when it answers again
+     *    (TlonChatRepo.drainQueue). Kept across restarts.
+     *  - "failed": the ship refused the poke; the message didn't land.
+     *    The row stays so the UI can say so.
      * "sent" isn't stored — once the server echoes the post under its
      * real id, MessageDao.reapLocalTwin removes the pending row and
      * inserts a fresh status=null row, which is the implicit "sent".
-     * Channel-chat surfaces only; DMs intentionally skip status
-     * tracking because their wire model doesn't expose a useful
-     * delivery signal beyond our own ship's ack.
      */
     val status: String? = null,
+    /**
+     * What search and watchword scans match: the title and the words as
+     * shown. [MessageDao]'s writes fill it; null only on rows from before
+     * it existed, until [TlonChatRepo] start fills those in.
+     */
+    val searchText: String? = null,
 )
+
+/** 48 to 49: [MessageEntity.searchText]. Old rows get theirs once the repo starts. */
+internal const val MESSAGE_SEARCH_TEXT_SQL = "ALTER TABLE messages ADD COLUMN searchText TEXT"
+
+/** See [MESSAGE_SEARCH_TEXT_SQL]. Android runs the same statement its own way. */
+val MESSAGE_SEARCH_TEXT_MIGRATION = object : Migration(48, 49) {
+    override fun migrate(connection: SQLiteConnection) = connection.execSQL(MESSAGE_SEARCH_TEXT_SQL)
+}

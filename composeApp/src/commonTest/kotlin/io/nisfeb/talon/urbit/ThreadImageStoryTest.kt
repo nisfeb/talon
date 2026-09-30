@@ -30,4 +30,16 @@ class ThreadImageStoryTest {
         assertTrue(parts.none { it is StoryPart.Text }, "no text/link fallback: $parts")
         assertTrue(!story.toString().contains("](" ), "no markdown-link syntax on the wire")
     }
+
+    // Text written with an attachment goes in the same message, after
+    // the image: it went out as the image alone and the text was lost.
+    @Test
+    fun `an image with a caption carries the text after it`() {
+        val parts = Story.parse(imageStory("https://x/y.png", 640, 480, "shot.png", caption = " look at this "))
+        assertEquals(2, parts.size, "the image, then the text: $parts")
+        assertTrue(parts[0] is StoryPart.Image)
+        val text = parts[1]
+        assertTrue(text is StoryPart.Text && text.text.text == "look at this", "$text")
+        assertEquals(1, Story.parse(imageStory("https://x/y.png", 640, 480, "shot.png", caption = "  ")).size, "no caption, no text")
+    }
 }

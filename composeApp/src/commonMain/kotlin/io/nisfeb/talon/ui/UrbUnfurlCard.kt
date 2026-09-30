@@ -26,12 +26,13 @@ import io.nisfeb.talon.urbit.UrbUnfurlCache
 
 /**
  * Resolves a urb:// address to its title + snippet for the inline
- * preview card, or null when there's no viewer ship / lattice isn't
- * serving it. Provided at the app root over http + the active ship;
- * default returns nothing so previews/tests don't crash.
+ * preview card: the card kept from last time at once, then the page's
+ * own ([UrbUnfurlCache.cards]); nothing when there's no viewer ship or
+ * lattice isn't serving it. Provided at the app root over http + the
+ * active ship; default returns nothing so previews/tests don't crash.
  */
 val LocalUrbFetcher =
-    staticCompositionLocalOf<(suspend (String) -> UrbUnfurlCache.Unfurl?)?> { null }
+    staticCompositionLocalOf<((String) -> kotlinx.coroutines.flow.Flow<UrbUnfurlCache.Unfurl>)?> { null }
 
 /** The active ship's HTTP base, for features that build ship URLs
  *  (e.g. publishing to Lattice). Null when signed out. */
@@ -56,38 +57,72 @@ fun UrbUnfurlCard(
 ) {
     val fetcher = LocalUrbFetcher.current ?: return
     var unfurl by remember(urbUrl) { mutableStateOf<UrbUnfurlCache.Unfurl?>(null) }
-    LaunchedEffect(urbUrl) { unfurl = fetcher(urbUrl) }
+    LaunchedEffect(urbUrl) { fetcher(urbUrl).collect { unfurl = it } }
     val u = unfurl ?: return
     // "urb://~ship" caption, like a domain on a link card.
     val host = "urb://" + urbUrl.removePrefix("urb://").substringBefore('/')
+    InlineLinkCard(host, u.title, u.snippet, onClick = { onOpen(urbUrl) }, modifier = modifier)
+}
+
+/**
+ * The card under a message that links a furum board or post ([link], a
+ * page URL or the f/ shorthand), from what the reader's own furum knows
+ * of it ([FurumPreview]). Nothing while it loads, or where the ship has
+ * no furum or no card for it. Tapping opens it as the link does.
+ */
+@Composable
+fun FurumCard(
+    link: String,
+    http: io.ktor.client.HttpClient,
+    onOpen: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ref = remember(link) { io.nisfeb.talon.urbit.FurumLink.parse(link) } ?: return
+    val shipUrl = LocalShipUrl.current ?: return
+    val cookie = LocalShipCookie.current ?: return
+    var card by remember(ref) { mutableStateOf<io.nisfeb.talon.urbit.FurumPreview.Card?>(null) }
+    LaunchedEffect(ref, shipUrl) { card = io.nisfeb.talon.urbit.FurumPreview.await(http, shipUrl, cookie, ref) }
+    val c = card ?: return
+    InlineLinkCard(c.caption, c.title, c.snippet, onClick = { onOpen(link) }, modifier = modifier)
+}
+
+/** A link card: a caption like a domain, a title, and a line from what it links. */
+@Composable
+private fun InlineLinkCard(
+    caption: String,
+    title: String?,
+    snippet: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
             .widthIn(max = 360.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable { onOpen(urbUrl) }
+            .clickable(onClick = onClick)
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(
-            host,
+            caption,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (!u.title.isNullOrBlank()) {
+        if (!title.isNullOrBlank()) {
             Text(
-                u.title!!,
+                title,
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (!u.snippet.isNullOrBlank()) {
+        if (!snippet.isNullOrBlank()) {
             Text(
-                u.snippet!!,
+                snippet,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,

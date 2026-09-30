@@ -71,6 +71,9 @@ class StoreScreenshots {
             baseUrl: String?,
         ) {}
         override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
+    override fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String) {}
+    override fun setFrontierReadsMessages(on: Boolean) {}
+    override fun setProfile(profile: io.nisfeb.talon.ai.AiProfile) {}
         override fun setSyncEnabled(enabled: Boolean) {}
         override fun setBraveApiKey(key: String) {}
         override fun setSttApiKey(key: String) {}

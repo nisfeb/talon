@@ -28,6 +28,8 @@ class CalendarDetachTest {
             HttpClient(
                 MockEngine { req ->
                     val name = if (ship() == "a") "Ship A event" else "Ship B event"
+                    // The next ship answers a moment later, so what shows before it does is seen.
+                    if (ship() == "b") delay(300)
                     when {
                         "/window" in req.url.encodedPath -> respond(ByteReadChannel(window(name)), HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
                         "/calendars" in req.url.encodedPath -> respond(ByteReadChannel(calendars), HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
@@ -63,6 +65,63 @@ class CalendarDetachTest {
             r.attach("https://b.example")
             waitFor { r.rows.value?.isNotEmpty() == true }
             assertEquals(listOf("Ship B event"), r.rows.value?.map { it.name }, "the new ship's own rows, not the old one's")
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `attaching straight to another ship shows none of the last one's`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob())
+        try {
+            var ship = "a"
+            val r = repo(scope) { ship }
+            r.attach("https://a.example")
+            waitFor { r.rows.value?.isNotEmpty() == true }
+            ship = "b"
+            r.attach("https://b.example")
+            assertNull(r.rows.value, "no rows until the new ship answers")
+            assertEquals(emptyList(), r.calendars.value)
+            waitFor { r.rows.value?.isNotEmpty() == true }
+            assertEquals(listOf("Ship B event"), r.rows.value?.map { it.name })
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `a new task goes to the default calendar only while it can be written to`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob())
+        val json = headersOf("Content-Type", "application/json")
+        val cals = """[{"id":"theirs","name":"Theirs","color":"#ff0000","kind":"local","count":0},""" +
+            """{"id":"work","name":"Work","color":"#00ff00","kind":"local","count":0},""" +
+            """{"id":"home","name":"Home","color":"#0000ff","kind":"local","count":0}]"""
+        val r = CalendarRepo(
+            HttpClient(
+                MockEngine { req ->
+                    val path = req.url.encodedPath
+                    when {
+                        path.endsWith("/calendars.json") -> respond(ByteReadChannel(cals), HttpStatusCode.OK, json)
+                        path.endsWith("/shares.json") -> respond(ByteReadChannel("""{"accepted":{"theirs":{"key":"~bus/cal","mode":"read"}}}"""), HttpStatusCode.OK, json)
+                        "/window" in path -> respond(ByteReadChannel("""{"rows":[]}"""), HttpStatusCode.OK, json)
+                        "/config" in path -> respond(ByteReadChannel(config), HttpStatusCode.OK, json)
+                        // The write is held: what is asserted is the stand-in.
+                        req.method == io.ktor.http.HttpMethod.Post -> { delay(5_000); respond("{}", HttpStatusCode.OK, json) }
+                        else -> respond(ByteReadChannel("[]"), HttpStatusCode.OK, json)
+                    }
+                },
+            ),
+            scope,
+            pollIntervalMs = 60 * 60 * 1000L,
+        )
+        try {
+            r.attach("https://a.example")
+            waitFor { r.calendars.value.size == 3 && "theirs" in r.readOnly }
+            val day = kotlinx.datetime.LocalDate(2026, 9, 25)
+            r.defaultCalendar.value = "home"
+            assertEquals("home", r.addTask(EventDraft(name = "a", date = day)).cal, "the default, not merely the first")
+            r.defaultCalendar.value = "theirs"
+            assertEquals("work", r.addTask(EventDraft(name = "b", date = day)).cal, "never one shared with us read-only")
         } finally {
             scope.cancel()
         }

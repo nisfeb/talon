@@ -90,9 +90,10 @@ fun ReactionDetailsSheet(
                             style = MaterialTheme.typography.bodyLarge,
                             maxLines = 1,
                         )
-                        if (label != r.author) {
+                        val handle = contactMap.handle(r.author)
+                        if (label != handle) {
                             Text(
-                                r.author,
+                                handle,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,

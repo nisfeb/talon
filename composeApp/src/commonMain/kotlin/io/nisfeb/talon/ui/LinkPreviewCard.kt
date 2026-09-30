@@ -127,6 +127,8 @@ fun firstLinkUrl(parts: List<io.nisfeb.talon.urbit.StoryPart>): String? {
                 // urb:// links get their own unfurl card (firstUrbUrl);
                 // don't feed them to the OpenGraph previewer.
                 if (ann.item.startsWith(io.nisfeb.talon.urbit.UrbLink.SCHEME)) continue
+                // Furum's own card reads it through the ship (firstFurumLink).
+                if (io.nisfeb.talon.urbit.FurumLink.parse(ann.item) != null) continue
                 if (ann.item.trimEnd('/') !in previewed) return ann.item
             }
         }
@@ -166,3 +168,11 @@ fun firstUrbUrl(parts: List<io.nisfeb.talon.urbit.StoryPart>): String? {
     }
     return null
 }
+
+/** The first furum board or post in [parts], a page URL or the f/ shorthand, for the [FurumCard]. */
+fun firstFurumLink(parts: List<io.nisfeb.talon.urbit.StoryPart>): String? =
+    parts.asSequence()
+        .filterIsInstance<io.nisfeb.talon.urbit.StoryPart.Text>()
+        .flatMap { p -> p.text.getStringAnnotations(tag = io.nisfeb.talon.urbit.URL_TAG, start = 0, end = p.text.length).asSequence() }
+        .map { it.item }
+        .firstOrNull { io.nisfeb.talon.urbit.FurumLink.parse(it) != null }

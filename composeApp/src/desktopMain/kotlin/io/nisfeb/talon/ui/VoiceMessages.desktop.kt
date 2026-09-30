@@ -58,18 +58,42 @@ actual fun VoicePreviewPlayButton(path: String, enabled: Boolean) = Unit
 @Composable
 actual fun rememberQrScanLauncher(prompt: String, onResult: (String?) -> Unit): (() -> Unit)? = null
 
+private const val WAIT_FOR_FIRST_FRAME_MS = 8_000L
+
 /**
  * Whether this computer can play a video in the row: vlcj binds to the
  * system's libvlc, and there is no libvlc on a machine without VLC.
- * Asked once, since the answer cannot change while the app runs, and
- * never on the main thread's critical path.
+ *
+ * Null until the answer is in. It is looked for on a thread of its own
+ * because looking means walking directories, and vlcj's discovery does
+ * that with File.listFiles and File.isDirectory: on a machine with a
+ * slow or enormous directory in the search path that is seconds, and it
+ * used to happen on the first composition of the whole app, which is
+ * before a window is drawn. The report was "no UI loads", with the
+ * watchdog naming BaseNativeDiscoveryStrategy.discover on the event
+ * thread. Nothing about a video in a chat row is worth a start that
+ * never finishes, so until it answers there is no player, and rows
+ * fall back to the link the way they do on a machine without VLC.
+ *
+ * TALON_NO_VLC=1 skips the search, for anyone it still hangs.
  */
-private const val WAIT_FOR_FIRST_FRAME_MS = 8_000L
+private val vlcPresent = androidx.compose.runtime.mutableStateOf<Boolean?>(null)
+private val lookedForVlc = kotlinx.atomicfu.atomic(false)
 
-private val vlcPresent: Boolean by lazy {
-    runCatching { NativeDiscovery().discover() }
-        .onFailure { Log.i("DesktopMedia", "no libvlc: ${it.message}") }
-        .getOrDefault(false)
+private fun lookForVlc() {
+    if (!lookedForVlc.compareAndSet(expect = false, update = true)) return
+    if (System.getenv("TALON_NO_VLC")?.trim().orEmpty().let { it == "1" || it.equals("true", true) }) {
+        Log.i("DesktopMedia", "TALON_NO_VLC is set; not looking for libvlc")
+        vlcPresent.value = false
+        return
+    }
+    kotlin.concurrent.thread(name = "talon-vlc-probe", isDaemon = true) {
+        val found = runCatching { NativeDiscovery().discover() }
+            .onFailure { Log.i("DesktopMedia", "no libvlc: ${it.message}") }
+            .getOrDefault(false)
+        Log.i("DesktopMedia", if (found) "libvlc found" else "no libvlc; media rows keep their links")
+        vlcPresent.value = found
+    }
 }
 
 /**
@@ -77,13 +101,21 @@ private val vlcPresent: Boolean by lazy {
  * it has always had. Without libvlc there is no player at all and the
  * row falls back to the link, which is what desktop did before.
  */
-actual fun platformInlineMediaPlayer(): (@Composable (url: String, kind: MediaKind) -> Unit)? =
-    if (!vlcPresent) null else { url, kind ->
+actual fun platformInlineMediaPlayer(): (@Composable (url: String, kind: MediaKind) -> Unit)? {
+    // Read during composition, so the rows redraw with a player the
+    // moment the search answers, and the search itself never runs here.
+    val present = vlcPresent.value
+    if (present == null) {
+        lookForVlc()
+        return null
+    }
+    return if (!present) null else { url, kind ->
         when (kind) {
             MediaKind.VIDEO -> DesktopInlineVideoPlayer(url)
             MediaKind.AUDIO -> FallbackInlineMediaRow(url, kind)
         }
     }
+}
 
 /**
  * A video in the chat row, decoded by libvlc into frames Compose draws

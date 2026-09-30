@@ -19,6 +19,9 @@ interface ContactDao {
     @Query("SELECT * FROM contacts WHERE ship = :ship LIMIT 1")
     suspend fun get(ship: String): ContactEntity?
 
+    @Query("SELECT * FROM contacts")
+    suspend fun all(): List<ContactEntity>
+
     @Query("SELECT * FROM contacts WHERE ship = :ship LIMIT 1")
     fun streamOne(ship: String): Flow<ContactEntity?>
 

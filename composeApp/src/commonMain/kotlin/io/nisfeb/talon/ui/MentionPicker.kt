@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -95,6 +96,49 @@ fun MentionPicker(
     }
 }
 
+/**
+ * The @ mention picker, under any box a ship is typed into: an invite,
+ * a new contact, a To line. It finds a ship by @p, word name, nickname
+ * or pet name, as a mention does; those boxes used to take whichever
+ * of those you knew, and offer none. With [separator] the box takes
+ * several: the name being typed at the end is the one suggested for,
+ * and a pick replaces it and adds the separator for the next.
+ */
+@Composable
+fun ShipSuggestions(
+    text: String,
+    onPick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    separator: String? = null,
+) {
+    val (head, typed) = shipDraft(text, several = separator != null)
+    // The signed-in ship's contacts, as the last screen to read them
+    // left them; the people with a name of yours first, since the
+    // table holds every peer ever seen and the list stops at six.
+    val map = LastContactMap.value
+    val ships = remember(map) { map.contacts.sortedByDescending { it.nickname != null }.map { it.ship } }
+    val suggestions = remember(typed, ships) {
+        if (typed.isEmpty()) emptyList()
+        // Gone once the box holds exactly the one ship it offers.
+        else suggestionsFor(typed, map, ships).takeUnless { it.size == 1 && it[0].ship == "~$typed" }.orEmpty()
+    }
+    MentionPicker(
+        suggestions,
+        onPick = { ship -> onPick(if (separator == null) ship else head + ship + separator) },
+        modifier = modifier,
+    )
+}
+
+/**
+ * A ship box's text as what stays and the name being typed: all of it
+ * for a box of one ship, the last of several otherwise. The name comes
+ * without its sig or @, which [suggestionsFor] matches without.
+ */
+internal fun shipDraft(text: String, several: Boolean): Pair<String, String> {
+    val head = if (several) text.substring(0, text.lastIndexOfAny(charArrayOf(',', ' ', '\n')) + 1) else ""
+    return head to text.substring(head.length).trim().removePrefix("@").removePrefix("~")
+}
+
 data class Suggestion(
     val ship: String,
     val nickname: String?,
@@ -115,14 +159,17 @@ data class Suggestion(
 
 /**
  * Inspect the composer text + caret position for an active mention
- * trigger — either `@query` or `~query`. Returns the query portion (no
- * trigger char) and the start index of the trigger if the caret is
- * inside such a token; null otherwise.
+ * trigger — `@query`, `~query`, or a comet's word name typed bare,
+ * `.words` or `..words`, as the name reads everywhere else. Returns the
+ * query portion (no `@`/`~`; a bare name keeps its dots) and the start
+ * index of the trigger if the caret is inside such a token; null
+ * otherwise.
  *
  * Rules: the trigger must be word-initial (preceded by start-of-text or
  * whitespace) and the query chars so far must be patp-shaped
  * (lowercase letters + dashes) or mnemonym-shaped (words joined by
- * dots — see [Mnemonym]).
+ * dots — see [Mnemonym]). A bare name needs a letter after its one or
+ * two dots, so an ellipsis is never one.
  */
 fun detectMentionQuery(text: String, cursor: Int): Pair<String, Int>? {
     if (cursor == 0 || cursor > text.length) return null
@@ -130,16 +177,24 @@ fun detectMentionQuery(text: String, cursor: Int): Pair<String, Int>? {
     while (i >= 0) {
         val c = text[i]
         if (c == '@' || c == '~') break
-        if (c == ' ' || c == '\n' || c == '\t') return null
+        if (c == ' ' || c == '\n' || c == '\t') break
         if (!(c.isLetter() || c == '-' || c == '.')) return null
         i--
     }
-    if (i < 0) return null
+    if (i < 0 || text[i] == ' ' || text[i] == '\n' || text[i] == '\t') {
+        // No @ or ~: a word name typed bare, whose dots are the trigger.
+        val start = i + 1
+        val token = text.substring(start, cursor)
+        return if (BARE_NYM.matches(token)) token to start else null
+    }
     val before = if (i == 0) ' ' else text[i - 1]
     if (!(before == ' ' || before == '\n' || before == '\t')) return null
     val query = text.substring(i + 1, cursor)
     return query to i
 }
+
+/** A word name being typed with no @ or ~: one or two dots, then words. */
+private val BARE_NYM = Regex("""\.{1,2}[a-z][a-z.]*""")
 
 /**
  * Shortlist contacts matching a query (case-insensitive). Matches

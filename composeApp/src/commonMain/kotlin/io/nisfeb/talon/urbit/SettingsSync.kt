@@ -23,6 +23,13 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
     fun attach(channel: UrbitChannel)
 
     /**
+     * A lease on [key] in the ship's %settings: true on the one device
+     * that holds it, false on every other and whenever the ship cannot
+     * be asked. A holder silent for [staleMs] can be taken over.
+     */
+    suspend fun claimKey(key: String, staleMs: Long, settleMs: Long = 3_000L): Boolean = false
+
+    /**
      * Hand over the device's UI settings store so preferences that
      * belong to the *user* (naming, ordering, accent) can ride
      * %settings to their other devices. Screen-shaped settings — font
@@ -125,12 +132,11 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
     // Default no-op for tests / hosts that don't sync.
     suspend fun setRailItemVisibility(item: io.nisfeb.talon.ui.RailItem, visible: Boolean) {}
 
-    // ───────── watchwords mutations ─────────
-    // Toggles whether a chat is excluded from watchword scanning. The
-    // Android impl routes through Watchwords.excludeChat so backfill /
-    // %settings push fire correctly; desktop default is a no-op.
+    // ───────── watchwords ─────────
+    // Mirror one watchword change to the ship. Watchwords calls it, and
+    // only while watchword sync is on (or for the switch itself).
 
-    suspend fun setWatchwordExclude(whom: String, excluded: Boolean) {}
+    suspend fun mirrorWatchword(change: io.nisfeb.talon.ai.WatchwordChange) {}
 
     // ───────── folder mutations ─────────
 

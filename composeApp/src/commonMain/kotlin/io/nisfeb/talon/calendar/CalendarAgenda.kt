@@ -24,6 +24,21 @@ fun agenda(rows: List<CalendarRow>, range: CalendarRange, nowMs: Long, zone: Tim
     return live.filter { (_, b) -> b.first < until }.map { it.first }
 }
 
+/**
+ * What the widget calls itself. A window a day wide reaches into
+ * tomorrow, so it stops claiming to be today.
+ */
+fun agendaHeading(range: CalendarRange): String =
+    if (range == CalendarRange.NEXT_DAY) "Coming Up" else "Today"
+
+/**
+ * The day a row belongs to in the list. Anything already under way is
+ * today's, whenever it began, so the line the list draws where the day
+ * turns over falls above the first event of tomorrow and nowhere else.
+ */
+fun agendaDay(startMs: Long, nowMs: Long, zone: TimeZone): LocalDate =
+    Instant.fromEpochMilliseconds(maxOf(startMs, nowMs)).toLocalDateTime(zone).date
+
 /** Where the widget's window ends, in unix ms; null for "next only", which has no end. */
 fun rangeEnd(range: CalendarRange, nowMs: Long, zone: TimeZone): Long? = when (range) {
     CalendarRange.NEXT_ONLY -> null

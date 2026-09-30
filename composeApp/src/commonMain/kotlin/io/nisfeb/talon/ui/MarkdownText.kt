@@ -106,7 +106,7 @@ internal fun parseMarkdownBlocks(src: String): List<MdBlock> {
 }
 
 /** Inline `code`, **bold**, *italic* and `[label](url)` within one block. */
-internal fun inlineAnnotated(text: String, codeBg: Color): AnnotatedString = buildAnnotatedString {
+internal fun inlineAnnotated(text: String, codeBg: Color, linkColor: Color? = null): AnnotatedString = buildAnnotatedString {
     var i = 0
     while (i < text.length) {
         when {
@@ -171,7 +171,7 @@ internal fun inlineAnnotated(text: String, codeBg: Color): AnnotatedString = bui
                     withLink(
                         LinkAnnotation.Url(
                             url = text.substring(close + 2, end),
-                            styles = TextLinkStyles(style = LINK_SPAN),
+                            styles = TextLinkStyles(style = linkSpan(linkColor)),
                         ),
                     ) { append(text.substring(i + 1, close)) }
                     i = end + 1
@@ -188,6 +188,7 @@ internal fun inlineAnnotated(text: String, codeBg: Color): AnnotatedString = bui
 fun MarkdownText(text: String, modifier: Modifier = Modifier) {
     val blocks = remember(text) { parseMarkdownBlocks(text) }
     val codeBg = MaterialTheme.colorScheme.surfaceVariant
+    val linkColor = io.nisfeb.talon.ui.theme.LocalLinkColor.current
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         blocks.forEach { block ->
             when (block) {
@@ -199,7 +200,7 @@ fun MarkdownText(text: String, modifier: Modifier = Modifier) {
                     )
                 }
                 is MdBlock.Heading -> Text(
-                    inlineAnnotated(block.text, codeBg),
+                    inlineAnnotated(block.text, codeBg, linkColor),
                     style = when (block.level) {
                         1 -> MaterialTheme.typography.titleMedium
                         2 -> MaterialTheme.typography.titleSmall
@@ -209,16 +210,16 @@ fun MarkdownText(text: String, modifier: Modifier = Modifier) {
                 )
                 is MdBlock.Bullet -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("•", style = MaterialTheme.typography.bodyLarge)
-                    Text(inlineAnnotated(block.text, codeBg), style = MaterialTheme.typography.bodyLarge)
+                    Text(inlineAnnotated(block.text, codeBg, linkColor), style = MaterialTheme.typography.bodyLarge)
                 }
                 is MdBlock.Ordered -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     // Author's own number, so "3." after a break still
                     // reads as 3 rather than being renumbered.
                     Text("${block.number}.", style = MaterialTheme.typography.bodyLarge)
-                    Text(inlineAnnotated(block.text, codeBg), style = MaterialTheme.typography.bodyLarge)
+                    Text(inlineAnnotated(block.text, codeBg, linkColor), style = MaterialTheme.typography.bodyLarge)
                 }
                 is MdBlock.Paragraph -> Text(
-                    inlineAnnotated(block.text, codeBg),
+                    inlineAnnotated(block.text, codeBg, linkColor),
                     style = MaterialTheme.typography.bodyLarge,
                 )
             }

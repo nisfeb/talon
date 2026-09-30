@@ -14,11 +14,11 @@ import kotlin.random.Random
  * ship that wrote it and never travels — so this wants to be unlikely
  * to collide rather than unguessable.
  */
-fun newDraftId(random: Random = Random): String {
+fun newDraftId(): String {
     val alphabet = "0123456789abcdefghijklmnopqrstuv"
-    val chars = CharArray(15) { alphabet[random.nextInt(alphabet.length)] }
+    val chars = CharArray(15) { alphabet[Random.nextInt(alphabet.length)] }
     // A leading zero is dropped when a @uv is rendered back, so an id we
     // stored and one the ship echoes would not match as strings.
-    if (chars[0] == '0') chars[0] = alphabet[1 + random.nextInt(alphabet.length - 1)]
+    if (chars[0] == '0') chars[0] = alphabet[1 + Random.nextInt(alphabet.length - 1)]
     return "0v" + chars.concatToString().chunked(5).joinToString(".")
 }

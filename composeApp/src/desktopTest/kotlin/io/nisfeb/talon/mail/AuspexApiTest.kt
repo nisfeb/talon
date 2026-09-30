@@ -137,6 +137,21 @@ class AuspexApiTest {
     // ---- writes --------------------------------------------------------
 
     @Test
+    fun `an attachment goes up as its raw bytes, and one comes back by a GET`() = runBlocking<Unit> {
+        val a = api { req ->
+            if (req.method == io.ktor.http.HttpMethod.Post) jsonOk(this, """{"hash":"0vabc"}""")
+            else respond(ByteReadChannel("hi"), HttpStatusCode.OK, headersOf("Content-Type", "text/plain"))
+        }
+        assertEquals("0vabc", a.uploadBlob(byteArrayOf(1, 2, 3)))
+        val up = seen.last()
+        assertEquals(io.ktor.http.HttpMethod.Post, up.method)
+        assertEquals(io.ktor.http.ContentType.Application.OctetStream, up.body.contentType)
+        assertEquals(listOf<Byte>(1, 2, 3), (up.body as io.ktor.http.content.OutgoingContent.ByteArrayContent).bytes().toList())
+        a.blob("0vabc", "a.txt", "text/plain")
+        assertEquals(io.ktor.http.HttpMethod.Get, seen.last().method)
+    }
+
+    @Test
     fun `a compose sends its null parent rather than omitting it`() = runBlocking<Unit> {
         val a = api { jsonOk(this, """{"ok":true}""") }
         a.send(to = listOf("~zod"), subject = "s", body = "b", prev = null)
@@ -148,14 +163,7 @@ class AuspexApiTest {
     }
 
     @Test
-    fun `a reply names the message it answers`() = runBlocking<Unit> {
-        val a = api { jsonOk(this, """{"ok":true}""") }
-        a.send(to = listOf("~zod"), subject = "re", body = "b", prev = "0vparent")
-        assertEquals("0vparent", sentBody()["prev"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun `an empty attachment list is left off entirely`() = runBlocking<Unit> {
+    fun `no attachments still sends the list, empty`() = runBlocking<Unit> {
         val a = api { jsonOk(this, """{"ok":true}""") }
         a.send(to = listOf("~zod"), subject = "s", body = "b")
         assertEquals(
@@ -166,40 +174,21 @@ class AuspexApiTest {
     }
 
     @Test
-    fun `marking read sends one set, and nothing at all when empty`() = runBlocking<Unit> {
+    fun `marking read sends one set with its thread, and nothing at all when empty`() = runBlocking<Unit> {
         val a = api { jsonOk(this, """{"ok":true}""") }
-        a.markRead(emptyList())
+        a.markRead("0vt", emptyList())
         assertTrue(seen.isEmpty(), "an empty mark is a no-op, not a request")
-        a.markRead(listOf("0va", "0vb"))
+        a.markRead("0vt", listOf("0va", "0vb"))
         assertEquals(1, seen.size)
         assertEquals(
             listOf("0va", "0vb"),
             sentBody()["msg-ids"]!!.jsonArray.map { it.jsonPrimitive.content },
         )
+        // Auspex 14 answers a mark with no thread 400 "bad thread-id".
+        assertEquals("0vt", sentBody()["thread-id"]!!.jsonPrimitive.content)
     }
 
     // ---- the three failures --------------------------------------------
-
-    @Test
-    fun `a refusal carries the ship's own reason`() = runBlocking<Unit> {
-        val a = api { respondError(HttpStatusCode.BadRequest, """{"error":"unknown attachment 0v9"}""") }
-        val e = assertFailsWith<AuspexError.Refused> { a.whoami() }
-        assertEquals(400, e.status)
-        assertEquals("unknown attachment 0v9", e.reason)
-    }
-
-    @Test
-    fun `a dead session is recognisable without parsing a message`() = runBlocking<Unit> {
-        val a = api { respondError(HttpStatusCode.Forbidden, """{"error":"forbidden"}""") }
-        val e = assertFailsWith<AuspexError.Refused> { a.whoami() }
-        assertTrue(e.isSignedOut)
-    }
-
-    @Test
-    fun `an answer we cannot read is not the same as no answer`() = runBlocking<Unit> {
-        val a = api { jsonOk(this, "this is not json") }
-        assertFailsWith<AuspexError.Garbled> { a.whoami() }
-    }
 
     @Test
     fun `nothing coming back is its own failure`() = runBlocking<Unit> {

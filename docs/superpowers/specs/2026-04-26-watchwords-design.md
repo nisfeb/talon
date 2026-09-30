@@ -439,7 +439,7 @@ The 1000-hits-per-term cap is enforced *only* when `countForTerm` exceeds 1100, 
 | Massive (multi-KB) message | `String.indexOf` is heavily optimized; ≪1ms even for 16KB × 50 terms. |
 | Burst of inserts past prune threshold | Lazy prune absorbs 100-hit headroom without re-pruning each insert. |
 | Term contains regex / SQL meta characters | Not regex (we use `String.indexOf`); LIKE pre-filter binds `:term` via Room's parameter substitution (no injection). |
-| User toggles sync OFF with terms on the ship | `clearWatchwordsOnShip` pushes `del-bucket` for both buckets. Local terms preserved. |
+| User toggles sync OFF with terms on the ship | `clearWatchwordsOnShip` pushes `del-bucket` for both buckets. Local terms preserved, on this device and every other: a peer does not mirror the `del-bucket`. |
 
 ## Testing
 

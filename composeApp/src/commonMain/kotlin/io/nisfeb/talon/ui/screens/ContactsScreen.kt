@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.shipHandle
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,7 +24,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -64,11 +65,18 @@ fun ContactsScreen(
     var newPatp by remember { mutableStateOf("") }
     var newName by remember { mutableStateOf("") }
 
-    val asPatp = run {
-        val t = newPatp.trim()
-        if (t.startsWith("~")) t else "~$t"
+    // Any name a comet answers to: its @p, its twelve-word name, or a
+    // short name or nickname of somebody already in the book.
+    val namesGen by io.nisfeb.talon.ui.AzimuthNames.generation.collectAsState()
+    val landed = remember(newPatp, allContacts, namesGen) {
+        io.nisfeb.talon.ui.NameToShip.one(
+            typed = newPatp,
+            known = allContacts.map { it.ship },
+            nicknameOf = { ship -> allContacts.firstOrNull { it.ship == ship }?.nickname },
+        )
     }
-    val isValidPatp = newPatp.isNotBlank() && PATP_REGEX.matches(asPatp)
+    val asPatp = landed ?: newPatp.trim().let { if (it.startsWith("~")) it else "~$it" }
+    val isValidPatp = landed != null
     val alreadyInBook = asPatp in bookContacts
 
     // Book members, joined to their cached contact rows, filtered by search.
@@ -107,8 +115,10 @@ fun ContactsScreen(
                 OutlinedTextField(
                     value = newPatp,
                     onValueChange = { newPatp = it },
-                    placeholder = { Text("~patp") },
-                    singleLine = true,
+                    placeholder = { Text("~patp, or a word name") },
+                    // A twelve-word name fits without scrolling inside the box.
+                    singleLine = false,
+                    maxLines = 6,
                     modifier = Modifier.weight(1f),
                 )
                 OutlinedTextField(
@@ -127,6 +137,7 @@ fun ContactsScreen(
                     },
                 ) { Text("Add") }
             }
+            io.nisfeb.talon.ui.ShipSuggestions(newPatp, onPick = { newPatp = it }, Modifier.padding(top = 4.dp))
             if (isValidPatp && alreadyInBook) {
                 Text(
                     "Already in your contacts.",
@@ -201,7 +212,7 @@ private fun ContactRow(c: ContactEntity, onClick: () -> Unit, onRemove: () -> Un
                 )
             }
             Text(
-                c.ship,
+                shipHandle(c.ship),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

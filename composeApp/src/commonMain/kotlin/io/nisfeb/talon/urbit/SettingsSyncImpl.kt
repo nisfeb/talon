@@ -1,4 +1,7 @@
 package io.nisfeb.talon.urbit
+import io.nisfeb.talon.ai.forSync
+import io.nisfeb.talon.ai.switches
+import io.nisfeb.talon.ai.keys
 import kotlin.concurrent.Volatile
 import io.nisfeb.talon.util.nowMs
 
@@ -34,6 +37,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -56,13 +60,6 @@ class SettingsSyncImpl(
      *  Android Loops facade, so the host injects this. No-op on desktop /
      *  tests (the while-open ticker re-reads loops every tick). */
     private val rearmLoops: () -> Unit = {},
-    /** Toggle a chat's watchword-exclusion through the Android-only
-     *  Watchwords class (which fires backfill cleanup + onChange →
-     *  %settings push). commonMain can't reference Watchwords directly
-     *  (it lives in androidMain), so the host injects this. Default is
-     *  a no-op for desktop and tests. */
-    private val watchwordExcludeRouter: suspend (whom: String, excluded: Boolean) -> Unit =
-        { _, _ -> },
 ) : SettingsSync {
 
     companion object {
@@ -126,8 +123,8 @@ class SettingsSyncImpl(
         // Loop definitions, keyed by gid. lastRunAt + run history are
         // device-local and never sync — only the definition travels.
         const val BUCKET_LOOPS = "loops"
-        // Cross-device write-loop lease, keyed by loop gid:
-        // { holder: <deviceId>, claimedAt: <ms> }. Pure coordination state,
+        // Cross-device leases, keyed by loop gid or by the job's own key
+        // (orrery-brief): { holder: <deviceId>, claimedAt: <ms> }. Pure coordination state,
         // not a user pref — it rides the desk scry but no applyBucket /
         // applyEntry branch maps it, so it never touches Room. See claim().
         const val BUCKET_AUTOMATION_CLAIMS = "automation-claims"
@@ -155,6 +152,18 @@ class SettingsSyncImpl(
         private const val STATUS_SEEN_ENTRY = "me"
         private const val AI_ENTRY = "config"
 
+        /**
+         * Credentials live in their own entry, apart from the
+         * preferences, because a put replaces a whole entry and the
+         * preferences are pushed by every device on every change. With
+         * both in one entry, a device that had no key of its own wiped
+         * the ship's copy the moment anybody toggled anything, and the
+         * ship stopped being the backup that makes a new install work.
+         * Nothing without a key of its own writes this entry.
+         */
+        internal const val AI_KEYS_ENTRY = "credentials"
+        private val REVOKED = kotlinx.serialization.serializer<Map<String, io.nisfeb.talon.ai.KeyMark>>()
+
         // Wire schema version for the ai-settings entry. v1 (no
         // marker) is everything written before rc33 — treated as
         // legacy because the rc8-era Android push gap silently
@@ -166,6 +175,11 @@ class SettingsSyncImpl(
 
     @Volatile private var channel: UrbitChannel? = null
     @Volatile private var ui: io.nisfeb.talon.ui.UiSettings? = null
+    /** Where a push that an arriving entry calls for runs, off the event stream: the shell's scope. */
+    @Volatile private var pushScope: kotlinx.coroutines.CoroutineScope? = null
+    private var marksPush: kotlinx.coroutines.Job? = null
+    /** A marks push asked for before there was a scope to run it in; it runs once there is. */
+    @Volatile private var marksOwed = false
     // Bootstrap can beat the host's attachUiSettings call. Hold what
     // the ship said until there's somewhere to put it.
     @Volatile private var pendingUiPrefs: JsonObject? = null
@@ -230,6 +244,8 @@ class SettingsSyncImpl(
     ) {
         if (ui != null) return
         ui = settings
+        pushScope = scope
+        if (marksOwed) pushMarks()
         // Drain anything bootstrap parked before we had a store.
         pendingUiPrefs?.let { parked ->
             pendingUiPrefs = null
@@ -242,9 +258,10 @@ class SettingsSyncImpl(
         // Watch each synced preference and push changes the user makes
         // here. drop(1) skips the current value — attaching is not an
         // edit — and the last-synced value keeps an incoming change
-        // from echoing back out.
+        // from echoing back out. Subscribed before this returns: started
+        // later, a change made in between was the value skipped.
         fun <T> watch(flow: Flow<T>, entry: String, encode: (T) -> JsonElement) {
-            scope.launch {
+            scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                 flow.drop(1).collect { v ->
                     val encoded = encode(v)
                     // Our own apply coming back through the StateFlow,
@@ -303,44 +320,50 @@ class SettingsSyncImpl(
             return
         }
         val obj = value as? JsonObject ?: return
-        applyLocal(entry, obj) {
-            when (entry) {
-                ENTRY_GROUP_CHANNEL_ORDER -> obj["value"].asStr()?.let { name ->
-                    runCatching { io.nisfeb.talon.ui.GroupChannelOrder.valueOf(name) }
-                        .onSuccess { settings.setGroupChannelOrder(it) }
+        // Noted as the watcher will encode what the store then holds,
+        // not as it arrived: a rail order from a build with fewer items
+        // came back completed, differed from the raw value, and was
+        // pushed straight back — between an older and a newer build, a
+        // loop, each dropping the other's items and re-sending.
+        when (entry) {
+            ENTRY_GROUP_CHANNEL_ORDER -> obj["value"].asStr()
+                ?.let { runCatching { io.nisfeb.talon.ui.GroupChannelOrder.valueOf(it) }.getOrNull() }
+                ?.let { applyLocal(entry, str(it.name)) { settings.setGroupChannelOrder(it) } }
+            ENTRY_FOLDER_ITEM_ORDER -> obj["value"].asStr()
+                ?.let { runCatching { io.nisfeb.talon.ui.FolderItemOrder.valueOf(it) }.getOrNull() }
+                ?.let { applyLocal(entry, str(it.name)) { settings.setFolderItemOrder(it) } }
+            ENTRY_SMART_SEARCH -> obj["enabled"].asBool()
+                ?.let { applyLocal(entry, bool(it)) { settings.setSmartSearchPreferred(it) } }
+            ENTRY_POWER_FEATURES -> obj["enabled"].asBool()
+                ?.let { applyLocal(entry, bool(it)) { settings.setPowerFeaturesEnabled(it) } }
+            ENTRY_HIDE_COMPOSER_BUTTONS -> obj["enabled"].asBool()
+                ?.let { applyLocal(entry, bool(it)) { settings.setHideComposerButtons(it) } }
+            ENTRY_RAIL_ITEM_ORDER -> {
+                val names = (obj["order"] as? JsonArray)?.mapNotNull { it.asStr() } ?: return
+                val items = names.mapNotNull { n ->
+                    runCatching { io.nisfeb.talon.ui.RailItem.valueOf(n) }.getOrNull()
                 }
-                ENTRY_FOLDER_ITEM_ORDER -> obj["value"].asStr()?.let { name ->
-                    runCatching { io.nisfeb.talon.ui.FolderItemOrder.valueOf(name) }
-                        .onSuccess { settings.setFolderItemOrder(it) }
-                }
-                ENTRY_SMART_SEARCH ->
-                    obj["enabled"].asBool()?.let { settings.setSmartSearchPreferred(it) }
-                ENTRY_POWER_FEATURES ->
-                    obj["enabled"].asBool()?.let { settings.setPowerFeaturesEnabled(it) }
-                ENTRY_HIDE_COMPOSER_BUTTONS ->
-                    obj["enabled"].asBool()?.let { settings.setHideComposerButtons(it) }
-                ENTRY_RAIL_ITEM_ORDER -> {
-                    val names = (obj["order"] as? JsonArray)?.mapNotNull { it.asStr() }
-                        ?: return@applyLocal
-                    val items = names.mapNotNull { n ->
-                        runCatching { io.nisfeb.talon.ui.RailItem.valueOf(n) }.getOrNull()
-                    }
-                    if (items.isNotEmpty()) settings.setRailItemOrder(items)
-                }
-                ENTRY_ACCENT -> settings.setAccentSettings(
-                    io.nisfeb.talon.ui.AccentSettings(
-                        enabled = obj["enabled"].asBool(),
-                        mode = obj["mode"].asStr()
-                            ?.let { m ->
-                                runCatching { io.nisfeb.talon.ui.AccentMode.valueOf(m) }.getOrNull()
-                            }
-                            ?: io.nisfeb.talon.ui.AccentMode.Profile,
-                        customHex = obj["customHex"].asStr(),
-                    ),
-                )
-                ENTRY_THEMES -> io.nisfeb.talon.ui.theme.ThemeSettings.fromJson(obj.toString())
-                    ?.let { settings.setThemeSettings(it) }
+                if (items.isEmpty()) return
+                val order = io.nisfeb.talon.ui.sanitizeRailItemOrder(items)
+                applyLocal(entry, encodeRailItemOrder(order)) { settings.setRailItemOrder(order) }
             }
+            ENTRY_ACCENT -> {
+                val accent = io.nisfeb.talon.ui.AccentSettings(
+                    enabled = obj["enabled"].asBool(),
+                    mode = obj["mode"].asStr()
+                        ?.let { m ->
+                            runCatching { io.nisfeb.talon.ui.AccentMode.valueOf(m) }.getOrNull()
+                        }
+                        ?: io.nisfeb.talon.ui.AccentMode.Profile,
+                    customHex = obj["customHex"].asStr(),
+                )
+                applyLocal(entry, encodeAccent(accent)) { settings.setAccentSettings(accent) }
+            }
+            // A theme from a writer that does not know the extras keeps
+            // this device's: absent is not a choice to clear one.
+            ENTRY_THEMES -> io.nisfeb.talon.ui.theme.ThemeSettings.fromJson(obj.toString())
+                ?.keepingLocalExtras(settings.themeSettings.value)
+                ?.let { themes -> applyLocal(entry, encodeThemes(themes)) { settings.setThemeSettings(themes) } }
         }
     }
 
@@ -390,40 +413,38 @@ class SettingsSyncImpl(
             seedFromLocal()
         } else {
             // Ship has state: treat it as authoritative, replace local.
-            applyBucket(BUCKET_GROUP_ORDERS, deskMap!![BUCKET_GROUP_ORDERS] as? JsonObject)
-            applyBucket(BUCKET_FOLDERS, deskMap[BUCKET_FOLDERS] as? JsonObject)
-            applyBucket(BUCKET_FOLDER_MEMBERS, deskMap[BUCKET_FOLDER_MEMBERS] as? JsonObject)
-            applyBucket(BUCKET_NOTIFY_PREFS, deskMap[BUCKET_NOTIFY_PREFS] as? JsonObject)
-            applyBucket(BUCKET_RAIL_ITEMS, deskMap[BUCKET_RAIL_ITEMS] as? JsonObject)
-            applyBucket(BUCKET_BOOKMARKS, deskMap[BUCKET_BOOKMARKS] as? JsonObject)
-            applyBucket(BUCKET_BOOKMARK_FOLDERS, deskMap[BUCKET_BOOKMARK_FOLDERS] as? JsonObject)
-            applyBucket(BUCKET_BOOKMARK_FOLDER_MEMBERS, deskMap[BUCKET_BOOKMARK_FOLDER_MEMBERS] as? JsonObject)
-            // AI settings: per-feature toggles always apply (they
-            // follow the user across devices). applyAiEntry itself
-            // gates the cloud-key fields on local syncEnabled so the
-            // API key only travels with explicit consent.
-            applyBucket(BUCKET_AI_SETTINGS, deskMap[BUCKET_AI_SETTINGS] as? JsonObject)
-            // UI preferences that follow the user. Bootstrap skipped this
-            // bucket entirely before, so a preference only ever reached a
-            // device that happened to be connected when it changed — a
-            // fresh login silently kept its local defaults.
-            applyBucket(BUCKET_UI_PREFS, deskMap[BUCKET_UI_PREFS] as? JsonObject)
-            // Watchwords are unconditionally applied (mirrors live
-            // subscribe semantics) so a fresh login hydrates the
-            // ship's existing terms — without this, push works but
-            // the bootstrap never pulls.
-            applyBucket(BUCKET_WATCHWORDS, deskMap[BUCKET_WATCHWORDS] as? JsonObject)
-            applyBucket(BUCKET_WATCHWORD_EXCLUDES, deskMap[BUCKET_WATCHWORD_EXCLUDES] as? JsonObject)
-            applyBucket(BUCKET_STATUS_SEEN, deskMap[BUCKET_STATUS_SEEN] as? JsonObject)
-            // Assistant history. Upsert (not replace-all) so conversations
-            // created offline on this device aren't wiped; conversations
-            // before turns so turns resolve their convGid (a stub is
-            // created either way if they arrive out of order).
-            applyBucket(BUCKET_ASSISTANT_CONVERSATIONS, deskMap[BUCKET_ASSISTANT_CONVERSATIONS] as? JsonObject)
-            applyBucket(BUCKET_ASSISTANT_TURNS, deskMap[BUCKET_ASSISTANT_TURNS] as? JsonObject)
-            // Loop definitions. Upsert (not replace-all) so loops created
-            // offline on this device survive; lastRunAt is preserved per row.
-            applyBucket(BUCKET_LOOPS, deskMap[BUCKET_LOOPS] as? JsonObject)
+            // Only what the ship has. A missing or empty bucket means this
+            // device's copy stands (see bucketIsMissingOrEmpty) and is
+            // seeded below; applying it as empty first wiped the rows the
+            // seed was about to send, so a bucket new to the ship erased
+            // that data here.
+            for (bucket in listOf(
+                BUCKET_GROUP_ORDERS, BUCKET_FOLDERS, BUCKET_FOLDER_MEMBERS,
+                BUCKET_NOTIFY_PREFS, BUCKET_RAIL_ITEMS, BUCKET_BOOKMARKS,
+                BUCKET_BOOKMARK_FOLDERS, BUCKET_BOOKMARK_FOLDER_MEMBERS,
+                // Per-feature toggles follow the user; applyAiEntry gates
+                // the cloud-key fields on local syncEnabled, so the API
+                // key only travels with explicit consent.
+                BUCKET_AI_SETTINGS,
+                // Pulled here too: a preference used to reach only a device
+                // connected when it changed, and a fresh login kept its
+                // local defaults.
+                BUCKET_UI_PREFS,
+                // Pulled so a fresh login has the ship's terms.
+                BUCKET_WATCHWORDS, BUCKET_WATCHWORD_EXCLUDES,
+                BUCKET_STATUS_SEEN,
+                // Upserted, not replaced, so conversations made offline here
+                // survive; conversations before turns, so turns resolve
+                // their convGid (a stub is made either way).
+                BUCKET_ASSISTANT_CONVERSATIONS, BUCKET_ASSISTANT_TURNS,
+                // Upserted too, so loops made offline survive; lastRunAt is
+                // kept per row.
+                BUCKET_LOOPS,
+            )) {
+                val entries = deskMap!![bucket] as? JsonObject
+                if (!bucketIsMissingOrEmpty(entries)) applyBucket(bucket, entries)
+            }
+            runCatching { dropOrphanedMembers() }.onFailure { Log.w(TAG, "orphaned folder members", it) }
 
             // Per-bucket recovery for the Room-backed buckets: any the
             // ship is missing (or holds empty) gets re-seeded from the
@@ -479,6 +500,17 @@ class SettingsSyncImpl(
                 runCatching { pushAiSettings() }
                     .onFailure { Log.w(TAG, "ai-settings upgrade push failed", it) }
             }
+        }
+        // A key typed while signed out reached no ship, and nothing
+        // pushed it afterwards unless some other setting happened to
+        // change. On every connect, a device that has credentials makes
+        // sure the ship has them. Idempotent: the same entry again.
+        val creds = (deskMap?.get(BUCKET_AI_SETTINGS) as? JsonObject)?.get(AI_KEYS_ENTRY)
+        val cfg = aiSettings.state.value
+        if (cfg.syncEnabled && cfg.hasCredentials() && creds == null) {
+            Log.i(TAG, "ship has no credentials entry — seeding from this device")
+            runCatching { pushAiSettings() }
+                .onFailure { Log.w(TAG, "credentials seed push failed", it) }
         }
 
         // Subscribe for live updates from other devices.
@@ -745,12 +777,6 @@ class SettingsSyncImpl(
         )
     }
 
-    /** Combined local+push. Kept for callers that aren't drag-driven. */
-    suspend fun reorderGroupOrders(flags: List<String>) {
-        reorderGroupOrdersLocal(flags)
-        pushGroupOrders()
-    }
-
     override suspend fun createFolder(name: String, sortOrder: Int): Long {
         val id = db.folders().createFolder(FolderEntity(name = name, sortOrder = sortOrder))
         pokePutEntry(
@@ -778,14 +804,14 @@ class SettingsSyncImpl(
     }
 
     override suspend fun deleteFolder(id: Long) {
+        val members = db.folders().streamMembers().first().filter { it.folderId == id }
         db.folders().deleteMembersOf(id)
         db.folders().delete(id)
         pokeDelEntry(BUCKET_FOLDERS, id.toString())
-        // Also clear any folder-members entries keyed by this folder.
-        // %settings has no wildcard del — so push a fresh bucket minus
-        // anything with this folder id prefix. Cheap because typically
-        // few folders.
-        clearFolderMembersForFolder(id)
+        // %settings has no wildcard del, so each member entry goes by
+        // name. Left behind, they were given to the next folder a new
+        // device made under this id.
+        members.forEach { pokeDelEntry(BUCKET_FOLDER_MEMBERS, folderMemberKey(id, it.whom)) }
     }
 
     override suspend fun addFolderMember(folderId: Long, whom: String) {
@@ -850,10 +876,59 @@ class SettingsSyncImpl(
         }
     }
 
-    /** Combined local+push. Kept for non-drag callers. */
-    suspend fun reorderFolderMembers(folderId: Long, whoms: List<String>) {
-        reorderFolderMembersLocal(folderId, whoms)
-        pushFolderMembersOrder(folderId)
+    /**
+     * The credentials as they go on the wire. They are written to their
+     * own entry, and mirrored into the preferences entry for builds
+     * before 1.8 that read only that one: a key-less device's preference
+     * push drops the mirror, which is the old wipe, but the entry beside
+     * it still holds them and nothing this side of 1.8 reads the mirror.
+     */
+    private fun JsonObjectBuilder.aiCredentials(cfg: AiSettings.Config) {
+        put("provider", cfg.provider.name)
+        // Only ship a credential we actually have. Emitting "" would
+        // make the ship's entry authoritatively key-less, and a
+        // later pull (here or on a peer) then blanks a real local
+        // key — the "keys not persisted" data loss. Absent ≠ empty.
+        // A removal travels as a mark in revokedKeys, below.
+        if (cfg.apiKey.isNotBlank()) put("apiKey", cfg.apiKey)
+        cfg.model?.let { put("model", it) }
+        cfg.baseUrl?.let { put("baseUrl", it) }
+        // Brave key rides the same opt-in gate as the LLM key —
+        // both are service credentials; same don't-ship-empty rule.
+        if (cfg.braveApiKey.isNotBlank()) put("braveApiKey", cfg.braveApiKey)
+        // STT key: same don't-ship-empty rule as the other
+        // credentials. Shipping "" whenever it was blank let a
+        // device that never had the key blank everyone's on its
+        // next push of any AI setting. A removal travels as an
+        // explicit stamp instead, so peers can tell "removed"
+        // from "this device just doesn't have it".
+        if (cfg.sttApiKey.isNotBlank()) {
+            put("sttApiKey", cfg.sttApiKey)
+        } else if (cfg.sttApiKeyRemovedAtMs > 0L) {
+            put("sttApiKeyRemovedAtMs", cfg.sttApiKeyRemovedAtMs)
+        }
+        // The private model. Its address is not a secret but
+        // it travels with the key that opens it.
+        cfg.privateBaseUrl?.let { put("privateBaseUrl", it) }
+        cfg.privateModel?.let { put("privateModel", it) }
+        if (cfg.privateApiKey.isNotBlank()) put("privateApiKey", cfg.privateApiKey)
+        // The profile's keys, by provider, on the same terms:
+        // only those a provider here actually has.
+        cfg.savedProfile?.keys()?.takeIf { it.isNotEmpty() }?.let { keys ->
+            put("providerKeys", buildJsonObject { keys.forEach { (id, k) -> put(id, k) } })
+        }
+        // The providers and models, which the frontier and
+        // private model fields above always kept to this
+        // entry: without keys or model lists.
+        cfg.savedProfile?.let {
+            put("profile", Json.encodeToJsonElement(io.nisfeb.talon.ai.AiProfile.serializer(), it.forSync()))
+        }
+        // Which model reads your messages: a fact about the frontier
+        // provider, and meaningless without one, so it travels here.
+        put("frontierReadsMessages", cfg.frontierReadsMessages)
+        // Every key taken out anywhere, so it leaves every device and
+        // no device's copy brings it back.
+        if (cfg.revokedKeys.isNotEmpty()) put("revokedKeys", Json.encodeToJsonElement(REVOKED, cfg.revokedKeys))
     }
 
     /**
@@ -869,8 +944,22 @@ class SettingsSyncImpl(
      * ship's entry with a feature-only blob, dropping the cloud-key
      * fields without needing a separate clear path.
      */
+
+
     override suspend fun pushAiSettings() {
         val cfg = aiSettings.state.value
+        // The credentials, in their own entry, and only from a device
+        // that has some. A device with none says nothing about them, so
+        // it cannot wipe the ship's copy by saving a preference.
+        if (cfg.syncEnabled && cfg.hasCredentials()) {
+            pokePutEntry(
+                BUCKET_AI_SETTINGS, AI_KEYS_ENTRY,
+                buildJsonObject {
+                    put("schemaVersion", AI_SCHEMA_V2)
+                    aiCredentials(cfg)
+                },
+            )
+        }
         pokePutEntry(
             BUCKET_AI_SETTINGS, AI_ENTRY,
             buildJsonObject {
@@ -878,30 +967,6 @@ class SettingsSyncImpl(
                 // these toggle values are an explicit write, not a
                 // legacy seed from the rc8-era recovery path.
                 put("schemaVersion", AI_SCHEMA_V2)
-                if (cfg.syncEnabled) {
-                    put("provider", cfg.provider.name)
-                    // Only ship a credential we actually have. Emitting "" would
-                    // make the ship's entry authoritatively key-less, and a
-                    // later pull (here or on a peer) then blanks a real local
-                    // key — the "keys not persisted" data loss. Absent ≠ empty.
-                    if (cfg.apiKey.isNotBlank()) put("apiKey", cfg.apiKey)
-                    cfg.model?.let { put("model", it) }
-                    cfg.baseUrl?.let { put("baseUrl", it) }
-                    // Brave key rides the same opt-in gate as the LLM key —
-                    // both are service credentials; same don't-ship-empty rule.
-                    if (cfg.braveApiKey.isNotBlank()) put("braveApiKey", cfg.braveApiKey)
-                    // STT key: same don't-ship-empty rule as the other
-                    // credentials. Shipping "" whenever it was blank let a
-                    // device that never had the key blank everyone's on its
-                    // next push of any AI setting. A removal travels as an
-                    // explicit stamp instead, so peers can tell "removed"
-                    // from "this device just doesn't have it".
-                    if (cfg.sttApiKey.isNotBlank()) {
-                        put("sttApiKey", cfg.sttApiKey)
-                    } else if (cfg.sttApiKeyRemovedAtMs > 0L) {
-                        put("sttApiKeyRemovedAtMs", cfg.sttApiKeyRemovedAtMs)
-                    }
-                }
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
                 put("smartFeaturesEnabled", cfg.smartFeaturesEnabled)
                 put("askUrbitEnabled", cfg.askUrbitEnabled)
@@ -911,6 +976,10 @@ class SettingsSyncImpl(
                 put("urbitKnowledgePrompt", cfg.urbitKnowledgePrompt)
                 put("assistantPrompt", cfg.assistantPrompt)
                 put("loopPrompt", cfg.loopPrompt)
+                // The profile's switches, which travel like the toggles
+                // above; its providers and models ride the credentials.
+                cfg.savedProfile?.let { put("switches", it.switches()) }
+                if (cfg.syncEnabled && cfg.hasCredentials()) aiCredentials(cfg)
             },
         )
     }
@@ -1017,24 +1086,28 @@ class SettingsSyncImpl(
     override fun canCoordinate(): Boolean = channel != null
 
     override suspend fun claim(loop: io.nisfeb.talon.data.LoopEntity): Boolean {
-        val ch = channel ?: return false
+        if (channel == null) return false
         if (loop.gid.isBlank()) return true // unsynced loop: single-device, nothing to race
-        val me = aiSettings.state.value.deviceId
-        if (me.isBlank()) return true       // no id (not a real platform store) — don't block
-        val now = nowMs()
+        if (aiSettings.state.value.deviceId.isBlank()) return true // no id (not a real platform store) — don't block
         // Stale after ~2 missed fires, clamped so sub-hour loops still fail
         // over reasonably and long loops don't pin a dead holder for days.
-        val staleMs = (loop.intervalMinutes.toLong() * 2).coerceIn(30, 720) * 60_000L
+        return claimKey(loop.gid, (loop.intervalMinutes.toLong() * 2).coerceIn(30, 720) * 60_000L, CLAIM_SETTLE_MS)
+    }
 
-        return when (io.nisfeb.talon.ai.decideClaim(readClaim(ch, loop.gid), me, now, staleMs)) {
-            io.nisfeb.talon.ai.ClaimDecision.RUN -> { writeClaim(loop.gid, me, now); true }
+    override suspend fun claimKey(key: String, staleMs: Long, settleMs: Long): Boolean {
+        val ch = channel ?: return false
+        val me = aiSettings.state.value.deviceId
+        if (me.isBlank()) return false
+        val now = nowMs()
+        return when (io.nisfeb.talon.ai.decideClaim(readClaim(ch, key), me, now, staleMs)) {
+            io.nisfeb.talon.ai.ClaimDecision.RUN -> { writeClaim(key, me, now); true }
             io.nisfeb.talon.ai.ClaimDecision.SKIP -> false
             io.nisfeb.talon.ai.ClaimDecision.CONTEST -> {
                 // Stake a claim, let concurrent claimants settle on the ship,
                 // then run only if I'm still the holder.
-                writeClaim(loop.gid, me, now)
-                kotlinx.coroutines.delay(CLAIM_SETTLE_MS)
-                readClaim(ch, loop.gid)?.first == me
+                writeClaim(key, me, now)
+                kotlinx.coroutines.delay(settleMs)
+                readClaim(ch, key)?.first == me
             }
         }
     }
@@ -1086,7 +1159,7 @@ class SettingsSyncImpl(
         // store) isn't encrypted.
         val redacted = JsonObject(
             obj.mapValues { (k, v) ->
-                if (k == "apiKey" || k == "braveApiKey" || k == "sttApiKey") JsonPrimitive("***") else v
+                if (k == "apiKey" || k == "braveApiKey" || k == "sttApiKey" || k == "privateApiKey" || k == "providerKeys") JsonPrimitive("***") else v
             },
         )
         Log.i(TAG, "applyAiEntry schemaVersion=$schemaVersion obj=$redacted")
@@ -1116,6 +1189,11 @@ class SettingsSyncImpl(
         // The transcription key: a real one wins; an absent one keeps ours;
         // a removal stamp newer than our own last removal clears ours.
         val remoteRemovedAt = obj["sttApiKeyRemovedAtMs"].asLong() ?: 0L
+        // Keys taken out on any device. The store keeps the marks of
+        // both sides and takes every marked key out of what it keeps,
+        // whichever side it came from (keepingCredentials).
+        val marks = (obj["revokedKeys"] as? JsonObject)
+            ?.let { runCatching { Json.decodeFromJsonElement(REVOKED, it) }.getOrNull() }.orEmpty()
         val remoteStt: String? = obj["sttApiKey"].asStr()?.takeIf { it.isNotBlank() }
             ?: if (remoteRemovedAt > current.sttApiKeyRemovedAtMs) "" else null
         val merged = if (current.syncEnabled) {
@@ -1123,7 +1201,16 @@ class SettingsSyncImpl(
             val provider = providerStr?.let {
                 runCatching { AiSettings.Provider.valueOf(it) }.getOrNull()
             }
-            if (provider != null) {
+            // A remote entry that carries no key of its own says
+            // nothing about which provider to use or what to call the
+            // model: an absent field used to read as "set it to null",
+            // so one launch of a key-less profile build turned a working
+            // OpenRouter setup into Anthropic with no model name and a
+            // key that then answered 401.
+            val carries = obj["apiKey"].asStr()?.isNotBlank() == true ||
+                obj["braveApiKey"].asStr()?.isNotBlank() == true ||
+                obj["sttApiKey"].asStr() != null || remoteRemovedAt > 0L
+            if (provider != null && carries) {
                 features.copy(
                     provider = provider,
                     // Only overwrite the key when the entry actually
@@ -1135,10 +1222,16 @@ class SettingsSyncImpl(
                     // ?: guard alone wouldn't catch a ship entry that was
                     // seeded with apiKey:"" by an older client.
                     apiKey = obj["apiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.apiKey,
-                    model = obj["model"].asStr(),
-                    baseUrl = obj["baseUrl"].asStr(),
+                    // Absent keeps what this device has, the way the
+                    // keys do. Only a blank string is a real erasure.
+                    model = obj["model"].asStr() ?: current.model,
+                    baseUrl = obj["baseUrl"].asStr() ?: current.baseUrl,
                     // Same "only overwrite when present and non-empty" guard.
                     braveApiKey = obj["braveApiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.braveApiKey,
+                    // The private model, on the same absent-keeps-local terms.
+                    privateBaseUrl = obj["privateBaseUrl"].asStr() ?: current.privateBaseUrl,
+                    privateModel = obj["privateModel"].asStr() ?: current.privateModel,
+                    privateApiKey = obj["privateApiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.privateApiKey,
                     // Unlike apiKey, present-but-empty here means the user
                     // cleared the key on a peer — nothing ever seeded
                     // sttApiKey:"" — so adopt "" and let the removal
@@ -1150,13 +1243,53 @@ class SettingsSyncImpl(
             } else features
         } else features
 
-        aiSettings.applyRemote(merged)
+        // Which model reads your messages rides the credentials: the
+        // model it names is only here on a device that syncs them, and a
+        // device that keeps its messages off the cloud is not told
+        // otherwise by a peer.
+        val gated =
+            if (current.syncEnabled) merged.copy(frontierReadsMessages = bool("frontierReadsMessages", merged.frontierReadsMessages), revokedKeys = marks)
+            else merged
+
+        // The profile: a new install's arrives whole, an old install's
+        // write changes what its fields describe, keys come with the
+        // credentials. applyRemote's keepingCredentials holds the rest.
+        val withProfile = gated.copy(savedProfile = io.nisfeb.talon.ai.profileAfterEntry(obj, current, gated))
+        aiSettings.applyRemote(withProfile)
+        // A peer that had not heard of a removal yet wrote its
+        // credentials over the ones that carried it. Said again, once:
+        // the peer takes the marks from this push, and this device's
+        // next apply of its own entry finds nothing missing. Off the
+        // event stream, which two pokes waiting on acks held up, and
+        // one at a time, since an older build's every write lacks them.
+        val kept = aiSettings.state.value.revokedKeys
+        if (current.syncEnabled && obj.containsKey("provider") && io.nisfeb.talon.ai.mergedMarks(marks, kept) != marks) pushMarks()
         // applyRemote deliberately bypasses onStateChange (anti-pingpong),
         // which is also the only rearm-on-key-change hook — so a key or
         // feature toggle arriving via sync must re-arm the loop scheduler
         // here, or a device whose alarm was disarmed for lack of a key
         // stays disarmed until restart even though loops can now run.
         rearmLoops()
+    }
+
+    /**
+     * The AI settings pushed again for their revoked-key marks, off the
+     * event stream and one at a time. Owed until there is a scope: an
+     * entry applied at bootstrap, before the shell attached, lost it.
+     */
+    private fun pushMarks() {
+        if (marksPush?.isActive == true) return
+        val scope = pushScope ?: run { marksOwed = true; return }
+        marksOwed = false
+        marksPush = scope.launch {
+            try {
+                pushAiSettings()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "revoked keys push failed", e)
+            }
+        }
     }
 
     override suspend fun addBookmark(whom: String, postId: String, ts: Long) {
@@ -1202,9 +1335,12 @@ class SettingsSyncImpl(
     }
 
     override suspend fun deleteBookmarkFolder(id: Long) {
+        val members = db.bookmarkFolders().streamMembers().first().filter { it.folderId == id }
         db.bookmarkFolders().deleteMembersOf(id)
         db.bookmarkFolders().delete(id)
         pokeDelEntry(BUCKET_BOOKMARK_FOLDERS, id.toString())
+        // As with a chat folder: its members go from the ship by name.
+        members.forEach { pokeDelEntry(BUCKET_BOOKMARK_FOLDER_MEMBERS, bookmarkFolderMemberKey(id, it.whom, it.postId)) }
     }
 
     override suspend fun addBookmarkToFolder(folderId: Long, whom: String, postId: String) {
@@ -1225,28 +1361,6 @@ class SettingsSyncImpl(
             BUCKET_BOOKMARK_FOLDER_MEMBERS,
             bookmarkFolderMemberKey(folderId, whom, postId),
         )
-    }
-
-    /** Local-only: rewrite a folder's ordering. Caller pushes the
-     *  resulting ordinals to %settings via [pushBookmarkFolderOrder]
-     *  on drag-stop, mirroring the conversation-folder pattern. */
-    suspend fun reorderBookmarkFolderMembersLocal(
-        folderId: Long,
-        items: List<Pair<String, String>>,
-    ) {
-        db.bookmarkFolders().reorderMembers(folderId, items)
-    }
-
-    suspend fun pushBookmarkFolderOrder(folderId: Long) {
-        val members = db.bookmarkFolders().streamMembers().first()
-            .filter { it.folderId == folderId }
-        members.forEach { m ->
-            pokePutEntry(
-                BUCKET_BOOKMARK_FOLDER_MEMBERS,
-                bookmarkFolderMemberKey(folderId, m.whom, m.postId),
-                buildJsonObject { put("ordinal", m.ordinal) },
-            )
-        }
     }
 
     override suspend fun setNotifyLevel(whom: String, level: String) {
@@ -1272,12 +1386,15 @@ class SettingsSyncImpl(
         }
     }
 
-    override suspend fun setWatchwordExclude(whom: String, excluded: Boolean) {
-        // Routes through Watchwords.excludeChat (Android-only) so the
-        // local DB write + onChange → %settings push fire correctly.
-        // Desktop builds inject a no-op router and the exclude row is
-        // only mutated through the Watchwords screen instead.
-        watchwordExcludeRouter(whom, excluded)
+    override suspend fun mirrorWatchword(change: io.nisfeb.talon.ai.WatchwordChange) {
+        when (change) {
+            is io.nisfeb.talon.ai.WatchwordChange.Upsert -> pushWatchwordEntry(change.term)
+            is io.nisfeb.talon.ai.WatchwordChange.Remove -> deleteWatchwordEntry(change.termText)
+            is io.nisfeb.talon.ai.WatchwordChange.Exclude -> pushWatchwordExclude(change.whom)
+            is io.nisfeb.talon.ai.WatchwordChange.Unexclude -> deleteWatchwordExclude(change.whom)
+            is io.nisfeb.talon.ai.WatchwordChange.SyncToggled ->
+                if (change.on) pushAllWatchwords() else clearWatchwordsOnShip()
+        }
     }
 
     /** Mirror one watchword term to the ship's settings. */
@@ -1363,100 +1480,158 @@ class SettingsSyncImpl(
     // directly without the full bootstrap+UrbitChannel scaffolding.
     // Kept in lockstep with production app/'s SettingsSync.kt — when
     // that copy is retired in Stage F the visibility can stay internal.
+    /**
+     * A bucket whose entries are rows in a table.
+     *
+     * Most of them are: an entry is one row, keyed by its own id, and
+     * sync does four things with it. Written out longhand that was a
+     * branch in each of four `when`s, so a new bucket meant four edits
+     * and a forgotten one meant a bucket that applied but never
+     * cleared. Here each bucket says how an entry reads and what to do
+     * with it, once.
+     */
+    private class Rows<T>(
+        val decode: (key: String, obj: JsonObject) -> T?,
+        val replaceAll: suspend (List<T>) -> Unit,
+        val upsert: suspend (T) -> Unit,
+        val remove: suspend (key: String) -> Unit,
+        /** True when an entry means there should be no local row at all. */
+        val drop: (JsonObject) -> Boolean = { false },
+    ) {
+        /** The whole bucket, which is the ship's word: anything not in it goes. */
+        suspend fun applyAll(entries: Map<String, JsonObject>) =
+            replaceAll(entries.mapNotNull { (key, obj) -> if (drop(obj)) null else decode(key, obj) })
+
+        suspend fun applyOne(key: String, obj: JsonObject) {
+            if (drop(obj)) remove(key) else decode(key, obj)?.let { upsert(it) }
+        }
+
+        suspend fun clear() = replaceAll(emptyList())
+    }
+
+    /** Every bucket that is just rows, and how each one reads. */
+    private val rowBuckets: Map<String, Rows<*>> by lazy {
+        mapOf(
+            BUCKET_GROUP_ORDERS to Rows(
+                decode = { key, obj -> obj["ordinal"].asInt()?.let { GroupOrderEntity(flag = key, ordinal = it) } },
+                replaceAll = { db.groupOrders().replaceAll(it) },
+                upsert = { db.groupOrders().upsertRaw(it.flag, it.ordinal) },
+                remove = { db.groupOrders().remove(it) },
+            ),
+            BUCKET_FOLDERS to Rows(
+                decode = { key, obj ->
+                    val id = key.toLongOrNull()
+                    val name = obj["name"].asStr()
+                    if (id == null || name == null) null
+                    else FolderEntity(id = id, name = name, sortOrder = obj["sortOrder"].asInt() ?: 0)
+                },
+                replaceAll = { db.folders().replaceAll(it) },
+                upsert = { db.folders().upsert(it) },
+                remove = { key ->
+                    key.toLongOrNull()?.let { id ->
+                        db.folders().deleteMembersOf(id)
+                        db.folders().delete(id)
+                    }
+                },
+            ),
+            BUCKET_FOLDER_MEMBERS to Rows(
+                decode = { key, obj ->
+                    parseFolderMemberKey(key)?.let { (folderId, whom) ->
+                        FolderMemberEntity(
+                            folderId = folderId,
+                            whom = whom,
+                            ordinal = obj["ordinal"].asInt() ?: 0,
+                            kind = obj["kind"].asStr() ?: FolderMemberEntity.KIND_WHOM,
+                        )
+                    }
+                },
+                replaceAll = { db.folders().replaceAllMembers(it) },
+                upsert = { db.folders().addMemberRaw(it.folderId, it.whom, it.ordinal, it.kind) },
+                remove = { key ->
+                    parseFolderMemberKey(key)?.let { (folderId, whom) -> db.folders().removeMember(folderId, whom) }
+                },
+            ),
+            BUCKET_NOTIFY_PREFS to Rows(
+                decode = { key, obj -> obj["level"].asStr()?.let { NotifyPreferenceEntity(whom = key, level = it) } },
+                replaceAll = { db.notifyPrefs().replaceAll(it) },
+                upsert = { db.notifyPrefs().upsert(it) },
+                remove = { db.notifyPrefs().clear(it) },
+            ),
+            BUCKET_RAIL_ITEMS to Rows(
+                // Absence is the default, so a visible item is no row at
+                // all: an explicit `true` would drift the read site.
+                decode = { key, obj ->
+                    if (obj["visible"].asBool() == null) null
+                    else railItemOrNull(key)?.let { RailItemPrefEntity(it.name, visible = false) }
+                },
+                replaceAll = { db.railItemPrefs().replaceAll(it) },
+                upsert = { db.railItemPrefs().upsert(it) },
+                remove = { db.railItemPrefs().delete(it) },
+                drop = { it["visible"].asBool() == true },
+            ),
+            BUCKET_BOOKMARKS to Rows(
+                decode = { key, obj ->
+                    parseBookmarkKey(key)?.let { (whom, postId) ->
+                        BookmarkEntity(whom = whom, postId = postId, bookmarkedMs = obj["ts"].asLong() ?: 0L)
+                    }
+                },
+                replaceAll = { db.bookmarks().replaceAll(it) },
+                upsert = { db.bookmarks().upsert(it) },
+                remove = { key -> parseBookmarkKey(key)?.let { (whom, postId) -> db.bookmarks().remove(whom, postId) } },
+            ),
+            BUCKET_BOOKMARK_FOLDERS to Rows(
+                decode = { key, obj ->
+                    val id = key.toLongOrNull()
+                    val name = obj["name"].asStr()
+                    if (id == null || name == null) null
+                    else BookmarkFolderEntity(id = id, name = name, sortOrder = obj["sortOrder"].asInt() ?: 0)
+                },
+                replaceAll = { db.bookmarkFolders().replaceAll(it) },
+                upsert = { db.bookmarkFolders().upsert(it) },
+                remove = { key ->
+                    key.toLongOrNull()?.let { id ->
+                        db.bookmarkFolders().deleteMembersOf(id)
+                        db.bookmarkFolders().delete(id)
+                    }
+                },
+            ),
+            BUCKET_BOOKMARK_FOLDER_MEMBERS to Rows(
+                decode = { key, obj ->
+                    parseBookmarkFolderMemberKey(key)?.let { (folderId, whom, postId) ->
+                        BookmarkFolderMemberEntity(
+                            folderId = folderId,
+                            whom = whom,
+                            postId = postId,
+                            ordinal = obj["ordinal"].asInt() ?: 0,
+                        )
+                    }
+                },
+                replaceAll = { db.bookmarkFolders().replaceAllMembers(it) },
+                upsert = { db.bookmarkFolders().addMemberRaw(it.folderId, it.whom, it.postId, it.ordinal) },
+                remove = { key ->
+                    parseBookmarkFolderMemberKey(key)?.let { (folderId, whom, postId) ->
+                        db.bookmarkFolders().removeMember(folderId, whom, postId)
+                    }
+                },
+            ),
+        )
+    }
+
+    /** One bucket's entries, unwrapped and kept only where they are objects. */
+    private fun objects(entries: JsonObject?): Map<String, JsonObject> =
+        entries.orEmpty().mapNotNull { (k, v) -> (unwrap(v) as? JsonObject)?.let { k to it } }.toMap()
+
     internal suspend fun applyBucket(bucket: String, entries: JsonObject?) {
         // Replace-on-apply: any local row not in the incoming bucket
         // will be wiped. For bucket reorders this is the right call.
+        rowBuckets[bucket]?.let { return it.applyAll(objects(entries)) }
         when (bucket) {
-            BUCKET_GROUP_ORDERS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val ordinal = (unwrap(v) as? JsonObject)?.get("ordinal")
-                        .asInt() ?: return@mapNotNull null
-                    GroupOrderEntity(flag = k, ordinal = ordinal)
-                }
-                db.groupOrders().replaceAll(list)
-            }
-            BUCKET_FOLDERS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val id = k.toLongOrNull() ?: return@mapNotNull null
-                    val obj = unwrap(v) as? JsonObject ?: return@mapNotNull null
-                    val name = obj["name"].asStr() ?: return@mapNotNull null
-                    val sortOrder = obj["sortOrder"].asInt() ?: 0
-                    FolderEntity(id = id, name = name, sortOrder = sortOrder)
-                }
-                db.folders().replaceAll(list)
-            }
-            BUCKET_FOLDER_MEMBERS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val (folderId, whom) = parseFolderMemberKey(k) ?: return@mapNotNull null
-                    val obj = unwrap(v) as? JsonObject
-                    val ordinal = obj?.get("ordinal").asInt() ?: 0
-                    val kind = obj?.get("kind").asStr()
-                        ?: FolderMemberEntity.KIND_WHOM
-                    FolderMemberEntity(
-                        folderId = folderId,
-                        whom = whom,
-                        ordinal = ordinal,
-                        kind = kind,
-                    )
-                }
-                db.folders().replaceAllMembers(list)
-            }
-            BUCKET_NOTIFY_PREFS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val level = (unwrap(v) as? JsonObject)?.get("level")
-                        .asStr() ?: return@mapNotNull null
-                    NotifyPreferenceEntity(whom = k, level = level)
-                }
-                db.notifyPrefs().replaceAll(list)
-            }
-            BUCKET_RAIL_ITEMS -> {
-                val rows = entries.orEmpty().mapNotNull { (k, v) ->
-                    val item = railItemOrNull(k) ?: return@mapNotNull null
-                    val visible = (unwrap(v) as? JsonObject)?.get("visible").asBool()
-                        ?: return@mapNotNull null
-                    // Skip explicit `true` entries — absence is the default and
-                    // we don't want stale `true` rows to drift the read site.
-                    if (visible) return@mapNotNull null
-                    RailItemPrefEntity(item.name, visible = false)
-                }
-                db.railItemPrefs().replaceAll(rows)
-            }
-            BUCKET_BOOKMARKS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val (whom, postId) = parseBookmarkKey(k) ?: return@mapNotNull null
-                    val ts = (unwrap(v) as? JsonObject)?.get("ts")
-                        .asLong() ?: 0L
-                    BookmarkEntity(whom = whom, postId = postId, bookmarkedMs = ts)
-                }
-                db.bookmarks().replaceAll(list)
-            }
-            BUCKET_BOOKMARK_FOLDERS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val id = k.toLongOrNull() ?: return@mapNotNull null
-                    val obj = unwrap(v) as? JsonObject ?: return@mapNotNull null
-                    val name = obj["name"].asStr() ?: return@mapNotNull null
-                    val sortOrder = obj["sortOrder"].asInt() ?: 0
-                    BookmarkFolderEntity(id = id, name = name, sortOrder = sortOrder)
-                }
-                db.bookmarkFolders().replaceAll(list)
-            }
-            BUCKET_BOOKMARK_FOLDER_MEMBERS -> {
-                val list = entries.orEmpty().mapNotNull { (k, v) ->
-                    val (folderId, whom, postId) =
-                        parseBookmarkFolderMemberKey(k) ?: return@mapNotNull null
-                    val ordinal = (unwrap(v) as? JsonObject)?.get("ordinal").asInt() ?: 0
-                    BookmarkFolderMemberEntity(
-                        folderId = folderId,
-                        whom = whom,
-                        postId = postId,
-                        ordinal = ordinal,
-                    )
-                }
-                db.bookmarkFolders().replaceAllMembers(list)
-            }
             BUCKET_AI_SETTINGS -> {
-                val entry = unwrap(entries?.get(AI_ENTRY)) as? JsonObject ?: return
-                applyAiEntry(entry)
+                // Preferences first, then the credentials, which are an
+                // entry of their own so that saving one cannot erase the
+                // other. An older ship has only the first.
+                (unwrap(entries?.get(AI_ENTRY)) as? JsonObject)?.let { applyAiEntry(it) }
+                (unwrap(entries?.get(AI_KEYS_ENTRY)) as? JsonObject)?.let { applyAiEntry(it) }
             }
             BUCKET_WATCHWORDS -> {
                 // Apply each entry; we don't have a "deleteAllTerms" since
@@ -1584,63 +1759,15 @@ class SettingsSyncImpl(
 
     internal suspend fun applyEntry(bucket: String, entry: String, value: JsonElement) {
         val unwrapped = unwrap(value)
+        val obj = unwrapped as? JsonObject
+        rowBuckets[bucket]?.let { rows ->
+            if (obj != null) rows.applyOne(entry, obj)
+            return
+        }
         when (bucket) {
-            BUCKET_GROUP_ORDERS -> {
-                val ordinal = (unwrapped as? JsonObject)?.get("ordinal")
-                    .asInt() ?: return
-                db.groupOrders().upsertRaw(entry, ordinal)
-            }
-            BUCKET_FOLDERS -> {
-                val id = entry.toLongOrNull() ?: return
-                val obj = unwrapped as? JsonObject ?: return
-                val name = obj["name"].asStr() ?: return
-                val sortOrder = obj["sortOrder"].asInt() ?: 0
-                db.folders().upsert(FolderEntity(id, name, sortOrder))
-            }
-            BUCKET_FOLDER_MEMBERS -> {
-                val (folderId, whom) = parseFolderMemberKey(entry) ?: return
-                val obj = unwrapped as? JsonObject
-                val ordinal = obj?.get("ordinal").asInt() ?: 0
-                val kind = obj?.get("kind").asStr()
-                    ?: FolderMemberEntity.KIND_WHOM
-                db.folders().addMemberRaw(folderId, whom, ordinal, kind)
-            }
-            BUCKET_NOTIFY_PREFS -> {
-                val level = (unwrapped as? JsonObject)?.get("level")
-                    .asStr() ?: return
-                db.notifyPrefs().upsert(NotifyPreferenceEntity(entry, level))
-            }
-            BUCKET_RAIL_ITEMS -> {
-                val item = railItemOrNull(entry) ?: return
-                val visible = (unwrapped as? JsonObject)?.get("visible").asBool() ?: return
-                if (visible) {
-                    db.railItemPrefs().delete(item.name)
-                } else {
-                    db.railItemPrefs().upsert(RailItemPrefEntity(item.name, visible = false))
-                }
-            }
-            BUCKET_BOOKMARKS -> {
-                val (whom, postId) = parseBookmarkKey(entry) ?: return
-                val ts = (unwrapped as? JsonObject)?.get("ts")
-                    .asLong() ?: 0L
-                db.bookmarks().upsert(BookmarkEntity(whom, postId, ts))
-            }
-            BUCKET_BOOKMARK_FOLDERS -> {
-                val id = entry.toLongOrNull() ?: return
-                val obj = unwrapped as? JsonObject ?: return
-                val name = obj["name"].asStr() ?: return
-                val sortOrder = obj["sortOrder"].asInt() ?: 0
-                db.bookmarkFolders().upsert(BookmarkFolderEntity(id, name, sortOrder))
-            }
-            BUCKET_BOOKMARK_FOLDER_MEMBERS -> {
-                val (folderId, whom, postId) =
-                    parseBookmarkFolderMemberKey(entry) ?: return
-                val ordinal = (unwrapped as? JsonObject)?.get("ordinal").asInt() ?: 0
-                db.bookmarkFolders().addMemberRaw(folderId, whom, postId, ordinal)
-            }
             BUCKET_AI_SETTINGS -> {
-                if (entry == AI_ENTRY) {
-                    (unwrapped as? JsonObject)?.let(::applyAiEntry)
+                if (entry == AI_ENTRY || entry == AI_KEYS_ENTRY) {
+                    (unwrapped as? JsonObject)?.let { applyAiEntry(it) }
                 }
             }
             BUCKET_WATCHWORDS -> {
@@ -1715,6 +1842,7 @@ class SettingsSyncImpl(
     }
 
     internal suspend fun removeEntry(bucket: String, entry: String) {
+        rowBuckets[bucket]?.let { return it.remove(entry) }
         when (bucket) {
             BUCKET_UI_PREFS -> {
                 // Entry deleted on the ship → back to that entry's default.
@@ -1723,38 +1851,11 @@ class SettingsSyncImpl(
                     ENTRY_NON_COMET_NAMES -> io.nisfeb.talon.ui.AzimuthNames.setEnabled(false)
                 }
             }
-            BUCKET_GROUP_ORDERS -> db.groupOrders().remove(entry)
-            BUCKET_FOLDERS -> {
-                val id = entry.toLongOrNull() ?: return
-                db.folders().deleteMembersOf(id)
-                db.folders().delete(id)
-            }
-            BUCKET_FOLDER_MEMBERS -> {
-                val (folderId, whom) = parseFolderMemberKey(entry) ?: return
-                db.folders().removeMember(folderId, whom)
-            }
-            BUCKET_NOTIFY_PREFS -> db.notifyPrefs().clear(entry)
-            BUCKET_RAIL_ITEMS -> db.railItemPrefs().delete(entry)
-            BUCKET_BOOKMARKS -> {
-                val (whom, postId) = parseBookmarkKey(entry) ?: return
-                db.bookmarks().remove(whom, postId)
-            }
-            BUCKET_BOOKMARK_FOLDERS -> {
-                val id = entry.toLongOrNull() ?: return
-                db.bookmarkFolders().deleteMembersOf(id)
-                db.bookmarkFolders().delete(id)
-            }
-            BUCKET_BOOKMARK_FOLDER_MEMBERS -> {
-                val (folderId, whom, postId) =
-                    parseBookmarkFolderMemberKey(entry) ?: return
-                db.bookmarkFolders().removeMember(folderId, whom, postId)
-            }
-            BUCKET_AI_SETTINGS -> {
-                // Ship removed config — clear local AI settings
-                // (only if local is in sync mode so we don't wipe a
-                // device that didn't opt in).
-                if (aiSettings.state.value.syncEnabled) aiSettings.clear()
-            }
+            // An AI settings entry going away takes nothing here: absent is
+            // not empty, and a deliberate removal travels as a revoke mark
+            // or as the profile the owner saved (hasCredentials). A device
+            // with keys puts the credentials entry back on its next connect.
+            BUCKET_AI_SETTINGS -> Unit
             BUCKET_WATCHWORDS -> {
                 // entry-key is sanitized form; delete by matching sanitization.
                 val terms = db.watchwords().streamTerms().firstOrNull().orEmpty()
@@ -1906,28 +2007,17 @@ class SettingsSyncImpl(
     }
 
     internal suspend fun clearBucketLocally(bucket: String) {
+        rowBuckets[bucket]?.let { return it.clear() }
         when (bucket) {
             BUCKET_UI_PREFS -> {
                 io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(false)
                 io.nisfeb.talon.ui.AzimuthNames.setEnabled(false)
             }
-            BUCKET_GROUP_ORDERS -> db.groupOrders().replaceAll(emptyList())
-            BUCKET_FOLDERS -> db.folders().replaceAll(emptyList())
-            BUCKET_FOLDER_MEMBERS -> db.folders().replaceAllMembers(emptyList())
-            BUCKET_NOTIFY_PREFS -> db.notifyPrefs().replaceAll(emptyList())
-            BUCKET_RAIL_ITEMS -> db.railItemPrefs().replaceAll(emptyList())
-            BUCKET_BOOKMARKS -> db.bookmarks().replaceAll(emptyList())
-            BUCKET_BOOKMARK_FOLDERS -> db.bookmarkFolders().replaceAll(emptyList())
-            BUCKET_BOOKMARK_FOLDER_MEMBERS -> db.bookmarkFolders().replaceAllMembers(emptyList())
-            BUCKET_WATCHWORDS -> {
-                val existing = db.watchwords().streamTerms().firstOrNull().orEmpty()
-                existing.forEach { db.watchwords().deleteTermById(it.id) }
-            }
-            BUCKET_WATCHWORD_EXCLUDES -> {
-                db.watchwords().excludesAsList().forEach {
-                    db.watchwords().deleteExclude(it)
-                }
-            }
+            // Only a device switching watchword sync off deletes these
+            // buckets: it takes the ship's copy away, not anyone's terms.
+            // Mirroring it here erased every other device's terms and
+            // excludes the moment one of them opted out.
+            BUCKET_WATCHWORDS, BUCKET_WATCHWORD_EXCLUDES -> Unit
             // A peer cleared assistant history (del-bucket) — mirror it
             // locally. Either bucket's del-bucket wipes both tables; turns
             // can't outlive their conversations.
@@ -1946,11 +2036,24 @@ class SettingsSyncImpl(
         }
     }
 
-    private suspend fun clearFolderMembersForFolder(folderId: Long) {
-        db.folders().deleteMembersOf(folderId)
-        // No wildcard settings del — best-effort: we'd re-push bucket.
-        // Skipped for v1; drift tolerated because the folder itself
-        // was deleted so its members are orphaned and filtered out.
+    /**
+     * Members of a folder that is gone, dropped here and on the ship.
+     * A folder deleted before its members went with it left them on
+     * the ship, and the next folder a new device made under that id
+     * showed them. Run once the ship's buckets are applied, so a
+     * folder is judged gone by the ship's word.
+     */
+    private suspend fun dropOrphanedMembers() {
+        val folders = db.folders().streamFolders().first().map { it.id }.toSet()
+        db.folders().streamMembers().first().filter { it.folderId !in folders }.forEach {
+            db.folders().removeMember(it.folderId, it.whom)
+            pokeDelEntry(BUCKET_FOLDER_MEMBERS, folderMemberKey(it.folderId, it.whom))
+        }
+        val marks = db.bookmarkFolders().streamFolders().first().map { it.id }.toSet()
+        db.bookmarkFolders().streamMembers().first().filter { it.folderId !in marks }.forEach {
+            db.bookmarkFolders().removeMember(it.folderId, it.whom, it.postId)
+            pokeDelEntry(BUCKET_BOOKMARK_FOLDER_MEMBERS, bookmarkFolderMemberKey(it.folderId, it.whom, it.postId))
+        }
     }
 
     // ───────── poke helpers ─────────

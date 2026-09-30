@@ -180,12 +180,6 @@ class AuspexApi(
         request(HttpMethod.Post, "/api/draft-delete", json.encodeToString(IdReq.serializer(), IdReq(id)))
     }
 
-    /** Sign and send a stored draft. The ship deletes it only if the
-     *  send succeeded. */
-    suspend fun sendDraft(id: String) {
-        request(HttpMethod.Post, "/api/draft-send", json.encodeToString(IdReq.serializer(), IdReq(id)))
-    }
-
     /** Move a thread in or out of the archive. Local state: no other
      *  ship can see it, so the client that changed it refreshes. */
     suspend fun setArchived(threadId: String, archived: Boolean) {
@@ -242,15 +236,24 @@ class AuspexApi(
         return Blob(bytes, dispositionName(resp.headers["content-disposition"]) ?: hash)
     }
 
-    /** Mark messages read. A set per request, deliberately: one id per
-     *  request costs the ship a mailbox scan each, on one fiber. */
-    suspend fun markRead(msgIds: List<String>) = mark("/api/read", msgIds)
+    /**
+     * Mark messages of one thread read. A set per request, and the thread
+     * named (auspex 14): the ship reads that thread alone, rather than
+     * scanning the mailbox for each id, and refuses a request without it
+     * as "bad thread-id". An id not in the thread is skipped.
+     */
+    suspend fun markRead(threadId: String, msgIds: List<String>) = mark("/api/read", threadId, msgIds)
 
-    suspend fun markUnread(msgIds: List<String>) = mark("/api/unread", msgIds)
+    suspend fun markUnread(threadId: String, msgIds: List<String>) = mark("/api/unread", threadId, msgIds)
 
-    private suspend fun mark(path: String, msgIds: List<String>) {
+    /** Close messages to their header line on every client, or open them again (auspex 15). Same body as a read mark. */
+    suspend fun fold(threadId: String, msgIds: List<String>) = mark("/api/fold", threadId, msgIds)
+
+    suspend fun unfold(threadId: String, msgIds: List<String>) = mark("/api/unfold", threadId, msgIds)
+
+    private suspend fun mark(path: String, threadId: String, msgIds: List<String>) {
         if (msgIds.isEmpty()) return
-        request(HttpMethod.Post, path, json.encodeToString(MarkReq.serializer(), MarkReq(msgIds)))
+        request(HttpMethod.Post, path, json.encodeToString(MarkReq.serializer(), MarkReq(threadId, msgIds)))
     }
 
     // ---- plumbing ------------------------------------------------------
@@ -464,6 +467,8 @@ data class MailThread(
     val unreadable: Int = 0,
     val archived: Boolean = false,
     val labels: List<String> = emptyList(),
+    /** Messages the owner closed to their header line, on any client (auspex 15). */
+    val folded: List<String> = emptyList(),
 )
 
 /** One row of a listing. The verdict is here and not only inside the
@@ -529,7 +534,7 @@ private data class SendReq(
 )
 
 @Serializable
-private data class MarkReq(@SerialName("msg-ids") val msgIds: List<String>)
+private data class MarkReq(@SerialName("thread-id") val threadId: String, @SerialName("msg-ids") val msgIds: List<String>)
 
 @Serializable
 private data class IdReq(val id: String)

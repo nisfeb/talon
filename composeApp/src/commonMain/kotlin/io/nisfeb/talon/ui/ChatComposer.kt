@@ -25,7 +25,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.LaunchedEffect
@@ -131,7 +131,53 @@ class ComposerState(initialDraftText: String) {
     var pendingQuote by mutableStateOf<MessageEntity?>(null)
     var pendingVoice by mutableStateOf<PendingVoice?>(null)
     var pendingAttachment by mutableStateOf<PendingAttachment?>(null)
-    var sendError by mutableStateOf<String?>(null)
+    private var shownError by mutableStateOf<String?>(null)
+
+    /** The line over the composer: what went wrong, in words. Setting it clears [sendErrorDetails]. */
+    var sendError: String?
+        get() = shownError
+        set(value) {
+            shownError = value
+            sendErrorDetails = null
+            sendErrorCalm = false
+        }
+
+    /** The failure whole, behind "Copy error details"; null where the line says it all. */
+    var sendErrorDetails by mutableStateOf<String?>(null)
+        private set
+
+    /** The line is a slow ship, not a refusal: drawn quietly, not in the error colour. */
+    var sendErrorCalm by mutableStateOf(false)
+        private set
+
+    /**
+     * [what] did not go through. A ship that was only slow or out of reach
+     * is said calmly, as something to try again when it is back; a refusal
+     * is said as one. Either way the error whole is behind Copy error
+     * details, not in the line: "Request timeout has expired [url=…]" was
+     * the line.
+     */
+    fun failed(what: String, err: Throwable) {
+        val slow = io.nisfeb.talon.util.isShipSlow(err)
+        sendError = if (slow) {
+            "Your ship is slow, so the ${noun(what)} didn't go through. Try again when it's back."
+        } else {
+            "$what failed: " + ((err as? io.nisfeb.talon.urbit.PokeNacked)?.let { "the ship refused it" }
+                ?: (err.message ?: err::class.simpleName).orEmpty().lineSequence().first().take(120))
+        }
+        sendErrorDetails = io.nisfeb.talon.util.errorDetailsOf(err)
+        sendErrorCalm = slow
+    }
+
+    private fun noun(what: String) = when (what) {
+        "send" -> "message"
+        "react" -> "reaction"
+        "notify" -> "notification setting"
+        "watchword toggle" -> "watchword change"
+        "voice send" -> "voice message"
+        else -> what
+    }
+
     var uploading by mutableStateOf(false)
 
     /**
@@ -211,10 +257,11 @@ fun rememberComposerState(whom: String, drafts: DraftStore, quoteKey: String = w
 interface ChatSendStrategy {
     suspend fun sendText(text: String)
 
-    /** Send a structured image. Both surfaces carry a full story —
+    /** Send a structured image, with [caption] (text written with it)
+     *  under it in the same message. Both surfaces carry a full story —
      *  DM/post via repo.sendImage, thread via repo.replyImage — so the
      *  image renders inline rather than as a link. */
-    suspend fun sendImage(src: String, width: Int, height: Int, alt: String)
+    suspend fun sendImage(src: String, width: Int, height: Int, alt: String, caption: String = "")
 
     val supportsQuote: Boolean
 
@@ -364,14 +411,18 @@ fun ChatComposer(
         }
     }
 
-    // Confirm the staged attachment: upload + send. On failure we keep
-    // the attachment staged (error shows above) so the user can retry
-    // the send instead of re-picking.
+    // Confirm the staged attachment: upload + send, with whatever was
+    // written in the box going in the same message. It used to go out
+    // alone and the text was then cleared, so a message written before
+    // attaching a screenshot was lost. On failure we keep the attachment
+    // staged and the text as it was (error shows above) so the user can
+    // retry the send instead of re-picking.
     val sendAttachment: () -> Unit = {
         val pending = state.pendingAttachment
         if (pending != null) {
             state.uploading = true
             state.sendError = null
+            val caption = state.draft.text.trim()
             scope.launch {
                 runCatching {
                     val hostedUrl = repo.uploadImage(pending.bytes, pending.mimeType, pending.displayName)
@@ -382,18 +433,24 @@ fun ChatComposer(
                             width = dims?.first ?: 0,
                             height = dims?.second ?: 0,
                             alt = pending.displayName,
+                            caption = caption,
                         )
                     } else {
-                        strategy.sendText(hostedUrl)
+                        strategy.sendText(if (caption.isEmpty()) hostedUrl else "$caption\n\n$hostedUrl")
                     }
-                    // Sent — clear the stage and the orphaned text draft so
-                    // the conversation list stops advertising "Draft:".
+                    // Sent, the text with it: clear the stage and the draft
+                    // so the conversation list stops advertising "Draft:".
+                    // Only if the box still says what went: the box stays
+                    // open during the upload, and a line typed meanwhile is
+                    // not the one that was sent.
                     state.pendingAttachment = null
-                    state.draft = TextFieldValue("")
-                    store.clear(whom)
+                    if (state.draft.text.trim() == caption) {
+                        state.draft = TextFieldValue("")
+                        store.clear(whom)
+                    }
                 }.onFailure { err ->
                     val kind = if (pending.isImage) "image" else "file"
-                    state.sendError = "$kind failed: ${err.message ?: err::class.simpleName}"
+                    state.failed(kind, err)
                 }
                 state.uploading = false
             }
@@ -404,9 +461,9 @@ fun ChatComposer(
     // existing image / file picker buttons. Image-shaped MIME goes
     // through strategy.sendImage so the recipient gets a structured
     // image post (where the surface supports it); everything else
-    // posts the bare URL the way the file button does. Clears the
-    // draft afterwards for the same reason the picker buttons do —
-    // the user finalized a send, the textual draft is orphaned.
+    // posts the bare URL the way the file button does. The text in the
+    // box is not sent with these, so it stays there: clearing it threw
+    // away a message written before the drop.
     // suspend, not fire-and-forget: a multi-file drop iterates files
     // through one coroutine so `uploading` stays true until the LAST
     // file lands — per-file coroutines re-enabled the composer (and
@@ -433,10 +490,8 @@ fun ChatComposer(
                 } else {
                     strategy.sendText(hostedUrl)
                 }
-                state.draft = TextFieldValue("")
-                store.clear(whom)
             }.onFailure { err ->
-                state.sendError = "upload failed: ${err.message ?: err::class.simpleName}"
+                state.failed("upload", err)
             }
             state.uploading = false
     }
@@ -587,12 +642,10 @@ fun ChatComposer(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            // Disabled while a staged preview (attachment or voice) has
-            // replaced the composer via early-return: the drop target sits on
-            // this outer Column, so without the guard a drop would land
-            // "behind" the preview — sending a stray file and flickering the
-            // preview's Send/Discard buttons. (Fixes the same pre-existing
-            // hole for the voice preview.)
+            // Disabled while an attachment is staged (there is one slot) or
+            // the voice preview has replaced the composer via early-return:
+            // the drop target sits on this outer Column, so without the
+            // guard a drop would land behind it and send a stray file.
             .fileDropTarget(
                 enabled = canSend && !state.uploading &&
                     state.pendingAttachment == null && state.pendingVoice == null,
@@ -613,17 +666,20 @@ fun ChatComposer(
                 }
             },
     ) {
-        if (state.sendError != null) {
-            val clipboard = LocalClipboardManager.current
-            val err = state.sendError!!
-            Text(
-                "$err · tap to copy",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier
-                    .clickable { clipboard.setText(AnnotatedString(err)) }
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+        val clipboard = LocalClipboardManager.current
+        // Writes waiting for a slow ship: said once, quietly, with what
+        // the last try said behind the button.
+        val slow = repo.shipSlow.collectAsState(initial = null).value
+        if (slow != null) {
+            NoteLine(
+                "Your ship is slow. ${slow.queued} queued for when it's back.",
+                calm = true,
+                details = slow.details,
+                onCopy = { clipboard.setText(AnnotatedString(it)) },
             )
+        }
+        state.sendError?.let { err ->
+            NoteLine(err, calm = state.sendErrorCalm, details = state.sendErrorDetails, onCopy = { clipboard.setText(AnnotatedString(it)) })
         }
         if (slashSuggestions.isNotEmpty() && slashTrigger != null) {
             SlashPicker(
@@ -681,6 +737,13 @@ fun ChatComposer(
                 onSaveEdit(edit, text)
                 return@doSend true
             }
+            // A staged attachment goes with whatever is written, as one
+            // message, text or none. A staged quote waits for the next.
+            if (state.pendingAttachment != null) {
+                if (!canSend || state.uploading) return@doSend false
+                sendAttachment()
+                return@doSend true
+            }
             val body = state.draft.text.trim()
             val quote = state.pendingQuote
             // A bare quote (empty body) is allowed so a user can
@@ -704,7 +767,11 @@ fun ChatComposer(
                 }
                 quote != null -> false
                 firstWord == "/invite" -> {
-                    when (val p = parseInvite(body, whom.takeIf { inDm }, myGroups)) {
+                    val invite = parseInvite(
+                        body, whom.takeIf { inDm }, myGroups,
+                        known = allShips, nicknameOf = { s -> contactMap.nickname(s) },
+                    )
+                    when (val p = invite) {
                         is InviteParse.Problem -> {
                             state.sendError = p.message
                             return@doSend false
@@ -793,7 +860,7 @@ fun ChatComposer(
                     }
                 }.onFailure { err ->
                     Log.e("ChatComposer", "send failed", err)
-                    state.sendError = "send failed: ${err.message ?: err::class.simpleName}"
+                    state.failed("send", err)
                 }
             }
             true
@@ -804,6 +871,18 @@ fun ChatComposer(
                 target = q,
                 contactMap = contactMap,
                 onDismiss = { state.pendingQuote = null },
+            )
+        }
+
+        // An attachment sits above the box, which stays open: what is
+        // written can be read and changed before the two go together.
+        // It used to take the box's place, and its Send posted the file
+        // alone and threw the text away.
+        state.pendingAttachment?.let { pa ->
+            AttachmentStrip(
+                pending = pa,
+                sending = state.uploading,
+                onCancel = { state.pendingAttachment = null },
             )
         }
 
@@ -872,8 +951,7 @@ fun ChatComposer(
                             deleteFile(pv.path)
                         }.onFailure { err ->
                             Log.e("ChatComposer", "voice send failed", err)
-                            state.sendError =
-                                "voice send failed: ${err.message ?: err::class.simpleName}"
+                            state.failed("voice send", err)
                         }
                         state.uploading = false
                     }
@@ -882,17 +960,6 @@ fun ChatComposer(
             return
         }
 
-        val pa = state.pendingAttachment
-        if (pa != null) {
-            AttachmentPreviewRow(
-                pending = pa,
-                sending = state.uploading,
-                sendAccent = sendAccent,
-                onCancel = { state.pendingAttachment = null },
-                onSend = sendAttachment,
-            )
-            return
-        }
 
         Row(
             modifier = Modifier
@@ -1003,6 +1070,11 @@ fun ChatComposer(
                     .onPreviewKeyEvent { e ->
                         if (e.type != KeyEventType.KeyDown) {
                             return@onPreviewKeyEvent false
+                        }
+                        // Escape drops a staged attachment, as its cross does.
+                        if (e.key == Key.Escape && state.pendingAttachment != null && !state.uploading) {
+                            state.pendingAttachment = null
+                            return@onPreviewKeyEvent true
                         }
                         // Up/Down move the highlighted row in the emoji
                         // dropdown (clamped at the ends). Only while the
@@ -1150,7 +1222,8 @@ fun ChatComposer(
             // touch, where hardware Enter doesn't exist, a bare quote is
             // unreachable.
             val sendable = canSend &&
-                (state.draft.text.isNotBlank() || state.pendingQuote != null)
+                (state.draft.text.isNotBlank() || state.pendingQuote != null ||
+                    (state.pendingAttachment != null && !state.uploading))
             IconButton(
                 onClick = { doSend() },
                 enabled = sendable,
@@ -1222,32 +1295,15 @@ private fun QuotePreviewRow(
 }
 
 @Composable
-internal fun AttachmentPreviewRow(
+internal fun AttachmentStrip(
     pending: PendingAttachment,
     sending: Boolean,
-    sendAccent: Color,
     onCancel: () -> Unit,
-    onSend: () -> Unit,
 ) {
-    // The text field, and the Enter handler on it, leave while this
-    // shows, so a paste followed by Enter went nowhere. The row takes
-    // the keys itself: Enter sends, Escape discards.
-    val keys = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { keys.requestFocus() } }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .focusRequester(keys)
-            .onPreviewKeyEvent { e ->
-                if (e.type != KeyEventType.KeyDown || sending) return@onPreviewKeyEvent false
-                when (e.key) {
-                    Key.Enter, Key.NumPadEnter -> { onSend(); true }
-                    Key.Escape -> { onCancel(); true }
-                    else -> false
-                }
-            }
-            .focusable()
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -1288,39 +1344,19 @@ internal fun AttachmentPreviewRow(
                 maxLines = 1,
             )
             Text(
-                (if (pending.isImage) "Image · " else "File · ") +
-                    if (isTouchPrimary) "tap send to post" else "Enter to post, Esc to discard",
+                if (sending) "Sending" else (if (pending.isImage) "Image" else "File") + ", sent with your message",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        IconButton(
-            onClick = onCancel,
-            enabled = !sending,
-            modifier = Modifier.size(36.dp),
-        ) {
-            Icon(
-                Icons.Filled.Close,
-                contentDescription = "Discard attachment",
-                modifier = Modifier.size(22.dp),
-            )
-        }
-        IconButton(
-            onClick = onSend,
-            enabled = !sending,
-            modifier = Modifier.size(36.dp),
-        ) {
-            if (sending) {
-                CircularProgressIndicator(
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(20.dp),
-                )
-            } else {
+        if (sending) {
+            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+        } else {
+            IconButton(onClick = onCancel, modifier = Modifier.size(36.dp)) {
                 Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send attachment",
+                    Icons.Filled.Close,
+                    contentDescription = "Discard attachment",
                     modifier = Modifier.size(22.dp),
-                    tint = sendAccent,
                 )
             }
         }
@@ -1385,6 +1421,27 @@ private fun VoicePreviewRow(
                     modifier = Modifier.size(22.dp),
                     tint = if (!sending) sendAccent else LocalContentColor.current,
                 )
+            }
+        }
+    }
+}
+
+/** A line over the composer, with the error whole behind "Copy error details" where there is one. */
+@Composable
+private fun NoteLine(text: String, calm: Boolean, details: String?, onCopy: (String) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (calm) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+            modifier = Modifier.weight(1f).padding(vertical = 4.dp),
+        )
+        if (details != null) {
+            TextButton(onClick = { onCopy(details) }) {
+                Text("Copy error details", style = MaterialTheme.typography.labelSmall)
             }
         }
     }

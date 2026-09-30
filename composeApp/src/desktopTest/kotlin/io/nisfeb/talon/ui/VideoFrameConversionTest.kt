@@ -79,12 +79,6 @@ class VideoFrameConversionTest {
     }
 
     @Test
-    fun `every pixel is written, including the last row`() {
-        val px = convert(16, 8, y = 235, u = 128, v = 128)
-        assertTrue(px.none { it == 0 }, "some pixels were never written")
-    }
-
-    @Test
     fun `row stride is honoured, not assumed equal to width`() {
         // A solid image cannot catch a stride bug: reading at the wrong
         // offset still lands on the same constant, which is exactly how

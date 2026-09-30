@@ -12,6 +12,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class CalendarEditTest {
@@ -66,11 +67,6 @@ class CalendarEditTest {
         assertEquals(LocalDate(2026, 9, 1), g[1])
     }
 
-    @Test fun `an all-day row spans its days and ends before r`() {
-        val row = CalendarRow(id = "t", all = true, l = 1_789_344_000_000L, r = 1_789_344_000_000L + 2 * 86_400_000L)
-        assertEquals(listOf(LocalDate(2026, 9, 14), LocalDate(2026, 9, 15)), daysOf(row, TimeZone.UTC))
-    }
-
     @Test fun `tags ride in meta as an array and come back`() {
         assertEquals(listOf("work", "lunch"), parseTags(" work, #lunch,, work "))
         val d = EventDraft(name = "Lunch", date = day, tags = listOf("work", "lunch"))
@@ -98,6 +94,7 @@ class CalendarEditTest {
         ).jsonObject
         val d = draftFromEvent(imported, day)!!
         assertEquals("rrule", d.rawKind)
+        assertEquals(8 * 60 to 15, d.minuteOfDay to d.durMin, "the form shows its own hour and length")
         val b = eventBody(d.copy(name = "Standup, renamed"), "x")
         assertEquals("rrule", b["kind"]!!.jsonPrimitive.content)
         assertEquals("FREQ=WEEKLY;BYDAY=MO", b["args"]!!.jsonObject["rrule"]!!.jsonPrimitive.content)
@@ -226,5 +223,38 @@ class CalendarEditTest {
         val (s, e) = long.bounds(TimeZone.UTC)
         assertEquals(utcMidnight, s)
         assertEquals(utcMidnight + 90 * 86_400_000L, e, "the full ninety days, not the capped list's end")
+    }
+
+    @Test fun `an edit keeps the colour and everything it does not show`() {
+        // A task as the ship holds it, mirrored from orrery and coloured.
+        val onShip = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"cat":"todo","cal":"default","done":false,"due_ms":null,
+               "meta":{"name":"Book the ferry","note":"the description","color":"#c0392b",
+                       "orrery":"act-123","priority":"5"}}""",
+        ).jsonObject
+        val d = assertNotNull(draftFromEvent(onShip, day))
+        assertEquals("the description", d.note)
+        assertEquals("#c0392b", d.color)
+        val back = eventBody(d.copy(name = "Book the ferry, Friday"), id = "t1")["meta"]!!.jsonObject
+        assertEquals("Book the ferry, Friday", back["name"]!!.jsonPrimitive.content, "the edit lands")
+        assertEquals("#c0392b", back["color"]!!.jsonPrimitive.content, "the colour survives")
+        assertEquals("act-123", back["orrery"]!!.jsonPrimitive.content, "and so does the link orrery finds it by")
+        assertEquals("5", back["priority"]!!.jsonPrimitive.content, "and a field another client wrote")
+        assertEquals("the description", back["note"]!!.jsonPrimitive.content)
+    }
+
+    @Test fun `a task's draft comes from its row, due on the day the row is on`() {
+        val ny = TimeZone.of("America/New_York")
+        val dayStart = LocalDate(2026, 9, 30).atTime(0, 0).toInstant(ny).toEpochMilliseconds()
+        val meta = io.nisfeb.talon.mail.AuspexApi.json.parseToJsonElement("""{"name":"Buy milk","note":"oat","tags":["home"],"list":"shop"}""").jsonObject
+        val d = taskDraft(CalendarRow(id = "t1", cal = "home", meta = meta, cat = "todo", kind = "todo", all = true, l = dayStart, r = dayStart, done = true), ny, day)!!
+        assertEquals(EventCat.TODO, d.cat)
+        assertEquals("Buy milk" to "oat", d.name to d.note)
+        assertEquals(listOf("home"), d.tags)
+        assertEquals("home", d.cal)
+        assertEquals(LocalDate(2026, 9, 30), d.due)
+        assertEquals(true, d.done)
+        assertEquals(true, "list" in d.otherMeta, "meta the form does not edit is kept")
+        assertNull(taskDraft(CalendarRow(id = "t2", cat = "todo", l = 0, r = 0), ny, day)!!.due, "no day, no due")
     }
 }

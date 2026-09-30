@@ -64,6 +64,23 @@ class GroupAdminParserTest {
     }
 
     @Test
+    fun `channels and roles are read from the record, and an incomplete channel is not editable`() {
+        val g = parse("~zod/g", """{
+            "meta":{"title":"G","description":"","image":"","cover":""},
+            "roles":{"admin":{"meta":{"title":"Admin","description":"","image":"","cover":""}},"gardener":{"meta":{"title":"","description":"","image":"","cover":""}}},
+            "channels":{
+              "chat/~zod/general":{"meta":{"title":"General","description":"talk","image":"","cover":""},"added":1700000000000,"section":"default","readers":["admin"],"join":true},
+              "heap/~zod/pics":{"meta":{"title":"Pictures","description":"","image":"","cover":""},"readers":[],"join":false}
+            }}""")
+        assertEquals("a role with no title goes by its id", mapOf("admin" to "Admin", "gardener" to "gardener"), g.roles)
+        val general = g.channels.single { it.nest == "chat/~zod/general" }
+        assertEquals(AdminChannel("chat/~zod/general", "General", "talk", "", "", 1_700_000_000_000, "default", setOf("admin"), true, editable = true), general)
+        assertEquals("chat", general.kind)
+        val pics = g.channels.single { it.nest == "heap/~zod/pics" }
+        assertFalse("no added or section: an edit would send back what the owner never set", pics.editable)
+    }
+
+    @Test
     fun `public privacy maps to open cordon`() {
         val raw = """
             {"meta":{"title":"x","description":"","image":"","cover":""},

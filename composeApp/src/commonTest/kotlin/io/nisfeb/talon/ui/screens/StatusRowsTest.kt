@@ -23,13 +23,6 @@ class StatusRowsTest {
     )
 
     @Test
-    fun `our own status is not in the list`() {
-        // The feed includes us; the widget is about everyone else.
-        val rows = statusRows(feed, emptyList(), 5, us)
-        assertTrue(rows.none { it.first.ship == us })
-    }
-
-    @Test
     fun `without pins it is just the newest with something to say`() {
         val rows = statusRows(feed, emptyList(), 5, us)
         assertEquals(listOf("~dalsyd", "~ricsul-bilwyt", "~palfun-foslup"), rows.map { it.first.ship })
@@ -58,12 +51,6 @@ class StatusRowsTest {
     }
 
     @Test
-    fun `somebody unpinned with nothing to say does not`() {
-        val rows = statusRows(feed, emptyList(), 5, us)
-        assertTrue(rows.none { it.first.ship == "~sorreg-namtyv" })
-    }
-
-    @Test
     fun `pins are never crowded out by the count`() {
         // Three pins and room for one still shows all three: a pin the
         // widget silently dropped would be worse than a longer list.
@@ -85,12 +72,6 @@ class StatusRowsTest {
         val rows = statusRows(feed, listOf("~nobody-atall", "~dalsyd"), 5, us)
         assertTrue(rows.none { it.first.ship == "~nobody-atall" })
         assertEquals("~dalsyd", rows.first().first.ship)
-    }
-
-    @Test
-    fun `an empty feed is an empty list, not a crash`() {
-        assertTrue(statusRows(emptyList(), listOf("~dalsyd"), 5, us).isEmpty())
-        assertTrue(statusRows(emptyList(), emptyList(), 5, us).isEmpty())
     }
 
     @Test

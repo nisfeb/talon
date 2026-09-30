@@ -87,19 +87,13 @@ on the `ubuntu-latest` runner alongside the `.deb` job.
 - $25 one-time developer fee.
 - You ship a signed AAB (`./gradlew :composeApp:bundleRelease`), not APK.
 - Updates gate behind Play review (~hours).
-- **Your situation:** viable. The crypto library (`androidx.security.crypto`)
-  and the API-key storage warrant a tight privacy policy ("AI keys
-  stored encrypted on device; never transmitted except to the
-  user-selected provider"). Spell out that the app talks to a
-  user-provided Urbit ship over user-configured HTTP.
+- **Your situation:** viable. The crypto library (`androidx.security.crypto`) and the API-key storage warrant a tight privacy policy: AI keys are stored encrypted on device and never transmitted except to the user-selected provider. Spell out that the app talks to a user-provided Urbit ship over user-configured HTTP. Spell out the optional Armillary provider too: off until the user adds it, it buys model inference through the user's own ship from a vendor ship they choose, paid by card through Stripe or by bitcoin through BTCPay Server, both operated by that vendor. Talon still has no backend and still takes no money.
 
 **F-Droid**
 - Required: fully open-source repo, reproducible build, F-Droid metadata under `fastlane/metadata/android/` (or alongside `composeApp/`, depending on the layout F-Droid's metadata fork ends up using).
 - F-Droid's build server handles signing.
 - Updates usually lag ~1 week.
-- **Your situation:** the AI providers (Anthropic / OpenAI / custom)
-  hit third-party servers — F-Droid flags this with an anti-feature
-  tag, not blocking but noted.
+- **Your situation:** the AI providers (Anthropic, OpenAI, custom) hit third-party servers, and F-Droid flags this with an anti-feature tag: not blocking, but noted. The optional Armillary provider adds a second tag's worth of the same thing, NonFreeNet plus a payment path: it reaches a vendor Urbit ship the user chose, and paying goes through that vendor's Stripe or BTCPay Server. Both are off until the user turns them on, which is the sentence the tag description should carry.
 
 **Recommendation:** ship both. F-Droid reaches the Urbit-native crowd
 (who prefer it), Play reaches everyone else. F-Droid is less work if

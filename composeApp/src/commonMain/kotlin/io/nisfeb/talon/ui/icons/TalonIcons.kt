@@ -683,6 +683,60 @@ object TalonIcons {
         }
     }
 
+    val GroupAdd: ImageVector by lazy {
+        materialIcon(name = "Filled.GroupAdd") {
+            materialPath() {
+                moveTo(22.0f, 9.0f)
+                lineToRelative(0.0f, -2.0f)
+                lineToRelative(-2.0f, 0.0f)
+                lineToRelative(0.0f, 2.0f)
+                lineToRelative(-2.0f, 0.0f)
+                lineToRelative(0.0f, 2.0f)
+                lineToRelative(2.0f, 0.0f)
+                lineToRelative(0.0f, 2.0f)
+                lineToRelative(2.0f, 0.0f)
+                lineToRelative(0.0f, -2.0f)
+                lineToRelative(2.0f, 0.0f)
+                lineToRelative(0.0f, -2.0f)
+                close()
+            }
+            materialPath() {
+                moveTo(8.0f, 12.0f)
+                curveToRelative(2.21f, 0.0f, 4.0f, -1.79f, 4.0f, -4.0f)
+                reflectiveCurveToRelative(-1.79f, -4.0f, -4.0f, -4.0f)
+                reflectiveCurveTo(4.0f, 5.79f, 4.0f, 8.0f)
+                reflectiveCurveTo(5.79f, 12.0f, 8.0f, 12.0f)
+                close()
+            }
+            materialPath() {
+                moveTo(8.0f, 13.0f)
+                curveToRelative(-2.67f, 0.0f, -8.0f, 1.34f, -8.0f, 4.0f)
+                verticalLineToRelative(3.0f)
+                horizontalLineToRelative(16.0f)
+                verticalLineToRelative(-3.0f)
+                curveTo(16.0f, 14.34f, 10.67f, 13.0f, 8.0f, 13.0f)
+                close()
+            }
+            materialPath() {
+                moveTo(12.51f, 4.05f)
+                curveTo(13.43f, 5.11f, 14.0f, 6.49f, 14.0f, 8.0f)
+                reflectiveCurveToRelative(-0.57f, 2.89f, -1.49f, 3.95f)
+                curveTo(14.47f, 11.7f, 16.0f, 10.04f, 16.0f, 8.0f)
+                reflectiveCurveTo(14.47f, 4.3f, 12.51f, 4.05f)
+                close()
+            }
+            materialPath() {
+                moveTo(16.53f, 13.83f)
+                curveTo(17.42f, 14.66f, 18.0f, 15.7f, 18.0f, 17.0f)
+                verticalLineToRelative(3.0f)
+                horizontalLineToRelative(2.0f)
+                verticalLineToRelative(-3.0f)
+                curveTo(20.0f, 15.55f, 18.41f, 14.49f, 16.53f, 13.83f)
+                close()
+            }
+        }
+    }
+
     val Groups: ImageVector by lazy {
         materialIcon(name = "Filled.Groups") {
             materialPath() {
@@ -1595,6 +1649,36 @@ object TalonIcons {
         }
     }
 
+    val Reply: ImageVector by lazy {
+        materialIcon(name = "AutoMirrored.Filled.Reply", autoMirror = true) {
+            materialPath() {
+                moveTo(10.0f, 9.0f)
+                verticalLineTo(5.0f)
+                lineToRelative(-7.0f, 7.0f)
+                lineToRelative(7.0f, 7.0f)
+                verticalLineToRelative(-4.1f)
+                curveToRelative(5.0f, 0.0f, 8.5f, 1.6f, 11.0f, 5.1f)
+                curveToRelative(-1.0f, -5.0f, -4.0f, -10.0f, -11.0f, -11.0f)
+                close()
+            }
+        }
+    }
+
+    val Forward: ImageVector by lazy {
+        materialIcon(name = "AutoMirrored.Filled.Forward", autoMirror = true) {
+            materialPath() {
+                moveTo(12.0f, 8.0f)
+                verticalLineTo(4.0f)
+                lineToRelative(8.0f, 8.0f)
+                lineToRelative(-8.0f, 8.0f)
+                verticalLineToRelative(-4.0f)
+                horizontalLineTo(4.0f)
+                verticalLineTo(8.0f)
+                close()
+            }
+        }
+    }
+
     /** Every icon by name, for the fidelity test. */
     fun entries(): List<Pair<String, ImageVector>> = listOf(
         "AcUnit" to AcUnit,
@@ -1617,6 +1701,7 @@ object TalonIcons {
         "Fullscreen" to Fullscreen,
         "FullscreenExit" to FullscreenExit,
         "Grain" to Grain,
+        "GroupAdd" to GroupAdd,
         "Groups" to Groups,
         "Image" to Image,
         "Inbox" to Inbox,
@@ -1643,5 +1728,7 @@ object TalonIcons {
         "WaterDrop" to WaterDrop,
         "Chat" to Chat,
         "Logout" to Logout,
+        "Reply" to Reply,
+        "Forward" to Forward,
     )
 }

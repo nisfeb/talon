@@ -89,6 +89,29 @@ already final in `Typography.kt` so switching families is a one-line swap.
 | labelMedium    | Body    | Medium    | 12   | 16   | Counters, small pills.            |
 | labelSmall     | Body    | Medium    | 11   | 14   | Badges, tiny metadata.            |
 
+## Shapes
+
+Corners come from `TalonShapes` in `Theme.kt`, never from a literal:
+`extraSmall` 6dp (fields, menus), `small` 8dp (chips, buttons, tabs),
+`medium` 10dp and `large` 12dp (cards), `extraLarge` 12dp (dialogs and
+sheets). Nothing in Talon is a pill but a badge, a dot or an avatar.
+
+Material draws its buttons as pills whatever the theme says, so the app
+uses `io.nisfeb.talon.ui.Button`, `OutlinedButton` and `TextButton`
+(`TalonButtons.kt`): the same parameters, with `small` corners.
+`MaterialButtonsGuardTest` fails the build for app code importing
+Material's.
+
+## Popups
+
+Every popup is drawn in `surface`: dialogs, menus, sheets and Talon's
+own overlays. The theme sets `surfaceContainerLow`, `surfaceContainer`
+and `surfaceContainerHigh` to the surface colour for this, in both
+palettes and in a custom theme, since Material gives each kind of popup
+a shade of its own. `surfaceContainerHighest` still steps, for switch
+tracks and filled fields. No `tonalElevation` on a popup: it tints the
+surface grey.
+
 ## Icon & store assets
 
 Masters live in `branding/` at the repo root. Don't regenerate from

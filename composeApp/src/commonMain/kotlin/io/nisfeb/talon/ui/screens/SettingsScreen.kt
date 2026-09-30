@@ -1,4 +1,6 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ui.theme.LINK_BLUE
+import io.nisfeb.talon.ui.theme.linkColor
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.background
@@ -25,14 +27,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.Button
+import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
@@ -44,7 +46,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.luminance
@@ -76,12 +78,17 @@ import io.nisfeb.talon.ui.isLoopsSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
 import io.nisfeb.talon.ui.theme.ThemePreference
 import io.nisfeb.talon.ui.icons.TalonIcons
+import io.nisfeb.talon.ai.hasModelFor
 
 @Composable
 fun SettingsScreen(
     aiSettings: AiSettingsRepository,
     themePreference: ThemePreference,
     uiSettings: UiSettings,
+    /** The orrery pipe, for its section under AI; null where no ship is known. */
+    orrery: io.nisfeb.talon.orrery.OrreryRepo? = null,
+    /** Armillary on the ship, for its provider card under AI; null where no ship is known. */
+    armillary: io.nisfeb.talon.armillary.ArmillaryRepo? = null,
     /** Whether the user is logged into 2+ ships. Drives the
      *  accent-color section's auto-default — multi-ship users land
      *  with the toggle on so they don't lose the per-ship pip / send
@@ -137,6 +144,8 @@ fun SettingsScreen(
     localShip: io.nisfeb.talon.comet.LocalShip = io.nisfeb.talon.comet.LocalShip.Noop,
     /** Open on the Account tab, where the local ship and its dojo live. */
     startOnAccount: Boolean = false,
+    /** Open on the AI tab: the way in from a failure the balance caused. */
+    startOnAi: Boolean = false,
     onAlwaysPatpChanged: (Boolean) -> Unit = {},
     /** Fired after the word-names toggle flips; hosts push the new
      *  value to %settings so the choice follows the user. Local apply
@@ -175,25 +184,9 @@ fun SettingsScreen(
     // feature switch, and keying on all of it re-bunted these fields
     // whenever any switch flipped. Accepted edge: an unsaved edit is
     // replaced when a remote sync changes that same field mid-edit.
-    var provider by remember(aiState.provider) { mutableStateOf(aiState.provider) }
-    var apiKey by remember(aiState.apiKey) { mutableStateOf(aiState.apiKey) }
-    var model by remember(aiState.model) { mutableStateOf(aiState.model.orEmpty()) }
-    var baseUrl by remember(aiState.baseUrl) { mutableStateOf(aiState.baseUrl.orEmpty()) }
-    var revealKey by remember { mutableStateOf(false) }
-    var providerMenuOpen by remember { mutableStateOf(false) }
     var braveKey by remember(aiState.braveApiKey) { mutableStateOf(aiState.braveApiKey) }
     var revealBrave by remember { mutableStateOf(false) }
-    var sttKey by remember(aiState.sttApiKey) { mutableStateOf(aiState.sttApiKey) }
-    var revealStt by remember { mutableStateOf(false) }
     var promptEditorKind by remember { mutableStateOf<AiSettings.PromptKind?>(null) }
-
-    // Compare on the same normalization Save persists (trim + blank→null)
-    // so e.g. a pasted key's trailing newline doesn't leave Save enabled
-    // forever after a successful save.
-    val dirty = provider != aiState.provider ||
-        apiKey.trim() != aiState.apiKey ||
-        (model.trim().ifBlank { null } != aiState.model) ||
-        (baseUrl.trim().ifBlank { null } != aiState.baseUrl)
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -217,12 +210,21 @@ fun SettingsScreen(
                 add(SettingsTab.Notifications)
             }
             add(SettingsTab.Ai)
+            // Under AI, and its own page: many will want it off, which is
+            // how it starts.
+            add(SettingsTab.Orrery)
             if (isCallsSupported && callController != null) add(SettingsTab.Calls)
             add(SettingsTab.Account)
             add(SettingsTab.About)
         }
         var tab by remember {
-            mutableStateOf(if (startOnAccount) SettingsTab.Account else SettingsTab.Appearance)
+            mutableStateOf(
+                when {
+                    startOnAccount -> SettingsTab.Account
+                    startOnAi -> SettingsTab.Ai
+                    else -> SettingsTab.Appearance
+                },
+            )
         }
         val safeTab = if (tab in visibleTabs) tab else visibleTabs.first()
 
@@ -340,14 +342,14 @@ fun SettingsScreen(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                androidx.compose.material3.OutlinedButton(onClick = {
+                io.nisfeb.talon.ui.OutlinedButton(onClick = {
                     themeDraft = io.nisfeb.talon.ui.theme.CustomTheme.blank(
                         dark = darkNow,
                         id = kotlin.random.Random.nextLong().toString(36).trimStart('-'),
                     )
                 }) { Text("New theme") }
                 themeSettings.active?.let { t ->
-                    androidx.compose.material3.OutlinedButton(onClick = { themeDraft = t }) { Text("Edit") }
+                    io.nisfeb.talon.ui.OutlinedButton(onClick = { themeDraft = t }) { Text("Edit") }
                     TextButton(onClick = {
                         uiSettings.setThemeSettings(
                             themeSettings.copy(
@@ -365,7 +367,9 @@ fun SettingsScreen(
                     onCancel = { themeDraft = null },
                     onSave = {
                         val others = themeSettings.themes.filter { it.id != d.id }
-                        uiSettings.setThemeSettings(themeSettings.copy(themes = others + d, activeId = d.id))
+                        // All six extras written, "" for Auto: a key left out
+                        // reads as a writer that did not know it.
+                        uiSettings.setThemeSettings(themeSettings.copy(themes = others + d.explicit(), activeId = d.id))
                         themeDraft = null
                     },
                 )
@@ -392,9 +396,10 @@ fun SettingsScreen(
             val alwaysPatp by io.nisfeb.talon.ui.ShipNames.alwaysPatp.collectAsState()
             FeatureToggleRow(
                 label = "Always show ~ship names",
-                description = "Ignore nicknames and word-based names " +
-                    "everywhere — rows, mentions and quoted posts all " +
-                    "show the raw Urbit name.",
+                description = "Ignore nicknames and planets' word names " +
+                    "everywhere: rows, mentions and quoted posts show the " +
+                    "Urbit name. A comet keeps its word name, since its " +
+                    "Urbit name is its key.",
                 enabled = alwaysPatp,
                 onChange = { on ->
                     io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(on)
@@ -656,7 +661,7 @@ fun SettingsScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Login QR generator", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "Build a scannable QR with a ship URL + +code for handoff.",
+                        "A QR of your login, for signing in quickly on your other devices.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -738,300 +743,108 @@ fun SettingsScreen(
             Spacer(Modifier.height(4.dp))
 
             }
-            if (safeTab == SettingsTab.Ai) {
-            Text(
-                "AI",
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-            )
-            Text(
-                "Enable AI features by pasting an API key. Features are hidden when no key is set.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            // Provider picker
-            Box {
-                OutlinedButton(
-                    onClick = { providerMenuOpen = true },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(provider.label, modifier = Modifier.weight(1f))
-                    Icon(TalonIcons.ExpandMore, contentDescription = null)
-                }
-                DropdownMenu(
-                    expanded = providerMenuOpen,
-                    onDismissRequest = { providerMenuOpen = false },
-                ) {
-                    AiSettings.Provider.values().forEach { p ->
-                        DropdownMenuItem(
-                            text = { Text(p.label) },
-                            onClick = {
-                                provider = p
-                                providerMenuOpen = false
-                            },
-                        )
-                    }
-                }
+            if (safeTab == SettingsTab.Orrery) {
+                OrrerySettingsSection(aiSettings, orrery)
             }
-
-            OutlinedTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it },
-                label = { Text("API key") },
-                singleLine = true,
-                visualTransformation = if (revealKey) VisualTransformation.None
-                else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { revealKey = !revealKey }) {
-                        Icon(
-                            imageVector = if (revealKey) TalonIcons.VisibilityOff
-                            else TalonIcons.Visibility,
-                            contentDescription = if (revealKey) "Hide key" else "Show key",
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = model,
-                onValueChange = { model = it },
-                label = {
-                    Text(
-                        if (provider == AiSettings.Provider.Custom) "Model"
-                        else "Model (optional)"
-                    )
-                },
-                placeholder = {
-                    Text(
-                        when (provider) {
-                            AiSettings.Provider.Anthropic -> "claude-sonnet-4-5-20250929"
-                            AiSettings.Provider.OpenRouter -> "anthropic/claude-sonnet-4"
-                            AiSettings.Provider.OpenAi -> "gpt-4o-mini"
-                            AiSettings.Provider.Custom -> "e.g. llama-3.1-70b"
-                        }
-                    )
-                },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (provider == AiSettings.Provider.Custom) {
+            if (safeTab == SettingsTab.Ai) {
+            // Providers, the default model, a row per feature, and Jev.
+            AiSettingsSection(aiSettings, orrery, armillary, onOpenOrrery = { tab = SettingsTab.Orrery })
+            // The assistant subsumes MCP (ship tools) and web access —
+            // no separate toggles. When it's on, offer the optional
+            // Brave key that powers its web search (it can open URLs
+            // without one).
+            if (isAssistantSupported && aiFeatureEnabled(aiState, AiSettings.Feature.Agent)) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Assistant web search",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                )
                 OutlinedTextField(
-                    value = baseUrl,
-                    onValueChange = { baseUrl = it },
-                    label = { Text("Base URL") },
-                    placeholder = { Text("https://api.example.com/v1") },
+                    value = braveKey,
+                    onValueChange = { braveKey = it },
+                    label = { Text("Brave Search API key (optional)") },
                     singleLine = true,
+                    visualTransformation = if (revealBrave) VisualTransformation.None
+                    else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { revealBrave = !revealBrave }) {
+                            Icon(
+                                imageVector = if (revealBrave) TalonIcons.VisibilityOff
+                                else TalonIcons.Visibility,
+                                contentDescription = if (revealBrave) "Hide key" else "Show key",
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { aiSettings.setBraveApiKey(braveKey.trim()) },
+                        enabled = braveKey.trim() != aiState.braveApiKey,
+                    ) { Text("Save key") }
+                }
                 Text(
-                    "OpenAI-compatible endpoint. Accepts a base URL ending " +
-                        "in `/v1` or a full `/v1/chat/completions` URL.",
+                    "Optional — a Brave Search API key lets the assistant search " +
+                        "the web (it can already open URLs without one). " +
+                        "Get a free key at search.brave.com/help/api.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "System prompts",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                )
+                Text(
+                    "The instructions the AI follows. Urbit knowledge is shared by " +
+                        "the assistant and scheduled jobs; each also has its own. " +
+                        "Customizing changes behavior; edits sync across your devices.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                PROMPT_PARTS.forEach { part ->
+                    OutlinedButton(onClick = { promptEditorKind = part.kind }) {
+                        Text(
+                            if (aiState.prompt(part.kind).isBlank()) "Edit ${part.label}"
+                            else "Edit ${part.label} (customized)",
+                        )
+                    }
+                }
+                promptEditorKind?.let { kind ->
+                    val part = PROMPT_PARTS.first { it.kind == kind }
+                    SystemPromptEditorDialog(
+                        title = part.label,
+                        current = aiState.prompt(kind),
+                        default = part.default,
+                        onSave = {
+                            aiSettings.setPrompt(kind, it)
+                            promptEditorKind = null
+                        },
+                        onDismiss = { promptEditorKind = null },
+                    )
+                }
             }
 
-            Spacer(Modifier.height(4.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        aiSettings.update(
-                            provider,
-                            apiKey.trim(),
-                            model.trim().ifBlank { null },
-                            baseUrl.trim().ifBlank { null },
-                        )
-                    },
-                    enabled = dirty,
-                ) { Text("Save") }
-                TextButton(
-                    onClick = {
-                        // The chat credential only. clear() also wiped
-                        // the Whisper key, the Brave key, every custom
-                        // system prompt and every feature toggle — none
-                        // of which this button names.
-                        aiSettings.update(AiSettings.Provider.Anthropic, "", null, null)
-                        provider = AiSettings.Provider.Anthropic
-                        apiKey = ""
-                        model = ""
-                        baseUrl = ""
-                    },
-                    enabled = aiState.hasKey(),
-                ) { Text("Remove key") }
-            }
             // Any stored credential is enough to want this switch: it
             // used to live under hasKey(), so someone who set only a
             // Whisper key had it pushed to %settings (syncEnabled
             // defaults on) with no way to opt out short of pasting a
             // chat key first.
-            if (aiState.hasKey() || aiState.sttApiKey.isNotBlank() ||
-                aiState.braveApiKey.isNotBlank()
-            ) {
+            if (aiState.hasCredentials()) {
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
                 FeatureToggleRow(
                     label = "Sync AI settings across devices",
-                    description = "Stores your provider, model, toggles, and all three " +
-                        "API keys — chat, Whisper transcription, and Brave Search — in " +
-                        "%settings on the ship. The keys will be on the ship — only " +
-                        "enable if you trust the ship.",
+                    description = "Stores your providers, models and switches, with every " +
+                        "provider's key and the Brave Search key, in %settings on the " +
+                        "ship. The keys will be on the ship, so only enable it if you " +
+                        "trust the ship.",
                     enabled = aiState.syncEnabled,
                     onChange = { aiSettings.setSyncEnabled(it) },
                 )
             }
-            if (aiState.hasKey()) {
-                Text(
-                    "✓ AI is enabled",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Cloud features",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                )
-                AiSettings.Feature.values()
-                    .filter { it.requiresCloudKey }
-                    // The Assistant needs the embedder host (isAssistantSupported);
-                    // the other cloud features run anywhere a key is set.
-                    .filter { isAssistantSupported || it != AiSettings.Feature.Agent }
-                    .forEach { feature ->
-                        FeatureToggleRow(
-                            label = feature.label,
-                            description = feature.description,
-                            enabled = aiFeatureEnabled(aiState, feature),
-                            onChange = { aiSettings.setFeature(feature, it) },
-                        )
-                    }
-
-                // The assistant subsumes MCP (ship tools) and web access —
-                // no separate toggles. When it's on, offer the optional
-                // Brave key that powers its web search (it can open URLs
-                // without one).
-                if (isAssistantSupported && aiFeatureEnabled(aiState, AiSettings.Feature.Agent)) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Assistant web search",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    )
-                    OutlinedTextField(
-                        value = braveKey,
-                        onValueChange = { braveKey = it },
-                        label = { Text("Brave Search API key (optional)") },
-                        singleLine = true,
-                        visualTransformation = if (revealBrave) VisualTransformation.None
-                        else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            IconButton(onClick = { revealBrave = !revealBrave }) {
-                                Icon(
-                                    imageVector = if (revealBrave) TalonIcons.VisibilityOff
-                                    else TalonIcons.Visibility,
-                                    contentDescription = if (revealBrave) "Hide key" else "Show key",
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = { aiSettings.setBraveApiKey(braveKey.trim()) },
-                            enabled = braveKey.trim() != aiState.braveApiKey,
-                        ) { Text("Save key") }
-                    }
-                    Text(
-                        "Optional — a Brave Search API key lets the assistant search " +
-                            "the web (it can already open URLs without one). " +
-                            "Get a free key at search.brave.com/help/api.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "System prompts",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    )
-                    Text(
-                        "The instructions the AI follows. Urbit knowledge is shared by " +
-                            "the assistant and scheduled jobs; each also has its own. " +
-                            "Customizing changes behavior; edits sync across your devices.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    PROMPT_PARTS.forEach { part ->
-                        OutlinedButton(onClick = { promptEditorKind = part.kind }) {
-                            Text(
-                                if (aiState.prompt(part.kind).isBlank()) "Edit ${part.label}"
-                                else "Edit ${part.label} (customized)",
-                            )
-                        }
-                    }
-                    promptEditorKind?.let { kind ->
-                        val part = PROMPT_PARTS.first { it.kind == kind }
-                        SystemPromptEditorDialog(
-                            title = part.label,
-                            current = aiState.prompt(kind),
-                            default = part.default,
-                            onSave = {
-                                aiSettings.setPrompt(kind, it)
-                                promptEditorKind = null
-                            },
-                            onDismiss = { promptEditorKind = null },
-                        )
-                    }
-                }
-            }
-
-            // ── Call transcription (Whisper) ───────────────────────
-            Spacer(Modifier.height(8.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Call transcription",
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-            )
-            Text(
-                "Transcribing a recorded party line uses OpenAI Whisper. If your " +
-                    "chat provider above is OpenAI (or a compatible Custom endpoint) " +
-                    "that key is used automatically \u2014 otherwise paste a " +
-                    "Whisper-capable key here.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedTextField(
-                value = sttKey,
-                onValueChange = { sttKey = it },
-                label = { Text("Whisper (OpenAI) API key") },
-                singleLine = true,
-                visualTransformation = if (revealStt) VisualTransformation.None
-                else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { revealStt = !revealStt }) {
-                        Icon(
-                            imageVector = if (revealStt) TalonIcons.VisibilityOff
-                            else TalonIcons.Visibility,
-                            contentDescription = if (revealStt) "Hide key" else "Show key",
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { aiSettings.setSttApiKey(sttKey.trim()) },
-                    enabled = sttKey.trim() != aiState.sttApiKey,
-                ) { Text("Save key") }
-                if (aiState.sttApiKey.isNotBlank()) {
-                    TextButton(onClick = {
-                        aiSettings.setSttApiKey("")
-                        sttKey = ""
-                    }) { Text("Remove") }
-                }
-            }
-
             // On-device features — gated behind isOnDeviceAiSupported.
             // True on Android (ML Kit + on-device embedder available);
             // false on desktop until / unless an equivalent stack lands.
@@ -1126,7 +939,7 @@ fun SettingsScreen(
             // the agent) and a platform that can fire it, so it's gated on
             // isLoopsSupported (Android via AlarmManager; desktop via the
             // while-open ticker — both true).
-            if (isLoopsSupported && aiState.hasKey()) {
+            if (isLoopsSupported && aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)) {
                 Spacer(Modifier.height(16.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
@@ -1486,8 +1299,25 @@ private fun ShipListEditor(
     onRemove: (String) -> Unit,
 ) {
     var draft by remember { mutableStateOf("") }
-    val candidate = draft.trim().let { if (it.startsWith("~")) it else "~$it" }
-    val valid = candidate.length > 3 && candidate.drop(1).all { it.isLetter() || it == '-' }
+    // A @p, a comet's word name, or the name of somebody known; and,
+    // since Add acts on it unseen, which ship that is. "rex" is the
+    // galaxy ~rex even with a contact called Rex, who is in the list
+    // under the box: a nickname is the peer's own, and any peer's
+    // could otherwise stand in for a @p typed here.
+    val (landed, hint) = remember(draft) {
+        val map = io.nisfeb.talon.ui.LastContactMap.value
+        val ship = io.nisfeb.talon.ui.NameToShip.one(draft, map.contacts.map { it.ship }, map::nickname)
+        val bare = draft.trim().removePrefix("~")
+        val alsoNamed = ship?.let { s -> map.contacts.firstOrNull { it.ship != s && it.nickname?.equals(bare, ignoreCase = true) == true } }
+        ship to when {
+            ship == null -> null
+            alsoNamed != null -> "Adds ${io.nisfeb.talon.ui.shipHandle(ship)}, not ${alsoNamed.nickname}. For them, pick from the list."
+            bare != ship.removePrefix("~") -> "Adds ${io.nisfeb.talon.ui.shipHandle(ship)}."
+            else -> null
+        }
+    }
+    val candidate = landed ?: draft.trim().let { if (it.startsWith("~")) it else "~$it" }
+    val valid = landed != null
 
     Spacer(Modifier.height(12.dp))
     Text(title, style = MaterialTheme.typography.labelLarge)
@@ -1517,8 +1347,9 @@ private fun ShipListEditor(
         OutlinedTextField(
             value = draft,
             onValueChange = { draft = it },
-            singleLine = true,
-            label = { Text("~sampel-palnet") },
+            singleLine = false,
+            maxLines = 6,
+            label = { Text("~sampel-palnet, or a word name") },
             modifier = Modifier.weight(1f),
         )
         Button(
@@ -1526,6 +1357,10 @@ private fun ShipListEditor(
             onClick = { onAdd(candidate); draft = "" },
         ) { Text("Add") }
     }
+    hint?.let {
+        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
+    }
+    io.nisfeb.talon.ui.ShipSuggestions(draft, onPick = { draft = it }, Modifier.padding(top = 4.dp))
 }
 
 @Composable
@@ -1700,7 +1535,10 @@ private fun NotificationHealthPanel(
     val needsAppDetails = systemState.notificationsAllowed == false ||
         systemState.backgroundRestricted == true
     if (needsBatteryFix || needsAppDetails || needsFullScreenFix || systemState.callLogIsVoip) {
-        Row(
+        // Up to four fixes: on a phone they go on to a second line
+        // whole, not squeezed into labels that wrap.
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        androidx.compose.foundation.layout.FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(top = 4.dp),
         ) {
@@ -1926,7 +1764,8 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
         return
     }
 
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (deviceId.isBlank()) {
             TextButton(
                 enabled = !working,
@@ -2092,9 +1931,10 @@ private fun SystemPromptEditorDialog(
         // multi-paragraph prompt. Let the Surface size itself instead.
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        // The corners and colour every popup has (TalonShapes, and the
+        // surface colour): a tonal elevation tinted this one grey.
         Surface(
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 6.dp,
+            shape = MaterialTheme.shapes.extraLarge,
             modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.9f),
         ) {
             Column(
@@ -2122,10 +1962,10 @@ private fun SystemPromptEditorDialog(
                         // Unchanged default → store "" so future default
                         // improvements still reach this user.
                         onSave(if (text.trim() == default.trim()) "" else text)
-                    }) { Text("Save") }
-                    OutlinedButton(onClick = { text = default }) { Text("Reset to default") }
+                    }) { io.nisfeb.talon.ui.FitText("Save") }
+                    OutlinedButton(onClick = { text = default }) { io.nisfeb.talon.ui.FitText("Reset to default") }
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    TextButton(onClick = onDismiss) { io.nisfeb.talon.ui.FitText("Cancel") }
                 }
             }
         }
@@ -2139,6 +1979,7 @@ private enum class SettingsTab(val label: String) {
     Chats("Chats"),
     Notifications("Notifications"),
     Ai("AI"),
+    Orrery("Orrery"),
     Calls("Calls"),
     Account("Account"),
     About("About"),
@@ -2242,7 +2083,49 @@ private fun ColorRow(label: String, value: String, onValue: (String) -> Unit) {
     }
 }
 
-/** Name, light or dark, five colors, and a live preview of the derived scheme. */
+/**
+ * The six colours a theme may set beyond its five, closed until asked
+ * for: each reads Auto (derived) until set, and goes back to Auto.
+ */
+@Composable
+private fun MoreColors(
+    draft: io.nisfeb.talon.ui.theme.CustomTheme,
+    onDraft: (io.nisfeb.talon.ui.theme.CustomTheme) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val set = listOf(draft.text, draft.muted, draft.raised, draft.error, draft.selection, draft.link).count { !it.isNullOrEmpty() }
+    TextButton(onClick = { open = !open }) {
+        Text(if (open) "Fewer colours" else if (set > 0) "More colours ($set set)" else "More colours")
+    }
+    if (!open) return
+    // Set starts from what Auto was drawing.
+    val now = io.nisfeb.talon.ui.theme.customScheme(draft)
+    OptionalColorRow("Text", draft.text, now.onSurface) { onDraft(draft.copy(text = it)) }
+    OptionalColorRow("Muted text", draft.muted, now.onSurfaceVariant) { onDraft(draft.copy(muted = it)) }
+    OptionalColorRow("Raised", draft.raised, now.surfaceVariant) { onDraft(draft.copy(raised = it)) }
+    OptionalColorRow("Error", draft.error, now.error) { onDraft(draft.copy(error = it)) }
+    OptionalColorRow("Selection", draft.selection, now.primary) { onDraft(draft.copy(selection = it)) }
+    OptionalColorRow("Links", draft.link, LINK_BLUE) { onDraft(draft.copy(link = it)) }
+}
+
+/** A colour that is Auto (derived) until set, with the way back to Auto. */
+@Composable
+private fun OptionalColorRow(label: String, value: String?, auto: androidx.compose.ui.graphics.Color, onValue: (String) -> Unit) {
+    if (value.isNullOrEmpty()) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(label, Modifier.width(88.dp), style = MaterialTheme.typography.bodyMedium)
+            Text("Auto", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = { onValue(auto.hex()) }) { Text("Set") }
+        }
+    } else {
+        Row(verticalAlignment = Alignment.Top) {
+            Box(Modifier.weight(1f)) { ColorRow(label, value, onValue) }
+            TextButton(onClick = { onValue("") }) { Text("Auto") }
+        }
+    }
+}
+
+/** Name, light or dark, five colors, six optional ones, and a live preview of the derived scheme. */
 @Composable
 private fun CustomThemeEditor(
     draft: io.nisfeb.talon.ui.theme.CustomTheme,
@@ -2268,6 +2151,7 @@ private fun CustomThemeEditor(
             ColorRow("Tertiary", draft.tertiary) { onDraft(draft.copy(tertiary = it)) }
             ColorRow("Background", draft.background) { onDraft(draft.copy(background = it)) }
             ColorRow("Surface", draft.surface) { onDraft(draft.copy(surface = it)) }
+            MoreColors(draft, onDraft)
             MaterialTheme(colorScheme = io.nisfeb.talon.ui.theme.customScheme(draft)) {
                 androidx.compose.material3.Surface(
                     color = MaterialTheme.colorScheme.background,
@@ -2282,13 +2166,21 @@ private fun CustomThemeEditor(
                             contentColor = MaterialTheme.colorScheme.onSurface,
                             shape = RoundedCornerShape(8.dp),
                         ) {
-                            Text("A message on a surface.", Modifier.padding(8.dp))
+                            Column(Modifier.padding(8.dp)) {
+                                Text("A message on a surface.")
+                                Text(
+                                    "a link, and a ~mention",
+                                    color = draft.linkColor() ?: LINK_BLUE,
+                                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                                )
+                                Text("Sent 2m ago", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            androidx.compose.material3.Button(onClick = {}) { Text("Primary") }
+                            io.nisfeb.talon.ui.Button(onClick = {}) { Text("Primary") }
                             FilterChip(true, {}, { Text("Selected") })
                             Text("Tertiary", color = MaterialTheme.colorScheme.tertiary)
                         }
@@ -2296,7 +2188,7 @@ private fun CustomThemeEditor(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                androidx.compose.material3.Button(onClick = onSave, enabled = draft.valid) { Text("Save and use") }
+                io.nisfeb.talon.ui.Button(onClick = onSave, enabled = draft.valid) { Text("Save and use") }
                 TextButton(onClick = onCancel) { Text("Cancel") }
             }
         }

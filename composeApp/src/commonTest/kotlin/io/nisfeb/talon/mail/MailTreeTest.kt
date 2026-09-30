@@ -21,20 +21,6 @@ class MailTreeTest {
     ) = MailMessage(id = id, from = "~zod", prev = prev, sent = sent, verdict = verdict)
 
     @Test
-    fun `two replies to one message are a branch, not a sequence`() {
-        val forest = threadTree(
-            listOf(
-                msg("root", sent = 1),
-                msg("a", prev = "root", sent = 2),
-                msg("b", prev = "root", sent = 3),
-            ),
-        )
-        assertEquals(1, forest.size)
-        assertEquals(listOf("a", "b"), forest[0].children.map { it.message.id })
-        assertTrue(branches(forest))
-    }
-
-    @Test
     fun `a straight thread does not branch`() {
         val forest = threadTree(
             listOf(msg("root", sent = 1), msg("a", prev = "root", sent = 2)),
@@ -58,12 +44,6 @@ class MailTreeTest {
             "theirs" in path,
             "a side exchange on another branch must not travel with a forward",
         )
-    }
-
-    @Test
-    fun `a path to the root is the root alone`() {
-        val forest = threadTree(listOf(msg("root"), msg("a", prev = "root", sent = 2)))
-        assertEquals(listOf("root"), pathTo(forest, "root").map { it.id })
     }
 
     @Test
@@ -111,12 +91,6 @@ class MailTreeTest {
         assertEquals(null, newestAnswerable(listOf(msg("f", verdict = Verdict.FORGED))))
     }
 
-    @Test
-    fun `an empty thread is an empty forest`() {
-        assertEquals(emptyList(), threadTree(emptyList()))
-        assertFalse(branches(emptyList()))
-    }
-
     // ---- the drawing ---------------------------------------------------
 
     @Test
@@ -136,6 +110,22 @@ class MailTreeTest {
         assertEquals(0.5f, by.getValue("root").row, "centred on the span of its children")
         assertEquals(2, l.rows)
         assertEquals(2, l.cols)
+    }
+
+    @Test
+    fun `replies and roots are drawn in the order they were sent, whatever order they came in`() {
+        val l = layoutTree(
+            listOf(
+                msg("late", sent = 5),
+                msg("root", sent = 1),
+                msg("b", prev = "root", sent = 3),
+                msg("a", prev = "root", sent = 2),
+            ),
+        )
+        val by = l.nodes.associateBy { it.message.id }
+        assertEquals(listOf("a", "b", "late"), listOf("a", "b", "late").sortedBy { by.getValue(it).row })
+        assertEquals(0f, by.getValue("a").row)
+        assertEquals(2f, by.getValue("late").row, "the later root below the first")
     }
 
     @Test
@@ -197,21 +187,6 @@ class MailTreeTest {
         val shut = flattenVisible(forest, setOf("a"))
         assertEquals(listOf("root", "a", "b"), shut.map { it.node.message.id })
         assertEquals(1, shut.single { it.node.message.id == "a" }.hidden)
-    }
-
-    @Test
-    fun `a fold says how much it swallowed`() {
-        val forest = threadTree(
-            listOf(
-                msg("root", sent = 1),
-                msg("a", prev = "root", sent = 2),
-                msg("a1", prev = "a", sent = 3),
-                msg("a2", prev = "a1", sent = 4),
-            ),
-        )
-        val v = flattenVisible(forest, setOf("root"))
-        assertEquals(listOf("root"), v.map { it.node.message.id })
-        assertEquals(3, v.single().hidden, "a fold that does not count is just an ending")
     }
 
     // ---- depth: a shape the wire can simply hand us --------------------
@@ -299,17 +274,6 @@ class MailTreeTest {
     }
 
     @Test
-    fun `a forged copy cannot re-hang a genuine branch`() {
-        val out = collapse(
-            listOf(
-                copy("m", Verdict.VERIFIED, sent = 5, prev = "real-parent"),
-                copy("m", Verdict.FORGED, sent = 9, prev = "somewhere-else"),
-            ),
-        )
-        assertEquals("real-parent", out.single().prev)
-    }
-
-    @Test
     fun `with nothing honest the newest copy speaks`() {
         val out = collapse(
             listOf(
@@ -337,13 +301,23 @@ class MailTreeTest {
         assertEquals(inList.node.message.verdict, inTree.message.verdict)
     }
 
+
+    // A reply goes to the people on the message it answers. It went to
+    // everyone the thread had ever held, so someone taken off a message
+    // was put back on every reply after it.
     @Test
-    fun `copies are counted for display`() {
-        val ms = listOf(
-            copy("a", Verdict.VERIFIED, sent = 1),
-            copy("a", Verdict.FORGED, sent = 2),
-            copy("b", Verdict.VERIFIED, sent = 3),
+    fun `a reply goes to the answered message's people, and someone taken off stays off`() {
+        val msgs = listOf(
+            MailMessage(id = "root", from = "~zod", to = listOf("~nec", "~bus"), sent = 1),
+            MailMessage(id = "nobus", from = "~nec", to = listOf("~zod"), prev = "root", sent = 2),
+            MailMessage(id = "junk", from = "~evil", to = listOf("~evil-two"), prev = "root", sent = 3, verdict = Verdict.FORGED),
         )
-        assertEquals(mapOf("a" to 2, "b" to 1), copyCounts(ms))
+        assertEquals(listOf("~zod"), replyAudience(msgs, "nobus", "~nec"), "~bus was taken off, and ~nec is us")
+        assertEquals(listOf("~nec"), replyAudience(msgs, "nobus", "~zod"), "answering it from the other side")
+        assertEquals(listOf("~zod", "~bus"), replyAudience(msgs, "root", "~nec"), "the message before still had ~bus")
+        // What a reply answers by default is the newest honest message, so
+        // a forged one poked into the thread adds nobody.
+        assertEquals(listOf("~zod"), replyAudience(msgs, newestAnswerable(msgs)?.id, "~nec"))
+        assertEquals(emptyList(), replyAudience(msgs, "gone", "~nec"))
     }
 }

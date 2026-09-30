@@ -13,12 +13,8 @@ class RailTabTest {
     }
 
     @Test
-    fun `null name falls back to Chats`() {
+    fun `null or blank name falls back to Chats`() {
         assertEquals(RailTab.Chats, railTabOrDefault(null))
-    }
-
-    @Test
-    fun `blank name falls back to Chats`() {
         assertEquals(RailTab.Chats, railTabOrDefault(""))
         assertEquals(RailTab.Chats, railTabOrDefault("   "))
     }

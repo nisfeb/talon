@@ -92,4 +92,19 @@ class AssistantActionsTest {
         assertEquals(1000, saneCount(100000))
         assertEquals(0, saneCount(-1))
     }
+
+    // The model was told to write to the thread's participants, which put
+    // back whoever had been taken off. It is told who a reply goes to.
+    @Test fun `a thread says who a reply goes to, and someone taken off is not among them`() {
+        val t = io.nisfeb.talon.mail.MailThread(
+            id = "t1",
+            messages = listOf(
+                io.nisfeb.talon.mail.MailMessage(id = "m1", from = "~zod", to = listOf("~nec", "~bus"), subject = "Plans", sent = 1_789_776_000_000L),
+                io.nisfeb.talon.mail.MailMessage(id = "m2", from = "~nec", to = listOf("~zod"), subject = "Plans", sent = 1_789_776_060_000L, prev = "m1"),
+            ),
+            participants = listOf("~zod", "~nec", "~bus"),
+        )
+        val header = formatThread(t, TimeZone.UTC, us = "~nec").lineSequence().first()
+        assertTrue(header.endsWith(" reply_to=~zod"), header)
+    }
 }

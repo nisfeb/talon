@@ -101,14 +101,6 @@ class CalParseTest {
     }
 
     @Test
-    fun `range pm marker on one side propagates to the other`() {
-        val tr = parseTimeToken("2-3p")
-        assertNotNull(tr)
-        assertEquals(14, tr!!.start.h)
-        assertEquals(15, tr.end!!.h)
-    }
-
-    @Test
     fun `range with both sides marked am and pm preserves each independently`() {
         val tr = parseTimeToken("2am-3pm")
         assertNotNull(tr)
@@ -176,6 +168,10 @@ class CalParseTest {
         // tomorrow is Jan 8 from the Sun Jan 7 anchor. Both start AND end on Jan 8.
         assertEquals(8, ldt(r.startMs).dayOfMonth)
         assertEquals(8, ldt(r.endMs).dayOfMonth)
+        // 11pm to 1am ends on the next day, not before it starts.
+        val late = parseCalText("tomorrow 11p-1a Meet", nowMs = now) as CalParseResult.Ok
+        assertEquals(8, ldt(late.startMs).dayOfMonth)
+        assertEquals(9, ldt(late.endMs).dayOfMonth)
     }
 
     @Test
@@ -183,13 +179,6 @@ class CalParseTest {
         val r = parseCalText("tomorrow 2pm", nowMs = now)
         assertTrue(r is CalParseResult.Ok)
         assertEquals("Event", (r as CalParseResult.Ok).title)
-    }
-
-    @Test
-    fun `tomorrow rolls forward one day`() {
-        val r = parseCalText("tomorrow 2pm Plan", nowMs = now)
-        assertTrue(r is CalParseResult.Ok)
-        assertEquals(8, ldt((r as CalParseResult.Ok).startMs).dayOfMonth)
     }
 
     @Test

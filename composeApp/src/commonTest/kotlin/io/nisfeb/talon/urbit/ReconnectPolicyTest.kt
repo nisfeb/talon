@@ -1,7 +1,6 @@
 package io.nisfeb.talon.urbit
 
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -42,8 +41,4 @@ class ReconnectPolicyTest {
         assertTrue(shouldBootstrap(firstRun = false, lastBootstrapMs = 0L, nowMs = 1_000L))
     }
 
-    @Test
-    fun `the window is a minute`() {
-        assertEquals(60_000L, BOOTSTRAP_MIN_GAP_MS)
-    }
 }

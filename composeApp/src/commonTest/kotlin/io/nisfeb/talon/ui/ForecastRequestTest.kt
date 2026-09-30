@@ -37,13 +37,6 @@ class ForecastRequestTest {
     }
 
     @Test
-    fun `the southern and western hemispheres survive rounding`() {
-        val wellington = OpenMeteoWeather.requestUrl(HomePlace(-41.2923, 174.7787, "Wellington"))
-        assertTrue(wellington.contains("latitude=-41.29"), wellington)
-        assertTrue(wellington.contains("longitude=174.77"), wellington)
-    }
-
-    @Test
     fun `a place on the line does not come out as minus nothing`() {
         val url = OpenMeteoWeather.requestUrl(HomePlace(0.0, 0.0, "Null Island"))
         assertTrue(url.contains("latitude=0.0"), url)

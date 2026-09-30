@@ -6,6 +6,7 @@ actual val isAssistantSupported: Boolean = true
 actual val isLoopsSupported: Boolean = true
 actual val isBackgroundSchedulingSupported: Boolean = true
 actual val isQrScanSupported: Boolean = true
+actual val isLocalTriageSupported: Boolean = true
 actual val isLocalCometSupported: Boolean = false
 actual val isTouchSwipeNavSupported: Boolean = true
 actual val hasSoftKeyboard: Boolean = true
@@ -44,3 +45,8 @@ actual val isUrbWebViewSupported: Boolean = true
 /** A phone has no room for a rail; the drawer is the way to every section. */
 actual val isDrawerNavigation: Boolean = true
 actual val isTouchPrimary: Boolean = true
+
+actual val isLocationSharingSupported: Boolean = true
+
+/** Nothing here forbids an outside checkout. */
+actual val isArmillaryPurchaseSupported: Boolean = true

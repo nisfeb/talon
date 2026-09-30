@@ -24,7 +24,33 @@ data class AdminGroup(
     val directInvitedShips: Set<String>,
     val pendingShips: Set<String>,
     val adminSects: Set<String>,
+    /** The group's channels, as its own record has them. */
+    val channels: List<AdminChannel> = emptyList(),
+    /** The group's roles: id to title. */
+    val roles: Map<String, String> = emptyMap(),
 )
+
+/**
+ * One channel as the group's record has it. [readers] are role ids, and
+ * none means every member reads it. [editable] is false where the record
+ * lacked a field a whole-channel edit must send back, which would
+ * otherwise be sent back as something the owner never set.
+ */
+data class AdminChannel(
+    val nest: String,
+    val title: String,
+    val description: String,
+    val image: String,
+    val cover: String,
+    val addedMs: Long,
+    val section: String,
+    val readers: Set<String>,
+    val join: Boolean,
+    val editable: Boolean,
+) {
+    /** chat, heap or diary: what kind of channel it is. */
+    val kind: String get() = nest.substringBefore('/')
+}
 
 data class AdminMember(
     val ship: String,

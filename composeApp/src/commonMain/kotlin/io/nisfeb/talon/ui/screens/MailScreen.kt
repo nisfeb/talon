@@ -47,11 +47,19 @@ fun MailScreen(
     initialThread: String? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Storage for a file too big to attach; see [MailComposer]. */
+    upload: (suspend (ByteArray, String, String) -> String)? = null,
 ) {
     io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:more")
     var openThread by remember { mutableStateOf(initialThread) }
     androidx.compose.runtime.LaunchedEffect(initialThread) { if (initialThread != null) openThread = initialThread }
     var composing by remember { mutableStateOf<MailIntent?>(null) }
+    // Back steps out of what is open inside mail first: the composer,
+    // then a message, to the list. Only the section's own back answered
+    // it, which closed all of mail and landed on the chat list.
+    io.nisfeb.talon.ui.PlatformBackHandler(enabled = composing != null || openThread != null) {
+        if (composing != null) composing = null else openThread = null
+    }
     androidx.compose.runtime.LaunchedEffect(composeTo) {
         if (composeTo != null) {
             composing = MailIntent(to = listOf(composeTo))
@@ -88,6 +96,7 @@ fun MailScreen(
             onOpenThread = { openThread = it },
             composing = composing,
             onCompose = { composing = it },
+            upload = upload,
         )
     }
 }

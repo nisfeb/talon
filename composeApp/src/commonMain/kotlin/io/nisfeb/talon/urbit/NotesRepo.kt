@@ -13,6 +13,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.coroutines.async
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -31,7 +32,7 @@ import kotlinx.serialization.json.put
  */
 class NotesRepo(
     private val db: AppDatabase,
-    @Suppress("unused") private val scope: CoroutineScope,
+    private val scope: CoroutineScope,
 ) {
     private var channel: UrbitChannel? = null
 
@@ -156,6 +157,12 @@ class NotesRepo(
                 Log.w(TAG, "notes scry failed for $key", it)
                 return
             }
+        // An answer that is not the lists is not an empty notebook: read as
+        // one, the tree below replaced every folder and note kept here.
+        if (foldersJson !is kotlinx.serialization.json.JsonArray || notesJson !is kotlinx.serialization.json.JsonArray) {
+            Log.w(TAG, "notes for $key came back in a shape this build does not read; keeping what is here")
+            return
+        }
 
         val folders = NotesParser.folders(foldersJson).map { f ->
             NotesFolderEntity(
@@ -244,8 +251,32 @@ class NotesRepo(
             .isSuccess
     }
 
-    suspend fun createNote(flag: NotesFlag, folderId: Long, title: String, body: String): Boolean =
-        poke(NotesActions.createNote(flag, folderId, title, body))
+    /**
+     * A new note, over %notes' REST route; null when the host took it,
+     * otherwise what to say ([write]).
+     */
+    suspend fun createNote(flag: NotesFlag, folderId: Long, title: String, body: String): String? =
+        write(flag, NotesPaths.v1Notes(flag), buildJsonObject {
+            put("folder", folderId)
+            put("title", title)
+            put("body", body)
+        })
+
+    /**
+     * A write whose answer the owner must hear. As a channel poke it was
+     * answered as soon as this ship had it, and the host's refusal (not an
+     * editor here, a folder gone) never came back: a new folder or note
+     * just did not appear. The REST route answers once the host has, and
+     * the notebook is read again at once rather than waiting on its
+     * stream, which may not be open yet. On this repo's scope, so leaving
+     * the screen does not stop it.
+     */
+    private suspend fun write(flag: NotesFlag, path: String, body: JsonObject): String? = scope.async {
+        val ch = channel ?: return@async "Not connected to your ship."
+        val resp = runCatching { ch.apiJson(method = "POST", path = path, body = body) }
+            .getOrElse { return@async "Your ship couldn't take it (${it.message ?: it::class.simpleName})." }
+        NotesParser.writeRefusal(resp).also { if (it == null) refreshNotebook(flag) }
+    }.await()
 
     /**
      * Save an edited body. [expectedRevision] must be the revision the
@@ -329,19 +360,27 @@ class NotesRepo(
     suspend fun unpublishNote(flag: NotesFlag, noteId: Long): Boolean =
         poke(NotesActions.unpublishNote(flag, noteId))
 
-    /** Note ids currently published, as `<flag>#<id>` keys. */
-    suspend fun publishedKeys(): Set<String> {
-        val ch = channel ?: return emptySet()
-        val body = runCatching { ch.scry(NotesPaths.APP, NotesPaths.PUBLISHED) }
-            .getOrElse { return emptySet() }
+    /**
+     * Note ids currently published, as `<flag>#<id>` keys, or null where
+     * the host could not be asked: read as none, a public note offered
+     * to be published and not to be taken down.
+     */
+    suspend fun publishedKeys(): Set<String>? {
+        val ch = channel ?: return null
+        val body = io.nisfeb.talon.util.runSuspendCatching { ch.scry(NotesPaths.APP, NotesPaths.PUBLISHED) }
+            .getOrElse { return null }
         return NotesParser.publishedKeys(body)
     }
 
     suspend fun restoreNote(flag: NotesFlag, noteId: Long, rev: Long): Boolean =
         poke(NotesActions.restoreNote(flag, noteId, rev))
 
-    suspend fun createFolder(flag: NotesFlag, parentFolderId: Long, name: String): Boolean =
-        poke(NotesActions.createFolder(flag, parentFolderId, name))
+    /** A new folder under [parentFolderId]; null when the host took it, otherwise what to say ([write]). */
+    suspend fun createFolder(flag: NotesFlag, parentFolderId: Long, name: String): String? =
+        write(flag, NotesPaths.v1Folders(flag), buildJsonObject {
+            put("folderName", name)
+            put("parent", parentFolderId)
+        })
 
     suspend fun renameFolder(flag: NotesFlag, folderId: Long, name: String): Boolean =
         poke(NotesActions.renameFolder(flag, folderId, name))

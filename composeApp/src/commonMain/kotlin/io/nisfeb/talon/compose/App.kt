@@ -1,6 +1,8 @@
 @file:OptIn(DelicateCoroutinesApi::class)
 
 package io.nisfeb.talon.compose
+import io.nisfeb.talon.ai.forFeature
+import io.nisfeb.talon.ai.triagePrivateSlot
 import io.nisfeb.talon.util.ioDispatcher
 import io.nisfeb.talon.util.isMacOsHost
 import io.nisfeb.talon.util.nowMs
@@ -20,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.pointer.pointerInput
@@ -41,6 +45,7 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.update
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ui.parseHexColor
 import io.nisfeb.talon.ai.InMemoryWatchwordsSyncSettings
@@ -108,6 +113,7 @@ import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.urbit.UrbitSession
 import io.nisfeb.talon.util.Log
 import io.ktor.client.HttpClient
+import io.nisfeb.talon.ai.hasModelFor
 
 /**
  * Top-level shared app entry point. Both Android's MainActivity and
@@ -236,6 +242,10 @@ fun App(
      *  show the install prompt rather than swallowing taps. */
     urbLinkLauncher: io.nisfeb.talon.urbit.UrbLinkLauncher =
         io.nisfeb.talon.urbit.NoopUrbLinkLauncher,
+    /** Handed the way to stop the signed-in ship's work and wait for it,
+     *  or null when it goes: a host closing the database itself (quitting,
+     *  restarting for an update) runs it first. See closeAfterWork. */
+    onShipWork: ((suspend () -> Unit)?) -> Unit = {},
 ) {
     // Derive the initial logged-in ship from sessionStore.active()
     // (the joined SavedSession) rather than activeShip() (just the
@@ -245,6 +255,9 @@ fun App(
     // tryRestore() returns null while loggedInShip stays non-null
     // and repo.start crashes on session.ourPatp ("not logged in").
     var loggedInShip by remember { mutableStateOf(sessionStore.active()?.ship) }
+    // The ship "Add ship" left, which the login form's Cancel goes back
+    // to. Null when there was none: a first sign-in has nowhere to return.
+    var addingFrom by remember { mutableStateOf<String?>(null) }
     // Local comet: the setup screen replaces the login form, and a
     // first login lands in the public Nisfeb Software group.
     var localShipSetupOpen by remember { mutableStateOf(false) }
@@ -254,10 +267,21 @@ fun App(
     var landingProgress by remember { mutableStateOf<io.nisfeb.talon.ui.LandingProgress?>(null) }
     var landingHidden by remember { mutableStateOf(false) }
     var settingsStartOnAccount by remember { mutableStateOf(false) }
-    var showSettings by remember { mutableStateOf(false) }
-    var showSidebarSettings by remember { mutableStateOf(false) }
-    var showApps by remember { mutableStateOf(false) }
-    var showLoops by remember { mutableStateOf(false) }
+    var settingsStartOnAi by remember { mutableStateOf(false) }
+    // Every full-screen section is a flag made here, so the resets and
+    // the back gesture cannot miss one. See Sections for the bug this ends.
+    val sections = remember { io.nisfeb.talon.ui.Sections() }
+    var showSettings by remember { sections.flag() }
+    // The way back to the card from a request the empty balance failed:
+    // Settings on the AI tab, with the top-up sheet already open.
+    val openTopUp: () -> Unit = {
+        io.nisfeb.talon.ai.AiSettings.pendingTopUp.value = true
+        settingsStartOnAi = true
+        showSettings = true
+    }
+    var showSidebarSettings by remember { sections.flag() }
+    var showApps by remember { sections.flag() }
+    var showLoops by remember { sections.flag() }
     var openChat by remember { mutableStateOf<String?>(null) }
     // Optional message id to scroll-and-flash when DmChatScreen mounts /
     // re-mounts on a new whom. Set when navigating from bookmarks (or any
@@ -266,7 +290,7 @@ fun App(
     // so a stale anchor can't paint on the wrong chat.
     var openChatFocusMessageId by remember { mutableStateOf<String?>(null) }
     /** Login-handoff QR generator. Reachable from LoginScreen
-     *  ("Helping someone else? Generate a login QR →") on cold launch
+     *  ("Signing in on another device? Make a login QR →") on cold launch
      *  and from Settings once a ship is logged in. */
     var shareLoginQrOpen by remember { mutableStateOf(false) }
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
@@ -331,32 +355,33 @@ fun App(
     val switchShipAction: () -> Unit = {
         applyRightPaneState(RightPaneStateReducer.switchShip(rightPaneSnapshot()))
     }
-    var showSelfProfile by remember { mutableStateOf(false) }
+    var showSelfProfile by remember { sections.flag() }
     /** A message being written, if any. Owns the detail pane while it
      *  is open, so a reply cannot be lost behind the thread it answers. */
     var mailComposing by remember { mutableStateOf<io.nisfeb.talon.ui.screens.MailIntent?>(null) }
     /** The mail thread the reader is on. The reader itself is the next
      *  slice; until it lands this records the tap and nothing renders it. */
     var openMailThread by remember { mutableStateOf<String?>(null) }
-    var showStatusFeed by remember { mutableStateOf(false) }
-    var showInvites by remember { mutableStateOf(false) }
-    var showBookmarks by remember { mutableStateOf(false) }
-    var showCalendar by remember { mutableStateOf(false) }
+    var showStatusFeed by remember { sections.flag() }
+    var showInvites by remember { sections.flag() }
+    var showActions by remember { sections.flag() }
+    var showBookmarks by remember { sections.flag() }
+    var showCalendar by remember { sections.flag() }
     var calendarPageOpen by remember { mutableStateOf(false) }
     var assistantListen by remember { mutableStateOf(false) }
-    var showActivity by remember { mutableStateOf(false) }
-    var showSearch by remember { mutableStateOf(false) }
-    var showAssistant by remember { mutableStateOf(false) }
+    var showActivity by remember { sections.flag() }
+    var showSearch by remember { sections.flag() }
+    var showAssistant by remember { sections.flag() }
     /** The assistant claims the whole content area; a thread or group-info
      *  pane left open would dock beside it and swallow clicks meant for it. */
     val openAssistantAction: () -> Unit = {
         closeRightPaneAction()
         showAssistant = true
     }
-    var showNewDm by remember { mutableStateOf(false) }
-    var showContacts by remember { mutableStateOf(false) }
-    var showWatchwords by remember { mutableStateOf(false) }
-    var showGroupAdminList by remember { mutableStateOf(false) }
+    var showNewDm by remember { sections.flag() }
+    var showContacts by remember { sections.flag() }
+    var showWatchwords by remember { sections.flag() }
+    var showGroupAdminList by remember { sections.flag() }
     var openGroupAdminFlag by remember { mutableStateOf<String?>(null) }
     var openGroupHomeFlag by remember { mutableStateOf<String?>(null) }
     /** A ship whose invite-me code was scanned or tapped: message it, or invite it to a group. */
@@ -387,20 +412,7 @@ fun App(
     // which outranks openChat in the right-pane `when`. Close them all
     // first, or the tap sets openChat and shows nothing.
     val jumpToChat: (String) -> Unit = { who ->
-        showSettings = false
-        showApps = false
-        showSelfProfile = false
-        showStatusFeed = false
-        showInvites = false
-        showBookmarks = false
-        showCalendar = false
-        showActivity = false
-        showSearch = false
-        showAssistant = false
-        showNewDm = false
-        showContacts = false
-        showWatchwords = false
-        showGroupAdminList = false
+        sections.closeAll()
         openGroupAdminFlag = null
         openGroupHomeFlag = null
         profileSheetShip = null
@@ -570,6 +582,9 @@ fun App(
     PlatformBackHandler(enabled = showStatusFeed) {
         showStatusFeed = false
     }
+    // Below every handler that follows in priority: it answers only for
+    // a section that has none of its own.
+    PlatformBackHandler(enabled = sections.anyOpen) { sections.closeLast() }
     PlatformBackHandler(enabled = showInvites) {
         showInvites = false
     }
@@ -583,6 +598,7 @@ fun App(
     PlatformBackHandler(enabled = showSearch) { showSearch = false }
     PlatformBackHandler(enabled = showNewDm) { showNewDm = false }
     PlatformBackHandler(enabled = showWatchwords) { showWatchwords = false }
+    PlatformBackHandler(enabled = showActions) { showActions = false }
     PlatformBackHandler(enabled = showContacts) { showContacts = false }
     PlatformBackHandler(
         enabled = openGroupAdminFlag != null,
@@ -648,12 +664,16 @@ fun App(
     // composes, which is the only path that doesn't permanently kill
     // repo's scope (see KDoc above).
     val shipKey = loggedInShip ?: "__loggedout__"
+    // What waits on a ship's database closing, by ship: forgetting it
+    // erases its files, which must not happen while SQLite has them open.
+    // Outside the key block, so it outlives the ship it is waiting on.
+    val afterShipClose = remember { kotlinx.coroutines.flow.MutableStateFlow<Map<String, () -> Unit>>(emptyMap()) }
     key(shipKey) {
         // Per-ship db + settingsSync. Built inside the key block so a
         // ship switch tears the prior pair down and constructs fresh
         // ones bound to the new ship's SQLite file. Without this the
         // home list keeps showing the prior ship's DMs after switch.
-        val db = remember { createDb(shipKey) }
+        val db = remember { createDb(shipKey).also { io.nisfeb.talon.ai.AiSpend.dao = it.orrerySent() } }
         val settingsSync = remember { createSettingsSync?.invoke(db) }
         // Per-ship UiSettings. railVisibility's read-flow is sourced
         // from the active ship's rail_item_prefs Room table, so this
@@ -693,6 +713,7 @@ fun App(
                 db = db,
                 settingsSync = settingsSync,
                 notificationHealth = notificationHealth,
+                watchwordsSyncEnabled = watchwordsSync.enabled,
             )
         }
         // Let user-shaped preferences ride %settings to this user's
@@ -901,6 +922,10 @@ fun App(
 
         // Mail lives on the ship's own HTTP surface, not the eyre
         // channel, so it needs only the session's cookie-bearing client.
+        // The assistant's runs, over a scope that outlives its section: a
+        // run goes on when the Assistant is left, and dots its icon when done.
+        val assistantScope = rememberCoroutineScope()
+        val assistantSession = remember(db) { io.nisfeb.talon.ui.screens.AssistantSession(assistantScope) }
         val mailRepo = remember(session, db, loggedInShip) {
             io.nisfeb.talon.mail.MailRepo(
                 session.http, loopScope,
@@ -922,12 +947,14 @@ fun App(
                 io.nisfeb.talon.ui.EyreAzimuthRpc(session.http, url),
             )
         }
-        // Mail lives in the same desk as the link handler's app, so the
-        // install is one thing offered from two places.
+        // Mail and the link handler's lattice are both stock desks of the
+        // Grubbery shell, so the install is one thing offered from two places.
         val grubberyInstall: (suspend () -> Result<Unit>)? = remember(session) {
-            io.nisfeb.talon.urbit.LatticeInstall.installer(http, { sessionStore.active()?.shipUrl }) {
-                app, mark, body -> runCatching { repo.pokeRaw(app, mark, body) }.isSuccess
-            }
+            io.nisfeb.talon.urbit.LatticeInstall.grubbery(
+                http,
+                { sessionStore.active()?.shipUrl },
+                cookie = { sessionStore.active()?.let { "${it.cookieName}=${it.cookieValue}" } },
+            ) { app, mark, body -> runCatching { repo.pokeRaw(app, mark, body) }.isSuccess }
         }
         val homePlaceRaw by uiSettings.homePlace.collectAsState()
         val homePlace = remember(homePlaceRaw) {
@@ -1002,6 +1029,58 @@ fun App(
         LaunchedEffect(calendarRepo, mailShipUrl) {
             if (mailShipUrl != null) calendarRepo.attach(mailShipUrl) else calendarRepo.detach()
         }
+        // Orrery rides the same surface, under a key of its own.
+        val orreryRepo = remember(session, db) {
+            io.nisfeb.talon.orrery.OrreryRepo(
+                session.http, loopScope, db, io.nisfeb.talon.ui.platformLabel, searchEmbedderClient,
+                cloud = io.nisfeb.talon.orrery.CloudTriage(
+                    io.nisfeb.talon.orrery.frontierReadsMessages(aiSettings),
+                ) { aiSettings.state.value },
+                book = { repo.bookContacts.value },
+                standDown = io.nisfeb.talon.orrery.StandDown(uiSettings.orreryStandDown, uiSettings::setOrreryStandDown),
+                decide = io.nisfeb.talon.orrery.DecideControl(uiSettings.orreryDecide, uiSettings::setOrreryDecide),
+            )
+        }
+        // Orrery runs only when the owner turned it on (Settings > Orrery),
+        // for all their devices: off, nothing probes, pushes or listens.
+        val orreryGate = aiState.savedProfile?.orrery
+        LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip, orreryGate == true) {
+            val ship = loggedInShip
+            if (orreryGate == true && mailShipUrl != null && ship != null) orreryRepo.attach(mailShipUrl, ship) else orreryRepo.detach()
+        }
+        LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip, orreryGate) {
+            val url = mailShipUrl ?: return@LaunchedEffect
+            val ship = loggedInShip ?: return@LaunchedEffect
+            io.nisfeb.talon.orrery.settleOrreryGate(orreryGate, db, aiSettings, orreryRepo, url, ship)
+        }
+        // Armillary rides the same surface again: the owner's cookie,
+        // and the AI settings, where the provider row it keeps lives.
+        // The notifier is for a payment landing while the window is
+        // behind the browser.
+        val armillaryRepo = remember(session, aiSettings, notifier) {
+            io.nisfeb.talon.armillary.ArmillaryRepo(session.http, loopScope, aiSettings, notifier)
+        }
+        LaunchedEffect(armillaryRepo, mailShipUrl, loggedInShip) {
+            val ship = loggedInShip
+            if (mailShipUrl != null && ship != null) armillaryRepo.attach(mailShipUrl, ship) else armillaryRepo.detach()
+        }
+        val orreryActions by orreryRepo.actions.collectAsState()
+        val orreryOn = orreryRepo.availability.collectAsState().value ==
+        io.nisfeb.talon.orrery.OrreryAvailability.PRESENT
+        // The private model, from Settings, into the ladder.
+        LaunchedEffect(aiSettings, uiSettings) {
+            io.nisfeb.talon.orrery.movePrivateModelIn(aiSettings, uiSettings)
+            aiSettings.state.collect { io.nisfeb.talon.orrery.LocalModels.usePrivate(it.triagePrivateSlot()) }
+        }
+        var openAction by remember { mutableStateOf<io.nisfeb.talon.orrery.OrreryAction?>(null) }
+        openAction?.takeIf { orreryGate == true }?.let { action ->
+            io.nisfeb.talon.ui.OrreryActionDialog(
+                action = action,
+                orrery = orreryRepo,
+                onClose = { openAction = null },
+                twentyFourHour = uiSettings.homeTwentyFourHour.collectAsState().value,
+            )
+        }
         // Desktop loop runner. No AlarmManager on desktop, so loops run
         // via a while-open ticker (below, inside the logged-in guard) plus
         // the "Run now" button. Built here so both the ticker and the
@@ -1013,7 +1092,7 @@ fun App(
         val loopWebOn = aiState.assistantOn()
         val loopBraveOn = loopWebOn && aiState.braveApiKey.isNotBlank()
         val loopRunner = remember(db, repo, searchEmbedderClient, loopWebOn, loopBraveOn, mailRepo, calendarRepo) {
-            val agentClient = io.nisfeb.talon.ai.AgentClient { aiSettings.state.value }
+            val agentClient = io.nisfeb.talon.ai.AgentClient(io.nisfeb.talon.ai.AiFeature.Assistant) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Assistant) }
             io.nisfeb.talon.ai.LoopRunner(
                 loops = db.loops(),
                 runs = db.loopRuns(),
@@ -1038,6 +1117,11 @@ fun App(
                         send = { whom, text -> repo.send(whom, text) },
                     ),
                 ),
+                // No orrery here. A loop runs headless on a timer, and
+                // reconfiguring the ship is not something to wake up
+                // and find done. The assistant has them; a loop asks a
+                // person. Android's Loops has no orrery handle either,
+                // and the two shells agreeing is the point.
                 completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
                 aiConfig = { aiSettings.state.value },
                 // One device runs a scheduled write fire — the %settings lease
@@ -1078,11 +1162,13 @@ fun App(
             )
         }
         val calendarInstall: suspend () -> Result<Unit> = remember(session, calendarRepo) {
-            val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
+            // The calendar is a stock desk of the Grubbery shell, fetched
+            // with lattice and mail; kiln does not publish it on its own.
+            val install = io.nisfeb.talon.urbit.LatticeInstall.grubbery(
                 http,
                 { sessionStore.active()?.shipUrl },
-                desk = "calendar",
-                installed = { url ->
+                cookie = { sessionStore.active()?.let { "${it.cookieName}=${it.cookieValue}" } },
+                answers = { url ->
                     runCatching { io.nisfeb.talon.calendar.CalendarApi(session.http, url).config() }.isSuccess
                 },
             ) { app, mark, body -> runCatching { repo.pokeRaw(app, mark, body) }.isSuccess }
@@ -1095,6 +1181,14 @@ fun App(
         LaunchedEffect(mailRepo, notifier) {
             mailRepo.onNewMail = { news ->
                 news.forEach { notifier.notify(it.title, it.body, "mail:" + it.threadId.ifBlank { "more" }) }
+            }
+        }
+        // New orrery proposals notify; one answered anywhere is taken back.
+        // Not while Actions is on screen: the list is the news.
+        LaunchedEffect(orreryRepo, notifier) {
+            orreryRepo.onActions = { raise, clear ->
+                clear.forEach { notifier.clear("action:$it") }
+                if (!showActions) raise.forEach { notifier.notify(it.title, it.body, "action:" + it.id.ifBlank { "more" }) }
             }
         }
         // "Run now", from both the Loops screen and the assistant's jobs pane.
@@ -1124,20 +1218,33 @@ fun App(
         }
 
         DisposableEffect(Unit) {
+            val stopWork: suspend () -> Unit = {
+                repo.stopAndJoin()
+                searchEmbedderClient?.stop()
+            }
+            onShipWork(stopWork)
             onDispose {
+                onShipWork(null)
                 runCatching { repo.stop() }
-                // Defer db.close by 2s so any in-flight Flow collectors
-                // from the prior key composition unwind cleanly. Closing
-                // the pool synchronously here would surface as
-                // SQLiteException spam in the brief overlap window.
-                // Matches production's TalonApplication.scheduleShipScopedTeardown.
+                // Defer the close 2s so the prior composition's Flow
+                // collectors unwind, then stop the ship's own work and
+                // wait for it: the delay alone let the indexer, a
+                // bootstrap or a sync write run into the close, which is
+                // a native crash. Matches production's
+                // TalonApplication.scheduleShipScopedTeardown.
                 val dying = db
+                val dyingShip = shipKey
                 // Fire-and-forget deferred close that must outlive this
                 // composition (a re-key) — GlobalScope is deliberate, the
                 // daemon Thread this replaces had the same lifetime.
                 GlobalScope.launch(ioDispatcher) {
                     delay(2_000)
-                    runCatching { dying.close() }
+                    val closed = io.nisfeb.talon.data.closeAfterWork(dying, stopWork = stopWork)
+                    var then: (() -> Unit)? = null
+                    afterShipClose.update { waiting -> then = waiting[dyingShip]; waiting - dyingShip }
+                    // Left open, its files stay: the pending marker erases
+                    // them at the next launch instead.
+                    if (closed) then?.let { runCatching(it) }
                 }
             }
         }
@@ -1241,19 +1348,32 @@ fun App(
             // against), so a brand-new DM no longer arrives silently.
             DisposableEffect(repo, notifier) {
                 repo.dmInviteListener = { ship ->
-                    runCatching { notifier.notify(ship, "wants to message you") }
+                    runCatching { notifier.notify(callContacts.displayName(ship), "wants to message you") }
                 }
                 // A new group invite is as easy to miss as a DM request —
                 // toast it the same way so it doesn't sit unseen behind a
                 // badge you have no reason to check.
                 repo.groupInviteListener = { invite ->
                     val name = invite.title ?: invite.flag
-                    val from = invite.inviter?.let { " from $it" } ?: ""
+                    val from = invite.inviter?.let { " from " + callContacts.displayName(it) } ?: ""
                     runCatching { notifier.notify(name, "invited you to a group$from") }
+                }
+                // A live message matched watchwords set to notify; the
+                // repo kept the hits. Quiet for the chat open in a
+                // focused window, as messages are.
+                repo.watchwordListener = { m, notice ->
+                    if (!(windowInfo.isWindowFocused && openChat == m.whom)) runCatching {
+                        notifier.notify(
+                            "${notice.terms.joinToString(", ")} in ${callContacts.conversationLabel(m.whom)}",
+                            notice.text.replace('\n', ' ').take(160),
+                            m.whom,
+                        )
+                    }
                 }
                 onDispose {
                     repo.dmInviteListener = null
                     repo.groupInviteListener = null
+                    repo.watchwordListener = null
                 }
             }
 
@@ -1314,6 +1434,10 @@ fun App(
                                 // and is dropped; live messages pass.
                                 nowMs = nowMs(),
                                 freshnessMaxAgeMs = 5L * 60_000L,
+                                // The name the rest of the app shows,
+                                // read as the balloon is built so a
+                                // nickname landing late is still used.
+                                nameFor = { callContacts.displayName(it) },
                             )
                         lastSeenIds = diff.newLastSeen
                         for (n in diff.notifications) {
@@ -1463,14 +1587,15 @@ fun App(
           // Resolves a urb:// address to title+snippet for the inline
           // unfurl card, against the active ship over the authenticated
           // http client (which already carries the session cookie).
-          val urbFetcher: suspend (String) -> io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl? =
-              remember(http) {
+          // Keyed on the database, so the cards kept are this ship's.
+          val urbFetcher: (String) -> kotlinx.coroutines.flow.Flow<io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl> =
+              remember(http, db) {
                   { urbUrl ->
                       val active = sessionStore.active()
                       val s = active?.shipUrl
                       val c = active?.let { "${it.cookieName}=${it.cookieValue}" }
-                      if (s == null || c == null) null
-                      else io.nisfeb.talon.urbit.UrbUnfurlCache.await(http, s, c, urbUrl)
+                      if (s == null || c == null) kotlinx.coroutines.flow.emptyFlow()
+                      else io.nisfeb.talon.urbit.UrbUnfurlCache.cards(http, s, c, urbUrl, db.urbUnfurls())
                   }
               }
           val citeScope = rememberCoroutineScope()
@@ -1524,6 +1649,10 @@ fun App(
               io.nisfeb.talon.notify.LocalNotificationClearer provides remember(notifier) { { key: String -> notifier.clear(key) } },
               io.nisfeb.talon.calendar.LocalCalendarRepo provides calendarRepo,
               io.nisfeb.talon.mail.LocalMailTo provides mailTarget,
+              io.nisfeb.talon.ui.LocalOpenProfile provides { ship: String -> profileSheetShip = ship },
+              io.nisfeb.talon.ui.LocalCometDomes provides remember(session, db) {
+                  session.baseUrl?.takeIf { it.isNotBlank() }?.let { io.nisfeb.talon.ui.CometDomes(session.http, it, db) }
+              },
               io.nisfeb.talon.mail.LocalGrubberyInstall provides grubberyInstall,
               io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
               androidx.compose.ui.platform.LocalDensity provides scaledDensity,
@@ -1568,7 +1697,71 @@ fun App(
             val partyFloats = !inlineCallUiShown.value &&
                 partyUi !is io.nisfeb.talon.call.PartyState.Idle && !meetingOpen
             val floats = callFloats || partyFloats
-            androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
+            // Keys are handled here, above the call strip, the party-line
+            // bar and the meeting view as well as the screens, so nothing
+            // in the window can hold focus outside it. When nothing does
+            // (the focused field went with a section closed by mouse),
+            // this takes it back, or shortcuts and Escape went dead until
+            // a click. Dialogs have their own focus, so none is taken.
+            val rootFocusRequester = remember { FocusRequester() }
+            var rootFocusLost by remember { mutableStateOf(0) }
+            LaunchedEffect(rootFocusLost) { runCatching { rootFocusRequester.requestFocus() } }
+            androidx.compose.foundation.layout.Column(
+                Modifier
+                    .fillMaxSize()
+                    .focusRequester(rootFocusRequester)
+                    .onFocusChanged { if (!it.hasFocus) rootFocusLost++ }
+                    .focusable()
+                    // Escape is taken on the way back up, after whatever has
+                    // focus: a composer drops its attachment, a viewer or a
+                    // dialog closes, and only an Escape nobody took leaves the
+                    // screen. Sections are drawn over the chat, so they close
+                    // first, the last opened first, by the registry that
+                    // knows every one of them.
+                    .onKeyEvent { event ->
+                        if (io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost) !=
+                            io.nisfeb.talon.ui.ShortcutAction.Back
+                        ) return@onKeyEvent false
+                        when {
+                            sections.anyOpen -> sections.closeLast()
+                            openThreadParent != null -> {
+                                openThreadParent = null
+                                openThreadReplyAnchor = null
+                            }
+                            openChat != null -> openChat = null
+                            else -> return@onKeyEvent false
+                        }
+                        true
+                    }
+                    .onPreviewKeyEvent { event ->
+                        val action = io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost)
+                            ?: return@onPreviewKeyEvent false
+                        when (action) {
+                            io.nisfeb.talon.ui.ShortcutAction.Back -> return@onPreviewKeyEvent false
+                            io.nisfeb.talon.ui.ShortcutAction.OpenSettings -> showSettings = true
+                            io.nisfeb.talon.ui.ShortcutAction.NewDm -> showNewDmRequest = true
+                            io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
+                            io.nisfeb.talon.ui.ShortcutAction.IncreaseFontSize ->
+                                uiSettings.setFontScale(
+                                    userFontScale + io.nisfeb.talon.ui.FONT_SCALE_STEP,
+                                )
+                            io.nisfeb.talon.ui.ShortcutAction.DecreaseFontSize ->
+                                uiSettings.setFontScale(
+                                    userFontScale - io.nisfeb.talon.ui.FONT_SCALE_STEP,
+                                )
+                            io.nisfeb.talon.ui.ShortcutAction.ResetFontSize ->
+                                uiSettings.setFontScale(1.0f)
+                            is io.nisfeb.talon.ui.ShortcutAction.SwitchShip -> {
+                                sessionStore.all().getOrNull(action.index)?.ship?.let { targetShip ->
+                                    leaveShip()
+                                    sessionStore.setActive(targetShip)
+                                    loggedInShip = targetShip
+                                }
+                            }
+                        }
+                        true
+                    },
+            ) {
                 landingProgress?.let { progress ->
                     val terminalText by localShip.terminal.collectAsState()
                     val lastLine = remember(terminalText) {
@@ -1650,51 +1843,8 @@ fun App(
                         .pointerInput(Unit) { detectTapGestures { } },
                 )
             }
-            val rootFocusRequester = remember { FocusRequester() }
-            LaunchedEffect(Unit) { rootFocusRequester.requestFocus() }
             Surface(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .focusRequester(rootFocusRequester)
-                    .focusable()
-                    .onPreviewKeyEvent { event ->
-                        val action = io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost)
-                            ?: return@onPreviewKeyEvent false
-                        when (action) {
-                            io.nisfeb.talon.ui.ShortcutAction.Back -> {
-                                when {
-                                    openThreadParent != null -> {
-                                        openThreadParent = null
-                                        openThreadReplyAnchor = null
-                                    }
-                                    openChat != null -> openChat = null
-                                    showSettings -> showSettings = false
-                                    else -> return@onPreviewKeyEvent false
-                                }
-                            }
-                            io.nisfeb.talon.ui.ShortcutAction.OpenSettings -> showSettings = true
-                            io.nisfeb.talon.ui.ShortcutAction.NewDm -> showNewDmRequest = true
-                            io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
-                            io.nisfeb.talon.ui.ShortcutAction.IncreaseFontSize ->
-                                uiSettings.setFontScale(
-                                    userFontScale + io.nisfeb.talon.ui.FONT_SCALE_STEP,
-                                )
-                            io.nisfeb.talon.ui.ShortcutAction.DecreaseFontSize ->
-                                uiSettings.setFontScale(
-                                    userFontScale - io.nisfeb.talon.ui.FONT_SCALE_STEP,
-                                )
-                            io.nisfeb.talon.ui.ShortcutAction.ResetFontSize ->
-                                uiSettings.setFontScale(1.0f)
-                            is io.nisfeb.talon.ui.ShortcutAction.SwitchShip -> {
-                                sessionStore.all().getOrNull(action.index)?.ship?.let { targetShip ->
-                                    leaveShip()
-                                    sessionStore.setActive(targetShip)
-                                    loggedInShip = targetShip
-                                }
-                            }
-                        }
-                        true
-                    },
+                modifier = Modifier.fillMaxSize(),
             ) {
                 // Effective ship: the session's actual restored state.
                 // Using session.shipName instead of loggedInShip avoids
@@ -1763,20 +1913,23 @@ fun App(
                     }
                     if (alsoData && removed.isSuccess) {
                         if (wasActive) {
-                            // The key block closes this database two
-                            // seconds after it re-keys. Erasing before
-                            // that deletes a file SQLite still has
-                            // open: Windows refuses, and elsewhere the
-                            // next checkpoint writes it straight back.
+                            // The key block closes this database once
+                            // its work has stopped, after it re-keys.
+                            // Erasing before that deletes a file SQLite
+                            // still has open: Windows refuses, and
+                            // elsewhere the next checkpoint writes it
+                            // straight back. So the erase waits on it.
                             // The marker is the record in case the
                             // process dies inside the window — the next
                             // launch replays it (see the takePending
                             // call near the top of App).
                             shipDataEraser.markPending(gone)
-                            GlobalScope.launch(ioDispatcher) {
-                                delay(2_500)
-                                shipDataEraser.erase(gone)
-                                    .onFailure { io.nisfeb.talon.util.Log.w("App", "forgetShip: erase failed for $gone", it) }
+                            afterShipClose.update { waiting ->
+                                waiting + (gone to {
+                                    shipDataEraser.erase(gone)
+                                        .onFailure { io.nisfeb.talon.util.Log.w("App", "forgetShip: erase failed for $gone", it) }
+                                    Unit
+                                })
                             }
                         } else {
                             shipDataEraser.erase(gone)
@@ -1789,6 +1942,7 @@ fun App(
                     }
                 }
                 val addShip: () -> Unit = {
+                    addingFrom = loggedInShip
                     leaveShip()
                     loggedInShip = null
                 }
@@ -1796,6 +1950,7 @@ fun App(
                 // render at full width without entering ChatPaneScaffold.
                 // Only DmList + chat-detail screens (chat, thread, notebook,
                 // gallery) participate in the list/detail split.
+                io.nisfeb.talon.ui.DrawerOverlay.Follow(drawerState.isOpen)
                 androidx.compose.material3.ModalNavigationDrawer(
                     drawerState = drawerState,
                     // Desktop opens the ship switcher only via the Talon
@@ -1945,7 +2100,8 @@ fun App(
                     )
                     ship == null -> LoginScreen(
                         session = session,
-                        onLoggedIn = { loggedInShip = it },
+                        onLoggedIn = { addingFrom = null; loggedInShip = it },
+                        onCancel = addingFrom?.let { from -> { addingFrom = null; switchShip(from) } },
                         notice = loginNotice,
                         onRunLocalShip = if (io.nisfeb.talon.ui.isLocalCometSupported) {
                             { localShipSetupOpen = true }
@@ -1974,15 +2130,38 @@ fun App(
                     showApps -> io.nisfeb.talon.ui.screens.AppsSettingsScreen(
                         mail = mailRepo,
                         calendar = calendarRepo,
+                        // Off, Orrery is nowhere in Talon, the Apps page too.
+                        orrery = orreryRepo.takeIf { orreryGate == true },
+                        armillary = armillaryRepo,
                         latticeInstalled = sessionStore.active()?.shipUrl?.let { url ->
-                            { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(http, url) }
+                            { io.nisfeb.talon.urbit.LatticeInstall.installedOrUnknown(http, url) ?: error("The ship could not be asked.") }
                         },
                         groupsInstalled = sessionStore.active()?.shipUrl?.let { url ->
-                            { io.nisfeb.talon.urbit.GroupsInstall.isInstalled(session.http, url) }
+                            { io.nisfeb.talon.urbit.GroupsInstall.installedOrUnknown(session.http, url) ?: error("The ship could not be asked.") }
                         },
                         onInstallGroups = io.nisfeb.talon.urbit.GroupsInstall.installer(
                             session.http,
                             { sessionStore.active()?.shipUrl },
+                        ) { a, mark, body -> runCatching { repo.pokeRaw(a, mark, body) }.isSuccess },
+                        // Shell desks, not kiln desks: the session's own
+                        // client, since adding one is an owner's call.
+                        onAddOrrery = io.nisfeb.talon.urbit.LatticeInstall.shellDesk(
+                            session.http,
+                            { sessionStore.active()?.shipUrl },
+                            name = "orrery",
+                            answers = {
+                        orreryRepo.probe()
+                        orreryRepo.availability.value == io.nisfeb.talon.orrery.OrreryAvailability.PRESENT
+                    },
+                        ) { a, mark, body -> runCatching { repo.pokeRaw(a, mark, body) }.isSuccess },
+                        onAddArmillary = io.nisfeb.talon.urbit.LatticeInstall.shellDesk(
+                            session.http,
+                            { sessionStore.active()?.shipUrl },
+                            name = "armillary",
+                            answers = {
+                        runCatching { armillaryRepo.refresh(fresh = true) }
+                        armillaryRepo.availability.value == io.nisfeb.talon.armillary.ArmillaryAvailability.PRESENT
+                    },
                         ) { a, mark, body -> runCatching { repo.pokeRaw(a, mark, body) }.isSuccess },
                         shipUrl = sessionStore.active()?.shipUrl,
                         onBack = { showApps = false },
@@ -2018,6 +2197,8 @@ fun App(
                             ship?.let { sessionStore.all().firstOrNull { it.ship == ship } }?.shipUrl
                         }
                         SettingsScreen(
+                            orrery = orreryRepo,
+                            armillary = armillaryRepo,
                             // Anyone who has ever posted a status, plus
                             // whoever is already pinned so a pin can be
                             // taken off again when they go quiet.
@@ -2046,6 +2227,7 @@ fun App(
                             onBack = {
                                 showSettings = false
                                 settingsStartOnAccount = false
+                                settingsStartOnAi = false
                             },
                             // wires it to dailyDigest.generateAndNotifyAsync
                             // when the production MainActivity migrates here.
@@ -2055,6 +2237,7 @@ fun App(
                             onOpenLoops = { showLoops = true },
                             localShip = localShip,
                             startOnAccount = settingsStartOnAccount,
+                            startOnAi = settingsStartOnAi,
                             onAlwaysPatpChanged = { on ->
                                 repo.pushScope.launch {
                                     runCatching { settingsSync?.pushAlwaysPatp(on) }
@@ -2201,8 +2384,23 @@ fun App(
                         onOpenContact = { patp -> profileSheetShip = patp },
                         onBack = { showContacts = false },
                     )
+                    showActions -> io.nisfeb.talon.ui.screens.OrreryActionsScreen(
+                        actions = orreryActions,
+                        onBack = { showActions = false },
+                        onShown = { orreryRepo.opened() },
+                        told = orreryRepo.told.collectAsState().value,
+                        onLeave = { orreryRepo.toldSeen() },
+                        failed = orreryRepo.failed.collectAsState().value,
+                        onDecide = { a, status, why -> orreryRepo.answer(a.id, status, why) },
+                        problem = orreryRepo.answerProblem.collectAsState().value ?: orreryRepo.error.collectAsState().value,
+                        generator = orreryRepo.generator.collectAsState().value?.let {
+                            io.nisfeb.talon.orrery.generatorLine(it, io.nisfeb.talon.util.nowMs(), kotlinx.datetime.TimeZone.currentSystemDefault())
+                        },
+                        twentyFourHour = uiSettings.homeTwentyFourHour.collectAsState().value,
+                    ) { a -> openAction = a }
                     showWatchwords -> WatchwordsScreen(
                         db = db,
+                        watchwords = repo.watchwords,
                         watchwordsSyncEnabled = watchwordsSyncEnabled,
                         onSetWatchwordsSyncEnabled = watchwordsSync::setEnabled,
                         onBack = { showWatchwords = false },
@@ -2579,6 +2777,7 @@ fun App(
                                     http = http,
                                     aiSettings = aiSettings,
                                     uiSettings = uiSettings,
+                                    calendar = calendarRepo,
                                     ourPatp = ship,
                                     whom = openChat!!,
                                     initialScrollMessageId = openChatFocusMessageId,
@@ -2595,6 +2794,7 @@ fun App(
                                     },
                                     onOpenImage = { url -> viewerImageUrl = url },
                                     onOpenSelfProfile = { showSelfProfile = true },
+                                    onTopUp = openTopUp,
                                     onStartCall =
                                         if (callController != null && openChat!!.startsWith("~")) {
                                             { callController.placeCall(openChat!!) }
@@ -2780,16 +2980,21 @@ fun App(
                         // same gate the old star icon used.
                         val assistantEnabled = isAssistantSupported &&
                             aiState.assistantOn() &&
-                            aiState.hasKey()
+                            aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)
                         val enabledItems: List<RailItem> = remember(
-                            railVisibility, railItemOrder, assistantEnabled,
+                            railVisibility, railItemOrder, assistantEnabled, orreryOn,
                         ) {
                             railItemOrder.filter { item ->
                                 // Map.isVisible enforces the Chats always-on invariant
                                 // (regardless of map state) and falls back to true
                                 // for absent entries.
                                 val visible = railVisibility.isVisible(item)
-                                val gateOk = item != RailItem.Assistant || assistantEnabled
+                                val gateOk = when (item) {
+                                    RailItem.Assistant -> assistantEnabled
+                                    // A section nobody can fill is noise.
+                                    RailItem.Actions -> orreryOn
+                                    else -> true
+                                }
                                 visible && gateOk
                             }
                         }
@@ -2832,11 +3037,19 @@ fun App(
                         val railEffectiveStatusesSeenMs =
                             maxOf(menuSeenState.lastSeenStatusesMs, railSyncedStatusesSeenMs)
                         val calendarShares by calendarRepo.shares.collectAsState()
+                        val mailUnread by mailRepo.inboxUnread.collectAsState()
+                        val assistantNews by assistantSession.news.collectAsState()
                         val menuBadges = remember(
                             railStatusFeed, railPendingInvites,
                             railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship, calendarShares,
+                            orreryActions, mailUnread, assistantNews,
                         ) {
                             MenuBadges(
+                                mailUnread = mailUnread,
+                                assistantNews = assistantNews,
+                                // A proposal is a question, and a question
+                                // nobody sees is the same as no question.
+                                actionsWaiting = orreryActions.any { it.status == "proposed" },
                                 calendarOffers = !calendarShares?.offers.isNullOrEmpty(),
                                 statusesFresh = railStatusFeed.any { c ->
                                     (c.statusUpdatedMs ?: 0L) > railEffectiveStatusesSeenMs &&
@@ -2852,27 +3065,14 @@ fun App(
                             // content with the rail still visible, so clicking
                             // ANY rail item must close it (the Assistant case
                             // below re-opens it, so clicking A is a no-op).
-                            showAssistant = false
                             // And leaving whichever of the others was open.
                             // The render is a `when` over these flags, so it
                             // shows the first one that is true rather than the
                             // one most recently asked for: left set, they pile
-                            // up and the earliest keeps winning. Harmless on a
-                            // rail, where people tended to come back the way
-                            // they went in; not harmless behind a drawer,
-                            // which is built for going straight from one
-                            // section to the next.
-                            showSelfProfile = false
-                            showWatchwords = false
-                            showGroupAdminList = false
-                            showInvites = false
-                            showSettings = false
-                            showApps = false
-                            showLoops = false
-                            showContacts = false
-                            showSearch = false
-                            showNewDm = false
-                            showCalendar = false
+                            // up and the earliest keeps winning. Every one the
+                            // registry made, so a new section cannot be left
+                            // out of this and stick.
+                            sections.closeAll()
                             // Clear the rail badge for items that show
                             // freshness signals — rail clicks were missing
                             // the markXSeen calls the kebab paths in
@@ -2914,6 +3114,16 @@ fun App(
                                     }
                                 } else {
                                     uiSettings.setActiveRailTab(tab)
+                                    // With no rail on screen the tab is the
+                                    // whole of the navigation: a chat left
+                                    // open would stay in front of it, and
+                                    // picking Mail or Home did nothing.
+                                    if (!expanded) {
+                                        openChat = null
+                                        openThreadParent = null
+                                        groupInfoOpenFor = null
+                                        groupInfoDrilldown = null
+                                    }
                                 }
                             } ?: when (item) {
                                 RailItem.Assistant -> openAssistantAction()
@@ -2921,6 +3131,7 @@ fun App(
                                 RailItem.Watchwords -> showWatchwords = true
                                 RailItem.Administration -> showGroupAdminList = true
                                 RailItem.Invites -> showInvites = true
+                                RailItem.Actions -> showActions = true
                                 RailItem.Settings -> showSettings = true
                                 // pane tabs handled above; never reaches here
                                 RailItem.Home, RailItem.Chats, RailItem.Mail, RailItem.Calendar,
@@ -2934,6 +3145,7 @@ fun App(
                                 RailTab.Home -> Unit
                                 RailTab.Chats -> {
                                     DmListScreen(
+                                        orreryOn = orreryGate == true,
                                         db = db,
                                         repo = repo,
                                         drafts = drafts,
@@ -2943,6 +3155,7 @@ fun App(
                                         // so expanding a group can land its most
                                         // recent channel there without navigating.
                                         autoOpenOnExpand = expanded,
+                                        openWhom = openChat.takeIf { expanded },
                                         onOpenConversation = { whom ->
                                             openConversationAction()
                                             openChatFocusMessageId = null
@@ -3097,6 +3310,7 @@ fun App(
                                         runCatching { io.nisfeb.talon.ui.RailItem.valueOf(it.name) }.getOrNull()
                                     },
                                     canOpen = { item -> item in enabledItems },
+                                    badges = menuBadges.byItem(),
                                     onSection = { item ->
                                         closeDrawer()
                                         onRailItemClicked(item)
@@ -3163,6 +3377,14 @@ fun App(
                                         statuses = homeStatuses,
                                         invites = homeInvites,
                                         onOpenInvites = { showInvites = true },
+                                        actions = io.nisfeb.talon.ui.newActions(orreryActions, uiSettings.homeTwentyFourHour.collectAsState().value),
+                                        // The chip was drawn from a listing that may
+                                        // have moved on. A tap that found nothing used
+                                        // to do nothing; it opens the list instead.
+                                        onOpenAction = { id ->
+                                            orreryActions.firstOrNull { it.id == id }
+                                                ?.let { openAction = it } ?: run { showActions = true }
+                                        },
                                         onOpenContact = { other -> profileSheetShip = other },
                                         // The same rule the kebab menu uses: a rail
                                         // to switch only where one is on screen.
@@ -3198,6 +3420,10 @@ fun App(
                                         onOpenThread = { openMailThread = it },
                                         composing = mailComposing,
                                         onCompose = { mailComposing = it },
+                                        // What a mail cannot carry, the
+                                        // ship's own storage can: the same
+                                        // upload chat images take.
+                                        upload = { bytes, mime, name -> repo.uploadImage(bytes, mime, name) },
                                     )
                                 }
                             } else if (activeRailTab == RailTab.Calendar && !showAssistant) {
@@ -3220,7 +3446,11 @@ fun App(
                                         mail = mailRepo,
                                         calendar = calendarRepo,
                                         calls = callController,
+                                        // No Orrery tools while Orrery is off.
+                                        orrery = orreryRepo.takeIf { orreryGate == true },
                                         listenOnOpen = assistantListen,
+                                        onTopUp = openTopUp,
+                                        session = assistantSession,
                                         scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
                                         onRunLoop = runLoopNow,
                                         onBack = if (expanded) null else ({ showAssistant = false; assistantListen = false }),

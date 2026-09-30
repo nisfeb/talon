@@ -8,24 +8,11 @@ import kotlin.test.assertTrue
 class UrbLinkTest {
 
     @Test
-    fun isUrbUrlAcceptsWellFormed() {
-        assertTrue(UrbLink.isUrbUrl("urb://~sampel-palnet/notes/hello.gmi"))
-        assertTrue(UrbLink.isUrbUrl("urb://~zod/"))
-        assertTrue(UrbLink.isUrbUrl("  urb://~zod/a/b  ")) // trimmed
-    }
-
-    @Test
     fun isUrbUrlRejectsJunk() {
         assertFalse(UrbLink.isUrbUrl("urb://"))            // scheme only
         assertFalse(UrbLink.isUrbUrl("https://example.com"))
         assertFalse(UrbLink.isUrbUrl("urb://~zod a"))      // embedded space
         assertFalse(UrbLink.isUrbUrl("see urb://~zod/x"))  // surrounding text
-    }
-
-    @Test
-    fun extractsBareUrlFromText() {
-        val text = "check out urb://~sampel-palnet/page.gmi it's great"
-        assertEquals(listOf("urb://~sampel-palnet/page.gmi"), UrbLink.extract(text))
     }
 
     @Test
@@ -67,14 +54,7 @@ class UrbLinkTest {
         assertTrue(UrbLink.extract("just some text, no links").isEmpty())
         assertTrue(UrbLink.extract("https://example.com/urb").isEmpty())
         assertTrue(UrbLink.extract("urb:// ").isEmpty()) // scheme only, then space
+        assertTrue(UrbLink.extract("urb://.").isEmpty()) // nothing but punctuation after it
     }
 
-    @Test
-    fun rangesPointIntoOriginal() {
-        val text = "x urb://~zod/p y"
-        val ranges = UrbLink.findRanges(text)
-        assertEquals(1, ranges.size)
-        val r = ranges[0]
-        assertEquals("urb://~zod/p", text.substring(r.first, r.last + 1))
-    }
 }

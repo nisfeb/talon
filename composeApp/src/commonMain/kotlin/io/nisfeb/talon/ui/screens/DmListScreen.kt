@@ -27,8 +27,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.graphics.Color
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -55,7 +55,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -100,6 +100,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.jsonPrimitive
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import io.nisfeb.talon.ui.icons.TalonIcons
@@ -108,6 +109,8 @@ import io.nisfeb.talon.ui.icons.TalonIcons
 @Composable
 fun DmListScreen(
     db: AppDatabase,
+    /** Orrery is on; off, its tray of noticed claims is not shown. */
+    orreryOn: Boolean = true,
     repo: TlonChatRepo,
     drafts: DraftStore,
     updateState: UpdateState,
@@ -191,6 +194,10 @@ fun DmListScreen(
      *  default because on compact layouts "open" navigates away
      *  from the list the user was in the middle of browsing. */
     autoOpenOnExpand: Boolean = false,
+    /** The conversation open beside the list, whose row keeps a soft
+     *  accent for as long as it has the focus. Null where the chat
+     *  replaces the list rather than sitting beside it. */
+    openWhom: String? = null,
     /** How the home list's Groups section and any custom folder's
      *  top-level entries sort. Same UiSettings-driven plumbing as
      *  [groupChannelOrder]. */
@@ -229,6 +236,10 @@ fun DmListScreen(
     // Rendered as a "Requests" section at the top of the list.
     val dmInvites by remember { db.dmInvites().stream() }
         .collectAsState(initial = emptyList())
+    // What the orrery triage noticed in what people said, waiting for a word.
+    val noticed by remember(activeShip, orreryOn) {
+        activeShip?.takeIf { orreryOn }?.let { db.orreryNoticed().pending(it) } ?: kotlinx.coroutines.flow.flowOf(emptyList())
+    }.collectAsState(initial = emptyList())
     val rows by remember {
         combine(
             db.messages().conversationLatest().distinctUntilChanged(),
@@ -281,9 +292,16 @@ fun DmListScreen(
         }
         val filtered = mutableListOf<UnreadEntity>()
         for (u in notifyUnreads) {
-            val recent = runCatching {
+            // Not runCatching: it caught the cancellation of a scan the
+            // next emission replaced, every row after it read as having
+            // nothing cached and so passed, and the stale list was shown.
+            val recent = try {
                 db.messages().latestAnyFor(u.whom, MENTION_SCAN_LIMIT)
-            }.getOrDefault(emptyList())
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
             val include = if (recent.isEmpty()) {
                 true
             } else {
@@ -429,10 +447,6 @@ fun DmListScreen(
     // Persist expanded-group set across navigations so groups stay open
     // when the user returns from a chat.
     var expandedGroups by remember { mutableStateOf(snap.expandedGroups) }
-    // The channel a group expand just landed in, with a nonce so landing
-    // in the same channel again replays the glow. Read by GroupChannelRow.
-    var jumpedWhom by remember { mutableStateOf<String?>(null) }
-    var jumpNonce by remember { mutableStateOf(0) }
     // Mirror every change back into the snapshot so the next mount
     // starts from the user's latest expansion state.
     androidx.compose.runtime.LaunchedEffect(expandedGroups) {
@@ -557,7 +571,14 @@ fun DmListScreen(
             selectedHomeTab = tab
         }
     }
+    // Only on a change of tab. Coming back from a chat is not one: the
+    // list state outlived the chat and still stands where it was, and
+    // restoring here put it back to where the tab was last *left* --
+    // the top, for anyone who never switched tabs.
+    var restoredTab by remember { mutableStateOf(selectedHomeTab) }
     LaunchedEffect(selectedHomeTab) {
+        if (selectedHomeTab == restoredTab) return@LaunchedEffect
+        restoredTab = selectedHomeTab
         val saved = when (selectedHomeTab) {
             HomeTab.Groups -> snap.groupsScroll
             HomeTab.Dms -> snap.dmsScroll
@@ -593,11 +614,7 @@ fun DmListScreen(
             homeRows.filterIsInstance<HomeRow.GroupChild>()
                 .filter { it.groupFlag == flag }
                 .maxByOrNull { it.m?.sentMs ?: 0L }
-                ?.let {
-                    jumpedWhom = it.whom
-                    jumpNonce++
-                    onRowOpen(it.whom)
-                }
+                ?.let { onRowOpen(it.whom) }
         }
         // Lazy-item index of the group head: each Header / GroupHead /
         // Flat is one item; GroupChild rows are bundled into their
@@ -1105,6 +1122,7 @@ fun DmListScreen(
             },
             onDismiss = { updateState.dismiss() },
         )
+        io.nisfeb.talon.ui.PermitsBanner(repo.shipHttp, repo.shipBaseUrl)
         // Mentions-tab list: drive off the unreads table directly, not
         // the messages-derived `rows`. A whom can carry notifyCount > 0
         // (drives the badge total) without having any cached message —
@@ -1138,6 +1156,29 @@ fun DmListScreen(
             contentPadding = PaddingValues(vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
+            // Claims the triage noticed, above everything: each is one tap
+            // to confirm or discard, and a kind confirmed enough times
+            // stops asking.
+            if (noticed.isNotEmpty()) {
+                item(key = "__noticed_header", contentType = "req_header") {
+                    Text(
+                        "Noticed",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+                items(items = noticed, key = { "noticed:${it.id}" }, contentType = { "noticed" }) { n ->
+                    NoticedRow(
+                        n = n,
+                        contactMap = contactMap,
+                        onConfirm = { repo.pushScope.launch { io.nisfeb.talon.orrery.OrreryRepo.confirm(db, n.id) } },
+                        onDiscard = { repo.pushScope.launch { io.nisfeb.talon.orrery.OrreryRepo.discard(db, n.id) } },
+                    )
+                    HorizontalDivider()
+                }
+            }
+
             // Pending DM requests pinned to the top — Accept opens the
             // conversation, Decline dismisses it. Always shown (any tab)
             // so a new DM can't hide behind a folder/special selection.
@@ -1193,6 +1234,7 @@ fun DmListScreen(
                             draft = drafts[m.whom],
                             onClick = onRowOpen,
                             onLongClick = onRowLongPress,
+                            open = m.whom == openWhom,
                         )
                         HorizontalDivider()
                     }
@@ -1224,6 +1266,7 @@ fun DmListScreen(
                                 draft = drafts[u.whom],
                                 onClick = onRowOpen,
                                 onLongClick = onRowLongPress,
+                                open = m.whom == openWhom,
                             )
                         } else {
                             MentionPlaceholderRow(
@@ -1316,11 +1359,7 @@ fun DmListScreen(
                                                 if (autoOpenOnExpand && expanding && !editMode) {
                                                     childrenSnapshot
                                                         .maxByOrNull { it.m?.sentMs ?: 0L }
-                                                        ?.let {
-                                                            jumpedWhom = it.whom
-                                                            jumpNonce++
-                                                            onRowOpen(it.whom)
-                                                        }
+                                                        ?.let { onRowOpen(it.whom) }
                                                 }
                                             },
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
@@ -1366,7 +1405,7 @@ fun DmListScreen(
                                                         draft = drafts[child.whom],
                                                         onClick = onRowOpen,
                                                         onLongClick = onRowLongPress,
-                                                        flashKey = if (jumpedWhom == child.whom) jumpNonce else null,
+                                                        open = child.whom == openWhom,
                                                     )
                                                     HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                                                 }
@@ -1406,6 +1445,7 @@ fun DmListScreen(
                                         draft = drafts[row.m.whom],
                                         onClick = onRowOpen,
                                         onLongClick = onRowLongPress,
+                                        open = row.m.whom == openWhom,
                                         editMode = editMode,
                                         dragHandleModifier = if (!canReorder) null else reorderHandle(
                                             onDragStarted = {
@@ -1503,11 +1543,7 @@ fun DmListScreen(
                                                 if (autoOpenOnExpand && expanding && !editMode) {
                                                     childrenSnapshot
                                                         .maxByOrNull { it.m?.sentMs ?: 0L }
-                                                        ?.let {
-                                                            jumpedWhom = it.whom
-                                                            jumpNonce++
-                                                            onRowOpen(it.whom)
-                                                        }
+                                                        ?.let { onRowOpen(it.whom) }
                                                 }
                                             },
                                             onLongClick = if (editMode) null else onGroupHeadLongPress,
@@ -1557,7 +1593,7 @@ fun DmListScreen(
                                                         draft = drafts[child.whom],
                                                         onClick = onRowOpen,
                                                         onLongClick = onRowLongPress,
-                                                        flashKey = if (jumpedWhom == child.whom) jumpNonce else null,
+                                                        open = child.whom == openWhom,
                                                     )
                                                     HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                                                 }
@@ -1581,6 +1617,7 @@ fun DmListScreen(
                                     draft = drafts[row.m.whom],
                                     onClick = onRowOpen,
                                     onLongClick = onRowLongPress,
+                                    open = row.m.whom == openWhom,
                                 )
                                 HorizontalDivider()
                             }
@@ -1672,9 +1709,7 @@ fun DmListScreen(
                     .map { it.nest }
                 scope.launch { runCatching { repo.markAllRead(whoms) } }
             },
-            onLeaveGroup = {
-                scope.launch { runCatching { repo.leaveGroup(flag) } }
-            },
+            onLeaveGroup = { repo.leaveGroup(flag) },
         )
     }
 
@@ -2043,7 +2078,7 @@ private fun TabChip(
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(MaterialTheme.shapes.small)
             .background(bg)
             .combinedClickableWithSecondary(
                 onClick = onClick,
@@ -2163,7 +2198,7 @@ private fun DmRequestRow(
     onAccept: () -> Unit,
     onDecline: () -> Unit,
 ) {
-    val label = remember(ship, contactMap) { contactMap.nickname(ship) ?: ship }
+    val label = remember(ship, contactMap) { contactMap.displayName(ship) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2191,6 +2226,47 @@ private fun DmRequestRow(
     }
 }
 
+/** One noticed claim: who, what, and the words it came from. */
+@Composable
+private fun NoticedRow(
+    n: io.nisfeb.talon.data.OrreryNoticedEntity,
+    contactMap: ContactMap,
+    onConfirm: () -> Unit,
+    onDiscard: () -> Unit,
+) {
+    fun who(id: String): String = when {
+        id == "person/me" -> "You"
+        id.startsWith("person/") -> id.removePrefix("person/").let { s -> contactMap.nickname("~$s") ?: "~$s" }
+        else -> id.substringAfter('/')
+    }
+    val value = remember(n.valueJson) {
+        runCatching {
+            val e = kotlinx.serialization.json.Json.parseToJsonElement(n.valueJson)
+            (e as? kotlinx.serialization.json.JsonObject)?.get("ref")?.let { r -> who(r.jsonPrimitive.content) }
+                ?: e.jsonPrimitive.content
+        }.getOrDefault(n.valueJson)
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("${who(n.subject)}: ${n.attr} is $value", style = MaterialTheme.typography.bodyLarge, maxLines = 2)
+            Text(
+                n.snippet,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+            )
+        }
+        TextButton(onClick = onDiscard) {
+            Text("Discard", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        TextButton(onClick = onConfirm) { Text("Confirm") }
+    }
+}
+
 @Composable
 private fun ConversationRow(
     m: MessageEntity,
@@ -2199,9 +2275,12 @@ private fun ConversationRow(
     draft: String?,
     onClick: (String) -> Unit,
     onLongClick: (String) -> Unit,
+    /** Open beside the list: see [focusGlow]. */
+    open: Boolean = false,
     editMode: Boolean = false,
     dragHandleModifier: Modifier? = null,
 ) {
+    val glow = focusGlow(open)
     val preview = remember(m.id, m.contentJson) {
         StoryCache.textFor(m.id, m.contentJson)
             .take(200)
@@ -2229,6 +2308,7 @@ private fun ConversationRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(glow)
             .then(rowClickModifier)
             .padding(horizontal = 16.dp, vertical = density.listRowVertical),
         verticalAlignment = Alignment.CenterVertically,
@@ -2564,6 +2644,20 @@ private fun GroupHeaderRow(
     }
 }
 
+/**
+ * The soft accent behind the row of the conversation open beside the
+ * list. It was a flash that faded when a group expand landed on a
+ * channel; kept, it says at a glance which one has the focus. It eases
+ * in and out as the focus moves.
+ */
+@Composable
+private fun focusGlow(open: Boolean): Color =
+    animateColorAsState(
+        if (open) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else Color.Transparent,
+        animationSpec = tween(durationMillis = 300),
+        label = "focus",
+    ).value
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GroupChannelRow(
@@ -2574,18 +2668,11 @@ private fun GroupChannelRow(
     draft: String?,
     onClick: (String) -> Unit,
     onLongClick: (String) -> Unit,
-    /** Non-null when a group expand just landed here: the row glows in the accent and fades. */
-    flashKey: Any? = null,
+    /** Open beside the list: see [focusGlow]. */
+    open: Boolean = false,
 ) {
     val shortName = remember(whom) { contactMap.channelShortName(whom) }
-    val flash = remember(whom) { Animatable(0f) }
-    LaunchedEffect(flashKey) {
-        if (flashKey != null) {
-            flash.snapTo(1f)
-            flash.animateTo(0f, tween(1_800, easing = LinearEasing))
-        }
-    }
-    val glow = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f * flash.value)
+    val glow = focusGlow(open)
     val preview = m?.let {
         remember(it.id, it.contentJson, it.title) {
             StoryCache.previewFor(it).take(200).replace('\n', ' ')

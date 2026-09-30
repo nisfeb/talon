@@ -46,7 +46,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.DisposableEffect
@@ -121,15 +121,16 @@ fun ThreadList(
     io.nisfeb.talon.notify.ClearNotificationsWhileShown(whom)
     // Taken once per thread: set by whatever opened it to reply.
     val openedToReply = remember(parentId) { ThreadOpenIntent.take(parentId) }
-    val parent by remember(whom, parentId) {
-        db.messages().streamOne(whom, parentId).distinctUntilChanged()
-    }.collectAsState(initial = null)
-
-    val rows by remember(whom, parentId) {
+    // The parent and its replies are one state, changed in one write. As
+    // two, a fetch that stored both could leave the list drawn with only
+    // one of them: the second state landed in the same instant and the
+    // list's contents never caught up with it.
+    val thread by remember(whom, parentId) {
         combine(
+            db.messages().streamOne(whom, parentId).distinctUntilChanged(),
             db.messages().streamReplies(whom, parentId).distinctUntilChanged(),
             db.reactions().stream(whom).distinctUntilChanged(),
-        ) { replies, reactions ->
+        ) { parent, replies, reactions ->
             val byPost = reactions.groupBy { it.postId }
             val parentReacts = byPost[parentId].orEmpty()
             var prev: MessageEntity? = null
@@ -147,9 +148,11 @@ fun ThreadList(
                     )
                 )
             }
-            parentReacts to (replyRows as List<ReplyRow>)
+            parent to (parentReacts to (replyRows as List<ReplyRow>))
         }.flowOn(Dispatchers.Default)
-    }.collectAsState(initial = emptyList<ReactionEntity>() to emptyList<ReplyRow>())
+    }.collectAsState(initial = null to (emptyList<ReactionEntity>() to emptyList<ReplyRow>()))
+    val parent = thread.first
+    val rows = thread.second
 
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
@@ -273,8 +276,9 @@ fun ThreadList(
                 width: Int,
                 height: Int,
                 alt: String,
+                caption: String,
             ) {
-                repo.replyImage(whom, parentId, src, width, height, alt)
+                repo.replyImage(whom, parentId, src, width, height, alt, caption)
             }
             override val supportsQuote: Boolean = false
             override suspend fun sendQuote(
@@ -312,10 +316,10 @@ fun ThreadList(
                 }
                 scope.launch {
                     runCatching {
-                        if (mineSame) repo.unreact(whom, m.id)
-                        else repo.react(whom, m.id, emoji)
+                        if (mineSame) repo.unreact(whom, m.id, m.parentId)
+                        else repo.react(whom, m.id, emoji, m.parentId)
                     }.onFailure {
-                        composerState.sendError = "react failed: ${it.message ?: it::class.simpleName}"
+                        composerState.failed("react", it)
                     }
                 }
                 Unit
@@ -325,14 +329,7 @@ fun ThreadList(
     val onMentionTap: (String) -> Unit = remember(onOpenConversation) {
         { patp -> onOpenConversation(patp) }
     }
-    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-    val urbLinkHandler = io.nisfeb.talon.ui.LocalUrbLinkHandler.current
-    val onLinkTap: (String) -> Unit = remember(uriHandler, urbLinkHandler) {
-        { url ->
-            if (io.nisfeb.talon.urbit.UrbLink.isUrbUrl(url)) urbLinkHandler(url)
-            else runCatching { uriHandler.openUri(url) }
-        }
-    }
+    val onLinkTap: (String) -> Unit = io.nisfeb.talon.ui.rememberLinkOpener()
     val onImageTap: (String) -> Unit = remember(onOpenImage) {
         { url -> onOpenImage(url) }
     }
@@ -354,10 +351,9 @@ fun ThreadList(
             onPickReaction = { code ->
                 actionTarget = null
                 scope.launch {
-                    runCatching { repo.react(whom, target.id, code) }
+                    runCatching { repo.react(whom, target.id, code, target.parentId) }
                         .onFailure {
-                            composerState.sendError =
-                                "react failed: ${it.message ?: it::class.simpleName}"
+                            composerState.failed("react", it)
                         }
                 }
             },
@@ -428,8 +424,8 @@ fun ThreadList(
                         ReactionPalette.normalize(mine) == ReactionPalette.normalize(emoji)
                     scope.launch {
                         runCatching {
-                            if (same) repo.unreact(whom, msg.id)
-                            else repo.react(whom, msg.id, emoji)
+                            if (same) repo.unreact(whom, msg.id, msg.parentId)
+                            else repo.react(whom, msg.id, emoji, msg.parentId)
                         }
                     }
                 }
@@ -530,7 +526,7 @@ fun ThreadList(
                         runCatching {
                             repo.delete(whom, t.id, parentId = t.parentId)
                         }.onFailure {
-                            composerState.sendError = "delete failed: ${it.message ?: it::class.simpleName}"
+                            composerState.failed("delete", it)
                         }
                     }
                 }) {
@@ -572,8 +568,7 @@ fun ThreadList(
                             }.onSuccess {
                                 composerState.sendError = "Reported to the group's admins"
                             }.onFailure {
-                                composerState.sendError =
-                                    "report failed: ${it.message ?: it::class.simpleName}"
+                                composerState.failed("report", it)
                             }
                         }
                     }
@@ -616,8 +611,7 @@ fun ThreadList(
                             originalContentJson = target.contentJson,
                         )
                     }.onFailure {
-                        composerState.sendError =
-                            "edit failed: ${it.message ?: it::class.simpleName}"
+                        composerState.failed("edit", it)
                     }
                 }
             },
@@ -753,11 +747,17 @@ private fun ThreadMessage(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             if (showHeader) {
-                Text(
-                    "$authorLabel · $stamp",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        "$authorLabel · $stamp",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (m.status == "pending") SendingIcon()
+                }
             }
             StoryRenderer(
                 parts,
@@ -771,6 +771,7 @@ private fun ThreadMessage(
                 // text rather than opening the menu (hover "⋯" opens it).
                 onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
+            SendStateNote(m.status)
             if (grouped.isNotEmpty()) {
                 FlowRow(
                     modifier = Modifier.padding(top = 4.dp),

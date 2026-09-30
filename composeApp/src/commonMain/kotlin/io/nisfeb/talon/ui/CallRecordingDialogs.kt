@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -151,11 +151,26 @@ fun RecordingResultDialog(
                                 http, stt!!, shipUrl!!, ourShip, cookie!!,
                                 title, whenLabel, rec, nameFor,
                             )
-                        }.onSuccess {
-                            publishedUrl = it
-                            message = "Published to $it"
+                        }.onSuccess { published ->
+                            publishedUrl = published.address
+                            message = "Published to ${published.address}"
                             kept = true
-                        }.onFailure { message = "Publish failed: ${it.message ?: "error"}" }
+                            // The call is a fact about the world: who was on
+                            // it, where its transcript is, and what was said,
+                            // which the triage reads here and now.
+                            val speakers = rec.clips.keys
+                            val at = io.nisfeb.talon.util.nowMs()
+                            io.nisfeb.talon.orrery.OrreryRepo.noteCall { idFor ->
+                                io.nisfeb.talon.orrery.callFacts(published.address, title, speakers, ourShip, at, nameFor) { ship ->
+                                    idFor(ship, nameFor(ship))
+                                }
+                            }
+                            val shipOf = speakers.associateBy { nameFor(it) }
+                            io.nisfeb.talon.orrery.OrreryRepo.noteTranscript(
+                                published.address,
+                                published.utterances.mapNotNull { u -> shipOf[u.speaker]?.let { io.nisfeb.talon.orrery.Spoken(it, u.text) } },
+                            )
+                        }.onFailure { if (it !is kotlinx.coroutines.CancellationException) message = "Publish failed: ${it.message ?: "error"}" }
                         busy = false
                     }
                 },
@@ -271,7 +286,7 @@ fun RecordingResultDialog(
                             }.onSuccess { path ->
                                 if (path != null) kept = true
                                 message = if (path != null) "Saved transcript to $path" else "Couldn't save on this platform."
-                            }.onFailure { message = "Transcription failed: ${it.message ?: "error"}" }
+                            }.onFailure { if (it !is kotlinx.coroutines.CancellationException) message = "Transcription failed: ${it.message ?: "error"}" }
                             busy = false
                         }
                     },

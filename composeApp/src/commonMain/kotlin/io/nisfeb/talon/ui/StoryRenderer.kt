@@ -32,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +43,10 @@ import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.urbit.StoryCache
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
@@ -188,12 +193,61 @@ fun mediaInStory(parts: List<StoryPart>): List<Pair<String, MediaKind>> {
     return out
 }
 
+/**
+ * [this] with its links and mentions in [color], the theme's link colour,
+ * over the blues they were parsed in; unchanged where the theme sets none.
+ */
+internal fun AnnotatedString.withLinkColor(color: androidx.compose.ui.graphics.Color?): AnnotatedString {
+    if (color == null) return this
+    val spans = getStringAnnotations(0, length).filter { it.tag == URL_TAG || it.tag == MENTION_TAG }
+    if (spans.isEmpty()) return this
+    return androidx.compose.ui.text.buildAnnotatedString {
+        append(this@withLinkColor)
+        spans.forEach { addStyle(androidx.compose.ui.text.SpanStyle(color = color), it.start, it.end) }
+    }
+}
+
+/**
+ * The link or mention under [pos]: the glyph the pointer is on, not the
+ * caret nearest it, so blank space past the end of a line is not the
+ * link that ends it. Tap and hover both ask this, so the hand shows
+ * exactly where a click opens something.
+ */
+internal fun TextLayoutResult.spanAt(text: AnnotatedString, pos: Offset): AnnotatedString.Range<String>? {
+    val char = glyphAt(text, pos) ?: return null
+    return text.getStringAnnotations(char, char + 1).firstOrNull { it.tag == URL_TAG || it.tag == MENTION_TAG }
+}
+
+/**
+ * The hand over a link or mention (an @p, a mnemonym, a nickname), as
+ * over any link. These spans are string annotations with their own tap
+ * handling, which Compose gives no cursor. Over a span it overrides
+ * the I-beam the selectable text sets for itself; elsewhere it defers.
+ */
+@Composable
+private fun Modifier.handOverSpans(text: AnnotatedString, layout: State<TextLayoutResult?>): Modifier {
+    var over by remember(text) { mutableStateOf(false) }
+    return pointerInput(text) {
+        awaitPointerEventScope {
+            while (true) {
+                val e = awaitPointerEvent()
+                val pos = e.changes.firstOrNull()?.position ?: continue
+                over = e.type != PointerEventType.Exit && layout.value?.spanAt(text, pos) != null
+            }
+        }
+    // Always attached: adding and removing it moved the tap detector in
+    // the chain, which reset it between a press and its release.
+    }.pointerHoverIcon(if (over) PointerIcon.Hand else PointerIcon.Text, overrideDescendants = over)
+}
+
 @Composable
 fun StoryRenderer(
     parts: List<StoryPart>,
     modifier: Modifier = Modifier,
     onMentionTap: (String) -> Unit = {},
-    onLinkTap: (String) -> Unit = {},
+    // The gallery and notebook posts passed none, and every link in
+    // them did nothing.
+    onLinkTap: (String) -> Unit = rememberLinkOpener(),
     onImageTap: (String) -> Unit = {},
     /** Reactions on this message, used by the poll widget to render
      *  per-option tallies. */
@@ -222,7 +276,10 @@ fun StoryRenderer(
     // inside text. The action menu is reached by tapping the row on
     // touch (onMessageTap) and by the row's hover "⋯" on desktop —
     // right-click can't be used here, this SelectionContainer eats it.
-    SelectionContainer(modifier = modifier) {
+    val linkColor = io.nisfeb.talon.ui.theme.LocalLinkColor.current
+    val link = rememberLinkUnder()
+    CopyLinkMenu(link, modifier) {
+    SelectionContainer {
     Column(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -243,23 +300,18 @@ fun StoryRenderer(
                     } else {
                         val layout = remember { mutableStateOf<TextLayoutResult?>(null) }
                         Text(
-                            text = part.text.applyEmojiSpans(),
+                            text = part.text.withLinkColor(linkColor).applyEmojiSpans(),
                             style = MaterialTheme.typography.bodyMedium,
                             onTextLayout = { layout.value = it },
                             modifier = if (hasAnnotations) {
-                                Modifier.pointerInput(part.text) {
+                                Modifier.handOverSpans(part.text, layout).pressedLink(part.text, { layout.value }, link).pointerInput(part.text) {
                                     // No onLongPress here — long-press is
                                     // owned by SelectionContainer (text
                                     // selection start). Tap stays bound to
                                     // URL / mention navigation.
                                     detectTapGestures(
                                         onTap = { pos ->
-                                            val l = layout.value
-                                            val ann = l?.let {
-                                                val offset = it.getOffsetForPosition(pos)
-                                                part.text.getStringAnnotations(offset, offset)
-                                                    .firstOrNull()
-                                            }
+                                            val ann = layout.value?.spanAt(part.text, pos)
                                             when (ann?.tag) {
                                                 URL_TAG -> onLinkTap(ann.item)
                                                 MENTION_TAG -> onMentionTap(ann.item)
@@ -398,6 +450,7 @@ fun StoryRenderer(
         }
     }
     } // SelectionContainer
+    } // CopyLinkMenu
 }
 
 /**
@@ -759,7 +812,7 @@ private fun LocWidgetBlock(
             }
             val uriHandlerLoc = androidx.compose.ui.platform.LocalUriHandler.current
             val mapsLauncher = LocalMapsLauncher.current
-            androidx.compose.material3.TextButton(onClick = {
+            io.nisfeb.talon.ui.TextButton(onClick = {
                 runCatching {
                     // Android: Intent(geo:) hands off to Google Maps /
                     // OsmAnd / etc. directly. Desktop / unset: browser
@@ -832,7 +885,7 @@ private fun CalWidgetBlock(
             }
             androidx.compose.foundation.layout.Box {
                 // The ship's own calendars first; another calendar app after.
-                androidx.compose.material3.TextButton(
+                io.nisfeb.talon.ui.TextButton(
                     onClick = {
                         if (shipCalendar != null && shipCalendars.isNotEmpty()) menuOpen = true else toAnotherApp()
                     },

@@ -45,6 +45,10 @@ internal object CallAudioSession {
             .getSystemService(Context.AUDIO_SERVICE) as AudioManager
         audioManager = am
         am.mode = AudioManager.MODE_IN_COMMUNICATION
+        // The route the owner picked, where this is a call coming back
+        // rather than a new one: a reconnect closes every link, which
+        // reaches release() below, and opens new ones here.
+        AndroidAudioDevices.restoreSelection(am)
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -81,7 +85,7 @@ internal object CallAudioSession {
             // in AndroidAudioDevices.
             runCatching { am.clearCommunicationDevice() }
         }
-        AndroidAudioDevices.clearSelection()
+        AndroidAudioDevices.sessionEnded()
     }
 
     private const val TAG = "CallAudioSession"

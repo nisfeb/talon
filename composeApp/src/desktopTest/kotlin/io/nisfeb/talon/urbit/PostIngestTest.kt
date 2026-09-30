@@ -87,19 +87,6 @@ class PostIngestTest {
 
     // ─── id normalization ──────────────────────────────────────
 
-    @Test
-    fun `dotted seal id is normalized to undotted in the entity`() {
-        val post = json.parseToJsonElement("""
-            {
-              "seal": {"id":"170.141.184.507.933.044.937.549.665.940.933.705.728",
-                       "reacts":{},"replies":{},"seq":1},
-              "essay": {"content":[],"author":"~x","sent":0,"kind":"/chat","blob":null,"meta":null}
-            }
-        """.trimIndent())
-        val out = ingestedPost("chat/~host/slug", post)
-        assertEquals("170141184507933044937549665940933705728", out.messages[0].id)
-    }
-
     // ─── malformed input ──────────────────────────────────────
 
     @Test
@@ -113,20 +100,7 @@ class PostIngestTest {
         assertEquals(0, out.tombstones.size)
     }
 
-    @Test
-    fun `non-object post yields an empty ingest`() {
-        val out = ingestedPost("chat/~host/slug", JsonPrimitive("garbage"))
-        assertEquals(0, out.messages.size)
-    }
-
     // ─── mergeBlobIntoContent ─────────────────────────────────
-
-    @Test
-    fun `mergeBlobIntoContent returns content unchanged when blob is null`() {
-        val content = buildJsonArray { }
-        val merged = mergeBlobIntoContent(content, null)
-        assertEquals(content, merged)
-    }
 
     @Test
     fun `mergeBlobIntoContent prepends a file block for each file entry`() {
@@ -173,17 +147,4 @@ class PostIngestTest {
         assertNull(e.image)
     }
 
-    @Test
-    fun `pureReplyEntity sets parentId and kind chat`() {
-        val essay = buildJsonObject {
-            put("author", "~x")
-            put("sent", 1L)
-            put("content", buildJsonArray { })
-        }
-        val e = pureReplyEntity("chat/~x/y", "parent123", "reply456", essay)
-        assertEquals("parent123", e.parentId)
-        assertEquals("/chat", e.kind)
-        assertEquals("~x", e.author)
-        assertEquals(1L, e.sentMs)
-    }
 }

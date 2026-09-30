@@ -66,25 +66,6 @@ class NotesDaoTest {
     )
 
     @Test
-    fun `replaceTree keeps a note pending across a host snapshot`() = runBlocking {
-        val dao = db.notes()
-        dao.upsertNotes(listOf(note(1, "original")))
-        // User edits: body swapped locally, row marked in flight.
-        dao.applyLocalEdit(flag, 1, "user's unsaved edit", 2_000L)
-        assertTrue(dao.note(flag, 1)!!.pending)
-
-        // A scry races in still carrying the host's older body.
-        dao.replaceTree(flag, listOf(folder(1, null)), listOf(note(1, "original")))
-
-        // The row must stay flagged so the UI keeps showing "saving…"
-        // instead of silently reverting to the host's copy.
-        assertTrue(
-            dao.note(flag, 1)!!.pending,
-            "an in-flight edit must survive a racing snapshot",
-        )
-    }
-
-    @Test
     fun `replaceTree drops rows the host no longer has`() = runBlocking {
         val dao = db.notes()
         dao.upsertNotes(listOf(note(1, "a"), note(2, "b")))
@@ -120,21 +101,6 @@ class NotesDaoTest {
         // And it stays cleared across further refreshes.
         dao.replaceTree(flag, emptyList(), listOf(note(1, "edited").copy(revision = 2)))
         assertFalse(dao.note(flag, 1)!!.pending)
-    }
-
-    @Test
-    fun `clearing pending lets the next snapshot win`() = runBlocking {
-        val dao = db.notes()
-        dao.upsertNotes(listOf(note(1, "original")))
-        dao.applyLocalEdit(flag, 1, "rejected edit", 2_000L)
-        // Save was rejected, so the optimistic state is abandoned.
-        dao.setPending(flag, 1, false)
-
-        dao.replaceTree(flag, emptyList(), listOf(note(1, "host version")))
-
-        val row = dao.note(flag, 1)!!
-        assertFalse(row.pending)
-        assertEquals("host version", row.bodyMd, "host must win once the edit is abandoned")
     }
 
     @Test

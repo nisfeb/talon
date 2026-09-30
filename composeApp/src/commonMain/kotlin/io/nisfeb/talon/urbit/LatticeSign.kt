@@ -1,5 +1,7 @@
 package io.nisfeb.talon.urbit
 
+import com.ionspin.kotlin.bignum.integer.BigInteger
+import com.ionspin.kotlin.bignum.integer.Sign
 import io.ktor.client.HttpClient
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -79,16 +81,6 @@ class LatticeSign(private val http: HttpClient, shipUrl: String) {
         return if (ok) Verdict.Ok else Verdict.No(o["reason"]?.jsonPrimitive?.content ?: "The signature does not check out.")
     }
 
-    /**
-     * The digest of [content] as this ship computes it. Only the ship can:
-     * the hash is Urbit's, salted, and there is no copy of it here.
-     *
-     * It signs to get one, which is why this is not "check a file" on its
-     * own — the record it makes is ours and is thrown away. The digest is
-     * the answer.
-     */
-    suspend fun digestOf(content: ByteArray): String = sign(content).digest
-
     private fun recordOf(body: String): SignedRecord {
         val o = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrNull()
             ?: error("The ship answered something we could not read.")
@@ -106,6 +98,20 @@ class LatticeSign(private val http: HttpClient, shipUrl: String) {
     private fun reason(body: String, status: Int): String =
         runCatching { Json.parseToJsonElement(body).jsonObject["error"]?.jsonPrimitive?.content }.getOrNull()
             ?: body.take(120).ifBlank { "HTTP $status" }
+}
+
+/**
+ * The digest a lattice signature covers for [content]: `(shaf %lattice
+ * (sham content))`, the bytes read as an atom, least significant first.
+ * Worked out here, so checking another ship's file never has this ship
+ * sign it: getting the digest by signing made a signature of ours over
+ * whatever was being checked. LatticeSignTest has vectors from a dojo.
+ */
+fun latticeDigest(content: ByteArray): String {
+    // `sham` of an atom is `(shaf %mash atom)`.
+    val sham = io.nisfeb.talon.ui.AzimuthFingerprint.shaf("mash".encodeToByteArray(), content)
+    val d = io.nisfeb.talon.ui.AzimuthFingerprint.shaf("lattice".encodeToByteArray(), sham)
+    return BigInteger.fromByteArray(d.reversedArray(), Sign.POSITIVE).toString()
 }
 
 /**

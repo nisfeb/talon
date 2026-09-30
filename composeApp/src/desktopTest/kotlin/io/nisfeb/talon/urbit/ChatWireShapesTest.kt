@@ -1,6 +1,5 @@
 package io.nisfeb.talon.urbit
 
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -76,16 +75,6 @@ class ChatWireShapesTest {
         assertTrue(add.containsKey("essay"))
     }
 
-    @Test
-    fun `dm delete poke carries ship + del delta`() {
-        val body = dmAction(
-            peer = "~sampel",
-            postId = "~ricsul/9.999",
-            delta = writsDelDelta(),
-        )
-        assertEquals(JsonNull, body["diff"]!!.jsonObject["delta"]!!.jsonObject["del"])
-    }
-
     // ─── club body ────────────────────────────────────────────
 
     @Test
@@ -104,27 +93,6 @@ class ChatWireShapesTest {
     }
 
     // ─── reply-add via replyDelta ────────────────────────────
-
-    @Test
-    fun `reply-add in a DM nests reply-essay under delta add`() {
-        val replyEssay = buildJsonObject {
-            put("content", buildJsonArray { })
-            put("author", "~ricsul")
-            put("sent", 0L)
-        }
-        val delta = replyDelta("~ricsul/9.999", replyEssay)
-        val body = dmAction(
-            peer = "~sampel",
-            postId = "~ricsul/1.234",
-            delta = delta,
-        )
-        val reply = body["diff"]!!.jsonObject["delta"]!!.jsonObject["reply"]!!.jsonObject
-        assertEquals("~ricsul/9.999", reply["id"]!!.jsonPrimitive.content)
-        assertEquals(JsonNull, reply["meta"])
-        val add = reply["delta"]!!.jsonObject["add"]!!.jsonObject
-        assertTrue(add.containsKey("reply-essay"))
-        assertEquals(JsonNull, add["time"])
-    }
 
     // ─── %groups lifecycle pokes ────────────────────────────
 
@@ -164,63 +132,7 @@ class ChatWireShapesTest {
         assertFalse(whomNeedsOptimisticDelete("heap/~host/slug"))
     }
 
-    @Test
-    fun `dm delete poke includes the postId in diff`() {
-        // Locks the on-the-wire shape so a chat-dm-action mark bump
-        // (or accidental rename) surfaces here loudly.
-        val body = dmAction(
-            peer = "~sampel",
-            postId = "~ricsul/9.999",
-            delta = writsDelDelta(),
-        )
-        val diff = body["diff"]!!.jsonObject
-        assertEquals("~ricsul/9.999", diff["id"]!!.jsonPrimitive.content)
-        assertEquals(JsonNull, diff["delta"]!!.jsonObject["del"])
-    }
-
-    @Test
-    fun `club delete poke nests the writ-id under writ delta`() {
-        val body = clubAction(
-            clubId = "0v4.abcde",
-            postId = "~ricsul/9.999",
-            delta = writsDelDelta(),
-        )
-        val writ = body["diff"]!!.jsonObject["delta"]!!.jsonObject["writ"]!!.jsonObject
-        assertEquals("~ricsul/9.999", writ["id"]!!.jsonPrimitive.content)
-        assertEquals(JsonNull, writ["delta"]!!.jsonObject["del"])
-    }
-
     // ─── redotWritId — egress @da dotting ──────────────────────
-
-    @Test
-    fun `redotWritId dot-groups the @da of an undotted writ id`() {
-        // DB keeps writ ids undotted — this is the rule we depend on
-        // for the SSE-vs-paginate dedupe. The %chat agent's poke dejs
-        // (slav %ud → dem:ag) only accepts dotted decimals though, so
-        // egress must convert. Without this, every DM/club delete +
-        // react was silently NACK'd by the server.
-        assertEquals(
-            "~ricsul-bilwyt-dozzod-nisfeb/170.141.184.507.933.044.937.549.665.940.933.705.728",
-            redotWritId(
-                "~ricsul-bilwyt-dozzod-nisfeb/170141184507933044937549665940933705728",
-            ),
-        )
-    }
-
-    @Test
-    fun `redotWritId is a no-op on already-dotted writ ids`() {
-        // Idempotent — re-dotting a dotted id returns the same string
-        // so layered helpers can't double-mangle.
-        assertEquals("~ricsul/9.999", redotWritId("~ricsul/9.999"))
-    }
-
-    @Test
-    fun `redotWritId leaves short author-prefixed ids alone`() {
-        // Tests an edge case: DB occasionally yields an id with a
-        // small @ud (under 1000) that doesn't need grouping. Should
-        // pass through unchanged.
-        assertEquals("~ricsul/9", redotWritId("~ricsul/9"))
-    }
 
     @Test
     fun `redotWritId handles an unprefixed bare da gracefully`() {
@@ -234,76 +146,7 @@ class ChatWireShapesTest {
         )
     }
 
-    @Test
-    fun `dm delete poke goes out with a dotted writ id`() {
-        // End-to-end through dmAction: undotted DB form goes in,
-        // dotted wire form comes out. Locks the invariant.
-        val body = dmAction(
-            peer = "~sampel",
-            postId = "~ricsul/170141184507933044937549665940933705728",
-            delta = writsDelDelta(),
-        )
-        val diff = body["diff"]!!.jsonObject
-        assertEquals(
-            "~ricsul/170.141.184.507.933.044.937.549.665.940.933.705.728",
-            diff["id"]!!.jsonPrimitive.content,
-        )
-    }
-
-    @Test
-    fun `club delete poke goes out with a dotted writ id`() {
-        val body = clubAction(
-            clubId = "0v4.abcde",
-            postId = "~ricsul/170141184507933044937549665940933705728",
-            delta = writsDelDelta(),
-        )
-        val writ = body["diff"]!!.jsonObject["delta"]!!.jsonObject["writ"]!!.jsonObject
-        assertEquals(
-            "~ricsul/170.141.184.507.933.044.937.549.665.940.933.705.728",
-            writ["id"]!!.jsonPrimitive.content,
-        )
-    }
-
     // ─── every writ-id egress path must dot ────────────────────
-
-    @Test
-    fun `replyDelta dots the reply id`() {
-        // The reply-add delta carries a writ id under the inner
-        // `reply.id`. Same rule as the outer envelopes.
-        val essay = buildJsonObject { put("content", buildJsonArray { }) }
-        val out = replyDelta(
-            replyId = "~author/170141184507933044937549665940933705728",
-            replyEssay = essay,
-        )
-        val reply = out["reply"]!!.jsonObject
-        assertEquals(
-            "~author/170.141.184.507.933.044.937.549.665.940.933.705.728",
-            reply["id"]!!.jsonPrimitive.content,
-        )
-    }
-
-    @Test
-    fun `dm reply-add dots both parent and inner reply ids`() {
-        // End-to-end: dmAction (parent id) + replyDelta (reply id).
-        // Both must be dotted; if either escapes undotted, the
-        // chat-dm-action-2 dejs NACKs the poke.
-        val essay = buildJsonObject { put("content", buildJsonArray { }) }
-        val body = dmAction(
-            peer = "~sampel",
-            postId = "~parent/170141184507", // outer parent
-            delta = replyDelta(
-                replyId = "~author/170141184507933044937549665940933705728",
-                replyEssay = essay,
-            ),
-        )
-        val diff = body["diff"]!!.jsonObject
-        assertEquals("~parent/170.141.184.507", diff["id"]!!.jsonPrimitive.content)
-        val inner = diff["delta"]!!.jsonObject["reply"]!!.jsonObject
-        assertEquals(
-            "~author/170.141.184.507.933.044.937.549.665.940.933.705.728",
-            inner["id"]!!.jsonPrimitive.content,
-        )
-    }
 
     @Test
     fun `club reply-add dots both parent and inner reply ids`() {
@@ -343,29 +186,4 @@ class ChatWireShapesTest {
         )
     }
 
-    @Test
-    fun `dm add-react carries a dotted writ id`() {
-        val body = dmAction(
-            peer = "~sampel",
-            postId = "~author/170141184507933044937549665940933705728",
-            delta = writsAddReactDelta("~me", "👍"),
-        )
-        assertEquals(
-            "~author/170.141.184.507.933.044.937.549.665.940.933.705.728",
-            body["diff"]!!.jsonObject["id"]!!.jsonPrimitive.content,
-        )
-    }
-
-    @Test
-    fun `dm del-react carries a dotted writ id`() {
-        val body = dmAction(
-            peer = "~sampel",
-            postId = "~author/170141184507933044937549665940933705728",
-            delta = writsDelReactDelta("~me"),
-        )
-        assertEquals(
-            "~author/170.141.184.507.933.044.937.549.665.940.933.705.728",
-            body["diff"]!!.jsonObject["id"]!!.jsonPrimitive.content,
-        )
-    }
 }

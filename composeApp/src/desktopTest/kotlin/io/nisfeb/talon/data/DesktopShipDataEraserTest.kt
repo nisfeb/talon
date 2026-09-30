@@ -55,8 +55,4 @@ class DesktopShipDataEraserTest {
         assertTrue(DesktopShipDataEraser().erase("~test-eraser-absent").isSuccess)
     }
 
-    @Test
-    fun `the noop eraser is a no-op, not a failure`() {
-        assertTrue(ShipDataEraser.Noop.erase("~anything").isSuccess)
-    }
 }

@@ -30,6 +30,9 @@ enum class NewKind {
     UNREAD,
     MAIL,
     INVITE,
+
+    /** The analyst proposed something, and it waits on you. */
+    ACTION,
 }
 
 data class NewItem(
@@ -40,6 +43,23 @@ data class NewItem(
     val line: String,
     val atMs: Long,
 )
+
+/** One open orrery action, as much of it as this needs; [due] as the owner reads it. */
+data class NewAction(val id: String, val kind: String, val title: String, val by: String, val due: String?)
+
+/**
+ * The actions that wait on the owner: proposals, and only those. One
+ * approved, done or dismissed has been answered, wherever that was, and
+ * showing it here would ask for the same answer twice.
+ */
+fun newActions(
+    actions: List<io.nisfeb.talon.orrery.OrreryAction>,
+    twentyFourHour: Boolean = false,
+    zone: kotlinx.datetime.TimeZone = kotlinx.datetime.TimeZone.currentSystemDefault(),
+): List<NewAction> =
+    actions.filter { it.status == "proposed" }.map {
+        NewAction(it.id, it.kind, it.title, it.by, it.due?.let { d -> io.nisfeb.talon.orrery.OrreryText.dueText(d, zone, twentyFourHour) })
+    }
 
 /** One unread mail thread, as much of it as this needs. */
 data class NewMail(val id: String, val from: String, val subject: String, val atMs: Long)
@@ -61,6 +81,7 @@ fun whatsNew(
     limit: Int,
     label: (whom: String) -> String,
     preview: (MessageEntity) -> String,
+    actions: List<NewAction> = emptyList(),
 ): List<NewItem> {
     val mentions = mutableListOf<NewItem>()
     val unread = mutableListOf<NewItem>()
@@ -99,9 +120,23 @@ fun whatsNew(
         )
     }
 
+    // An action waits on the person the way a mention does, so it
+    // sits with the mentions, not after the unread.
+    val actionItems = actions.map {
+        NewItem(
+            kind = NewKind.ACTION,
+            target = it.id,
+            title = it.title,
+            // The due in words: the row's time is when a thing happened,
+            // and read so, due tomorrow said "just now".
+            line = it.kind + " proposed by " + it.by.ifBlank { "the analyst" } + (it.due?.let { d -> ", due $d" } ?: ""),
+            atMs = 0L,
+        )
+    }
+
     fun newestFirst(rows: List<NewItem>) = rows.sortedByDescending { it.atMs }
     return (
-        newestFirst(mentions) + newestFirst(unread) +
+        newestFirst(mentions) + actionItems + newestFirst(unread) +
             newestFirst(mailItems) + inviteItems
         ).take(limit.coerceAtLeast(0))
 }

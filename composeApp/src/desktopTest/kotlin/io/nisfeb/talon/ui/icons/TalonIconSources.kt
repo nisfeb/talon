@@ -3,6 +3,8 @@ package io.nisfeb.talon.ui.icons
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.Forward
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Archive
@@ -23,6 +25,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Grain
+import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Inbox
@@ -78,6 +81,7 @@ object TalonIconSources {
         "Fullscreen" to Icons.Filled.Fullscreen,
         "FullscreenExit" to Icons.Filled.FullscreenExit,
         "Grain" to Icons.Filled.Grain,
+        "GroupAdd" to Icons.Filled.GroupAdd,
         "Groups" to Icons.Filled.Groups,
         "Image" to Icons.Filled.Image,
         "Inbox" to Icons.Filled.Inbox,
@@ -104,5 +108,7 @@ object TalonIconSources {
         "WaterDrop" to Icons.Filled.WaterDrop,
         "Chat" to Icons.AutoMirrored.Filled.Chat,
         "Logout" to Icons.AutoMirrored.Filled.Logout,
+        "Reply" to Icons.AutoMirrored.Filled.Reply,
+        "Forward" to Icons.AutoMirrored.Filled.Forward,
     )
 }

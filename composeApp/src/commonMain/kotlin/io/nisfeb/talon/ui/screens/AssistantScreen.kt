@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
@@ -23,7 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -32,17 +33,18 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -103,6 +105,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.nisfeb.talon.ui.icons.TalonIcons
+import io.nisfeb.talon.ai.hasModelFor
 
 /**
  * Talon Assistant (docs/assistant.md). One opt-in agent: it answers
@@ -140,7 +143,43 @@ internal fun toExchanges(lines: List<Line>): List<List<Line>> {
     return out
 }
 
-private data class Pending(val call: ToolCall, val tool: Tool, val gate: CompletableDeferred<Boolean>)
+internal data class Pending(val call: ToolCall, val tool: Tool, val gate: CompletableDeferred<Boolean>)
+
+/**
+ * An assistant run, and everything the screen shows of it, held by the
+ * host rather than by the screen. A run is minutes of model calls and
+ * tool use, and it lived in the screen's own scope: leaving the Assistant
+ * section tore that down and cancelled the run halfway, transcript and
+ * all. The host keeps one of these per ship, over a scope that outlives
+ * the section, and the screen reads and writes it.
+ */
+class AssistantSession(internal val scope: kotlinx.coroutines.CoroutineScope) {
+    internal val transcript = mutableStateListOf<Line>()
+    internal var question by mutableStateOf(TextFieldValue(""))
+    internal var busy by mutableStateOf(false)
+    internal var error by mutableStateOf<String?>(null)
+    internal var pending by mutableStateOf<Pending?>(null)
+    internal var convId by mutableStateOf<Long?>(null)
+    internal var convGid by mutableStateOf<String?>(null)
+    internal var centroid by mutableStateOf<FloatArray?>(null)
+    internal var turnCount by mutableStateOf(0)
+    internal var explicit by mutableStateOf(false)
+    internal var generation by mutableStateOf(0)
+    /** The most recent conversation is resumed once, not on every return. */
+    internal var resumed = false
+    /** Whether the Assistant is on screen now. */
+    internal var shown = false
+
+    private val _news = kotlinx.coroutines.flow.MutableStateFlow(false)
+    /**
+     * A run finished, or is waiting on a confirmation, while the Assistant
+     * was not on screen: the dot on its icon. Cleared once it is shown.
+     */
+    val news: kotlinx.coroutines.flow.StateFlow<Boolean> = _news
+
+    internal fun tell() { if (!shown) _news.value = true }
+    internal fun seen() { shown = true; _news.value = false }
+}
 
 /** How many turns to retain across all conversations. Defined with the DAO
  *  so the sync path (which re-applies the cap after pulling the ship's
@@ -179,16 +218,30 @@ fun AssistantScreen(
     mail: io.nisfeb.talon.mail.MailRepo? = null,
     calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
     calls: io.nisfeb.talon.call.CallController? = null,
+    /** The owner's own model on their ship, where orrery is installed
+     *  and this install has a key. Its rules stay behind a tool rather
+     *  than in the prompt: a question about Urbit should not pay for
+     *  them. */
+    orrery: io.nisfeb.talon.orrery.OrreryRepo? = null,
     /** Start listening as the screen opens (the home widget's tap);
      *  where nothing can listen, the field takes the cursor instead. */
     listenOnOpen: Boolean = false,
+    /** Opens Settings, AI on the top-up sheet, for a failure that was
+     *  the empty Armillary balance. Null where the shell has no way there. */
+    onTopUp: (() -> Unit)? = null,
+    /** The run and what it shows, kept by the host so it goes on when the screen goes. */
+    session: AssistantSession,
     modifier: Modifier = Modifier,
 ) {
+    DisposableEffect(session) {
+        session.seen()
+        onDispose { session.shown = false }
+    }
     val aiState by aiSettings.state.collectAsState()
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
     val scope = rememberCoroutineScope()
 
-    val agentClient = remember(aiSettings) { AgentClient { aiSettings.state.value } }
+    val agentClient = remember(aiSettings) { AgentClient(io.nisfeb.talon.ai.AiFeature.Assistant) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Assistant) } }
 
     // MCP: if the user opted in (and is in Act mode) and the ship exposes
     // an /mcp endpoint, discover its tools and hand them to the agent.
@@ -241,6 +294,32 @@ fun AssistantScreen(
         }
     }
 
+    // The owner's memory in Lattice, where the ship has it: a second MCP,
+    // grubbery's, beside %mcp-server's. None is not an error, only no
+    // memory, and the prompt says nothing of one.
+    var latticeTools by remember { mutableStateOf<List<Tool>>(emptyList()) }
+    LaunchedEffect(repo) {
+        val shipHttp = repo?.shipHttp
+        val shipBase = repo?.shipBaseUrl
+        if (shipHttp == null || shipBase == null) {
+            latticeTools = emptyList()
+            return@LaunchedEffect
+        }
+        io.nisfeb.talon.ai.LatticeMemory.cached(shipHttp, shipBase)?.let {
+            latticeTools = it
+            return@LaunchedEffect
+        }
+        runCatching { io.nisfeb.talon.ai.LatticeMemory.connect(shipHttp, shipBase) }
+            .onSuccess {
+                io.nisfeb.talon.ai.LatticeMemory.keep(shipHttp, shipBase, it)
+                latticeTools = it
+            }
+            .onFailure { e ->
+                latticeTools = emptyList()
+                Log.i("AssistantScreen", "no Lattice memory: ${e.message}")
+            }
+    }
+
     // Web access is part of the assistant (no separate toggle) — being here
     // means it's on, so fetch_url is always wired and web_search whenever a
     // Brave key is set. Gating tool *presence* means the model never sees a
@@ -257,11 +336,15 @@ fun AssistantScreen(
     // Built once per prompt change, not per recomposition — it's a multi-KB
     // concat used as a remember key, so rebuilding it every frame also meant
     // a full-length string compare every frame.
-    val systemPrompt = remember(aiState.urbitKnowledgePrompt, aiState.assistantPrompt) {
-        AgentPrompt.forAssistant(aiState)
+    val hasMemory = latticeTools.isNotEmpty()
+    val systemPrompt = remember(aiState.urbitKnowledgePrompt, aiState.assistantPrompt, hasMemory) {
+        // Told of a memory only where it has one: the tools and the prompt
+        // arrive together or not at all.
+        AgentPrompt.forAssistant(aiState) +
+            if (hasMemory) "\n\n" + io.nisfeb.talon.ai.LatticeMemory.prompt else ""
     }
     val calendarZone by (calendar?.zone ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, braveKeyPresent, systemPrompt, mail, calendar, calls, calendarZone) {
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, latticeTools, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
         if (repo != null) {
@@ -286,19 +369,20 @@ fun AssistantScreen(
                     repo, db, embedder,
                     braveSearch = if (braveKeyPresent) braveSearch else null,
                     urlFetcher = urlFetcher,
-                ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) + mcpTools).dedupToolNames(),
+                ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) +
+                    orrery?.let { io.nisfeb.talon.ai.orreryTools(it) }.orEmpty() + mcpTools + latticeTools).dedupToolNames(),
                 systemPrompt = systemPrompt,
             )
         } else null
     }
 
-    var questionField by remember { mutableStateOf(TextFieldValue("")) }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var questionField by session::question
+    var busy by session::busy
+    var error by session::error
 
     // The agent transcript + the in-flight write awaiting confirmation.
-    val transcript = remember { mutableStateListOf<Line>() }
-    var pending by remember { mutableStateOf<Pending?>(null) }
+    val transcript = session.transcript
+    var pending by session::pending
 
     // @p autocomplete: candidate ships are the contact book. Mirrors the
     // chat composer (ChatComposer.kt) so referring to a ship feels the
@@ -315,18 +399,18 @@ fun AssistantScreen(
     // and re-registers the invalidation observer on every recomposition.
     val conversations by remember(convDao) { convDao.recent(CONV_KEEP) }
         .collectAsState(initial = emptyList())
-    var currentConvId by remember { mutableStateOf<Long?>(null) }
-    var currentConvGid by remember { mutableStateOf<String?>(null) }
-    var currentCentroid by remember { mutableStateOf<FloatArray?>(null) }
-    var currentTurnCount by remember { mutableStateOf(0) }
+    var currentConvId by session::convId
+    var currentConvGid by session::convGid
+    var currentCentroid by session::centroid
+    var currentTurnCount by session::turnCount
     // The user picked / resumed this conversation, so a follow-up continues it
     // regardless of what the similarity heuristic thinks (and the heuristic
     // can't judge at all without an embedder). Cleared by "New conversation".
-    var explicitConv by remember { mutableStateOf(false) }
+    var explicitConv by session::explicit
     // Bumped whenever the active conversation is re-pointed. A run that
     // finishes after a switch must not write its turn into the newly
     // selected conversation, nor clobber that conversation's live state.
-    var convGeneration by remember { mutableStateOf(0) }
+    var convGeneration by session::generation
 
     // Sidebar (master pane) state: which tab is showing, and — on narrow
     // screens where the panes stack — whether the sidebar or the transcript
@@ -340,6 +424,10 @@ fun AssistantScreen(
     var listFraction by remember { mutableStateOf(DEFAULT_LIST_FRACTION) }
 
     LaunchedEffect(Unit) {
+        // Once per session: coming back to a run still going, or to a
+        // conversation picked before leaving, must not re-point it.
+        if (session.resumed) return@LaunchedEffect
+        session.resumed = true
         convDao.mostRecent()?.let { c ->
             currentConvId = c.id
             currentConvGid = c.gid.ifBlank { null }
@@ -380,7 +468,9 @@ fun AssistantScreen(
         var snapCentroid = currentCentroid
         val snapTurnCount = currentTurnCount
         val snapExplicit = explicitConv
-        scope.launch {
+        // The host's scope, not this screen's: the run goes on when the
+        // screen is left, and its dot says so when it is done.
+        session.scope.launch {
             runCatching {
                 val qVec = embedder?.embed(q)
                 // Lazily rebuild a synced conversation's centroid. A
@@ -426,6 +516,8 @@ fun AssistantScreen(
                     confirm = { call, tool ->
                         val gate = CompletableDeferred<Boolean>()
                         pending = Pending(call, tool, gate)
+                        // It cannot go on without the owner: say so.
+                        session.tell()
                         val ok = gate.await()
                         pending = null
                         ok
@@ -525,6 +617,7 @@ fun AssistantScreen(
                 }
             }
             busy = false
+            session.tell()
         }
     }
 
@@ -568,7 +661,7 @@ fun AssistantScreen(
         mobileShowSidebar = false
     }
 
-    val jobsEnabled = isLoopsSupported && aiState.hasKey()
+    val jobsEnabled = isLoopsSupported && aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)
     val settingsSync = repo?.settingsSync
 
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -702,6 +795,9 @@ fun AssistantScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
+                if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(it)) {
+                    TextButton(onClick = { error = null; onTopUp() }) { Text("Top up") }
+                }
             }
 
             // The write-confirmation card — the Phase 2 trust boundary.

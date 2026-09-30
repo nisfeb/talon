@@ -118,7 +118,7 @@ class Loops(
         // can't execute), or no enabled loops. Otherwise a keyless device
         // with an enabled loop would wake, do nothing, and (since lastRunAt
         // never advances) re-arm in the past — a wasteful no-progress loop.
-        if (sessionStore.activeShip() == null || !aiSettings.state.value.hasKey()) {
+        if (sessionStore.activeShip() == null || !aiSettings.state.value.hasModelFor(AiFeature.Assistant)) {
             alarmManager.cancel(pi); return
         }
         val enabled = getDb().loops().enabled()
@@ -136,7 +136,7 @@ class Loops(
     // settings through a lambda, so one instance for the process lifetime
     // never goes stale on a key change — and every wake-up reuses the pool
     // instead of leaving a fresh one behind.
-    private val agentClient by lazy { AgentClient { aiSettings.state.value } }
+    private val agentClient by lazy { AgentClient(io.nisfeb.talon.ai.AiFeature.Assistant) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Assistant) } }
     private val braveClient by lazy { BraveSearchClient { aiSettings.state.value } }
     private val urlFetcher by lazy { UrlFetcher { aiSettings.state.value } }
 

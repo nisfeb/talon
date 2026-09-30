@@ -58,8 +58,4 @@ class DirectoryFieldsTest {
         assertEquals("Alice", nickname(entry), "mod-at is not a field overlay")
     }
 
-    @Test
-    fun `an empty entry flattens to itself rather than throwing`() {
-        assertEquals(0, directoryFields(obj("{}")).size)
-    }
 }

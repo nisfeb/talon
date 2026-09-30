@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -36,9 +39,11 @@ fun MailWorkspace(
     composing: MailIntent?,
     onCompose: (MailIntent?) -> Unit,
     modifier: Modifier = Modifier,
+    /** Storage for a file too big to attach; see [MailComposer]. */
+    upload: (suspend (ByteArray, String, String) -> String)? = null,
 ) {
     io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:more")
-    BoxWithConstraints(modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         // Enough for a mailbox column, a listing that can still show a
         // subject, and a message worth reading.
         val threeColumns = maxWidth >= 900.dp
@@ -50,6 +55,8 @@ fun MailWorkspace(
                     intent = composing,
                     onSent = { onCompose(null) },
                     onCancel = { onCompose(null) },
+                    upload = upload,
+                    nameFor = contacts::displayName,
                 )
 
                 openThread != null -> MailThreadPane(
@@ -94,6 +101,8 @@ fun MailWorkspace(
                         intent = composing,
                         onSent = { onCompose(null) },
                         onCancel = { onCompose(null) },
+                        upload = upload,
+                        nameFor = contacts::displayName,
                     )
 
                     openThread != null -> MailThreadPane(

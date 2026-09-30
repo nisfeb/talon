@@ -2,7 +2,11 @@ package io.nisfeb.talon.data
 
 import androidx.room.Dao
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
+import io.nisfeb.talon.urbit.Story
+import io.nisfeb.talon.urbit.StoryPart
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -16,11 +20,28 @@ abstract class MessageDao {
      * normalize, but if one regresses, the DAO still keeps the DB sane.
      */
     open suspend fun upsert(message: MessageEntity) {
-        upsertRaw(message.normalized())
+        upsertRaw(message.normalized().searchable())
     }
 
     open suspend fun upsertAll(messages: List<MessageEntity>) {
-        upsertAllRaw(messages.map { it.normalized() })
+        upsertAllRaw(messages.map { it.normalized().searchable() })
+    }
+
+    @Query("SELECT * FROM messages WHERE searchText IS NULL LIMIT :limit")
+    protected abstract suspend fun unsearchable(limit: Int): List<MessageEntity>
+
+    @Query("UPDATE messages SET searchText = :text WHERE whom = :whom AND id = :id")
+    protected abstract suspend fun setSearchText(whom: String, id: String, text: String)
+
+    /**
+     * Give up to [limit] rows stored before [MessageEntity.searchText]
+     * existed their text. Returns how many it did; call until 0.
+     */
+    @Transaction
+    open suspend fun fillSearchText(limit: Int): Int {
+        val rows = unsearchable(limit)
+        rows.forEach { setSearchText(it.whom, it.id, searchTextOf(it.contentJson, it.title)) }
+        return rows.size
     }
 
     @Upsert
@@ -124,14 +145,53 @@ abstract class MessageDao {
     abstract suspend fun newestIdFor(whom: String): String?
 
     /**
+     * The messages just before [beforeMs] in one conversation, newest
+     * first, ours among them: a reply reads right only with what it
+     * answers. Callers reverse it for the oldest first.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE whom = :whom AND isDeleted = 0 AND parentId IS NULL AND sentMs < :beforeMs
+        ORDER BY sentMs DESC LIMIT :limit
+    """)
+    abstract suspend fun before(whom: String, beforeMs: Long, limit: Int): List<MessageEntity>
+
+    /** Other people's posts after [sinceMs] and before [beforeMs], newest first: what a cursor has already walked. */
+    @Query("""
+        SELECT * FROM messages
+        WHERE isDeleted = 0 AND parentId IS NULL AND sentMs > :sinceMs AND sentMs < :beforeMs AND author != :notAuthor
+        ORDER BY sentMs DESC LIMIT :limit
+    """)
+    abstract suspend fun postsBetween(sinceMs: Long, beforeMs: Long, notAuthor: String, limit: Int): List<MessageEntity>
+
+    /**
      * Remove stale optimistic-insert rows for a channel where id still
      * starts with "~". Channel post ids from the ship are raw @ud; any
      * leading-tilde row is a ghost from a pre-fix local send whose
      * echo arrived under a different id. Safe because %channels never
      * assigns author-prefixed ids.
      */
-    @Query("DELETE FROM messages WHERE whom = :whom AND (id LIKE '~%' OR id LIKE 'local_%')")
+    // Never a queued row: it is waiting for the ship, and this runs on
+    // every refresh of the conversation, opening it included.
+    @Query("DELETE FROM messages WHERE whom = :whom AND (id LIKE '~%' OR id LIKE 'local_%') AND (status IS NULL OR status != 'queued')")
     abstract suspend fun purgeStaleLocalIds(whom: String)
+
+    /** Our messages waiting for the ship (status "queued"), oldest first, the order they go out in. */
+    @Query("SELECT * FROM messages WHERE status = 'queued' ORDER BY sentMs ASC")
+    abstract suspend fun queued(): List<MessageEntity>
+
+    /** How many messages are waiting for the ship. */
+    @Query("SELECT COUNT(*) FROM messages WHERE status = 'queued'")
+    abstract fun queuedCount(): Flow<Int>
+
+    /**
+     * Whether the ship's own copy of our post sent at [sentMs] is here: a
+     * row by [author] at that time under an id the ship gave it. A queued
+     * channel post that has one got there, whatever the write that timed
+     * out said, and is not sent again.
+     */
+    @Query("SELECT COUNT(*) FROM messages WHERE whom = :whom AND author = :author AND sentMs = :sentMs AND id NOT LIKE 'local_%' AND isDeleted = 0")
+    abstract suspend fun shipCopyCount(whom: String, author: String, sentMs: Long): Int
 
     /**
      * Find every (whom, id) whose id contains a dot. Used by the
@@ -187,14 +247,16 @@ abstract class MessageDao {
     abstract suspend fun reapOldestLocalTwin(whom: String, author: String): Int
 
     /**
-     * Set the send-state column for one row. Used by the channels
-     * poke-ack listener: marks "failed" on a poke nack, or clears the
-     * pending flag if we ever want to (we don't — sent is implicit by
-     * the local twin getting reaped). Channel-chat only; DM/club rows
-     * never have status set so this is a no-op for them.
+     * Set the send-state column for one row. The send path marks a
+     * row "failed" when the ship refuses it; sent is implicit, by the
+     * local twin getting reaped. The id is undotted as [upsert] stores
+     * it, or a dotted DM id would match no row.
      */
+    open suspend fun setStatus(whom: String, id: String, status: String?) =
+        setStatusRaw(whom, id.replace(".", ""), status)
+
     @Query("UPDATE messages SET status = :status WHERE whom = :whom AND id = :id")
-    abstract suspend fun setStatus(whom: String, id: String, status: String?)
+    protected abstract suspend fun setStatusRaw(whom: String, id: String, status: String?)
 
     /**
      * Per-parent reply digest: count, most-recent reply timestamp, and
@@ -247,10 +309,9 @@ abstract class MessageDao {
     abstract fun conversationLatest(): Flow<List<MessageEntity>>
 
     /**
-     * Substring search across all messages' content JSON. v1 matches raw
-     * JSON text — inline text spans come through directly; structural
-     * JSON keys (like "inline", "block") would also match but don't come
-     * up as realistic queries.
+     * Substring search across messages' titles and words as shown
+     * ([MessageEntity.searchText]). It matched the story JSON once, so
+     * "ship", "link" or "break" found every mention, link and line break.
      *
      * Callers MUST pre-escape the needle via [escapeLikeNeedle] — without
      * it, queries containing `%` or `_` produce wrong results (search
@@ -260,8 +321,7 @@ abstract class MessageDao {
     @Query("""
         SELECT * FROM messages
         WHERE isDeleted = 0
-          AND (contentJson LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE
-               OR title LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE)
+          AND COALESCE(searchText, contentJson) LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE
         ORDER BY sentMs DESC
         LIMIT 100
     """)
@@ -287,7 +347,7 @@ abstract class MessageDao {
         WHERE m.isDeleted = 0
           AND (
             :needle IS NULL
-            OR m.contentJson LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE
+            OR COALESCE(m.searchText, m.contentJson) LIKE '%' || :needle || '%' ESCAPE '\' COLLATE NOCASE
           )
           AND (:fromShip IS NULL OR m.author = :fromShip)
           AND (:inWhom IS NULL OR m.whom = :inWhom)
@@ -336,7 +396,7 @@ abstract class MessageDao {
         SELECT * FROM messages
         WHERE isDeleted = 0
           AND author != :exceptAuthor
-          AND contentJson LIKE '%' || :term || '%' ESCAPE '\' COLLATE NOCASE
+          AND COALESCE(searchText, contentJson) LIKE '%' || :term || '%' ESCAPE '\' COLLATE NOCASE
         ORDER BY sentMs DESC
     """)
     abstract suspend fun candidatesForBackfill(term: String, exceptAuthor: String): List<MessageEntity>
@@ -360,6 +420,31 @@ data class ReplyCount(
  * only reads / writes undotted ids; wire payloads carry dotted @ud so
  * any ingest path that forgets to strip dots produces a phantom twin.
  */
+internal fun MessageEntity.searchable(): MessageEntity = copy(searchText = searchTextOf(contentJson, title))
+
+/**
+ * The title and the words a reader sees, for search. Not the story JSON,
+ * and not the placeholders previews use ("[image]" would match "image").
+ */
+internal fun searchTextOf(contentJson: String, title: String?): String {
+    val head = listOfNotNull(title?.trim()?.takeIf { it.isNotEmpty() })
+    val parts = runCatching { Story.parse(Json.parseToJsonElement(contentJson)) }.getOrNull()
+        ?: return (head + contentJson).joinToString("\n")
+    val words = parts.mapNotNull { part ->
+        when (part) {
+            is StoryPart.Text -> part.text.text
+            is StoryPart.Code -> part.code
+            is StoryPart.Image -> part.alt
+            is StoryPart.Table -> (listOf(part.header) + part.rows).joinToString("\n") { row -> row.joinToString(" ") { it.text } }
+            is StoryPart.LinkPreview -> listOfNotNull(part.title, part.url).joinToString(" ")
+            is StoryPart.CalWidget -> part.title
+            is StoryPart.PollWidget -> (listOf(part.question) + part.options).joinToString("\n")
+            else -> null
+        }
+    }
+    return (head + words).joinToString("\n")
+}
+
 internal fun MessageEntity.normalized(): MessageEntity {
     val rawId = id
     val rawParent = parentId

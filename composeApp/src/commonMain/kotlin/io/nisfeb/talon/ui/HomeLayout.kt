@@ -277,6 +277,14 @@ fun resizedRows(startRows: Int, dragPx: Float, unitPx: Float): Int {
 }
 
 /**
+ * One column's pitch, the distance a drag must cover to move a widget
+ * one column: a column's width plus the gap after it. Any unit, as long
+ * as all three arguments share it.
+ */
+fun columnPitch(pageWidth: Float, padding: Float, gap: Float, columns: Int = HOME_COLUMNS): Float =
+    (pageWidth - padding * 2 - gap * (columns - 1)) / columns + gap
+
+/**
  * Which column and row a widget's top left corner lands in, given how
  * far it has been dragged from where it started.
  *

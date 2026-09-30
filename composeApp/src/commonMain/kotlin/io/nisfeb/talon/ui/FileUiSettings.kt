@@ -62,6 +62,10 @@ class FileUiSettings(
         val hiddenCalendars: List<String> = emptyList(),
         val defaultCalendar: String = "",
         val calendarWeekView: Boolean = false,
+        val orreryStandDown: Boolean = true,
+        val orreryDecide: io.nisfeb.talon.orrery.DecideSettings = io.nisfeb.talon.orrery.DecideSettings(),
+        val orreryServerUrl: String = "",
+        val orreryServerModel: String = "",
         val homeFahrenheit: Boolean = true,
         val homeTwentyFourHour: Boolean = false,
         val homeLayout: String = "",
@@ -186,6 +190,27 @@ class FileUiSettings(
         _calendarWeekView.value = on
         persistCurrent()
     }
+
+    private val _orreryStandDown = MutableStateFlow(initial.orreryStandDown)
+    override val orreryStandDown: StateFlow<Boolean> = _orreryStandDown.asStateFlow()
+    override fun setOrreryStandDown(on: Boolean) {
+        if (_orreryStandDown.value == on) return
+        _orreryStandDown.value = on
+        persistCurrent()
+    }
+
+    private val _orreryDecide = MutableStateFlow(initial.orreryDecide)
+    override val orreryDecide: StateFlow<io.nisfeb.talon.orrery.DecideSettings> = _orreryDecide.asStateFlow()
+    override fun setOrreryDecide(d: io.nisfeb.talon.orrery.DecideSettings) {
+        if (_orreryDecide.value == d) return
+        _orreryDecide.value = d
+        persistCurrent()
+    }
+
+    private val _orreryServerUrl = MutableStateFlow(initial.orreryServerUrl)
+    override val orreryServerUrl: StateFlow<String> = _orreryServerUrl.asStateFlow()
+    private val _orreryServerModel = MutableStateFlow(initial.orreryServerModel)
+    override val orreryServerModel: StateFlow<String> = _orreryServerModel.asStateFlow()
 
     private val _homeFahrenheit = MutableStateFlow(initial.homeFahrenheit)
     override val homeFahrenheit: StateFlow<Boolean> = _homeFahrenheit.asStateFlow()
@@ -347,6 +372,10 @@ class FileUiSettings(
                 hiddenCalendars = _hiddenCalendars.value.toList(),
                 defaultCalendar = _defaultCalendar.value,
                 calendarWeekView = _calendarWeekView.value,
+                orreryStandDown = _orreryStandDown.value,
+                orreryDecide = _orreryDecide.value,
+                orreryServerUrl = _orreryServerUrl.value,
+                orreryServerModel = _orreryServerModel.value,
                 homeFahrenheit = _homeFahrenheit.value,
                 homeTwentyFourHour = _homeTwentyFourHour.value,
                 homeLayout = _homeLayout.value,

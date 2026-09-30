@@ -2,6 +2,7 @@ package io.nisfeb.talon.ai
 
 import android.content.Context
 import android.content.SharedPreferences
+import io.nisfeb.talon.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,18 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class AndroidAiSettings(context: Context) : AiSettingsRepository {
 
-    private val prefs: SharedPreferences = run {
-        val key = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            "talon_ai",
-            key,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
-    }
+    private val prefs: SharedPreferences = openStore(context)
 
     private val _state = MutableStateFlow(read())
     override val state: StateFlow<AiSettings.Config> = _state.asStateFlow()
@@ -76,15 +66,41 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
     }
 
     override fun setBraveApiKey(key: String) {
-        prefs.edit().putString(KEY_BRAVE_API_KEY, key).apply()
-        _state.value = _state.value.copy(braveApiKey = key)
+        persistAll(_state.value.withBraveKey(key, io.nisfeb.talon.util.nowMs()))
         onStateChange?.invoke(_state.value, false)
     }
 
     override fun setSttApiKey(key: String) {
-        val removedAt = if (key.isBlank()) io.nisfeb.talon.util.nowMs() else 0L
-        prefs.edit().putString(KEY_STT_API_KEY, key).putLong(KEY_STT_REMOVED_AT, removedAt).apply()
-        _state.value = _state.value.copy(sttApiKey = key, sttApiKeyRemovedAtMs = removedAt)
+        val now = io.nisfeb.talon.util.nowMs()
+        val removedAt = if (key.isBlank()) now else 0L
+        val setAt = if (key.isBlank()) _state.value.sttApiKeySetAtMs else now
+        prefs.edit()
+            .putString(KEY_STT_API_KEY, key)
+            .putLong(KEY_STT_REMOVED_AT, removedAt)
+            .putLong(KEY_STT_SET_AT, setAt)
+            .apply()
+        _state.value = _state.value.copy(
+            sttApiKey = key, sttApiKeyRemovedAtMs = removedAt, sttApiKeySetAtMs = setAt,
+        )
+        onStateChange?.invoke(_state.value, false)
+    }
+
+    override fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String) {
+        val url = baseUrl?.trim()?.takeIf { it.isNotEmpty() }
+        val name = model?.trim()?.takeIf { it.isNotEmpty() }
+        val key = apiKey.trim()
+        prefs.edit()
+            .putString(KEY_PRIVATE_BASE_URL, url)
+            .putString(KEY_PRIVATE_MODEL, name)
+            .putString(KEY_PRIVATE_API_KEY, key)
+            .apply()
+        _state.value = _state.value.copy(privateBaseUrl = url, privateModel = name, privateApiKey = key)
+        onStateChange?.invoke(_state.value, false)
+    }
+
+    override fun setFrontierReadsMessages(on: Boolean) {
+        prefs.edit().putBoolean(KEY_FRONTIER_READS, on).apply()
+        _state.value = _state.value.copy(frontierReadsMessages = on)
         onStateChange?.invoke(_state.value, false)
     }
 
@@ -102,7 +118,19 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         onStateChange?.invoke(_state.value, wasEnabled && !enabled)
     }
 
-    override fun applyRemote(config: AiSettings.Config) {
+    override fun applyRemote(remote: AiSettings.Config) {
+        // A credential this device holds is never dropped by arriving
+        // state. See keepingCredentials: the rule lives here so that no
+        // future caller can lose a key by accident.
+        persistAll(remote.keepingCredentials(_state.value))
+    }
+
+    override fun setProfile(profile: AiProfile) {
+        persistAll(_state.value.withProfile(profile, io.nisfeb.talon.util.nowMs()))
+        onStateChange?.invoke(_state.value, false)
+    }
+
+    private fun persistAll(config: AiSettings.Config) {
         prefs.edit()
             .putString(KEY_PROVIDER, config.provider.name)
             .putString(KEY_API_KEY, config.apiKey)
@@ -119,6 +147,12 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             .putString(KEY_BRAVE_API_KEY, config.braveApiKey)
             .putString(KEY_STT_API_KEY, config.sttApiKey)
             .putLong(KEY_STT_REMOVED_AT, config.sttApiKeyRemovedAtMs)
+            .putLong(KEY_STT_SET_AT, config.sttApiKeySetAtMs)
+            .putString(KEY_REVOKED, PROFILE_JSON.encodeToString(REVOKED, config.revokedKeys))
+            .putString(KEY_PRIVATE_BASE_URL, config.privateBaseUrl?.takeIf { it.isNotBlank() })
+            .putString(KEY_PRIVATE_MODEL, config.privateModel?.takeIf { it.isNotBlank() })
+            .putString(KEY_PRIVATE_API_KEY, config.privateApiKey)
+            .putBoolean(KEY_FRONTIER_READS, config.frontierReadsMessages)
             .putString(KEY_URBIT_KNOWLEDGE_PROMPT, config.urbitKnowledgePrompt)
             .putString(KEY_ASSISTANT_PROMPT, config.assistantPrompt)
             .putString(KEY_LOOP_PROMPT, config.loopPrompt)
@@ -126,18 +160,30 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             // so applyRemote preserves this device's stable identity.
             .putString(KEY_DEVICE_ID, config.deviceId)
             .putBoolean(KEY_SYNC, config.syncEnabled)
+            .putString(KEY_PROFILE, config.savedProfile?.let { PROFILE_JSON.encodeToString(AiProfile.serializer(), it) })
             .apply()
         _state.value = config
     }
 
     override fun clear() {
         val editor = prefs.edit()
+            .remove(KEY_PROFILE)
             .remove(KEY_PROVIDER)
             .remove(KEY_API_KEY)
             .remove(KEY_MODEL)
             .remove(KEY_BASE_URL)
             .remove(KEY_BRAVE_API_KEY)
             .remove(KEY_STT_API_KEY)
+            .remove(KEY_PRIVATE_BASE_URL)
+            .remove(KEY_PRIVATE_MODEL)
+            .remove(KEY_PRIVATE_API_KEY)
+            // A privacy choice, and one the profile is rebuilt from: left
+            // behind, sign-out kept "the cloud reads my messages" on for
+            // whoever signed in next.
+            .remove(KEY_FRONTIER_READS)
+            .remove(KEY_STT_SET_AT)
+            .remove(KEY_STT_REMOVED_AT)
+            .remove(KEY_REVOKED)
             .remove(KEY_URBIT_KNOWLEDGE_PROMPT)
             .remove(KEY_ASSISTANT_PROMPT)
             .remove(KEY_LOOP_PROMPT)
@@ -185,10 +231,19 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
             braveApiKey = prefs.getString(KEY_BRAVE_API_KEY, "").orEmpty(),
             sttApiKey = prefs.getString(KEY_STT_API_KEY, "").orEmpty(),
             sttApiKeyRemovedAtMs = prefs.getLong(KEY_STT_REMOVED_AT, 0L),
+            sttApiKeySetAtMs = prefs.getLong(KEY_STT_SET_AT, 0L),
+            revokedKeys = prefs.getString(KEY_REVOKED, null)
+                ?.let { runCatching { PROFILE_JSON.decodeFromString(REVOKED, it) }.getOrNull() }.orEmpty(),
+            privateBaseUrl = prefs.getString(KEY_PRIVATE_BASE_URL, null)?.takeIf { it.isNotBlank() },
+            privateModel = prefs.getString(KEY_PRIVATE_MODEL, null)?.takeIf { it.isNotBlank() },
+            privateApiKey = prefs.getString(KEY_PRIVATE_API_KEY, "").orEmpty(),
+            frontierReadsMessages = prefs.getBoolean(KEY_FRONTIER_READS, false),
             urbitKnowledgePrompt = prefs.getString(KEY_URBIT_KNOWLEDGE_PROMPT, "").orEmpty(),
             assistantPrompt = prefs.getString(KEY_ASSISTANT_PROMPT, "").orEmpty(),
             loopPrompt = prefs.getString(KEY_LOOP_PROMPT, "").orEmpty(),
             deviceId = deviceId(),
+            savedProfile = prefs.getString(KEY_PROFILE, null)
+                ?.let { runCatching { PROFILE_JSON.decodeFromString(AiProfile.serializer(), it) }.getOrNull() },
         )
     }
 
@@ -228,17 +283,72 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
     }
 
     companion object {
+        private const val TAG = "AndroidAiSettings"
+        private const val STORE = "talon_ai"
+
+        private fun encrypted(context: Context): SharedPreferences {
+            val key = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            return EncryptedSharedPreferences.create(
+                context,
+                STORE,
+                key,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        }
+
+        /**
+         * The settings store, and what to do when it will not open.
+         *
+         * It is read while the application object is being built, so
+         * throwing here killed the app on every launch, with no screen
+         * ever drawn and nothing the owner could do from inside it. A
+         * store can refuse for reasons that have nothing to do with
+         * this app being wrong: a master key the device no longer has
+         * after a restore onto another phone or a keystore reset, and a
+         * file half written by a kill. Upgrading from an old version is
+         * where people meet it.
+         *
+         * So: open it, and if it will not open, take it away and start
+         * it again. What is lost is what was in it, which is the API
+         * keys, and the ship has those where sync is on.
+         */
+        internal fun openStore(context: Context): SharedPreferences =
+            runCatching { encrypted(context) }.getOrElse { first ->
+                Log.w(TAG, "the AI settings store would not open; starting it again", first)
+                runCatching { context.deleteSharedPreferences(STORE) }
+                runCatching { encrypted(context) }.getOrElse { second ->
+                    // Twice is a device that cannot keep a key at all.
+                    // The rest of the app has no business dying for it,
+                    // and the settings are not written in the clear to
+                    // save them: they last the session, and that is said.
+                    Log.e(TAG, "the AI settings store is unusable on this device; keeping them in memory", second)
+                    MemoryPrefs()
+                }
+            }
+
         private const val KEY_PROVIDER = "provider"
         private const val KEY_API_KEY = "api_key"
         private const val KEY_MODEL = "model"
         private const val KEY_BASE_URL = "base_url"
         private const val KEY_BRAVE_API_KEY = "brave_api_key"
         private const val KEY_STT_API_KEY = "stt_api_key"
+        private const val KEY_STT_SET_AT = "stt_api_key_set_at"
+        private const val KEY_REVOKED = "revoked_keys"
+        private val REVOKED = kotlinx.serialization.serializer<Map<String, io.nisfeb.talon.ai.KeyMark>>()
+        private const val KEY_PRIVATE_BASE_URL = "private_base_url"
+        private const val KEY_PRIVATE_MODEL = "private_model"
+        private const val KEY_PRIVATE_API_KEY = "private_api_key"
+        private const val KEY_FRONTIER_READS = "frontier_reads_messages"
         private const val KEY_STT_REMOVED_AT = "stt_api_key_removed_at"
         private const val KEY_URBIT_KNOWLEDGE_PROMPT = "urbit_knowledge_prompt"
         private const val KEY_ASSISTANT_PROMPT = "assistant_prompt"
         private const val KEY_LOOP_PROMPT = "loop_prompt"
         private const val KEY_DEVICE_ID = "device_id"
+        private const val KEY_PROFILE = "ai_profile"
+        private val PROFILE_JSON = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         private const val KEY_SYNC = "sync_enabled"
         // Legacy "Ask your Urbit" key, folded into the unified assistant
         // (feat_agent). Read for migration + written in lockstep.

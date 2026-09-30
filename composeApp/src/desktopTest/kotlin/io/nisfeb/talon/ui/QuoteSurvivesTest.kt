@@ -25,7 +25,7 @@ class QuoteSurvivesTest {
 
     private val noSend = object : ChatSendStrategy {
         override suspend fun sendText(text: String) = Unit
-        override suspend fun sendImage(src: String, width: Int, height: Int, alt: String) = Unit
+        override suspend fun sendImage(src: String, width: Int, height: Int, alt: String, caption: String) = Unit
         override val supportsQuote = true
         override suspend fun sendQuote(body: String, quoteWhom: String, quoteId: String) = Unit
     }

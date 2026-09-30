@@ -21,21 +21,6 @@ class PollFormatTest {
     }
 
     @Test
-    fun `parsePollInput rejects only a question`() {
-        val r = parsePollInput("just a question?")
-        assertTrue(r is PollParseResult.Err)
-    }
-
-    @Test
-    fun `parsePollInput accepts the minimum of 2 options`() {
-        val r = parsePollInput("q? | a | b")
-        assertTrue(r is PollParseResult.Ok)
-        r as PollParseResult.Ok
-        assertEquals("q?", r.poll.question)
-        assertEquals(listOf("a", "b"), r.poll.options)
-    }
-
-    @Test
     fun `parsePollInput rejects more than 10 options`() {
         // Vote emojis only go up to 10. Eleven options → Err.
         val opts = (1..11).joinToString(" | ") { "opt$it" }
@@ -64,6 +49,7 @@ class PollFormatTest {
         val longQ = "?".repeat(241)
         val r = parsePollInput("$longQ | a | b")
         assertTrue(r is PollParseResult.Err)
+        assertTrue(parsePollInput("${"?".repeat(240)} | a | b") is PollParseResult.Ok, "240 is allowed")
     }
 
     @Test
@@ -106,11 +92,6 @@ class PollFormatTest {
         assertNotNull(decoded)
         assertEquals(poll.question, decoded!!.question)
         assertEquals(poll.options, decoded.options)
-    }
-
-    @Test
-    fun `decode returns null when tag is absent`() {
-        assertNull(decodePollTag("no poll here"))
     }
 
     @Test

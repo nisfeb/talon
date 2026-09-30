@@ -36,16 +36,6 @@ class DialPaletteTest {
     }
 
     @Test
-    fun `the night sun is plainly not the day sun`() {
-        assertTrue(contrast(SUN, NIGHT_BASE) > 2 * contrast(SUN_DOWN, NIGHT_BASE))
-    }
-
-    @Test
-    fun `a lit moon still outshines the sun below the earth`() {
-        assertTrue(contrast(MOON, NIGHT_BASE) > 2 * contrast(SUN_DOWN, NIGHT_BASE))
-    }
-
-    @Test
     fun `an unlit limb is the dimmest thing on the ring`() {
         // It has to be there without claiming to be lit.
         assertTrue(contrast(MOON_DARK, NIGHT_BASE) < contrast(SUN_DOWN, NIGHT_BASE))

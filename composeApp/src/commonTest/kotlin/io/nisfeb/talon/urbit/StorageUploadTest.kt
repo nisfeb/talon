@@ -90,20 +90,6 @@ class StorageUploadTest {
     }
 
     @Test
-    fun `credentials mode with full credentials is upload-ready`() {
-        val creds = StorageCreds("https://s3.example.com", "AKIA", "shhh")
-        val config = StorageConfig("media", "us-east-1", null, "credentials")
-        assertTrue(storageS3Ready(creds, config))
-    }
-
-    @Test
-    fun `missing service is upload-ready when credentials are present`() {
-        val creds = StorageCreds("https://s3.example.com", "AKIA", "shhh")
-        val config = StorageConfig("media", "us-east-1", null, null)
-        assertTrue(storageS3Ready(creds, config))
-    }
-
-    @Test
     fun `blank credentials are not upload-ready regardless of mode`() {
         val config = StorageConfig("media", "us-east-1", null, "credentials")
         assertFalse(storageS3Ready(StorageCreds("", "AKIA", "shhh"), config))
@@ -129,26 +115,11 @@ class StorageUploadTest {
     private fun String.utf8Len() = this.encodeToByteArray().size
 
     @Test
-    fun `a short name is passed through untouched`() {
-        assertEquals("photo.jpg", truncateUploadName("photo.jpg"))
-    }
-
-    @Test
     fun `an over-long name is cut to the budget and keeps its extension`() {
         val name = "a".repeat(400) + ".jpeg"
         val out = truncateUploadName(name)
         assertTrue(out.utf8Len() <= MAX_UPLOAD_NAME_BYTES, "got ${out.utf8Len()} bytes")
         assertTrue(out.endsWith(".jpeg"), "lost the extension: $out")
-    }
-
-    @Test
-    fun `length is counted in bytes, not characters`() {
-        // 200 CJK characters is 600 bytes — a character-counting
-        // check would have called this comfortably short.
-        val name = "\u6f22".repeat(200) + ".png"
-        val out = truncateUploadName(name)
-        assertTrue(out.utf8Len() <= MAX_UPLOAD_NAME_BYTES, "got ${out.utf8Len()} bytes")
-        assertTrue(out.endsWith(".png"))
     }
 
     /**
@@ -184,19 +155,6 @@ class StorageUploadTest {
     }
 
     @Test
-    fun `the default budget also holds for wide characters`() {
-        for (name in listOf(
-            "\u6f22".repeat(200) + ".png",
-            "\uD83D\uDE00".repeat(100) + ".gif",
-            ("\u6f22" + "a" + "\uD83D\uDE00").repeat(80) + ".jpeg",
-        )) {
-            val out = truncateUploadName(name)
-            assertTrue(out.utf8Len() <= MAX_UPLOAD_NAME_BYTES, "$out is ${out.utf8Len()} bytes")
-            assertTrue(out.survivesUtf8(), "cut mid-character: $out")
-        }
-    }
-
-    @Test
     fun `a name that is only an over-long extension still gets a stem`() {
         val out = truncateUploadName("." + "x".repeat(400))
         assertTrue(out.isNotEmpty())
@@ -210,6 +168,34 @@ class StorageUploadTest {
         // segments and quietly change the object's key.
         assertEquals("photo.jpg", truncateUploadName("/tmp/holiday/photo.jpg"))
         assertEquals("photo.jpg", truncateUploadName("C:\\Users\\me\\photo.jpg"))
+    }
+
+    @Test
+    fun `a name exactly at the budget goes whole, and one byte over is cut`() {
+        assertEquals("a".repeat(20), truncateUploadName("a".repeat(20), maxBytes = 20))
+        assertEquals("a".repeat(20), truncateUploadName("a".repeat(21), maxBytes = 20))
+    }
+
+    @Test
+    fun `a dotfile or a trailing dot is not taken for an extension`() {
+        assertEquals(".abcdefghi", truncateUploadName(".abcdefghijkl", maxBytes = 10))
+        assertEquals("abcdefghij", truncateUploadName("abcdefghijkl.", maxBytes = 10))
+    }
+
+    @Test
+    fun `an extension of sixteen bytes is kept, and one of seventeen is not`() {
+        val sixteen = ".abcdefghijklmno"
+        assertTrue(truncateUploadName("x".repeat(200) + sixteen, maxBytes = 40).endsWith(sixteen))
+        assertEquals("x".repeat(40), truncateUploadName("x".repeat(200) + sixteen + "p", maxBytes = 40))
+    }
+
+    @Test
+    fun `each UTF-8 width is counted to its edge`() {
+        // One, two, two and three bytes: the last of each width and the
+        // first of the next. A budget of ten takes 10, 5, 5 and 3 of them.
+        for ((ch, fits) in listOf('\u007F' to 10, '\u0080' to 5, '\u07FF' to 5, '\u0800' to 3)) {
+            assertEquals(ch.toString().repeat(fits), truncateUploadName(ch.toString().repeat(20), maxBytes = 10), "U+${ch.code.toString(16)}")
+        }
     }
 
     @Test

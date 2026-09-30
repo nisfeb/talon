@@ -18,7 +18,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -90,6 +90,10 @@ fun BookmarksList(
         // Folder filter chips. "All" first; each user folder; "+ New"
         // last to create a new folder. Long-press a folder chip to
         // rename / delete it.
+        // Read here, not in the chips: deleting the selected folder moves
+        // the selection to All and takes a chip away in the same moment,
+        // and a chip reading it missed the change (see GroupInfoPane).
+        val selectedNow = selectedFolderId
         LazyRow(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -97,7 +101,7 @@ fun BookmarksList(
         ) {
             item(key = "__all") {
                 FilterChip(
-                    selected = selectedFolderId == null,
+                    selected = selectedNow == null,
                     onClick = { selectedFolderId = null },
                     label = { Text("All") },
                 )
@@ -109,7 +113,7 @@ fun BookmarksList(
                 Box {
                     FolderChipWithMenu(
                         folder = f,
-                        selected = selectedFolderId == f.id,
+                        selected = selectedNow == f.id,
                         onClick = { selectedFolderId = f.id },
                         onLongPress = { folderMenuFor = f },
                     )

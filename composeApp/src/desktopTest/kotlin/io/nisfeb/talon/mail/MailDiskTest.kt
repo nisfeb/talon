@@ -12,13 +12,21 @@ import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.CALENDAR_ROWS_MIGRATION
+import io.nisfeb.talon.data.ORRERY_ACCOUNTS_MIGRATION
+import io.nisfeb.talon.data.ORRERY_SENT_MIGRATION
+import io.nisfeb.talon.data.COMET_DOMES_MIGRATION
+import io.nisfeb.talon.data.ORRERY_HANDOFF_MIGRATION
+import io.nisfeb.talon.data.ORRERY_SHIP_WORK_MIGRATION
+import io.nisfeb.talon.data.MESSAGE_SEARCH_TEXT_MIGRATION
+import io.nisfeb.talon.data.URB_UNFURLS_MIGRATION
 import io.nisfeb.talon.data.MAIL_ROWS_MIGRATION
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
@@ -45,15 +53,18 @@ class MailDiskTest {
     // No destructive fallback: a migration that does not match the entity fails here.
     private fun db() = Room.databaseBuilder<AppDatabase>(name = dbPath)
         .setDriver(BundledSQLiteDriver())
-        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION)
+        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION, COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION)
         .build()
 
     @Test
     fun `the mail table arrives by migration and everything else stays`() = runBlocking {
         db().also { it.mailRows().listing("inbox"); it.close() }
-        // Wind the file back to 41: the table gone, a row of other data in place.
+        // Wind the file back to 41: the tables gone, a row of other data in place.
         BundledSQLiteDriver().open(dbPath).also { c ->
             c.execSQL("DROP TABLE mail_rows")
+            c.execSQL("ALTER TABLE messages DROP COLUMN searchText") // added at 49
+            // Made at 44 in an older shape, which the later migrations read.
+            c.execSQL("DROP TABLE orrery_accounts")
             c.execSQL("INSERT INTO rail_item_prefs (itemName, visible) VALUES ('Mail', 0)")
             c.execSQL("PRAGMA user_version = 41")
             c.close()
@@ -111,7 +122,7 @@ class MailDiskTest {
             assertEquals(1, cold.page.value?.total)
             assertEquals("pay me", cold.storedThread("0v1")?.messages?.single()?.body)
         } finally {
-            scope.cancel()
+            scope.coroutineContext.job.cancelAndJoin()
             db.close()
         }
     }

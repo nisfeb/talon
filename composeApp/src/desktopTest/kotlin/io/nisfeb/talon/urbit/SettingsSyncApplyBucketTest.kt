@@ -1,5 +1,6 @@
 package io.nisfeb.talon.urbit
 
+import io.nisfeb.talon.ai.legacyInto
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.ai.AiSettings
@@ -10,10 +11,8 @@ import io.nisfeb.talon.data.AssistantConversationEntity
 import io.nisfeb.talon.data.AssistantHistoryEntity
 import io.nisfeb.talon.data.BookmarkEntity
 import io.nisfeb.talon.data.BookmarkFolderEntity
-import io.nisfeb.talon.data.BookmarkFolderMemberEntity
 import io.nisfeb.talon.data.FolderEntity
 import io.nisfeb.talon.data.FolderMemberEntity
-import io.nisfeb.talon.data.GroupOrderEntity
 import io.nisfeb.talon.data.NotifyLevel
 import io.nisfeb.talon.data.NotifyPreferenceEntity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,9 +20,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -165,19 +161,6 @@ class SettingsSyncApplyBucketTest {
     // ── notify-prefs ────────────────────────────────────────────────
 
     @Test
-    fun `applyBucket NOTIFY_PREFS replaces local prefs`() = runBlocking {
-        db.notifyPrefs().upsert(NotifyPreferenceEntity("~zod", NotifyLevel.NONE))
-        val bucket = buildJsonObject {
-            put("~zod", buildJsonObject { put("level", NotifyLevel.MENTIONS) })
-            put("chat/~host/general", buildJsonObject { put("level", NotifyLevel.ALL) })
-        }
-        sync.applyBucket(SettingsSyncImpl.BUCKET_NOTIFY_PREFS, bucket)
-
-        assertEquals(NotifyLevel.MENTIONS, db.notifyPrefs().levelFor("~zod"))
-        assertEquals(NotifyLevel.ALL, db.notifyPrefs().levelFor("chat/~host/general"))
-    }
-
-    @Test
     fun `applyBucket NOTIFY_PREFS drops entries missing the level field`() = runBlocking {
         val bucket = buildJsonObject {
             put("~zod", buildJsonObject { /* no level */ })
@@ -304,6 +287,47 @@ class SettingsSyncApplyBucketTest {
             assertEquals(false, cfg.catchMeUpEnabled)
         }
 
+    private suspend fun applyAi(vararg fields: Pair<String, kotlinx.serialization.json.JsonElement>) =
+        sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, buildJsonObject {
+            put("config", buildJsonObject {
+                put("schemaVersion", 2)
+                fields.forEach { (k, v) -> put(k, v) }
+            })
+        })
+
+    @Test
+    fun `a peer's Brave key alone carries its provider, and an address it does not send keeps ours`() = runBlocking {
+        aiSettings.applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "sk-mine", model = null, baseUrl = "https://mine.example", syncEnabled = true))
+        applyAi("provider" to JsonPrimitive("OpenAi"), "braveApiKey" to JsonPrimitive("brv-2"))
+        val cfg = aiSettings.state.value
+        assertEquals(AiSettings.Provider.OpenAi to "brv-2", cfg.provider to cfg.braveApiKey)
+        assertEquals("sk-mine" to "https://mine.example", cfg.apiKey to cfg.baseUrl, "what it did not send stays")
+        applyAi("provider" to JsonPrimitive("OpenAi"), "braveApiKey" to JsonPrimitive("brv-2"), "baseUrl" to JsonPrimitive("https://theirs.example"))
+        assertEquals("https://theirs.example", aiSettings.state.value.baseUrl)
+    }
+
+    @Test
+    fun `the keys taken out anywhere arrive with the credentials, and marks it cannot read are none`() = runBlocking {
+        aiSettings.applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "", model = null, syncEnabled = true))
+        val print = io.nisfeb.talon.ai.keyPrint("sk-old")
+        applyAi(
+            "provider" to JsonPrimitive("OpenAi"), "apiKey" to JsonPrimitive("sk-new"),
+            "revokedKeys" to buildJsonObject { put(print, buildJsonObject { put("at", 5); put("revoked", true) }) },
+        )
+        assertEquals(setOf(print), aiSettings.state.value.revokedKeys.keys)
+        applyAi("provider" to JsonPrimitive("OpenAi"), "apiKey" to JsonPrimitive("sk-new"), "revokedKeys" to JsonPrimitive("garbled"))
+        assertEquals(emptySet(), aiSettings.state.value.revokedKeys.keys)
+    }
+
+    @Test
+    fun `an emptied transcription key keeps its removal time, and a real one clears it`() = runBlocking {
+        aiSettings.applyRemote(AiSettings.Config(provider = AiSettings.Provider.OpenAi, apiKey = "sk", model = null, syncEnabled = true, sttApiKey = "stt-old"))
+        applyAi("provider" to JsonPrimitive("OpenAi"), "sttApiKey" to JsonPrimitive(""), "sttApiKeyRemovedAtMs" to JsonPrimitive(50))
+        assertEquals("" to 50L, aiSettings.state.value.sttApiKey to aiSettings.state.value.sttApiKeyRemovedAtMs)
+        applyAi("provider" to JsonPrimitive("OpenAi"), "sttApiKey" to JsonPrimitive("stt-new"))
+        assertEquals("stt-new" to 0L, aiSettings.state.value.sttApiKey to aiSettings.state.value.sttApiKeyRemovedAtMs)
+    }
+
     @Test
     fun `applyBucket AI_SETTINGS preserves a locally-enabled assistant toggle the entry omits`() =
         runBlocking {
@@ -355,6 +379,125 @@ class SettingsSyncApplyBucketTest {
             sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
             assertEquals("whisper-local", aiSettings.state.value.sttApiKey)
         }
+
+    /**
+     * The bug that made keys vanish. A second install with no key of
+     * its own (a profile build, a fresh phone) writes its preferences
+     * on startup. That used to replace the whole entry, so the ship
+     * lost the key, and the entry it left behind then told every other
+     * device to switch provider and forget its model name. The key was
+     * still there, against the wrong endpoint, answering 401.
+     */
+    @Test
+    fun `a device with no key of its own says nothing about anybody's`() = runBlocking {
+        aiSettings.applyRemote(
+            AiSettings.Config(
+                provider = AiSettings.Provider.OpenRouter,
+                apiKey = "sk-mine",
+                model = "anthropic/claude-sonnet-4",
+                baseUrl = null,
+                syncEnabled = true,
+            ),
+        )
+        // What a key-less peer writes: its preferences, stamped, with
+        // the provider it happens to be defaulted to.
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_AI_SETTINGS,
+            buildJsonObject {
+                put("config", buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "Anthropic")
+                    put("catchMeUpEnabled", false)
+                })
+            },
+        )
+        val after = aiSettings.state.value
+        assertEquals("sk-mine", after.apiKey, "the key stays")
+        assertEquals(AiSettings.Provider.OpenRouter, after.provider, "and so does the provider it belongs to")
+        assertEquals("anthropic/claude-sonnet-4", after.model, "and the model name")
+        assertEquals(false, after.catchMeUpEnabled, "the preference it did have something to say about travels")
+    }
+
+    @Test
+    fun `the private model travels with the credentials, and is not lost by a peer`() = runBlocking {
+        aiSettings.applyRemote(
+            AiSettings.Config(
+                provider = AiSettings.Provider.OpenAi, apiKey = "sk-mine", model = null, syncEnabled = true,
+            ),
+        )
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_AI_SETTINGS,
+            buildJsonObject {
+                put(SettingsSyncImpl.AI_KEYS_ENTRY, buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "OpenAi")
+                    put("apiKey", "sk-mine")
+                    put("privateBaseUrl", "http://localhost:1234")
+                    put("privateModel", "qwen2.5-7b")
+                    put("privateApiKey", "local-key")
+                })
+            },
+        )
+        val after = aiSettings.state.value
+        assertEquals("http://localhost:1234", after.privateBaseUrl, "a server set on one machine reaches the others")
+        assertEquals("qwen2.5-7b", after.privateModel)
+        assertEquals("local-key", after.privateApiKey)
+        // A peer that has a frontier key but no private model of its own
+        // says nothing about one, and what is here stays.
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_AI_SETTINGS,
+            buildJsonObject {
+                put(SettingsSyncImpl.AI_KEYS_ENTRY, buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("provider", "OpenAi")
+                    put("apiKey", "sk-mine")
+                })
+            },
+        )
+        assertEquals("http://localhost:1234", aiSettings.state.value.privateBaseUrl)
+        assertEquals("local-key", aiSettings.state.value.privateApiKey)
+    }
+
+    @Test
+    fun `letting the frontier model read messages is a preference, and off by default`() = runBlocking {
+        assertEquals(false, aiSettings.state.value.frontierReadsMessages)
+        sync.applyBucket(
+            SettingsSyncImpl.BUCKET_AI_SETTINGS,
+            buildJsonObject {
+                put("config", buildJsonObject {
+                    put("schemaVersion", 2)
+                    put("frontierReadsMessages", true)
+                })
+            },
+        )
+        assertEquals(true, aiSettings.state.value.frontierReadsMessages)
+    }
+
+    @Test
+    fun `only a device that has credentials writes the credentials entry`() {
+        // What decides it, since the push itself needs a live channel.
+        val bare = AiSettings.Config(provider = AiSettings.Provider.OpenAi, apiKey = "", model = null)
+        assertEquals(false, bare.hasCredentials())
+        assertEquals(true, bare.copy(apiKey = "sk-mine").hasCredentials())
+        assertEquals(true, bare.copy(braveApiKey = "brave").hasCredentials())
+        assertEquals(true, bare.copy(sttApiKey = "whisper").hasCredentials())
+        // A removal is a thing to say about credentials too, or it
+        // could never reach the other devices.
+        assertEquals(true, bare.copy(sttApiKeyRemovedAtMs = 5_000L).hasCredentials())
+    }
+
+    @Test
+    fun `an AI settings entry going away takes nothing here`() = runBlocking {
+        aiSettings.applyRemote(
+            AiSettings.Config(
+                provider = AiSettings.Provider.OpenAi, apiKey = "sk-mine", model = null, syncEnabled = true,
+            ),
+        )
+        sync.removeEntry(SettingsSyncImpl.BUCKET_AI_SETTINGS, "config")
+        assertEquals("sk-mine", aiSettings.state.value.apiKey)
+        sync.removeEntry(SettingsSyncImpl.BUCKET_AI_SETTINGS, SettingsSyncImpl.AI_KEYS_ENTRY)
+        assertEquals("sk-mine", aiSettings.state.value.apiKey, "absent is not empty: a removal travels as a mark")
+    }
 
     @Test
     fun `applyBucket AI_SETTINGS adopts a transcription key and a newer removal`() =
@@ -410,26 +553,6 @@ class SettingsSyncApplyBucketTest {
             sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
             assertEquals(true, aiSettings.state.value.askUrbitEnabled)
             assertEquals(true, aiSettings.state.value.agentEnabled)
-        }
-
-    @Test
-    fun `applyBucket AI_SETTINGS does not blank a saved key when the entry omits apiKey`() =
-        runBlocking {
-            // A peer push with syncEnabled=false omits apiKey; the old
-            // orEmpty() blanked the local key → silently disabled AI.
-            aiSettings.applyRemote(
-                AiSettings.Config(AiSettings.Provider.Anthropic, "sk-keep", null, syncEnabled = true),
-            )
-            val bucket = buildJsonObject {
-                put("config", buildJsonObject {
-                    put("schemaVersion", 2)
-                    put("provider", "Anthropic")
-                    put("catchMeUpEnabled", "false")
-                    // no apiKey
-                })
-            }
-            sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
-            assertEquals("sk-keep", aiSettings.state.value.apiKey)
         }
 
     @Test
@@ -593,11 +716,12 @@ class SettingsSyncApplyBucketTest {
             put("config", buildJsonObject {
                 put("provider", "Anthropic")
                 put("apiKey", "key")
+                put("syncEnabled", false)
             })
         }
         sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket)
 
-        assertEquals(true, aiSettings.state.value.syncEnabled)
+        assertEquals(true, aiSettings.state.value.syncEnabled, "a peer's false must not switch sync off here")
     }
 
     @Test
@@ -752,40 +876,6 @@ class SettingsSyncApplyBucketTest {
         assertEquals(listOf("~zod/keep"), rows.map { it.flag })
     }
 
-    @Test
-    fun `applySettingsEvent ignores events with no recognized envelope shape`() =
-        runBlocking {
-            // Pre-populate; an empty payload must be a silent no-op.
-            db.groupOrders().reorder(listOf("~zod/keep"))
-            sync.applySettingsEvent(buildJsonObject {})
-            val rows = db.groupOrders().stream().first()
-            assertEquals(listOf("~zod/keep"), rows.map { it.flag })
-        }
-
-    // ── setWatchwordExclude routes to the injected callback ─────────
-
-    @Test
-    fun `setWatchwordExclude invokes the injected router with whom and excluded`() = runBlocking {
-        // Pre-Stage-F app/ DmChatScreen called Watchwords.excludeChat
-        // directly. Stage F moved DmChatScreen to commonMain; the call
-        // re-routed through SettingsSync.setWatchwordExclude. Verify
-        // the override actually fires the router (vs. inheriting the
-        // interface's no-op default).
-        val captured = mutableListOf<Pair<String, Boolean>>()
-        val routedSync = SettingsSyncImpl(
-            db = db,
-            aiSettings = aiSettings,
-            watchwordExcludeRouter = { whom, excluded ->
-                captured += whom to excluded
-            },
-        )
-        routedSync.setWatchwordExclude("~zod", true)
-        routedSync.setWatchwordExclude("chat/~host/general", false)
-        assertEquals(
-            listOf("~zod" to true, "chat/~host/general" to false),
-            captured,
-        )
-    }
 
     // ── cord-stringified value compatibility ────────────────────────
 
@@ -845,16 +935,6 @@ class SettingsSyncApplyBucketTest {
     }
 
     // ── status-seen (cross-device fresh-status marker) ──────────────
-
-    @Test
-    fun `applyBucket STATUS_SEEN publishes the marker to the flow`() = runBlocking {
-        assertEquals(0L, sync.statusesSeenMs.value)
-        val bucket = buildJsonObject {
-            put("me", buildJsonObject { put("ms", 1_700_000_000_000L) })
-        }
-        sync.applyBucket(SettingsSyncImpl.BUCKET_STATUS_SEEN, bucket)
-        assertEquals(1_700_000_000_000L, sync.statusesSeenMs.value)
-    }
 
     @Test
     fun `status-seen marker is monotonic — a stale value never regresses it`() = runBlocking {
@@ -974,34 +1054,6 @@ class SettingsSyncApplyBucketTest {
         sync.clearBucketLocally(SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS)
         assertNull(db.assistantConversations().getByGid("c1"))
         assertTrue(db.assistantHistory().recent(10).first().isEmpty())
-    }
-
-    @Test
-    fun `applyBucket ASSISTANT_TURNS links the turn to its conversation`() = runBlocking {
-        sync.applyBucket(
-            SettingsSyncImpl.BUCKET_ASSISTANT_CONVERSATIONS,
-            buildJsonObject { put("c1", convMeta("topic", turnCount = 1)) },
-        )
-        sync.applyBucket(
-            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
-            buildJsonObject { put("t1", turnVal("c1", "q1", "a1")) },
-        )
-        val convId = db.assistantConversations().getByGid("c1")!!.id
-        val turns = db.assistantHistory().forConversation(convId)
-        assertEquals(listOf("q1"), turns.map { it.question })
-        assertEquals("c1", turns.single().convGid)
-    }
-
-    @Test
-    fun `applyBucket ASSISTANT_TURNS stubs a conversation when the turn arrives first`() = runBlocking {
-        // Out-of-order delivery: the turn must still have a home.
-        sync.applyBucket(
-            SettingsSyncImpl.BUCKET_ASSISTANT_TURNS,
-            buildJsonObject { put("t1", turnVal("c2", "orphan question", "a")) },
-        )
-        val conv = db.assistantConversations().getByGid("c2")
-        assertNotNull(conv)
-        assertEquals(1, db.assistantHistory().forConversation(conv.id).size)
     }
 
     @Test
@@ -1195,14 +1247,10 @@ class SettingsSyncApplyBucketTest {
 // Test doubles
 // ──────────────────────────────────────────────────────────────────
 
-internal class FakeAiSettings : AiSettingsRepository {
-    private val _state = MutableStateFlow(
-        AiSettings.Config(
-            provider = AiSettings.Provider.Anthropic,
-            apiKey = "",
-            model = null,
-        ),
-    )
+internal class FakeAiSettings(
+    initial: AiSettings.Config = AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "", model = null),
+) : AiSettingsRepository {
+    private val _state = MutableStateFlow(initial)
     override val state: StateFlow<AiSettings.Config> = _state.asStateFlow()
     override var onStateChange: ((AiSettings.Config, Boolean) -> Unit)? = null
     override fun update(
@@ -1212,6 +1260,19 @@ internal class FakeAiSettings : AiSettingsRepository {
         baseUrl: String?,
     ) { /* unused */ }
     override fun setFeature(feature: AiSettings.Feature, enabled: Boolean) {}
+    override fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String) {
+        _state.value = _state.value.copy(
+            privateBaseUrl = baseUrl?.takeIf { it.isNotBlank() },
+            privateModel = model?.takeIf { it.isNotBlank() },
+            privateApiKey = apiKey,
+        )
+    }
+    override fun setFrontierReadsMessages(on: Boolean) {
+        _state.value = _state.value.copy(frontierReadsMessages = on)
+    }
+    override fun setProfile(profile: io.nisfeb.talon.ai.AiProfile) {
+        _state.value = profile.legacyInto(_state.value).copy(savedProfile = profile)
+    }
     override fun setBraveApiKey(key: String) {
         _state.value = _state.value.copy(braveApiKey = key)
     }

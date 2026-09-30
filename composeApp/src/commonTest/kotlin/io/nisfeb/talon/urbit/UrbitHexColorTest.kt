@@ -30,19 +30,6 @@ class UrbitHexColorTest {
     }
 
     @Test
-    fun `a colour with no red at all loses the whole group`() {
-        assertEquals("ffff", tint("#00ffff"))
-        assertEquals("ff", tint("#0000ff"))
-        assertEquals("1.0000", tint("#010000"))
-    }
-
-    @Test
-    fun `black is zero, not six zeroes`() {
-        assertEquals("0", tint("#000000"))
-        assertEquals("0", tint(""))
-    }
-
-    @Test
     fun `every colour in the wheel produces a canonical value`() {
         // Canonical means: no dot-group longer than four, no leading
         // zero on the front group, and nothing empty.

@@ -14,8 +14,6 @@ import kotlin.test.assertNotEquals
 class ShipNamingTest {
 
     private val COMET = "~doznec-binwes-samper-siglet--fidpen-sogdur-wacser-wissun"
-    private val NYM = "..admire...attune"
-
     private val nicked = ContactEntity(
         ship = "~litzod", nickname = "Maya", bio = null, avatarUrl = null,
     )
@@ -30,37 +28,13 @@ class ShipNamingTest {
     )
 
     @Test
-    fun nicknameWinsWhenPresent() {
-        assertEquals("Maya", map(alwaysPatp = false).displayName("~litzod"))
-    }
-
-    @Test
-    fun starsHaveNoMnemonymAndKeepTheirPatp() {
-        // Only a comet's @p spells a key, so a star stays a ~ship.
-        val m = ContactMap(contacts = listOf(ContactEntity("~timzod", null, null, null)))
-        assertEquals("~timzod", m.displayName("~timzod"))
-    }
-
-    @Test
-    fun planetsHaveNoMnemonymAndKeepTheirPatp() {
-        val m = ContactMap(
-            contacts = listOf(ContactEntity("~sampel-palnet", null, null, null)),
-        )
-        assertEquals("~sampel-palnet", m.displayName("~sampel-palnet"))
-    }
-
-    @Test
-    fun mnemonymFillsInForShipsWithoutNicknames() {
-        val shown = map(alwaysPatp = false).displayName(COMET)
-        assertNotEquals(COMET, shown)
-        assertEquals(NYM, shown)
-    }
-
-    @Test
-    fun alwaysPatpOverridesEverything() {
+    fun alwaysPatpShowsTheUrbitNameButACometsWordName() {
         val m = map(alwaysPatp = true)
-        assertEquals("~litzod", m.displayName("~litzod"))
-        assertEquals(COMET, m.displayName(COMET))
+        assertEquals("~litzod", m.displayName("~litzod"), "a nickname is set aside")
+        // A comet's @p is its key: its word name stays, the setting or not.
+        assertEquals(Mnemonym.display(COMET), m.displayName(COMET))
+        val nickedComet = ContactMap(contacts = listOf(bare.copy(nickname = "Bus")), alwaysPatp = true)
+        assertEquals(Mnemonym.display(COMET), nickedComet.displayName(COMET), "and a comet's nickname too")
     }
 
     @Test

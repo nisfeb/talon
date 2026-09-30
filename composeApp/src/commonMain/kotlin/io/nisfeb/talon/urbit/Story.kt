@@ -263,10 +263,23 @@ object Story {
      * recursively.
      */
     private fun splitForWidgetTags(text: androidx.compose.ui.text.AnnotatedString): List<StoryPart> {
-        // TODO(port/wave2): wire up widget-tag parsing (TZ/Cal/Poll/Loc) once
-        // io.nisfeb.talon.ui.{TZ_TAG_RE, CAL_TAG_RE, …} are ported to commonMain.
-        // For now, return the text block as-is — widgets will render as plain text.
-        return listOf(StoryPart.Text(text))
+        // The earliest widget tag of any kind. This was a stub after the
+        // port to common code, so /poll, /cal, /tz and /loc messages
+        // showed their raw tags on every platform.
+        val tag = listOf(
+            io.nisfeb.talon.ui.TZ_TAG_RE, io.nisfeb.talon.ui.CAL_TAG_RE,
+            io.nisfeb.talon.ui.POLL_TAG_RE, io.nisfeb.talon.ui.LOC_TAG_RE,
+        ).mapNotNull { it.find(text.text) }.minByOrNull { it.range.first }?.value
+            ?: return listOf(StoryPart.Text(text))
+        val widget = io.nisfeb.talon.ui.decodeTzTag(tag)?.let { StoryPart.TzWidget(it.instantMs, it.sourceLabel) }
+            ?: io.nisfeb.talon.ui.decodeCalTag(tag)?.let { StoryPart.CalWidget(it.startMs, it.endMs, it.title) }
+            ?: io.nisfeb.talon.ui.decodePollTag(tag)?.let { StoryPart.PollWidget(it.question, it.options) }
+            ?: io.nisfeb.talon.ui.decodeLocTag(tag)?.let { StoryPart.LocWidget(it.lat, it.lng) }
+            ?: return listOf(StoryPart.Text(text))
+        // Our slash commands put a plain-text summary beside the tag for
+        // clients without widgets. Here the card is the message, and the
+        // summary would only repeat it.
+        return listOf(widget)
     }
 
     private fun trimEndBlanks(s: androidx.compose.ui.text.AnnotatedString): androidx.compose.ui.text.AnnotatedString {
@@ -302,7 +315,12 @@ object Story {
 
     private fun appendLinkifyingUrb(raw: String, out: androidx.compose.ui.text.AnnotatedString.Builder) {
         val text = replaceEmojiShortcodes(raw)
-        val ranges = UrbLink.findRanges(text)
+        // And furum's f/~host/board shorthand, which no server linkifies
+        // either: its href is the shorthand, which the tap site knows.
+        var last = -1
+        val ranges = (UrbLink.findRanges(text) + FurumLink.findRanges(text))
+            .sortedBy { it.first }
+            .filter { r -> (r.first > last).also { if (it) last = r.last } }
         if (ranges.isEmpty()) {
             out.append(text)
             return
@@ -505,6 +523,8 @@ object Story {
         renderList(list, out, depth, expandMarkdown)
     }
 
+    private val BULLETS = listOf("• ", "◦ ", "▪ ")
+
     private class TaskItem(val checked: Boolean, val rest: JsonArray)
 
     private val TASK_PREFIX_RE = Regex("^\\[([ xX])]\\s+")
@@ -535,7 +555,11 @@ object Story {
         val contents = list["contents"] as? JsonArray
         val items = list["items"] as? JsonArray ?: return
 
-        val indent = "  ".repeat(depth)
+        // Four spaces a level: two were too little to see which items a
+        // sub-list hangs from in a proportional font.
+        val indent = "    ".repeat(depth)
+        // Numbers count items only: a sub-list between two items is not one.
+        var number = 0
 
         // Track whether the builder currently ends with '\n' so we can
         // skip the per-iteration `out.toString().endsWith('\n')` —
@@ -569,8 +593,8 @@ object Story {
             endsWithNewline = false
         }
 
-        items.forEachIndexed { idx, raw ->
-            val itemObj = raw as? JsonObject ?: return@forEachIndexed
+        items.forEach { raw ->
+            val itemObj = raw as? JsonObject ?: return@forEach
             (itemObj["item"] as? JsonArray)?.let { inlineArr ->
                 ensureNewline()
                 out.append(indent)
@@ -582,11 +606,12 @@ object Story {
                     out.append(if (task.checked) "☑ " else "☐ ")
                     renderInlineArray(task.rest, out, expandMarkdown)
                 } else {
-                    out.append(if (ordered) "${idx + 1}. " else "• ")
+                    // Disc, circle, square by level, as HTML (and so Lattice) draws them.
+                    out.append(if (ordered) "${++number}. " else BULLETS[depth % BULLETS.size])
                     renderInlineArray(inlineArr, out, expandMarkdown)
                 }
                 endsWithNewline = false
-                return@forEachIndexed
+                return@forEach
             }
             (itemObj["list"] as? JsonObject)?.let { nested ->
                 renderList(nested, out, depth + 1, expandMarkdown)
@@ -762,7 +787,7 @@ object Story {
     // ───────── style constants ─────────
 
     private val MENTION_COLOR = Color(0xFF4F63D2)
-    private val LINK_COLOR = Color(0xFF2962FF)
+    private val LINK_COLOR = io.nisfeb.talon.ui.theme.LINK_BLUE
     private val MONO_SPAN = SpanStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
 }
 

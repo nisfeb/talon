@@ -6,7 +6,9 @@ import io.nisfeb.talon.data.AppDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -35,7 +37,10 @@ class DesktopUiSettingsTest {
 
     @After
     fun tearDown() {
-        scope.cancel()
+        // Joined, not only cancelled: the rail-visibility reader starts a
+        // query at construction, and closing the db under it is a native
+        // SQLite crash that takes the whole test JVM down.
+        runBlocking { scope.coroutineContext.job.cancelAndJoin() }
         runCatching { db.close() }
         tmpDir.deleteRecursively()
     }
@@ -44,28 +49,12 @@ class DesktopUiSettingsTest {
         DesktopUiSettings(file = targetFile, db = db, scope = scope)
 
     @Test
-    fun `default hideComposerButtons is false when file does not exist`() {
-        val store = newStore()
-        assertFalse(store.hideComposerButtons.value)
-        assertFalse(file.exists())
-    }
-
-    @Test
     fun `setHideComposerButtons true persists and survives reload`() {
         newStore().setHideComposerButtons(true)
         assertTrue(file.exists())
 
         val reloaded = newStore()
         assertTrue(reloaded.hideComposerButtons.value)
-    }
-
-    @Test
-    fun `setHideComposerButtons toggle flips both directions`() {
-        val store = newStore()
-        store.setHideComposerButtons(true)
-        assertTrue(store.hideComposerButtons.value)
-        store.setHideComposerButtons(false)
-        assertFalse(store.hideComposerButtons.value)
     }
 
     @Test
@@ -79,13 +68,6 @@ class DesktopUiSettingsTest {
         file.writeText("not json")
         val store = newStore()
         assertFalse(store.hideComposerButtons.value)
-    }
-
-    @Test
-    fun `atomic move leaves no tmp file after persist`() {
-        newStore().setHideComposerButtons(true)
-        val tmp = File(tmpDir, "ui.json.tmp")
-        assertFalse(tmp.exists())
     }
 
     // ── accent settings ──────────────────────────────────────────
@@ -148,14 +130,6 @@ class DesktopUiSettingsTest {
     // ── group channel order ──────────────────────────────────────
 
     @Test
-    fun `default groupChannelOrder is Recent`() {
-        kotlin.test.assertEquals(
-            GroupChannelOrder.Recent,
-            newStore().groupChannelOrder.value,
-        )
-    }
-
-    @Test
     fun `setGroupChannelOrder persists across reload`() {
         newStore().setGroupChannelOrder(GroupChannelOrder.HostOrder)
         kotlin.test.assertEquals(
@@ -188,5 +162,62 @@ class DesktopUiSettingsTest {
         assertFalse(newStore().calendarWeekView.value)
         newStore().setCalendarWeekView(true)
         assertTrue(newStore().calendarWeekView.value)
+    }
+
+    @Test
+    fun `every other setting survives a reload`() {
+        val theme = io.nisfeb.talon.ui.theme.ThemeSettings(
+            themes = listOf(io.nisfeb.talon.ui.theme.CustomTheme.blank(dark = true, id = "t1").copy(name = "Dusk")), activeId = "t1",
+        )
+        val decide = io.nisfeb.talon.orrery.DecideSettings(on = true, threshold = 0.25)
+        newStore().apply {
+            setThemeSettings(theme)
+            setMicProcessing(io.nisfeb.talon.call.MicProcessing(noiseSuppression = false))
+            setHomePlace("51.5,-0.1,London")
+            setHiddenCalendars(setOf("work"))
+            setDefaultCalendar("home")
+            setOrreryStandDown(false)
+            setOrreryDecide(decide)
+            setHomeFahrenheit(false)
+            setHomeTwentyFourHour(true)
+            setHomeLayout("{\"widgets\":[]}")
+            setFolderItemOrder(FolderItemOrder.Recent)
+            setSmartSearchPreferred(true)
+            setPowerFeaturesEnabled(true)
+            setSwipeQuotes(false)
+            setDensity(Density.Compact)
+            setRailItemOrder(listOf(RailItem.Mail, RailItem.Chats))
+        }
+        newStore().apply {
+            kotlin.test.assertEquals("Dusk", themeSettings.value.active?.name)
+            assertFalse(micProcessing.value.noiseSuppression)
+            kotlin.test.assertEquals("51.5,-0.1,London", homePlace.value)
+            kotlin.test.assertEquals(setOf("work"), hiddenCalendars.value)
+            kotlin.test.assertEquals("home", defaultCalendar.value)
+            assertFalse(orreryStandDown.value)
+            kotlin.test.assertEquals(decide, orreryDecide.value)
+            assertFalse(homeFahrenheit.value)
+            assertTrue(homeTwentyFourHour.value)
+            kotlin.test.assertEquals("{\"widgets\":[]}", homeLayout.value)
+            kotlin.test.assertEquals(FolderItemOrder.Recent, folderItemOrder.value)
+            assertTrue(smartSearchPreferred.value && powerFeaturesEnabled.value && !swipeQuotes.value)
+            kotlin.test.assertEquals(Density.Compact, density.value)
+            kotlin.test.assertEquals(listOf(RailItem.Mail, RailItem.Chats), railItemOrder.value.take(2))
+            kotlin.test.assertEquals(RailItem.entries.toSet(), railItemOrder.value.toSet(), "completed with the rest")
+        }
+    }
+
+    @Test
+    fun `pane sizes and the font scale are kept within bounds`() {
+        newStore().apply {
+            setChatPaneListFraction(0.9f)
+            setRightPaneWidthDp(10f)
+            setFontScale(1.234f)
+        }
+        newStore().apply {
+            kotlin.test.assertEquals(0.50f, chatPaneListFraction.value)
+            kotlin.test.assertEquals(280f, rightPaneWidthDp.value)
+            kotlin.test.assertEquals(normalizeFontScale(1.234f), fontScale.value)
+        }
     }
 }

@@ -31,7 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -178,13 +178,13 @@ fun GalleryPostScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Avatar(
-                    label = contactMap.nickname(p.author) ?: p.author,
+                    label = contactMap.displayName(p.author),
                     url = contactMap.avatar(p.author),
                     colorHex = contactMap.shipColor(p.author),
                     size = 28.dp,
                 )
                 Text(
-                    contactMap.nickname(p.author) ?: p.author,
+                    contactMap.displayName(p.author),
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Medium,
                     ),
@@ -213,13 +213,13 @@ fun GalleryPostScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Avatar(
-                                label = contactMap.nickname(r.author) ?: r.author,
+                                label = contactMap.displayName(r.author),
                                 url = contactMap.avatar(r.author),
                                 colorHex = contactMap.shipColor(r.author),
                                 size = 24.dp,
                             )
                             Text(
-                                contactMap.nickname(r.author) ?: r.author,
+                                contactMap.displayName(r.author),
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.Medium,
                                 ),
@@ -229,12 +229,15 @@ fun GalleryPostScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            // As threads show it: a refused comment otherwise looked posted.
+                            if (r.status == "pending") SendingIcon()
                         }
                         Spacer(Modifier.height(6.dp))
                         val rParts = remember(r.id, r.contentJson) {
                             StoryCache.partsFor(r.id, r.contentJson)
                         }
                         StoryRenderer(parts = rParts)
+                        SendStateNote(r.status)
                     }
                 }
             }

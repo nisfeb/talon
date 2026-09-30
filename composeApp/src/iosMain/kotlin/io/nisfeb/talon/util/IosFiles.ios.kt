@@ -85,6 +85,12 @@ internal object IosFiles {
         }.getOrNull()
     }
 
+    /** Whether the file is there at all, apart from whether it can be read now. */
+    fun exists(name: String): Boolean {
+        val path = "${baseDir()}/$name".toPath()
+        return runCatching { FileSystem.SYSTEM.exists(path) }.getOrDefault(false)
+    }
+
     fun write(name: String, content: String) {
         val dir = baseDir()
         val path = "$dir/$name".toPath()

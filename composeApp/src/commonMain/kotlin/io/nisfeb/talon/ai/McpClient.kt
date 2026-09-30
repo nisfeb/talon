@@ -4,6 +4,7 @@ import io.nisfeb.talon.util.ioDispatcher
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -22,7 +23,6 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -181,18 +181,20 @@ class McpClient(
         initialized.value = true
     }
 
-    suspend fun listTools(): List<McpToolDef> {
-        val tools = rpc("tools/list", buildJsonObject {}).jsonObject["tools"]?.jsonArray
-            ?: return emptyList()
-        return tools.mapNotNull { el ->
-            val o = el as? JsonObject ?: return@mapNotNull null
-            val name = o["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-            McpToolDef(
-                name = name,
-                description = o["description"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                inputSchema = o["inputSchema"] as? JsonObject ?: JsonObject(emptyMap()),
-            )
-        }
+    suspend fun listTools(): List<McpToolDef> = toolDefs(rpc("tools/list", buildJsonObject {}).jsonObject)
+
+    /**
+     * grubbery's whole tool registry. Its tools/list names only a
+     * dispatcher (call_tool, echo, list_tools), yet every tool it holds
+     * answers a tools/call by its own name; the full definitions, in
+     * tools/list's own shape, are what its UI reads at `<mcp>/api/tools`.
+     */
+    suspend fun registry(): List<McpToolDef> = withContext(ioDispatcher) {
+        val body = http.get("$endpoint/api/tools") {
+            header("Accept", "application/json")
+            timeout { requestTimeoutMillis = 30_000 }
+        }.bodyAsText()
+        toolDefs(Json.parseToJsonElement(body).jsonObject["result"] as? JsonObject ?: JsonObject(emptyMap()))
     }
 
     suspend fun callTool(name: String, arguments: JsonObject): String {
@@ -215,6 +217,18 @@ class McpClient(
             val h = host.removePrefix("[").removeSuffix("]") // strip IPv6 brackets
             return h == "localhost" || h == "::1" || h.startsWith("127.")
         }
+
+        /** A tools/list result's tool entries. */
+        internal fun toolDefs(result: JsonObject): List<McpToolDef> =
+            (result["tools"] as? JsonArray).orEmpty().mapNotNull { el ->
+                val o = el as? JsonObject ?: return@mapNotNull null
+                val name = o["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                McpToolDef(
+                    name = name,
+                    description = o["description"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                    inputSchema = o["inputSchema"] as? JsonObject ?: JsonObject(emptyMap()),
+                )
+            }
 
         /** Flatten an MCP `tools/call` result to plain text for the model.
          *  Pure. Handles all three shapes the ship's server emits:

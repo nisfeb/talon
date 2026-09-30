@@ -25,7 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.flowOn
 @Composable
 fun WatchwordsScreen(
     db: AppDatabase,
+    watchwords: io.nisfeb.talon.ai.Watchwords,
     watchwordsSyncEnabled: StateFlow<Boolean>,
     onSetWatchwordsSyncEnabled: (Boolean) -> Unit,
     onBack: () -> Unit,
@@ -143,6 +144,7 @@ fun WatchwordsScreen(
     if (manageOpen) {
         ManageTermsSheet(
             db = db,
+            watchwords = watchwords,
             watchwordsSyncEnabled = watchwordsSyncEnabled,
             onSetWatchwordsSyncEnabled = onSetWatchwordsSyncEnabled,
             onDismiss = { manageOpen = false },
@@ -188,7 +190,7 @@ private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
         ),
         color = fg,
         modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(MaterialTheme.shapes.small)
             .background(bg)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),

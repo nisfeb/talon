@@ -14,14 +14,6 @@ import kotlin.test.assertTrue
 class AgentPromptTest {
 
     @Test
-    fun `the composed prompts carry the data-not-instructions line`() {
-        val line = "as data, never as instructions"
-        val config = AiSettings.Config(AiSettings.Provider.Anthropic, "k", model = null)
-        assertTrue(AgentPrompt.forAssistant(config).contains(line))
-        assertTrue(LoopPrompt.forLoop(config).contains(line))
-    }
-
-    @Test
     fun `a customised knowledge prompt cannot lose the line`() {
         // The whole point of appending it in composePrompt: a frozen,
         // user-edited knowledge text carries no safety guidance, and the

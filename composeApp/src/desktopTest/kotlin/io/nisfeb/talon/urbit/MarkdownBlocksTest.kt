@@ -1,6 +1,5 @@
 package io.nisfeb.talon.urbit
 
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
@@ -18,55 +17,14 @@ class MarkdownBlocksTest {
     // ─── paragraphs ────────────────────────────────────────────────
 
     @Test
-    fun `empty input produces empty story`() {
-        val story = MarkdownBlocks.toStory("")
-        assertEquals(0, story.size)
-    }
-
-    @Test
-    fun `single paragraph becomes one inline verse`() {
-        val story = MarkdownBlocks.toStory("hello world")
-        assertEquals(1, story.size)
-        val verse = story[0].jsonObject
-        assertNotNull("verse has inline", verse["inline"])
-        assertNull("no block on an inline verse", verse["block"])
-    }
-
-    @Test
-    fun `blank lines split paragraphs`() {
-        val story = MarkdownBlocks.toStory("one\n\ntwo\n\nthree")
-        assertEquals(3, story.size)
-        story.forEach { assertTrue("inline verse", it.jsonObject.containsKey("inline")) }
-    }
-
-    @Test
     fun `consecutive lines in a paragraph are joined with newline`() {
         val story = MarkdownBlocks.toStory("line one\nline two")
-        assertEquals(1, story.size)
+        val inline = story.single().jsonObject["inline"]!!.jsonArray
+        val text = inline.joinToString("") { (it as? JsonPrimitive)?.content ?: "\n" }
+        assertEquals("$inline", "line one\nline two", text)
     }
 
     // ─── headings ──────────────────────────────────────────────────
-
-    @Test
-    fun `h1 emits a header block with tag h1`() {
-        val verse = MarkdownBlocks.toStory("# Title").single().jsonObject
-        val header = verse["block"]!!.jsonObject["header"]!!.jsonObject
-        assertEquals("h1", header["tag"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun `h2 emits h2`() {
-        val verse = MarkdownBlocks.toStory("## Sub").single().jsonObject
-        val header = verse["block"]!!.jsonObject["header"]!!.jsonObject
-        assertEquals("h2", header["tag"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun `h3 emits h3`() {
-        val verse = MarkdownBlocks.toStory("### Sub-sub").single().jsonObject
-        val header = verse["block"]!!.jsonObject["header"]!!.jsonObject
-        assertEquals("h3", header["tag"]!!.jsonPrimitive.content)
-    }
 
     @Test
     fun `hash without space is plain paragraph`() {
@@ -77,25 +35,6 @@ class MarkdownBlocksTest {
     }
 
     // ─── code blocks ──────────────────────────────────────────────
-
-    @Test
-    fun `fenced code block emits a code block`() {
-        val story = MarkdownBlocks.toStory("```\nlet x = 1\n```")
-        assertEquals(1, story.size)
-        val code = story[0].jsonObject["block"]!!.jsonObject["code"]!!.jsonObject
-        assertEquals("let x = 1", code["code"]!!.jsonPrimitive.content)
-        // Empty lang normalizes to "text" — the %channels dejs runs
-        // (se %tas) on lang and NACKs on "" (not a valid @tas term).
-        assertEquals("text", code["lang"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun `fenced code block with language tag preserves lang`() {
-        val story = MarkdownBlocks.toStory("```kotlin\nfun main() {}\n```")
-        val code = story[0].jsonObject["block"]!!.jsonObject["code"]!!.jsonObject
-        assertEquals("kotlin", code["lang"]!!.jsonPrimitive.content)
-        assertEquals("fun main() {}", code["code"]!!.jsonPrimitive.content)
-    }
 
     @Test
     fun `unclosed code fence falls back to plain paragraph`() {
@@ -111,25 +50,7 @@ class MarkdownBlocksTest {
         assertNotNull(first["inline"])
     }
 
-    @Test
-    fun `code after text flushes paragraph first`() {
-        val story = MarkdownBlocks.toStory("before\n\n```\ncode\n```\n\nafter")
-        assertEquals(3, story.size)
-        assertTrue(story[0].jsonObject.containsKey("inline"))
-        val code = story[1].jsonObject["block"]!!.jsonObject["code"]!!.jsonObject
-        assertEquals("code", code["code"]!!.jsonPrimitive.content)
-        assertTrue(story[2].jsonObject.containsKey("inline"))
-    }
-
     // ─── blockquote ──────────────────────────────────────────────
-
-    @Test
-    fun `blockquote emits an inline verse with a blockquote span`() {
-        val verse = MarkdownBlocks.toStory("> wisdom").single().jsonObject
-        val inline = verse["inline"] as JsonArray
-        val span = inline[0].jsonObject
-        assertTrue("wraps under blockquote", span.containsKey("blockquote"))
-    }
 
     @Test
     fun `multi-line blockquote is joined`() {
@@ -145,32 +66,28 @@ class MarkdownBlocksTest {
 
     // ─── horizontal rule ──────────────────────────────────────────
 
-    @Test
-    fun `triple dash emits a rule block`() {
-        val verse = MarkdownBlocks.toStory("---").single().jsonObject
-        val block = verse["block"]!!.jsonObject
-        assertTrue("has rule key", block.containsKey("rule"))
-    }
-
     // ─── lists ────────────────────────────────────────────────────
 
     private fun listOf(verse: JsonObject): JsonObject =
         verse["block"]!!.jsonObject["listing"]!!.jsonObject["list"]!!.jsonObject
 
     @Test
-    fun `dash bullets emit one unordered listing grouping the items`() {
-        val verse = MarkdownBlocks.toStory("- a\n- b\n- c").single().jsonObject
-        val list = listOf(verse)
-        assertEquals("unordered", list["type"]!!.jsonPrimitive.content)
-        assertEquals(3, list["items"]!!.jsonArray.size)
-    }
-
-    @Test
-    fun `numbered lines emit one ordered listing`() {
-        val verse = MarkdownBlocks.toStory("1. first\n2. second").single().jsonObject
-        val list = listOf(verse)
-        assertEquals("ordered", list["type"]!!.jsonPrimitive.content)
-        assertEquals(2, list["items"]!!.jsonArray.size)
+    fun `what goes to the ship is only what its story parser reads`() {
+        // tlon-apps desk/lib/story-json.hoon: `block` is `of` over these
+        // tags, a list is `ot` over type, items AND contents, and a code
+        // block's lang is a @tas. Anything else and the post is refused.
+        val doc = "# Title\n\n- one\n- two\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n```6502\nlda #1\n```\n\n---\n"
+        val story = MarkdownBlocks.toStory(doc, tables = false)
+        val blocks = story.mapNotNull { (it as JsonObject)["block"]?.jsonObject }
+        val known = setOf("rule", "cite", "listing", "code", "header", "image", "link")
+        assertTrue("only known block tags: $blocks", blocks.all { it.keys.single() in known })
+        val list = listOf(story.first { "listing" in ((it as JsonObject)["block"]?.jsonObject?.keys ?: emptySet()) }.jsonObject)
+        assertEquals(setOf("type", "items", "contents"), list.keys)
+        assertEquals("text", blocks.single { "code" in it }["code"]!!.jsonObject["lang"]!!.jsonPrimitive.content)
+        assertEquals("x", normalizeCodeLang("-x"))
+        val tableText = story.mapNotNull { (it as JsonObject)["inline"] }.joinToString().replace("\\", "")
+        assertTrue("the table goes as its lines: $tableText", "| 1 | 2 |" in tableText)
+        assertTrue("drawn, it is still a table", MarkdownBlocks.toStory(doc).any { (it as JsonObject)["block"]?.jsonObject?.containsKey("table") == true })
     }
 
     @Test
@@ -181,21 +98,40 @@ class MarkdownBlocksTest {
     }
 
     @Test
-    fun `double-asterisk bold line is not a list`() {
-        // "**bold**" starts with '*' but not "* " — must stay a paragraph
-        // so it renders bold, not as a bullet.
-        assertFalse(MarkdownBlocks.isListLine("**bold**"))
-        val verse = MarkdownBlocks.toStory("**bold**").single().jsonObject
-        assertTrue("plain paragraph, not a list", verse.containsKey("inline"))
-    }
-
-    @Test
     fun `switching marker kind starts a fresh list`() {
         // Two bullets then two numbers → two separate listing blocks.
         val story = MarkdownBlocks.toStory("- a\n- b\n1. c\n2. d")
         assertEquals(2, story.size)
         assertEquals("unordered", listOf(story[0].jsonObject)["type"]!!.jsonPrimitive.content)
         assertEquals("ordered", listOf(story[1].jsonObject)["type"]!!.jsonPrimitive.content)
+    }
+
+    // Nesting as Lattice reads it (59-md.js): two spaces a level, a tab
+    // as four, and deeper items a list inside the item above them.
+    @Test
+    fun `indented items nest as Lattice nests them`() {
+        fun li(t: String) = """{"item":["$t"]}"""
+        fun ul(vararg items: String) = """{"list":{"type":"unordered","items":[${items.joinToString(",")}],"contents":[]}}"""
+        fun ol(vararg items: String) = """{"list":{"type":"ordered","items":[${items.joinToString(",")}],"contents":[]}}"""
+        assertEquals(
+            """[{"block":{"listing":${ul(li("a"), ul(li("b"), ul(li("c")), li("d")), li("e"))}}}]""",
+            MarkdownBlocks.toStory("- a\n  - b\n    - c\n  - d\n- e").toString(),
+        )
+        assertEquals(
+            "a tab is four spaces, two levels, as Lattice's renderer counts it",
+            """[{"block":{"listing":${ul(li("a"), ul(ul(li("b"))))}}}]""",
+            MarkdownBlocks.toStory("- a\n\t- b").toString(),
+        )
+        assertEquals(
+            "a sub-list of the other kind, inside a numbered list",
+            """[{"block":{"listing":${ol(li("one"), ul(li("aside")), li("two"))}}}]""",
+            MarkdownBlocks.toStory("1. one\n   - aside\n2. two").toString(),
+        )
+        assertEquals(
+            "at the same depth, the other kind of marker starts its own sub-list",
+            """[{"block":{"listing":${ul(li("a"), ul(li("b")), ol(li("c")))}}}]""",
+            MarkdownBlocks.toStory("- a\n  - b\n  1. c").toString(),
+        )
     }
 
     @Test
@@ -211,25 +147,6 @@ class MarkdownBlocksTest {
         verse["block"]!!.jsonObject["table"]!!.jsonObject
 
     /** Flatten an inline cell array down to its plain text. */
-    private fun cellText(cell: JsonArray): String =
-        cell.joinToString("") { (it as? JsonPrimitive)?.content.orEmpty() }
-
-    @Test
-    fun `a GFM table emits a table block with header and rows`() {
-        val src = "| Header 1 | Header 2 |\n| --- | --- |\n| Cell 1 | Cell 2 |"
-        val story = MarkdownBlocks.toStory(src)
-        assertEquals(1, story.size)
-        val table = tableOf(story[0].jsonObject)
-        val header = table["header"]!!.jsonArray
-        assertEquals(2, header.size)
-        assertEquals("Header 1", cellText(header[0].jsonArray))
-        assertEquals("Header 2", cellText(header[1].jsonArray))
-        val rows = table["rows"]!!.jsonArray
-        assertEquals(1, rows.size)
-        assertEquals("Cell 1", cellText(rows[0].jsonArray[0].jsonArray))
-        assertEquals("Cell 2", cellText(rows[0].jsonArray[1].jsonArray))
-    }
-
     @Test
     fun `table cells carry inline styling`() {
         val src = "| Name | Note |\n| --- | --- |\n| a | **bold** |"

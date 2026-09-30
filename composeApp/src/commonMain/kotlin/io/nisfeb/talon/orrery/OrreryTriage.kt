@@ -1,0 +1,224 @@
+package io.nisfeb.talon.orrery
+
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+
+/**
+ * The funnel, without the model: which messages are worth a look, who
+ * they name, and the few shapes of claim that need no model to read.
+ *
+ * Pure, so every rule is a fixture away from being checked. The rules
+ * are the floor the model ladder stands on: a status line, where
+ * somebody says they are, where they say a known body is. They claim
+ * little, at conf 60 to 70, and everything they claim goes through the
+ * Noticed tray until the person has trusted that kind of claim.
+ */
+data class KnownBody(val id: String, val name: String?, val aliases: List<String>, val ship: String?)
+
+/** One claim the triage noticed, with the body it would need. */
+data class Noticed(
+    val subject: String,
+    val attr: String,
+    val value: JsonElement,
+    val atMs: Long,
+    val untilMs: Long?,
+    val conf: Int,
+    val body: OBody? = null,
+)
+
+/**
+ * Names to bodies, from the state view. A match is whole-word and
+ * case-insensitive, over each body's name, aliases and ship, so "Sam"
+ * does not find "Samantha" and a ship's @p finds its person.
+ */
+class NameIndex(bodies: List<KnownBody>) {
+    private val entries: List<Pair<Regex, KnownBody>> = bodies.flatMap { b ->
+        (b.aliases + listOfNotNull(b.name, b.ship))
+            .map { it.trim() }
+            .filter { it.length >= 2 && !it.equals("me", ignoreCase = true) && !it.equals("I", ignoreCase = true) }
+            .distinct()
+            .map { Regex("(?<![\\w~])" + Regex.escape(it) + "(?![\\w-])", RegexOption.IGNORE_CASE) to b }
+    }
+    private val byShip: Map<String, KnownBody> = bodies.filter { it.ship != null }.associateBy { it.ship!! }
+    private val byId: Map<String, KnownBody> = bodies.associateBy { it.id }
+
+    fun has(id: String): Boolean = id in byId
+
+    fun forShip(ship: String): KnownBody? = byShip[ship]
+
+    /** Bodies named in [text], each once, with the alias that named them. */
+    fun find(text: String): List<Pair<KnownBody, String>> {
+        val seen = HashSet<String>()
+        return entries.mapNotNull { (re, b) ->
+            val m = re.find(text) ?: return@mapNotNull null
+            if (!seen.add(b.id)) return@mapNotNull null
+            b to m.value
+        }
+    }
+
+    /** The id [author] goes by: the ship's own body when the ship has one, else `person/<slug>`. */
+    fun authorId(author: String, ourShip: String): String =
+        if (author == ourShip) "person/me" else forShip(author)?.id ?: personId(author)
+
+    /** The body whose id, ship, name or alias is exactly [said], case-insensitive. */
+    fun resolveExact(said: String): KnownBody? {
+        val s = said.trim()
+        if (s.isEmpty()) return null
+        byId[s]?.let { return it }
+        byShip[s]?.let { return it }
+        return byId.values.firstOrNull { b -> b.name.equals(s, true) || b.aliases.any { it.equals(s, true) } }
+    }
+
+    /** The body a place name refers to, when one is known by that name. */
+    fun place(name: String): KnownBody? =
+        find(name).firstOrNull { (b, alias) -> b.id.startsWith("place/") && alias.equals(name.trim(), ignoreCase = true) }?.first
+}
+
+/**
+ * Whether a message is the triage's business at all. A DM or a group
+ * DM always is. A channel post is when the channel is allowed, or when
+ * it names us.
+ */
+fun inScope(whom: String, text: String, ourShip: String, ourNick: String?, allowedChannels: Set<String>): Boolean {
+    if (isDirect(whom)) return true
+    if (whom in allowedChannels) return true
+    if (text.contains(ourShip, ignoreCase = true)) return true
+    val nick = ourNick?.trim().orEmpty()
+    return nick.length >= 2 && nickRegex(nick).containsMatchIn(text)
+}
+
+/**
+ * The nickname as a whole word. The same nickname is asked about for
+ * every post of a pass, so the pattern is built when it changes and
+ * not once a message.
+ */
+private fun nickRegex(nick: String): Regex =
+    nickPattern?.takeIf { it.first == nick }?.second
+        ?: Regex("(?<!\\w)" + Regex.escape(nick) + "(?!\\w)", RegexOption.IGNORE_CASE).also { nickPattern = nick to it }
+
+private var nickPattern: Pair<String, Regex>? = null
+
+private const val SIX_HOURS = 6L * 60 * 60 * 1000
+
+private val I_AM = "(?:i'?m|i am|we'?re|we are)"
+private val PLACE = "([^.,!?;\\n]{2,40}?)(?=[.,!?;\\n]|\\s+(?:now|today|tonight|right now|atm|for|until|till)\\b|$)"
+private val RE_I_AT = Regex("\\b$I_AM\\s+(?:at|in)\\s+(?:the\\s+)?$PLACE", RegexOption.IGNORE_CASE)
+private val RE_I_HOME = Regex("\\b$I_AM\\s+(?:back\\s+)?(?:at\\s+)?home\\b", RegexOption.IGNORE_CASE)
+private val RE_I_STATUS = Regex("\\b(?:i'?m|i am)\\s+(stranded|stuck|sick|ill|busy|free|on my way|running late|late|off today|out of office|on vacation|travelling|traveling)\\b", RegexOption.IGNORE_CASE)
+private val RE_X_AT = Regex("\\b(%s)\\s+(?:is|'s|was)\\s+(?:at|in)\\s+(?:the\\s+)?$PLACE", RegexOption.IGNORE_CASE)
+private val RE_X_STATUS = Regex("\\b(%s)\\s+(?:is|'s)\\s+(sick|ill|stranded|stuck|fine|ok|okay|back|home|away|busy|free)\\b", RegexOption.IGNORE_CASE)
+
+/**
+ * What [text] claims, by the rules. [author] is who said it: "I" is
+ * them, and a body named in the text is itself. Nothing here reads a
+ * negation, a question or a quote, so a claim in a question is a
+ * claim the tray will show and the person will discard.
+ */
+fun ruleFacts(text: String, author: String, atMs: Long, ourShip: String, index: NameIndex): List<Noticed> {
+    if (text.isBlank() || text.trimEnd().endsWith("?")) return emptyList()
+    val out = mutableListOf<Noticed>()
+    val self = index.authorId(author, ourShip)
+    val selfBody = if (author == ourShip || index.has(self)) null else OBody(self, aliases = listOf(author))
+    fun place(raw: String): JsonElement {
+        val name = raw.trim().trimEnd('.', ',', '!')
+        // The pattern eats a leading "the", and a place's alias may keep it.
+        val known = index.place(name) ?: index.place("the $name")
+        return known?.let { buildJsonObject { put("ref", it.id) } } ?: JsonPrimitive(name)
+    }
+
+    RE_I_AT.find(text)?.let { m ->
+        out += Noticed(self, "location", place(m.groupValues[1]), atMs, atMs + SIX_HOURS, 70, selfBody)
+    }
+    if (out.none { it.attr == "location" }) {
+        RE_I_HOME.find(text)?.let {
+            val home = index.place("home")?.let { b -> buildJsonObject { put("ref", b.id) } } ?: JsonPrimitive("home")
+            out += Noticed(self, "location", home, atMs, atMs + SIX_HOURS, 70, selfBody)
+        }
+    }
+    RE_I_STATUS.find(text)?.let { m ->
+        out += Noticed(self, "status", JsonPrimitive(m.groupValues[1].lowercase()), atMs, atMs + SIX_HOURS, 70, selfBody)
+    }
+
+    val named = index.find(text)
+    if (named.isNotEmpty()) {
+        val alt = named.joinToString("|") { (_, alias) -> Regex.escape(alias) }
+        Regex(RE_X_AT.pattern.replace("%s", alt), RegexOption.IGNORE_CASE).find(text)?.let { m ->
+            val body = named.first { (_, alias) -> alias.equals(m.groupValues[1], ignoreCase = true) }.first
+            if (body.id != self) out += Noticed(body.id, "location", place(m.groupValues[2]), atMs, atMs + SIX_HOURS, 60)
+        }
+        Regex(RE_X_STATUS.pattern.replace("%s", alt), RegexOption.IGNORE_CASE).find(text)?.let { m ->
+            val body = named.first { (_, alias) -> alias.equals(m.groupValues[1], ignoreCase = true) }.first
+            if (body.id != self) out += Noticed(body.id, "status", JsonPrimitive(m.groupValues[2].lowercase()), atMs, atMs + SIX_HOURS, 60)
+        }
+    }
+    return out.distinctBy { claimKey(it.subject, it.attr, it.value) }
+}
+
+/**
+ * Long enough to state something, and not a question: what the model
+ * is run on. The gate check simulates the pass with this same rule,
+ * so the two cannot drift into counting different messages.
+ */
+internal fun forTheReader(text: String): Boolean = text.length >= 8 && !text.trimEnd().endsWith("?")
+
+/** What reaches the gate: what the model is run on, less a slash command. */
+internal fun forTheGate(text: String): Boolean = forTheReader(text) && !text.trimStart().startsWith("/")
+
+/**
+ * Attributes that hold several values at once: a second evening off
+ * stands beside the first instead of replacing it.
+ */
+val MULTI_VALUED = setOf("skipped")
+
+/**
+ * What makes two claims the same claim: subject and attribute, and
+ * the value too where the attribute holds several. The parse drops
+ * duplicates by it and the tray's row id is built from it, so the two
+ * cannot disagree about what one claim is: a second skipped evening
+ * kept by the one and ignored on insert by the other was the bug.
+ */
+fun claimKey(subject: String, attr: String, value: JsonElement): String =
+    if (attr in MULTI_VALUED) "$subject|$attr|$value" else "$subject|$attr"
+
+/**
+ * Stable per claim and source, so a message re-read on the next pass
+ * is the same row. For a single-valued attribute it is the id it has
+ * always been, so rows already in the tray keep theirs.
+ */
+fun noticedId(sourceId: String, subject: String, attr: String, value: JsonElement): String =
+    "$sourceId|" + claimKey(subject, attr, value)
+
+/** One thing somebody said on a call. */
+data class Spoken(val ship: String, val text: String)
+
+/**
+ * Consecutive lines by one speaker as one message, so a claim split
+ * across two breaths is read whole, capped so a monologue stays
+ * within what a prompt takes.
+ */
+fun mergeSpoken(lines: List<Spoken>, maxChars: Int = 1000): List<Spoken> {
+    val out = mutableListOf<Spoken>()
+    for (l in lines) {
+        val text = l.text.trim()
+        if (text.isEmpty()) continue
+        val last = out.lastOrNull()
+        if (last != null && last.ship == l.ship && last.text.length + text.length + 1 <= maxChars) {
+            out[out.size - 1] = Spoken(l.ship, last.text + " " + text)
+        } else {
+            out += Spoken(l.ship, text)
+        }
+    }
+    return out
+}
+
+/**
+ * Whether a key belonging to a computer running Talon was used within
+ * [windowMs] of [nowMs]. A key's identity is `talon/<platform>` and a
+ * computer's platform begins with "desktop"; the ship records a key's
+ * use once an hour, so two hours is the honest window. A phone reads
+ * this and leaves the reading to the bigger model while it is on.
+ */
+fun computerActive(keys: List<ClientKey>, nowMs: Long, windowMs: Long = 2L * 60 * 60 * 1000): Boolean =
+    keys.any { it.by.startsWith("talon/desktop") && it.usedMs != null && nowMs - it.usedMs <= windowMs }

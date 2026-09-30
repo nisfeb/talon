@@ -107,34 +107,86 @@ class AndroidAudioDevices(context: Context) : AudioDevices {
      * name is the fallback for built-ins, which report the phone's
      * model and would read as three identically-named rows.
      */
-    private fun labelFor(d: AudioDeviceInfo): String = when (d.type) {
-        AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Earpiece"
-        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Speaker"
-        AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired headset"
-        AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired headphones"
-        AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE -> "USB audio"
-        AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET ->
-            d.productName?.toString()?.takeIf { it.isNotBlank() } ?: "Bluetooth headset"
-        AudioDeviceInfo.TYPE_HEARING_AID -> "Hearing aid"
-        else -> d.productName?.toString()?.takeIf { it.isNotBlank() } ?: "Audio device"
-    }
 
     companion object {
         private const val TAG = "AndroidAudioDevices"
+
+        private fun labelFor(d: AudioDeviceInfo): String = when (d.type) {
+            AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Earpiece"
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Speaker"
+            AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired headset"
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired headphones"
+            AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE -> "USB audio"
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BLE_HEADSET ->
+                d.productName?.toString()?.takeIf { it.isNotBlank() } ?: "Bluetooth headset"
+            AudioDeviceInfo.TYPE_HEARING_AID -> "Hearing aid"
+            else -> d.productName?.toString()?.takeIf { it.isNotBlank() } ?: "Audio device"
+        }
+
 
         // Companion, not instance state: setCommunicationDevice is
         // process-global, so the record of what we picked must be too.
         @Volatile
         private var chosen: String? = null
 
+        /** When the last link went away, 0 while a session is up. */
+        @Volatile
+        private var quietSince: Long = 0L
+
         /**
-         * Forget the recorded route. [CallAudioSession] calls this when
-         * the last call/line ends, right after clearCommunicationDevice
-         * hands routing back to the platform — so the pane doesn't show
-         * a selection that is no longer in force.
+         * A session ended. The route is remembered rather than
+         * forgotten, because this is also what a reconnect looks like
+         * from here: losing the network closes every link, and the new
+         * ones open a moment later. Forgetting here put a call that
+         * dropped for a few seconds back on the earpiece with the
+         * speaker still ticked in the pane.
+         *
+         * [CallAudioSession] calls this as the last call or line ends,
+         * right after clearCommunicationDevice has handed routing back
+         * to the platform.
          */
-        internal fun clearSelection() {
-            chosen = null
+        internal fun sessionEnded() {
+            quietSince = io.nisfeb.talon.util.nowMs()
         }
+
+        /**
+         * Put the owner's route back as a session starts, where one was
+         * picked recently enough that this is the same call coming
+         * back. Anything older is forgotten instead: a speakerphone
+         * pick must not open the next call, hours later, in public.
+         *
+         * ponytail: time is the only thing that tells a reconnect from
+         * a new call down here. Give it the real answer when hanging up
+         * can say so.
+         */
+        internal fun restoreSelection(am: AudioManager) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+            val id = chosen ?: return
+            val quiet = quietSince
+            quietSince = 0L
+            if (!routeSurvives(quiet, io.nisfeb.talon.util.nowMs())) {
+                chosen = null
+                return
+            }
+            runCatching {
+                val target = am.availableCommunicationDevices.firstOrNull { it.id.toString() == id }
+                if (target == null) {
+                    // It left while we were away, which a headset does.
+                    Log.i(TAG, "route $id is gone; the platform picks")
+                    chosen = null
+                    return
+                }
+                if (am.setCommunicationDevice(target)) {
+                    Log.i(TAG, "audio route restored -> ${labelFor(target)}")
+                } else {
+                    Log.w(TAG, "platform refused the route it had; the platform picks")
+                    chosen = null
+                }
+            }.onFailure {
+                Log.w(TAG, "could not put the route back", it)
+                chosen = null
+            }
+        }
+
     }
 }

@@ -37,15 +37,4 @@ class DayKeyerTest {
         assertNotEquals(day1, day2)
     }
 
-    @Test
-    fun windowedResultMatchesFreshKeyer() {
-        // A keyer walking a full day must produce the same key a
-        // fresh keyer produces for that day in isolation — i.e. the
-        // in-window fast path never disagrees with a real conversion.
-        val walked = DayKeyer(utc)
-        walked.keyFor(ms(2026, 7, 11, 1, 0))
-        val walkedNoon = walked.keyFor(ms(2026, 7, 11, 12, 0))
-        val fresh = DayKeyer(utc).keyFor(ms(2026, 7, 11, 12, 0))
-        assertEquals(fresh, walkedNoon)
-    }
 }

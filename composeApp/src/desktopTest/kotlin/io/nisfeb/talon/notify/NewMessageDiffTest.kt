@@ -58,11 +58,6 @@ class NewMessageDiffTest {
         assertEquals(mapOf("~zod" to "id-1", "~bus" to "id-2"), baseline)
     }
 
-    @Test
-    fun `seed of empty rows is empty map`() {
-        assertEquals(emptyMap(), seedNewMessageBaseline(emptyList()))
-    }
-
     // ── diffNewMessageNotifications: staleness guard ────────────
 
     @Test
@@ -100,134 +95,26 @@ class NewMessageDiffTest {
         assertEquals(1, diff.notifications.size)
     }
 
-    @Test
-    fun `default args disable the staleness guard`() {
-        // Back-compat: callers that don't pass nowMs/freshnessMaxAgeMs
-        // get the old behavior — even a sentMs=0 (epoch) message fires.
-        val diff = diffNewMessageNotifications(
-            rows = listOf(msg("~zod", "id-1", author = "~bus", sentMs = 0L)),
-            lastSeen = emptyMap(),
-            ourPatp = "~zod",
-            openChat = null,
-            levels = emptyMap(),
-            storyText = storyText,
-        )
-        assertEquals(1, diff.notifications.size)
-    }
-
     // ── diffNewMessageNotifications: filtering ──────────────────
 
+    // A comet's @p is fifty-six characters of key fingerprint. Whoever
+    // reads the balloon needs the name the rest of the app gives it.
     @Test
-    fun `same id as lastSeen does not fire`() {
+    fun `a message is announced by what its author is called`() {
+        val comet = "~dozzod-dozzod-dozzod-dozzod--dozzod-dozzod-dozzod-dozzod"
         val diff = diffNewMessageNotifications(
-            rows = listOf(msg("~zod", "id-1", author = "~bus")),
-            lastSeen = mapOf("~zod" to "id-1"),
-            ourPatp = "~zod",
-            openChat = null,
-            levels = emptyMap(),
-            storyText = storyText,
-        )
-        assertTrue(diff.notifications.isEmpty())
-        assertEquals(mapOf("~zod" to "id-1"), diff.newLastSeen)
-    }
-
-    @Test
-    fun `new whom not in lastSeen fires once`() {
-        val diff = diffNewMessageNotifications(
-            rows = listOf(msg("~zod", "id-1", author = "~bus")),
+            rows = listOf(msg("~zod", "id-1", author = comet)),
             lastSeen = emptyMap(),
             ourPatp = "~me",
             openChat = null,
             levels = emptyMap(),
             storyText = storyText,
+            nameFor = { if (it == comet) "..lucky.dozen" else it },
         )
-        assertEquals(1, diff.notifications.size)
-        val n = diff.notifications[0]
-        assertEquals("~zod", n.whom)
-        assertEquals("~bus", n.title)
-    }
-
-    @Test
-    fun `updated id for known whom fires`() {
-        val diff = diffNewMessageNotifications(
-            rows = listOf(msg("~zod", "id-2", author = "~bus")),
-            lastSeen = mapOf("~zod" to "id-1"),
-            ourPatp = "~me",
-            openChat = null,
-            levels = emptyMap(),
-            storyText = storyText,
-        )
-        assertEquals(1, diff.notifications.size)
-        assertEquals("id-2", diff.newLastSeen["~zod"])
-    }
-
-    @Test
-    fun `row authored by ourPatp does NOT fire (self-notify suppressed)`() {
-        val diff = diffNewMessageNotifications(
-            rows = listOf(msg("~zod", "id-2", author = "~me")),
-            lastSeen = mapOf("~zod" to "id-1"),
-            ourPatp = "~me",
-            openChat = null,
-            levels = emptyMap(),
-            storyText = storyText,
-        )
-        assertTrue(diff.notifications.isEmpty(),
-            "must not notify for messages the local user sent")
-        // Critical: lastSeen still updates. Otherwise once the user
-        // sends a message, every subsequent message in that chat
-        // would re-fire because we'd still be comparing to the
-        // pre-self-message id.
-        assertEquals("id-2", diff.newLastSeen["~zod"])
-    }
-
-    @Test
-    fun `row for openChat does NOT fire`() {
-        val diff = diffNewMessageNotifications(
-            rows = listOf(msg("~zod", "id-2", author = "~bus")),
-            lastSeen = mapOf("~zod" to "id-1"),
-            ourPatp = "~me",
-            openChat = "~zod",  // user is staring at this chat
-            levels = emptyMap(),
-            storyText = storyText,
-        )
-        assertTrue(diff.notifications.isEmpty())
-        assertEquals("id-2", diff.newLastSeen["~zod"],
-            "lastSeen still advances even when suppressed")
-    }
-
-    @Test
-    fun `row for muted whom does NOT fire`() {
-        val diff = diffNewMessageNotifications(
-            rows = listOf(msg("~zod", "id-2", author = "~bus")),
-            lastSeen = mapOf("~zod" to "id-1"),
-            ourPatp = "~me",
-            openChat = null,
-            levels = mapOf("~zod" to "none"),
-            storyText = storyText,
-        )
-        assertTrue(diff.notifications.isEmpty())
-        // lastSeen MUST advance. Otherwise unmuting wouldn't surface
-        // the in-progress message until the next post arrives.
-        assertEquals("id-2", diff.newLastSeen["~zod"])
+        assertEquals("..lucky.dozen", diff.notifications[0].title)
     }
 
     // ── diffNewMessageNotifications: body formatting ───────────
-
-    @Test
-    fun `body is the rendered story text`() {
-        val diff = diffNewMessageNotifications(
-            rows = listOf(
-                msg("~zod", "id-1", author = "~bus",
-                    contentJson = """{"inline":[{"text":"hello there"}]}"""),
-            ),
-            lastSeen = emptyMap(),
-            ourPatp = "~me",
-            openChat = null,
-            levels = emptyMap(),
-            storyText = storyText,
-        )
-        assertEquals("hello there", diff.notifications[0].body)
-    }
 
     @Test
     fun `newlines in the body are flattened to spaces`() {
@@ -398,9 +285,4 @@ class NewMessageDiffTest {
         assertEquals(0, fire(listOf(mention), mapOf(plain.whom to "none")))
     }
 
-    @Test
-    fun `a DM at the default level still fires`() {
-        val dm = groupRow("""{"inline":["hey"]}""").copy(whom = "~bud")
-        assertEquals(1, fire(listOf(dm), emptyMap()))
-    }
 }

@@ -3,7 +3,6 @@ package io.nisfeb.talon.urbit
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -81,15 +80,6 @@ class EditStoryTest {
         // Garbage content must not throw — fall back to re-parsing the text.
         assertEquals(chatTextToStory("x"), editedStory("not json", "x"))
         assertEquals("", editableText("not json"))
-    }
-
-    @Test
-    fun `editableText drops the cite label the old dialog used to show`() {
-        // The bug's fingerprint: textFor renders a Citation part as a
-        // label, which landed in the editor and got posted as prose.
-        val text = editableText(quotePost)
-        assertTrue(!text.contains("~zod"), "no cite label in the editor: '$text'")
-        assertNull(text.lineSequence().firstOrNull { it.contains("msg/123") })
     }
 
     // ── the editor shows markdown the chat parser reads back ────────

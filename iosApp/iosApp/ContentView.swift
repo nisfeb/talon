@@ -4,7 +4,7 @@ import ComposeApp
 
 struct ComposeView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {
-        MainViewControllerKt.MainViewController(rtc: TalonRtcFactory())
+        MainViewControllerKt.MainViewController(rtc: TalonRtcFactory(), models: TalonModelFactory())
     }
 
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}

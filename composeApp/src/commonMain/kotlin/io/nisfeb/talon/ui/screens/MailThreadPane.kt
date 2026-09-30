@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.UnreadDividerRow
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,15 +19,22 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material.icons.filled.MoreVert
@@ -36,7 +45,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -97,11 +106,23 @@ fun MailThreadPane(
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var loading by remember(threadId) { mutableStateOf(repo.cachedThread(threadId) == null) }
     var refreshing by remember(threadId) { mutableStateOf(false) }
-    var drawn by remember(threadId) { mutableStateOf(false) }
+    // Kept by the repo, so a reply written from the tree comes back to it.
+    var drawn by remember(threadId) { mutableStateOf(repo.treeShown(threadId)) }
     // Folded subtrees, and messages read down to their header line.
     var filed by remember(threadId) { mutableStateOf<String?>(null) }
     val folded = remember(threadId) { mutableStateListOf<String>() }
     val shut = remember(threadId) { mutableStateListOf<String>() }
+    // What was unread when the thread was opened, and what has arrived
+    // since. The ship marks a message read the moment it is shown, so by
+    // the time anyone looks nothing here is unread any more: this is kept
+    // for as long as the thread is open, as a chat keeps its New line.
+    val fresh = remember(threadId) { mutableStateListOf<String>() }
+    // Whether the read messages have been folded yet: once, when the
+    // thread first comes back from the ship, and never over a choice made.
+    var tidied by remember(threadId) { mutableStateOf(false) }
+    // Scrolled to the first new message, once.
+    var landed by remember(threadId) { mutableStateOf(false) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     var selected by remember(threadId) { mutableStateOf<String?>(null) }
     // Remote images in a sender-controlled body are a read receipt and
     // an IP leak, so they never load unasked. One tap trusts the thread
@@ -109,10 +130,7 @@ fun MailThreadPane(
     var imagesShown by remember(threadId) { mutableStateOf(false) }
 
     io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:$threadId")
-    LaunchedEffect(threadId) {
-        // Not read this session: the copy an earlier one left on disk, if any.
-        if (thread == null) thread = repo.storedThread(threadId)
-        loading = thread == null
+    suspend fun read() {
         refreshing = thread != null
         val t = repo.loadThread(threadId)
         // Out of reach with a copy on screen: keep the copy rather than call the thread gone.
@@ -122,10 +140,42 @@ fun MailThreadPane(
         // Reading it is what marks it read, and the mark is invisible to
         // every other client, so nothing else would ever do it.
         val unread = t?.messages.orEmpty().filter { !it.read }.map { it.id }
+        // A forged copy is never news.
+        t?.messages.orEmpty().filter { !it.read && it.verdict != Verdict.FORGED }
+            .forEach { if (it.id !in fresh) fresh += it.id }
+        // MAIL READS LIKE MAIL: in a thread of three or more, what has
+        // been read folds to its header line, and the newest and anything
+        // new stay open. A thread of one or two saves nothing by folding.
+        if (t != null && !tidied) {
+            tidied = true
+            val shown = io.nisfeb.talon.mail.collapse(t.messages)
+            val newest = shown.maxByOrNull { it.sent }?.id
+            if (shown.size >= 3) shown.map { it.id }.filter { it != newest && it !in fresh }
+                .forEach { if (it !in shut) shut += it }
+            // What the owner closed on any client opens closed here, even
+            // the newest or a new one.
+            t.folded.forEach { if (it !in shut) shut += it }
+        }
         if (unread.isNotEmpty()) {
             repo.markRead(unread, threadId)
             thread = repo.cachedThread(threadId) ?: thread
         }
+    }
+    LaunchedEffect(threadId) {
+        // Not read this session: the copy an earlier one left on disk, if any.
+        if (thread == null) thread = repo.storedThread(threadId)
+        loading = thread == null
+        read()
+    }
+    // A reply that arrives while the thread is open: once a listing says
+    // the thread has something newer than what is on screen, it is read
+    // again here, as it was only by leaving and coming back. The listing
+    // is read anyway, so this costs the ship nothing of its own.
+    val listedLast by remember(threadId) { repo.listedLast(threadId) }.collectAsState()
+    LaunchedEffect(threadId, listedLast) {
+        val shown = thread ?: return@LaunchedEffect
+        val newest = maxOf(shown.last, shown.messages.maxOfOrNull { it.sent } ?: 0L)
+        if (!loading && !refreshing && (listedLast ?: 0L) > newest) read()
     }
 
     // A refused write's rollback lands in the repo's caches, not in the
@@ -158,13 +208,30 @@ fun MailThreadPane(
         io.nisfeb.talon.mail.flattenVisible(forest, folded.toSet())
     }
 
+    /**
+     * A card the owner closes or opens, kept on the ship (auspex 15) so
+     * every client opens the thread the same way. Only a change from what
+     * the ship holds is sent: closing older messages on open, and opening
+     * one of those, stay here. A fold is by message id, so a forged twin
+     * sharing it goes with it.
+     */
+    fun setShut(id: String, close: Boolean) {
+        if (close) { if (id !in shut) shut += id } else shut.remove(id)
+        if (close != (id in thread?.folded.orEmpty())) {
+            repo.setFolded(listOf(id), threadId, close)
+            thread = repo.cachedThread(threadId) ?: thread
+        }
+    }
+
     val nameFor: (String) -> String = contacts::displayName
     fun whenAt(ms: Long) = shortRelativeTime(ms, nowMs())
-    fun intent(forwarding: Boolean) = MailIntent(
-        prev = answering,
-        to = if (forwarding) emptyList() else thread?.participants.orEmpty().filter { it != ourShip },
+    /** A reply or forward from [id]: what travels is the path down to it. */
+    fun intent(forwarding: Boolean, id: String? = answering) = MailIntent(
+        prev = id,
+        threadId = threadId,
+        to = if (forwarding) emptyList() else io.nisfeb.talon.mail.replyAudience(thread?.messages.orEmpty(), id, ourShip),
         subject = answerSubject(thread?.messages?.firstOrNull()?.subject.orEmpty(), forwarding),
-        travels = travelling.size,
+        travels = if (id == answering) travelling.size else id?.let { pathTo(forest, it).size } ?: 0,
         forwarding = forwarding,
     )
 
@@ -174,14 +241,9 @@ fun MailThreadPane(
             filed = "Filing…"
             filed = repo.publishToLattice(title = title, seed = seed, gemtext = gemtext)
                 ?.let { "Filed to Lattice at $it" }
-                ?: repo.error.value ?: "Could not file it."
+                ?: repo.problem.value ?: "Could not file it."
         }
     }
-    fun fileMessage(m: io.nisfeb.talon.mail.MailMessage) = file(
-        title = m.subject.ifBlank { "Mail" },
-        seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, m.id),
-        gemtext = io.nisfeb.talon.mail.MailGemtext.message(m, nameFor, ::whenAt),
-    )
 
     Column(modifier.fillMaxSize()) {
         MailThreadHeader(
@@ -197,7 +259,7 @@ fun MailThreadPane(
             },
             showTree = hasBranches,
             drawn = drawn,
-            onMode = { drawn = it },
+            onMode = { drawn = it; repo.showTree(threadId, it) },
             onBack = onBack,
             archived = thread?.archived == true,
             // Each shows at once and writes in the background, so the view can leave straight away.
@@ -216,6 +278,7 @@ fun MailThreadPane(
                 repo.deleteThread(threadId)
                 onGone()
             },
+            onCopyLink = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(io.nisfeb.talon.urbit.TalonLink.forMail(threadId))) },
             onFile = {
                 val t = thread ?: return@MailThreadHeader
                 file(
@@ -258,19 +321,11 @@ fun MailThreadPane(
             else -> {
                 TravelLine(travelling.size)
                 HorizontalDivider()
-                MailThreadActions(
-                    // A forged copy cannot be answered, so a thread of
-                    // nothing else has nothing to reply to.
-                    enabled = answering != null,
-                    onReply = { onCompose(intent(forwarding = false)) },
-                    onForward = { onCompose(intent(forwarding = true)) },
-                    onCopyLink = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(io.nisfeb.talon.urbit.TalonLink.forMail(threadId))) },
-                )
-                HorizontalDivider()
                 if (drawn) {
                     // The picture, and under it the message it selects.
                     MailThreadTree(
                         messages = t.messages,
+                        fresh = fresh.toSet(),
                         selected = answering,
                         nameFor = nameFor,
                         onSelect = { selected = it },
@@ -296,44 +351,71 @@ fun MailThreadPane(
                                 hidden = 0,
                                 copies = copies[shown.id] ?: 1,
                                 nameFor = nameFor,
-                                onFile = { fileMessage(shown) },
                                 repo = repo,
                                 imagesShown = imagesShown,
                                 onShowImages = { imagesShown = true },
+                                onAnswer = if (shown.verdict == Verdict.FORGED) null else { f -> onCompose(intent(f, shown.id)) },
+                                full = true,
+                                fresh = shown.id in fresh,
                             )
                         }
                     }
-                } else LazyColumn(Modifier.fillMaxSize()) {
+                } else {
+                    val firstNew = visible.indexOfFirst { it.node.message.id in fresh }
+                    LaunchedEffect(threadId, firstNew) {
+                        if (!landed && firstNew >= 0) {
+                            landed = true
+                            listState.scrollToItem(firstNew)
+                        }
+                    }
+                    // Read here, not inside the rows: a read that brings new
+                    // messages writes the thread, what is new and what is
+                    // shut together, and rows reading those states left an
+                    // already drawn message open or unmarked (the lazy list
+                    // missed one of several states changed at once; see
+                    // GroupInfoPane, ThreadList).
+                    val shutNow = shut.toSet()
+                    val freshNow = fresh.toSet()
+                    val foldedNow = folded.toSet()
+                    LazyColumn(Modifier.fillMaxSize(), state = listState) {
                     items(
                         visible,
                         key = { it.node.message.id },
                     ) { v ->
                         val node = v.node
+                        // The chat's New line, above the first of them.
+                        if (visible.getOrNull(firstNew)?.node?.message?.id == node.message.id) UnreadDividerRow()
                         MailMessageCard(
                             node = node,
                             depth = v.depth,
                             hidden = v.hidden,
                             copies = copies[node.message.id] ?: 1,
                             foldable = node.children.isNotEmpty(),
-                            folded = node.message.id in folded,
+                            folded = node.message.id in foldedNow,
                             onFold = {
                                 if (!folded.remove(node.message.id)) folded.add(node.message.id)
                             },
-                            shut = node.message.id in shut,
-                            onShut = {
-                                if (!shut.remove(node.message.id)) shut.add(node.message.id)
-                            },
+                            shut = node.message.id in shutNow,
+                            onShut = { setShut(node.message.id, node.message.id !in shutNow) },
                             onPath = node.message.id in travellingIds,
                             selected = node.message.id == selected,
                             selectable = node.message.verdict != Verdict.FORGED,
                             nameFor = nameFor,
-                            onSelect = { selected = node.message.id },
-                            onFile = { fileMessage(node.message) },
+                            // A folded one opens where it is tapped, not
+                            // only on the name.
+                            onSelect = { selected = node.message.id; setShut(node.message.id, false) },
+                            fresh = node.message.id in freshNow,
                             repo = repo,
                             imagesShown = imagesShown,
                             onShowImages = { imagesShown = true },
+                            // A forged copy cannot be answered. Every other
+                            // message answers from its own header, and the
+                            // selected one has the full row under it too.
+                            onAnswer = if (node.message.verdict == Verdict.FORGED) null else { f -> onCompose(intent(f, node.message.id)) },
+                            full = node.message.id == answering,
                         )
                         HorizontalDivider()
+                    }
                     }
                 }
             }
@@ -356,6 +438,8 @@ private fun ThreadActions(
     onMarkUnread: () -> Unit,
     onDelete: () -> Unit,
     onFile: () -> Unit,
+    onCopyLink: () -> Unit,
+    onLabels: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     var confirming by remember { mutableStateOf(false) }
@@ -372,6 +456,14 @@ private fun ThreadActions(
             DropdownMenuItem(
                 text = { Text("Mark unread") },
                 onClick = { open = false; onMarkUnread() },
+            )
+            DropdownMenuItem(
+                text = { Text("Labels…") },
+                onClick = { open = false; onLabels() },
+            )
+            DropdownMenuItem(
+                text = { Text("Copy link") },
+                onClick = { open = false; onCopyLink() },
             )
             DropdownMenuItem(
                 text = { Text("File to Lattice") },
@@ -404,24 +496,6 @@ private fun ThreadActions(
     }
 }
 
-/**
- * Reply and forward. Both send from the message the reader is on: the
- * newest honest one in list mode, the selected node in tree mode. That
- * is what makes selecting a node and replying a deliberate act rather
- * than a surprise.
- */
-@Composable
-private fun MailThreadActions(enabled: Boolean, onReply: () -> Unit, onForward: () -> Unit, onCopyLink: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        TextButton(onClick = onReply, enabled = enabled) { Text("Reply") }
-        TextButton(onClick = onForward, enabled = enabled) { Text("Forward") }
-        TextButton(onClick = onCopyLink) { Text("Copy link") }
-    }
-}
-
 @Composable
 private fun MailThreadHeader(
     subject: String,
@@ -434,12 +508,25 @@ private fun MailThreadHeader(
     onArchive: () -> Unit,
     onMarkUnread: () -> Unit,
     onDelete: () -> Unit,
+    onCopyLink: () -> Unit,
     onFile: () -> Unit,
     showTree: Boolean,
     drawn: Boolean,
     onMode: (Boolean) -> Unit,
     onBack: (() -> Unit)?,
 ) {
+    // Labelling is not common enough to hold the space above every
+    // message: the editor is behind the menu, and only the labels a
+    // thread has show here, a tap away from it.
+    var labeling by remember { mutableStateOf(false) }
+    if (labeling) {
+        AlertDialog(
+            onDismissRequest = { labeling = false },
+            title = { Text("Labels") },
+            text = { MailLabelRow(labels = labels, known = known, onToggle = onLabel) },
+            confirmButton = { TextButton(onClick = { labeling = false }) { Text("Done") } },
+        )
+    }
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (onBack != null) {
@@ -458,19 +545,18 @@ private fun MailThreadHeader(
                 onMarkUnread = onMarkUnread,
                 onDelete = onDelete,
                 onFile = onFile,
+                onCopyLink = onCopyLink,
+                onLabels = { labeling = true },
             )
             // Offered only where there is a tree to see. A straight
             // thread has nothing the two modes would show differently.
             if (showTree) {
-                FilterChip(
-                    selected = !drawn,
-                    onClick = { onMode(false) },
-                    label = { Text("Messages") },
-                )
-                Spacer(Modifier.width(6.dp))
+                // One switch: the tree is shown or it is not. Two chips,
+                // Messages and Tree, read as a pair of views, and Tree
+                // clicked again did nothing.
                 FilterChip(
                     selected = drawn,
-                    onClick = { onMode(true) },
+                    onClick = { onMode(!drawn) },
                     label = { Text("Tree") },
                 )
             }
@@ -483,7 +569,11 @@ private fun MailThreadHeader(
                 modifier = Modifier.padding(start = 8.dp),
             )
         }
-        MailLabelRow(labels = labels, known = known, onToggle = onLabel)
+        if (labels.isNotEmpty()) {
+            Row(Modifier.padding(start = 8.dp, top = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                labels.forEach { l -> AssistChip(onClick = { labeling = true }, label = { Text(l) }) }
+            }
+        }
         if (unreadable > 0) {
             Text(
                 unreadableThreadLine(unreadable),
@@ -539,12 +629,18 @@ private fun MailMessageCard(
     selected: Boolean = false,
     selectable: Boolean = false,
     onSelect: () -> Unit = {},
-    onFile: () -> Unit,
     repo: MailRepo,
     /** Whether remote images may load. False shows the affordance
      *  instead; true only after the reader asked, per thread. */
     imagesShown: Boolean = false,
     onShowImages: () -> Unit = {},
+    /** Reply to or forward this message; null where it cannot be
+     *  answered, a forged copy. */
+    onAnswer: ((forwarding: Boolean) -> Unit)? = null,
+    /** The message being read: Reply, Forward and Copy in full under it. */
+    full: Boolean = false,
+    /** New when the thread was opened: marked as an unread thread is. */
+    fresh: Boolean = false,
 ) {
     val m = node.message
     val ground = when {
@@ -552,11 +648,27 @@ private fun MailMessageCard(
         onPath -> MaterialTheme.colorScheme.primary.copy(alpha = 0.045f)
         else -> Color.Transparent
     }
+    // A tap selects the message. On touch that is a clickable, with
+    // long-press left for selecting text. With a mouse a clickable over
+    // the body swallowed the drag that selects text, so none of a message
+    // could be highlighted or copied (chat rows had the same trouble; see
+    // isTapToOpenMenuSupported): there a plain click is only watched for,
+    // never taken, and a drag stays the text's.
+    val touch = io.nisfeb.talon.ui.isTapToOpenMenuSupported
+    val rule = MaterialTheme.colorScheme.primary
     Column(
         Modifier
             .fillMaxWidth()
             .background(ground)
-            .then(if (selectable) Modifier.clickable(onClick = onSelect) else Modifier)
+            // New: the accent down its edge, as an unread thread has its dot.
+            .drawBehind { if (fresh) drawRect(rule, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height)) }
+            .then(
+                when {
+                    !selectable -> Modifier
+                    touch -> Modifier.clickable(onClick = onSelect)
+                    else -> Modifier.onPlainClick(onSelect)
+                },
+            )
             .padding(start = (12 + depth * 14).dp, end = 12.dp, top = 8.dp, bottom = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -576,9 +688,13 @@ private fun MailMessageCard(
             } else {
                 Spacer(Modifier.width(24.dp))
             }
+            if (fresh) {
+                MenuBadgeDot()
+                Spacer(Modifier.width(6.dp))
+            }
             Text(
                 nameFor(m.from),
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = if (fresh) FontWeight.Bold else FontWeight.SemiBold),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.clickable(onClick = onShut),
@@ -597,7 +713,16 @@ private fun MailMessageCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            TextButton(onClick = onFile) { Text("File", style = MaterialTheme.typography.labelSmall) }
+            // On every message, so answering one never means selecting it
+            // and then going back up to the top of the thread.
+            if (onAnswer != null) {
+                IconButton(onClick = { onAnswer(false) }, modifier = Modifier.size(30.dp)) {
+                    Icon(TalonIcons.Reply, contentDescription = "Reply", modifier = Modifier.size(18.dp))
+                }
+                IconButton(onClick = { onAnswer(true) }, modifier = Modifier.size(30.dp)) {
+                    Icon(TalonIcons.Forward, contentDescription = "Forward", modifier = Modifier.size(18.dp))
+                }
+            }
         }
         if (hidden > 0) {
             Text(
@@ -620,7 +745,8 @@ private fun MailMessageCard(
         // the row still says what it is.
         if (shut) {
             Text(
-                m.body.lineSequence().firstOrNull().orEmpty().take(120),
+                // Its own words, not a quote of what it answers.
+                treePreview(m.body).take(120),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -653,9 +779,33 @@ private fun MailMessageCard(
         Column(Modifier.padding(start = 24.dp, top = 6.dp)) {
             // Links open through the app's handler, so an urb:// address
             // lands in lattice as it does from a chat; the rest go out.
-            SelectionContainer {
-                Text(io.nisfeb.talon.ui.linkifyStatus(m.body), style = MaterialTheme.typography.bodyMedium)
-            }
+            // A quote, lines taken from an earlier message with "> ",
+            // is set off with a rule beside it and quieter text: what
+            // somebody else said, inside what this sender says.
+            val link = io.nisfeb.talon.ui.rememberLinkUnder()
+            io.nisfeb.talon.ui.CopyLinkMenu(link) { SelectionContainer {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    quoteBlocks(m.body).forEach { (quoted, text) ->
+                        if (quoted) {
+                            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+                                Box(
+                                    Modifier.width(3.dp).fillMaxHeight()
+                                        .background(MaterialTheme.colorScheme.outlineVariant),
+                                )
+                                io.nisfeb.talon.ui.LinkedText(
+                                    io.nisfeb.talon.ui.linkifyStatus(text, io.nisfeb.talon.ui.theme.LocalLinkColor.current),
+                                    link,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 8.dp),
+                                )
+                            }
+                        } else {
+                            io.nisfeb.talon.ui.LinkedText(io.nisfeb.talon.ui.linkifyStatus(text, io.nisfeb.talon.ui.theme.LocalLinkColor.current), link, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            } }
             val images = remember(m.body) { io.nisfeb.talon.ui.imageUrlsIn(m.body) }
             if (images.isNotEmpty()) {
                 if (!imagesShown) {
@@ -707,6 +857,23 @@ private fun MailMessageCard(
                     }
                 }
             }
+            // On the message itself, not above the thread: which message
+            // a reply answers is the one the buttons sit under. The body
+            // copies whole from here too; any part of it selects.
+            if (full) {
+                val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                var copied by remember(m.id) { mutableStateOf(false) }
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (onAnswer != null) {
+                        io.nisfeb.talon.ui.OutlinedButton(onClick = { onAnswer(false) }) { io.nisfeb.talon.ui.FitText("Reply") }
+                        io.nisfeb.talon.ui.OutlinedButton(onClick = { onAnswer(true) }) { io.nisfeb.talon.ui.FitText("Forward") }
+                    }
+                    TextButton(onClick = {
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(m.body))
+                        copied = true
+                    }) { io.nisfeb.talon.ui.FitText(if (copied) "Copied" else "Copy") }
+                }
+            }
         }
     }
 }
@@ -714,3 +881,42 @@ private fun MailMessageCard(
 internal fun sizeLabel(bytes: Long): String =
     if (bytes <= 0) "unknown size" else io.nisfeb.talon.util.humanFileSize(bytes)
 
+/**
+ * A click that did not move, seen after everything under it has had the
+ * event and without taking it: the text's selection keeps its drag, a
+ * link or button inside keeps its click, and the message is selected
+ * as well.
+ */
+private fun Modifier.onPlainClick(onClick: () -> Unit): Modifier = pointerInput(onClick) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
+        var moved = false
+        while (true) {
+            val change = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id } ?: break
+            if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) moved = true
+            if (!change.pressed) {
+                // Not a click a control in the card took: the sender's name
+                // closed the card, and this reopened it, and every header
+                // button selected the message as well.
+                if (!moved && !change.isConsumed) onClick()
+                break
+            }
+        }
+    }
+}
+
+/**
+ * A body as runs of its own words and of quoted lines, a quoted line
+ * being one that starts with ">", which is taken off. Blank lines stay
+ * with the run they sit in.
+ */
+internal fun quoteBlocks(body: String): List<Pair<Boolean, String>> {
+    val out = mutableListOf<Pair<Boolean, MutableList<String>>>()
+    for (line in body.trimEnd().lines()) {
+        val quoted = line.trimStart().startsWith(">")
+        val text = if (quoted) line.trimStart().removePrefix(">").removePrefix(" ") else line
+        if (out.isNotEmpty() && out.last().first == quoted) out.last().second += text
+        else out += quoted to mutableListOf(text)
+    }
+    return out.map { (q, lines) -> q to lines.joinToString("\n").trim('\n') }.filter { it.second.isNotBlank() }
+}

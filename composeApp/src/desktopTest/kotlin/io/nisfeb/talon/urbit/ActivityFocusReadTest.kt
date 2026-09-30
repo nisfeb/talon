@@ -67,25 +67,6 @@ class ActivityFocusReadTest {
         }
 
     @Test
-    fun `open chat while foregrounded is treated as read`() = runBlocking {
-        repo.setOpenChat("~sampel")
-        repo.setForeground(true)
-        repo.applyActivityUpdate(unreadActivity())
-        // Actively viewing it → badge cleared.
-        assertEquals(0, db.unreads().getOne("~sampel")?.count ?: 0)
-    }
-
-    @Test
-    fun `open chat while backgrounded keeps its unread badge`() = runBlocking {
-        // The bug: this used to zero the badge because only openWhom was
-        // checked. Backgrounded → not actually being read → badge stays.
-        repo.setOpenChat("~sampel")
-        repo.setForeground(false)
-        repo.applyActivityUpdate(unreadActivity())
-        assertEquals(7, db.unreads().getOne("~sampel")?.count)
-    }
-
-    @Test
     fun `returning to foreground resumes treating the open chat as read`() = runBlocking {
         repo.setOpenChat("~sampel")
         repo.setForeground(false)

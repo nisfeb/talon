@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import platform.StoreKit.SKPaymentQueue
 import platform.UIKit.UIDevice
 
 // iOS capability matrix. On-device AI (MediaPipe / DJL-ONNX) has no iOS
@@ -15,6 +16,7 @@ actual val isAssistantSupported: Boolean = true
 actual val isLoopsSupported: Boolean = true
 actual val isBackgroundSchedulingSupported: Boolean = false
 actual val isQrScanSupported: Boolean = true
+actual val isLocalTriageSupported: Boolean = true
 actual val isLocalCometSupported: Boolean = false
 actual val isTouchSwipeNavSupported: Boolean = true
 actual val hasSoftKeyboard: Boolean = true
@@ -60,3 +62,10 @@ actual val isUrbWebViewSupported: Boolean = true
 /** As Android: a drawer, and the edge swipe to come back. */
 actual val isDrawerNavigation: Boolean = true
 actual val isTouchPrimary: Boolean = true
+
+// Port pending: CLLocationManager significant-change monitoring.
+actual val isLocationSharingSupported: Boolean = false
+
+/** The US storefront only. Read each time: the storefront follows the Apple ID's country. */
+actual val isArmillaryPurchaseSupported: Boolean
+    get() = outsideCheckoutAllowedOnAppStore(SKPaymentQueue.defaultQueue().storefront?.countryCode)

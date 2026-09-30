@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 actual val isVoiceMessagesSupported: Boolean = false
 actual val isQrScanSupported: Boolean = false
+actual val isLocalTriageSupported: Boolean = true
 actual val isLocalCometSupported: Boolean = true
 // Loops run on desktop via a while-open ticker in App.kt (no
 // AlarmManager off Android): due loops fire once a minute while the
@@ -82,3 +83,9 @@ actual val isUrbWebViewSupported: Boolean = false
 /** The rail is already there, and there is no swipe to replace a back button with. */
 actual val isDrawerNavigation: Boolean = false
 actual val isTouchPrimary: Boolean = false
+
+// A computer does not move with you.
+actual val isLocationSharingSupported: Boolean = false
+
+/** Nothing here forbids an outside checkout. */
+actual val isArmillaryPurchaseSupported: Boolean = true

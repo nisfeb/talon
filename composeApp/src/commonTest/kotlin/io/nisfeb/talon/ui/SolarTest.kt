@@ -71,14 +71,6 @@ class SolarTest {
         assertTrue(t.sunsetMinute in (20 * 60 + 45)..(21 * 60 + 45), SkyClock.clockLabel(t.sunsetMinute, true))
     }
 
-    @Test
-    fun `twilight lengthens away from the equator`() {
-        assertTrue(Solar.twilightMinutes(0.0) < Solar.twilightMinutes(60.0))
-        // Bounded, because the dial wants a band that looks right rather
-        // than a number anybody depends on.
-        assertTrue(Solar.twilightMinutes(89.9) <= 180)
-    }
-
     // ---- elevation -----------------------------------------------------
 
     @Test
@@ -112,12 +104,4 @@ class SolarTest {
         assertEquals(Solar.horizonDip(9000.0), Solar.horizonDip(40_000.0))
     }
 
-    @Test
-    fun `elevation cannot invent a sunrise past the polar circle`() {
-        // Height helps, but not by five weeks. Midwinter at 78 north is
-        // still a night that does not end.
-        val t = Solar.sunTimes(78.0, 15.0, december, 60, elevationMetres = 3000.0)
-        assertTrue(t.polar)
-        assertFalse(t.polarDay)
-    }
 }

@@ -16,7 +16,6 @@ import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -85,15 +84,6 @@ class SlashCommandsTest {
     }
 
     @Test
-    fun `recognized command with bad usage still returns Error not passthrough`() {
-        // The passthrough only catches truly-unknown commands. A known
-        // command with invalid args must still surface its helpful error
-        // rather than silently sending "/pet" into the channel.
-        val r = run("/pet")
-        assertTrue(r is CommandResult.Error)
-    }
-
-    @Test
     fun `img file mic are recognized as Handled by the dispatcher`() {
         // These three are intercepted by the UI layer before runCommand
         // sees them, but routing still needs to recognize them as known
@@ -140,14 +130,7 @@ class SlashCommandsTest {
     @Test
     fun `pet with only a ship and no name returns usage error`() {
         val r = run("/pet ~zod")
-        assertTrue(r is CommandResult.Error)
-    }
-
-    @Test
-    fun `pet rejects an arg that isn't a patp`() {
-        val r = run("/pet badShip myname")
-        assertTrue(r is CommandResult.Error)
-        assertTrue((r as CommandResult.Error).message.contains("isn't a ship patp"))
+        assertTrue(r is CommandResult.Error && "usage" in r.message, "$r")
     }
 
     @Test
@@ -158,13 +141,6 @@ class SlashCommandsTest {
         val r = run("/pet ~ZOD myname")
         assertTrue(r is CommandResult.Error)
         assertTrue((r as CommandResult.Error).message.contains("isn't a ship patp"))
-    }
-
-    @Test
-    fun `pet rejects an empty name after a valid ship`() {
-        // The trailing whitespace-only "name" trims to empty.
-        val r = run("/pet ~zod    ")
-        assertTrue(r is CommandResult.Error)
     }
 
     @Test
@@ -283,9 +259,11 @@ class SlashCommandsTest {
 
     @Test
     fun `filterSlashCommands prioritizes prefix hits over substring hits`() {
-        // "ic" is a substring of "mic" but not a prefix of any command.
-        val r = filterSlashCommands("ic")
-        assertNotNull(r.firstOrNull { it.name == "mic" })
+        // "loc" starts with l; the rest only contain it.
+        assertEquals(
+            listOf("loc", "call", "cal", "file", "poll", "talk"),
+            filterSlashCommands("l").map { it.name },
+        )
     }
 
     @Test
@@ -293,17 +271,6 @@ class SlashCommandsTest {
         // Both lowercases the query; commands' names are already lower.
         val r = filterSlashCommands("CA")
         assertNotNull(r.firstOrNull { it.name == "cal" })
-    }
-
-    @Test
-    fun `filterSlashCommands prefix matches outrank substring matches`() {
-        // "p" is a prefix of "pet"/"poll" and a substring of "help"-
-        // ish names — but no command has it as a substring, so check
-        // the ordering by using "a" which is in "cal" as a substring
-        // and a prefix of nothing.
-        val r = filterSlashCommands("a")
-        assertNull(r.firstOrNull { it.name.startsWith("a") })
-        assertNotNull(r.firstOrNull { it.name.contains("a") })
     }
 
     // ── /poke ───────────────────────────────────────────────────────
@@ -351,5 +318,52 @@ class SlashCommandsTest {
             (r as CommandResult.Error).message.contains("failed"),
             "expected wrapped failure message, got: ${r.message}",
         )
+    }
+
+    // ── the commands that make a message ────────────────────────────
+
+    private fun sent(r: CommandResult): String = (r as? CommandResult.Send)?.body ?: error("not a Send: $r")
+
+    @Test
+    fun `cal makes an event card, and says what it could not read`() {
+        val card = sent(run("/cal 2026-10-03 15:30 Seed swap"))
+        assertTrue(card.startsWith("📅 Seed swap") && "[cal|" in card, card)
+        assertTrue((run("/cal") as CommandResult.Error).message.startsWith("/cal:"))
+    }
+
+    @Test
+    fun `tz makes a time everyone reads in their own zone, and refuses a zone it does not know`() {
+        val t = sent(run("/tz 3p utc"))
+        assertTrue(t.startsWith("🕒") && "[tz|" in t, t)
+        assertTrue((run("/tz 3p notazone") as CommandResult.Error).message.startsWith("/tz:"))
+    }
+
+    @Test
+    fun `poll numbers its options, and a poll without enough of them is refused`() {
+        val p = sent(run("/poll lunch? | tacos | ramen"))
+        assertTrue(p.startsWith("📊 lunch?") && "tacos" in p && "ramen" in p && "[poll|" in p, p)
+        assertTrue((run("/poll lunch? | tacos") as CommandResult.Error).message.startsWith("/poll:"))
+    }
+
+    @Test
+    fun `nick wants a name of sensible length, and goes to the profile`() {
+        assertEquals("/nick: give a name", (run("/nick") as CommandResult.Error).message)
+        assertTrue((run("/nick " + "x".repeat(65)) as CommandResult.Error).message.contains("too long"))
+        assertTrue((run("/nick Bus") as CommandResult.Error).message.startsWith("/nick:"), "reached the repo, which is not connected here")
+    }
+
+    @Test
+    fun `hn posts the top story with its score and discussion`() {
+        val news = HttpClient(MockEngine { req ->
+            when {
+                req.url.encodedPath.endsWith("/topstories.json") -> respond("[42, 7]", HttpStatusCode.OK)
+                req.url.encodedPath.endsWith("/item/42.json") -> respond("""{"title":"Ships at sea","url":"https://a.test","score":99}""", HttpStatusCode.OK)
+                else -> respond("", HttpStatusCode.NotFound)
+            }
+        })
+        val story = sent(runBlocking { runCommand("/hn", repo, news) })
+        assertEquals("📰 Ships at sea · 99 pts\nhttps://a.test\n💬 https://news.ycombinator.com/item?id=42", story)
+        val empty = HttpClient(MockEngine { respond("[]", HttpStatusCode.OK) })
+        assertEquals("/hn: empty top-stories list", (runBlocking { runCommand("/hn", repo, empty) } as CommandResult.Error).message)
     }
 }

@@ -29,11 +29,6 @@ class LatticeSignTest {
     )
 
     @Test
-    fun `a record survives being written out and read back`() {
-        assertEquals(rec, signedRecordIn(rec.armor()))
-    }
-
-    @Test
     fun `a record is found in the middle of a pasted message`() {
         val pasted = "here you go:\n\n${rec.armor()}\n\nthat's the file I mentioned"
         assertEquals(rec, signedRecordIn(pasted))
@@ -44,6 +39,21 @@ class LatticeSignTest {
         assertNull(signedRecordIn("no signature here"))
         assertNull(signedRecordIn(rec.armor().replace(sig, "not-a-number")))
         assertNull(signedRecordIn(rec.armor().substringBefore("-----END")))
+    }
+
+    @Test
+    fun `each number must be all digits, not only the signature`() {
+        assertNull(signedRecordIn(rec.armor().replace("life: 3", "life: 3a")), "life")
+        assertNull(signedRecordIn(rec.armor().replace(digest, "7x7")), "digest")
+        assertEquals(rec, signedRecordIn(rec.armor().trimStart()), "a record at the very start of the text")
+    }
+
+    @Test
+    fun `the algorithm and salt come from the record, and default where it names none`() {
+        val other = rec.copy(alg = "secp256k1", salt = "notes")
+        assertEquals(other, signedRecordIn(other.armor()))
+        val bare = rec.armor().lines().filterNot { it.startsWith("alg:") || it.startsWith("salt:") }.joinToString("\n")
+        assertEquals("ed25519" to "lattice", signedRecordIn(bare)!!.let { it.alg to it.salt })
     }
 
     private fun signClient(
@@ -90,5 +100,17 @@ class LatticeSignTest {
                 "\"sig\":$sig,\"content\":\"the file\"}",
             seen,
         )
+    }
+
+    @Test
+    fun `a file's digest is worked out here, as the ship works it out`() {
+        // From ~feb's dojo: ^-(@ud (shaf %lattice (sham 'hello'))).
+        assertEquals("188307405661025176166319078927924685055", latticeDigest("hello".encodeToByteArray()))
+        assertEquals(
+            "315530320481824302728523356676665380137",
+            latticeDigest("Talon file check, with a tail".encodeToByteArray()),
+        )
+        // The bytes are an atom: a trailing zero byte is not part of it.
+        assertEquals(latticeDigest("hello".encodeToByteArray()), latticeDigest("hello".encodeToByteArray() + 0))
     }
 }

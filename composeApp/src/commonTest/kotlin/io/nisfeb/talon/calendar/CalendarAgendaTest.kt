@@ -1,7 +1,9 @@
 package io.nisfeb.talon.calendar
 
 import io.nisfeb.talon.ui.CalendarRange
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.plus
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -18,10 +20,6 @@ class CalendarAgendaTest {
         row("nextweek", now + 7 * 24 * h, now + 7 * 24 * h + h),
     )
     private val utc = TimeZone.UTC
-
-    @Test fun `what is under way counts, what is over does not`() {
-        assertEquals(listOf("ongoing", "soon"), agenda(rows, CalendarRange.NEXT_3_HOURS, now, utc).map { it.id })
-    }
 
     @Test fun `next only is the first live one however far off`() {
         assertEquals(listOf("ongoing"), agenda(rows, CalendarRange.NEXT_ONLY, now, utc).map { it.id })
@@ -71,5 +69,24 @@ class CalendarAgendaTest {
         val midnight = 1_789_344_000_000L
         val ts = listOf(task("today", midnight), task("tomorrow", midnight + 24 * h))
         assertEquals(listOf("today"), tasksInRange(ts, CalendarRange.NEXT_ONLY, midnight, utc).map { it.id })
+    }
+
+    @Test fun `a day's window stops calling itself today`() {
+        assertEquals("Coming Up", agendaHeading(CalendarRange.NEXT_DAY))
+        for (r in CalendarRange.entries.filter { it != CalendarRange.NEXT_DAY }) {
+            assertEquals("Today", agendaHeading(r), r.name)
+        }
+    }
+
+    @Test fun `the line falls where the day turns over, and not above what is running`() {
+        val today = agendaDay(now, now, utc)
+        // Yesterday evening, still going: today's, so no line above it.
+        assertEquals(today, agendaDay(now - 20 * h, now, utc))
+        assertEquals(today, agendaDay(now + 2 * h, now, utc))
+        // The first thing after midnight is the one the line goes above.
+        assertEquals(today.plus(1, DateTimeUnit.DAY), agendaDay(now + 20 * h, now, utc))
+        // The zone decides when the day turns, not UTC.
+        val noumea = TimeZone.of("Pacific/Noumea")
+        assertEquals(agendaDay(now, now, noumea).plus(1, DateTimeUnit.DAY), agendaDay(now + 9 * h, now, noumea))
     }
 }

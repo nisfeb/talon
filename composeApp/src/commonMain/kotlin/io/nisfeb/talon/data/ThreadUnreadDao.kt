@@ -25,14 +25,6 @@ interface ThreadUnreadDao {
     @Query("SELECT * FROM thread_unreads WHERE whom = :whom AND parentPostId = :parentPostId LIMIT 1")
     suspend fun getOne(whom: String, parentPostId: String): ThreadUnreadEntity?
 
-    /** Clear per-thread state for a conversation. Called from
-     *  `markRead(whom)` so the channel-level read mirror also clears
-     *  the per-thread rows locally (the server's read-action recurses
-     *  via `deep=true`, so the next %activity update also reflects
-     *  this — but local UI shouldn't lag on the round-trip). */
-    @Query("DELETE FROM thread_unreads WHERE whom = :whom")
-    suspend fun deleteForWhom(whom: String)
-
     /** Clear a single thread's unread row — fired when the user opens
      *  the thread, so the row's tint and any in-thread divider clear
      *  immediately. */

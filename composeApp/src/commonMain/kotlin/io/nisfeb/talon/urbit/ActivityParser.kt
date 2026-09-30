@@ -220,7 +220,8 @@ internal fun sourceToWhom(source: JsonObject): String? {
  * - `count` — total unread items (channel posts, DM writs, thread
  *   replies — we treat all three uniformly for badge purposes).
  * - `notify-count` — subset that should ping the user (@-mentions,
- *   replies to our own posts). Drives the Mentions tab.
+ *   replies to our own posts), of the main stream only. Drives the
+ *   Mentions tab.
  * - `recency` — last-event ms, used to sort the home list.
  * - `unread.id` — first-unread message boundary (null when caught
  *   up). Canonicalized to match MessageEntity.id and stored as
@@ -242,7 +243,13 @@ internal fun toUnread(
     // how many follow. Threads keep their own rows (toThreadUnread).
     val own = summary["unread"] as? JsonObject
     val count = own?.get("count").asInt() ?: 0
-    val notifyCount = summary["notify-count"].asInt() ?: 0
+    // `notify-count` rolls up every child thread as `count` does, and a
+    // shallow read never clears those, so a channel kept a thread's
+    // replies as mentions for good: gone once opened, back on the next
+    // full read of activity. Only the main stream's own is counted.
+    // ponytail: the wire has no main-stream notify-count, only whether it
+    // notifies, so the rolled-up one is capped at the main stream's count.
+    val notifyCount = if (own?.get("notify").asBool() == true) minOf(summary["notify-count"].asInt() ?: 0, count) else 0
     val recency = summary["recency"].asLong() ?: 0L
     val firstUnreadId = own
         ?.get("id").asStr()

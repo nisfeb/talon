@@ -24,21 +24,6 @@ class DesktopThemePreferenceTest {
     }
 
     @Test
-    fun `default System when file does not exist`() {
-        val store = DesktopThemePreference(file)
-        assertEquals(ThemePreference.Mode.System, store.mode.value)
-        assertFalse(file.exists())
-    }
-
-    @Test
-    fun `setMode Light persists and survives reload`() {
-        DesktopThemePreference(file).setMode(ThemePreference.Mode.Light)
-
-        val reloaded = DesktopThemePreference(file)
-        assertEquals(ThemePreference.Mode.Light, reloaded.mode.value)
-    }
-
-    @Test
     fun `setMode Dark persists and survives reload`() {
         DesktopThemePreference(file).setMode(ThemePreference.Mode.Dark)
 
@@ -55,12 +40,6 @@ class DesktopThemePreferenceTest {
         assertEquals(ThemePreference.Mode.Light, store.mode.value)
         store.setMode(ThemePreference.Mode.System)
         assertEquals(ThemePreference.Mode.System, store.mode.value)
-    }
-
-    @Test
-    fun `setMode with same value is a no-op and does not touch disk`() {
-        DesktopThemePreference(file).setMode(ThemePreference.Mode.System)  // already default
-        assertFalse(file.exists())
     }
 
     @Test

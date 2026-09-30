@@ -90,16 +90,22 @@ fun PartyLinesList(
         }
         return
     }
+    // Read here, not in the rows: one host answer writes who is on and
+    // how many together, just after the rows change, and a row reading
+    // them missed the change (see GroupInfoPane).
+    val onLineNow = onLine
+    val presenceNow = presence
+    val latestNow = latest
     LazyColumn(modifier.fillMaxSize()) {
         items(rows, key = { it.key }) { row ->
             val ships = live?.takeIf { it.room == row.name }?.members?.map { it.ship }
-                ?: onLine[row.key].orEmpty().toList()
-            val count = maxOf(presence[row.key] ?: 0, ships.size)
+                ?: onLineNow[row.key].orEmpty().toList()
+            val count = maxOf(presenceNow[row.key] ?: 0, ships.size)
             // The channel to land in: the group's most recently active
             // one, per the same latest-message feed the chat list uses.
             val whom = row.groupFlag?.let { flag ->
                 val channels = contacts.channelsOfGroup(flag)
-                latest.firstOrNull { it.whom in channels }?.whom ?: channels.firstOrNull()
+                latestNow.firstOrNull { it.whom in channels }?.whom ?: channels.firstOrNull()
             }
             PartyLineListRow(
                 row = row,

@@ -26,7 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -39,7 +39,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import io.nisfeb.talon.ui.MarkdownText
 import io.nisfeb.talon.urbit.NotesFlag
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.launch
@@ -81,7 +80,8 @@ fun NoteScreen(
     var confirmDelete by remember(noteId) { mutableStateOf(false) }
     /** False only while we're still waiting for the row to show up. */
     var settled by remember(noteId) { mutableStateOf(false) }
-    var published by remember(noteId) { mutableStateOf(false) }
+    /** Null until the host has said: the publish button waits for it. */
+    var published by remember(noteId) { mutableStateOf<Boolean?>(null) }
     var confirmPublish by remember(noteId) { mutableStateOf(false) }
     var publicPath by remember(noteId) { mutableStateOf<String?>(null) }
     /** In-flight save; disables the check button so a double-tap can't
@@ -96,8 +96,8 @@ fun NoteScreen(
     LaunchedEffect(noteId, flag) {
         // Matches NotesParser.publishedKeys: "<host>/<name>#<id>".
         val key = "${flag.flagString}#$noteId"
-        published = repo.notes.publishedKeys().contains(key)
-        if (published) publicPath = io.nisfeb.talon.urbit.NotesPaths.publicPath(flag, noteId)
+        published = repo.notes.publishedKeys()?.contains(key)
+        if (published == true) publicPath = io.nisfeb.talon.urbit.NotesPaths.publicPath(flag, noteId)
     }
 
     LaunchedEffect(noteId, note) {
@@ -172,8 +172,8 @@ fun NoteScreen(
                 IconButton(onClick = { editing = true }) {
                     Icon(Icons.Filled.Edit, contentDescription = "Edit")
                 }
-                IconButton(onClick = {
-                    if (published) {
+                if (published != null) IconButton(onClick = {
+                    if (published == true) {
                         actionError = null
                         scope.launch {
                             if (repo.notes.unpublishNote(flag, noteId)) {
@@ -190,8 +190,8 @@ fun NoteScreen(
                 }) {
                     Icon(
                         TalonIcons.Public,
-                        contentDescription = if (published) "Unpublish" else "Publish to web",
-                        tint = if (published) {
+                        contentDescription = if (published == true) "Unpublish" else "Publish to web",
+                        tint = if (published == true) {
                             MaterialTheme.colorScheme.primary
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
@@ -271,7 +271,13 @@ fun NoteScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    MarkdownText(body)
+                    // Drawn as chat draws a message: the same blocks (nested
+                    // lists, quotes, tables, images) and the same inline styles.
+                    // It had its own small renderer, which drew no sub-list.
+                    val parts = remember(body) {
+                        io.nisfeb.talon.urbit.Story.parse(io.nisfeb.talon.urbit.MarkdownBlocks.toStory(body), expandMarkdown = false)
+                    }
+                    io.nisfeb.talon.ui.StoryRenderer(parts = parts, modifier = Modifier.fillMaxWidth())
                 }
             }
         }
@@ -312,7 +318,7 @@ fun NoteScreen(
                     scope.launch {
                         publicPath = repo.notes.publishNote(flag, noteId)
                         published = publicPath != null
-                        if (!published) {
+                        if (publicPath == null) {
                             actionError =
                                 "Couldn't publish — check your connection and try again."
                         }

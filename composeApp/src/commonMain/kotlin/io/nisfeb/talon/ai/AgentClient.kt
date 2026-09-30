@@ -39,7 +39,11 @@ import kotlinx.serialization.json.putJsonArray
  * (`build*Request` / `parse*Turn`) so the wire translation for both the
  * Anthropic and OpenAI dialects is unit-tested without a live API.
  */
-class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
+class AgentClient(
+    /** The feature whose month spend a call adds to, or none. */
+    private val feature: AiFeature? = null,
+    private val settingsProvider: () -> AiSettings.Config,
+) {
 
     private val http = createAppHttpClient()
 
@@ -57,6 +61,7 @@ class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
                     system, messages, tools, maxOutputTokens,
                 )
                 execute(
+                    cfg, cfg.model ?: "claude-sonnet-4-5-20250929",
                     url = "https://api.anthropic.com/v1/messages",
                     payload = payload.toString(),
                     headers = {
@@ -98,8 +103,15 @@ class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
         endpoint: String,
         model: String,
     ): AgentTurn {
-        val payload = buildOpenAiRequest(model, system, messages, tools, maxTokens)
+        var payload = buildOpenAiRequest(model, system, messages, tools, maxTokens, endpoint)
+        // OpenRouter says what a call cost only when asked, and so does
+        // an Armillary base, which is OpenRouter under a lease and the
+        // vendor's own proxy otherwise.
+        if (cfg.provider == AiSettings.Provider.OpenRouter || cfg.usageInclude) {
+            payload = JsonObject(payload + ("usage" to buildJsonObject { put("include", true) }))
+        }
         return execute(
+            cfg, model,
             url = endpoint,
             payload = payload.toString(),
             headers = { header("Authorization", "Bearer ${cfg.apiKey}") },
@@ -107,6 +119,8 @@ class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
     }
 
     private suspend fun execute(
+        cfg: AiSettings.Config,
+        model: String,
         url: String,
         payload: String,
         headers: HttpRequestBuilder.() -> Unit,
@@ -129,6 +143,7 @@ class AgentClient(private val settingsProvider: () -> AiSettings.Config) {
         }
         val obj = runCatching { JSON.parseToJsonElement(body).jsonObject }
             .getOrElse { error("$host bad JSON: ${body.take(300)}") }
+        feature?.let { AiSpend.add(it.name, usageCost(cfg.provider, model, obj)) }
         parse(obj)
     }
 
@@ -229,9 +244,11 @@ internal fun buildOpenAiRequest(
     messages: List<AgentMessage>,
     tools: List<ToolSpec>,
     maxTokens: Int,
+    /** Where it goes, which decides the cap's field: see [outputCapKey]. */
+    endpoint: String = "",
 ): JsonObject = buildJsonObject {
     put("model", model)
-    put("max_tokens", maxTokens)
+    put(outputCapKey(endpoint), maxTokens)
     putJsonArray("tools") {
         tools.forEach { t ->
             add(buildJsonObject {
@@ -353,4 +370,18 @@ private fun upstreamMessage(raw: JsonElement): String? {
     val nested = (asObj?.get("error") as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull
         ?: asObj?.get("message")?.jsonPrimitive?.contentOrNull
     return nested ?: (raw as? JsonPrimitive)?.contentOrNull
+}
+
+/**
+ * The field a chat completion caps its answer with. OpenAI's own API
+ * takes `max_completion_tokens` on every chat model and refuses
+ * `max_tokens` on its newer ones (its reasoning models, gpt-6-luna among
+ * them), so a key that worked everywhere failed in Talon. OpenRouter and
+ * servers of the owner's own read `max_tokens`. Decided by where the
+ * request goes rather than the provider picked, so a custom base pointed
+ * at OpenAI, or Azure's OpenAI, gets it too.
+ */
+internal fun outputCapKey(endpoint: String): String {
+    val host = runCatching { io.ktor.http.Url(endpoint).host }.getOrDefault("")
+    return if (host == "api.openai.com" || host.endsWith(".openai.azure.com")) "max_completion_tokens" else "max_tokens"
 }

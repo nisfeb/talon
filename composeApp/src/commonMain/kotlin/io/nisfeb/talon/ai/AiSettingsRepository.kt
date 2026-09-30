@@ -29,6 +29,22 @@ interface AiSettingsRepository {
         baseUrl: String? = null,
     )
 
+    /**
+     * The private model: where it is, what it is called and the key it
+     * wants, or blanks for whatever this device can run itself.
+     */
+    fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String)
+
+    /** Whether the frontier model may read messages too. Off by default. */
+    fun setFrontierReadsMessages(on: Boolean)
+
+    /**
+     * The AI settings as the new screen has them. The old fields are
+     * derived from it and kept, for the features and installs that still
+     * read them.
+     */
+    fun setProfile(profile: AiProfile)
+
     fun setFeature(feature: AiSettings.Feature, enabled: Boolean)
     fun setSyncEnabled(enabled: Boolean)
 

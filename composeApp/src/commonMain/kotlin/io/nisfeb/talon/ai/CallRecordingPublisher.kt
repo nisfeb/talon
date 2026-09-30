@@ -28,24 +28,21 @@ object CallRecordingPublisher {
      * that a Whisper-capable key is needed.
      */
     fun sttFrom(cfg: AiSettings.Config): Stt? {
-        // A dedicated Whisper key wins, whatever the chat provider is —
-        // this is how an Anthropic/OpenRouter user gets transcripts.
-        cfg.sttApiKey.takeIf { it.isNotBlank() }?.let {
-            return Stt(OPENAI_STT, it, WHISPER_MODEL)
-        }
-        return when (cfg.provider) {
-            AiSettings.Provider.OpenAi ->
-                cfg.apiKey.takeIf { it.isNotBlank() }?.let {
-                    Stt(OPENAI_STT, it, WHISPER_MODEL)
-                }
-            AiSettings.Provider.Custom ->
-                cfg.baseUrl?.takeIf { it.isNotBlank() && cfg.apiKey.isNotBlank() }?.let {
-                    // The chat model is not a speech model — posting it
-                    // here (what this used to do) fails on every host.
-                    // And the saved base URL is often a full chat URL,
-                    // which produced ".../chat/completions/audio/…".
-                    Stt(audioEndpoint(it), cfg.apiKey, WHISPER_MODEL)
-                }
+        // The transcription row: a dedicated Whisper key where there is
+        // one, whatever the chat provider is, else an OpenAI or custom
+        // chat key. Anthropic and OpenRouter have no audio endpoint,
+        // and neither has an Armillary base: the vendor's proxy sells
+        // chat and embeddings and nothing else.
+        val r = cfg.profile().resolve(AiFeature.Transcription)?.takeIf { cfg.profile().isOn(AiFeature.Transcription) } ?: return null
+        val key = r.provider.apiKey.takeIf { it.isNotBlank() } ?: return null
+        // The row's own speech model; one that follows the default is a chat model, so whisper-1.
+        val model = cfg.profile().features[AiFeature.Transcription]?.model?.model?.ifBlank { null } ?: WHISPER_MODEL
+        return when (r.provider.kind) {
+            ProviderKind.OpenAi -> Stt(OPENAI_STT, key, model)
+            // The chat model is not a speech model, and the saved base URL
+            // is often a full chat URL, which produced
+            // ".../chat/completions/audio/…".
+            ProviderKind.OpenAiCompatible -> r.provider.baseUrl?.takeIf { it.isNotBlank() }?.let { Stt(audioEndpoint(it), key, model) }
             else -> null
         }
     }
@@ -89,14 +86,18 @@ object CallRecordingPublisher {
         for ((ship, pcm) in call.clips) {
             if (pcm.isEmpty()) continue
             val label = nameFor(ship)
-            runCatching { transcribeClip(http, stt, pcm, call.rateOf(ship)) }
-                .onSuccess { segs ->
-                    segs.forEach { utterances += TranscriptGemtext.Utterance(label, it.startMs, it.text) }
-                }
-                .onFailure {
-                    failed += label
-                    Log.w(TAG, "could not transcribe $label", it)
-                }
+            // Not runCatching: a Stop cancels this, and a cancellation
+            // counted as the speaker failing ended in "transcription
+            // failed for every speaker" over the "Stopped." it asked for.
+            try {
+                transcribeClip(http, stt, pcm, call.rateOf(ship))
+                    .forEach { utterances += TranscriptGemtext.Utterance(label, it.startMs, it.text) }
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                failed += label
+                Log.w(TAG, "could not transcribe $label", t)
+            }
         }
         if (failed.isNotEmpty() && utterances.isEmpty()) {
             error("transcription failed for every speaker (${failed.joinToString(", ")})")
@@ -104,9 +105,14 @@ object CallRecordingPublisher {
         return Transcript(utterances.sortedBy { it.startMs }, failed)
     }
 
+    /** A published transcript: where it lives, and the words, which stay on this device. */
+    data class PublishedTranscript(val address: String, val utterances: List<TranscriptGemtext.Utterance>)
+
     /**
      * Transcribe every speaker and publish the merged transcript to
-     * Lattice. Returns the canonical urb:// address of the new page.
+     * Lattice. Returns the canonical urb:// address of the new page
+     * with the utterances, so the orrery triage can read them here
+     * rather than fetch its own words back.
      */
     suspend fun publishTranscript(
         http: HttpClient,
@@ -118,7 +124,7 @@ object CallRecordingPublisher {
         whenLabel: String,
         call: RecordedCall,
         nameFor: (String) -> String,
-    ): String {
+    ): PublishedTranscript {
         val t = transcribeAll(http, stt, call, nameFor)
         val gemtext = TranscriptGemtext.build(
             title = title.ifBlank { "Party line" },
@@ -132,7 +138,7 @@ object CallRecordingPublisher {
             title.ifBlank { "party-line" },
             "$ourShip-$whenLabel-${nowMs()}",
         )
-        return LatticePublish.publish(http, shipUrl, ourShip, cookie, slug, gemtext)
+        return PublishedTranscript(LatticePublish.publish(http, shipUrl, ourShip, cookie, slug, gemtext), t.utterances)
     }
 
     /**
@@ -225,7 +231,7 @@ object CallRecordingPublisher {
     }
 
     private const val TAG = "CallRecording"
-    private const val OPENAI_STT = "https://api.openai.com/v1/audio/transcriptions"
+    internal const val OPENAI_STT = "https://api.openai.com/v1/audio/transcriptions"
     private const val WHISPER_MODEL = "whisper-1"
 
     /** What Whisper works at internally; sending more is wasted upload. */

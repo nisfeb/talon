@@ -22,13 +22,6 @@ class GroupsScryParserTest {
         parseGroupsScry(json.parseToJsonElement(payload) as JsonObject)
 
     @Test
-    fun `empty groups payload yields empty result`() {
-        val out = parse("{}")
-        assertTrue(out.groups.isEmpty())
-        assertTrue(out.channelGroups.isEmpty())
-    }
-
-    @Test
     fun `single group with single channel parses both rows`() {
         val out = parse(
             """

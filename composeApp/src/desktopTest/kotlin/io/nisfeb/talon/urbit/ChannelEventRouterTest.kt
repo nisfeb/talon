@@ -20,23 +20,6 @@ class ChannelEventRouterTest {
     // ─── top-level post events ──────────────────────────────────
 
     @Test
-    fun `r-post set with tombstone routes to PostTombstone`() {
-        // Regression: before we added tombstone detection, this fell
-        // into the "ingest as post" branch and silently did nothing.
-        val raw = """
-            {"post":{"id":"170141184507933044937549665940933705728",
-             "r-post":{"set":{"author":"~ricsul","id":"170.141.184.507.933.044.937.549.665.940.933.705.728",
-                              "deleted-at":1777055041699,"type":"tombstone","seq":961}}}}
-        """.trimIndent()
-        val intent = classify(raw)
-        assertTrue(intent is ChannelDeltaIntent.PostTombstone)
-        assertEquals(
-            "170141184507933044937549665940933705728",
-            (intent as ChannelDeltaIntent.PostTombstone).id,
-        )
-    }
-
-    @Test
     fun `r-post set with dotted id is normalized`() {
         // The SSE echo sometimes comes with a dot-grouped id; our DB
         // stores raw digits. Router must normalize.

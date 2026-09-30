@@ -19,7 +19,8 @@ import androidx.compose.ui.text.withLink
  * ending punctuation (`.,;:!?`) is trimmed off the matched URL so
  * "check out https://example.com." doesn't include the period.
  */
-fun linkifyStatus(text: String): AnnotatedString {
+fun linkifyStatus(text: String, linkColor: Color? = null): AnnotatedString {
+    val style = linkSpan(linkColor)
     if (text.isEmpty()) return AnnotatedString(text)
 
     val matches = URL_RE.findAll(text).toList()
@@ -52,7 +53,7 @@ fun linkifyStatus(text: String): AnnotatedString {
             withLink(
                 LinkAnnotation.Url(
                     url = href,
-                    styles = TextLinkStyles(style = LINK_SPAN),
+                    styles = TextLinkStyles(style = style),
                 ),
             ) { append(raw) }
 
@@ -70,6 +71,9 @@ private val TRAILING_PUNCT = setOf('.', ',', ';', ':', '!', '?', ')', ']')
 // linkified statuses match the chat-message link affordance. Shared with
 // [MarkdownText]'s inline `[label](url)` spans.
 internal val LINK_SPAN = SpanStyle(
-    color = Color(0xFF2962FF),
+    color = io.nisfeb.talon.ui.theme.LINK_BLUE,
     textDecoration = TextDecoration.Underline,
 )
+
+/** [LINK_SPAN] in the theme's link colour where it sets one ([io.nisfeb.talon.ui.theme.LocalLinkColor]). */
+internal fun linkSpan(linkColor: Color?): SpanStyle = linkColor?.let { LINK_SPAN.copy(color = it) } ?: LINK_SPAN

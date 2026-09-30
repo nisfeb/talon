@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import io.nisfeb.talon.ai.triagePrivateSlot
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.WindowInsets
@@ -86,6 +87,7 @@ import io.nisfeb.talon.ui.RightPaneState
 import io.nisfeb.talon.ui.RightPaneStateReducer
 import io.nisfeb.talon.urbit.MediaCategory
 import kotlinx.coroutines.launch
+import io.nisfeb.talon.ai.hasModelFor
 
 /** How many times to ask a group's host whether a party line exists
  *  before giving up — same widening backoff App.kt uses. */
@@ -143,6 +145,7 @@ fun TalonApp(
     initialThreadAnchor: String? = null,
     /** A tapped mail notification: open Mail on arrival. */
     initialOpenMail: Boolean = false,
+    initialOpenActions: Boolean = false,
     pendingShare: ShareIntent? = null,
     /** When non-null, the user already picked the share target in
      *  the system share sheet (Sharing Shortcut). Skip the in-app
@@ -379,6 +382,9 @@ fun TalonApp(
     }
     // Mail rides the ship's own HTTP surface, not the eyre channel, so
     // the session's cookie-bearing client is all it needs.
+    // The assistant's runs, over the app's scope: a run goes on when the
+    // Assistant is left, and dots its icon when done.
+    val assistantSession = remember(app.db) { io.nisfeb.talon.ui.screens.AssistantSession(appScope) }
     val mailRepo = remember(app.session) {
         io.nisfeb.talon.mail.MailRepo(
             app.session.http, appScope,
@@ -421,12 +427,71 @@ fun TalonApp(
         if (mailShipUrl != null && loggedInShip != null) calendarRepo.attach(mailShipUrl)
         else calendarRepo.detach()
     }
+    // Orrery rides the same surface, under a key of its own.
+    val orreryRepo = remember(app.session) {
+        io.nisfeb.talon.orrery.OrreryRepo(
+            app.session.http, appScope, app.db, io.nisfeb.talon.ui.platformLabel, app.searchEmbedderClient,
+            cloud = io.nisfeb.talon.orrery.CloudTriage(
+                io.nisfeb.talon.orrery.frontierReadsMessages(app.aiSettings),
+            ) { app.aiSettings.state.value },
+            book = { app.repo.bookContacts.value },
+            standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),
+            decide = io.nisfeb.talon.orrery.DecideControl(app.uiSettings.orreryDecide, app.uiSettings::setOrreryDecide),
+            location = io.nisfeb.talon.ui.AndroidLocationControl,
+        )
+    }
+    DisposableEffect(orreryRepo) {
+        onDispose { runCatching { orreryRepo.detach() } }
+    }
+    // Orrery runs only when the owner turned it on (Settings > Orrery),
+    // for all their devices: off, nothing probes, pushes or listens.
+    val orreryGate = app.aiSettings.state.collectAsState().value.savedProfile?.orrery
+    LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip, orreryGate == true) {
+        if (orreryGate == true && mailShipUrl != null && loggedInShip != null) orreryRepo.attach(mailShipUrl, loggedInShip)
+        else orreryRepo.detach()
+    }
+    LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip, orreryGate) {
+        val url = mailShipUrl ?: return@LaunchedEffect
+        val ship = loggedInShip ?: return@LaunchedEffect
+        io.nisfeb.talon.orrery.settleOrreryGate(orreryGate, app.db, app.aiSettings, orreryRepo, url, ship)
+    }
+    // Armillary rides the same surface again: the owner's cookie, and
+    // the AI settings, where the provider row it keeps lives.
+    val armillaryRepo = remember(app.session) {
+        io.nisfeb.talon.armillary.ArmillaryRepo(app.session.http, appScope, app.aiSettings)
+    }
+    DisposableEffect(armillaryRepo) {
+        onDispose { runCatching { armillaryRepo.detach() } }
+    }
+    LaunchedEffect(armillaryRepo, mailShipUrl, loggedInShip) {
+        if (mailShipUrl != null && loggedInShip != null) armillaryRepo.attach(mailShipUrl, loggedInShip)
+        else armillaryRepo.detach()
+    }
+    val orreryActions by orreryRepo.actions.collectAsState()
+    LaunchedEffect(app.aiSettings) {
+        io.nisfeb.talon.orrery.movePrivateModelIn(app.aiSettings, app.uiSettings)
+        app.aiSettings.state.collect { io.nisfeb.talon.orrery.LocalModels.usePrivate(it.triagePrivateSlot()) }
+    }
+    var openAction by remember { mutableStateOf<io.nisfeb.talon.orrery.OrreryAction?>(null) }
+    // Whether the pipe is on at all: the actions section is its.
+    val orreryOn = orreryRepo.availability.collectAsState().value ==
+        io.nisfeb.talon.orrery.OrreryAvailability.PRESENT
+    openAction?.takeIf { orreryGate == true }?.let { action ->
+        io.nisfeb.talon.ui.OrreryActionDialog(
+            action = action,
+            orrery = orreryRepo,
+            onClose = { openAction = null },
+            twentyFourHour = app.uiSettings.homeTwentyFourHour.collectAsState().value,
+        )
+    }
     val calendarInstall: suspend () -> Result<Unit> = remember(app, calendarRepo) {
-        val install = io.nisfeb.talon.urbit.LatticeInstall.installer(
+        // The calendar is a stock desk of the Grubbery shell, fetched
+        // with lattice and mail; kiln does not publish it on its own.
+        val install = io.nisfeb.talon.urbit.LatticeInstall.grubbery(
             app.ktorHttp,
             { app.sessionStore.active()?.shipUrl },
-            desk = "calendar",
-            installed = { url ->
+            cookie = { app.sessionStore.active()?.let { "${it.cookieName}=${it.cookieValue}" } },
+            answers = { url ->
                 runCatching { io.nisfeb.talon.calendar.CalendarApi(app.session.http, url).config() }.isSuccess
             },
         ) { a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess }
@@ -541,16 +606,20 @@ fun TalonApp(
     // opened conversation still snaps to the newest message.
     val chatScrollState = remember(openWhom) { LazyListState() }
     val chatScrollAnchored = remember(openWhom) { mutableStateOf(false) }
-    var searchOpen by remember { mutableStateOf(false) }
+    // Every full-screen section is a flag made here, so the drawer's
+    // reset and the back button cannot miss one. See Sections for the
+    // bug this ends.
+    val sections = remember { io.nisfeb.talon.ui.Sections() }
+    var searchOpen by remember { sections.flag() }
     var revealGroupRequest by remember { mutableStateOf<String?>(null) }
-    var newDmOpen by remember { mutableStateOf(false) }
+    var newDmOpen by remember { sections.flag() }
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
     var viewerImageList by remember {
         mutableStateOf<io.nisfeb.talon.ui.screens.ViewerImageList?>(null)
     }
-    var editingProfile by remember { mutableStateOf(false) }
-    var statusFeedOpen by remember { mutableStateOf(false) }
-    var mailOpen by remember { mutableStateOf(initialOpenMail) }
+    var editingProfile by remember { sections.flag() }
+    var statusFeedOpen by remember { sections.flag() }
+    var mailOpen by remember { sections.flag(initialOpenMail) }
     /** A ship the profile sheet asked us to write to, consumed by the
      *  mail screen when it opens. */
     var mailTo by remember { mutableStateOf<String?>(null) }
@@ -576,16 +645,16 @@ fun TalonApp(
             }
         }
     }
-    var bookmarksOpen by remember { mutableStateOf(false) }
-    var calendarOpen by remember { mutableStateOf(false) }
+    var bookmarksOpen by remember { sections.flag() }
+    var calendarOpen by remember { sections.flag() }
     var calendarPageOpen by remember { mutableStateOf(false) }
     /** The mail thread a tap outside mail asked for. */
     var pendingMailThread by remember { mutableStateOf<String?>(null) }
     /** The home widget asked the assistant to listen as it opens. */
     var assistantListen by remember { mutableStateOf(false) }
-    var activityOpen by remember { mutableStateOf(false) }
-    var contactsOpen by remember { mutableStateOf(false) }
-    var watchwordsOpen by remember { mutableStateOf(false) }
+    var activityOpen by remember { sections.flag() }
+    var contactsOpen by remember { sections.flag() }
+    var watchwordsOpen by remember { sections.flag() }
     // Curated contact book (%contacts /v1/book) — gates add affordances
     // and backs the Contacts screen.
     val bookContacts by app.repo.bookContacts.collectAsState()
@@ -593,9 +662,17 @@ fun TalonApp(
     // onOpenAssistant below); collected here so a toggle/key change
     // recomposes the gate live.
     val aiState by app.aiSettings.state.collectAsState()
-    var homeOpen by remember { mutableStateOf(false) }
-    var settingsOpen by remember { mutableStateOf(false) }
-    var assistantOpen by remember { mutableStateOf(false) }
+    var homeOpen by remember { sections.flag() }
+    var settingsOpen by remember { sections.flag() }
+    var settingsStartOnAi by remember { mutableStateOf(false) }
+    // The way back to the card from a request the empty balance failed:
+    // Settings on the AI tab, with the top-up sheet already open.
+    val openTopUp: () -> Unit = {
+        io.nisfeb.talon.ai.AiSettings.pendingTopUp.value = true
+        settingsStartOnAi = true
+        settingsOpen = true
+    }
+    var assistantOpen by remember { sections.flag() }
     inviteShipFromCode?.let { ship ->
         io.nisfeb.talon.ui.InviteToGroupDialog(
             db = app.db, repo = app.repo, ship = ship, shipName = io.nisfeb.talon.ui.shipHandle(ship),
@@ -608,15 +685,16 @@ fun TalonApp(
             },
         )
     }
-    var loopsOpen by remember { mutableStateOf(false) }
-    var sidebarSettingsOpen by remember { mutableStateOf(false) }
-    var appsOpen by remember { mutableStateOf(false) }
-    var adminListOpen by remember { mutableStateOf(false) }
+    var loopsOpen by remember { sections.flag() }
+    var sidebarSettingsOpen by remember { sections.flag() }
+    var appsOpen by remember { sections.flag() }
+    var adminListOpen by remember { sections.flag() }
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
-    var invitesOpen by remember { mutableStateOf(false) }
+    var invitesOpen by remember { sections.flag() }
+    var actionsOpen by remember { sections.flag() }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
     /** Login-handoff QR generator. Reachable from the LoginScreen
-     *  "Generate QR for someone" link (pre-login) and from settings
+     *  "Make a login QR" link (pre-login) and from settings
      *  once a ship is logged in. State is local because the screen
      *  is short-lived and doesn't need to survive ship switches. */
     var shareLoginQrOpen by remember { mutableStateOf(false) }
@@ -646,25 +724,9 @@ fun TalonApp(
      * branch wins for ever.
      */
     fun closeSections() {
-        statusFeedOpen = false
-        mailOpen = false
-        bookmarksOpen = false
-        calendarOpen = false
-        activityOpen = false
-        watchwordsOpen = false
-        contactsOpen = false
-        homeOpen = false
-        settingsOpen = false
-        sidebarSettingsOpen = false
-        appsOpen = false
-        adminListOpen = false
+        // Every section flag, including any added after this was written.
+        sections.closeAll()
         adminGroupFlag = null
-        invitesOpen = false
-        searchOpen = false
-        newDmOpen = false
-        editingProfile = false
-        assistantOpen = false
-        loopsOpen = false
         groupInfoOpenFor = null
         groupInfoDrilldown = null
         // An open conversation is a thing to put down too. It is not a
@@ -684,6 +746,23 @@ fun TalonApp(
             closeSections()
             mailOpen = true
             onDeepLinkConsumed()
+        }
+    }
+    // A tapped orrery notification: straight to what is waiting.
+    LaunchedEffect(initialOpenActions) {
+        if (initialOpenActions) {
+            closeSections()
+            actionsOpen = true
+            onDeepLinkConsumed()
+        }
+    }
+    // New proposals notify; one answered anywhere takes its notification
+    // back. Not while Actions is on screen: the list is the news.
+    val actionContext = LocalContext.current
+    LaunchedEffect(orreryRepo) {
+        orreryRepo.onActions = { raise, clear ->
+            clear.forEach { io.nisfeb.talon.Notifications.clearAction(actionContext, it) }
+            if (!actionsOpen) raise.forEach { io.nisfeb.talon.Notifications.showAction(actionContext, it.id, it.title, it.body) }
         }
     }
 
@@ -1058,34 +1137,25 @@ fun TalonApp(
                             sentMs = m.sentMs,
                         )
                     }
-
-                    // ── watchword path (NEW) ───────────────────────────
-                    val ourPatp = loggedInShip ?: ""
-                    if (m.author == ourPatp) return@launch
-                    if (muted) return@launch
-                    if (m.whom in app.watchwords.excludes.value) return@launch
-                    val terms = app.watchwords.terms.value
-                    if (terms.isEmpty()) return@launch
-
-                    val plainText = StoryCache.textFor(m.id, m.contentJson)
-                    val matches = app.watchwords.evaluateLive(m, plainText)
-                    if (matches.isEmpty()) return@launch
-                    val notifiable = matches.filter { it.term.notify }
-                    if (notifiable.isEmpty()) return@launch
-
-                    val convoLabel = contactMap.conversationLabel(m.whom)
-                    Notifications.showWatchwordHit(
-                        context = context,
-                        whom = m.whom,
-                        forShip = loggedInShip,
-                        postId = m.id,
-                        parentId = m.parentId,
-                        terms = notifiable.map { it.term.term },
-                        label = convoLabel,
-                        body = plainText.take(160).replace('\n', ' '),
-                        sentMs = m.sentMs,
-                    )
                 }
+            }
+        }
+        // A live message matched watchwords set to notify. The repo
+        // did the matching and kept the hits; this only shows it.
+        app.repo.watchwordListener = { m, notice ->
+            val foreground = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            if (!(foreground && openWhomState.value == m.whom)) appScope.launch {
+                Notifications.showWatchwordHit(
+                    context = context,
+                    whom = m.whom,
+                    forShip = loggedInShip,
+                    postId = m.id,
+                    parentId = m.parentId,
+                    terms = notice.terms,
+                    label = contactMap.conversationLabel(m.whom),
+                    body = notice.text.take(160).replace('\n', ' '),
+                    sentMs = m.sentMs,
+                )
             }
         }
         // New pending DM request → notify. Always fires (there's no
@@ -1109,7 +1179,7 @@ fun TalonApp(
         // the group (its flag doubles as the whom via the "group:" route).
         app.repo.groupInviteListener = { invite ->
             appScope.launch {
-                val from = invite.inviter?.let { " from $it" } ?: ""
+                val from = invite.inviter?.let { " from " + contactMap.displayName(it) } ?: ""
                 Notifications.showMessage(
                     context = context,
                     whom = "group:${invite.flag}",
@@ -1123,6 +1193,7 @@ fun TalonApp(
         }
         onDispose {
             app.repo.messageListener = null
+            app.repo.watchwordListener = null
             app.repo.dmInviteListener = null
             app.repo.groupInviteListener = null
         }
@@ -1257,14 +1328,15 @@ fun TalonApp(
             onUrb = urbLinkHandler,
         )
     }
-    val urbFetcher: suspend (String) -> io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl? =
-        remember(app) {
+    // Keyed on the ship, so the cards kept are the ship's own database's.
+    val urbFetcher: (String) -> kotlinx.coroutines.flow.Flow<io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl> =
+        remember(app, loggedInShip) {
             { urbUrl ->
                 val active = app.sessionStore.active()
                 val s = active?.shipUrl
                 val c = active?.let { "${it.cookieName}=${it.cookieValue}" }
-                if (s == null || c == null) null
-                else io.nisfeb.talon.urbit.UrbUnfurlCache.await(app.ktorHttp, s, c, urbUrl)
+                if (s == null || c == null) kotlinx.coroutines.flow.emptyFlow()
+                else io.nisfeb.talon.urbit.UrbUnfurlCache.cards(app.ktorHttp, s, c, urbUrl, app.db.urbUnfurls())
             }
         }
     // Keyed on the ship: the database and repo are rebuilt on a switch,
@@ -1315,9 +1387,15 @@ fun TalonApp(
         // Mail lives in the same desk as the link handler's app, so the
         // install is one thing offered from two places.
         io.nisfeb.talon.mail.LocalGrubberyInstall provides
-            io.nisfeb.talon.urbit.LatticeInstall.installer(app.ktorHttp, { app.sessionStore.active()?.shipUrl }) {
-                a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess
-            },
+            io.nisfeb.talon.urbit.LatticeInstall.grubbery(
+                app.ktorHttp,
+                { app.sessionStore.active()?.shipUrl },
+                cookie = { app.sessionStore.active()?.let { "${it.cookieName}=${it.cookieValue}" } },
+            ) { a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess },
+        LocalCometDomes provides remember(app.session, app.db) {
+            app.session.baseUrl?.takeIf { it.isNotBlank() }?.let { CometDomes(app.session.http, it, app.db) }
+        },
+        LocalOpenProfile provides { ship: String -> profileSheetShip = ship },
         io.nisfeb.talon.mail.LocalMailTo provides
             if (mailAvailable) {
                 { peer: String ->
@@ -1416,6 +1494,10 @@ fun TalonApp(
         // overlays everything else (you can open it from a chat, which
         // means both `viewerImageUrl` and `openWhom` are non-null at
         // the same time), so its handler is registered last.
+        // Registered first, so every handler below outranks it: it only
+        // answers for a section that has none of its own, which is every
+        // section somebody adds and forgets to give one.
+        BackHandler(enabled = sections.anyOpen) { sections.closeLast() }
         BackHandler(enabled = editingProfile) { editingProfile = false }
         BackHandler(enabled = statusFeedOpen) { statusFeedOpen = false }
         BackHandler(enabled = mailOpen) { mailOpen = false }
@@ -1512,6 +1594,7 @@ fun TalonApp(
             adminGroupFlag != null -> "GroupAdmin($adminGroupFlag)"
             adminListOpen -> "AdminList"
             invitesOpen -> "Invites"
+            actionsOpen -> "Actions"
             openGroupFlag != null -> "GroupHome($openGroupFlag)"
             sidebarSettingsOpen -> "SidebarSettings"
             appsOpen -> "Apps"
@@ -1551,6 +1634,16 @@ fun TalonApp(
         val shipNicknamesMap = app.shipProfiles.nicknames.collectAsState().value
         val railOrder by app.uiSettings.railItemOrder.collectAsState()
         val railVisible by app.uiSettings.railVisibility.collectAsState()
+        val mailUnread by mailRepo.inboxUnread.collectAsState()
+        val assistantNews by assistantSession.news.collectAsState()
+        // The desktop rail's dots, as far as this host has them.
+        val drawerBadges = remember(orreryActions, mailUnread, assistantNews) {
+            io.nisfeb.talon.ui.MenuBadges(
+                actionsWaiting = orreryActions.any { it.status == "proposed" },
+                mailUnread = mailUnread,
+                assistantNews = assistantNews,
+            ).byItem()
+        }
 
         io.nisfeb.talon.ui.TalonDrawer(
             drawer = { close ->
@@ -1560,10 +1653,12 @@ fun TalonApp(
                     // Chats is the root of this host rather than a
                     // destination, so nothing is ever marked.
                     active = null,
+                    badges = drawerBadges,
                     canOpen = { item ->
                         when (item) {
                             io.nisfeb.talon.ui.RailItem.Assistant ->
-                                isAssistantSupported && aiState.assistantOn() && aiState.hasKey()
+                                isAssistantSupported && aiState.assistantOn() && aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)
+                            io.nisfeb.talon.ui.RailItem.Actions -> orreryOn
                             else -> true
                         }
                     },
@@ -1588,6 +1683,7 @@ fun TalonApp(
                             io.nisfeb.talon.ui.RailItem.Watchwords -> watchwordsOpen = true
                             io.nisfeb.talon.ui.RailItem.Administration -> adminListOpen = true
                             io.nisfeb.talon.ui.RailItem.Invites -> invitesOpen = true
+                            io.nisfeb.talon.ui.RailItem.Actions -> actionsOpen = true
                             io.nisfeb.talon.ui.RailItem.Settings -> settingsOpen = true
                         }
                     },
@@ -1721,11 +1817,14 @@ fun TalonApp(
             )
 
             addingAnotherShip -> LoginScreen(
-                session = app.session,
+                // Its own session: the one open here stays as it is, whatever the sign-in does.
+                session = remember { io.nisfeb.talon.urbit.UrbitSession(app.ktorHttp, app.sessionStore) },
                 onLoggedIn = { ship ->
                     addingAnotherShip = false
                     app.onShipLoggedIn(ship)
                 },
+                // The ship open underneath was never left.
+                onCancel = { addingAnotherShip = false },
                 usernameAutofill = { onFill ->
                     rememberAutofillModifier(
                         types = listOf(
@@ -1813,6 +1912,9 @@ fun TalonApp(
                 onComposeToConsumed = { mailTo = null },
                 initialThread = pendingMailThread,
                 onBack = { mailOpen = false; pendingMailThread = null },
+                // What a mail cannot carry, the ship's own storage can:
+                // the same upload chat images take.
+                upload = { bytes, mime, name -> app.repo.uploadImage(bytes, mime, name) },
                 modifier = mod,
             )
 
@@ -1903,6 +2005,7 @@ fun TalonApp(
 
             watchwordsOpen -> WatchwordsScreen(
                 db = app.db,
+                watchwords = app.repo.watchwords,
                 watchwordsSyncEnabled = app.watchwordsSyncEnabled,
                 onSetWatchwordsSyncEnabled = { app.setWatchwordsSyncEnabled(it) },
                 onBack = { watchwordsOpen = false },
@@ -1930,7 +2033,7 @@ fun TalonApp(
                     mail = mailRepo,
                     calendar = calendarRepo,
                     onOpenCalendar = { homeOpen = false; calendarOpen = true },
-                    onOpenAssistant = if (isAssistantSupported && aiState.assistantOn() && aiState.hasKey()) {
+                    onOpenAssistant = if (isAssistantSupported && aiState.assistantOn() && aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)) {
                         { listen -> homeOpen = false; assistantListen = listen; assistantOpen = true }
                     } else null,
                     onInstallCalendar = calendarInstall,
@@ -1955,6 +2058,12 @@ fun TalonApp(
                     invites = app.repo.invitesFlow.collectAsState().value
                         ?.map { it.flag }.orEmpty(),
                     onOpenInvites = { homeOpen = false; invitesOpen = true },
+                    actions = io.nisfeb.talon.ui.newActions(orreryActions, app.uiSettings.homeTwentyFourHour.collectAsState().value),
+                    // The chip was drawn from a listing that may have moved
+                    // on. A tap that found nothing used to do nothing.
+                    onOpenAction = { id ->
+                        orreryActions.firstOrNull { it.id == id }?.let { openAction = it } ?: run { homeOpen = false; actionsOpen = true }
+                    },
                     onOpenContact = { other -> profileSheetShip = other },
                     onOpenStatuses = { homeOpen = false; statusFeedOpen = true },
                     onOpenConversation = { whom -> homeOpen = false; openWhom = whom },
@@ -1988,6 +2097,22 @@ fun TalonApp(
                 modifier = mod,
             )
 
+            actionsOpen -> io.nisfeb.talon.ui.screens.OrreryActionsScreen(
+                actions = orreryActions,
+                onBack = { actionsOpen = false },
+                modifier = mod,
+                onShown = { orreryRepo.opened() },
+                told = orreryRepo.told.collectAsState().value,
+                onLeave = { orreryRepo.toldSeen() },
+                failed = orreryRepo.failed.collectAsState().value,
+                onDecide = { a, status, why -> orreryRepo.answer(a.id, status, why) },
+                problem = orreryRepo.answerProblem.collectAsState().value ?: orreryRepo.error.collectAsState().value,
+                        generator = orreryRepo.generator.collectAsState().value?.let {
+                            io.nisfeb.talon.orrery.generatorLine(it, io.nisfeb.talon.util.nowMs(), kotlinx.datetime.TimeZone.currentSystemDefault())
+                        },
+                twentyFourHour = app.uiSettings.homeTwentyFourHour.collectAsState().value,
+            ) { a -> openAction = a }
+
             openGroupFlag != null -> GroupHomeScreen(
                 db = app.db,
                 repo = app.repo,
@@ -2007,15 +2132,38 @@ fun TalonApp(
             appsOpen -> io.nisfeb.talon.ui.screens.AppsSettingsScreen(
                 mail = mailRepo,
                 calendar = calendarRepo,
+                // Off, Orrery is nowhere in Talon, the Apps page too.
+                orrery = orreryRepo.takeIf { orreryGate == true },
+                armillary = armillaryRepo,
                 latticeInstalled = app.sessionStore.active()?.shipUrl?.let { url ->
-                    { io.nisfeb.talon.urbit.LatticeInstall.isInstalled(app.ktorHttp, url) }
+                    { io.nisfeb.talon.urbit.LatticeInstall.installedOrUnknown(app.ktorHttp, url) ?: error("The ship could not be asked.") }
                 },
                 groupsInstalled = app.sessionStore.active()?.shipUrl?.let { url ->
-                    { io.nisfeb.talon.urbit.GroupsInstall.isInstalled(app.session.http, url) }
+                    { io.nisfeb.talon.urbit.GroupsInstall.installedOrUnknown(app.session.http, url) ?: error("The ship could not be asked.") }
                 },
                 onInstallGroups = io.nisfeb.talon.urbit.GroupsInstall.installer(
                     app.session.http,
                     { app.sessionStore.active()?.shipUrl },
+                ) { a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess },
+                // Shell desks, not kiln desks: the session's own client,
+                // since adding one is an owner's call.
+                onAddOrrery = io.nisfeb.talon.urbit.LatticeInstall.shellDesk(
+                    app.session.http,
+                    { app.sessionStore.active()?.shipUrl },
+                    name = "orrery",
+                    answers = {
+                        orreryRepo.probe()
+                        orreryRepo.availability.value == io.nisfeb.talon.orrery.OrreryAvailability.PRESENT
+                    },
+                ) { a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess },
+                onAddArmillary = io.nisfeb.talon.urbit.LatticeInstall.shellDesk(
+                    app.session.http,
+                    { app.sessionStore.active()?.shipUrl },
+                    name = "armillary",
+                    answers = {
+                        runCatching { armillaryRepo.refresh(fresh = true) }
+                        armillaryRepo.availability.value == io.nisfeb.talon.armillary.ArmillaryAvailability.PRESENT
+                    },
                 ) { a, mark, body -> runCatching { app.repo.pokeRaw(a, mark, body) }.isSuccess },
                 shipUrl = app.sessionStore.active()?.shipUrl,
                 onBack = { appsOpen = false },
@@ -2039,7 +2187,11 @@ fun TalonApp(
                 mail = mailRepo,
                 calendar = calendarRepo,
                 calls = callController,
+                // No Orrery tools while Orrery is off.
+                orrery = orreryRepo.takeIf { orreryGate == true },
                 listenOnOpen = assistantListen,
+                onTopUp = openTopUp,
+                session = assistantSession,
                 scheduler = app.loops,
                 onRunLoop = { app.loops.runOneNow(it) },
                 onBack = { assistantOpen = false; assistantListen = false },
@@ -2091,6 +2243,8 @@ fun TalonApp(
                     io.nisfeb.talon.notify.AndroidSystemNotificationProbe(app)
                 }
                 SettingsScreen(
+                    orrery = orreryRepo,
+                    armillary = armillaryRepo,
                     aiSettings = app.aiSettings,
                     themePreference = app.themePreference,
                     uiSettings = app.uiSettings,
@@ -2115,7 +2269,8 @@ fun TalonApp(
                         activePatp = ourPatp,
                         activeShipUrl = activeShipUrl,
                     ),
-                    onBack = { settingsOpen = false },
+                    onBack = { settingsOpen = false; settingsStartOnAi = false },
+                    startOnAi = settingsStartOnAi,
                     onOpenSidebarSettings = { sidebarSettingsOpen = true },
                     onOpenApps = { appsOpen = true },
                     onOpenShareLoginQr = { shareLoginQrOpen = true },
@@ -2474,6 +2629,7 @@ fun TalonApp(
                     http = app.ktorHttp,
                     aiSettings = app.aiSettings,
                     uiSettings = app.uiSettings,
+                    calendar = calendarRepo,
                     ourPatp = loggedInShip ?: "",
                     whom = openWhom!!,
                     initialScrollMessageId = pendingScrollMessageId,
@@ -2487,6 +2643,7 @@ fun TalonApp(
                     },
                     onOpenImage = { viewerImageUrl = it },
                     onOpenSelfProfile = { editingProfile = true },
+                    onTopUp = openTopUp,
                     onStartCall =
                         if (callController != null && openWhom!!.startsWith("~")) {
                             { callController.placeCall(openWhom!!) }
@@ -2717,6 +2874,7 @@ fun TalonApp(
             )
 
             else -> DmListScreen(
+                orreryOn = orreryGate == true,
                 db = app.db,
                 repo = app.repo,
                 drafts = app.drafts,
@@ -2732,7 +2890,7 @@ fun TalonApp(
                 // platforms — the embedder only enhances retrieval.
                 onOpenAssistant = if (isAssistantSupported &&
                     aiState.assistantOn() &&
-                    aiState.hasKey()
+                    aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)
                 ) {
                     { assistantOpen = true }
                 } else null,

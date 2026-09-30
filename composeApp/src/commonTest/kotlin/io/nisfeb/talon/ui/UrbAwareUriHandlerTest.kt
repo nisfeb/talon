@@ -35,4 +35,20 @@ class UrbAwareUriHandlerTest {
         assertEquals("https://urbit.org", delegate.opened)
         assertNull(urb, "http(s) must go to the platform handler, not the urb launcher")
     }
+
+    // A furum page on the sharer's ship refuses the reader's cookie, so a
+    // furum link, page or shorthand, opens on the reader's own ship.
+    @Test
+    fun routesFurumToHandlerNotDelegate() {
+        listOf("https://sharer.io/apps/furum/b/~zod/cats/7", "f/~zod/cats").forEach { link ->
+            val delegate = RecordingDelegate()
+            var urb: String? = null
+            UrbAwareUriHandler(delegate) { urb = it }.openUri(link)
+            assertEquals(link, urb)
+            assertNull(delegate.opened, link)
+        }
+        val delegate = RecordingDelegate()
+        UrbAwareUriHandler(delegate) { error("not furum") }.openUri("https://sharer.io/apps/furum/about")
+        assertEquals("https://sharer.io/apps/furum/about", delegate.opened)
+    }
 }

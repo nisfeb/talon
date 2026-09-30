@@ -116,6 +116,8 @@ private class DesktopAppGraph {
     // DisposableEffect runs on a 2s delay and may not finish before
     // exitProcess fires.
     @Volatile var currentDb: AppDatabase? = null
+    /** Stops the signed-in ship's work and waits for it; App hands it over (onShipWork). */
+    @Volatile var stopShipWork: (suspend () -> Unit)? = null
     val createDb: (String) -> AppDatabase = { shipKey ->
         createAppDatabase(shipKey).also { currentDb = it }
     }
@@ -222,7 +224,16 @@ private class DesktopAppGraph {
         }
         runCatching { http.connectionPool.evictAll() }
         runCatching { ktorHttp.close() }
-        runCatching { currentDb?.close() }
+        // The ship's own work first, waited for: closed under a running
+        // query (a bootstrap, the indexer, a sync write) the process
+        // crashed on the way out, or instead of restarting for an update.
+        currentDb?.let { db ->
+            runCatching {
+                kotlinx.coroutines.runBlocking {
+                    io.nisfeb.talon.data.closeAfterWork(db, waitMs = 5_000) { stopShipWork?.invoke() }
+                }
+            }
+        }
     }
 }
 
@@ -513,6 +524,7 @@ fun main() {
                     },
                     lastOpenChatStore = graph.lastOpenChatStore,
                     urbLinkLauncher = io.nisfeb.talon.urbit.DesktopUrbLinkLauncher,
+                    onShipWork = { graph.stopShipWork = it },
                 )
             }
         }

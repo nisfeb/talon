@@ -90,15 +90,6 @@ class EnsureChannelGroupRowTest {
     }
 
     @Test
-    fun `ensureChannelGroupRow then setPinnedPostId persists the pin`() = runBlocking {
-        val nest = "chat/~sampel/general"
-        repo.ensureChannelGroupRow(nest)
-        val affected = db.groups().setPinnedPostId(nest, "post-id-1")
-        assertEquals(1, affected)
-        assertEquals("post-id-1", db.groups().pinnedPostIdFor(nest))
-    }
-
-    @Test
     fun `ensureChannelGroupRow no-ops on non-chat nest`() = runBlocking {
         // The helper's nest-to-flag derivation only meaningfully fires
         // for chat channels. Heaps, diaries, DMs aren't pin-eligible

@@ -2,8 +2,6 @@ package io.nisfeb.talon.urbit
 
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
-import io.ktor.client.statement.HttpResponse
-import io.ktor.http.isSuccess
 
 /**
  * Detecting and installing %groups, which is what chat itself runs on:
@@ -22,11 +20,11 @@ object GroupsInstall {
      * depend on. Authenticated: [http] has to be the session's client,
      * because a scry without the cookie is a 403 whatever is installed.
      */
-    suspend fun isInstalled(http: HttpClient, shipUrl: String): Boolean =
-        runCatching {
-            val resp: HttpResponse = http.get("${shipUrl.trimEnd('/')}/~/scry/groups/v2/groups.json")
-            resp.status.isSuccess()
-        }.getOrDefault(false)
+    suspend fun isInstalled(http: HttpClient, shipUrl: String): Boolean = installedOrUnknown(http, shipUrl) == true
+
+    /** As [isInstalled], or null where the ship could not be asked: see [LatticeInstall.probe]. */
+    suspend fun installedOrUnknown(http: HttpClient, shipUrl: String): Boolean? =
+        LatticeInstall.probe { http.get("${shipUrl.trimEnd('/')}/~/scry/groups/v2/groups.json") }
 
     /** The install, for the hosts that offer it. */
     fun installer(

@@ -21,6 +21,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.uuid.ExperimentalUuidApi
@@ -412,8 +415,15 @@ class PartyLine(
         // Feedback now — the strip clears on the tap, not after the
         // close handshake.
         if (_state.value !is PartyState.Failed) _state.value = PartyState.Idle
+        Log.i(TAG, "leaving the line")
         scope.launch {
-            runCatching { send(buildJsonObject { put("type", "join"); put("kind", "leave"); put("group", galeneGroup) }) }
+            // A goodbye, not a gate. Waited for, a socket that had stalled
+            // held it forever and the cancel below never ran: the screen
+            // said Idle while the line went on playing, after Leave and
+            // after the app was swiped away (Android, 2026-09-28).
+            withTimeoutOrNull(GOODBYE_MS) {
+                send(buildJsonObject { put("type", "join"); put("kind", "leave"); put("group", galeneGroup) })
+            } ?: Log.w(TAG, "the goodbye did not go out; leaving anyway")
             // The pump owns teardown (its finally); cancelling runs it
             // exactly once. Tearing down here as well raced a quick
             // re-join — the old pump's delayed finally executed
@@ -753,7 +763,10 @@ class PartyLine(
             }
             return retry
         } finally {
-            teardown()
+            // Whole, though the pump was cancelled: under cancellation the
+            // socket's close threw at once, so Galène never saw us go.
+            // Every wait in it is bounded, so this cannot hold a leave.
+            withContext(NonCancellable) { teardown() }
         }
     }
 
@@ -1414,12 +1427,18 @@ class PartyLine(
         // and then an abrupt EOF rather than a close handshake, and it
         // keeps a client it never saw leave — so everyone else went on
         // showing the person who just left.
+        // Bounded: a socket that has stalled takes the close frame no
+        // more than any other, and the links below are what stop the
+        // sound.
         runCatching {
-            session?.close(
-                CloseReason(CloseReason.Codes.NORMAL, "left"),
-            )
+            withTimeoutOrNull(GOODBYE_MS) {
+                session?.close(
+                    CloseReason(CloseReason.Codes.NORMAL, "left"),
+                )
+            } ?: Log.w(TAG, "the socket did not close in time; dropping it")
         }
         session = null
+        Log.i(TAG, "closing the line: ${downLinks.size} down links${if (upLink != null) " and the up link" else ""}")
         upLink?.close()
         upLink = null
         _upLink.value = null
@@ -1480,6 +1499,8 @@ class PartyLine(
          */
         internal const val MUTE_KIND = "talon-mute"
         private const val RECONNECT_MAX = 6
+        /** How long leaving waits on the socket, to say goodbye and to close it. */
+        internal const val GOODBYE_MS = 2_000L
         private const val RECONNECT_BASE_MS = 1_000L
         private const val RECONNECT_STABLE_MS = 30_000L
 

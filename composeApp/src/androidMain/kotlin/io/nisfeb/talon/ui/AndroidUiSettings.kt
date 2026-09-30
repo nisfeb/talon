@@ -144,6 +144,29 @@ class AndroidUiSettings(
         _calendarWeekView.value = on
     }
 
+    private val _orreryStandDown = MutableStateFlow(prefs.getBoolean(KEY_ORRERY_STAND_DOWN, true))
+    override val orreryStandDown: StateFlow<Boolean> = _orreryStandDown.asStateFlow()
+    override fun setOrreryStandDown(on: Boolean) {
+        if (_orreryStandDown.value == on) return
+        prefs.edit().putBoolean(KEY_ORRERY_STAND_DOWN, on).apply()
+        _orreryStandDown.value = on
+    }
+
+    private val _orreryDecide = MutableStateFlow(
+        prefs.getString(KEY_ORRERY_DECIDE, null)
+            ?.let { runCatching { kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString(io.nisfeb.talon.orrery.DecideSettings.serializer(), it) }.getOrNull() }
+            ?: io.nisfeb.talon.orrery.DecideSettings(),
+    )
+    override val orreryDecide: StateFlow<io.nisfeb.talon.orrery.DecideSettings> = _orreryDecide.asStateFlow()
+    override fun setOrreryDecide(d: io.nisfeb.talon.orrery.DecideSettings) {
+        if (_orreryDecide.value == d) return
+        prefs.edit().putString(KEY_ORRERY_DECIDE, kotlinx.serialization.json.Json.encodeToString(io.nisfeb.talon.orrery.DecideSettings.serializer(), d)).apply()
+        _orreryDecide.value = d
+    }
+
+    override val orreryServerUrl: StateFlow<String> = MutableStateFlow(prefs.getString(KEY_ORRERY_SERVER_URL, "") ?: "")
+    override val orreryServerModel: StateFlow<String> = MutableStateFlow(prefs.getString(KEY_ORRERY_SERVER_MODEL, "") ?: "")
+
     private val _defaultCalendar = MutableStateFlow(prefs.getString(KEY_DEFAULT_CALENDAR, "") ?: "")
     override val defaultCalendar: StateFlow<String> = _defaultCalendar.asStateFlow()
     override fun setDefaultCalendar(id: String) {
@@ -382,6 +405,10 @@ class AndroidUiSettings(
         private const val KEY_HIDDEN_CALENDARS = "hidden_calendars"
         private const val KEY_DEFAULT_CALENDAR = "default_calendar"
         private const val KEY_CALENDAR_WEEK_VIEW = "calendar_week_view"
+        private const val KEY_ORRERY_STAND_DOWN = "orrery_stand_down"
+        private const val KEY_ORRERY_DECIDE = "orrery_decide"
+        private const val KEY_ORRERY_SERVER_URL = "orrery_server_url"
+        private const val KEY_ORRERY_SERVER_MODEL = "orrery_server_model"
         private const val KEY_HOME_FAHRENHEIT = HomePrefs.FAHRENHEIT
         private const val KEY_HOME_24H = HomePrefs.TWENTY_FOUR_HOUR
         private const val KEY_HOME_LAYOUT = "home_layout"

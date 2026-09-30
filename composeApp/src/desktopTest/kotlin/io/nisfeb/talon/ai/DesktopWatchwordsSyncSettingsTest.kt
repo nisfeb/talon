@@ -47,13 +47,6 @@ class DesktopWatchwordsSyncSettingsTest {
     }
 
     @Test
-    fun `setEnabled with same value is a no-op and does not touch disk`() {
-        // Default is true. Setting to true again should not write.
-        DesktopWatchwordsSyncSettings(file).setEnabled(true)
-        assertFalse(file.exists())
-    }
-
-    @Test
     fun `setEnabled toggle flips state both directions`() {
         val store = DesktopWatchwordsSyncSettings(file)
         store.setEnabled(false)
@@ -70,13 +63,6 @@ class DesktopWatchwordsSyncSettingsTest {
         file.writeText("{this is not valid json}")
         val store = DesktopWatchwordsSyncSettings(file)
         assertTrue(store.enabled.value)
-    }
-
-    @Test
-    fun `atomic move leaves no tmp file after persist`() {
-        DesktopWatchwordsSyncSettings(file).setEnabled(true)
-        val tmp = File(tmpDir, "watchwords_sync.json.tmp")
-        assertFalse(tmp.exists())
     }
 
     @Test

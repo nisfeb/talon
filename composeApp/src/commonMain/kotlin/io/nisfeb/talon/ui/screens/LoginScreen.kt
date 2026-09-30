@@ -25,26 +25,26 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material3.Button
+import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,7 +52,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -71,6 +73,18 @@ import kotlinx.coroutines.launch
 import io.nisfeb.talon.ui.icons.TalonIcons
 
 private const val GETTING_STARTED_URL = "https://urbit.org/overview/running-urbit"
+
+/**
+ * What the form holds, kept while the form is off screen: the login-QR
+ * screen and the scanner both take its place, and coming back from
+ * either without a sign-in must not mean typing it all again. Emptied
+ * by a sign-in that works.
+ */
+internal object LoginDraft {
+    val url = mutableStateOf("")
+    val code = mutableStateOf("")
+    fun clear() { url.value = ""; code.value = "" }
+}
 
 @Composable
 fun LoginScreen(
@@ -104,12 +118,12 @@ fun LoginScreen(
     /** Desktop only: boot a comet on this computer instead of signing
      *  in to a hosted ship. Null hides the action. */
     onRunLocalShip: (() -> Unit)? = null,
-    /** Optional callback to open the "Generate handoff QR" screen.
-     *  When non-null, LoginScreen shows a "Generate QR for someone"
-     *  link below the main form so helpers/admins can build a QR
-     *  with another user's credentials. Both targets support
-     *  generation (ZXing core is JVM-only and works under both
-     *  Compose Desktop and Compose Android). */
+    /** Optional callback to open the login QR screen. When non-null,
+     *  LoginScreen shows a link below the main form for making a QR
+     *  of your own login, which your other devices scan to sign in
+     *  quickly. Both targets support generation (ZXing core is
+     *  JVM-only and works under both Compose Desktop and Compose
+     *  Android). */
     onOpenShareQr: (() -> Unit)? = null,
     /** Optional update-status hook. When non-null, the global
      *  [UpdateBanner] renders above the login form so users see
@@ -118,9 +132,12 @@ fun LoginScreen(
      *  the post-login home list before this. Android passes the
      *  real instance; desktop passes null (no checker wired). */
     updateState: UpdateState? = null,
+    /** Back to the ship this was opened from, when "Add ship" opened it.
+     *  Null on a first sign-in, which has nowhere to go back to. */
+    onCancel: (() -> Unit)? = null,
 ) {
-    var shipUrl by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf("") }
+    var shipUrl by LoginDraft.url
+    var code by LoginDraft.code
     var status by remember { mutableStateOf<String?>(null) }
     // Failures render in error red; info/progress text stays neutral.
     var statusIsError by remember { mutableStateOf(false) }
@@ -128,6 +145,7 @@ fun LoginScreen(
     var codeVisible by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
+    io.nisfeb.talon.ui.PlatformBackHandler(enabled = onCancel != null && !connecting) { onCancel?.invoke() }
 
     // Outer Column holds the update banner above the centered form.
     // Without it, the banner would sit inside the form column and
@@ -220,7 +238,7 @@ fun LoginScreen(
             // clear "this is the action area" affordance vs the
             // brand block above it.
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.large,
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -272,13 +290,10 @@ fun LoginScreen(
                             status = "QR scanned — tap Connect to sign in."
                             statusIsError = false
                         } else {
-                            // null = user cancelled OR the QR wasn't a
-                            // talon:// login URI. Keep silent on cancel
-                            // (common path) — the manual fields stay
-                            // editable. A surface'd hint here on bad
-                            // format would help, but distinguishing
-                            // cancel from "wrong QR" would require a
-                            // sentinel from the scanner; defer.
+                            // null = backed out of the scanner, or the QR
+                            // wasn't a talon:// login. The form keeps what
+                            // was typed: a scanner opened by mistake must
+                            // not cost typing it all again.
                         }
                     }
                     if (triggerScan != null) {
@@ -311,6 +326,7 @@ fun LoginScreen(
                                         // login() keeps the leading ~ on the
                                         // ship name — don't prepend another.
                                         status = "Connected as $ship"
+                                        LoginDraft.clear()
                                         onLoggedIn(ship)
                                     }
                                     .onFailure { err ->
@@ -337,6 +353,11 @@ fun LoginScreen(
                             Text("Connect")
                         }
                     }
+                    onCancel?.let { cancel ->
+                        TextButton(onClick = cancel, enabled = !connecting, modifier = Modifier.fillMaxWidth()) {
+                            Text("Cancel")
+                        }
+                    }
                     status?.let {
                         Text(
                             it,
@@ -348,14 +369,14 @@ fun LoginScreen(
                         )
                     }
                     onOpenShareQr?.let { openShare ->
-                        // "Helping someone else log in?" affordance —
-                        // opens the QR generator screen. Lives inside
+                        // Signing in on another device: opens the QR
+                        // generator screen. Lives inside
                         // the form card so it reads as a related action
                         // and not a stray link. Available on both
                         // targets since QR generation is JVM-only and
                         // ZXing core is wired into both leaves.
                         Text(
-                            text = "Helping someone else? Generate a login QR →",
+                            text = "Signing in on another device? Make a login QR →",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                             textAlign = TextAlign.Center,
@@ -409,10 +430,9 @@ fun LoginScreen(
 }
 
 /**
- * Minimal styled-link text. ClickableText doesn't inherit the
- * surrounding theme color the way a plain Text does, so we re-stamp
- * the link span's color from the call site (where MaterialTheme is
- * accessible) before handing the AnnotatedString down.
+ * Minimal styled-link text. The link span's color is re-stamped from
+ * the call site (where MaterialTheme is accessible). Links are
+ * LinkAnnotations, so a mouse over one shows the hand.
  */
 @Composable
 private fun ClickableLinkText(
@@ -424,31 +444,27 @@ private fun ClickableLinkText(
     // Re-build the AnnotatedString so the URL-tagged span gets the
     // theme's primary color. Avoids hard-coding a brand hex into the
     // composable that built the AnnotatedString upstream.
+    val tap by rememberUpdatedState(onLinkTap)
     val themed = remember(text, primaryColor, baseColor) {
         buildAnnotatedString {
             withStyle(SpanStyle(color = baseColor)) {
                 append(text.text)
             }
             text.getStringAnnotations("URL", 0, text.length).forEach { ann ->
-                addStyle(
-                    style = SpanStyle(
-                        color = primaryColor,
-                        fontWeight = FontWeight.Medium,
-                    ),
+                addLink(
+                    LinkAnnotation.Clickable(
+                        tag = ann.item,
+                        styles = TextLinkStyles(SpanStyle(color = primaryColor, fontWeight = FontWeight.Medium)),
+                    ) { tap(ann.item) },
                     start = ann.start,
                     end = ann.end,
                 )
-                addStringAnnotation("URL", ann.item, ann.start, ann.end)
             }
         }
     }
-    ClickableText(
+    Text(
         text = themed,
         style = MaterialTheme.typography.bodyMedium.copy(textAlign = TextAlign.Center),
-        onClick = { offset ->
-            themed.getStringAnnotations("URL", offset, offset)
-                .firstOrNull()?.let { onLinkTap(it.item) }
-        },
         modifier = Modifier.fillMaxWidth(),
     )
 }
@@ -461,7 +477,8 @@ private fun ClickableLinkText(
 private fun friendlyError(err: Throwable): String {
     val msg = err.message.orEmpty()
     return when {
-        "HTTP 401" in msg || "HTTP 403" in msg -> "Wrong +code — try again"
+        // Eyre answers a wrong +code with 400.
+        "HTTP 400" in msg || "HTTP 401" in msg || "HTTP 403" in msg -> "Wrong +code. Try again."
         "UnknownHostException" in err::class.simpleName.orEmpty() ||
             "host" in msg.lowercase() && "resolve" in msg.lowercase() ->
             "Can't reach that ship URL — check it and your connection"
@@ -479,7 +496,7 @@ private fun friendlyError(err: Throwable): String {
         "Expected URL scheme" in msg ->
             "Add http:// or https:// to the ship URL"
         "no urbauth cookie" in msg ->
-            "Ship didn't return a session cookie — is the URL correct?"
+            "That address answered, but no ship signed you in there. Check the URL."
         "ConnectException" in err::class.simpleName.orEmpty() ->
             "Connection refused — is the ship running?"
         msg.isNotBlank() -> "Couldn't sign in: $msg"

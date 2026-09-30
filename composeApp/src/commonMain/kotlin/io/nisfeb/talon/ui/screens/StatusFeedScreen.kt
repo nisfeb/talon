@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ui.shipHandle
 import io.nisfeb.talon.util.formatMonthDay
 import io.nisfeb.talon.util.formatTime24
 import io.nisfeb.talon.util.nowMs
@@ -22,7 +23,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -111,7 +112,7 @@ internal fun SelfStatusRow(
             // is sniffed for "no status yet" patterns and breaks).
             if (status != null) {
                 Text(
-                    text = linkifyStatus(status),
+                    text = linkifyStatus(status, io.nisfeb.talon.ui.theme.LocalLinkColor.current),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -179,7 +180,7 @@ internal fun EditStatusDialog(
 
 @Composable
 internal fun StatusRow(c: ContactEntity, onClick: () -> Unit) {
-    val label = c.nickname ?: c.ship
+    val label = c.nickname ?: shipHandle(c.ship)
     val stamp = remember(c.statusUpdatedMs) {
         c.statusUpdatedMs?.let { formatRelative(it) }
     }
@@ -203,7 +204,7 @@ internal fun StatusRow(c: ContactEntity, onClick: () -> Unit) {
                 )
                 if (!c.nickname.isNullOrBlank()) {
                     Text(
-                        c.ship,
+                        shipHandle(c.ship),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -211,7 +212,7 @@ internal fun StatusRow(c: ContactEntity, onClick: () -> Unit) {
             }
             c.status?.let {
                 Text(
-                    text = linkifyStatus(it),
+                    text = linkifyStatus(it, io.nisfeb.talon.ui.theme.LocalLinkColor.current),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )

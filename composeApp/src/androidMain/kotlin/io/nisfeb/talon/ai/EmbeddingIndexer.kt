@@ -6,6 +6,7 @@ import io.nisfeb.talon.urbit.StoryCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,6 +49,9 @@ class EmbeddingIndexer(
     }
 
     fun stop() { job?.cancel() }
+
+    /** Stop, and wait until it has: the ship's database closes next. */
+    suspend fun stopAndJoin() { job?.cancelAndJoin() }
 
     private suspend fun backfill() {
         // We don't want to load every message at once on a chatty

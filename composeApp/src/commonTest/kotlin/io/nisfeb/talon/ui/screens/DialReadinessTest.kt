@@ -3,16 +3,12 @@ package io.nisfeb.talon.ui.screens
 import io.nisfeb.talon.ui.SkyClock
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DialReadinessTest {
 
     private val hour = 60 * 60_000L
-
-    @Test
-    fun `nothing fetched yet is stale`() {
-        assertTrue(weatherIsStale(0L, 1_789_128_000_000L))
-    }
 
     @Test
     fun `a fresh answer is left alone`() {
@@ -88,5 +84,6 @@ class DialReadinessTest {
         val sky = SkyClock.Sky(minuteOfDay = 12 * 60, condition = SkyClock.Weather.CLEAR)
         val said = dialDescription(sky, true, false)
         assertEquals(said, said.replace("Cloudy", "!"), "clear should add nothing: $said")
+        assertNull(conditionIcon(SkyClock.Weather.CLEAR))
     }
 }

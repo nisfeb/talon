@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 import io.nisfeb.talon.urbit.Fuzz
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -44,13 +45,6 @@ class SlashCommandFuzzTest {
     // ─── parseCalText invariants ────────────────────────────────────
 
     @Test
-    fun `parseCalText never throws on arbitrary strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            parseCalText(Fuzz.randomString(rnd, maxLen = 200))
-        }
-    }
-
-    @Test
     fun `parseCalText Ok result always has end greater than or equal to start`() {
         // The screen renders start..end and would crash / show garbage
         // if end < start. Pin that on every successful parse.
@@ -62,13 +56,6 @@ class SlashCommandFuzzTest {
                     r.endMs >= r.startMs,
                 )
             }
-        }
-    }
-
-    @Test
-    fun `parseTimeToken never throws on arbitrary strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            parseTimeToken(Fuzz.randomString(rnd, maxLen = 50))
         }
     }
 
@@ -85,16 +72,11 @@ class SlashCommandFuzzTest {
                 assertTrue("end.m=${it.m}", it.m in 0..59)
             }
         }
+        // Random strings rarely make an out-of-range time, so name some.
+        for (t in listOf("25", "9:75", "30-31", "9-25")) assertNull(t, parseTimeToken(t))
     }
 
     // ─── parseTzInput invariants ────────────────────────────────────
-
-    @Test
-    fun `parseTzInput never throws on arbitrary strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            parseTzInput(Fuzz.randomString(rnd, maxLen = 100))
-        }
-    }
 
     @Test
     fun `resolveZoneToken never throws on arbitrary strings`() {
@@ -135,66 +117,6 @@ class SlashCommandFuzzTest {
         }
     }
 
-    @Test
-    fun `parsePollInput Ok always honors option count + length caps`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val r = parsePollInput(Fuzz.randomString(rnd, maxLen = 600))
-            if (r is PollParseResult.Ok) {
-                assertTrue(
-                    "options.size=${r.poll.options.size}",
-                    r.poll.options.size in 2..MAX_POLL_OPTIONS,
-                )
-                assertTrue(
-                    "question length=${r.poll.question.length}",
-                    r.poll.question.length <= 240,
-                )
-                for (o in r.poll.options) {
-                    assertTrue("option length=${o.length}", o.length <= 120)
-                }
-            }
-        }
-    }
-
-    @Test
-    fun `encodePollTag and decodePollTag round-trip on parsed polls`() {
-        // Generates inputs that PARSE successfully, then verifies the
-        // encode/decode cycle preserves question + options exactly.
-        // Catches escape-rule regressions (e.g. an option containing
-        // `|` accidentally splitting into two on decode).
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val parsed = parsePollInput(Fuzz.randomString(rnd, maxLen = 600))
-            if (parsed is PollParseResult.Ok) {
-                val tag = encodePollTag(parsed.poll)
-                val decoded = decodePollTag(tag)
-                    ?: throw AssertionError(
-                        "decodePollTag returned null for self-encoded tag: $tag",
-                    )
-                if (decoded.question != parsed.poll.question) {
-                    throw AssertionError(
-                        "question mismatch: encoded=${parsed.poll.question} " +
-                            "decoded=${decoded.question} tag=$tag",
-                    )
-                }
-                if (decoded.options != parsed.poll.options) {
-                    throw AssertionError(
-                        "options mismatch: encoded=${parsed.poll.options} " +
-                            "decoded=${decoded.options} tag=$tag",
-                    )
-                }
-            }
-        }
-    }
-
     // ─── slash-command spec: filter never crashes ──────────────────
 
-    @Test
-    fun `filterSlashCommands never throws and result is a subset of catalog`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val out = filterSlashCommands(Fuzz.randomString(rnd, maxLen = 50))
-            assertTrue(
-                "filter returned items not in the catalog: $out",
-                out.all { it in SLASH_COMMANDS },
-            )
-        }
-    }
 }

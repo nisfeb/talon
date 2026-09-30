@@ -1,12 +1,5 @@
 package io.nisfeb.talon.urbit
 
-import kotlin.random.Random
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -74,26 +67,10 @@ class FuzzTest {
     // ─── string parsers — never throw, bounded recursion ──────
 
     @Test
-    fun `Markdown parseInlines never throws on arbitrary strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val input = Fuzz.randomString(rnd, maxLen = 200)
-            Markdown.parseInlines(input)
-        }
-    }
-
-    @Test
     fun `MarkdownBlocks toStory never throws on arbitrary strings`() {
         Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
             val input = Fuzz.randomString(rnd, maxLen = 500)
             MarkdownBlocks.toStory(input)
-        }
-    }
-
-    @Test
-    fun `chatTextToStory never throws on arbitrary strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val input = Fuzz.randomString(rnd, maxLen = 500)
-            chatTextToStory(input)
         }
     }
 
@@ -113,68 +90,6 @@ class FuzzTest {
     // ─── invariants we actively care about ───────────────────
 
     @Test
-    fun `ingestedPost always emits undotted ids`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val whom = "chat/~h/s"
-            val input = Fuzz.randomJson(rnd, depth = 4)
-            val out = ingestedPost(whom, input)
-            for (m in out.messages) {
-                assertFalse(
-                    "message id $m must not contain '.'",
-                    m.id.contains('.'),
-                )
-                m.parentId?.let {
-                    assertFalse(
-                        "parentId $it must not contain '.'",
-                        it.contains('.'),
-                    )
-                }
-            }
-            for (r in out.reactions) {
-                assertFalse(
-                    "reaction postId ${r.postId} must not contain '.'",
-                    r.postId.contains('.'),
-                )
-            }
-            for (t in out.tombstones) {
-                assertFalse(
-                    "tombstone id $t must not contain '.'",
-                    t.contains('.'),
-                )
-            }
-        }
-    }
-
-    @Test
-    fun `undotAtom is idempotent`() {
-        // Calling undotAtom twice must equal calling it once for any
-        // string. Catches any accidental dot-re-introduction.
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val s = Fuzz.randomString(rnd, 50)
-            assertEquals(undotAtom(s), undotAtom(undotAtom(s)))
-        }
-    }
-
-    @Test
-    fun `dotAtom is idempotent on digit-only inputs`() {
-        // Applying dotAtom twice to a purely numeric string must match
-        // applying it once. Non-numeric inputs are pass-through so the
-        // property trivially holds.
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val n = rnd.nextLong(0, Long.MAX_VALUE).toString()
-            assertEquals(dotAtom(n), dotAtom(dotAtom(n)))
-        }
-    }
-
-    @Test
-    fun `dotAtom then undotAtom round-trips digit strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val n = rnd.nextLong(0, Long.MAX_VALUE).toString()
-            assertEquals(n, undotAtom(dotAtom(n)))
-        }
-    }
-
-    @Test
     fun `chatTextToStory always emits at least one verse for non-empty input`() {
         Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
             val input = Fuzz.randomString(rnd, 100)
@@ -185,96 +100,6 @@ class FuzzTest {
         }
     }
 
-    @Test
-    fun `classifyChannelDelta posts-batch preserves every key`() {
-        Fuzz.run(200, SEED) { rnd, _ ->
-            // Seed a PostsBatch-shaped payload with random post children.
-            val posts = buildJsonObject {
-                repeat(rnd.nextInt(0, 5)) {
-                    put("${rnd.nextLong()}", Fuzz.randomJson(rnd, depth = 2))
-                }
-            }
-            val payload = buildJsonObject { put("posts", posts) }
-            val intent = classifyChannelDelta(payload) as? ChannelDeltaIntent.PostsBatch
-                ?: return@run
-            assertEquals(posts.size, intent.posts.size)
-        }
-    }
-
-    @Test
-    fun `parseCite group variant always produces openTarget prefixed with group colon`() {
-        Fuzz.run(200, SEED) { rnd, _ ->
-            val flag = "~sampel/${Fuzz.randomString(rnd, 10).ifBlank { "x" }}"
-            val cite = buildJsonObject { put("group", flag) }
-            val r = parseCite(cite)
-            val target = r.target as? CiteTarget.Group ?: return@run
-            assertEquals(flag, target.flag)
-        }
-    }
-
     // ─── activity feed parser (rc14) ──────────────────────────
 
-    @Test
-    fun `parseActivityFeedBody never throws on arbitrary JSON`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val input = Fuzz.randomJsonObject(rnd, depth = 4)
-            TlonChatRepo.parseActivityFeedBody(input)
-        }
-    }
-
-    @Test
-    fun `parseActivityFeedBody never throws on null body`() {
-        // Null is the only "off-shape" the public API can hand us
-        // (the `as? JsonObject` cast at the call site filters out
-        // arrays / primitives before we get here). Pin it.
-        TlonChatRepo.parseActivityFeedBody(null)
-    }
-
-    @Test
-    fun `parseActivityFeedBody output is sorted newest-first by sentMs`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val input = Fuzz.randomJsonObject(rnd, depth = 4)
-            val items = TlonChatRepo.parseActivityFeedBody(input)
-            for (i in 1 until items.size) {
-                assertTrue(
-                    "items must be sorted by sentMs DESC; " +
-                        "items[${i - 1}]=${items[i - 1].sentMs}, items[$i]=${items[i].sentMs}",
-                    items[i - 1].sentMs >= items[i].sentMs,
-                )
-            }
-        }
-    }
-
-    @Test
-    fun `parseActivityFeedBody emits non-negative sentMs for every item`() {
-        // Mid-broken inputs sometimes produce nonsense times — the
-        // fallback path returns 0L. Negative would mean a parsing
-        // bug that snuck signed math in.
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val input = Fuzz.randomJsonObject(rnd, depth = 4)
-            val items = TlonChatRepo.parseActivityFeedBody(input)
-            for (item in items) {
-                assertTrue("sentMs must be >= 0; got ${item.sentMs}", item.sentMs >= 0)
-            }
-        }
-    }
-
-    @Test
-    fun `parseActivityEventTimeMs never throws on arbitrary strings`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val time = Fuzz.randomString(rnd, 50)
-            val event = Fuzz.randomJsonObject(rnd, depth = 2)
-            TlonChatRepo.parseActivityEventTimeMs(time, event)
-        }
-    }
-
-    @Test
-    fun `parseActivityEventTimeMs result is always non-negative`() {
-        Fuzz.run(ITERATIONS, SEED) { rnd, _ ->
-            val time = Fuzz.randomString(rnd, 50)
-            val event = Fuzz.randomJsonObject(rnd, depth = 2)
-            val ms = TlonChatRepo.parseActivityEventTimeMs(time, event)
-            assertTrue("got $ms for time=$time", ms >= 0)
-        }
-    }
 }

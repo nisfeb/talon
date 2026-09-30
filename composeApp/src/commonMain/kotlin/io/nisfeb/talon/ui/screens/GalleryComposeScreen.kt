@@ -29,7 +29,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -181,7 +181,9 @@ fun GalleryComposeScreen(
                             add(buildJsonObject {
                                 put("inline", buildJsonArray {
                                     lines.forEachIndexed { i, l ->
-                                        if (i > 0) add(buildJsonObject { put("break", buildJsonObject { }) })
+                                        // null, as every other story here writes it:
+                                        // the ship's story parser takes no object.
+                                        if (i > 0) add(buildJsonObject { put("break", kotlinx.serialization.json.JsonNull) })
                                         add(JsonPrimitive(l))
                                     }
                                 })

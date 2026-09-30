@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -8,6 +9,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -35,7 +39,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -70,6 +74,8 @@ import io.nisfeb.talon.calendar.CalendarAvailability
 import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.agenda
+import io.nisfeb.talon.calendar.agendaDay
+import io.nisfeb.talon.calendar.agendaHeading
 import io.nisfeb.talon.calendar.bounds
 import io.nisfeb.talon.calendar.tasksInRange
 import io.nisfeb.talon.calendar.dueDate
@@ -83,6 +89,7 @@ import io.nisfeb.talon.ui.HomeLayout
 import io.nisfeb.talon.ui.HomePlace
 import io.nisfeb.talon.ui.HomeWidget
 import io.nisfeb.talon.ui.HomeWidgetKind
+import io.nisfeb.talon.ui.columnPitch
 import io.nisfeb.talon.ui.droppedAt
 import io.nisfeb.talon.ui.keepEdgeGesture
 import io.nisfeb.talon.ui.resizedRows
@@ -93,6 +100,7 @@ import io.nisfeb.talon.ui.SkyClock
 import io.nisfeb.talon.ui.Solar
 import kotlinx.coroutines.delay
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.plus
@@ -172,6 +180,9 @@ fun HomeScreen(
      *  widget. Empty where the host has not wired invitations. */
     invites: List<String> = emptyList(),
     onOpenInvites: () -> Unit = {},
+    /** The analyst's open actions, for the New widget. */
+    actions: List<io.nisfeb.talon.ui.NewAction> = emptyList(),
+    onOpenAction: (String) -> Unit = {},
     onOpenConversation: (whom: String) -> Unit,
     onOpenChats: () -> Unit,
     onOpenMailThread: (threadId: String) -> Unit,
@@ -217,7 +228,10 @@ fun HomeScreen(
         onLayoutChanged(layout.with(w))
     }
 
-    BoxWithConstraints(modifier.fillMaxSize()) {
+    // Every screen pads for the safe area itself, and this one did not:
+    // on a phone with a notch it ran up under the clock. A parent that
+    // has already padded consumes the inset, so this adds nothing there.
+    BoxWithConstraints(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         val placedWidgets = remember(layout) {
             layout.shown.sortedWith(compareBy({ it.row }, { it.col }))
         }
@@ -229,10 +243,7 @@ fun HomeScreen(
         // zero is a widget that cannot be moved sideways at all.
         val density = LocalDensity.current
         val rowPitch = with(density) { HOME_ROW_UNIT.toPx() }
-        val colPitch = with(density) {
-            val inner = maxWidth - PAGE_PADDING * 2
-            ((inner - GRID_GAP * (HOME_COLUMNS - 1)) / HOME_COLUMNS + GRID_GAP).toPx()
-        }
+        val colPitch = with(density) { columnPitch(maxWidth.toPx(), PAGE_PADDING.toPx(), GRID_GAP.toPx()) }
         // Held rather than captured, for the same reason as everything
         // else a gesture reads: pointerInput keeps whatever it was
         // given when the node was made.
@@ -374,6 +385,8 @@ fun HomeScreen(
                         onOpenStatuses = onOpenStatuses,
                         invites = invites,
                         onOpenInvites = onOpenInvites,
+                        actions = actions,
+                        onOpenAction = onOpenAction,
                         onLongPress = { editing = true },
                     )
 
@@ -595,6 +608,7 @@ private fun BoxScope.ResizeHandles(
             Modifier.align(Alignment.CenterEnd),
             grip,
             label = "Width of ${title(widget.kind)}",
+            cursor = io.nisfeb.talon.ui.ResizeLeftRightIcon,
             onStart = ::freeze,
         ) { total ->
             resize(widget.copy(span = resizedSpan(startSpan, total.x, startCell, HOME_COLUMNS)))
@@ -604,6 +618,7 @@ private fun BoxScope.ResizeHandles(
         Modifier.align(Alignment.BottomCenter),
         grip,
         label = "Height of ${title(widget.kind)}",
+        cursor = io.nisfeb.talon.ui.ResizeUpDownIcon,
         onStart = ::freeze,
     ) { total ->
         val rows = resizedRows(startRows, total.y, rowUnitPx)
@@ -614,6 +629,7 @@ private fun BoxScope.ResizeHandles(
         grip,
         corner = true,
         label = "Size of ${title(widget.kind)}",
+        cursor = io.nisfeb.talon.ui.ResizeCornerIcon,
         onStart = ::freeze,
     ) { total ->
         if (square) {
@@ -672,6 +688,7 @@ private fun Grip(
     modifier: Modifier,
     color: androidx.compose.ui.graphics.Color,
     label: String,
+    cursor: androidx.compose.ui.input.pointer.PointerIcon,
     corner: Boolean = false,
     onStart: () -> Unit = {},
     onDrag: (Offset) -> Unit,
@@ -686,6 +703,7 @@ private fun Grip(
             // which makes it a grip that leaves the app instead of
             // being dragged.
             .keepEdgeGesture()
+            .pointerHoverIcon(cursor)
             .semantics { contentDescription = label }
             .pointerInput(Unit) {
                 var total = Offset.Zero
@@ -748,12 +766,14 @@ private fun WidgetBody(
     onOpenStatuses: () -> Unit,
     invites: List<String>,
     onOpenInvites: () -> Unit,
+    actions: List<io.nisfeb.talon.ui.NewAction>,
+    onOpenAction: (String) -> Unit,
     onLongPress: () -> Unit,
 ) {
     when (widget.kind) {
         HomeWidgetKind.NEEDS -> NewPanel(
-            recent, unreadBy, mail, invites, contacts, ourShip, widget,
-            onOpenConversation, onOpenMailThread, onOpenInvites, onLongPress,
+            recent, unreadBy, mail, invites, actions, contacts, ourShip, widget,
+            onOpenConversation, onOpenMailThread, onOpenInvites, onOpenAction, onLongPress,
         )
         HomeWidgetKind.CLOCK -> ClockWeatherPanel(
             dialSizeFor(widget.rows),
@@ -977,7 +997,7 @@ private fun MailPanel(
     Panel("Mail", Icons.Filled.MailOutline, ("Inbox" to onAll).takeIf { mail != null }) {
         when {
             mail == null || availability == MailAvailability.NO_GRUBBERY ||
-                availability == MailAvailability.OLD_GRUBBERY ->
+                availability == MailAvailability.NOT_FETCHED ->
                 Empty("This ship has no mail app yet.")
 
             availability == MailAvailability.SIGNED_OUT -> Empty("Signed out of the ship.")
@@ -1258,15 +1278,9 @@ private fun CalendarPanel(
     val shares = calendar?.shares?.collectAsState()?.value
     val offers = shares?.offers?.size ?: 0
     val readOnly = shares?.readOnly.orEmpty()
-    // Ticked here, until the refresh after the poke drops the line.
-    var ticked by remember { mutableStateOf(setOf<String>()) }
-    // Reconcile, don't clear: a tick the ship has caught up with (done,
-    // or dropped from the list) is its truth now; one it hasn't stays
-    // optimistic instead of flickering off on any unrelated refresh.
-    LaunchedEffect(rawTasks) {
-        val byId = rawTasks.associateBy { it.id }
-        ticked = ticked.filter { byId[it]?.done == false }.toSet()
-    }
+    // Ticks on their way to the ship, kept by the calendar, not here:
+    // kept here, they were lost by going to another section and back.
+    val ticking = calendar?.ticking?.collectAsState()?.value.orEmpty()
     val scope = rememberCoroutineScope()
     var installing by remember { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
@@ -1279,7 +1293,7 @@ private fun CalendarPanel(
         }
     }
     val action = onOpen?.takeIf { availability == CalendarAvailability.PRESENT }?.let { "Calendar" to it }
-    Panel("Today", TalonIcons.CalendarToday, action, scrollable = true) {
+    Panel(agendaHeading(range), TalonIcons.CalendarToday, action, scrollable = true) {
         when {
             calendar == null -> Empty("This host has no calendar.")
 
@@ -1332,15 +1346,8 @@ private fun CalendarPanel(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             androidx.compose.material3.Checkbox(
-                                checked = t.id in ticked,
-                                onCheckedChange = { done ->
-                                    ticked = if (done) ticked + t.id else ticked - t.id
-                                    scope.launch {
-                                        if (!calendar!!.setDone(t.id, done)) {
-                                            ticked = if (done) ticked - t.id else ticked + t.id
-                                        }
-                                    }
-                                },
+                                checked = ticking[t.id] ?: t.done,
+                                onCheckedChange = { done -> scope.launch { calendar!!.setDone(t.id, done) } },
                                 enabled = t.cal !in readOnly,
                                 modifier = Modifier.size(32.dp),
                             )
@@ -1357,12 +1364,25 @@ private fun CalendarPanel(
                             )
                         }
                     }
+                    // A line where the day turns over, so the first
+                    // event of tomorrow reads as tomorrow's at a glance.
+                    // Anything already running counts as today's.
+                    var lastDay: LocalDate? = null
                     shown.forEach { row ->
+                        val starts = row.bounds(zone).first
+                        val day = agendaDay(starts, tick, zone)
+                        if (lastDay != null && day != lastDay) {
+                            HorizontalDivider(
+                                Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                            )
+                        }
+                        lastDay = day
                         EventRow(
                             row = row,
                             whenLabel = whenLabel(row, tick, zone, twentyFourHour),
                             colour = calendarHexColor(row.color ?: calColors[row.cal]),
-                            ongoing = row.bounds(zone).first <= tick,
+                            ongoing = starts <= tick,
                             onClick = onOpen ?: {},
                             onLongPress = onLongPress,
                         )
@@ -1464,12 +1484,14 @@ private fun NewPanel(
     unreadBy: Map<String, io.nisfeb.talon.data.UnreadEntity>,
     mail: MailRepo?,
     invites: List<String>,
+    actions: List<io.nisfeb.talon.ui.NewAction>,
     contacts: ContactMap,
     ourShip: String,
     widget: HomeWidget,
     onOpenConversation: (String) -> Unit,
     onOpenMailThread: (String) -> Unit,
     onOpenInvites: () -> Unit,
+    onOpenAction: (String) -> Unit,
     onLongPress: () -> Unit,
 ) {
     val page = mail?.page?.collectAsState()?.value
@@ -1477,7 +1499,7 @@ private fun NewPanel(
         page?.threads.orEmpty().filter { it.unread }
             .map { io.nisfeb.talon.ui.NewMail(it.id, it.from, it.subject, it.last) }
     }
-    val rows = remember(recent, unreadBy, mailNeeds, invites, ourShip, widget.count) {
+    val rows = remember(recent, unreadBy, mailNeeds, invites, actions, ourShip, widget.count) {
         io.nisfeb.talon.ui.whatsNew(
             latest = recent,
             unreadBy = unreadBy,
@@ -1487,6 +1509,7 @@ private fun NewPanel(
             limit = widget.count,
             label = { contacts.conversationLabel(it) },
             preview = { preview(it, contacts, ourShip) },
+            actions = actions,
         )
     }
     Panel("New", Icons.Filled.Notifications) {
@@ -1506,6 +1529,7 @@ private fun NewPanel(
                         when (row.kind) {
                             io.nisfeb.talon.ui.NewKind.MAIL -> onOpenMailThread(row.target)
                             io.nisfeb.talon.ui.NewKind.INVITE -> onOpenInvites()
+                            io.nisfeb.talon.ui.NewKind.ACTION -> onOpenAction(row.target)
                             else -> onOpenConversation(row.target)
                         }
                     },

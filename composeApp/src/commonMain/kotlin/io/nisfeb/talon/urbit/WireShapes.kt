@@ -310,6 +310,54 @@ internal fun aGroupMetaUpdate(
     })
 }
 
+/** a-group channel diff: `{channel: {nest, a-channel}}`. */
+internal fun aGroupChannel(nest: String, aChannel: JsonObject): JsonObject = buildJsonObject {
+    put("channel", buildJsonObject {
+        put("nest", nest)
+        put("a-channel", aChannel)
+    })
+}
+
+/** a-channel: roles that may read it added, or taken away. None left means every member reads it. */
+internal fun aChannelReaders(add: Boolean, roles: Set<String>): JsonObject = buildJsonObject {
+    put(if (add) "add-readers" else "del-readers", buildJsonArray { roles.sorted().forEach { add(JsonPrimitive(it)) } })
+}
+
+/**
+ * a-channel edit, of the title and description. The ship's parser takes
+ * the whole channel, every key, so the rest goes back as the record had it.
+ */
+internal fun aChannelEdit(c: AdminChannel, title: String, description: String): JsonObject = buildJsonObject {
+    put("edit", buildJsonObject {
+        put("meta", buildJsonObject {
+            put("title", title)
+            put("description", description)
+            put("image", c.image)
+            put("cover", c.cover)
+        })
+        put("added", c.addedMs)
+        put("section", c.section)
+        put("readers", buildJsonArray { c.readers.sorted().forEach { add(JsonPrimitive(it)) } })
+        put("join", c.join)
+    })
+}
+
+/** a-channel delete: the channel leaves the group. */
+internal fun aChannelDelete(): JsonObject = buildJsonObject { put("del", JsonNull) }
+
+/**
+ * %channels channel-action-2: roles that may post added, or taken away.
+ * None left means every member may post.
+ */
+internal fun channelWriters(nest: String, add: Boolean, roles: Set<String>): JsonObject = buildJsonObject {
+    put("channel", buildJsonObject {
+        put("nest", nest)
+        put("action", buildJsonObject {
+            put(if (add) "add-writers" else "del-writers", buildJsonArray { roles.sorted().forEach { add(JsonPrimitive(it)) } })
+        })
+    })
+}
+
 /** a-group delete. */
 internal fun aGroupDelete(): JsonObject =
     buildJsonObject { put("delete", JsonNull) }

@@ -19,7 +19,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -43,6 +43,7 @@ import io.nisfeb.talon.ui.latticeRow
 import io.nisfeb.talon.ui.mailRow
 import io.nisfeb.talon.ui.permitsUrl
 import kotlinx.coroutines.launch
+import io.nisfeb.talon.util.runSuspendCatching
 
 /**
  * What this ship's Grubbery apps are doing: whether each answers, what
@@ -57,12 +58,20 @@ import kotlinx.coroutines.launch
 fun AppsSettingsScreen(
     mail: MailRepo?,
     calendar: CalendarRepo?,
+    /** The pipe into orrery on the ship; null where no ship is known. */
+    orrery: io.nisfeb.talon.orrery.OrreryRepo? = null,
+    /** Armillary on the ship, where the AI features buy their inference; null where no ship is known. */
+    armillary: io.nisfeb.talon.armillary.ArmillaryRepo? = null,
     /** Probes whether Grubbery is on the ship; null where no ship is known. */
     latticeInstalled: (suspend () -> Boolean)?,
     /** Probes whether %groups is on the ship, which chat itself runs on. */
     groupsInstalled: (suspend () -> Boolean)? = null,
     /** Installs %groups from its own publisher. Null hides the offer. */
     onInstallGroups: (suspend () -> Result<Unit>)? = null,
+    /** Adds orrery to the ship's Grubbery shell. Null hides the offer. */
+    onAddOrrery: (suspend () -> Result<Unit>)? = null,
+    /** Adds armillary the same way. Null hides the offer. */
+    onAddArmillary: (suspend () -> Result<Unit>)? = null,
     /** This ship's base URL, for the permits page. Null when signed out. */
     shipUrl: String?,
     onBack: () -> Unit,
@@ -79,6 +88,11 @@ fun AppsSettingsScreen(
     val mailError by (mail?.error ?: noError).collectAsState()
     val calendarAvailability = calendar?.availability?.collectAsState()?.value
     val calendarError by (calendar?.error ?: noError).collectAsState()
+    val orreryAvailability = orrery?.availability?.collectAsState()?.value
+    val orreryError by (orrery?.error ?: noError).collectAsState()
+    val orreryOn = orrery?.enabled?.collectAsState()?.value ?: false
+    val armillaryAvailability = armillary?.availability?.collectAsState()?.value
+    val armillaryError by (armillary?.error ?: noError).collectAsState()
 
     var lattice by remember { mutableStateOf<Boolean?>(null) }
     var groups by remember { mutableStateOf<Boolean?>(null) }
@@ -86,10 +100,10 @@ fun AppsSettingsScreen(
     var note by remember { mutableStateOf<String?>(null) }
 
     suspend fun probeLattice() {
-        lattice = latticeInstalled?.let { runCatching { it() }.getOrNull() }
+        lattice = latticeInstalled?.let { runSuspendCatching { it() }.getOrNull() }
     }
     suspend fun probeGroups() {
-        groups = groupsInstalled?.let { runCatching { it() }.getOrNull() }
+        groups = groupsInstalled?.let { runSuspendCatching { it() }.getOrNull() }
     }
     LaunchedEffect(latticeInstalled, groupsInstalled) {
         probeLattice()
@@ -98,36 +112,48 @@ fun AppsSettingsScreen(
 
     val rows = buildList {
         if (mailAvailability != null) add(mailRow(mailAvailability, mailError))
-        if (calendarAvailability != null) add(calendarRow(calendarAvailability, calendarError, lattice))
+        if (calendarAvailability != null) add(calendarRow(calendarAvailability, calendarError))
         add(latticeRow(lattice))
         add(groupsRow(groups))
+        if (orreryAvailability != null) add(io.nisfeb.talon.ui.orreryRow(orreryAvailability, orreryError))
+        if (armillaryAvailability != null) add(io.nisfeb.talon.ui.armillaryRow(armillaryAvailability, armillaryError))
     }
 
     /**
      * Install, then re-ask every app whether it is there now. One action:
-     * mail, the calendar and lattice all arrive in the Grubbery desk, so
-     * there is nothing else left to install.
+     * mail, the calendar and lattice are all the Grubbery shell's stock
+     * desks, which the one install fetches together.
      */
+    fun installFor(row: AppRow): (suspend () -> Result<Unit>)? = when (row.install) {
+        io.nisfeb.talon.ui.AppInstall.GROUPS -> onInstallGroups
+        io.nisfeb.talon.ui.AppInstall.GRUBBERY -> installGrubbery
+        io.nisfeb.talon.ui.AppInstall.ORRERY -> onAddOrrery
+        io.nisfeb.talon.ui.AppInstall.ARMILLARY -> onAddArmillary
+        null -> null
+    }
     fun install(row: AppRow) {
-        val action = when (row.install) {
-            io.nisfeb.talon.ui.AppInstall.GROUPS -> onInstallGroups
-            io.nisfeb.talon.ui.AppInstall.GRUBBERY -> installGrubbery
-            null -> null
-        } ?: return
+        val action = installFor(row) ?: return
         busy = row.name
         note = null
         scope.launch {
             action().fold(
                 onSuccess = {
-                    note = if (row.install == io.nisfeb.talon.ui.AppInstall.GROUPS) "Installed Groups."
-                    else "Installed Grubbery. The apps arrive with it."
+                    note = when (row.install) {
+                        io.nisfeb.talon.ui.AppInstall.GROUPS -> "Installed Groups."
+                        io.nisfeb.talon.ui.AppInstall.GRUBBERY -> "Grubbery and its apps are here."
+                        // The desk is on the ship; what it may reach is
+                        // the owner's to allow, on the ship's own page.
+                        else -> "Added ${row.name} to your Grubbery shell. Open it on your ship to approve what it reaches."
+                    }
                 },
                 onFailure = { note = it.message ?: "The install did not finish." },
             )
             probeLattice()
             probeGroups()
-            runCatching { mail?.refresh() }
-            runCatching { calendar?.refreshAll() }
+            runSuspendCatching { mail?.refresh() }
+            runSuspendCatching { calendar?.refreshAll() }
+            runSuspendCatching { orrery?.probe() }
+            runSuspendCatching { armillary?.refresh() }
             busy = null
         }
     }
@@ -151,8 +177,10 @@ fun AppsSettingsScreen(
                         busy = "all"
                         probeLattice()
                         probeGroups()
-                        runCatching { mail?.refresh() }
-                        runCatching { calendar?.refreshAll() }
+                        runSuspendCatching { mail?.refresh() }
+                        runSuspendCatching { calendar?.refreshAll() }
+                        runSuspendCatching { orrery?.probe() }
+                        runSuspendCatching { armillary?.refresh() }
                         busy = null
                     }
                 },
@@ -199,7 +227,8 @@ fun AppsSettingsScreen(
                     }
                     if (busy == row.name) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else if (row.canInstall && (if (row.install == io.nisfeb.talon.ui.AppInstall.GROUPS) onInstallGroups != null else installGrubbery != null)) {
+                    } else if (installFor(row) != null) {
+                        // Offered only where the tap has something to run.
                         TextButton(enabled = busy == null, onClick = { install(row) }) { Text("Install") }
                     }
                 }
@@ -209,6 +238,27 @@ fun AppsSettingsScreen(
             note?.let {
                 Spacer(Modifier.height(8.dp))
                 Text(it, style = MaterialTheme.typography.bodySmall)
+            }
+
+            // Feeding orrery, and which model reads for it, live under
+            // Settings > AI, beside the rest of the AI configuration.
+            if (orrery != null && orreryAvailability == io.nisfeb.talon.orrery.OrreryAvailability.PRESENT) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (orreryOn) "Talon is feeding Orrery. Its settings are under AI." else "Feed Orrery from Settings, under AI.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // Buying inference is an AI setting, not an app setting, so
+            // this says where it lives rather than putting it here.
+            if (armillaryAvailability == io.nisfeb.talon.armillary.ArmillaryAvailability.PRESENT) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Armillary is a provider under AI.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             Spacer(Modifier.height(16.dp))
@@ -240,7 +290,6 @@ fun AppsSettingsScreen(
 private fun stateWord(state: AppState): String = when (state) {
     AppState.WORKING -> "working"
     AppState.MISSING -> "not installed"
-    AppState.OUTDATED -> "out of date"
     AppState.SIGNED_OUT -> "signed out"
     AppState.UNKNOWN -> "unknown"
 }

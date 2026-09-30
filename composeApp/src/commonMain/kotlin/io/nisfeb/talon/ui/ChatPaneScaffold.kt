@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -74,7 +73,7 @@ internal fun PaneDragHandle(
         modifier = modifier
             .fillMaxHeight()
             .width(6.dp)
-            .pointerHoverIcon(PointerIcon.Hand)
+            .pointerHoverIcon(ResizeLeftRightIcon)
             .draggable(
                 orientation = Orientation.Horizontal,
                 state = rememberDraggableState { delta -> onDragDelta(delta) },

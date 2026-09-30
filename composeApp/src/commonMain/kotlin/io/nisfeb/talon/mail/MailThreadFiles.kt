@@ -35,6 +35,20 @@ internal class MailThreadFiles(private val dir: Path, private val keep: Int = KE
         }.onFailure { Log.w(TAG, "thread not stored", it) }
     }
 
+    /**
+     * The stored thread holding [msgId], or null. A draft says which
+     * message it answers and never which thread that is in, and auspex
+     * keeps no index from one to the other, so the answer is looked for
+     * among the threads this install has read. A reply is always one of
+     * them: the thread had to be open to reply to it.
+     */
+    fun holding(msgId: String): MailThread? = runCatching {
+        fs.list(dir).asSequence()
+            .filter { it.name.endsWith(".json") }
+            .mapNotNull { f -> runCatching { AuspexApi.json.decodeFromString(MailThread.serializer(), fs.read(f) { readUtf8() }) }.getOrNull() }
+            .firstOrNull { t -> t.messages.any { it.id == msgId } }
+    }.getOrNull()
+
     fun delete(id: String) {
         runCatching { fs.delete(file(id)) }
     }

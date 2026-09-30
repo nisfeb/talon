@@ -156,7 +156,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         add(Tool(
             spec = ToolSpec(
                 "send_mail",
-                "Send a signed mail from the user. Recipients are ships (@p); resolve names with find_person first. To answer a thread, give thread and write to its other participants. To mail an invitation, give event: the invite goes along as an .ics file the recipient can add to their calendar.",
+                "Send a signed mail from the user. Recipients are ships (@p); resolve names with find_person first. To answer a thread, give thread and write to the reply_to that read_mail shows for it: the sender and recipients of its newest message, so someone taken off it stays off. To mail an invitation, give event: the invite goes along as an .ics file the recipient can add to their calendar.",
                 toolSchema(
                     "to" to ("string" to "Recipient ships, comma-separated."),
                     "subject" to ("string" to "The subject line; for a reply, the thread's own subject is used when this is blank."),
@@ -189,7 +189,9 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                     .getOrElse { return@Tool "Error: the invite could not be stored: ${it.message}" }
                 attachments += io.nisfeb.talon.mail.AttachRef("event.ics", "text/calendar", hash)
             }
-            if (mail.send(to, subject, body, thread?.messages?.lastOrNull()?.id, attachments)) {
+            // The newest honest message, as the thread screen answers: the
+            // last in the list could be a forged copy, which the ship refuses.
+            if (mail.send(to, subject, body, thread?.let { io.nisfeb.talon.mail.newestAnswerable(it.messages)?.id }, attachments)) {
                 "Mailed ${to.joinToString()}${if (attachments.isNotEmpty()) " with the invite attached" else ""}."
             } else {
                 "The ship did not send it: ${mail.error.value ?: "unknown reason"}."
@@ -235,14 +237,14 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         add(Tool(
             spec = ToolSpec(
                 "read_mail",
-                "Read one mail thread: each message with who sent it to whom, when, the subject, the body and its attachments, plus the thread's participants and a link that opens it.",
+                "Read one mail thread: each message with who sent it to whom, when, the subject, the body and its attachments, plus the thread's participants, who a reply goes to (reply_to), and a link that opens it.",
                 toolSchema("thread" to ("string" to "The thread id from list_mail or search_mail."), required = listOf("thread")),
             ),
             write = false,
         ) { args ->
             val id = args.text("thread")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: thread is required."
             val t = mail.loadThread(id) ?: return@Tool "No thread $id${mail.error.value?.let { ": $it" } ?: ""}."
-            formatThread(t, a.zone())
+            formatThread(t, a.zone(), mail.ourShip)
         })
     }
     a.calendar?.let { cal ->
@@ -321,10 +323,24 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 zone = if (minute != null) zoneArg else null,
                 tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
             )
-            if (cal.poke(eventBody(draft))) {
-                "Added \"$name\" on $date${if (time != null) " at $time${zoneArg?.let { " $it" } ?: ""}" else ""} to calendar ${calId ?: "default"}."
-            } else {
-                "The calendar did not take it."
+            if (!cal.pokeEvent(eventBody(draft))) return@Tool "The calendar did not take it."
+            val target = cal.calendars.value.firstOrNull { it.id == calId }
+            val where = target?.let { "the ${it.name.ifBlank { it.id }} calendar" } ?: "the default calendar"
+            val whenText = "$date${if (time != null) " at $time${zoneArg?.let { " $it" } ?: ""}" else ""}"
+            // Read back before saying it is there: the ship answers a write
+            // before it applies it, and "Added" went to the owner for an
+            // event they then could not find. A repeat's first time can be
+            // weeks on (the nth weekday of the month), so look that far.
+            val zone = zoneArg?.let { TimeZone.of(it) } ?: a.zone()
+            val from = date.atTime(0, 0).toInstant(zone).toEpochMilliseconds() - 86_400_000L
+            val seen = cal.windowRows(from, from + 40 * 86_400_000L)
+            val synced = target?.kind?.takeIf { it == "google" || it == "caldav" }?.let {
+                " It is synced there: it goes out to the other side on the next sync, which sync_calendars runs now."
+            }.orEmpty()
+            when {
+                seen == null -> "The calendar took \"$name\" for $whenText on $where, but did not answer when asked whether it is there. Check with list_events before telling the owner it is." + synced
+                seen.any { it.name == name && (calId == null || it.cal == calId) } -> "Added \"$name\" on $whenText to $where." + synced
+                else -> "The calendar took \"$name\" for $whenText on $where, but it is not showing there yet. Do not tell the owner it is added: check with list_events in a moment." + synced
             }
         })
         add(Tool(
@@ -417,13 +433,13 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                     date = newDate ?: at.date,
                     minuteOfDay = newMinute ?: (at.hour * 60 + at.minute),
                 )
-                if (!cal.poke(eventBody(one))) return@Tool "The calendar did not take it."
-                if (!cal.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })) {
+                if (!cal.pokeEvent(eventBody(one), readBack = false)) return@Tool "The calendar did not take it."
+                if (!cal.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })) {
                     return@Tool "Half done: the changed \"${d.name}\" was added, but the original occurrence on $occ is still there too — the calendar refused the skip. Skip it by hand, or try again."
                 }
                 return@Tool "Updated \"${d.name}\" for that occurrence."
             }
-            if (cal.poke(eventBody(d, id))) "Updated \"${d.name}\"." else "The calendar did not take it."
+            if (cal.pokeEvent(eventBody(d, id))) "Updated \"${d.name}\"." else "The calendar did not take it."
         })
         add(Tool(
             spec = ToolSpec(
@@ -446,9 +462,9 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             if (occText != null && d?.repeats == true) {
                 val occ = parseDate(occText) ?: return@Tool "Error: occurrence must be YYYY-MM-DD."
                 val row = findOccurrence(cal, id, occ, a.zone()) ?: return@Tool "Error: \"$name\" has no occurrence on $occ."
-                return@Tool if (cal.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })) "Skipped \"$name\" on $occ." else "The calendar did not take it."
+                return@Tool if (cal.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })) "Skipped \"$name\" on $occ." else "The calendar did not take it."
             }
-            if (cal.poke(buildJsonObject { put("action", "del-event"); put("id", id) })) {
+            if (cal.pokeEvent(buildJsonObject { put("action", "del-event"); put("id", id) })) {
                 "Deleted \"$name\"${if (d?.repeats == true) " and every occurrence" else ""}."
             } else {
                 "The calendar did not take it."
@@ -482,7 +498,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 cat = EventCat.TODO, date = due ?: today, due = due,
                 tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
             )
-            if (cal.poke(eventBody(draft))) "Added task \"$name\"${if (due != null) " due $due" else ""}." else "The calendar did not take it."
+            if (cal.pokeEvent(eventBody(draft))) "Added task \"$name\"${if (due != null) " due $due" else ""}." else "The calendar did not take it."
         })
         add(Tool(
             spec = ToolSpec(
@@ -493,7 +509,8 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             write = false,
         ) { args ->
             val withDone = args.text("include_done") == "true"
-            val all = taskOrder(cal.tasks.value.orEmpty().filter { withDone || !it.done })
+            val tasks = cal.tasksOrAsk() ?: return@Tool "The calendar did not answer${cal.error.value?.let { ": $it" } ?: ""}."
+            val all = taskOrder(tasks.filter { withDone || !it.done })
             // Calendar by NAME, the way list_events shows it — the raw id
             // is opaque to the model and the user alike.
             val names = cal.calendars.value.associate { it.id to it.name.ifBlank { it.id } }
@@ -514,7 +531,8 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         ) { args ->
             val q = args.text("task")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: task is required."
             val reopen = args.text("reopen") == "true"
-            val pool = cal.tasks.value.orEmpty().filter { it.done == reopen }
+            val tasks = cal.tasksOrAsk() ?: return@Tool "The calendar did not answer${cal.error.value?.let { ": $it" } ?: ""}."
+            val pool = tasks.filter { it.done == reopen }
             val hits = pool.filter { it.id == q }.ifEmpty { pool.filter { it.name.contains(q, ignoreCase = true) } }
             when {
                 hits.isEmpty() -> "No ${if (reopen) "done" else "open"} task matches \"$q\"."
@@ -666,6 +684,14 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
     }
 }
 
+/**
+ * The tasks, asked for where none have been read yet, or null where the
+ * calendar still has not answered: told "no open tasks" then, a loop
+ * running unattended went on as if the user had none.
+ */
+private suspend fun CalendarRepo.tasksOrAsk(): List<io.nisfeb.talon.calendar.CalendarTask>? =
+    tasks.value ?: run { refreshTasks(); tasks.value }
+
 private fun JsonObject.text(key: String): String? = this[key]?.let { (it as? JsonPrimitive)?.contentOrNull }
 private fun JsonObject.int(key: String): Int? = this[key]?.let { (it as? JsonPrimitive)?.contentOrNull?.toIntOrNull() }
 
@@ -680,12 +706,16 @@ internal const val READ_MAIL_MAX_MESSAGES = 20
 /** One mail thread as the model reads it: header, then the last
  *  [READ_MAIL_MAX_MESSAGES] messages, each body capped. Older messages
  *  are summarized as a count so the model knows they exist. */
-internal fun formatThread(t: io.nisfeb.talon.mail.MailThread, zone: TimeZone): String {
+internal fun formatThread(t: io.nisfeb.talon.mail.MailThread, zone: TimeZone, us: String? = null): String {
     fun two(n: Int) = n.toString().padStart(2, '0')
     val shown = t.messages.takeLast(READ_MAIL_MAX_MESSAGES)
     val earlier = t.messages.size - shown.size
     return buildString {
         append("thread=${t.id} link=${io.nisfeb.talon.urbit.TalonLink.forMail(t.id)} participants=${t.participants.joinToString(", ")}")
+        // Who a reply goes to, worked out here rather than left to the
+        // model: from the participants it put back whoever was taken off.
+        val answering = io.nisfeb.talon.mail.newestAnswerable(t.messages)
+        if (answering != null) append(" reply_to=${io.nisfeb.talon.mail.replyAudience(t.messages, answering.id, us).joinToString(", ")}")
         if (t.labels.isNotEmpty()) append(" labels=${t.labels.joinToString(", ")}")
         if (earlier > 0) append("\n\n… and $earlier earlier message${if (earlier == 1) "" else "s"} in this thread, not shown; these are the ${shown.size} most recent.")
         shown.forEach { m ->

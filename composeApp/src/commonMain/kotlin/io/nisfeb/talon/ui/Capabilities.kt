@@ -30,6 +30,9 @@ package io.nisfeb.talon.ui
  *  - needsManualImagePaste — D, i; A: the text field's content receiver takes pasted images.
  *  - isImmersiveCallSupported — A, i (full-screen call view); D: the inline roster toggles in place.
  *  - isUrbWebViewSupported — A, i (in-app webview popover); D: hands off to the system browser.
+ *  - isLocalTriageSupported — D (llama.cpp on the JVM, or a local Ollama), A (MediaPipe LLM Inference), i (Apple's system model on iOS 26, else llama.cpp).
+ *  - isLocationSharingSupported — A (LocationManager wakes a receiver on a significant move). D: a computer does not move with you. i: port pending (CLLocationManager significant-change monitoring, Always authorization, Info.plist strings).
+ *  - isArmillaryPurchaseSupported — A, D; i on the US App Store storefront only. Apple allows a button to an outside checkout there and nowhere else (guideline 3.1.1(a)), so elsewhere buying, its pitch and every "top up" go. The card, the balance and the history do not depend on it.
  *
  * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
  * below too — a display name and a per-feature predicate, not flags.
@@ -87,6 +90,17 @@ expect val isBackgroundSchedulingSupported: Boolean
  * (QrLoginScanner.ios.kt). Desktop: false, no camera to assume.
  */
 expect val isQrScanSupported: Boolean
+
+/**
+ * Whether a language model can run on this device for the orrery
+ * triage (see docs/superpowers/specs/2026-09-17-orrery-client-design.md,
+ * section 5). Desktop: true, the llama.cpp JVM binding behind a
+ * child-process probe, or a local Ollama when one is running. Android:
+ * true, MediaPipe LLM Inference with the same Qwen model. iOS: true,
+ * Apple's on-device model on iOS 26 with Apple Intelligence, else
+ * llama.cpp through the XCFramework with the same Qwen model.
+ */
+expect val isLocalTriageSupported: Boolean
 
 /**
  * Whether Talon can run a comet on this machine for someone with no
@@ -306,3 +320,31 @@ expect val isImmersiveCallSupported: Boolean
  * ship's web session already lives.
  */
 expect val isUrbWebViewSupported: Boolean
+
+/**
+ * Whether this device can tell orrery where the owner is when they
+ * move: the phone in their pocket, woken by the platform on a move of
+ * a few hundred metres, with the app closed. Gates the switch under
+ * the orrery triage row. See [LocationSharing].
+ */
+expect val isLocationSharingSupported: Boolean
+
+/**
+ * Whether credit can be bought from inside the app.
+ *
+ * Armillary's card shows the balance, the warning, the history and the
+ * vendor either way; this is the buying. Off, the sheet, the buttons,
+ * the Top up on an empty balance and the pitch for Armillary all go,
+ * and nothing says where else to pay: outside the US, Apple counts
+ * even that as steering away from in-app purchase. Off only on iOS
+ * outside the US storefront; see [outsideCheckoutAllowedOnAppStore].
+ */
+expect val isArmillaryPurchaseSupported: Boolean
+
+/**
+ * Whether an App Store storefront allows a button to a checkout outside
+ * Apple's in-app purchase: the United States one only (App Review
+ * guideline 3.1.1(a)). [storefrontCountry] is StoreKit's ISO 3166-1
+ * alpha-3 code, null when StoreKit has none, which counts as not.
+ */
+fun outsideCheckoutAllowedOnAppStore(storefrontCountry: String?): Boolean = storefrontCountry == "USA"

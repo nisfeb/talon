@@ -1,0 +1,266 @@
+package io.nisfeb.talon.orrery
+
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+import kotlin.test.assertFalse
+
+/**
+ * The parse is the contract every rung is held to. A model that answers
+ * in shape gets its claims through; anything outside orrery's rules is
+ * dropped, not repaired.
+ */
+class ModelExtractorTest {
+    private val me = "~zod"
+    private val index = NameIndex(listOf(
+        KnownBody("person/me", "me", listOf("me"), me),
+        KnownBody("person/sarah", "Sarah", listOf("Sarah"), "~sampel-palnet"),
+        KnownBody("place/johns-machine-shop", "John's Machine Shop", listOf("the shop"), null),
+    ))
+
+    @Test
+    fun `claims in shape come through with refs, caps and a horizon`() {
+        val answer = """{"claims":[
+            {"subject":"person/bus","attr":"location","value":{"ref":"place/johns-machine-shop"},"conf":95,"until_hours":3},
+            {"subject":"person/sarah","attr":"status","value":"stranded","conf":70},
+            {"subject":"person/me","attr":"phone","value":null,"conf":60}
+        ]}"""
+        val out = ModelExtractor.parse(answer, index, author = "~bus", atMs = 1_000L, ourShip = me)
+        assertEquals(3, out.size)
+        val loc = out[0]
+        assertEquals("place/johns-machine-shop", loc.value.jsonObject["ref"]!!.jsonPrimitive.content)
+        assertEquals(80, loc.conf, "a model never claims above 80")
+        assertEquals(1_000L + 3 * 3_600_000, loc.untilMs)
+        assertEquals("person/bus", loc.body?.id, "the author is a stranger, so their body comes along")
+        assertEquals(JsonPrimitive("stranded"), out[1].value)
+        assertEquals(JsonNull, out[2].value)
+    }
+
+    @Test
+    fun `what the rules would refuse is dropped`() {
+        val answer = """{"claims":[
+            {"subject":"person/nobody","attr":"status","value":"x","conf":90},
+            {"subject":"person/sarah","attr":"Bad Attr!","value":"x","conf":90},
+            {"subject":"person/sarah","attr":"spouse","value":{"ref":"person/unknown"},"conf":90},
+            {"subject":"person/sarah","attr":"status","value":"low","conf":10},
+            {"subject":"person/sarah","attr":"status","value":"","conf":90},
+            {"subject":"person/sarah","attr":"status","value":"kept","conf":90}
+        ]}"""
+        val out = ModelExtractor.parse(answer, index, "~bus", 1L, me)
+        assertEquals(listOf("kept"), out.map { it.value.jsonPrimitive.content })
+    }
+
+    @Test
+    fun `a medical or money claim is dropped, whatever it is called`() {
+        // The ship keeps health and income from keys, so this client
+        // cannot write them; under another name it would write them
+        // where every key can read them.
+        val answer = """{"claims":[
+            {"subject":"person/sarah","attr":"health","value":"broken ankle","conf":90},
+            {"subject":"person/sarah","attr":"diagnosis","value":"broken ankle","conf":90},
+            {"subject":"person/sarah","attr":"salary","value":"90k","conf":90},
+            {"subject":"person/sarah","attr":"status","value":"on crutches","conf":90}
+        ]}"""
+        val out = ModelExtractor.parse(answer, index, "~bus", 1L, me, text = "sarah is on crutches, broken ankle, 90k")
+        assertEquals(listOf("status"), out.map { it.attr })
+    }
+
+    @Test
+    fun `not JSON, or not the shape, is nothing`() {
+        assertTrue(ModelExtractor.parse("Sure! Here is", index, "~bus", 1L, me).isEmpty())
+        assertTrue(ModelExtractor.parse("""{"result":[]}""", index, "~bus", 1L, me).isEmpty())
+        assertTrue(ModelExtractor.parse("""{"claims":[]}""", index, "~bus", 1L, me).isEmpty())
+    }
+
+    @Test
+    fun `the prompt lists the bodies and names the author's id`() {
+        val u = ModelExtractor.user(listOf(KnownBody("person/sarah", "Sarah", listOf("Sarah", "wife"), "~sampel-palnet")), "~bus", "person/bus", "2026-09-17T12:00:00Z", "hi")
+        assertTrue("- person/sarah: Sarah (wife, ~sampel-palnet)" in u, u)
+        assertTrue("Author: ~bus (person/bus)" in u)
+        assertTrue(ModelExtractor.GRAMMAR.startsWith("root ::="))
+    }
+
+    @Test
+    fun `whether a medical fact may be written is the ship's to say`() {
+        val claim = """{"claims":[{"subject":"person/sarah","attr":"health","value":"biopsy came back clear","conf":80}]}"""
+        // The ship's schema view for this key does not name health, so
+        // the key may not write it and the claim goes.
+        assertTrue(ModelExtractor.parse(claim, index, "~bus", 1L, me, null, mapOf("person" to listOf("status"))).isEmpty())
+        // A key the owner minted to write what it can never read is
+        // told so by the schema it is served.
+        assertEquals(
+            1,
+            ModelExtractor.parse(claim, index, "~bus", 1L, me, null, mapOf("person" to listOf("status", "health"))).size,
+        )
+    }
+
+    @Test
+    fun `a feeling has somewhere to go, and nothing comes of it`() {
+        // The prompt offers mood so that "want to scream" does not land
+        // on status, which is a circumstance an onlooker would state.
+        val answer = """{"claims":[
+            {"subject":"person/sarah","attr":"status","value":"on jury duty","conf":80},
+            {"subject":"person/sarah","attr":"mood","value":"frustrated","conf":60},
+            {"subject":"person/sarah","attr":"feelings","value":"fed up","conf":60}
+        ]}"""
+        val out = ModelExtractor.parse(answer, index, "~bus", 1L, me)
+        assertEquals(listOf("status" to "on jury duty"), out.map { it.attr to it.value.jsonPrimitive.content })
+    }
+
+    @Test
+    fun `an event is never said to be open`() {
+        val here = NameIndex(listOf(KnownBody("situation/bed-delivery", "Bed delivery", emptyList(), null)))
+        val answer = """{"claims":[
+            {"subject":"situation/bed-delivery","attr":"status","value":"open","conf":90},
+            {"subject":"situation/bed-delivery","attr":"status","value":"closed","conf":90}
+        ]}"""
+        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me)
+        assertEquals(listOf("closed"), out.map { it.value.jsonPrimitive.content }, "open reopens what the ship retired")
+    }
+
+    // One evening being called off is not the series ending, and until
+    // orrery 37 gives an occurrence somewhere to go there is no way to
+    // say the smaller thing. Saying the larger one killed the activity.
+    @Test
+    fun `one evening off does not end the series`() {
+        val here = NameIndex(listOf(KnownBody("activity/pirates-practice", "Pirates practice", emptyList(), null)))
+        val answer = """{"claims":[
+            {"subject":"activity/pirates-practice","attr":"status","value":"cancelled","conf":90},
+            {"subject":"activity/pirates-practice","attr":"location","value":"the rink","conf":90}
+        ]}"""
+        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me, null, emptyMap(), "pirates practice is cancelled tonight, see you at the rink next week")
+        assertEquals(listOf("location"), out.map { it.attr }, "the series is still running")
+    }
+
+    // Multi-valued: a second cancelled evening stands beside the first
+    // rather than replacing it, which is what makes it a list.
+    @Test
+    fun `two evenings off are two rows`() {
+        val here = NameIndex(listOf(KnownBody("activity/pirates-practice", "Pirates practice", emptyList(), null)))
+        val answer = """{"claims":[
+            {"subject":"activity/pirates-practice","attr":"skipped","value":"2026-09-22T22:00:00Z","conf":90},
+            {"subject":"activity/pirates-practice","attr":"skipped","value":"2026-09-29T22:00:00Z","conf":90}
+        ]}"""
+        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me, null, emptyMap(), "no practice tonight or next week")
+        assertEquals(2, out.size)
+        // A status said twice is still a contradiction, and still one row.
+        val twice = """{"claims":[
+            {"subject":"person/sarah","attr":"status","value":"away","conf":90},
+            {"subject":"person/sarah","attr":"status","value":"back","conf":90}
+        ]}"""
+        assertEquals(1, ModelExtractor.parse(twice, index, "~bus", 1L, me).size)
+    }
+
+    // Said of the series, though, it is the series that is meant.
+    @Test
+    fun `a season ending ends the series`() {
+        val here = NameIndex(listOf(KnownBody("activity/pirates-practice", "Pirates practice", emptyList(), null)))
+        val answer = """{"claims":[{"subject":"activity/pirates-practice","attr":"status","value":"cancelled","conf":90}]}"""
+        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me, null, emptyMap(), "that was the last practice, we're done for the season")
+        assertEquals(listOf("cancelled"), out.map { it.value.jsonPrimitive.content })
+    }
+
+    @Test
+    fun `an activity can still be said to be running`() {
+        val here = NameIndex(listOf(KnownBody("activity/pirates-practice", "Pirates practice", emptyList(), null)))
+        val answer = """{"claims":[{"subject":"activity/pirates-practice","attr":"status","value":"active","conf":90}]}"""
+        val out = ModelExtractor.parse(answer, here, "~bus", 1L, me)
+        assertEquals(listOf("active"), out.map { it.value.jsonPrimitive.content })
+    }
+
+    @Test
+    fun `what ends a series and what does not`() {
+        listOf(
+            "practice is over for the season",
+            "we're ending the series",
+            "no more practice after this",
+            "that was the last practice",
+            "the team disbanded",
+            "cancelled permanently",
+        ).forEach { assertTrue(ModelExtractor.endsTheSeries(it), it) }
+        listOf(
+            "practice is cancelled tonight",
+            "no practice this week",
+            "cancelled, the rink is flooded",
+            "skipping tomorrow",
+            "cancelled until further notice",
+        ).forEach { assertFalse(ModelExtractor.endsTheSeries(it), it) }
+    }
+
+    @Test
+    fun `a status that reads like the message before is a reading of it`() {
+        val answer = """{"claims":[{"subject":"person/sarah","attr":"status","value":"stranded, waiting for a tow","conf":80}]}"""
+        val earlier = listOf("car died on route 9, stranded waiting for a tow")
+        assertTrue(
+            ModelExtractor.parse(answer, index, "~bus", 1L, me, null, emptyMap(), "still here", earlier).isEmpty(),
+            "the words are the earlier message's, not this one's",
+        )
+        assertEquals(
+            1,
+            ModelExtractor.parse(answer, index, "~bus", 1L, me, null, emptyMap(), "still stranded", earlier).size,
+        )
+        // A status of the new message stands even when it shares no word
+        // with it: a paraphrase is the whole point of the attribute.
+        val paraphrase = """{"claims":[{"subject":"person/sarah","attr":"status","value":"at the DMV","conf":80}]}"""
+        assertEquals(1, ModelExtractor.parse(paraphrase, index, "~bus", 1L, me, null, emptyMap(), "stuck at the DMV all day", earlier).size)
+        assertEquals(1, ModelExtractor.parse(answer, index, "~bus", 1L, me, null, emptyMap(), "still here").size)
+    }
+
+    @Test
+    fun `the prompt carries the ship's own wording and what was said before`() {
+        val u = ModelExtractor.user(
+            emptyList(), "~bus", "person/bus", "2026-09-17T12:00:00Z", "yes, at 8",
+            notes = mapOf("person" to mapOf("status" to "what they are dealing with now, not a feeling")),
+            context = listOf("~zod" to "dinner thursday?", "~bus" to "which one"),
+        )
+        assertTrue("person.status: what they are dealing with now, not a feeling" in u, u)
+        assertTrue("Claim nothing from these" in u, u)
+        assertTrue("- ~zod: dinner thursday?" in u, u)
+        assertTrue("Message: yes, at 8" in u, u)
+    }
+
+    @Test
+    fun `a fake model's answer goes through extract`() = kotlinx.coroutines.test.runTest {
+        val fake = object : LocalModel {
+            override val rung = "fake"
+            override suspend fun complete(system: String, user: String, grammar: String?, maxTokens: Int) =
+                """{"claims":[{"subject":"person/bus","attr":"location","value":"the airport","conf":75,"until_hours":4}]}"""
+            override fun close() = Unit
+        }
+        val out = ModelExtractor.extract(fake, index, emptyList(), "at the airport, boarding soon", "~bus", 1L, me)
+        assertEquals("location", out.single().attr)
+    }
+
+    // Any failure read as "the model is down" held the item, and one this
+    // input can never get, too long or unreadable, held every item behind
+    // it forever. Only a failure another try may get holds.
+    @Test
+    fun `only an answer another try may get holds the reading`() = kotlinx.coroutines.test.runTest {
+        fun failing(e: Throwable) = object : LocalModel {
+            override val rung = "fake"
+            override suspend fun complete(system: String, user: String, grammar: String?, maxTokens: Int): String = throw e
+            override fun close() = Unit
+        }
+        val index = NameIndex(listOf(KnownBody("person/me", "me", listOf("me"), "~zod")))
+        suspend fun held(e: Throwable): Boolean {
+            var down = false
+            ModelExtractor.extract(failing(e), index, emptyList(), "I'm at the shop", "~bus", 0L, "~zod", onNoAnswer = { down = true })
+            return down
+        }
+        kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(429, "rate limited")))
+        kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(402, "out of credit")))
+        kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(503, "busy")))
+        kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(401, "key revoked")), "a key or a model gone is not the input's fault")
+        kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(404, "no such model")))
+        kotlin.test.assertFalse(held(io.nisfeb.talon.ai.ModelHttpError(400, "context length exceeded")))
+        kotlin.test.assertFalse(held(io.nisfeb.talon.ai.ModelHttpError(413, "too large")))
+        kotlin.test.assertFalse(held(IllegalStateException("input too long")))
+        kotlin.test.assertFalse(held(io.nisfeb.talon.ai.ModelHttpError(403, "openrouter.ai 403: input was flagged by moderation")), "flagged is the input's, forever")
+        kotlin.test.assertTrue(held(io.nisfeb.talon.ai.ModelHttpError(400, "api.anthropic.com 400: Your credit balance is too low")), "a balance is the account's, whatever the status")
+        kotlin.test.assertTrue(held(NotImplementedError("no runtime here")), "an Error is the runtime's, never the input's")
+    }
+}

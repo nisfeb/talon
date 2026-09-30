@@ -42,7 +42,7 @@ import platform.UIKit.UIViewController
 
 /**
  * iOS entry point. The Xcode host (iosApp) calls
- * `MainViewControllerKt.MainViewController(rtc:)` and embeds the
+ * `MainViewControllerKt.MainViewController(rtc:models:)` and embeds the
  * returned controller. Wires the six required App() dependencies with iOS-backed
  * impls; the rest take their commonMain defaults.
  *
@@ -52,7 +52,9 @@ import platform.UIKit.UIViewController
  * projection). Update install is a no-op — App Store owns updates.
  * On-device AI / digest / loops are gated off in Capabilities.ios.kt.
  */
-fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
+fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.NativeModelFactory?): UIViewController {
+    // The orrery triage's models live in Swift; the ladder asks this.
+    io.nisfeb.talon.orrery.IosModels.factory = models
     // Kotlin/Native terminates on any exception that escapes to a foreign
     // (GCD) frame — Apple review hit that as an undiagnosable SIGABRT
     // crash-loop, and the .ips logs carry no Kotlin frames. Write the
@@ -162,8 +164,11 @@ fun MainViewController(rtc: NativeRtcFactory?): UIViewController {
         // move, and the switcher still opens from the Talon logo.
         // Only present when something has registered a back handler, so
         // at the top of the stack the strip isn't sitting over the
-        // conversation rows' avatars waiting to eat a tap.
-        if (IosBackDispatcher.hasHandler) {
+        // conversation rows' avatars waiting to eat a tap. Gone while a
+        // drawer is open, too: it lay over the left edge of the sheet,
+        // where a row's icon is, and ate the tap that would have opened
+        // the section.
+        if (IosBackDispatcher.hasHandler && !io.nisfeb.talon.ui.DrawerOverlay.open) {
         Box(
             Modifier
                 .align(Alignment.CenterStart)

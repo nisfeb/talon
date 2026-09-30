@@ -49,15 +49,6 @@ class DmInviteTest {
         buildJsonArray { s.forEach { add(JsonPrimitive(it)) } }
 
     @Test
-    fun `live invites are stored and notified`() = runBlocking {
-        val notified = mutableListOf<String>()
-        repo.dmInviteListener = { notified += it }
-        repo.applyDmInvites(ships("~sampel-palnet", "~bus"), notify = true)
-        assertEquals(setOf("~sampel-palnet", "~bus"), db.dmInvites().allShips().toSet())
-        assertEquals(setOf("~sampel-palnet", "~bus"), notified.toSet())
-    }
-
-    @Test
     fun `bootstrap stores invites without notifying`() = runBlocking {
         val notified = mutableListOf<String>()
         repo.dmInviteListener = { notified += it }

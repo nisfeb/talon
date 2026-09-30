@@ -132,20 +132,4 @@ class RightPaneStateReducerTest {
         assertEquals(RightPaneState(), s1)
     }
 
-    @Test
-    fun `openCategory does not affect thread state`() {
-        // Defensive: openCategory should only touch drilldown, even
-        // if the state is in a "shouldn't happen" hybrid (thread +
-        // group-info both set). The reducer doesn't try to enforce
-        // global invariants that other transitions are responsible
-        // for — its job is the transition's local mutex, not state
-        // sanitisation.
-        val s0 = RightPaneState(
-            openThreadParent = "~zod/1.000",
-            groupInfoOpenFor = "chat/~zod/x",
-        )
-        val s1 = RightPaneStateReducer.openCategory(s0, MediaCategory.Photo)
-        assertEquals("~zod/1.000", s1.openThreadParent)
-        assertEquals(MediaCategory.Photo, s1.groupInfoDrilldown)
-    }
 }

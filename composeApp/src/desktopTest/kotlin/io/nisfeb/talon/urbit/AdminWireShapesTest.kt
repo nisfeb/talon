@@ -2,7 +2,6 @@ package io.nisfeb.talon.urbit
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -38,6 +37,51 @@ class AdminWireShapesTest {
         assertEquals(JsonNull, body["delete"])
     }
 
+    // ─── channels ─────────────────────────────────────────────
+    // Checked against tlon-apps' parsers: groups-json dejs v7 a-channel
+    // (add-readers/del-readers take role ids, edit takes the whole
+    // channel with every key, del takes null) and channel-json dejs v10
+    // a-channel (add-writers/del-writers take role ids, as %tas).
+
+    private val general = AdminChannel(
+        nest = "chat/~zod/general", title = "General", description = "talk", image = "", cover = "#abcdef",
+        addedMs = 1_700_000_000_000, section = "default", readers = setOf("gardener"), join = true, editable = true,
+    )
+
+    @Test
+    fun `a channel's readers go to the group, wrapped for group-action-4`() {
+        assertEquals(
+            """{"group":{"flag":"~zod/garden","a-group":{"channel":{"nest":"chat/~zod/general","a-channel":{"add-readers":["admin","gardener"]}}}}}""",
+            groupAction4("~zod/garden", aGroupChannel("chat/~zod/general", aChannelReaders(true, setOf("gardener", "admin")))).toString(),
+        )
+        assertEquals("""{"del-readers":["admin"]}""", aChannelReaders(false, setOf("admin")).toString())
+    }
+
+    @Test
+    fun `a channel edit sends every key, the rest as the record had it`() {
+        assertEquals(
+            """{"edit":{"meta":{"title":"Chat","description":"all of it","image":"","cover":"#abcdef"},"added":1700000000000,"section":"default","readers":["gardener"],"join":true}}""",
+            aChannelEdit(general, "Chat", "all of it").toString(),
+        )
+    }
+
+    @Test
+    fun `a channel delete is del null`() {
+        assertEquals("""{"del":null}""", aChannelDelete().toString())
+    }
+
+    @Test
+    fun `who may post goes to channels as channel-action-2`() {
+        assertEquals(
+            """{"channel":{"nest":"chat/~zod/general","action":{"add-writers":["admin"]}}}""",
+            channelWriters("chat/~zod/general", true, setOf("admin")).toString(),
+        )
+        assertEquals(
+            """{"channel":{"nest":"chat/~zod/general","action":{"del-writers":["admin","gardener"]}}}""",
+            channelWriters("chat/~zod/general", false, setOf("gardener", "admin")).toString(),
+        )
+    }
+
     // ─── seat / member ────────────────────────────────────────
 
     @Test
@@ -50,13 +94,6 @@ class AdminWireShapesTest {
         )
         val aSeat = seat["a-seat"]!!.jsonObject
         assertEquals(JsonNull, aSeat["del"])
-    }
-
-    @Test
-    fun `aGroupSeatDel accepts bare ship and adds tilde`() {
-        val body = aGroupSeatDel("sampel")
-        val ships = body["seat"]!!.jsonObject["ships"] as JsonArray
-        assertEquals("~sampel", ships[0].jsonPrimitive.content)
     }
 
     @Test
@@ -98,17 +135,11 @@ class AdminWireShapesTest {
     // ─── entry.ask ───────────────────────────────────────────
 
     @Test
-    fun `aGroupAskResolve approve uses a-ask string approve`() {
-        val body = aGroupAskResolve("~guest", approve = true)
-        val ask = body["entry"]!!.jsonObject["ask"]!!.jsonObject
-        assertEquals("approve", ask["a-ask"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun `aGroupAskResolve deny uses a-ask string deny`() {
-        val body = aGroupAskResolve("~guest", approve = false)
-        val ask = body["entry"]!!.jsonObject["ask"]!!.jsonObject
-        assertEquals("deny", ask["a-ask"]!!.jsonPrimitive.content)
+    fun `aGroupAskResolve says approve or deny in a-ask`() {
+        for ((approve, word) in listOf(true to "approve", false to "deny")) {
+            val ask = aGroupAskResolve("~guest", approve)["entry"]!!.jsonObject["ask"]!!.jsonObject
+            assertEquals(word, ask["a-ask"]!!.jsonPrimitive.content)
+        }
     }
 
     // ─── entry.ban ───────────────────────────────────────────
@@ -162,13 +193,4 @@ class AdminWireShapesTest {
 
     // ─── normalisePatp ─────────────────────────────────────
 
-    @Test
-    fun `normalisePatp adds tilde when missing`() {
-        assertEquals("~sampel", normalisePatp("sampel"))
-    }
-
-    @Test
-    fun `normalisePatp is idempotent on tilded ship`() {
-        assertEquals("~sampel-palnet", normalisePatp("~sampel-palnet"))
-    }
 }

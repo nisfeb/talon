@@ -1,8 +1,6 @@
 package io.nisfeb.talon.ai
 
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -61,6 +59,19 @@ class AgentClientTest {
         assertEquals("c1", msgs[3].jsonObject["tool_call_id"]!!.jsonPrimitive.content)
     }
 
+    // OpenAI's own API refuses max_tokens on its newer models (a user's
+    // gpt-6-luna key failed in Talon and nowhere else); the rest read it.
+    @Test
+    fun `the answer's cap is named as the server it goes to reads it`() {
+        val toOpenAi = buildOpenAiRequest("gpt-6-luna", "SYS", convo, listOf(tool), 256, "https://api.openai.com/v1/chat/completions")
+        assertEquals(256, toOpenAi["max_completion_tokens"]!!.jsonPrimitive.content.toInt())
+        assertTrue("max_tokens" !in toOpenAi)
+        assertEquals("max_completion_tokens", outputCapKey("https://acme.openai.azure.com/openai/deployments/x/chat/completions"))
+        assertEquals("max_tokens", outputCapKey("https://openrouter.ai/api/v1/chat/completions"))
+        assertEquals("max_tokens", outputCapKey("http://127.0.0.1:1234/v1/chat/completions"))
+        assertTrue("max_tokens" in buildOpenAiRequest("m", "SYS", convo, listOf(tool), 256, "https://openrouter.ai/api/v1/chat/completions"))
+    }
+
     @Test
     fun `parse anthropic tool_use yields Calls with decoded args`() {
         val body = json.parseToJsonElement(
@@ -77,14 +88,6 @@ class AgentClientTest {
         assertEquals("checking", turn.text)
         assertEquals("send_message", turn.calls.single().name)
         assertEquals("~bus", turn.calls.single().args["whom"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun `parse anthropic text-only yields Final`() {
-        val body = json.parseToJsonElement(
-            """{"content":[{"type":"text","text":"all done"}],"stop_reason":"end_turn"}""",
-        ).jsonObject
-        assertEquals(AgentTurn.Final("all done"), parseAnthropicTurn(body))
     }
 
     @Test

@@ -2,7 +2,11 @@ package io.nisfeb.talon.mail
 
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import io.ktor.client.HttpClient
@@ -163,5 +167,157 @@ class MailThreadPaneTest {
         assertEquals("2.0 KB", sizeLabel(2048))
         assertTrue(unreadableThreadLine(1).startsWith("1 copy here is"))
         assertTrue(unreadableThreadLine(3).startsWith("3 copies here are"))
+    }
+
+    // Writing a reply puts the composer where the reader was, and the
+    // reader came back from it as a list, not the tree it was left in.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `the tree is still shown when the reader comes back from a reply`() = runComposeUiTest {
+        val repo = repoServing(branching)
+        var reading by androidx.compose.runtime.mutableStateOf(true)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                if (reading) {
+                    MailThreadPane(
+                        repo = repo,
+                        threadId = "0vt",
+                        contacts = ContactMap.EMPTY,
+                        ourShip = "~nec",
+                        onCompose = {},
+                    )
+                }
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) {
+            runCatching { onNodeWithText("Tree").assertIsDisplayed(); true }.getOrDefault(false)
+        }
+        onNodeWithText("Tree").performClick()
+        waitForIdle()
+        onNodeWithText("Tree").assertIsSelected()
+        reading = false // the composer takes its place
+        waitForIdle()
+        reading = true // sent, and back to the thread
+        waitUntil(timeoutMillis = 5_000) {
+            runCatching { onNodeWithText("Tree").assertIsDisplayed(); true }.getOrDefault(false)
+        }
+        onNodeWithText("Tree").assertIsSelected()
+    }
+
+    // By the time the thread shows, the ship has marked it read. What was
+    // new when it opened stays marked under a New line, and what had been
+    // read already folds to its header, in a thread long enough to fold.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `what was new when the thread opened is marked, and what was read folds`() = runComposeUiTest {
+        val repo = repoServing(
+            """
+            {"id":"0vt","participants":["~zod","~nec"],"last":30,"unreadable":0,
+             "archived":false,"labels":[],"messages":[
+              {"id":"0va","from":"~zod","to":["~nec"],"subject":"Plans",
+               "body":"first line\nsecond line","sent":10,"prev":null,"verdict":"verified","read":true},
+              {"id":"0vb","from":"~nec","to":["~zod"],"subject":"Plans",
+               "body":"a reply","sent":20,"prev":"0va","verdict":"verified","read":true},
+              {"id":"0vc","from":"~zod","to":["~nec"],"subject":"Plans",
+               "body":"the news","sent":30,"prev":"0vb","verdict":"verified","read":false}]}
+            """.trimIndent(),
+        )
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailThreadPane(repo = repo, threadId = "0vt", contacts = ContactMap.EMPTY, ourShip = "~nec", onCompose = {})
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) {
+            runCatching { onNodeWithText("New").assertIsDisplayed(); true }.getOrDefault(false)
+        }
+        onNodeWithText("the news").assertIsDisplayed()
+        // Folded: its two lines as one, which only the header line shows.
+        onNodeWithText("first line second line").assertIsDisplayed()
+    }
+
+    // Auspex 15 keeps a card the owner closed, on every client: one the
+    // ship holds closed opens closed here, and opening or closing one by
+    // hand tells the ship, with the thread named.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a message closed on another client opens closed, and a close or open here is kept`() = runComposeUiTest {
+        val posts = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val http = HttpClient(
+            MockEngine { req ->
+                if (req.method == io.ktor.http.HttpMethod.Post) {
+                    posts += req.url.encodedPath + " " + (req.body as io.ktor.http.content.TextContent).text
+                }
+                val body = if ("/api/thread/" in req.url.encodedPath) """
+                    {"id":"0vt","participants":["~bus","~nec"],"last":20,"unreadable":0,
+                     "archived":false,"labels":[],"folded":["0va"],"messages":[
+                      {"id":"0va","from":"~bus","to":["~nec"],"subject":"Plans",
+                       "body":"first line\nsecond line","sent":10,"prev":null,"verdict":"verified","read":true},
+                      {"id":"0vb","from":"~nec","to":["~bus"],"subject":"Plans",
+                       "body":"a reply","sent":20,"prev":"0va","verdict":"verified","read":true}]}
+                """.trimIndent() else """{"ok":true,"threads":[]}"""
+                respond(ByteReadChannel(body), HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+            },
+        )
+        val repo = MailRepo(http, CoroutineScope(SupervisorJob()), pollIntervalMs = 60 * 60 * 1000L)
+            .also { it.attach("https://ship.example") }
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailThreadPane(repo = repo, threadId = "0vt", contacts = ContactMap.EMPTY, ourShip = "~nec", onCompose = {})
+            }
+        }
+        // Two messages, which Talon would show open: the ship's fold wins.
+        waitUntil(timeoutMillis = 5_000) {
+            runCatching { onNodeWithText("first line second line").assertIsDisplayed(); true }.getOrDefault(false)
+        }
+        onNodeWithText("~bus").performClick()
+        waitUntil(timeoutMillis = 5_000) { posts.any { "/api/unfold" in it } }
+        assertEquals(listOf("""/apps/auspex/api/unfold {"thread-id":"0vt","msg-ids":["0va"]}"""), posts.filter { "fold" in it })
+        onNodeWithText("~bus").performClick()
+        waitUntil(timeoutMillis = 5_000) { posts.any { it.startsWith("/apps/auspex/api/fold") } }
+        // And it stays closed: on desktop the card's own click watcher saw
+        // the name's click too, and opened the card again straight after.
+        waitForIdle()
+        onNodeWithText("first line second line").assertIsDisplayed()
+        assertEquals(
+            listOf(
+                """/apps/auspex/api/unfold {"thread-id":"0vt","msg-ids":["0va"]}""",
+                """/apps/auspex/api/fold {"thread-id":"0vt","msg-ids":["0va"]}""",
+            ),
+            posts.filter { "fold" in it },
+        )
+        // The other card was never closed by hand, so nothing was said of it.
+        assertTrue(posts.none { "0vb" in it && "fold" in it }, "$posts")
+    }
+
+    /** ~bus was on the root, and taken off the reply to it. */
+    private val takenOff = """
+        {"id":"0vt","participants":["~zod","~nec","~bus"],"last":20,"unreadable":0,
+         "archived":false,"labels":[],"messages":[
+          {"id":"0vroot","from":"~zod","to":["~nec","~bus"],"subject":"Plans",
+           "body":"the root","sent":10,"prev":null,"verdict":"verified","read":true},
+          {"id":"0vnobus","from":"~nec","to":["~zod"],"subject":"Plans",
+           "body":"without bus","sent":20,"prev":"0vroot","verdict":"verified","read":true}]}
+    """.trimIndent()
+
+    // A reply was addressed to everyone the thread had ever held, so
+    // someone taken off a message was back on every reply after it.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `someone taken off a message is not on a reply to it`() = runComposeUiTest {
+        val repo = repoServing(takenOff)
+        val asked = mutableListOf<io.nisfeb.talon.ui.screens.MailIntent>()
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailThreadPane(repo = repo, threadId = "0vt", contacts = ContactMap.EMPTY, ourShip = "~nec", onCompose = { asked += it })
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) {
+            runCatching { onNodeWithText("without bus").assertIsDisplayed(); true }.getOrDefault(false)
+        }
+        val replies = onAllNodesWithContentDescription("Reply")
+        (0 until replies.fetchSemanticsNodes().size).forEach { replies[it].performClick() }
+        val to = asked.associate { it.prev to it.to }
+        assertEquals(listOf("~zod"), to["0vnobus"], "~bus was taken off it")
+        assertEquals(listOf("~zod", "~bus"), to["0vroot"], "the root still went to ~bus")
     }
 }

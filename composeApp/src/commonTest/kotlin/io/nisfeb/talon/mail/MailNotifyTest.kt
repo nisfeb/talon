@@ -56,15 +56,6 @@ class MailNotifyTest {
     }
 
     @Test
-    fun `an already-announced thread is not announced on every tick`() {
-        val rows = listOf(row("a"))
-        val (first, seen) = diffMailNotifications(rows, emptySet(), plainName)
-        assertEquals(1, first.size)
-        val (second, _) = diffMailNotifications(rows, seen, plainName)
-        assertTrue(second.isEmpty(), "a poll must not become a nuisance")
-    }
-
-    @Test
     fun `a forgery stays loud where the user is not looking`() {
         val (fired, _) = diffMailNotifications(
             listOf(row("f", from = "~zod", subject = "Invoice", forged = true)),

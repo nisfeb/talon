@@ -1,6 +1,5 @@
 package io.nisfeb.talon.mail
 
-import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -32,8 +31,4 @@ class DraftIdTest {
         assertEquals(100, ids.size)
     }
 
-    @Test
-    fun `a seeded source gives a repeatable id`() {
-        assertEquals(newDraftId(Random(7)), newDraftId(Random(7)))
-    }
 }

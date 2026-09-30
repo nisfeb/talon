@@ -73,6 +73,11 @@ fun diffNewMessageNotifications(
      *  `sentMs` and passes. The baseline still advances for suppressed
      *  rows so they never fire later either. Default MAX_VALUE = off. */
     freshnessMaxAgeMs: Long = Long.MAX_VALUE,
+    /** What to call the author. A comet's @p is fifty-six characters
+     *  of fingerprint and says nothing to the person reading it, so
+     *  the same name the rest of the app shows goes on the balloon.
+     *  Identity by default, for callers that have no name to give. */
+    nameFor: (String) -> String = { it },
 ): NewMessageDiff {
     val newLastSeen = lastSeen.toMutableMap()
     val notifications = mutableListOf<NotificationCandidate>()
@@ -97,7 +102,7 @@ fun diffNewMessageNotifications(
             .ifBlank { "(attachment)" }
         notifications += NotificationCandidate(
             whom = row.whom,
-            title = row.author,
+            title = nameFor(row.author),
             body = body,
         )
     }

@@ -13,6 +13,8 @@ import androidx.compose.ui.Modifier
  * @param url    the lattice reader URL to load (see [io.nisfeb.talon.urbit.UrbHttp]).
  * @param origin the ship base URL the [cookie] belongs to.
      * @param cookie the viewer's eyre session cookie, in "name=value" form.
+ * @param onMissing the page itself came back 404: eyre has no lattice to
+ *   route it to (lattice answers a page it lacks with 200 and its own page).
  */
 @Composable
 expect fun UrbWebView(
@@ -20,4 +22,5 @@ expect fun UrbWebView(
     origin: String,
     cookie: String,
     modifier: Modifier,
+    onMissing: () -> Unit = {},
 )

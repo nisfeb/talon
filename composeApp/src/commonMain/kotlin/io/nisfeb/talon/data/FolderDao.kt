@@ -49,25 +49,8 @@ interface FolderDao {
         addMemberRaw(folderId, whom, next, FolderMemberEntity.KIND_WHOM)
     }
 
-    /** Adds a whole group (by flag) at the bottom of the folder. Idempotent. */
-    @androidx.room.Transaction
-    suspend fun addGroupMember(folderId: Long, groupFlag: String) {
-        val next = maxOrdinalIn(folderId) + 1
-        addMemberRaw(folderId, groupFlag, next, FolderMemberEntity.KIND_GROUP)
-    }
-
     @Query("DELETE FROM folder_members WHERE folderId = :folderId AND whom = :whom")
     suspend fun removeMember(folderId: Long, whom: String)
-
-    @Query(
-        "SELECT * FROM folder_members WHERE folderId = :folderId AND kind = 'group'"
-    )
-    suspend fun groupMembersOf(folderId: Long): List<FolderMemberEntity>
-
-    @Query(
-        "SELECT folderId FROM folder_members WHERE whom = :flag AND kind = 'group'"
-    )
-    suspend fun foldersContainingGroup(flag: String): List<Long>
 
     @Query("UPDATE folder_members SET ordinal = :ordinal WHERE folderId = :folderId AND whom = :whom")
     suspend fun setOrdinal(folderId: Long, whom: String, ordinal: Int)
@@ -77,9 +60,6 @@ interface FolderDao {
     suspend fun reorderMembers(folderId: Long, whoms: List<String>) {
         whoms.forEachIndexed { i, w -> setOrdinal(folderId, w, i) }
     }
-
-    @Query("SELECT folderId FROM folder_members WHERE whom = :whom")
-    suspend fun foldersFor(whom: String): List<Long>
 
     @Query("DELETE FROM folders")
     suspend fun clearFolders()

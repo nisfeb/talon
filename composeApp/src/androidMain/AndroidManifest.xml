@@ -59,6 +59,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Where the owner is, for orrery, when they move with the app closed (orrery/LocationWatch.kt). -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!--
       Sideload distribution only — required by UpdateInstaller to
@@ -179,6 +181,10 @@
 
         <receiver
             android:name="io.nisfeb.talon.LoopAlarmReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name="io.nisfeb.talon.orrery.LocationReceiver"
             android:exported="false" />
 
         <receiver

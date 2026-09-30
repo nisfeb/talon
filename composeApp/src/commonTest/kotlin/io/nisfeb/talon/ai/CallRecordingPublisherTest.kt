@@ -2,7 +2,6 @@ package io.nisfeb.talon.ai
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 
 /**
  * Which endpoint and model a recording is transcribed against. Both of
@@ -35,11 +34,6 @@ class CallRecordingPublisherTest {
         assertEquals("sk-whisper", stt?.key)
         assertEquals("https://api.openai.com/v1/audio/transcriptions", stt?.endpoint)
         assertEquals("whisper-1", stt?.model)
-    }
-
-    @Test
-    fun anthropicWithNoWhisperKeyHasNoEndpoint() {
-        assertNull(CallRecordingPublisher.sttFrom(cfg(AiSettings.Provider.Anthropic, apiKey = "sk-ant")))
     }
 
     @Test

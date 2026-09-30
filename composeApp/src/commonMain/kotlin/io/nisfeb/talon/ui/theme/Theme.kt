@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui.theme
 
 
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -48,9 +49,13 @@ private val LightColors = lightColorScheme(
     surfaceDim           = Color(0xFFE7E5E4),
     surfaceBright        = Color(0xFFFFFFFF),
     surfaceContainerLowest  = Color(0xFFFFFFFF),
-    surfaceContainerLow     = Color(0xFFFAFAF9),
-    surfaceContainer        = Color(0xFFF5F5F4),
-    surfaceContainerHigh    = Color(0xFFEEEDEC),
+    // Every popup is drawn in the surface colour, as Talon's own are and
+    // as its cards are: Material gives sheets, menus and dialogs a shade
+    // each (Low, the default, High), so each kind was a different grey
+    // from the others and from the screen under it.
+    surfaceContainerLow     = Color(0xFFFFFFFF),
+    surfaceContainer        = Color(0xFFFFFFFF),
+    surfaceContainerHigh    = Color(0xFFFFFFFF),
     surfaceContainerHighest = Color(0xFFE7E5E4),
     inverseSurface       = Color(0xFF1C1917),
     inverseOnSurface     = Color(0xFFFAFAF9),
@@ -91,9 +96,10 @@ private val DarkColors = darkColorScheme(
     surfaceDim           = Color(0xFF0F0D1A),
     surfaceBright        = Color(0xFF352F42),
     surfaceContainerLowest  = Color(0xFF0A0812),
-    surfaceContainerLow     = Color(0xFF161221),
-    surfaceContainer        = Color(0xFF1F1A2B),
-    surfaceContainerHigh    = Color(0xFF272231),
+    // The surface colour, for every popup: see the light palette.
+    surfaceContainerLow     = Color(0xFF1A1625),
+    surfaceContainer        = Color(0xFF1A1625),
+    surfaceContainerHigh    = Color(0xFF1A1625),
     surfaceContainerHighest = Color(0xFF302A3B),
     inverseSurface       = Color(0xFFF5F5F4),
     inverseOnSurface     = Color(0xFF1C1917),
@@ -132,6 +138,48 @@ fun TalonTheme(
     MaterialTheme(
         colorScheme = effective,
         typography = TalonTypography,
-        content = content,
-    )
+        shapes = TalonShapes,
+    ) {
+        // The two extras a theme may set that Material has no role for.
+        val selection = customTheme?.selectionColor()
+        val provided = listOfNotNull(
+            LocalLinkColor provides customTheme?.linkColor(),
+            selection?.let {
+                androidx.compose.foundation.text.selection.LocalTextSelectionColors provides
+                    androidx.compose.foundation.text.selection.TextSelectionColors(handleColor = it, backgroundColor = it.copy(alpha = 0.4f))
+            },
+        )
+        androidx.compose.runtime.CompositionLocalProvider(*provided.toTypedArray(), content = content)
+    }
 }
+
+/**
+ * The link colour the theme sets, for links and mentions in messages,
+ * statuses and markdown; null keeps the standard link blue they are
+ * drawn in, whatever the theme. See [CustomTheme.link].
+ */
+val LocalLinkColor = androidx.compose.runtime.staticCompositionLocalOf<Color?> { null }
+
+/**
+ * The app's own corners.
+ *
+ * Material's defaults round a dialog by 28dp and a sheet by 16, which
+ * is nothing like the 8 to 12 every surface in Talon is drawn with, so
+ * a dialog opened over the app read as another app's window sitting on
+ * top of it. Here rather than at each call site: every Material
+ * component takes its shape from this, so the calendar's popup, the
+ * orrery action, the menus and the sheets all move together and a new
+ * one is right without being told.
+ *
+ * Buttons are the exception Material makes: it draws them as pills
+ * whatever the theme says, so Talon's [io.nisfeb.talon.ui.Button],
+ * [io.nisfeb.talon.ui.OutlinedButton] and [io.nisfeb.talon.ui.TextButton]
+ * give them [small] like the chips beside them.
+ */
+private val TalonShapes = androidx.compose.material3.Shapes(
+    extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+    small = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+    large = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+)

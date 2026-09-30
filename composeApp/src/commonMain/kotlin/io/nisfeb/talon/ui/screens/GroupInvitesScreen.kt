@@ -16,13 +16,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Button
+import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,9 +48,14 @@ fun GroupInvitesScreen(
 ) {
     val cached by repo.invitesFlow.collectAsState()
     val invites = cached ?: emptyList()
-    val loading = cached == null
+    val joining by repo.joiningFlow.collectAsState()
     var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // A failed first load is an error to show, not a spinner to leave running.
+    val loading = cached == null && error == null
+    // An accept or decline the ship refused: its own words, since it was
+    // shown as "Couldn't refresh" and read as a network problem.
+    var actionError by remember { mutableStateOf<String?>(null) }
     var pendingAction by remember { mutableStateOf<Pair<String, String>?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -102,14 +107,14 @@ fun GroupInvitesScreen(
 
             // Full-screen error only when the cache has nothing to show;
             // a failed refresh over a populated list becomes a banner.
-            error != null && invites.isEmpty() -> Text(
+            error != null && invites.isEmpty() && joining.isEmpty() -> Text(
                 "Couldn't load invites: $error",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(24.dp),
             )
 
-            invites.isEmpty() -> Text(
+            invites.isEmpty() && joining.isEmpty() -> Text(
                 "No pending invites.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -117,12 +122,12 @@ fun GroupInvitesScreen(
             )
 
             else -> Column {
-                error?.let {
+                listOfNotNull(error?.let { "Couldn't refresh: $it" }, actionError).forEach {
                     Text(
-                        "Couldn't refresh: $it",
+                        it,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
-                        maxLines = 1,
+                        maxLines = 2,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     )
                 }
@@ -130,23 +135,52 @@ fun GroupInvitesScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 4.dp),
             ) {
+                // Accepted and not got into yet: accepting again does
+                // nothing while the ship waits, so the way out is to stop.
+                if (joining.isNotEmpty()) {
+                    item(key = "joining-head") {
+                        Text(
+                            "Joining",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+                        )
+                    }
+                    items(items = joining, key = { "j-" + it.flag }) { j ->
+                        JoiningRow(
+                            invite = j,
+                            busy = pendingAction?.first == j.flag,
+                            onCancel = {
+                                pendingAction = j.flag to "cancel"
+                                actionError = null
+                                scope.launch {
+                                    runCatching { repo.cancelJoin(j.flag) }
+                                        .onFailure { actionError = "Couldn't stop joining ${j.title ?: j.flag}: ${it.message ?: it::class.simpleName}" }
+                                    pendingAction = null
+                                }
+                            },
+                        )
+                        HorizontalDivider()
+                    }
+                }
                 items(items = invites, key = { it.flag }) { inv ->
                     InviteRow(
                         invite = inv,
                         busy = pendingAction?.first == inv.flag,
                         onAccept = {
                             pendingAction = inv.flag to "accept"
+                            actionError = null
                             scope.launch {
                                 runCatching { repo.acceptInvite(inv.flag) }
-                                    .onFailure { error = it.message ?: it::class.simpleName }
+                                    .onFailure { actionError = "Couldn't join ${inv.title ?: inv.flag}: ${it.message ?: it::class.simpleName}" }
                                 pendingAction = null
                             }
                         },
                         onReject = {
                             pendingAction = inv.flag to "reject"
+                            actionError = null
                             scope.launch {
                                 runCatching { repo.rejectInvite(inv.flag) }
-                                    .onFailure { error = it.message ?: it::class.simpleName }
+                                    .onFailure { actionError = "Couldn't decline ${inv.title ?: inv.flag}: ${it.message ?: it::class.simpleName}" }
                                 pendingAction = null
                             }
                         },
@@ -156,6 +190,37 @@ fun GroupInvitesScreen(
                 }
             }
         }
+    }
+}
+
+/** A group the ship is joining: whose answer it waits on, and a way to stop. */
+@Composable
+private fun JoiningRow(invite: TlonChatRepo.InviteSummary, busy: Boolean, onCancel: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(invite.title ?: invite.flag, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold))
+            invite.inviter?.let {
+                Text("from $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            // The join is a poke to the host's own ship, not the
+            // inviter's. Unanswered, ames resends it until the host
+            // acks, which an offline host never does: say so, or the
+            // row sits there with no reason given.
+            val host = invite.flag.substringBefore('/')
+            Text(
+                if (invite.hostAnswered) "$host let your ship in. Getting the group."
+                else "Waiting for $host, which hosts the group, to answer your ship. " +
+                    "If this lasts, $host is likely offline; your ship keeps asking. " +
+                    "Stop joining puts it back as an invite you can reject.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        OutlinedButton(enabled = !busy, onClick = onCancel) { Text("Stop joining") }
     }
 }
 
@@ -187,6 +252,13 @@ private fun InviteRow(
                     fontWeight = FontWeight.SemiBold,
                 ),
             )
+            if (invite.failed) {
+                Text(
+                    "Joining it failed last time. Accept tries again.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             invite.inviter?.let {
                 Text(
                     "from $it",

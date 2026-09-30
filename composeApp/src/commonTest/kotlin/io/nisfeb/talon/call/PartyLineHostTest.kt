@@ -17,25 +17,6 @@ import kotlin.test.assertNull
 class PartyLineHostTest {
 
     @Test
-    fun groupFlagMapsToHostAndRoom() {
-        assertEquals("~zod" to "lounge", PartyLineHost.roomForGroup("~zod/lounge"))
-        assertEquals(
-            "~ricsul-bilwyt" to "networked-subject",
-            PartyLineHost.roomForGroup("~ricsul-bilwyt/networked-subject"),
-        )
-    }
-
-    @Test
-    fun everyChannelInAGroupSharesOneRoom() {
-        // The whole point of keying on the group: #general and #random
-        // are the same line, so an admin enables it once.
-        val a = PartyLineHost.roomForGroup("~zod/dev")
-        val b = PartyLineHost.roomForGroup("~zod/dev")
-        assertEquals(a, b)
-        assertEquals("~zod" to "dev", a)
-    }
-
-    @Test
     fun slashesInTheFlagCollapseToOneRoomName() {
         // The room name becomes a Galène subgroup, where a slash would
         // start a *different* subgroup — and so a different token

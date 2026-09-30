@@ -17,6 +17,12 @@ data class MenuBadges(
     val invitesPending: Boolean = false,
     /** A calendar another ship offered, waiting to be accepted. */
     val calendarOffers: Boolean = false,
+    /** Orrery has proposed something and is waiting for an answer. */
+    val actionsWaiting: Boolean = false,
+    /** The inbox holds unread mail. */
+    val mailUnread: Boolean = false,
+    /** An assistant run finished, or waits on a confirmation, while it was not on screen. */
+    val assistantNews: Boolean = false,
 ) {
     /**
      * Read-site helper: returns true if [item]'s rail icon should
@@ -28,6 +34,12 @@ data class MenuBadges(
         RailItem.Statuses -> statusesFresh
         RailItem.Invites -> invitesPending
         RailItem.Calendar -> calendarOffers
+        RailItem.Actions -> actionsWaiting
+        RailItem.Mail -> mailUnread
+        RailItem.Assistant -> assistantNews
         else -> false
     }
+
+    /** Every item's dot, for the drawer. */
+    fun byItem(): Map<RailItem, Boolean> = RailItem.entries.associateWith(::forItem)
 }

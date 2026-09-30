@@ -33,7 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -235,14 +235,14 @@ fun NotebookPostScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Avatar(
-                    label = contactMap.nickname(p.author) ?: p.author,
+                    label = contactMap.displayName(p.author),
                     url = contactMap.avatar(p.author),
                     colorHex = contactMap.shipColor(p.author),
                     size = 32.dp,
                 )
                 Column {
                     Text(
-                        contactMap.nickname(p.author) ?: p.author,
+                        contactMap.displayName(p.author),
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontWeight = FontWeight.Medium,
                         ),
@@ -372,13 +372,13 @@ private fun CommentRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Avatar(
-                    label = contactMap.nickname(reply.author) ?: reply.author,
+                    label = contactMap.displayName(reply.author),
                     url = contactMap.avatar(reply.author),
                     colorHex = contactMap.shipColor(reply.author),
                     size = 24.dp,
                 )
                 Text(
-                    contactMap.nickname(reply.author) ?: reply.author,
+                    contactMap.displayName(reply.author),
                     style = MaterialTheme.typography.labelMedium.copy(
                         fontWeight = FontWeight.Medium,
                     ),
@@ -388,12 +388,15 @@ private fun CommentRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // As threads show it: a refused comment otherwise looked posted.
+                if (reply.status == "pending") SendingIcon()
             }
             Spacer(Modifier.height(6.dp))
             val parts = remember(reply.id, reply.contentJson) {
                 StoryCache.partsFor(reply.id, reply.contentJson)
             }
             StoryRenderer(parts = parts)
+            SendStateNote(reply.status)
         }
     }
 }

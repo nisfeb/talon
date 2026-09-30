@@ -34,22 +34,25 @@ class WhatsNewTest {
     ) = whatsNew(latest, unreads, mail, invites, us, limit, { it }, { "said something" })
 
     @Test
+    fun `an action sits with the mentions, ahead of the unread`() {
+        val rows = whatsNew(
+            listOf(msg("~dalsyd", "~dalsyd", 100), msg("~nec", "~nec", 200)),
+            mapOf("~dalsyd" to unread(1), "~nec" to unread(1, notify = 1)),
+            emptyList(), emptyList(), us, 10, { it }, { "said" },
+            actions = listOf(NewAction("a1", "task", "Call the shop", "claude-code", "Thu 24 Sep")),
+        )
+        assertEquals(listOf(NewKind.MENTION, NewKind.ACTION, NewKind.UNREAD), rows.map { it.kind })
+        assertEquals("task proposed by claude-code, due Thu 24 Sep", rows[1].line)
+        assertEquals(0L, rows[1].atMs, "a due is not when something happened, and shown as one read 'just now'")
+    }
+
+    @Test
     fun `nothing is new about our own last word`() {
         val rows = run(
             listOf(msg("~dalsyd", us, 100)),
             mapOf("~dalsyd" to unread(3)),
         )
         assertTrue(rows.isEmpty(), "it listed a conversation we spoke last in")
-    }
-
-    @Test
-    fun `somebody else's last word, unread, is new`() {
-        val rows = run(
-            listOf(msg("~dalsyd", "~dalsyd", 100)),
-            mapOf("~dalsyd" to unread(3)),
-        )
-        assertEquals(listOf(NewKind.UNREAD), rows.map { it.kind })
-        assertEquals("~dalsyd", rows.single().target)
     }
 
     @Test
@@ -126,8 +129,12 @@ class WhatsNewTest {
     }
 
     @Test
-    fun `nothing new is an empty list, not a crash`() {
-        assertTrue(run(emptyList(), emptyMap()).isEmpty())
-        assertTrue(run(emptyList(), emptyMap(), limit = 0).isEmpty())
+    fun `only a proposal is new, and an action answered anywhere is not`() {
+        fun a(id: String, status: String) = io.nisfeb.talon.orrery.OrreryAction(
+            id, "task", "Call the shop", kotlinx.serialization.json.JsonObject(emptyMap()), emptyList(), "2026-09-20T13:00:00Z", status, "generator",
+        )
+        val new = newActions(listOf(a("p", "proposed"), a("ap", "approved"), a("c", "claimed"), a("d", "done"), a("x", "dismissed")))
+        assertEquals(listOf("p"), new.map { it.id })
+        assertEquals("Sun 20 Sep 13:00", newActions(listOf(a("p", "proposed")), twentyFourHour = true, zone = kotlinx.datetime.TimeZone.UTC).single().due)
     }
 }

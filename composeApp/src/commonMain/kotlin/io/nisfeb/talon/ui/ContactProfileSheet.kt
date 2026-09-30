@@ -16,18 +16,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MailOutline
-import androidx.compose.material3.Button
+import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.OutlinedButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,7 +68,9 @@ fun ContactProfileSheet(
     // Where the viewer's ship has no mail app this is null and the
     // button is simply not drawn, rather than drawn and dead.
     val mailTo = io.nisfeb.talon.mail.LocalMailTo.current
-    val sheetState = rememberModalBottomSheetState()
+    // Open all the way: half open left Message, Mail and Close below
+    // the fold on a short window, behind a drag nobody knows to make.
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val label = remember(contact, ship) { contact?.nickname ?: ship }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -98,31 +99,45 @@ fun ContactProfileSheet(
             // read somebody's name in full and take it away with you.
             val clipboard = LocalClipboardManager.current
             var copied by remember { mutableStateOf<String?>(null) }
-            fun copyRow(text: String): () -> Unit = {
+            fun copyRow(text: String, said: String = text): () -> Unit = {
                 clipboard.setText(AnnotatedString(text))
-                copied = text
+                copied = said
             }
             // A comet is its word name and nothing else, here as
             // everywhere. This is the long form of it -- every word,
             // not the two-word short name the rest of the app shows --
             // because telling two alike-looking comets apart is what
             // somebody opened this sheet to do. Its @p is not shown at
-            // all: it is the fifty-six characters the name replaces.
+            // unless asked for: it is the fifty-six characters the name
+            // replaces, and some places still want exactly those.
             //
             // Every other ship shows its @p, which is its real name and
-            // short enough to read.
-            // Unless the reader asked for raw @p everywhere: that
-            // toggle means what it says, here as on every other screen.
-            val alwaysPatp by ShipNames.alwaysPatp.collectAsState()
-            val nym = remember(ship, alwaysPatp) {
-                if (alwaysPatp) null else Mnemonym.forShip(ship)
-            }
+            // short enough to read. "Always show ~ship names" keeps a
+            // comet's word name too: its @p is only its key.
+            val nym = remember(ship) { Mnemonym.forShip(ship) }
             Text(
                 nym ?: ship,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.clickable(onClick = copyRow(nym ?: ship)),
             )
+            if (nym != null) {
+                var showPatp by remember(ship) { mutableStateOf(false) }
+                if (showPatp) {
+                    Text(
+                        ship,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.clickable(onClick = copyRow(ship, "the @p")),
+                    )
+                    TextButton(onClick = copyRow(ship, "the @p")) { Text("Copy @p") }
+                } else {
+                    TextButton(onClick = { showPatp = true }) { Text("Show @p") }
+                }
+            }
+            // Asked of the ship once per comet, ever: see [CometDomes].
+            GroundwireLine(ship)
             copied?.let {
                 Text(
                     "Copied $it",
@@ -130,22 +145,32 @@ fun ContactProfileSheet(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
+            // Status and bio are selectable, to copy out of, and a link
+            // in either can be copied from the right-click menu.
+            val link = rememberLinkUnder()
+            val linkColor = io.nisfeb.talon.ui.theme.LocalLinkColor.current
             if (!contact?.status.isNullOrBlank()) {
-                Text(
-                    text = linkifyStatus(contact!!.status!!),
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.Medium,
-                    ),
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                CopyLinkMenu(link) { androidx.compose.foundation.text.selection.SelectionContainer {
+                    LinkedText(
+                        linkifyStatus(contact!!.status!!, linkColor),
+                        link,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = FontWeight.Medium,
+                        ),
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } }
             }
             if (!contact?.bio.isNullOrBlank()) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                Text(
-                    contact!!.bio!!,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                CopyLinkMenu(link) { androidx.compose.foundation.text.selection.SelectionContainer {
+                    LinkedText(
+                        linkifyStatus(contact!!.bio!!, linkColor),
+                        link,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } }
             }
             Spacer(Modifier.height(4.dp))
             // Contact-book state for a peer (never for self):
@@ -187,7 +212,7 @@ fun ContactProfileSheet(
                     ) {
                         Icon(Icons.Filled.Edit, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Edit profile")
+                        FitText("Edit profile")
                     }
                 } else {
                     Button(
@@ -196,7 +221,8 @@ fun ContactProfileSheet(
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Message")
+                        // Shrinks rather than wrapping beside Mail and Close.
+                        FitText("Message")
                     }
                     if (mailTo != null) {
                         OutlinedButton(
@@ -205,13 +231,20 @@ fun ContactProfileSheet(
                         ) {
                             Icon(Icons.Filled.MailOutline, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
-                            Text("Mail")
+                            FitText("Mail")
                         }
                     }
-                    OutlinedButton(onClick = onDismiss) { Text("Close") }
+                    OutlinedButton(onClick = onDismiss) { FitText("Close") }
                 }
             }
             Spacer(Modifier.height(12.dp))
         }
     }
 }
+
+/**
+ * Opens a ship's profile sheet over whatever is showing, where the host
+ * has one: a recipient in the mail composer, say. Null where there is
+ * none, and the tap does nothing.
+ */
+val LocalOpenProfile = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }

@@ -228,6 +228,7 @@ private fun sidebarRowState(item: RailItem): SidebarRowState = when (item) {
     RailItem.Watchwords -> SidebarRowState("Watchwords", null, false, false)
     RailItem.Administration -> SidebarRowState("Administration", null, false, false)
     RailItem.Invites -> SidebarRowState("Invites", null, false, false)
+    RailItem.Actions -> SidebarRowState("Actions", null, false, false)
     // On a phone the drawer is the only thing that opens Settings,
     // so the toggle that would hide it is not offered: turning it off
     // would take away the screen the toggle lives on. The sidebar has

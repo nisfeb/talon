@@ -220,6 +220,19 @@ fun branches(forest: List<MailNode>): Boolean {
 fun newestAnswerable(messages: List<MailMessage>): MailMessage? =
     collapse(messages).filter { it.verdict != Verdict.FORGED }.maxByOrNull { it.sent }
 
+/**
+ * Who a reply to [id] goes to: that message's sender and its recipients,
+ * less [us]. Every copy of one id names the same people, the id being a
+ * hash over them. Not the thread's participants, every ship any copy in
+ * the thread ever named: someone taken off a message came back on every
+ * reply after it, and a forged message poked into the thread added its
+ * own audience to them.
+ */
+fun replyAudience(messages: List<MailMessage>, id: String?, us: String?): List<String> {
+    val m = messages.firstOrNull { it.id == id } ?: return emptyList()
+    return (listOf(m.from) + m.to).filter { it.isNotBlank() && it != us }.distinct()
+}
+
 /** One node placed on the drawing: [depth] is its generation, [row] its
  *  line, fractional where a parent sits between its children. */
 data class PlacedNode(

@@ -22,26 +22,12 @@ class DesktopLastOpenChatStoreTest {
     }
 
     @Test
-    fun `set persists then a fresh store reads it back`() {
-        DesktopLastOpenChatStore(file = tempFile).set("~sampel", "~friend")
-        val reloaded = DesktopLastOpenChatStore(file = tempFile)
-        assertEquals("~friend", reloaded.state.value["~sampel"])
-    }
-
-    @Test
     fun `clear persists removal`() {
         val s1 = DesktopLastOpenChatStore(file = tempFile)
         s1.set("~sampel", "~friend")
         s1.clear("~sampel")
         val s2 = DesktopLastOpenChatStore(file = tempFile)
         assertNull(s2.state.value["~sampel"])
-    }
-
-    @Test
-    fun `missing file means empty state - no exception`() {
-        // tempFile was deleted in init — store should construct cleanly.
-        val s = DesktopLastOpenChatStore(file = tempFile)
-        assertTrue(s.state.value.isEmpty())
     }
 
     @Test

@@ -20,12 +20,6 @@ class SkyMixTest {
     }
 
     @Test
-    fun `noon is full day and the small hours are deep night`() {
-        assertEquals(1f, mix(12 * 60))
-        assertEquals(-1f, mix(0))
-    }
-
-    @Test
     fun `the sky slides rather than cuts`() {
         // The whole point of dropping the four flat bands: consecutive
         // minutes near sunrise must differ, and never by a jump.

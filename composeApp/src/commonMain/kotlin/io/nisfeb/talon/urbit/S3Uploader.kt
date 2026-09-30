@@ -114,7 +114,14 @@ object S3Uploader {
             "$name:${v.trim()}\n"
         }
 
-        val canonicalUri = "/${config.bucket}/${encodePath(key)}"
+        // Read off the URL being sent rather than rebuilt beside it.
+        // SigV4 signs the path the server will see, and an endpoint may
+        // carry a path of its own — a ship serving Jars at /jars, a
+        // gateway behind a prefix — which the rebuilt version dropped:
+        // the server hashed /jars/bucket/key while we had signed
+        // /bucket/key, and answered 403 on every upload. One source for
+        // both is what keeps them from drifting apart again.
+        val canonicalUri = canonicalPathOf(baseUrl)
         val canonicalRequest = buildString {
             append("PUT\n")
             append("$canonicalUri\n")
@@ -199,6 +206,20 @@ object S3Uploader {
     private fun String.toHttpHost(): String {
         val stripped = substringAfter("://")
         return stripped.substringBefore('/')
+    }
+
+    /**
+     * The path of [url], which is what SigV4 signs: everything after
+     * the host, leading slash included, query excluded.
+     *
+     * Takes the whole request URL on purpose. The path is already
+     * built — endpoint prefix, bucket, encoded key — and signing a
+     * second construction of it is how the endpoint's own prefix came
+     * to be sent but not signed.
+     */
+    internal fun canonicalPathOf(url: String): String {
+        val afterHost = url.substringAfter("://").substringAfter('/', "").substringBefore('?')
+        return "/$afterHost"
     }
 
     private fun deriveSigningKey(

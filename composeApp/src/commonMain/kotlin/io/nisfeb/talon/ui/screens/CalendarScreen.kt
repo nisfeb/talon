@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,15 +34,18 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.unit.Dp
 import kotlinx.datetime.minus
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -54,7 +58,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.material3.TimeInput
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
@@ -94,6 +98,10 @@ import io.nisfeb.talon.ui.urlsIn
 import io.nisfeb.talon.ui.phoneNumbersIn
 import io.nisfeb.talon.ui.telUri
 import io.nisfeb.talon.calendar.dueDate
+import io.nisfeb.talon.calendar.groupTasks
+import io.nisfeb.talon.calendar.taskDraft
+import io.nisfeb.talon.calendar.inFilter
+import io.nisfeb.talon.calendar.matches
 import io.nisfeb.talon.calendar.taskOrder
 import io.nisfeb.talon.calendar.EventCat
 import io.nisfeb.talon.calendar.EventDraft
@@ -122,6 +130,8 @@ import kotlinx.datetime.plus
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import io.nisfeb.talon.ui.icons.TalonIcons
 
@@ -154,7 +164,10 @@ fun CalendarScreen(
 ) {
     val availability by repo.availability.collectAsState()
     val allTags by repo.tags.collectAsState()
-    var tagFilter by remember { mutableStateOf<String?>(null) }
+    /** Tags to narrow to. Empty is the default and means all of them. */
+    var tagFilter by remember { mutableStateOf(emptySet<String>()) }
+    // Any of the chosen tags, not all: picking two asks for both sets.
+    val tagged = { tags: List<String> -> tagFilter.isEmpty() || tags.any { it in tagFilter } }
     val rows by repo.rangeRows.collectAsState()
     val tasks by repo.tasks.collectAsState()
     var showTasks by remember { mutableStateOf(false) }
@@ -204,6 +217,10 @@ fun CalendarScreen(
     // The page is read again on opening: ten minutes is a long time
     // after a change made on the calendar's page or another device.
     LaunchedEffect(Unit) { repo.refresh() }
+    // Opening the task list reads the tasks, not the nine things a full
+    // refresh reads: the calendars, the shares, the conflicts and the
+    // rest have not changed because somebody tapped Tasks.
+    LaunchedEffect(showTasks) { if (showTasks) repo.refreshTasks() }
     LaunchedEffect(year, month, zoneId, availability) {
         if (availability != CalendarAvailability.PRESENT) return@LaunchedEffect
         val from = grid.first().atTime(0, 0).toInstant(zone).toEpochMilliseconds()
@@ -212,12 +229,20 @@ fun CalendarScreen(
     }
     // A tick shows at once and holds until the calendar answers; the
     // rows only learn of it on the refresh after the poke.
-    var pendingTicks by remember { mutableStateOf(mapOf<String, Boolean>()) }
+    // Ticks on their way to the ship: the repo's, so leaving this screen keeps them.
+    val pendingTicks by repo.ticking.collectAsState()
     // A new event shows on its day the moment it is saved, greyed,
     // until the calendar's own copy arrives; its id says so.
     var pendingRows by remember { mutableStateOf(listOf<CalendarRow>()) }
-    // An edited event wears its new words, greyed, until the refresh.
+    // An edited event wears its new words, greyed, until the ship takes it.
     var pendingEdits by remember { mutableStateOf(mapOf<String, EventDraft>()) }
+    // Taken by the ship, and shown as saved, not greyed, while the ship's
+    // own copy is read back: that reading is seconds more on a busy ship,
+    // and the save waited for it before it said saved.
+    var savedEdits by remember { mutableStateOf(mapOf<String, EventDraft>()) }
+    var savedRows by remember { mutableStateOf(listOf<CalendarRow>()) }
+    // Deleted, and gone from the screen at once rather than at the reading.
+    var removing by remember { mutableStateOf(setOf<String>()) }
     fun placeholderFor(d: EventDraft): CalendarRow? {
         val id = "pending-${nowMs()}"
         fun utcDay(day: LocalDate, days: Int = 1) = day.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds().let { it to it + days * 86_400_000L }
@@ -237,16 +262,25 @@ fun CalendarScreen(
             },
         )
     }
-    val visible = remember(rows, hidden, tagFilter, pendingTicks, pendingRows, pendingEdits) {
-        (rows.orEmpty() + pendingRows).filter { it.cal !in hidden && (tagFilter == null || tagFilter in it.tags) }
+    val visible = remember(rows, hidden, tagFilter, pendingTicks, pendingRows, pendingEdits, savedEdits, savedRows, removing) {
+        val edits = savedEdits + pendingEdits
+        (rows.orEmpty() + pendingRows + savedRows).filter { it.cal !in hidden && tagged(it.tags) && it.id !in removing }
             .map { r -> pendingTicks[r.id]?.let { r.copy(done = it) } ?: r }
-            .map { r ->
-                pendingEdits[r.id]?.let { d ->
-                    r.copy(meta = buildJsonObject {
+            .mapNotNull { r ->
+                val d = edits[r.id] ?: return@mapNotNull r
+                // A task given no day is in no day's list.
+                if (d.cat == EventCat.TODO && d.due == null) return@mapNotNull null
+                // On the day it was moved to: it stayed on the old one until
+                // the reading came back, which read as the move not taking.
+                // A series keeps its occurrences; only its words change here.
+                val at = if (r.repeats || d.repeats) null else placeholderFor(d)
+                r.copy(
+                    meta = buildJsonObject {
                         put("name", d.name.trim()); if (d.location.isNotBlank()) put("location", d.location.trim()); if (d.note.isNotBlank()) put("note", d.note.trim())
                         r.color?.let { put("color", it) }
-                    })
-                } ?: r
+                    },
+                    l = at?.l ?: r.l, r = at?.r ?: r.r, all = at?.all ?: r.all,
+                )
             }
     }
     val byDay = remember(visible, zoneId) {
@@ -266,35 +300,75 @@ fun CalendarScreen(
         editingStartMs = null
         editingAllDay = false
     }
+    /** What the wait says, where there is one long enough to say it. */
+    val OPENING = "Opening the editor..."
+
     fun openById(id: String, idx: Int?, startMs: Long?, allDay: Boolean) {
         scope.launch {
+            // Only where the read is actually slow, and never in front
+            // of it: the tap used to leave the screen exactly as it was
+            // for as long as the ship's queue took, which reads as a
+            // button that did nothing.
+            val slow = launch { kotlinx.coroutines.delay(150); status = OPENING }
             val json = repo.eventDetail(id)
+            slow.cancel()
             val d = json?.let { draftFromEvent(it, selected) }
             if (d == null) { status = "That event could not be read for editing."; return@launch }
+            if (status == OPENING) status = null
             editing = id to d
             editingIdx = idx
             editingStartMs = startMs
             editingAllDay = allDay
         }
     }
-    fun openExisting(r: CalendarRow) { if (r.cal in readOnly) status = readOnlyNote else openById(r.id, r.idx, r.l, r.all) }
-    fun view(r: CalendarRow) { viewing = r }
+    /** A task opens at once from its row; an event reads its rule first. */
+    fun openRow(r: CalendarRow) {
+        if (r.isTask) {
+            taskDraft(r, zone, selected)?.let { d ->
+                editing = r.id to d
+                editingIdx = null
+                editingStartMs = null
+                editingAllDay = r.all
+                return
+            }
+        }
+        openById(r.id, r.idx, r.l, r.all)
+    }
+    fun view(r: CalendarRow) {
+        // A stand-in has no id the ship knows, to read or to edit.
+        if (r.id.startsWith("pending-") || r.id.startsWith("saved-")) return
+        viewing = r
+        // Edit is a button in this sheet, and it cannot open without
+        // the event's rule breakdown. Read it now, while the owner is
+        // reading the event, rather than after they have asked.
+        if (r.cal !in readOnly) repo.prefetchEvent(r.id)
+    }
     fun tick(id: String, done: Boolean) {
-        pendingTicks = pendingTicks + (id to done)
         scope.launch {
             if (!repo.setDone(id, done)) status = "The ship did not take the change."
-            pendingTicks = pendingTicks - id
         }
     }
     /** Closes the editor and says what is happening; the calendar's
      *  answer, and the reads after it, take seconds on a busy ship. */
     fun say(doing: String, failed: String, body: suspend () -> Boolean) {
         status = doing
-        scope.launch { status = if (body()) null else failed }
+        // Done, only the "doing" line goes: what the body said of how it
+        // went stays. It used to be cleared too, so a group share never
+        // said whom it mailed, nor that it could mail nobody.
+        scope.launch { val ok = body(); status = if (!ok) failed else status.takeUnless { it == doing } }
     }
     fun act(doing: String, failed: String, body: suspend () -> Boolean) {
         editing = null
         say(doing, failed, body)
+    }
+    /** Delete [id]: gone from the screen now, back only if the ship refuses. */
+    fun removeNow(id: String, doing: String, failed: String) {
+        removing = removing + id
+        act(doing, failed) {
+            val w = repo.writeEvent(io.nisfeb.talon.calendar.deleteBody(id))
+            if (w.ok) scope.launch { w.shown.join(); removing = removing - id } else removing = removing - id
+            w.ok
+        }
     }
     // Sending an event on: to a chat as a message, by mail with an
     // invite file, or to a group, which is its channel and every ship
@@ -335,32 +409,28 @@ fun CalendarScreen(
             val flag = d.groups().channelGroupFor(whom)?.groupFlag ?: return@say false
             // Null: the roster could not be read, so no invites were mailed -- not the same as none.
             val members = runCatching { c.fetchGroupAdmin(flag)?.members?.map { it.ship } }.getOrNull()?.filter { it != ourShip }
-            val posted = runCatching { c.send(whom, textOf(r)) }.isSuccess
+            val posted = io.nisfeb.talon.util.runSuspendCatching { c.send(whom, textOf(r)) }.isSuccess
             val mailed = members.isNullOrEmpty() || mailEvent(r, members)
-            if (posted && mailed) status = when {
+            // Half of it done is said as that half: "could not be
+            // reached" after the post went out had people share again,
+            // and post twice.
+            status = when {
+                !posted && !mailed -> return@say false
+                !mailed -> "Posted to ${labelOf(whom)}, but the invite could not be mailed to its members."
+                !posted -> "Mailed the invite to ${members!!.size} ship${if (members.size == 1) "" else "s"}, but the post to ${labelOf(whom)} did not go."
                 members == null -> "Posted to ${labelOf(whom)}. The member list could not be read, so no invites were mailed."
                 members.isEmpty() -> "Posted to ${labelOf(whom)}."
                 else -> "Posted to ${labelOf(whom)} and mailed the invite to ${members.size} ship${if (members.size == 1) "" else "s"}."
             }
-            posted && mailed
+            true
         }
     }
-    // A task shows the moment it is typed, greyed, until the calendar's
-    // own copy arrives with the refresh after the poke.
-    var pendingTasks by remember { mutableStateOf(listOf<CalendarTask>()) }
-    fun addTask(name: String, due: LocalDate?, cal: String?) {
-        val d = EventDraft(name = name, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = listOfNotNull(tagFilter))
-        val ghost = CalendarTask(
-            id = "pending-${nowMs()}", cal = cal ?: "default", cat = "todo",
-            meta = buildJsonObject { put("name", name); if (tagFilter != null) put("tags", kotlinx.serialization.json.JsonArray(listOf(kotlinx.serialization.json.JsonPrimitive(tagFilter!!)))) },
-            dueMs = due?.atTime(0, 0)?.toInstant(TimeZone.UTC)?.toEpochMilliseconds(),
-        )
-        pendingTasks = pendingTasks + ghost
-        scope.launch {
-            val ok = repo.poke(eventBody(d))
-            pendingTasks = pendingTasks - ghost
-            if (!ok) status = "The ship did not take \"$name\"."
-        }
+    // A task shows the moment it is typed, in flight, until the
+    // calendar's own copy arrives. The write belongs to the repo, so
+    // leaving this screen does not lose it.
+    val pendingTasks by repo.pendingTasks.collectAsState()
+    fun addTask(name: String, due: LocalDate?, cal: String?, note: String = "") {
+        repo.addTask(EventDraft(name = name, note = note, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = tagFilter.toList())) { status = it }
     }
 
     // A title and nine controls do not fit a phone. The title was left a
@@ -449,17 +519,43 @@ fun CalendarScreen(
             }
             Spacer(Modifier.height(4.dp))
         }
+        // Tags narrow what is shown, and nothing is ticked to begin
+        // with, so the calendar opens showing everything. A menu rather
+        // than a row of chips: a ship with twenty tags scrolled the row
+        // sideways past whatever was being looked for.
         if (allTags.isNotEmpty()) {
-            LazyRow(
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                item { FilterChip(selected = tagFilter == null, onClick = { tagFilter = null }, label = { Text("All tags") }) }
-                items(allTags, key = { it }) { t ->
-                    FilterChip(selected = tagFilter == t, onClick = { tagFilter = if (tagFilter == t) null else t }, label = { Text("#$t") })
+            var tagsOpen by remember { mutableStateOf(false) }
+            Box(Modifier.padding(start = 8.dp)) {
+                TextButton(onClick = { tagsOpen = true }) {
+                    Text(
+                        when (tagFilter.size) {
+                            0 -> "All tags"
+                            1 -> "#" + tagFilter.first()
+                            else -> "${tagFilter.size} tags"
+                        },
+                    )
+                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(18.dp))
+                }
+                androidx.compose.material3.DropdownMenu(expanded = tagsOpen, onDismissRequest = { tagsOpen = false }) {
+                    if (tagFilter.isNotEmpty()) {
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("Clear") },
+                            onClick = { tagFilter = emptySet() },
+                        )
+                        androidx.compose.material3.HorizontalDivider()
+                    }
+                    allTags.forEach { t ->
+                        val on = t in tagFilter
+                        // Stays open: picking tags is usually picking
+                        // more than one.
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("#$t") },
+                            leadingIcon = { Checkbox(checked = on, onCheckedChange = null) },
+                            onClick = { tagFilter = if (on) tagFilter - t else tagFilter + t },
+                        )
+                    }
                 }
             }
-            Spacer(Modifier.height(4.dp))
         }
         if (narrow) {
             Row(
@@ -478,7 +574,7 @@ fun CalendarScreen(
         }
         if (showTasks) {
             TasksView(
-                tasks = tasks?.filter { it.cal !in hidden && (tagFilter == null || tagFilter in it.tags) }
+                tasks = tasks?.filter { it.cal !in hidden && tagged(it.tags) }
                     ?.map { t -> pendingTicks[t.id]?.let { t.copy(done = it) } ?: t },
                 today = today,
                 calendars = calendars.filter { it.id !in hidden && it.id !in readOnly },
@@ -494,6 +590,15 @@ fun CalendarScreen(
                 },
                 pending = pendingTasks,
                 onAdd = ::addTask,
+                onMore = { n, due, c, note ->
+                    editing = null to EventDraft(
+                        name = n, note = note, cat = EventCat.TODO, date = due ?: today, due = due,
+                        cal = c, tags = tagFilter.toList(),
+                    )
+                    editingIdx = null
+                    editingStartMs = null
+                    editingAllDay = false
+                },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
             return@Column
@@ -585,6 +690,10 @@ fun CalendarScreen(
                 }
             }
             val dayRows = byDay[selected].orEmpty()
+            // Read here, with the rows they changed with: read in an item,
+            // a row from before the change could meet the state after it.
+            val dayNow = selected
+            val editsNow = pendingEdits
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (rows == null) {
                     Text("Looking…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
@@ -593,9 +702,9 @@ fun CalendarScreen(
                 } else {
                     LazyColumn(Modifier.fillMaxSize()) {
                         items(dayRows, key = { "${it.id}/${it.idx}" }) { r ->
-                            val ghost = r.id.startsWith("pending-") || r.id in pendingEdits
+                            val ghost = r.id.startsWith("pending-") || r.id in editsNow
                             Row(
-                                Modifier.fillMaxWidth().clickable(enabled = !ghost) { view(r) }.alpha(if (ghost) 0.45f else 1f).padding(horizontal = 16.dp, vertical = 8.dp),
+                                Modifier.fillMaxWidth().clickable(enabled = !ghost && !r.id.startsWith("saved-")) { view(r) }.alpha(if (ghost) 0.45f else 1f).padding(horizontal = 16.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
@@ -612,7 +721,7 @@ fun CalendarScreen(
                                         .filter { it.isNotBlank() }.joinToString(" · ")
                                     if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
-                                Text(if (ghost) "syncing…" else spanLabel(r, selected, zone, twentyFourHour), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(if (ghost) "syncing…" else spanLabel(r, dayNow, zone, twentyFourHour), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             HorizontalDivider(Modifier.padding(start = 36.dp))
                         }
@@ -660,6 +769,7 @@ fun CalendarScreen(
     viewing?.let { r ->
         // Deleting asks once, here in the details, and closes on the tap.
         var confirmDelete by remember(r.id) { mutableStateOf(false) }
+        var moreOpen by remember(r.id) { mutableStateOf(false) }
         val calName = calendars.firstOrNull { it.id == r.cal }?.let { it.name.ifBlank { it.id } }
         val readOnlyHere = r.cal in readOnly
         AlertDialog(
@@ -726,40 +836,96 @@ fun CalendarScreen(
                             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    if (chat != null && db != null) {
-                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            TextButton(onClick = { sharingRow = r; sharingToGroup = false; viewing = null }) { Text("Send to a chat") }
-                            if (mail != null) TextButton(onClick = { mailingRow = r; viewing = null }) { Text("Mail") }
-                            if (mail != null) TextButton(onClick = { sharingRow = r; sharingToGroup = true; viewing = null }) { Text("Share with a group") }
+                    // What a person does with an event, in the order they
+                    // do it: read it, tick it off, edit it. Eight text
+                    // buttons of equal weight were the reason this window
+                    // read as a list of options rather than an event, so
+                    // the ones that are neither frequent nor reversible
+                    // are behind a word.
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (!readOnlyHere && r.isTask) {
+                            TextButton(onClick = { tick(r.id, !r.done); viewing = null }) { Text(if (r.done) "Reopen" else "Done") }
                         }
-                    }
-                    if (!readOnlyHere) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (r.isTask) TextButton(onClick = { tick(r.id, !r.done); viewing = null }) { Text(if (r.done) "Reopen" else "Done") }
-                            if (r.repeats) TextButton(onClick = {
+                        if (!readOnlyHere && r.repeats) {
+                            TextButton(onClick = {
                                 val idx = r.idx
                                 act("Skipping this one…", "The ship did not skip it.") {
-                                    repo.poke(buildJsonObject { put("action", "skip-event"); put("id", r.id); put("idx", idx) })
+                                    repo.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", r.id); put("idx", idx) })
                                 }
                                 viewing = null
                             }) { Text("Skip this one") }
-                            if (confirmDelete) {
-                                TextButton(onClick = {
-                                    act(if (r.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${r.name}\"; it is still there.") {
-                                        repo.poke(buildJsonObject { put("action", "del-event"); put("id", r.id) })
+                        }
+                        Spacer(Modifier.weight(1f))
+                        val sharable = chat != null && db != null
+                        if (sharable || !readOnlyHere) {
+                            Box {
+                                TextButton(onClick = { moreOpen = true }) { Text("More") }
+                                androidx.compose.material3.DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                                    if (sharable) {
+                                        androidx.compose.material3.DropdownMenuItem(
+                                            text = { Text("Send to a chat") },
+                                            onClick = { moreOpen = false; sharingRow = r; sharingToGroup = false; viewing = null },
+                                        )
+                                        if (mail != null) {
+                                            androidx.compose.material3.DropdownMenuItem(
+                                                text = { Text("Mail") },
+                                                onClick = { moreOpen = false; mailingRow = r; viewing = null },
+                                            )
+                                            androidx.compose.material3.DropdownMenuItem(
+                                                text = { Text("Share with a group") },
+                                                onClick = { moreOpen = false; sharingRow = r; sharingToGroup = true; viewing = null },
+                                            )
+                                        }
                                     }
-                                    viewing = null
-                                }) { Text(if (r.repeats) "Delete the whole series" else "Yes, delete", color = MaterialTheme.colorScheme.error) }
-                                TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
-                            } else {
-                                TextButton(onClick = { confirmDelete = true }) { Text(if (r.repeats) "Delete series" else "Delete") }
+                                    if (!readOnlyHere) {
+                                        if (sharable) androidx.compose.material3.HorizontalDivider()
+                                        androidx.compose.material3.DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    if (r.repeats) "Delete series" else "Delete",
+                                                    color = MaterialTheme.colorScheme.error,
+                                                )
+                                            },
+                                            onClick = { moreOpen = false; confirmDelete = true },
+                                        )
+                                    }
+                                }
                             }
+                        }
+                    }
+                    // Asked for, and asked again: the second tap is the
+                    // one that deletes, and it says what it will take.
+                    if (confirmDelete && !readOnlyHere) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                if (r.repeats) "Delete every occurrence of \"${r.name}\"?" else "Delete \"${r.name}\"?",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
+                            TextButton(onClick = {
+                                removeNow(r.id, if (r.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${r.name}\"; it is still there.")
+                                viewing = null
+                            }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
                         }
                     }
                 }
             },
+            // Filled, like Save in the editor: it is the one thing this
+            // window is for, and it read as another of the eight text
+            // buttons above it.
             confirmButton = {
-                if (!readOnlyHere) TextButton(onClick = { viewing = null; openById(r.id, r.idx.takeIf { !r.isTask }, r.l.takeIf { !r.isTask }, r.all) }) { Text("Edit") }
+                if (!readOnlyHere) {
+                    Button(onClick = { viewing = null; openRow(r) }) { Text("Edit") }
+                }
             },
             dismissButton = { TextButton(onClick = { viewing = null }) { Text("Close") } },
         )
@@ -778,7 +944,9 @@ fun CalendarScreen(
     }
     mailingRow?.let { r ->
         var to by remember(r.id) { mutableStateOf("") }
-        val ships = to.split(',', ' ').map { it.trim() }.filter { it.isNotEmpty() }.map { if (it.startsWith("~")) it else "~$it" }
+        // A word name stands for its ship here too; what resolves to nobody stays as typed and is refused below.
+        val ships = to.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            .map { io.nisfeb.talon.ui.NameToShip.one(it) ?: io.nisfeb.talon.urbit.normalisePatp(it) }
         AlertDialog(
             onDismissRequest = { mailingRow = null },
             title = { Text("Mail the event") },
@@ -786,6 +954,7 @@ fun CalendarScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("The invite goes as text with an .ics file any calendar imports.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(value = to, onValueChange = { to = it }, label = { Text("To, ships separated by commas") }, placeholder = { Text("~sampel-palnet, ~zod") }, modifier = Modifier.fillMaxWidth())
+                    io.nisfeb.talon.ui.ShipSuggestions(to, onPick = { to = it }, separator = ", ")
                 }
             },
             confirmButton = {
@@ -810,30 +979,64 @@ fun CalendarScreen(
             onChoosePostTo = { pickingPostTo = true },
             onClearPostTo = { postTo = null },
             onDismiss = { editing = null; postTo = null },
-            onSave = { d, editScope ->
+            onSave = onSave@{ d, editScope ->
+                // A new task goes on the list at once and is written behind it.
+                if (id == null && d.cat == EventCat.TODO && postTo == null) {
+                    editing = null
+                    repo.addTask(d) { status = it }
+                    return@onSave
+                }
                 val idx = editingIdx
                 val occurrence = editingStartMs?.let { occurrenceAt(it, editingAllDay, zone) }
                 val ghost = if (id == null) placeholderFor(d) else null
                 if (ghost != null) pendingRows = pendingRows + ghost
                 if (id != null) pendingEdits = pendingEdits + (id to d)
                 act(if (id == null) "Adding…" else "Saving…", "The ship did not take the change; \"${d.name.trim()}\" is as it was.") {
-                    val ok = when {
-                        id == null || editScope == EditScope.ALL || idx == null || occurrence == null ->
-                            repo.poke(eventBody(d, id))
-                        // The page's own two steps: end or skip the old, then add.
-                        editScope == EditScope.FOLLOWING ->
-                            repo.poke(buildJsonObject { put("action", "cap-event"); put("id", id); put("dom", idx) }) &&
-                                repo.poke(followingBody(d, occurrence))
-                        else ->
-                            repo.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) }) &&
-                                repo.poke(onlyBody(d, occurrence))
+                    // The whole write on the repo's scope: leaving the screen
+                    // no longer cancels it partway (a series edit is two pokes).
+                    val written = repo.carry {
+                        // A ticked task opened from its row lacks when it was
+                        // done; read it here, behind the closed editor, or the
+                        // save would stamp it done now.
+                        val d = if (id != null && d.cat == EventCat.TODO && d.done && d.doneMs == null) {
+                            d.copy(doneMs = repo.eventDetail(id)?.get("done_ms")?.jsonPrimitive?.longOrNull)
+                        } else d
+                        when {
+                            id == null || editScope == EditScope.ALL || idx == null || occurrence == null ->
+                                repo.writeEvent(eventBody(d, id))
+                            // The page's own two steps: end or skip the old, then add.
+                            editScope == EditScope.FOLLOWING ->
+                                if (repo.pokeEvent(buildJsonObject { put("action", "cap-event"); put("id", id); put("dom", idx) }, readBack = false)) {
+                                    repo.writeEvent(followingBody(d, occurrence))
+                                } else null
+                            else ->
+                                if (repo.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) }, readBack = false)) {
+                                    repo.writeEvent(onlyBody(d, occurrence))
+                                } else null
+                        }
                     }
+                    val ok = written?.ok == true
                     if (ghost != null) pendingRows = pendingRows - ghost
                     if (id != null) pendingEdits = pendingEdits - id
+                    if (ok) {
+                        // Saved, and said so now; shown as saved until the
+                        // ship's own copy comes back in.
+                        val kept = ghost?.copy(id = "saved-" + ghost.id)
+                        if (kept != null) savedRows = savedRows + kept
+                        if (id != null) savedEdits = savedEdits + (id to d)
+                        scope.launch {
+                            written!!.shown.join()
+                            if (kept != null) savedRows = savedRows - kept
+                            if (id != null) savedEdits = savedEdits - id
+                        }
+                    }
                     // A new event, posted where it was asked to go.
                     val target = postTo
                     if (ok && id == null && target != null && chat != null && ghost != null) {
-                        runCatching { chat.send(target, textOf(ghost)) }
+                        // Said when it does not go: the event is made either way.
+                        if (io.nisfeb.talon.util.runSuspendCatching { chat.send(target, textOf(ghost)) }.isFailure) {
+                            status = "The event is on the calendar, but posting it to ${labelOf(target)} did not go."
+                        }
                         postTo = null
                     }
                     ok
@@ -841,16 +1044,14 @@ fun CalendarScreen(
             },
             onDelete = if (id == null) null else {
                 {
-                    act(if (draft.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${draft.name.trim()}\"; it is still there.") {
-                        repo.poke(buildJsonObject { put("action", "del-event"); put("id", id) })
-                    }
+                    removeNow(id, if (draft.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${draft.name.trim()}\"; it is still there.")
                 }
             },
             onSkip = if (id == null || editingIdx == null) null else {
                 {
                     val idx = editingIdx!!
                     act("Skipping this one…", "The ship did not skip it.") {
-                        repo.poke(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
+                        repo.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
                     }
                 }
             },
@@ -932,6 +1133,11 @@ private fun spanLabel(r: CalendarRow, day: LocalDate, zone: TimeZone, twentyFour
 }
 
 /** The event form. Saves the whole series; a single occurrence can be skipped. */
+/** The colours an entry can be given here: a spread that reads on light and dark. */
+private val ENTRY_COLOURS = listOf(
+    "#c0392b", "#d35400", "#f39c12", "#27ae60", "#16a085", "#2980b9", "#1e3a5f", "#8e44ad", "#7f8c8d",
+)
+
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun EventEditor(
@@ -1107,6 +1313,28 @@ private fun EventEditor(
                         }
                     }
                 }
+                // Its own colour, or the calendar's. The calendar keeps any
+                // colour, so one set elsewhere shows as chosen here too.
+                Text("Colour", style = MaterialTheme.typography.labelMedium)
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    FilterChip(selected = d.color.isBlank(), onClick = { d = d.copy(color = "") }, label = { Text("Calendar's") })
+                    (ENTRY_COLOURS + listOf(d.color).filter { it.isNotBlank() && it !in ENTRY_COLOURS }).forEach { hex ->
+                        val c = calendarHexColor(hex) ?: return@forEach
+                        Box(
+                            Modifier.size(28.dp).clip(CircleShape).background(c)
+                                .then(
+                                    if (d.color.equals(hex, ignoreCase = true)) {
+                                        Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
+                                    } else Modifier,
+                                )
+                                .clickable { d = d.copy(color = hex) },
+                        )
+                    }
+                }
                 if (postToLabel != null) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         TextButton(onClick = onChoosePostTo) { Text(if (postToLabel.isEmpty()) "Also post to a chat…" else "Posts to ${postToLabel}") }
@@ -1278,10 +1506,13 @@ private fun CalendarsDialog(
                                 }
                             }
                             OutlinedTextField(
-                                value = shareShip, onValueChange = { shareShip = it }, label = { Text("Share with a ship") }, placeholder = { Text("~sampel-palnet") }, singleLine = true,
+                                value = shareShip, onValueChange = { shareShip = it }, label = { Text("Share with a ship") },
+                                placeholder = { Text("~sampel-palnet, or a word name") }, singleLine = false, maxLines = 6,
                                 modifier = Modifier.fillMaxWidth(),
                             )
-                            val ship = shareShip.trim().let { if (it.isNotEmpty() && !it.startsWith("~")) "~$it" else it }
+                            io.nisfeb.talon.ui.ShipSuggestions(shareShip, onPick = { shareShip = it })
+                            val ship = io.nisfeb.talon.ui.NameToShip.one(shareShip)
+                                ?: shareShip.trim().let { if (it.isNotEmpty() && !it.startsWith("~")) "~$it" else it }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 FilterChip(selected = !shareEdit, onClick = { shareEdit = false }, label = { Text("Read only") })
                                 FilterChip(selected = shareEdit, onClick = { shareEdit = true }, label = { Text("Read and edit") })
@@ -1411,35 +1642,123 @@ private fun TasksView(
     status: String?,
     onTick: (id: String, done: Boolean) -> Unit,
     onOpen: (CalendarTask) -> Unit,
-    onAdd: (name: String, due: LocalDate?, cal: String?) -> Unit,
+    onAdd: (name: String, due: LocalDate?, cal: String?, note: String) -> Unit,
+    /** The full editor, for everything a task can carry, starting from what is typed. */
+    onMore: (name: String, due: LocalDate?, cal: String?, note: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var name by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
     var due by remember { mutableStateOf<LocalDate?>(null) }
     var cal by remember(calendars, defaultCal) { mutableStateOf(defaultCal ?: calendars.firstOrNull()?.id) }
     var picking by remember { mutableStateOf(false) }
-    var showDone by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    var filter by remember { mutableStateOf(io.nisfeb.talon.calendar.TaskFilter.OPEN) }
+    // Writing a task and looking for one are both occasional; the list
+    // is what the screen is for. Each is a tap away and costs a row
+    // only while it is open.
+    var adding by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(false) }
+    val addFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val searchFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // Without this the field appears but stays inert until tapped.
+    LaunchedEffect(adding) { if (adding) addFocus.requestFocus() }
+    LaunchedEffect(searching) { if (searching) searchFocus.requestFocus() }
     fun add() {
         val n = name.trim()
         if (n.isEmpty()) return
-        onAdd(n, due, cal)
-        name = ""; due = null
+        onAdd(n, due, cal, note.trim())
+        name = ""; note = ""; due = null
+    }
+    // The counts are of everything, so a filter that would show nothing
+    // says so on its own chip rather than by emptying the screen. Worked
+    // out when the tasks or the words change, in one walk over them:
+    // every keystroke in the new-task field recomposes this screen.
+    val all = tasks.orEmpty()
+    val counts = remember(all, query, today) {
+        val found = all.filter { it.matches(query) }
+        io.nisfeb.talon.calendar.TaskFilter.entries.associateWith { f -> found.count { it.inFilter(f, today) } }
     }
     Column(modifier) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            OutlinedTextField(
-                value = name, onValueChange = { name = it }, placeholder = { Text("New task") }, singleLine = true,
-                modifier = Modifier.weight(1f),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { add() }),
-            )
-            TextButton(onClick = { picking = true }) { Text(due?.let { "${it.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[it.monthNumber - 1]}" } ?: "Due") }
-            IconButton(onClick = ::add, enabled = name.isNotBlank()) { Icon(Icons.Filled.Add, contentDescription = "Add task") }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = {
+                searching = !searching
+                // A search left behind a closed field would go on
+                // narrowing the list with nothing on screen saying so.
+                if (!searching) query = ""
+            }) {
+                Icon(
+                    if (searching) Icons.Filled.Clear else Icons.Filled.Search,
+                    contentDescription = if (searching) "Close the search" else "Search tasks",
+                )
+            }
+            LazyRow(
+                Modifier.weight(1f),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                items(io.nisfeb.talon.calendar.TaskFilter.entries.toList(), key = { it.name }) { f ->
+                    val n = counts[f] ?: 0
+                    FilterChip(
+                        selected = filter == f,
+                        onClick = { filter = f },
+                        label = { Text(if (n > 0) "${f.label} $n" else f.label) },
+                    )
+                }
+            }
+            IconButton(onClick = { adding = !adding }) {
+                Icon(
+                    if (adding) Icons.Filled.Clear else Icons.Filled.Add,
+                    contentDescription = if (adding) "Close the new task" else "New task",
+                )
+            }
         }
-        if (calendars.size > 1) {
-            LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(calendars, key = { it.id }) { c ->
-                    FilterChip(selected = cal == c.id, onClick = { cal = c.id }, label = { Text(c.name.ifBlank { c.id }) })
+        if (searching) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Search tasks") },
+                singleLine = true,
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, contentDescription = "Clear the search") }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).focusRequester(searchFocus),
+            )
+        }
+        if (adding) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it }, placeholder = { Text("New task") }, singleLine = true,
+                    modifier = Modifier.weight(1f).focusRequester(addFocus),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { add() }),
+                )
+                TextButton(onClick = { picking = true }) { Text(due?.let { "${it.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[it.monthNumber - 1]}" } ?: "Due") }
+                IconButton(onClick = ::add, enabled = name.isNotBlank()) { Icon(Icons.Filled.Add, contentDescription = "Add task") }
+            }
+            // A description as soon as there is something to describe; the
+            // rest of what a task carries is one tap further, in the editor.
+            if (name.isNotBlank()) {
+                OutlinedTextField(
+                    value = note, onValueChange = { note = it }, placeholder = { Text("Description") },
+                    minLines = 1, maxLines = 4,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+                TextButton(
+                    onClick = { onMore(name.trim(), due, cal, note.trim()); name = ""; note = ""; due = null; adding = false },
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                ) { Text("More: place, tags, colour") }
+            }
+            // Which calendar it lands in: asked here, where it is being
+            // written, rather than kept on screen the rest of the time.
+            if (calendars.size > 1) {
+                LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(calendars, key = { it.id }) { c ->
+                        FilterChip(selected = cal == c.id, onClick = { cal = c.id }, label = { Text(c.name.ifBlank { c.id }) })
+                    }
                 }
             }
         }
@@ -1455,19 +1774,36 @@ private fun TasksView(
             Text("Looking…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
             return@Column
         }
-        val open = taskOrder(tasks.orEmpty().filter { !it.done })
-        val done = taskOrder(tasks.orEmpty().filter { it.done })
+        val shown = remember(all, filter, query, today) {
+            groupTasks(all.filter { it.inFilter(filter, today) && it.matches(query) }, today)
+        }
         LazyColumn(Modifier.fillMaxSize()) {
             items(pending, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), false, onTick, {}, pending = true) }
-            if (open.isEmpty() && pending.isEmpty()) item { Text("Nothing to do.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp)) }
-            items(open, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), t.cal !in readOnly, onTick, onOpen) }
-            if (done.isNotEmpty()) {
+            if (shown.isEmpty() && pending.isEmpty()) {
                 item {
-                    TextButton(onClick = { showDone = !showDone }, modifier = Modifier.padding(horizontal = 8.dp)) {
-                        Text(if (showDone) "Hide done (${done.size})" else "Done (${done.size})")
-                    }
+                    Text(
+                        // The way to add one is an icon now, so an empty
+                        // list says where it is rather than leaving the
+                        // screen blank.
+                        if (query.isNotBlank()) "Nothing matches \"${query.trim()}\"." else "Nothing to do. Tap + to add a task.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(16.dp),
+                    )
                 }
-                if (showDone) items(done, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), t.cal !in readOnly, onTick, onOpen) }
+            }
+            shown.forEach { group ->
+                item(key = "head:" + group.label) {
+                    Text(
+                        group.label + " · " + group.tasks.size,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (group.label == "Overdue") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 2.dp),
+                    )
+                }
+                items(group.tasks, key = { it.id }) { t ->
+                    TaskLine(t, today, colourOf(t), t.cal !in readOnly, onTick, onOpen)
+                }
             }
         }
     }
@@ -1511,7 +1847,9 @@ private fun TaskLine(
             if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (pending) {
-            Text("syncing…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // In flight: written, and not yet read back from the ship.
+            androidx.compose.material3.CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+            Text("Saving", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else if (dueDay != null) {
             Text(
                 "${dueDay.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[dueDay.monthNumber - 1]}" + if (late) " · overdue" else "",
@@ -1672,7 +2010,7 @@ private fun WeekGrid(
 }
 
 /** "3 min ago", "2 h ago", "yesterday": for a sync's last pull. */
-private fun agoLabel(ms: Long): String {
+internal fun agoLabel(ms: Long): String {
     val d = (nowMs() - ms).coerceAtLeast(0) / 60_000
     return when {
         d < 1 -> "just now"

@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,7 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -171,6 +173,7 @@ private fun NewRule(onSave: (Rule) -> Unit) {
                 modifier = Modifier.weight(1f),
             )
         }
+        io.nisfeb.talon.ui.ShipSuggestions(from, onPick = { from = it })
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = label,
@@ -245,6 +248,7 @@ private fun NewList(onSave: (MailingList) -> Unit) {
                 modifier = Modifier.weight(1f),
             )
         }
+        io.nisfeb.talon.ui.ShipSuggestions(members, onPick = { members = it }, separator = " ")
         problem?.let {
             Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
         }
@@ -277,14 +281,36 @@ fun MailLabelRow(
     onToggle: (String, Boolean) -> Unit,
 ) {
     var adding by remember { mutableStateOf("") }
+    // Typing narrows the labels already in use to the ones it could be,
+    // letters in order ("inv" finds "invoices"), so picking one is most
+    // of the time a few letters and a tap rather than typing it out.
+    val q = adding.trim().lowercase()
+    val offered = known.filter { it !in labels }.let { rest ->
+        if (q.isEmpty()) rest.take(6) else rest.filter { fuzzyHas(it.lowercase(), q) }.take(8)
+    }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            // A tap takes it off, and the cross says so.
             labels.forEach { l ->
-                AssistChip(onClick = { onToggle(l, false) }, label = { Text(l) })
-            }
-            known.filter { it !in labels }.take(3).forEach { l ->
                 AssistChip(
-                    onClick = { onToggle(l, true) },
+                    onClick = { onToggle(l, false) },
+                    label = { Text(l) },
+                    trailingIcon = {
+                        androidx.compose.material3.Icon(
+                            androidx.compose.material.icons.Icons.Filled.Close,
+                            contentDescription = "Take off $l",
+                            modifier = Modifier.size(14.dp),
+                        )
+                    },
+                )
+            }
+            offered.forEach { l ->
+                AssistChip(
+                    onClick = { onToggle(l, true); adding = "" },
                     label = { Text("+ $l", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 )
             }
@@ -303,4 +329,11 @@ fun MailLabelRow(
             ) { Text("Add") }
         }
     }
+}
+
+/** Whether every letter of [q] is in [s], in order: "inv" is in "invoices" and in "in review". */
+internal fun fuzzyHas(s: String, q: String): Boolean {
+    var i = 0
+    for (c in s) if (i < q.length && c == q[i]) i++
+    return i == q.length
 }

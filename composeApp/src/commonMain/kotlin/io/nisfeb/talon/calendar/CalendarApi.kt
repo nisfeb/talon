@@ -154,8 +154,15 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
 
     suspend fun calendars(): List<CalendarInfo> = decode(get("/calendars.json"))
 
-    /** The tasks, dated or not: the full listing, kept to `cat == todo`. */
-    suspend fun tasks(): List<CalendarTask> = decode<List<CalendarTask>>(get("/events.json")).filter { it.cat == "todo" }
+    /**
+     * The tasks, dated or not. The calendar keeps to them itself (`cat`):
+     * the whole listing came down for every read of the task list, every
+     * event near and far, to be thrown away here. Kept to `todo` here too,
+     * for a calendar old enough to ignore the filter.
+     */
+    suspend fun tasks(): List<CalendarTask> =
+        decode<List<CalendarTask>>(get("/events.json?cat=todo")).filter { it.cat == "todo" }
+
 
     suspend fun config(): CalendarConfig = decode(get("/config.json"))
 
@@ -261,7 +268,7 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
         } catch (t: Throwable) {
             throw AuspexError.Unreachable(t)
         }
-        val text = try { resp.bodyAsText() } catch (t: Throwable) { throw AuspexError.Garbled(t) }
+        val text = try { resp.bodyAsText() } catch (c: CancellationException) { throw c } catch (t: Throwable) { throw AuspexError.Garbled(t) }
         if (!resp.status.isSuccess()) throw AuspexError.Refused(resp.status.value, text.take(200))
         return text
     }

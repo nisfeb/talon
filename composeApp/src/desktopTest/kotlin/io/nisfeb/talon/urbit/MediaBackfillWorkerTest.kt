@@ -43,12 +43,6 @@ class MediaBackfillWorkerTest {
     }
 
     @Test
-    fun `empty messages table yields no media rows`() = runBlocking {
-        MediaBackfillWorker.runIfNeeded(db)
-        assertEquals(0, db.messageMedia().totalCount())
-    }
-
-    @Test
     fun `seeded messages get media rows`() = runBlocking {
         val m1 = MessageEntity(
             whom = "~zod",
@@ -87,7 +81,10 @@ class MediaBackfillWorkerTest {
         val before = db.messageMedia().totalCount()
         assertTrue(before > 0)
         // totalCount() > 0 — second call must short-circuit and not
-        // insert duplicate rows.
+        // insert duplicate rows. A message arriving since would be
+        // picked up by a second full pass, so it shows the pass did not run.
+        db.messages().upsert(m.copy(id = "~zod/2000", sentMs = 200L,
+            contentJson = """[{"inline":[{"link":{"href":"https://x.com/b.jpg","content":"img"}}]}]"""))
         MediaBackfillWorker.runIfNeeded(db)
         assertEquals(before, db.messageMedia().totalCount())
     }

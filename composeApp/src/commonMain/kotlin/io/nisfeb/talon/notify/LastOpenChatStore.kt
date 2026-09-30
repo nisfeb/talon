@@ -26,21 +26,6 @@ interface LastOpenChatStore {
     fun clear(patp: String)
 }
 
-class InMemoryLastOpenChatStore(
-    initial: Map<String, String> = emptyMap(),
-) : LastOpenChatStore {
-    private val _state = MutableStateFlow(initial)
-    override val state: StateFlow<Map<String, String>> = _state.asStateFlow()
-    override fun set(patp: String, whom: String) {
-        if (_state.value[patp] == whom) return
-        _state.value = _state.value + (patp to whom)
-    }
-    override fun clear(patp: String) {
-        if (patp !in _state.value) return
-        _state.value = _state.value.minus(patp)
-    }
-}
-
 object NoopLastOpenChatStore : LastOpenChatStore {
     override val state: StateFlow<Map<String, String>> =
         MutableStateFlow(emptyMap<String, String>()).asStateFlow()

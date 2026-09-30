@@ -1,5 +1,7 @@
 package io.nisfeb.talon
 
+import io.nisfeb.talon.ai.forFeature
+import io.nisfeb.talon.ai.orreryOn
 import android.app.Application
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiFeatures
@@ -102,8 +104,6 @@ class TalonApplication : Application() {
      *  db and embeddingIndexer are ship-scoped. */
     lateinit var searchEmbedderClient: io.nisfeb.talon.ai.AndroidSearchEmbedderClient
         private set
-    lateinit var watchwords: io.nisfeb.talon.ai.Watchwords
-        private set
 
     // Both lazy so neither touches Context until after attachBaseContext()
     // / onCreate() — eager property initializers run during the
@@ -128,7 +128,6 @@ class TalonApplication : Application() {
         if (_watchwordsSyncEnabled.value == enabled) return
         watchwordsPrefs.edit().putBoolean(KEY_WATCHWORDS_SYNC, enabled).apply()
         _watchwordsSyncEnabled.value = enabled
-        watchwords.emitSyncToggled()
     }
 
     private val _activeShip = MutableStateFlow<String?>(null)
@@ -199,7 +198,7 @@ class TalonApplication : Application() {
         // railVisibility flow from the rail_item_prefs Room table.
         themePreference = io.nisfeb.talon.ui.theme.AndroidThemePreference(this)
         shipProfiles = ShipProfileStore(this)
-        aiClient = AiClient(settingsProvider = { aiSettings.state.value })
+        aiClient = AiClient(feature = io.nisfeb.talon.ai.AiFeature.CatchUp, settingsProvider = { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.CatchUp) })
         ai = AiFeatures(aiClient)
         embedder = io.nisfeb.talon.ai.Embedder(this)
         Notifications.ensureChannel(this)
@@ -278,6 +277,12 @@ class TalonApplication : Application() {
         // calling on every cold start doesn't reset the schedule.
         // The worker itself no-ops when no ship is bound.
         CatchUpWorker.schedule(this)
+        // The orrery pass while charging and idle; a no-op until the pipe is on.
+        OrreryWorker.schedule(this)
+        // Where the owner is, on a move: a registration a reboot or an
+        // update ended is made again here. A no-op while the switch is off.
+        // And only with Orrery on: off, where the owner is goes nowhere.
+        if (aiSettings.state.value.orreryOn()) runCatching { io.nisfeb.talon.orrery.LocationWatch.resume(this) }
 
 
         // User loops — headless scheduled agent runs. Ship-scoped deps
@@ -315,31 +320,6 @@ class TalonApplication : Application() {
             }
         }
 
-        watchwords.onChange = { evt, transitionedOffSync ->
-            appScope.launch {
-                runCatching {
-                    when {
-                        transitionedOffSync ->
-                            settingsSync.clearWatchwordsOnShip()
-                        _watchwordsSyncEnabled.value -> when (evt) {
-                            is io.nisfeb.talon.ai.WatchwordChange.Upsert ->
-                                settingsSync.pushWatchwordEntry(evt.term)
-                            is io.nisfeb.talon.ai.WatchwordChange.Remove ->
-                                settingsSync.deleteWatchwordEntry(evt.termText)
-                            is io.nisfeb.talon.ai.WatchwordChange.Exclude ->
-                                settingsSync.pushWatchwordExclude(evt.whom)
-                            is io.nisfeb.talon.ai.WatchwordChange.Unexclude ->
-                                settingsSync.deleteWatchwordExclude(evt.whom)
-                            is io.nisfeb.talon.ai.WatchwordChange.SyncToggled ->
-                                settingsSync.pushAllWatchwords()
-                        }
-                        else -> Unit
-                    }
-                }
-            }
-        }
-
-
         // Arm the alarm if the user has enabled it (and re-arm on every
         // app start — belt-and-suspenders against the receiver being killed
         // before it finished re-arming yesterday).
@@ -365,10 +345,12 @@ class TalonApplication : Application() {
     private fun buildShipScoped(ship: String, afterPriorClose: (() -> Unit)? = null) {
         val priorDb = if (::db.isInitialized) db else null
         val priorIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
+        val priorRepo = if (::repo.isInitialized) repo else null
 
         // A quote waiting in a chat belongs to the ship that picked it.
         io.nisfeb.talon.ui.PendingQuotes.clear()
         db = io.nisfeb.talon.data.createAppDatabase(this, io.nisfeb.talon.data.shipDbName(ship))
+        io.nisfeb.talon.ai.AiSpend.dao = db.orrerySent()
         session = UrbitSession(ktorHttp, sessionStore)
         // Re-hydrate the cookie jar + baseUrl from the stored session
         // for this ship (if any). Skips silently for the placeholder
@@ -387,25 +369,12 @@ class TalonApplication : Application() {
                 // always-on and built before buildShipScoped runs.
                 runCatching { loops.reschedule() }
             },
-            watchwordExcludeRouter = { whom, excluded ->
-                // Route to Watchwords.excludeChat so backfill cleanup +
-                // onChange → %settings push both fire. `watchwords` is
-                // assigned just below in this same buildShipScoped call,
-                // so by the time the chat-screen dropdown invokes this
-                // it's safely initialized.
-                watchwords.excludeChat(whom, excluded)
-            },
         )
         repo = TlonChatRepo(
             db = db,
             settingsSync = settingsSync,
             notificationHealth = notificationHealth,
-        )
-        watchwords = io.nisfeb.talon.ai.Watchwords(
-            db = db,
-            ourPatpProvider = { ship.takeIf { it != "none" } ?: "" },
-            scope = appScope,
-            syncEnabledProvider = { _watchwordsSyncEnabled.value },
+            watchwordsSyncEnabled = watchwordsSyncEnabled,
         )
         drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
         menuSeen = io.nisfeb.talon.ui.AndroidMenuSeenStore(this, ship)
@@ -425,29 +394,38 @@ class TalonApplication : Application() {
         }
 
         if (priorDb != null || priorIndexer != null) {
-            scheduleShipScopedTeardown(priorDb, priorIndexer, afterPriorClose)
+            scheduleShipScopedTeardown(priorDb, priorIndexer, priorRepo, afterPriorClose)
         }
     }
 
     /**
-     * Wait for the UI to drop the prior ship's collectors, then close
-     * the prior `AppDatabase` and stop the prior embedding indexer. A
-     * 2s delay covers the typical re-keying frame plus any in-flight
-     * suspend Room call returning. Running on appScope (IO supervisor)
-     * means the cleanup survives the ship-switch caller returning.
+     * Wait for the UI to drop the prior ship's collectors, then stop the
+     * prior ship's own work (its repo and embedding indexer) and wait
+     * for it, and only then close its `AppDatabase`: the indexer used to
+     * be cancelled and the pool closed the same instant, so a page it
+     * was writing ran into the close, which is a native crash (see
+     * closeAfterWork). Running on appScope (IO supervisor) means the
+     * cleanup survives the ship-switch caller returning.
      */
     private fun scheduleShipScopedTeardown(
         priorDb: AppDatabase?,
         priorIndexer: io.nisfeb.talon.ai.EmbeddingIndexer?,
+        priorRepo: TlonChatRepo?,
         /** Runs once the database is closed -- the only safe moment to
-         *  delete its file, which forgetShip needs. */
+         *  delete its file, which forgetShip needs. Not run where the
+         *  work would not stop and the database was left open: the
+         *  pending marker erases it at the next launch instead. */
         afterClose: (() -> Unit)? = null,
     ) {
         appScope.launch {
             delay(2_000)
-            runCatching { priorIndexer?.stop() }
-            runCatching { priorDb?.close() }
-            afterClose?.let { runCatching(it) }
+            val stopWork: suspend () -> Unit = {
+                priorRepo?.stopAndJoin()
+                priorIndexer?.stopAndJoin()
+            }
+            val closed = if (priorDb != null) io.nisfeb.talon.data.closeAfterWork(priorDb, stopWork = stopWork)
+            else { runCatching { stopWork() }; true }
+            if (closed) afterClose?.let { runCatching(it) }
         }
     }
 
@@ -563,6 +541,7 @@ class TalonApplication : Application() {
         if (alsoData) shipDataEraser.markPending(ship)
         val dying = db
         val dyingIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
+        val dyingRepo = if (::repo.isInitialized) repo else null
         val next = sessionStore.activeShip() ?: sessionStore.all().firstOrNull()?.ship
         if (next != null) {
             buildShipScoped(next, afterPriorClose = erase)
@@ -570,7 +549,7 @@ class TalonApplication : Application() {
             _activeShip.value = next
         } else {
             _activeShip.value = null
-            scheduleShipScopedTeardown(dying, dyingIndexer, afterClose = erase)
+            scheduleShipScopedTeardown(dying, dyingIndexer, dyingRepo, afterClose = erase)
         }
     }
 
@@ -580,6 +559,15 @@ class TalonApplication : Application() {
      * the case where the ship just became known.
      */
     fun onShipLoggedIn(ship: String) {
+        // Signed in again to the ship already open: it takes the new cookie
+        // and reconnects. Rebuilt, its new repo was never started, since
+        // the active ship did not change and nothing ran start again, and
+        // the old one was stopped: "not connected" on every screen.
+        if (ship == _activeShip.value) {
+            runCatching { session.tryRestore(ship) }
+            repo.forceReconnect()
+            return
+        }
         runCatching { repo.stop() }
         runCatching { shortcuts.stop() }
         buildShipScoped(ship)

@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.foundation.ExperimentalFoundationApi
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +14,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -26,17 +29,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -52,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.urbit.AdminChannel
 import io.nisfeb.talon.urbit.AdminGroup
 import io.nisfeb.talon.urbit.AdminMember
 import io.nisfeb.talon.urbit.TlonChatRepo
@@ -93,10 +97,15 @@ fun GroupAdminScreen(
     // %contacts events come in.
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
+    /** Re-read the group. It clears only a failure of its own: an
+     *  action's refusal stays until dismissed, or the refresh after it
+     *  (its rollback, or another action's) cleared it before anyone
+     *  could read it, and the row just came back, unexplained. */
+    var refreshSaid by remember { mutableStateOf<String?>(null) }
     suspend fun refresh() {
         runCatching { repo.fetchGroupAdmin(flag) }
-            .onSuccess { group = it; error = null }
-            .onFailure { error = it.message ?: it::class.simpleName }
+            .onSuccess { group = it; if (error == refreshSaid) error = null; refreshSaid = null }
+            .onFailure { e -> (e.message ?: e::class.simpleName).let { error = it; refreshSaid = it } }
     }
 
     LaunchedEffect(flag) {
@@ -169,6 +178,7 @@ fun GroupAdminScreen(
                 group = group!!,
                 contactMap = contactMap,
                 savingMeta = savingMeta,
+                onChannelChanged = { scope.launch { kotlinx.coroutines.delay(500); refresh() } },
                 onSaveMeta = { title, desc, img, cover ->
                     scope.launch {
                         savingMeta = true
@@ -273,7 +283,7 @@ fun GroupAdminScreen(
         val hasAdminRole = "admin" in m.sects
         AlertDialog(
             onDismissRequest = { memberActionTarget = null },
-            title = { Text(m.ship) },
+            title = { Text(contactMap.displayName(m.ship)) },
             text = {
                 Text(
                     "Roles: ${if (m.sects.isEmpty()) "(none)" else m.sects.joinToString(", ")}",
@@ -512,8 +522,11 @@ private fun AdminBody(
     onUnban: (ship: String) -> Unit,
     onMemberLongPress: (AdminMember) -> Unit,
     onReportError: (String) -> Unit,
+    /** A channel's settings changed: read the group again. */
+    onChannelChanged: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    var openChannel by remember { mutableStateOf<String?>(null) }
 
     var title by remember(group.flag) { mutableStateOf(group.title.orEmpty()) }
     var description by remember(group.flag) { mutableStateOf(group.description.orEmpty()) }
@@ -641,6 +654,32 @@ private fun AdminBody(
         HorizontalDivider()
         }
 
+        // ───────── Channels ─────────
+        if (mayAdminister && group.channels.isNotEmpty()) {
+            SectionHeader("Channels")
+            group.channels.forEach { c ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { openChannel = c.nest }.padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(c.title.ifBlank { c.nest.substringAfterLast('/') }, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            channelKindLabel(c.kind) + if (c.readers.isEmpty()) "" else " · only some roles can read",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text("Settings", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+            HorizontalDivider()
+        }
+        // Looked up by nest each time, so a re-read group shows in it.
+        openChannel?.let { nest -> group.channels.firstOrNull { it.nest == nest } }?.let { c ->
+            ChannelSettingsDialog(repo, flag, c, group.roles, onDismiss = { openChannel = null }, onChanged = onChannelChanged)
+        }
+
         // ───────── Invite ─────────
         if (mayAdminister) {
         SectionHeader("Invite")
@@ -681,10 +720,11 @@ private fun AdminBody(
                 label = { Text("~ship, or a word name") },
                 modifier = Modifier.weight(1f),
                 // A comet's @p is fifty-six characters and its full
-                // name twelve words; on one line you could not see
-                // what you had pasted.
+                // name twelve words; on one line you could not see what
+                // you had pasted, and in three the rest had to scroll
+                // inside the box, which on a phone it would not do.
                 singleLine = false,
-                maxLines = 3,
+                maxLines = 6,
             )
             Button(
                 enabled = invitePatp != null,
@@ -787,7 +827,7 @@ private fun AdminBody(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Avatar(
-                        label = contactMap.nickname(ship) ?: ship,
+                        label = contactMap.displayName(ship),
                         url = contactMap.avatar(ship),
                         colorHex = contactMap.shipColor(ship),
                         size = 32.dp,
@@ -836,9 +876,9 @@ private fun AdminBody(
             MemberRow(
                 member = m,
                 contactMap = contactMap,
-                // Kick and ban live behind this. A non-admin gets no
-                // sheet rather than one whose every action is refused.
-                onLongPress = { if (mayAdminister) onMemberLongPress(m) },
+                // Make admin, kick and ban live behind this. A non-admin
+                // gets no sheet rather than one whose every action is refused.
+                onManage = if (mayAdminister) ({ onMemberLongPress(m) }) else null,
             )
         }
         val remaining = group.members.size - visible.size
@@ -1164,17 +1204,14 @@ private fun RoomAccessControls(
     }
 
     // Role id → display title, for the checkboxes. Ids go on the wire.
+    // Null until read, and where it could not be: taken as "no roles",
+    // the gate hid the roles it already had, and the next tap on it
+    // sent an empty list over them.
     var roles by remember(groupFlag) {
-        mutableStateOf<Map<String, String>>(emptyMap())
+        mutableStateOf<Map<String, String>?>(null)
     }
     LaunchedEffect(groupFlag) {
-        roles = try {
-            repo.fetchGroupRoles(groupFlag)
-        } catch (c: kotlinx.coroutines.CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            emptyMap()
-        }
+        roles = io.nisfeb.talon.util.runSuspendCatching { repo.fetchGroupRoles(groupFlag) }.getOrNull()
     }
 
     Spacer(Modifier.height(8.dp))
@@ -1261,7 +1298,8 @@ private fun RoomAccessControls(
 private fun RoleGate(
     label: String,
     selected: List<String>?,
-    roles: Map<String, String>,
+    /** Null where the group's roles could not be read. */
+    roles: Map<String, String>?,
     onChange: (List<String>?) -> Unit,
 ) {
     val everyone = selected == null
@@ -1282,14 +1320,21 @@ private fun RoleGate(
         }
     }
     if (selected != null) {
-        if (roles.isEmpty()) {
+        if (roles == null) {
+            Text(
+                "The group's roles could not be read. Those already chosen are listed by their ids.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        } else if (roles.isEmpty()) {
             Text(
                 "This group has no roles — only admins pass this gate.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        for ((id, title) in roles.toList().sortedBy { it.second.lowercase() }) {
+        val shown = roles ?: selected.associateWith { it }
+        for ((id, title) in shown.toList().sortedBy { it.second.lowercase() }) {
             val checked = id in selected
             Row(
                 modifier = Modifier.fillMaxWidth()
@@ -1346,7 +1391,7 @@ private fun ShipRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Avatar(
-            label = contactMap.nickname(ship) ?: ship,
+            label = contactMap.displayName(ship),
             url = contactMap.avatar(ship),
             colorHex = contactMap.shipColor(ship),
             size = 32.dp,
@@ -1370,6 +1415,168 @@ private fun ShipRow(
     }
 }
 
+private fun channelKindLabel(kind: String) = when (kind) {
+    "chat" -> "Chat"
+    "heap" -> "Gallery"
+    "diary" -> "Notebook"
+    else -> kind
+}
+
+/**
+ * One channel's settings, for an admin: its title and description, who
+ * may post, who may read, and taking it out of the group. Each change is
+ * sent on its own and confirmed by the ship; a refusal is said here.
+ */
+@Composable
+private fun ChannelSettingsDialog(
+    repo: TlonChatRepo,
+    flag: String,
+    c: AdminChannel,
+    roles: Map<String, String>,
+    onDismiss: () -> Unit,
+    onChanged: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+    var title by remember(c.nest, c.title) { mutableStateOf(c.title) }
+    var description by remember(c.nest, c.description) { mutableStateOf(c.description) }
+    var readers by remember(c.nest, c.readers) { mutableStateOf(c.readers) }
+    // Null until the ship says. Posting is offered only once it has said
+    // which roles: an empty list would read as everyone.
+    val notebook = c.kind == "notes"
+    var writers by remember(c.nest) { mutableStateOf<TlonChatRepo.ChannelWriters?>(null) }
+    LaunchedEffect(c.nest) { if (!notebook) writers = repo.fetchChannelWriters(c.nest) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    fun act(block: suspend () -> Unit, after: () -> Unit = {}) {
+        scope.launch {
+            busy = true
+            note = null
+            runCatching { block() }
+                .onSuccess { after(); onChanged() }
+                .onFailure { note = "Your ship did not take it: ${it.message ?: it::class.simpleName}" }
+            busy = false
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(c.title.ifBlank { "Channel" }) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = title, onValueChange = { title = it }, enabled = !busy && c.editable, singleLine = true,
+                    label = { Text("Title") }, modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = description, onValueChange = { description = it }, enabled = !busy && c.editable,
+                    label = { Text("Description") }, modifier = Modifier.fillMaxWidth(),
+                )
+                if (!c.editable) {
+                    Text(
+                        "The group's record of this channel is incomplete, so its title can't be changed here.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (title.trim() != c.title || description.trim() != c.description) {
+                    TextButton(
+                        enabled = !busy && title.isNotBlank(),
+                        onClick = { act({ repo.editChannel(flag, c, title.trim(), description.trim()) }) },
+                    ) { Text("Save title and description") }
+                }
+                HorizontalDivider()
+                Text("Who can post", style = MaterialTheme.typography.titleSmall)
+                // %notes makes everyone who joins a notebook an editor, and a
+                // group notebook takes its readers from the group.
+                if (notebook) Text("In a notebook, everyone who can read it can also write in it.", style = MaterialTheme.typography.bodySmall)
+                else when (val w = writers) {
+                    null -> Text("Asking your ship…", style = MaterialTheme.typography.bodySmall)
+                    TlonChatRepo.ChannelWriters.NotJoined -> Text(
+                        "Your ship hasn't joined this channel, so it can't say who can post. Join it on this ship to change this.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    is TlonChatRepo.ChannelWriters.NoAnswer -> Text(
+                        "Your ship didn't say who can post (${w.why}). Close this and open it again to retry.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    is TlonChatRepo.ChannelWriters.Roles -> Audience("post", roles, w.ids, busy) { now ->
+                        act({ repo.setChannelWriters(c.nest, w.ids, now) }, after = { writers = TlonChatRepo.ChannelWriters.Roles(now) })
+                    }
+                }
+                HorizontalDivider()
+                Text("Who can read", style = MaterialTheme.typography.titleSmall)
+                Audience("read", roles, readers, busy) { now ->
+                    val was = readers
+                    act({ repo.setChannelReaders(flag, c.nest, was, now) }, after = { readers = now })
+                }
+                HorizontalDivider()
+                TextButton(enabled = !busy, onClick = { confirmDelete = true }) {
+                    Text("Delete channel", color = MaterialTheme.colorScheme.error)
+                }
+                note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete ${c.title.ifBlank { "this channel" }}?") },
+            text = { Text("It leaves the group for every member.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    act({ repo.deleteChannel(flag, c.nest) }, after = onDismiss)
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/**
+ * Everyone in the group, or only the roles picked. No roles picked is
+ * how the ship says everyone, so the last role cannot be unticked: the
+ * switch turns everyone back on instead.
+ */
+@Composable
+private fun Audience(verb: String, roles: Map<String, String>, current: Set<String>, busy: Boolean, onChange: (Set<String>) -> Unit) {
+    // The whole row is the switch, read out with its words.
+    val everyoneEnabled = !busy && (current.isNotEmpty() || roles.isNotEmpty())
+    Row(
+        modifier = Modifier.fillMaxWidth().toggleable(
+            value = current.isEmpty(),
+            enabled = everyoneEnabled,
+            role = Role.Switch,
+            onValueChange = { everyone ->
+                onChange(if (everyone) emptySet() else setOf(if ("admin" in roles) "admin" else roles.keys.sorted().first()))
+            },
+        ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Everyone in the group can $verb", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Switch(checked = current.isEmpty(), onCheckedChange = null, enabled = everyoneEnabled)
+    }
+    if (current.isNotEmpty()) {
+        (roles.keys + current).sorted().forEach { id ->
+            val enabled = !busy && !(id in current && current.size == 1)
+            Row(
+                modifier = Modifier.fillMaxWidth().toggleable(
+                    value = id in current,
+                    enabled = enabled,
+                    role = Role.Checkbox,
+                    onValueChange = { on -> onChange(if (on) current + id else current - id) },
+                ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.Checkbox(checked = id in current, onCheckedChange = null, enabled = enabled)
+                Text(roles[id] ?: id, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
+}
+
 @Composable
 private fun SectionHeader(label: String) {
     Text(
@@ -1383,19 +1590,24 @@ private fun SectionHeader(label: String) {
 private fun MemberRow(
     member: AdminMember,
     contactMap: ContactMap,
-    onLongPress: () -> Unit,
+    /**
+     * Opens the member's actions (make admin, kick, ban), or null where
+     * this ship may do none of them. Behind a long-press alone, nobody
+     * found them: there was "no way to make someone an admin".
+     */
+    onManage: (() -> Unit)?,
 ) {
     val nickname = contactMap.nickname(member.ship)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickableWithSecondary(onClick = {}, onLongClick = onLongPress)
+            .combinedClickableWithSecondary(onClick = { onManage?.invoke() }, onLongClick = { onManage?.invoke() })
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Avatar(
-            label = nickname ?: member.ship,
+            label = contactMap.displayName(member.ship),
             url = contactMap.avatar(member.ship),
             colorHex = contactMap.shipColor(member.ship),
             size = 32.dp,
@@ -1409,13 +1621,13 @@ private fun MemberRow(
                     ),
                 )
                 Text(
-                    member.ship,
+                    contactMap.handle(member.ship),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
                 Text(
-                    member.ship,
+                    contactMap.handle(member.ship),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -1436,6 +1648,15 @@ private fun MemberRow(
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
+            }
+        }
+        if (onManage != null) {
+            androidx.compose.material3.IconButton(onClick = onManage, modifier = Modifier.size(32.dp)) {
+                androidx.compose.material3.Icon(
+                    androidx.compose.material.icons.Icons.Filled.MoreVert,
+                    contentDescription = "Manage ${contactMap.displayName(member.ship)}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

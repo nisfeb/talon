@@ -2,8 +2,11 @@ package io.nisfeb.talon.mail
 
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
@@ -35,15 +38,33 @@ import kotlin.test.assertTrue
  */
 class MailComposerTest {
 
-    private val seen = mutableListOf<HttpRequestData>()
+    // The repo's own poller asks at the same time the test does, and a
+    // plain list throws when one thread walks it while another adds.
+    private val seen = java.util.concurrent.CopyOnWriteArrayList<HttpRequestData>()
 
-    private fun repo(): MailRepo {
+    /** A ship that takes everything. [draftsListed] is what its drafts list says. */
+    private fun repo(
+        draftsListed: () -> String = { "[]" },
+        lists: String = "[]",
+        /** What the ship says to a send; it takes it by default. */
+        sendAnswer: Pair<HttpStatusCode, String>? = null,
+        /** Thread 0vt, where a test has one. */
+        thread: String? = null,
+    ): MailRepo {
         val http = HttpClient(
             MockEngine { req ->
                 seen += req
+                val path = req.url.encodedPath
+                val (status, body) = when {
+                    path.endsWith("/api/send") && sendAnswer != null -> sendAnswer
+                    path.endsWith("/api/thread/0vt") && thread != null -> HttpStatusCode.OK to thread
+                    path.endsWith("/api/drafts") -> HttpStatusCode.OK to draftsListed()
+                    path.endsWith("/api/lists") -> HttpStatusCode.OK to lists
+                    else -> HttpStatusCode.OK to """{"ok":true,"threads":[]}"""
+                }
                 respond(
-                    ByteReadChannel("""{"ok":true,"threads":[]}"""),
-                    HttpStatusCode.OK,
+                    ByteReadChannel(body),
+                    status,
                     headersOf("Content-Type", "application/json"),
                 )
             },
@@ -51,6 +72,11 @@ class MailComposerTest {
         return MailRepo(http, CoroutineScope(SupervisorJob()), pollIntervalMs = 60 * 60 * 1000L)
             .also { it.attach("https://ship.example") }
     }
+
+    /** The last draft saved. */
+    private fun draftBody() = Json.parseToJsonElement(
+        (seen.last { it.url.encodedPath.endsWith("/api/draft") }.body as TextContent).text,
+    ).jsonObject
 
     private fun sentBody() = Json.parseToJsonElement(
         (seen.last { it.url.encodedPath.endsWith("/api/send") }.body as TextContent).text,
@@ -104,6 +130,8 @@ class MailComposerTest {
         onNodeWithText("Send").performClick()
         waitUntil(timeoutMillis = 5_000) { sent }
 
+        // One send path since auspex 14: the send route, then the draft
+        // it was saved as dropped.
         val body = sentBody()
         assertEquals("0vparent", body["prev"]!!.jsonPrimitive.content)
         assertEquals(
@@ -111,6 +139,14 @@ class MailComposerTest {
             body["to"]!!.jsonArray.map { it.jsonPrimitive.content },
         )
         assertEquals("answering", body["body"]!!.jsonPrimitive.content)
+        waitUntil(timeoutMillis = 5_000) { seen.any { it.url.encodedPath.endsWith("/api/draft-delete") } }
+        val dropped = seen.last { it.url.encodedPath.endsWith("/api/draft-delete") }
+        assertEquals(
+            draftBody()["id"]!!.jsonPrimitive.content,
+            Json.parseToJsonElement((dropped.body as TextContent).text).jsonObject["id"]!!.jsonPrimitive.content,
+            "the draft that was saved is the one dropped",
+        )
+        assertTrue(seen.none { it.url.encodedPath.endsWith("/api/draft-send") }, "a route auspex 14 no longer has")
     }
 
     @OptIn(ExperimentalTestApi::class)
@@ -137,25 +173,65 @@ class MailComposerTest {
     @Test
     fun `closing with something written keeps it as a draft`() = runComposeUiTest {
         var closed = false
+        // Closing takes the composer off the screen, as both shells do
+        // by clearing what is being composed. The save is the dispose's,
+        // so that the button itself need not wait for the ship.
+        val showing = androidx.compose.runtime.mutableStateOf(true)
         setContent {
             TalonTheme(darkTheme = false) {
-                MailComposer(
-                    repo = repo(),
-                    intent = MailIntent(),
-                    onSent = {},
-                    onCancel = { closed = true },
-                )
+                if (showing.value) {
+                    MailComposer(
+                        repo = repo(),
+                        intent = MailIntent(),
+                        onSent = {},
+                        onCancel = { closed = true; showing.value = false },
+                    )
+                }
             }
         }
         onNodeWithText("Message").performTextInput("half a thought")
         onNodeWithContentDescription("Close").performClick()
         waitUntil(timeoutMillis = 5_000) { closed }
+        waitUntil(timeoutMillis = 5_000) { seen.any { it.url.encodedPath.endsWith("/api/draft") } }
         val saved = seen.last { it.url.encodedPath.endsWith("/api/draft") }
         val body = Json.parseToJsonElement((saved.body as TextContent).text).jsonObject
         assertEquals("half a thought", body["body"]!!.jsonPrimitive.content)
         assertTrue(
             body["id"]!!.jsonPrimitive.content.startsWith("0v"),
             "the client mints the id, because the route answers before the writer applies",
+        )
+    }
+
+    // A reply's recipients sit in the To field rather than in chips
+    // beside it, so nothing has committed them when the composer goes
+    // away. The draft that is kept has to read them off the field.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a reply left half written keeps who it was going to`() = runComposeUiTest {
+        var closed = false
+        val showing = androidx.compose.runtime.mutableStateOf(true)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                if (showing.value) {
+                    MailComposer(
+                        repo = repo(),
+                        intent = MailIntent(prev = "0vparent", to = listOf("~zod"), subject = "Plans"),
+                        onSent = {},
+                        onCancel = { closed = true; showing.value = false },
+                    )
+                }
+            }
+        }
+        onNodeWithText("Message").performTextInput("later")
+        onNodeWithContentDescription("Close").performClick()
+        waitUntil(timeoutMillis = 5_000) { closed }
+        waitUntil(timeoutMillis = 5_000) { seen.any { it.url.encodedPath.endsWith("/api/draft") } }
+        val saved = seen.last { it.url.encodedPath.endsWith("/api/draft") }
+        val body = Json.parseToJsonElement((saved.body as TextContent).text).jsonObject
+        assertEquals(
+            listOf("~zod"),
+            body["to"]!!.jsonArray.map { it.jsonPrimitive.content },
+            "the reply was addressed before a word of it was written",
         )
     }
 
@@ -195,5 +271,229 @@ class MailComposerTest {
         onNodeWithText("Send").performClick()
         onNodeWithText("Say who this is going to.").assertIsDisplayed()
         assertTrue(seen.none { it.url.encodedPath.endsWith("/api/send") })
+    }
+
+    /** The last save the composer asked the ship for, or null. */
+    private fun savedDraft() = seen.lastOrNull { it.url.encodedPath.endsWith("/api/draft") }
+        ?.let { Json.parseToJsonElement((it.body as TextContent).text).jsonObject }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `leaving the composer by any route keeps what was written`() = runComposeUiTest {
+        val r = repo()
+        // Compose state, so that clearing it really does take the
+        // composer out of composition.
+        val showing = androidx.compose.runtime.mutableStateOf(true)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                if (showing.value) {
+                    MailComposer(
+                        repo = r,
+                        intent = MailIntent(to = listOf("~zod")),
+                        onSent = {},
+                        onCancel = {},
+                    )
+                }
+            }
+        }
+        onNodeWithText("Message").performTextInput("half a thought")
+        waitForIdle()
+        // Switching section takes the composer out of composition: no
+        // back button, no cancel, the way mail to chat does it.
+        showing.value = false
+        waitForIdle()
+        waitUntil(timeoutMillis = 5_000) { savedDraft() != null }
+        assertEquals("half a thought", savedDraft()?.get("body")?.jsonPrimitive?.content)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `what was typed survives the screen being rebuilt`() = runComposeUiTest {
+        val r = repo()
+        // One intent, two mountings: a window crossing a layout width,
+        // a rail tab, a section switch all do this, and every remember
+        // in the composer dies in between.
+        val intent = MailIntent(to = listOf("~zod"))
+        val wide = androidx.compose.runtime.mutableStateOf(false)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                if (wide.value) {
+                    androidx.compose.foundation.layout.Box {
+                        MailComposer(repo = r, intent = intent, onSent = {}, onCancel = {})
+                    }
+                } else {
+                    MailComposer(repo = r, intent = intent, onSent = {}, onCancel = {})
+                }
+            }
+        }
+        onNodeWithText("Message").performTextInput("half a thought")
+        onNodeWithText("Subject").performTextInput("Plans")
+        waitForIdle()
+        wide.value = true
+        waitForIdle()
+        onNodeWithText("half a thought").assertIsDisplayed()
+        onNodeWithText("Plans").assertIsDisplayed()
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a reply whose thread is not known says what it carries anyway`() = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailComposer(
+                    repo = repo(),
+                    // A draft, as it comes back from the ship: it says
+                    // what it answers and nothing about how much of the
+                    // conversation goes with it.
+                    intent = MailIntent(prev = "0vparent", draftId = "0vdraft", to = listOf("~bus")),
+                    onSent = {},
+                    onCancel = {},
+                )
+            }
+        }
+        waitForIdle()
+        onNodeWithText("This reply carries the conversation it answers to whoever you name.")
+            .assertIsDisplayed()
+    }
+
+    // A recipient is a name to tap for their card and a cross to take
+    // them off. A tap used to take them off, which nothing said.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a tap on a recipient opens their card, and only the cross removes them`() = runComposeUiTest {
+        var opened: String? = null
+        setContent {
+            TalonTheme(darkTheme = false) {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    io.nisfeb.talon.ui.LocalOpenProfile provides { ship: String -> opened = ship },
+                ) {
+                    MailComposer(
+                        repo = repo(),
+                        intent = MailIntent(prev = null, to = emptyList(), subject = "Hi"),
+                        onSent = {},
+                        onCancel = {},
+                    )
+                }
+            }
+        }
+        onNodeWithText("To").performTextInput("~zod")
+        onNodeWithText("Add recipient").performClick()
+        waitForIdle()
+        onNodeWithText("~zod").performClick()
+        waitForIdle()
+        assertEquals("~zod", opened, "the card was asked for")
+        onNodeWithText("~zod").assertIsDisplayed()
+        onNodeWithContentDescription("Remove ~zod").performClick()
+        waitForIdle()
+        assertTrue(onAllNodesWithText("~zod").fetchSemanticsNodes().isEmpty(), "and the cross took them off")
+    }
+
+    // A send runs on the repo's scope: leaving the composer while it is
+    // out used to cancel it, and the message sat in Drafts unsent.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `leaving while a message sends does not stop it`() = runComposeUiTest {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val calls = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val http = HttpClient(
+            MockEngine { req ->
+                calls += req.url.encodedPath
+                // The ship holds the send until the composer is gone.
+                if (req.url.encodedPath.endsWith("/api/send")) gate.await()
+                val body = if (req.url.encodedPath.endsWith("/api/drafts")) "[]" else """{"ok":true,"threads":[]}"""
+                respond(ByteReadChannel(body), HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+            },
+        )
+        val repo = MailRepo(http, CoroutineScope(SupervisorJob()), pollIntervalMs = 60 * 60 * 1000L)
+            .also { it.attach("https://ship.example") }
+        val showing = androidx.compose.runtime.mutableStateOf(true)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                if (showing.value) {
+                    MailComposer(
+                        repo = repo,
+                        intent = MailIntent(prev = "0vparent", to = listOf("~zod"), subject = "Plans"),
+                        onSent = {},
+                        onCancel = {},
+                    )
+                }
+            }
+        }
+        onNodeWithText("Message").performTextInput("on my way")
+        onNodeWithText("Send").performClick()
+        waitUntil(timeoutMillis = 5_000) { calls.any { it.endsWith("/api/send") } }
+        showing.value = false
+        waitForIdle()
+        gate.complete(Unit)
+        waitUntil(timeoutMillis = 5_000) { calls.any { it.endsWith("/api/draft-delete") } }
+        // And the way out filed nothing behind the send: a draft saved
+        // after the send dropped it came back as a message still to send.
+        waitForIdle()
+        val all = calls.toList()
+        val afterDelete = all.drop(all.indexOfLast { it.endsWith("/api/draft-delete") })
+        assertTrue(afterDelete.none { it.endsWith("/api/draft") }, "$all")
+        assertEquals(1, all.count { it.endsWith("/api/draft") }, "saved once, before the send: $all")
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a mailing list adds its members, and its name never travels`() = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailComposer(repo = repo(lists = """[{"name":"garden","members":["~bus","~nec"]}]"""), intent = MailIntent(), onSent = {}, onCancel = {})
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("+ garden").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("+ garden").performClick()
+        onNodeWithText("Message").performTextInput("the seeds are in")
+        onNodeWithText("Send").performClick()
+        waitUntil(timeoutMillis = 5_000) { seen.any { it.url.encodedPath.endsWith("/api/send") } }
+        assertEquals(listOf("~bus", "~nec"), sentBody()["to"]!!.jsonArray.map { it.jsonPrimitive.content })
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a send the ship refuses says why, and the message stays`() = runComposeUiTest {
+        var sent = false
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailComposer(
+                    repo = repo(sendAnswer = HttpStatusCode.InternalServerError to """{"error":"no route to ~bus"}"""),
+                    intent = MailIntent(to = listOf("~bus")), onSent = { sent = true }, onCancel = {},
+                )
+            }
+        }
+        onNodeWithText("Message").performTextInput("hello")
+        onNodeWithText("Send").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("route to ~bus", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(!sent, "still here, to try again")
+        onNodeWithText("Send").assertIsDisplayed()
+    }
+
+    // Who has seen what travels is whom it was sent to. The thread's
+    // participants counted the names a forged message poked into it
+    // gave, so adding one of them said nothing.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a name a forged message gave is still somebody who has not seen it`() = runComposeUiTest {
+        val thread = """{"id":"0vt","participants":["~zod","~nec","~wex","~feb"],"last":30,"unreadable":0,
+            "archived":false,"labels":[],"messages":[
+            {"id":"0vroot","from":"~zod","to":["~nec"],"subject":"Plans","body":"the root","sent":10,"prev":null,"verdict":"verified","read":true},
+            {"id":"0vjunk","from":"~wex","to":["~feb"],"subject":"Plans","body":"junk","sent":30,"prev":"0vroot","verdict":"forged","read":true}]}"""
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailComposer(
+                    repo = repo(thread = thread),
+                    intent = MailIntent(prev = "0vroot", threadId = "0vt", to = listOf("~zod"), subject = "Plans", travels = 1),
+                    onSent = {},
+                    onCancel = {},
+                )
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Replying to", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        onAllNodes(hasSetTextAction())[0].performTextReplacement("~zod ~wex")
+        onNodeWithText("Add recipient").performClick()
+        waitForIdle()
+        onNodeWithText("This signed message goes to people who have not seen it.").assertIsDisplayed()
     }
 }

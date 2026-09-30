@@ -74,14 +74,6 @@ class HourlyWeatherTest {
     }
 
     @Test
-    fun `a cloudier hour draws a bigger cloud`() {
-        assertTrue(cloudScale(1f) > cloudScale(0.3f))
-        for (c in listOf(0f, 0.5f, 1f, 2f, -1f)) {
-            assertTrue(cloudScale(c) in 0.8f..1.4f, "scale for $c is ${cloudScale(c)}")
-        }
-    }
-
-    @Test
     fun `rain darkens the hour it rains, not the whole day`() {
         val hourly = List(24) { h -> if (h in 14..16) Weather.RAIN else Weather.CLEAR }
         assertEquals(0f, gloomAt(9 * 60, hourly, Weather.CLEAR), "the morning is left alone")

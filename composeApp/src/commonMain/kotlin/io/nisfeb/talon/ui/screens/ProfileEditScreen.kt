@@ -21,7 +21,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
+import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -29,7 +29,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -102,6 +102,10 @@ fun ProfileEditScreen(
     }
 
     LaunchedEffect(ourPatp) {
+        // Ask the ship before showing it: this screen is where an edit
+        // made in another client of the same ship would otherwise be
+        // overwritten with what Talon last saw.
+        runCatching { repo.refreshSelf() }
         val c = db.contacts().get(ourPatp) ?: return@LaunchedEffect
         nickname = c.nickname.orEmpty()
         status = c.status.orEmpty()
@@ -184,10 +188,24 @@ fun ProfileEditScreen(
                 enabled = !uploading,
             ) { Text("Change photo") }
 
+            // A comet is its word name everywhere else, so it is here
+            // too, whole, above the @p it stands for.
+            io.nisfeb.talon.ui.Mnemonym.forShip(ourPatp)?.let { nym ->
+                Text(nym, style = MaterialTheme.typography.bodyMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            }
+            io.nisfeb.talon.ui.GroundwireLine(ourPatp)
+            // Tap to copy: a comet's @p is fifty-six characters nobody
+            // types, and some places still want it.
+            var patpCopied by remember(ourPatp) { mutableStateOf(false) }
             Text(
-                ourPatp,
+                if (patpCopied) "Copied $ourPatp" else ourPatp,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (patpCopied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.clickable {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(ourPatp))
+                    patpCopied = true
+                },
             )
 
             OutlinedTextField(
@@ -249,7 +267,8 @@ fun ProfileEditScreen(
                                 bio = bio,
                                 avatarUrl = avatarUrl,
                                 status = status,
-                                color = color,
+                                // "—" is no colour: sent as a clear, not left as it was.
+                                color = color.orEmpty(),
                             )
                         }.onFailure { e ->
                             error = "save failed: ${e.message ?: e::class.simpleName}"

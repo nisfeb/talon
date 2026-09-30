@@ -3,6 +3,7 @@ package io.nisfeb.talon.ai
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +47,11 @@ class DesktopSearchEmbedderClient(
     }
 
     override suspend fun start() = indexer.start()
+
+    override suspend fun stop() {
+        indexer.stopAndJoin()
+        scope.coroutineContext[kotlinx.coroutines.Job]?.cancelAndJoin()
+    }
 
     override suspend fun semanticSearch(query: String): List<MessageEntity> {
         if (query.length < 2) return emptyList()

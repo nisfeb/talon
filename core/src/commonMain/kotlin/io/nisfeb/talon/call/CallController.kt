@@ -301,17 +301,32 @@ class CallController(
                 channel = ch
                 // The ship's advertised ICE servers (its sidecar / its
                 // sponsor's). Best-effort: no config means Tier 0 only.
-                runCatching { _ice.value = TrunkWire.parseIce(ch.scry(TrunkWire.AGENT, "/ice")) }
-                    .onSuccess { Log.i(TAG, "ice config: ${iceServers.size} servers") }
+                val ice = runCatching { ch.scry(TrunkWire.AGENT, "/ice") }
                     .onFailure { Log.w(TAG, "ice scry failed (Tier 0 only)", it) }
+                    .getOrNull()
+                if (ice != null) {
+                    _ice.value = TrunkWire.parseIce(ice)
+                    Log.i(TAG, "ice config: ${iceServers.size} servers")
+                }
+                // Only a ship that answered it has none takes the default:
+                // a failed read, or an answer in another shape, replaced
+                // the servers someone had set, for every device on it.
                 // Guarded like every other step here. It is internally
                 // safe today, but a throw between opening the channel
                 // and subscribing is the worst failure this loop has:
                 // `channel` is already assigned, so pokes keep working
                 // and the ship looks reachable while no fact ever
                 // arrives again.
-                runCatching { adoptDefaultIce(ch) }
-                    .onFailure { Log.w(TAG, "adopting default ice failed", it) }
+                // Off the connect path: the poke's ack comes down the event
+                // stream, which is read only once this loop subscribes
+                // below, so waiting for it here held calls up for the
+                // poke's whole 15s timeout. It reads /ice again itself.
+                if (ice is kotlinx.serialization.json.JsonArray && ice.isEmpty()) {
+                    scope.launch {
+                        runCatching { adoptDefaultIce(ch) }
+                            .onFailure { Log.w(TAG, "adopting default ice failed", it) }
+                    }
+                }
                 // No %trunk (or a desk predating policy) leaves this
                 // null, and the settings editor stays hidden.
                 runCatching { _policy.value = TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy")) }
@@ -343,11 +358,16 @@ class CallController(
                             TrunkInstall.Outdated(shipWire, TrunkWire.WIRE_VERSION)
                     }
                 }.onFailure { Log.w(TAG, "version scry failed; assuming an old desk", it) }
-                runCatching { adoptDefaultSfu(ch) }
-                    .onFailure { Log.w(TAG, "default sfu check failed", it) }
                 runCatching {
-                    _shipSfuBase.value = (ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject)
-                        ?.get("base")?.jsonPrimitive?.content.orEmpty()
+                    val sfu = ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject
+                    // Only a ship that answered it has none takes the default,
+                    // and off the connect path, like the ICE above.
+                    if (sfu != null && sfu["configured"]?.jsonPrimitive?.content != "true" && defaults.sfuBase.isNotEmpty()) {
+                        _shipSfuBase.value = defaults.sfuBase
+                        scope.launch { adoptDefaultSfu(ch) }
+                    } else {
+                        _shipSfuBase.value = sfu?.get("base")?.jsonPrimitive?.content.orEmpty()
+                    }
                 }.onFailure { Log.w(TAG, "sfu scry failed", it) }
                 runCatching {
                     val ours = session.shipName.orEmpty()
@@ -985,20 +1005,13 @@ class CallController(
     }
 
     /**
-     * Point this ship at the build's default sidecar, but only if it
-     * has none. Never overwrites a ship that has been configured — a
+     * Point this ship, which said it has no sidecar, at the build's
+     * default. Never called for a ship that has been configured — a
      * user who set their own server keeps it.
      */
     private suspend fun adoptDefaultSfu(ch: UrbitChannel) {
-        if (defaults.sfuBase.isEmpty()) return
-        val configured = runCatching {
-            (ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject)
-                ?.get("configured")?.jsonPrimitive?.content == "true"
-        }.getOrElse { return }
-        if (configured) return
         Log.i(TAG, "no sidecar on this ship; adopting the built-in default")
-        _shipSfuBase.value = defaults.sfuBase
-        runCatching {
+        io.nisfeb.talon.util.runSuspendCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,
                 TrunkWire.setSfuAction(
@@ -1007,7 +1020,10 @@ class CallController(
                     defaults.sfuKey,
                 ),
             )
-        }.onFailure { Log.w(TAG, "set-sfu poke failed", it) }
+        }.onFailure {
+            Log.w(TAG, "set-sfu poke failed", it)
+            _shipSfuBase.compareAndSet(defaults.sfuBase, "")
+        }
     }
 
     /**
@@ -1325,7 +1341,8 @@ class CallController(
      * pokes write it: a host desk that predates roles can't cast the
      * action mark and nacks, and the admin screen shows this instead
      * of a switch that silently snaps back. Cleared by
-     * [dismissRoleError] and by the next role poke that succeeds.
+     * [dismissRoleError] and by the next role change that succeeds; a
+     * read going through says nothing about a change that did not.
      */
     private val _roleError = MutableStateFlow<String?>(null)
     val roleError: StateFlow<String?> = _roleError.asStateFlow()
@@ -1350,9 +1367,9 @@ class CallController(
 
     /** Ask [host] for a room's gates; the answer lands in [roomAccess]. */
     suspend fun getRoomAccess(host: String, name: String) =
-        pokeRoles("get-room-access", TrunkWire.getRoomAccessAction(host, name))
+        pokeRoles("get-room-access", TrunkWire.getRoomAccessAction(host, name), read = true)
 
-    private suspend fun pokeRoles(what: String, action: kotlinx.serialization.json.JsonElement) {
+    private suspend fun pokeRoles(what: String, action: kotlinx.serialization.json.JsonElement, read: Boolean = false) {
         val ch = channel
         if (ch == null) {
             // A silent no-op here read as "saved" in the admin UI.
@@ -1361,7 +1378,7 @@ class CallController(
         }
         try {
             ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, action)
-            _roleError.value = null
+            if (!read) _roleError.value = null
         } catch (t: kotlinx.coroutines.CancellationException) {
             // Navigating away mid-ack says nothing about the host.
             throw t
@@ -1403,7 +1420,8 @@ class CallController(
         _pendingJoin.value = key
         lastAskKey = key
         lastAskAtMs = nowMs()
-        runCatching {
+        // Cancelled is not declined (as peekRoom and pokeRoles have it).
+        io.nisfeb.talon.util.runSuspendCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,
                 TrunkWire.joinRoomAction(host, name),
@@ -1495,7 +1513,12 @@ class CallController(
             }
             is TrunkSig.Offer -> {
                 if (sig.id != callId) return
-                if (_state.value is CallUiState.Active) {
+                // Answering makes the call Active before its first offer
+                // lands (the caller gathers only once the ring is acked),
+                // so Active alone is not a restart; an offer after the
+                // first one is. A quick answer's offer taken for a
+                // restart was dropped, and the call died of "no offer".
+                if (_state.value is CallUiState.Active && pendingOffer.isCompleted) {
                     // The caller restarted ICE after a network change:
                     // answer in place on the live engine.
                     if (sdpFingerprint(sig.sdp) != sig.fpr) {
