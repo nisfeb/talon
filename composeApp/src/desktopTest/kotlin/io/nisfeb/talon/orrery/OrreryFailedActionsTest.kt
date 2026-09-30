@@ -31,6 +31,8 @@ import kotlin.test.assertTrue
 class OrreryFailedActionsTest {
     @Volatile private var open = """[${row("m1", "approved", "Tell Bus about lunch")}, ${row("t1", "approved", "Buy goggles")}]"""
     @Volatile private var failed = "[]"
+    /** How long the ship takes over everything but the open list. */
+    @Volatile private var slowRest = 0L
     private val asked = CopyOnWriteArrayList<String>()
 
     private fun row(id: String, status: String, title: String, note: String = "", at: String = "2026-09-28T09:00:00Z") =
@@ -47,9 +49,11 @@ class OrreryFailedActionsTest {
             val json = { body: String -> respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
             val status = req.url.parameters["status"]
             if (status != null) asked += status
+            if (!(req.url.encodedPath.endsWith("/api/actions") && status != "failed")) delay(slowRest)
             when {
                 req.url.encodedPath.endsWith("/api/actions") && status == "failed" -> json(failed)
                 req.url.encodedPath.endsWith("/api/actions") -> json(open)
+                req.url.encodedPath.endsWith("/api/generator/last") -> json("""{"at":"2026-09-30T09:00:00Z","read":4}""")
                 else -> json("{}")
             }
         })
@@ -71,6 +75,22 @@ class OrreryFailedActionsTest {
             assertEquals(listOf(ActionNotification("failed:m1", "Did not go through: Tell Bus about lunch", "no DM with ~bus")), raised.toList())
             assertEquals(listOf("m1"), repo.failed.value.map { it.id }, "a failure from January is not news")
             assertEquals("no DM with ~bus", repo.failed.value.single().note)
+
+            // "actions feel slow to load when I enter their page. even though
+            // there are new things to approve the spinner goes for a long time".
+            // Opening waits for the open list alone; the generator's line and
+            // the failures come after it.
+            slowRest = 3_000
+            open = "[${row("p1", "proposed", "Say hi to Nec")}]"
+            val failedAsks = asked.count { it == "failed" }
+            val t0 = System.currentTimeMillis()
+            repo.opened()
+            val took = System.currentTimeMillis() - t0
+            assertTrue(took < 1_500, "the page spun ${took}ms")
+            assertEquals(listOf("p1"), repo.actions.value.map { it.id })
+            // Both still come, just not held for.
+            withTimeout(10_000) { while (repo.generator.value == null) delay(20) }
+            withTimeout(10_000) { while (asked.count { it == "failed" } == failedAsks) delay(20) }
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
             db.close()

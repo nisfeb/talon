@@ -2101,7 +2101,7 @@ fun TalonApp(
                 actions = orreryActions,
                 onBack = { actionsOpen = false },
                 modifier = mod,
-                onShown = { orreryRepo.refreshWaiting(); orreryRepo.loadFailed() },
+                onShown = { orreryRepo.opened() },
                 failed = orreryRepo.failed.collectAsState().value,
                 onDecide = { a, status, why -> orreryRepo.answer(a.id, status, why) },
                 problem = orreryRepo.answerProblem.collectAsState().value ?: orreryRepo.error.collectAsState().value,

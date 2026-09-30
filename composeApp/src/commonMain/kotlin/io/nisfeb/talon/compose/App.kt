@@ -2387,7 +2387,7 @@ fun App(
                     showActions -> io.nisfeb.talon.ui.screens.OrreryActionsScreen(
                         actions = orreryActions,
                         onBack = { showActions = false },
-                        onShown = { orreryRepo.refreshWaiting(); orreryRepo.loadFailed() },
+                        onShown = { orreryRepo.opened() },
                         failed = orreryRepo.failed.collectAsState().value,
                         onDecide = { a, status, why -> orreryRepo.answer(a.id, status, why) },
                         problem = orreryRepo.answerProblem.collectAsState().value ?: orreryRepo.error.collectAsState().value,

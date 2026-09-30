@@ -604,8 +604,21 @@ class OrreryRepo(
         runCatching { a.actions(keyToken()) }
             .onSuccess { published(it) }
             .onFailure { Log.i(TAG, "actions skipped: ${it.message}") }
-        // A pass files proposals and moves the beacon: its record comes with them.
-        a.generatorLast()?.let { _generator.value = it }
+        // A pass files proposals and moves the beacon: its record comes with
+        // them. Not waited for: it is one line under the title, and each
+        // request queues behind the ship's others.
+        scope.launch { a.generatorLast()?.let { _generator.value = it } }
+    }
+
+    /**
+     * Opening Actions: what is waiting, read again, and the week's
+     * failures beside it, not waited for. The page spins until this
+     * returns, and it spun through three requests in a row to a busy
+     * ship over rows already on screen (the beacon keeps them current).
+     */
+    suspend fun opened() {
+        scope.launch { loadFailed() }
+        refreshWaiting()
     }
 
     fun detach() {
