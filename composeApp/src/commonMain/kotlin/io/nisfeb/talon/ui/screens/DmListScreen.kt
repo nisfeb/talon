@@ -571,7 +571,14 @@ fun DmListScreen(
             selectedHomeTab = tab
         }
     }
+    // Only on a change of tab. Coming back from a chat is not one: the
+    // list state outlived the chat and still stands where it was, and
+    // restoring here put it back to where the tab was last *left* --
+    // the top, for anyone who never switched tabs.
+    var restoredTab by remember { mutableStateOf(selectedHomeTab) }
     LaunchedEffect(selectedHomeTab) {
+        if (selectedHomeTab == restoredTab) return@LaunchedEffect
+        restoredTab = selectedHomeTab
         val saved = when (selectedHomeTab) {
             HomeTab.Groups -> snap.groupsScroll
             HomeTab.Dms -> snap.dmsScroll

@@ -56,7 +56,13 @@ class HomeListTest {
     /** Where the list sent the user: each menu destination by name. */
     private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
-    private fun home(seed: suspend AppDatabase.() -> Unit, synced: Boolean = false, block: ComposeUiTest.(FakeShip) -> Unit) {
+    /** [shown] false takes the list off screen, as opening a chat does on a phone. */
+    private fun home(
+        seed: suspend AppDatabase.() -> Unit,
+        synced: Boolean = false,
+        shown: androidx.compose.runtime.State<Boolean> = androidx.compose.runtime.mutableStateOf(true),
+        block: ComposeUiTest.(FakeShip) -> Unit,
+    ) {
         val tmp = createTempDirectory(prefix = "talon-home-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
@@ -74,7 +80,7 @@ class HomeListTest {
             runComposeUiTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
-                        DmListScreen(
+                        if (shown.value) DmListScreen(
                             db = db, repo = repo, drafts = InMemoryDraftStore(),
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
                             onOpenConversation = { opened += it }, onOpenSearch = {}, onNewMessage = {},
@@ -161,6 +167,52 @@ class HomeListTest {
         tap("general")
         waitForIdle()
         assertEquals(listOf("chat/~bus/general"), opened)
+    }
+
+    // "when you scroll down, open a group, enter a channel, and go back it
+    // takes you to the top of the group list rather than keeping your
+    // scroll position".
+    @Test
+    fun `back from a channel, the group list is where it was left`() {
+        val shown = androidx.compose.runtime.mutableStateOf(true)
+        home(shown = shown, seed = {
+            val names = (0 until 40).map { "Group %02d".format(it) }
+            groups().upsertGroups(names.mapIndexed { i, n -> GroupEntity("~bus/g$i", n, null) })
+            groups().upsertChannelGroups(names.indices.map { i -> ChannelGroupEntity("chat/~bus/c$i", "~bus/g$i", title = "general") })
+            // Newest first, so the list reads Group 00 down to Group 39.
+            messages().upsertAll(names.indices.map { i -> msg("chat/~bus/c$i", "1701411845${100 + i}", "~bus", "hi", 100_000L - i) })
+        }) {
+            shows("Group 00")
+            val list = io.nisfeb.talon.ui.screens.HomeListSnapshot.active!!.listState
+            runOnIdle { runBlocking { list.scrollToItem(25) } }
+            shows("Group 25")
+            shown.value = false // into the channel
+            waitForIdle()
+            shown.value = true // and back
+            waitForIdle()
+            shows("Group 25")
+            assertEquals(25, list.firstVisibleItemIndex)
+            onAllNodesWithText("Group 00").assertCountEquals(0)
+        }
+    }
+
+    @Test
+    fun `each tab keeps its own place across a switch`() = home(seed = {
+        val names = (0 until 40).map { "Group %02d".format(it) }
+        groups().upsertGroups(names.mapIndexed { i, n -> GroupEntity("~bus/g$i", n, null) })
+        groups().upsertChannelGroups(names.indices.map { i -> ChannelGroupEntity("chat/~bus/c$i", "~bus/g$i", title = "general") })
+        messages().upsertAll(names.indices.map { i -> msg("chat/~bus/c$i", "1701411845${100 + i}", "~bus", "hi", 100_000L - i) })
+        messages().upsert(msg("~nec", "~nec/170141184506", "~nec", "a DM", 1_000))
+    }) {
+        shows("Group 00")
+        val list = io.nisfeb.talon.ui.screens.HomeListSnapshot.active!!.listState
+        runOnIdle { runBlocking { list.scrollToItem(25) } }
+        tap("DMs")
+        shows("a DM")
+        assertEquals(0, list.firstVisibleItemIndex, "DMs from its own top")
+        tap("Groups")
+        shows("Group 25")
+        assertEquals(25, list.firstVisibleItemIndex)
     }
 
     // ─── DM requests ──────────────────────────────────────────────
