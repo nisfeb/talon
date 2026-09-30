@@ -13,6 +13,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Signing in, for real: the repo starts its session against a
@@ -87,5 +88,47 @@ class TlonChatRepoStartupTest {
         until("history") { db.messages().getOne("~bus", "~bus/170141184506") != null }
         until("the progress bar clears") { !repo.bootstrapping.value }
         assertNull(db.groups().getGroup("~bus/garden"))
+    }
+
+    private val init = "groups-ui/v6/init-posts/10/10"
+    private fun streams() = ship.requests.count { it.startsWith("GET /~/channel/") }
+
+    // "the time to load new messages when they open the app is very long.
+    // over 5 seconds" (iOS). Coming back, the old channel's delete hangs on
+    // a dead socket; the reconnect waited out its 5s, then a 1-3s jitter,
+    // and a return inside a minute of the last load read nothing at all.
+    @Test
+    fun `back in the app, what came while away loads at once`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        until("history") { db.messages().getOne("~bus", "~bus/170141184506") != null }
+        until("the stream") { streams() >= 1 }
+        ship.holdDelete = 10_000
+        ship.scries[init] = """{"chat":{"~bus":{${post("~bus/170141184506", "~bus", "a DM", 1_000)},
+            ${post("~bus/170141184508", "~bus", "while you were away", 3_000)}}}}"""
+        val t0 = System.currentTimeMillis()
+        repo.forceReconnect()
+        until("the message that came while away") { db.messages().getOne("~bus", "~bus/170141184508") != null }
+        val took = System.currentTimeMillis() - t0
+        assertTrue(took < 2_000, "took ${took}ms")
+    }
+
+    // The stream often died while the app was suspended, and the loop sat
+    // in a backoff the return could not cut short.
+    @Test
+    fun `back in the app, a backoff does not keep the stream waiting`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        until("the stream") { streams() >= 1 }
+        ship.refuseStream = true
+        ship.endStreams()
+        until("a refused reconnect") { streams() >= 2 }
+        ship.refuseStream = false
+        val before = streams()
+        val t0 = System.currentTimeMillis()
+        repo.forceReconnect()
+        until("the stream again") { streams() > before }
+        val took = System.currentTimeMillis() - t0
+        assertTrue(took < 1_500, "took ${took}ms")
     }
 }

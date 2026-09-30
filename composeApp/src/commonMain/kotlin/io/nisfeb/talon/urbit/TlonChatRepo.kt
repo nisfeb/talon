@@ -53,6 +53,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.flow.Flow
@@ -466,9 +467,20 @@ class TlonChatRepo(
             // Jitter. A ship restart drops every client at the same
             // instant, so a fixed delay brings them all back on the same
             // tick and the ship meets the whole fleet at once.
-            delay(jittered(backoffMs))
+            // [forceReconnect] cuts the wait short: one person coming back
+            // to the app is not a fleet. On iOS the stream is often already
+            // dead by then, the loop sitting in a backoff of up to a
+            // minute, and the new messages waited for all of it.
+            val woken = withTimeoutOrNull(jittered(backoffMs)) { reconnectWake.receive() } != null
+            if (woken) backoffMs = 2_000L
         }
     }
+
+    /** Set by [forceReconnect]; wakes the loop out of its backoff. */
+    private val reconnectWake = Channel<Unit>(Channel.CONFLATED)
+
+    /** Set by [forceReconnect], read once by the next connect: see [runSessionOnce]. */
+    @Volatile private var forcedReconnect = false
 
     private suspend fun runSessionOnce(session: UrbitSession, firstRun: Boolean) = coroutineScope {
         Log.i(TAG, "opening channel (firstRun=$firstRun)")
@@ -551,6 +563,14 @@ class TlonChatRepo(
         // rules: a reconnect must be cheap.
         val sinceBootstrapMs = nowMs() - lastBootstrapMs
         val skipBootstrap = !shouldBootstrap(firstRun, lastBootstrapMs, nowMs())
+        // A connect somebody asked for (back to the app, the network back)
+        // still reads the recent messages and the unread counts inside the
+        // window: the stream was down while they were away, and what landed
+        // then comes no other way. Without it, a quick trip out of an iOS
+        // app lost that minute's messages until some later reconnect.
+        val forced = forcedReconnect
+        forcedReconnect = false
+        val reconnectAskedMs = lastReconnectMs
         if (skipBootstrap) {
             Log.i(TAG, "reconnected ${sinceBootstrapMs}ms after the last bootstrap; re-subscribed only")
         }
@@ -635,7 +655,20 @@ class TlonChatRepo(
                         firstRunJobs
                     ).awaitAll()
                 lastBootstrapMs = nowMs()
+            } else if (forced) {
+                listOf(
+                    async {
+                        runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
+                            .onFailure { Log.e(TAG, "initPosts scry failed", it) }
+                    },
+                    async {
+                        runCatching { bootstrapActivity(ch) }
+                            .onSuccess { notificationHealth.markReconcileSuccess() }
+                            .onFailure { Log.e(TAG, "activity scry failed", it) }
+                    },
+                ).awaitAll()
             }
+            if (forced) Log.i(TAG, "reconnect asked for: messages read ${nowMs() - reconnectAskedMs}ms later")
             groupsJob.await()
         } finally {
             if (firstRun) _bootstrapping.value = false
@@ -740,7 +773,10 @@ class TlonChatRepo(
                 // a reader that is gone: dozens of "eyre: clogged" lines
                 // and a pegged core, which made it slow, which made this
                 // watchdog reconnect, which opened yet another channel.
-                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                // Off the reconnect's path: back in an iOS app the old
+                // socket is dead, and the next channel waited out this
+                // delete's whole timeout before it was even asked for.
+                kotlinx.coroutines.CoroutineScope(io.nisfeb.talon.util.ioDispatcher).launch {
                     runCatching { kotlinx.coroutines.withTimeoutOrNull(5_000) { ch.delete() } }
                 }
             }
@@ -748,6 +784,9 @@ class TlonChatRepo(
         }
         collectJob.invokeOnCompletion { ackJob.cancel() }
         sessionJob = collectJob
+        // A reconnect asked for while this one was connecting is answered
+        // by it; left pending, it would skip the jitter on some later drop.
+        reconnectWake.tryReceive()
         val watchdogJob = launch {
             while (isActive && collectJob.isActive) {
                 delay(30_000L)
@@ -787,7 +826,9 @@ class TlonChatRepo(
         }
         lastReconnectMs = now
         Log.i(TAG, "forceReconnect requested")
+        forcedReconnect = true
         sessionJob?.cancel()
+        reconnectWake.trySend(Unit)
     }
     @Volatile private var lastReconnectMs: Long = 0L
 

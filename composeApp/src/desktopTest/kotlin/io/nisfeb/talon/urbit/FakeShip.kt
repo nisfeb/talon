@@ -74,6 +74,10 @@ internal class FakeShip(val us: String = "~zod") {
     @Volatile var answerApi: (method: String, path: String, body: String) -> String? = { _, _, _ -> null }
     /** A scry the ship fails on (500), as a crashed or busy agent does; unlike one it has no answer for (404). */
     @Volatile var failScry: (path: String) -> Boolean = { false }
+    /** How long a channel's delete waits for an answer: a dead socket, as an iOS app finds coming back. */
+    @Volatile var holdDelete: Long = 0
+    /** While true the event stream is refused, as with no network yet. */
+    @Volatile var refuseStream: Boolean = false
     /** Every request, "METHOD path", whatever it was for: what an app that must say nothing did say. */
     val requests: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
@@ -107,6 +111,12 @@ internal class FakeShip(val us: String = "~zod") {
                 pumps.launch { runCatching { for (f in p.queue) p.stream.writeStringUtf8(f) } }
             }
         }
+
+    /** End every open event stream, as a dropped connection does. */
+    suspend fun endStreams() = writing.withLock {
+        pipes.values.forEach { it.queue.close(); it.stream.close() }
+        pipes.clear()
+    }
 
     /** Put a fact on every channel's event stream, framed as eyre frames it. */
     suspend fun emit(json: String) = writing.withLock {
@@ -149,10 +159,13 @@ internal class FakeShip(val us: String = "~zod") {
                             subscribed += "${o["app"]?.jsonPrimitive?.content}${o["path"]?.jsonPrimitive?.content}"
                             answer(path, """{"id":$id,"response":"subscribe","ok":"ok"}""")
                         }
+                        "delete" -> if (holdDelete > 0) kotlinx.coroutines.delay(holdDelete)
                     }
                 }
                 respond("", HttpStatusCode.NoContent)
             }
+            req.method == HttpMethod.Get && path.startsWith("/~/channel/") && refuseStream ->
+                respond("", HttpStatusCode.ServiceUnavailable)
             req.method == HttpMethod.Get && path.startsWith("/~/channel/") ->
                 respond(writing.withLock { pipeOf(path) }.stream, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
             path.startsWith("/~/scry/") && failScry(path.removePrefix("/~/scry/").removeSuffix(".json")) ->
