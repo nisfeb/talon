@@ -519,9 +519,15 @@ class TlonChatRepo(
         listOf(
             SubSpec("chat", "/v4"),
             SubSpec("channels", "/v4"),
-            SubSpec("activity", "/v5", fallback = "/v4"),
+            // /v6 (12.1.0) carries notebook and note sources, which v5
+            // and v4 leave out: notebooks had no unreads here.
+            SubSpec("activity", "/v6", fallbacks = listOf("/v5", "/v4")),
             SubSpec("contacts", "/v1/news"),
-            SubSpec("groups", "/v1/groups"),
+            // /v3 (12.2.0) is what Tlon's own client watches: same
+            // envelope, plus `blob` and `active-channel`, which go to
+            // Unknown. /v1 is no longer called by Tlon's clients, which
+            // makes it removable under its N-1 policy.
+            SubSpec("groups", "/v3/groups", fallbacks = listOf("/v1/groups")),
             SubSpec("presence", "/v1"),
             // Invites live here, not on the content subscriptions above:
             // %chat pushes the pending-DM list on /dm/invited (never on
@@ -536,7 +542,7 @@ class TlonChatRepo(
             async {
                 runCatching { ch.subscribe(spec.app, spec.path) }
                     .onSuccess { id ->
-                        spec.fallback?.let { subFallbacks[id] = spec.app to it }
+                        if (spec.fallbacks.isNotEmpty()) subFallbacks[id] = spec.app to spec.fallbacks
                     }
                     .onFailure { Log.e(TAG, "${spec.app} subscribe failed", it) }
             }
@@ -3218,10 +3224,12 @@ class TlonChatRepo(
                 // than the wire version we asked for. Retry the path we
                 // registered as this request's fallback, once.
                 if (response == "subscribe" && pokeIdLong != null) {
-                    subFallbacks.remove(pokeIdLong)?.let { (app, path) ->
+                    subFallbacks.remove(pokeIdLong)?.let { (app, paths) ->
+                        val path = paths.first()
                         Log.w(TAG, "$app subscribe rejected; falling back to $path")
                         scope.launch {
                             runCatching { channel?.subscribe(app, path) }
+                                .onSuccess { id -> if (id != null && paths.size > 1) subFallbacks[id] = app to paths.drop(1) }
                                 .onFailure { Log.e(TAG, "$app fallback subscribe failed", it) }
                         }
                     }
@@ -3621,7 +3629,9 @@ class TlonChatRepo(
         // and `dm-thread/<whom>/<author>/<da>` sources never surface,
         // and ThreadUnreadEntity never populates — leaving the
         // per-row indicator tint and in-thread "New" divider perma-off.
-        val body = channel.scry("activity", "/v4/activity/full", BOOTSTRAP_TIMEOUT_SECS)
+        // /v6 (12.1.0) has notebook sources; an older ship has only /v4.
+        val body = io.nisfeb.talon.util.runSuspendCatching { channel.scry("activity", "/v6/activity/full", BOOTSTRAP_TIMEOUT_SECS) }
+            .getOrElse { channel.scry("activity", "/v4/activity/full", BOOTSTRAP_TIMEOUT_SECS) }
         val obj = body as? JsonObject
         if (obj == null) {
             Log.w(
@@ -3899,6 +3909,9 @@ class TlonChatRepo(
                 Log.w(TAG, "markRead: no group flag for $whom; skipping poke")
                 return
             }
+        } else if (whom.startsWith("notes/")) {
+            // A notebook may be in no group: its source says so with null.
+            db.groups().channelGroupFor(whom)?.groupFlag
         } else null
         val source = activityReadSource(whom, groupFlag) ?: return
         pokeActivityRead(ch, whom, source)
@@ -3941,13 +3954,21 @@ class TlonChatRepo(
         val maxAttempts = 4
         var attempt = 0
         var lastErr: Throwable? = null
+        // A notebook's badge is its notes': only a deep read clears them.
+        val notebook = source.containsKey("notebook")
+        val action = activityReadAction(source, deep = notebook)
         while (attempt < maxAttempts) {
             val outcome = runCatching {
-                ch.poke(
-                    app = "activity",
-                    mark = "activity-action",
-                    payload = activityReadAction(source),
-                )
+                // activity-action-2 (12.1.0) is the mark Tlon's client sends,
+                // and the only one that names a notebook. A ship that is
+                // older refuses it; the original mark says the same of
+                // anything else.
+                try {
+                    ch.poke(app = "activity", mark = "activity-action-2", payload = action)
+                } catch (n: PokeNacked) {
+                    if (notebook) throw n
+                    ch.poke(app = "activity", mark = "activity-action", payload = action)
+                }
             }
             if (outcome.isSuccess) return
             lastErr = outcome.exceptionOrNull()
@@ -3976,11 +3997,12 @@ class TlonChatRepo(
     private data class SubSpec(
         val app: String,
         val path: String,
-        val fallback: String? = null,
+        /** Older paths to try in turn, each on the one before's nack. */
+        val fallbacks: List<String> = emptyList(),
     )
 
-    /** subscribe request id → (app, fallback path), pending a nack. */
-    private val subFallbacks = ConcurrentMap<Long, Pair<String, String>>()
+    /** subscribe request id → (app, the fallback paths left), pending a nack. */
+    private val subFallbacks = ConcurrentMap<Long, Pair<String, List<String>>>()
 
     // ───────── presence (typing indicators) ─────────
 

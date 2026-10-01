@@ -158,4 +158,33 @@ class TlonChatRepoStartupTest {
             assertEquals("Wex", db.contacts().get("~wex")?.nickname, "nothing known of them, so nothing changes")
         }
     }
+
+    // ─── Tlon 12.3.0's N-1 policy: newer paths first, older ones behind ───
+
+    @Test
+    fun `an older ship's activity and groups subscriptions walk back to what it has`() = started(prepare = {
+        refuseWatch = { w -> if (w == "activity/v6" || w == "activity/v5" || w == "groups/v3/groups") "no such path" else null }
+    }) {
+        until("activity on /v4") { "activity/v4" in ship.subscribed }
+        until("groups on /v1") { "groups/v1/groups" in ship.subscribed }
+        val activity = ship.subscribed.filter { it.startsWith("activity/") }
+        assertEquals(listOf("activity/v6", "activity/v5", "activity/v4"), activity, "in turn")
+    }
+
+    @Test
+    fun `a current ship is watched on the paths Tlon's client uses`() = started(prepare = {}) {
+        until("subscriptions") { "groups/v3/groups" in ship.subscribed && "activity/v6" in ship.subscribed }
+        assertTrue(ship.subscribed.none { it == "activity/v5" || it == "groups/v1/groups" })
+    }
+
+    // "Notebook unread indicators": activity /v6 (12.1.0) has notebook
+    // sources, whose unread is always ~ and whose count is their notes'.
+    @Test
+    fun `a notebook's unread notes are counted from activity v6`() = started(prepare = {
+        scries["activity/v6/activity/full"] = """{"notebook/~bus/recipes":{"count":3,"notify-count":0,"recency":1000,"notify":false,"unread":null},
+            "note/~bus/recipes/12":{"count":3,"notify-count":0,"recency":1000,"notify":false,"unread":null}}"""
+    }) { repo ->
+        until("the notebook's unread") { db.unreads().getOne("notes/~bus/recipes")?.count == 3 }
+    }
 }
+

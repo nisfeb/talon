@@ -268,7 +268,43 @@ class TlonChatRepoSendTest {
         repo.markRead("~bus")
         val row = db.unreads().getOne("~bus")!!
         assertEquals(0 to 0, row.count to row.notifyCount)
-        assertEquals("activity-action", ship.pokesTo("activity").single().mark)
+        // The mark Tlon's client sends (12.1.0); see the next for older ships.
+        assertEquals("activity-action-2", ship.pokesTo("activity").single().mark)
+    }
+
+    @Test
+    fun `a ship too old for activity-action-2 is told under the mark it has`() = live {
+        ship.refuse = { p -> if (p.mark == "activity-action-2") "no mark activity-action-2" else null }
+        repo.markRead("~bus")
+        val marks = ship.pokesTo("activity").map { it.mark }
+        assertEquals(listOf("activity-action-2", "activity-action"), marks)
+        assertEquals(ship.pokesTo("activity")[0].json, ship.pokesTo("activity")[1].json, "the same read")
+    }
+
+    // Wire pinned against desk/lib/activity-json.hoon's read decoder (ot
+    // asks for `group`, null allowed) and Tlon's activityApi.ts, which
+    // sends the same for a notebook.
+    @Test
+    fun `opening a notebook reads it and its notes, under activity-action-2`() = live {
+        db.groups().upsertChannelGroupsKeepingPin(listOf(io.nisfeb.talon.data.ChannelGroupEntity(nest = "notes/~bus/recipes", groupFlag = "~bus/garden")))
+        db.unreads().upsert(UnreadEntity("notes/~bus/recipes", count = 3, notifyCount = 0, recencyMs = 1))
+        repo.markRead("notes/~bus/recipes")
+        assertEquals(0, db.unreads().getOne("notes/~bus/recipes")!!.count)
+        val read = ship.pokesTo("activity").single()
+        assertEquals("activity-action-2", read.mark)
+        assertEquals(
+            """{"read":{"source":{"notebook":{"flag":"~bus/recipes","group":"~bus/garden"}},"action":{"all":{"time":null,"deep":true}}}}""",
+            read.json.toString(),
+        )
+    }
+
+    @Test
+    fun `a notebook in no group is read with a null group, and not under the old mark`() = live {
+        ship.refuse = { p -> if (p.mark == "activity-action-2") "no mark activity-action-2" else null }
+        repo.markRead("notes/~bus/loose")
+        val sent = ship.pokesTo("activity")
+        assertEquals(1, sent.size, "the old mark cannot name a notebook: not sent again under it")
+        assertTrue(""""group":null""" in sent.single().json.toString(), sent.single().json.toString())
     }
 
     @Test

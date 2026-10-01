@@ -37,6 +37,9 @@ import kotlinx.serialization.json.put
  * channel rollup.
  */
 internal fun sourceKeyToWhom(key: String): String? = when {
+    // A notebook (activity /v6, 12.1.0) is Talon's `notes/` conversation.
+    // Its notes (`note/~h/n/<id>`) are children, counted in it.
+    key.startsWith("notebook/") -> "notes/" + key.removePrefix("notebook/")
     key.startsWith("ship/") -> key.removePrefix("ship/")
     key.startsWith("club/") -> key.removePrefix("club/")
     key.startsWith("channel/") -> key.removePrefix("channel/")
@@ -211,6 +214,9 @@ internal fun sourceToWhom(source: JsonObject): String? {
     (source["channel"] as? JsonObject)?.let { ch ->
         ch["nest"].asStr()?.let { return it }
     }
+    (source["notebook"] as? JsonObject)?.let { nb ->
+        nb["flag"].asStr()?.let { return "notes/$it" }
+    }
     return null
 }
 
@@ -236,6 +242,19 @@ internal fun toUnread(
     val whom = overrideWhom
         ?: sourceKeyToWhom(sourceKey ?: return null)
         ?: return null
+    val recencyMs = summary["recency"].asLong() ?: 0L
+    // A notebook has no stream of its own: `unread` is always ~ for it
+    // (note events carry no message key), and its count is its notes'.
+    // Read off `unread`, every notebook said nothing new.
+    if (whom.startsWith("notes/")) {
+        return UnreadEntity(
+            whom = whom,
+            count = summary["count"].asInt() ?: 0,
+            notifyCount = summary["notify-count"].asInt() ?: 0,
+            recencyMs = recencyMs,
+            firstUnreadId = null,
+        )
+    }
     // `count` on the wire includes every child thread, which is why a
     // channel badge built from it could only clear with a deep read
     // that marked threads read behind the user's back. `unread` is the
@@ -367,6 +386,14 @@ internal fun activityReadSource(whom: String, groupFlag: String? = null): JsonOb
                     put("group", groupFlag)
                 })
             }
+        }
+        // activity-action-2 only (12.1.0). `group` must be there, null
+        // for a notebook in no group (activity-json's decoder asks for it).
+        whom.startsWith("notes/") -> buildJsonObject {
+            put("notebook", buildJsonObject {
+                put("flag", whom.removePrefix("notes/"))
+                put("group", groupFlag?.let(::JsonPrimitive) ?: kotlinx.serialization.json.JsonNull)
+            })
         }
         else -> null
     }
