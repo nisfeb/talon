@@ -298,5 +298,22 @@ class TlonChatRepoStartupTest {
     fun `a first launch reads fifty a channel`() = started(prepare = { scries[init] = initPosts }) { repo ->
         until("the deep pass") { ship.scried.any { "init-posts/50" in it } }
     }
+
+    // A dropped stream inside a minute of the last full pass read the
+    // notebook list again, and each loop of a reconnect storm with it.
+    @Test
+    fun `a quick reconnect nobody asked for watches the notebooks without reading them`() = started(prepare = {
+        scries[init] = initPosts
+        scries["notes/v0/notebooks"] = """[{"flagName":"recipes","host":"~bus","notebook":{"title":"Recipes","id":7,"rootFolderId":8,
+            "createdBy":"~bus","createdAt":1784592399,"updatedAt":1784592399,"updatedBy":"~bus"},"visibility":"private"}]"""
+    }) { repo ->
+        until("the notebook watched") { "notes/v0/notes/~bus/recipes/stream" in ship.subscribed }
+        until("the progress bar clears") { !repo.bootstrapping.value }
+        val lists = ship.scried.count { it == "notes/v0/notebooks" }
+        val watches = ship.subscribed.count { it == "notes/v0/notes/~bus/recipes/stream" }
+        ship.endStreams()
+        until("watched again on the new channel") { ship.subscribed.count { it == "notes/v0/notes/~bus/recipes/stream" } > watches }
+        assertEquals(lists, ship.scried.count { it == "notes/v0/notebooks" }, "the list not read again")
+    }
 }
 

@@ -63,6 +63,11 @@ class NotesRepo(
     fun streamNotes(flag: NotesFlag) = db.notes().streamNotes(flag.flagString)
     fun streamNote(flag: NotesFlag, noteId: Long) = db.notes().streamNote(flag.flagString, noteId)
 
+    /** A quick reconnect's: watch the notebooks kept here again, reading nothing. */
+    suspend fun resubscribe() {
+        ensureSubscribedAll(db.notes().allNotebooks().mapNotNull { NotesFlag.parse(it.flag) })
+    }
+
     /**
      * Pull the notebook list. Safe to call on every reconnect: it
      * replaces the notebook rows and (re)subscribes to each stream.

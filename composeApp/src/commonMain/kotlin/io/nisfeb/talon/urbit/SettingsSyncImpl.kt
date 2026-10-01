@@ -531,9 +531,14 @@ class SettingsSyncImpl(
         }
 
         // Subscribe for live updates from other devices.
+        resubscribe()
+        Log.i(TAG, "bootstrap done")
+    }
+
+    override suspend fun resubscribe() {
+        val ch = channel ?: return
         runCatching { ch.subscribe("settings", "/desk/$DESK") }
             .onFailure { Log.w(TAG, "subscribe failed", it) }
-        Log.i(TAG, "bootstrap done")
     }
 
     private fun JsonObject?.isNullOrEmpty(): Boolean = bucketIsMissingOrEmpty(this)

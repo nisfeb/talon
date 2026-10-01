@@ -735,9 +735,13 @@ class TlonChatRepo(
         // lost forever — the watchdog at the bottom of this function
         // restores the connection but not the missed payload, and the
         // user only catches up on a full app kill+relaunch.
+        // A reconnect nobody asked for, inside a minute of the last full
+        // pass, only watches again: the gap is that minute, and a whole
+        // desk and the notebook list per reconnect is what a loop costs.
+        val watchOnly = skipBootstrap && !forced
         settingsSync?.attach(ch)
         if (settingsSync != null) {
-            runCatching { settingsSync.bootstrap() }
+            runCatching { if (watchOnly) settingsSync.resubscribe() else settingsSync.bootstrap() }
                 .onFailure { Log.e(TAG, "settings bootstrap failed", it) }
         }
 
@@ -746,7 +750,7 @@ class TlonChatRepo(
         // such agent — bootstrap logs and returns, leaving the tables
         // empty, so this is safe to run unconditionally.
         notes.attach(ch)
-        runCatching { notes.bootstrap() }
+        runCatching { if (watchOnly) notes.resubscribe() else notes.bootstrap() }
             .onFailure { Log.w(TAG, "notes bootstrap failed", it) }
 
         // Watchdog: if nothing at all arrives on the stream for 90s the
