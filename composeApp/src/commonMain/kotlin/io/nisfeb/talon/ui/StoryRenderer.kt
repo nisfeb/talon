@@ -122,6 +122,14 @@ internal object CiteCache {
     private val cache = HashMap<Pair<String, String>, MessageEntity>()
     private val mutexes = HashMap<Pair<String, String>, kotlinx.coroutines.sync.Mutex>()
 
+    /**
+     * When a quote last could not be found. Forgotten, one that does not
+     * resolve (deleted, or a reply now read with its whole thread) was
+     * asked of the ship again each time its row came back into view.
+     */
+    private val misses = HashMap<Pair<String, String>, Long>()
+    private const val MISS_KEPT_MS = 2 * 60_000L
+
     suspend fun resolve(
         whom: String,
         da: String,
@@ -129,6 +137,8 @@ internal object CiteCache {
     ): MessageEntity? {
         val key = whom to da
         kotlinx.atomicfu.locks.synchronized(lock) { cache[key] }?.let { return it }
+        val missedAt = kotlinx.atomicfu.locks.synchronized(lock) { misses[key] }
+        if (missedAt != null && io.nisfeb.talon.util.nowMs() - missedAt < MISS_KEPT_MS) return null
         val mutex = kotlinx.atomicfu.locks.synchronized(lock) {
             mutexes.getOrPut(key) { kotlinx.coroutines.sync.Mutex() }
         }
@@ -137,7 +147,7 @@ internal object CiteCache {
             if (cached != null) return@withLock cached
             val result = load()
             kotlinx.atomicfu.locks.synchronized(lock) {
-                if (result != null) cache[key] = result
+                if (result != null) { cache[key] = result; misses.remove(key) } else misses[key] = io.nisfeb.talon.util.nowMs()
                 mutexes.remove(key)
             }
             result

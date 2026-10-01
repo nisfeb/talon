@@ -428,7 +428,10 @@ class MailRepo(
             else -> {
                 _error.value = e.said()
                 Log.w(TAG, "mail refresh failed", e)
-                if (e is AuspexError.Unreachable) askAgainSoon()
+                // Soon only for a ship that is down, back from a restart in
+                // minutes. A slow one (a timeout, a 504) asked every few
+                // seconds is only made slower; the poll asks it again.
+                if (e is AuspexError.Unreachable && e.down) askAgainSoon()
             }
         }
     }

@@ -324,7 +324,10 @@ class AuspexApi(
          */
         internal fun throwIfShipDown(resp: io.ktor.client.statement.HttpResponse) {
             val s = resp.status.value
-            if (s in 502..504) throw AuspexError.Unreachable(IllegalStateException("HTTP $s from the web server in front of the ship"), down = true)
+            // 502/503: no ship behind the web server, down or restarting.
+            // 504: it waited for a ship that is there but slow; no answer,
+            // and not one to be asked again any sooner.
+            if (s in 502..504) throw AuspexError.Unreachable(IllegalStateException("HTTP $s from the web server in front of the ship"), down = s != 504)
         }
 
         /** Where grubbery binds the nexus. */

@@ -199,12 +199,17 @@ class AuspexApiTest {
     // "a giant red banner with raw html saying 502 bad gateway"
     @Test
     fun `the web server answering for a ship that is down is no answer, said plainly`() = runBlocking<Unit> {
-        for (code in listOf(HttpStatusCode.BadGateway, HttpStatusCode.ServiceUnavailable, HttpStatusCode.GatewayTimeout)) {
+        for (code in listOf(HttpStatusCode.BadGateway, HttpStatusCode.ServiceUnavailable)) {
             val a = api { respond(NGINX_502, code, headersOf("Content-Type", "text/html")) }
             val e = assertFailsWith<AuspexError.Unreachable> { a.inbox(MailView.INBOX) }
             assertTrue(e.down, "$code")
             assertEquals("Your ship isn't answering. It may be restarting.", e.said())
         }
+        // A 504 is a ship that is there and slow: no answer, not down.
+        val slow = api { respond(NGINX_502, HttpStatusCode.GatewayTimeout, headersOf("Content-Type", "text/html")) }
+        val e = assertFailsWith<AuspexError.Unreachable> { slow.inbox(MailView.INBOX) }
+        assertTrue(!e.down)
+        assertEquals("No answer from the ship.", e.said())
     }
 
     @Test
