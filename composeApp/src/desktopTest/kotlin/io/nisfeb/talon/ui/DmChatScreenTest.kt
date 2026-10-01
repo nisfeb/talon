@@ -113,7 +113,7 @@ class DmChatScreenTest {
 
     @Test
     fun `an empty chat the ship sent invites the first message`() = chat(prepare = {
-        scries["chat/v4/dm/~bus/writs/newest/500/heavy"] = """{"writs":{}}"""
+        scries["chat/v4/dm/~bus/writs/newest/50/heavy"] = """{"writs":{}}"""
     }) { _, _ ->
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("No messages yet").fetchSemanticsNodes().isNotEmpty() }
         onAllNodesWithText("Messages could not be loaded").assertCountEquals(0)

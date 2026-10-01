@@ -405,5 +405,15 @@ class TlonChatRepoSendTest {
         delay(TlonChatRepo.FOCUSED_READ_EVERY_MS + 300)
         assertEquals(1, ship.pokesTo("activity").size, "sent on leaving, and not again when its time came")
     }
+
+    // Every open read 500 posts, a reopen seconds later included.
+    @Test
+    fun `a chat is read as it opens once a connect, its newest fifty`() = live {
+        ship.scries["chat/v4/dm/~bus/writs/newest/50/heavy"] = """{"writs":{}}"""
+        repo.refreshOnOpen("~bus")
+        repo.refreshOnOpen("~bus")
+        assertEquals(1, ship.scried.count { it.startsWith("chat/") && "/writs/newest/" in it }, "${ship.scried}")
+        assertTrue(ship.scried.any { it.endsWith("/newest/50/heavy") })
+    }
 }
 

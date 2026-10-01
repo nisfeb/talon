@@ -524,6 +524,8 @@ class TlonChatRepo(
         // event, not just reactions. So ask for /v5 and let the nack
         // walk us back to /v4.
         subFallbacks.clear()
+        // What streamed while away is not in an opened chat yet: read again.
+        readOnOpen.clear()
         listOf(
             SubSpec("chat", "/v4"),
             SubSpec("channels", "/v4"),
@@ -2462,6 +2464,21 @@ class TlonChatRepo(
         if (channel == null) return null
         fetchThread(nest, parentDa.replace(".", ""))
         return db.messages().getOne(nest, replyDa.replace(".", ""))
+    }
+
+    /** Conversations read on opening since this connect; the stream keeps them current after. */
+    private val readOnOpen = ConcurrentMap<String, Boolean>()
+
+    /**
+     * A conversation read as it opens: its newest [OPEN_READ_COUNT], once a
+     * connect. It read 500 on every open, a reopen seconds later with the
+     * stream live included, and rewrote them all; scrolling back loads the
+     * rest page by page, and a reconnect's catch-up covers a gap.
+     */
+    suspend fun refreshOnOpen(whom: String) {
+        if (readOnOpen[whom] == true) return
+        refreshConversation(whom, count = OPEN_READ_COUNT)
+        readOnOpen[whom] = true
     }
 
     /**
@@ -4881,6 +4898,9 @@ class TlonChatRepo(
     companion object {
         /** At most one read this often for the chat or thread in view. */
         const val FOCUSED_READ_EVERY_MS = 3_000L
+
+        /** Posts read as a conversation opens. */
+        const val OPEN_READ_COUNT = 50
 
         /** The first wait before a queued write is tried again; it doubles to [MAX_DRAIN_PAUSE_MS]. */
         private const val FIRST_DRAIN_PAUSE_MS = 2_000L

@@ -536,7 +536,7 @@ fun DmChatScreen(
     LaunchedEffect(whom) {
         Log.i("DmChatScreen", "mount whom=$whom rows=${rows.size}")
         refreshing = true
-        refreshFailed = runSuspendCatching { repo.refreshConversation(whom, count = 500) }
+        refreshFailed = runSuspendCatching { repo.refreshOnOpen(whom) }
             .onFailure { Log.w("DmChatScreen", "refresh $whom failed: ${it.message}") }
             .isFailure
         refreshing = false
