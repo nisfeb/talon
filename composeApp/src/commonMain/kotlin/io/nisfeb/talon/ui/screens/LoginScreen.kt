@@ -65,7 +65,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.login.TalonLoginUri
 import io.nisfeb.talon.ui.UpdateBanner
-import io.nisfeb.talon.ui.talonLogoPainter
 import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.update.UpdateStatus
 import io.nisfeb.talon.urbit.UrbitSession
@@ -196,13 +195,7 @@ fun LoginScreen(
                 modifier = Modifier.size(96.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Image(
-                        painter = talonLogoPainter(),
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape),
-                    )
+                    io.nisfeb.talon.ui.TalonLogo(contentDescription = null, modifier = Modifier.size(72.dp))
                 }
             }
             Spacer(Modifier.height(20.dp))

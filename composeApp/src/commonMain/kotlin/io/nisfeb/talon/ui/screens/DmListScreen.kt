@@ -1029,11 +1029,8 @@ fun DmListScreen(
                 }
             }
             // The brand mark on the right, where the ellipsis was, and
-            // it is what opens the ship picker. Kept as an Image: an
-            // Icon would tint every non-transparent pixel and flatten a
-            // multi-colour logo into a silhouette.
-            androidx.compose.foundation.Image(
-                painter = io.nisfeb.talon.ui.talonLogoPainter(),
+            // it is what opens the ship picker.
+            io.nisfeb.talon.ui.TalonLogo(
                 contentDescription = "Switch ship",
                 modifier = Modifier
                     .padding(end = 4.dp)
@@ -1861,11 +1858,7 @@ internal fun ShipSwitcherDrawer(
                         .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    androidx.compose.foundation.Image(
-                        painter = io.nisfeb.talon.ui.talonLogoPainter(),
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                    )
+                    io.nisfeb.talon.ui.TalonLogo(contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.size(12.dp))
                     Column {
                         if (!nickname.isNullOrBlank()) {
