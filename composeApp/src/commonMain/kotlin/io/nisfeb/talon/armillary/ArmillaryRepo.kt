@@ -327,8 +327,9 @@ class ArmillaryRepo(
         watching = scope.launch {
             var waited = 0L
             while (isActive && waited < limit) {
-                delay(WATCH_EVERY_MS)
-                waited += WATCH_EVERY_MS
+                val every = watchEvery(waited)
+                delay(every)
+                waited += every
                 val a = api ?: return@launch
                 val acct = runSuspendCatching { a.account(fresh = true) }
                     .onFailure { Log.i(TAG, "balance watch: ${it.message}") }
@@ -506,6 +507,16 @@ class ArmillaryRepo(
 
         /** A bitcoin payment settles after a block, so its watch is longer. */
         const val BTC_WATCH_MS = 900_000L
+        /** Past the first two minutes (a bitcoin payment's block is minutes off). */
+        const val BTC_WATCH_LATER_EVERY_MS = 30_000L
+
+        /**
+         * Every 5 s while a card payment could land, then every 30 s: a
+         * 15-minute bitcoin watch at 5 s was 180 fresh reads, each one a
+         * call from the ship to the vendor.
+         */
+        fun watchEvery(waitedMs: Long): Long =
+            if (waitedMs < WATCH_MS) WATCH_EVERY_MS else BTC_WATCH_LATER_EVERY_MS
         const val BTC_RAIL = "btcpay"
 
         /** How long "Paid" stays on the card before the plain balance comes back. */
