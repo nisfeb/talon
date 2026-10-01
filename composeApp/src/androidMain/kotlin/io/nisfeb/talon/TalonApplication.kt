@@ -220,11 +220,11 @@ class TalonApplication : Application() {
             now = { System.currentTimeMillis() },
             lastCheckedAtMs = { updatePrefs.getLong("last_http_check_ms", 0L) },
             recordCheckedAt = { updatePrefs.edit().putLong("last_http_check_ms", it).apply() },
-            minIntervalMs = 12L * 60L * 60L * 1000L,
+            minIntervalMs = io.nisfeb.talon.update.UPDATE_MIN_INTERVAL_MS,
         )
         // Re-check on every app-foreground (cold launch AND warm
         // resume), not just process onCreate. HttpUpdateChecker has
-        // its own 12-hour minInterval throttle, so daily users hit
+        // its own six-hour minInterval throttle, so daily users hit
         // the network at most once per day; the lifecycle observer
         // just ensures users who keep the Talon process alive for
         // days (warm-resume only) still get the prompt eventually.

@@ -154,12 +154,11 @@ private class DesktopAppGraph {
     )
 
     init {
-        // Cold-start update check. Same throttle Android uses (12h);
-        // the timestamp persists in AppDirs/update.properties so a
-        // user re-launching Talon many times in one session doesn't
-        // re-hit GitHub each time. No window-focus re-trigger yet —
-        // desktop users typically restart the app between sessions,
-        // which is enough to surface a new release within a day.
+        // Update checks: at launch and every hour while Talon runs, the
+        // network asked at most every six hours (the timestamp persists
+        // in AppDirs/update.properties, so relaunching does not re-ask
+        // GitHub). Asked only at launch, a Talon left in the tray never
+        // saw a release that came out after it started.
         val updatePrefs = File(AppDirs.userData, "update.properties")
         val readLastChecked: () -> Long = {
             runCatching {
@@ -184,11 +183,10 @@ private class DesktopAppGraph {
             now = { System.currentTimeMillis() },
             lastCheckedAtMs = readLastChecked,
             recordCheckedAt = writeLastChecked,
-            minIntervalMs = 12L * 60L * 60L * 1000L,
+            minIntervalMs = io.nisfeb.talon.update.UPDATE_MIN_INTERVAL_MS,
         )
         updateScope.launch {
-            val m = checker.check()
-            if (m != null) updateState.onManifest(m)
+            io.nisfeb.talon.update.keepCheckingForUpdates(checker, io.nisfeb.talon.update.UPDATE_RECHECK_MS, updateState::onManifest)
         }
     }
 
