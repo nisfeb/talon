@@ -75,6 +75,19 @@ class TaskListTest {
         assertEquals(listOf("tomorrow's"), groups[1].tasks.map { it.name })
     }
 
+    // Under a heading that spans days, two of one priority go by their
+    // day, then by name, as on the calendar's page.
+    @Test
+    fun `under a heading of several days, a priority's tasks go soonest first`() {
+        val sun = LocalDate(2026, 9, 27)
+        val fri = LocalDate(2026, 9, 25)
+        val week = groupTasks(
+            listOf(task("a sunday", sun, priority = 5), task("z friday", fri, priority = 5), task("high sunday", sun, priority = 1)),
+            today,
+        ).single { it.label == "This week" }
+        assertEquals(listOf("high sunday", "z friday", "a sunday"), week.tasks.map { it.name })
+    }
+
     // The home page's list runs by day; priority orders a day's tasks.
     @Test
     fun `the home page's tasks run by day, then by priority`() {

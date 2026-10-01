@@ -62,14 +62,14 @@ data class TaskGroup(val label: String, val tasks: List<CalendarTask>)
  * was due before today first, then today, tomorrow, the rest of the
  * week, everything later, what was never given a date, and what is done
  * at the end. Under each heading the most pressing first (priority 1,
- * none last), then by name: the calendar's own page sorts them so, and
- * the two should agree.
+ * none last), then the soonest due, then by name: the calendar's own
+ * page sorts them so, and the two should agree.
  */
 fun groupTasks(tasks: List<CalendarTask>, today: LocalDate): List<TaskGroup> {
     val (finished, open) = tasks.partition { it.done }
     val tomorrow = today.plus(1, DateTimeUnit.DAY)
     fun of(pick: (LocalDate?) -> Boolean) =
-        open.filter { pick(it.dueDate()) }.sortedWith(compareBy({ it.priorityRank }, { it.name.lowercase() }))
+        open.filter { pick(it.dueDate()) }.sortedWith(compareBy({ it.priorityRank }, { it.dueMs ?: Long.MAX_VALUE }, { it.name.lowercase() }))
     val overdue = of { it != null && it < today }
     val now = of { it == today }
     val next = of { it == tomorrow }
