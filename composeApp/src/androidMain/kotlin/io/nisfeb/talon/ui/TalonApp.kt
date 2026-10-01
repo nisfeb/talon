@@ -1382,6 +1382,8 @@ fun TalonApp(
         { ship -> citeContacts.displayName(ship) }
     }
     androidx.compose.runtime.CompositionLocalProvider(
+        // The density setting and the font scale, as App.kt provides them.
+        *io.nisfeb.talon.ui.chatDensityLocals(app.uiSettings),
         // Null until the nexus answers, so nothing offers mail on a ship
         // that has none.
         // Mail lives in the same desk as the link handler's app, so the

@@ -1468,10 +1468,6 @@ fun App(
         //   * mode = Brand → null (explicit opt-out also stays brand).
         val accentSettings by uiSettings.accentSettings.collectAsState()
         val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
-        val densityMode by uiSettings.density.collectAsState()
-        val chatDensity = remember(densityMode) {
-            io.nisfeb.talon.ui.ChatDensity.forMode(densityMode)
-        }
         // User font scale (Ctrl/Cmd +/-/0). Layered on top of the
         // density preset's own multiplier below.
         val userFontScale by uiSettings.fontScale.collectAsState()
@@ -1505,24 +1501,6 @@ fun App(
         }
         val themeSettings by uiSettings.themeSettings.collectAsState()
         TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active) {
-          // Scale the whole app's `sp`-based sizes by the active
-          // density's font multiplier. Compose computes pixel sizes
-          // for sp values as `sp * density * fontScale`, so
-          // multiplying `fontScale` by 0.90 / 1.0 / 1.12 globally
-          // scales every Text without touching individual styles.
-          // We deliberately do NOT scale `density` itself because
-          // that would shrink/grow icons + image previews + Dp-based
-          // gaps that aren't part of the density story (the rail,
-          // image viewer, etc.); per-component dp values stay under
-          // explicit `LocalChatDensity.current` reads.
-          val baseDensity = androidx.compose.ui.platform.LocalDensity.current
-          val scaledDensity = remember(baseDensity, chatDensity, userFontScale) {
-              androidx.compose.ui.unit.Density(
-                  density = baseDensity.density,
-                  fontScale = baseDensity.fontScale *
-                      chatDensity.fontScaleMultiplier * userFontScale,
-              )
-          }
           // urb:// links: check lattice is installed on our ship,
           // offer to install it (from ~ricsul-bilwyt) if not, then
           // resolve — webview popover on mobile, system browser on
@@ -1654,8 +1632,7 @@ fun App(
                   session.baseUrl?.takeIf { it.isNotBlank() }?.let { io.nisfeb.talon.ui.CometDomes(session.http, it, db) }
               },
               io.nisfeb.talon.mail.LocalGrubberyInstall provides grubberyInstall,
-              io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
-              androidx.compose.ui.platform.LocalDensity provides scaledDensity,
+              *io.nisfeb.talon.ui.chatDensityLocals(uiSettings),
               io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
               io.nisfeb.talon.ui.LocalUrbFetcher provides urbFetcher,
               io.nisfeb.talon.ui.LocalShipUrl provides sessionStore.active()?.shipUrl,
