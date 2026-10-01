@@ -765,7 +765,8 @@ class TlonChatRepo(
         // arriving a beat behind ingestion.
         val ackQueue = Channel<Long>(Channel.UNLIMITED)
         val ackJob = launch {
-            for (id in ackQueue) runCatching { ch.ack(id) }
+            // In batches: one ack covers every event before it.
+            ackInBatches(ackQueue) { ch.ack(it) }
         }
         val collectJob = launch {
             try {

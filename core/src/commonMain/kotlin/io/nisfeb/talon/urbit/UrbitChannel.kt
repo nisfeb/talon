@@ -440,3 +440,45 @@ class PokeUnacked(
     val app: String,
     val mark: String,
 ) : RuntimeException("$app never answered a $mark poke: it may or may not have landed")
+
+/** Events waiting before an ack is sent for them all. */
+const val ACK_EVERY = 20
+
+/** Quiet before the events waiting are acked. */
+const val ACK_QUIET_MS = 5_000L
+
+/**
+ * Ack the event ids from [ids] in batches: the newest once [every] are
+ * waiting, or once [quietMs] pass with none newer, and whatever waits
+ * when [ids] closes. Eyre's ack prunes every event up to the id it names,
+ * so one covers the run before it. One PUT per event, as it was, made
+ * every fact cost the ship a second event of its own. Well inside eyre's
+ * clog limits: 50 events unacked and 30 seconds old.
+ */
+suspend fun ackInBatches(
+    ids: kotlinx.coroutines.channels.ReceiveChannel<Long>,
+    every: Int = ACK_EVERY,
+    quietMs: Long = ACK_QUIET_MS,
+    ack: suspend (Long) -> Unit,
+) {
+    var newest = -1L
+    var waiting = 0
+    suspend fun flush() {
+        if (waiting == 0) return
+        waiting = 0
+        runCatching { ack(newest) }
+    }
+    while (true) {
+        val next = kotlinx.coroutines.withTimeoutOrNull(quietMs) { ids.receiveCatching() }
+        when {
+            next == null -> flush()
+            next.isClosed -> { flush(); return }
+            else -> {
+                newest = maxOf(newest, next.getOrThrow())
+                waiting += 1
+                if (waiting >= every) flush()
+            }
+        }
+    }
+}
+

@@ -260,5 +260,17 @@ class TlonChatRepoStartupTest {
         until("the invite") { repo.invitesFlow.value?.any { it.flag == "~bus/garden" } == true }
         assertTrue(ship.scried.none { it.startsWith("groups-ui/") && it.endsWith("/init") }, "${ship.scried}")
     }
+
+    // One PUT per event made each fact cost the ship a second event.
+    @Test
+    fun `a run of facts is acked in one request, not one each`() = started(prepare = {}) {
+        until("subscriptions") { ship.subscribed.isNotEmpty() }
+        delay(300)
+        val before = ship.acked.size
+        repeat(30) { ship.emit("""{"nothing":$it}""") }
+        until("the run acked") { ship.acked.size > before }
+        delay(500)
+        assertTrue(ship.acked.size - before <= 2, "${ship.acked.size - before} acks for 30 facts")
+    }
 }
 

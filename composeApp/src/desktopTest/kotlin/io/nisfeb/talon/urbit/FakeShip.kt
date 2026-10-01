@@ -44,6 +44,8 @@ internal class FakeShip(val us: String = "~zod") {
 
     /** Every subscription opened, as `app/path`. */
     val subscribed: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    /** The event ids each ack named, in order. */
+    val acked: MutableList<Long> = java.util.concurrent.CopyOnWriteArrayList()
 
     /** Every scry path asked for, answered or not, in order. */
     val scried: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
@@ -162,6 +164,7 @@ internal class FakeShip(val us: String = "~zod") {
                             )
                             landThenFail(p)?.let { throw it }
                         }
+                        "ack" -> { o["event-id"]?.jsonPrimitive?.content?.toLongOrNull()?.let { acked += it } }
                         "subscribe" -> {
                             val watch = "${o["app"]?.jsonPrimitive?.content}${o["path"]?.jsonPrimitive?.content}"
                             subscribed += watch

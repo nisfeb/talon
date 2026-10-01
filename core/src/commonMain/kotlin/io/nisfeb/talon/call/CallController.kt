@@ -382,8 +382,13 @@ class CallController(
                     ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH)
                     backoff = 2_000L
                     _connected.value = true
+                    // Acked in batches, as the main channel is: a PUT per
+                    // event doubled what each fact cost the ship.
+                    val acks = kotlinx.coroutines.channels.Channel<Long>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+                    scope.launch { io.nisfeb.talon.urbit.ackInBatches(acks) { ch.ack(it) } }
+                    try {
                     events.collect { ev ->
-                        ev.id?.let { runCatching { ch.ack(it) } }
+                        ev.id?.let { acks.trySend(it) }
                         val body = ev.body as? JsonObject ?: return@collect
                         // Surface poke nacks — a silently-refused poke cost
                         // us a day of "the accept never arrives" debugging.
@@ -587,6 +592,10 @@ class CallController(
                             }
                             null -> {}
                         }
+                    }
+                    } finally {
+                        // What waits is acked as the stream ends.
+                        acks.close()
                     }
                 }
             }.onFailure {
