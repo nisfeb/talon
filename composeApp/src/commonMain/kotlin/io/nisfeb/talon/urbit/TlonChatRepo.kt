@@ -862,6 +862,24 @@ class TlonChatRepo(
     @Volatile private var lastReconnectMs: Long = 0L
 
     /**
+     * Reconnect only if the stream has gone quiet. Eyre sends something at
+     * least every ~20 s, so bytes within [STREAM_FRESH_MS] mean the socket
+     * is live and nothing was missed. Android's foreground service keeps
+     * the socket up, and tearing it down on every return to the app (back
+     * from the image picker included) cost a delete, every subscribe and
+     * the catch-up reads. iOS and desktop keep [forceReconnect]: there the
+     * socket is usually dead on return.
+     */
+    fun reconnectIfStale() {
+        val ch = channel
+        if (ch != null && ch.streamIdleMs < STREAM_FRESH_MS) {
+            Log.i(TAG, "reconnect skipped: stream live (${ch.streamIdleMs} ms)")
+            return
+        }
+        forceReconnect()
+    }
+
+    /**
      * Re-scry init-posts + activity without reopening the channel. Cheap
      * enough to call every time the app comes to the foreground — closes
      * the "messages came in while I was away" gap that doze sometimes
@@ -869,6 +887,10 @@ class TlonChatRepo(
      */
     fun catchUp() {
         val ch = channel ?: return
+        // A stream with bytes in the last half minute has missed nothing:
+        // a screen-on or the 15-minute worker re-read the recent slice of
+        // every chat and the whole activity anyway, a healthy socket or not.
+        if (ch.streamIdleMs < STREAM_FRESH_MS) return
         scope.launch {
             // catchUp pulls just the recent slice — anything older was
             // already covered by the deep-history scry on the original
@@ -4898,6 +4920,9 @@ class TlonChatRepo(
     companion object {
         /** At most one read this often for the chat or thread in view. */
         const val FOCUSED_READ_EVERY_MS = 3_000L
+
+        /** A stream with bytes this recently is live: eyre sends at least every ~20 s. */
+        const val STREAM_FRESH_MS = 30_000L
 
         /** Posts read as a conversation opens. */
         const val OPEN_READ_COUNT = 50

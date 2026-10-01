@@ -1219,7 +1219,8 @@ fun TalonApp(
                     // Foreground: a chat left open now counts as actively
                     // viewed again (gates auto-mark-read in the repo).
                     app.repo.setForeground(true)
-                    app.repo.forceReconnect()
+                    // The service keeps the socket up: reconnect only if it went quiet.
+                    app.repo.reconnectIfStale()
                     // Coming back is one of the four things that makes the
                     // mailbox ask again; a ten-minute timer alone cannot
                     // cover the moment somebody actually looks at it.

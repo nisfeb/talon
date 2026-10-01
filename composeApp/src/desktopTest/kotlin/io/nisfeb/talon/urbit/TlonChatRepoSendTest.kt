@@ -415,5 +415,22 @@ class TlonChatRepoSendTest {
         assertEquals(1, ship.scried.count { it.startsWith("chat/") && "/writs/newest/" in it }, "${ship.scried}")
         assertTrue(ship.scried.any { it.endsWith("/newest/50/heavy") })
     }
+
+    // A screen-on and the 15-minute worker re-read every chat's recent
+    // slice and the whole activity, a healthy socket or not.
+    @Test
+    fun `a live stream is not caught up again`() = live {
+        ship.emit("""{"nothing":1}""")
+        kotlinx.coroutines.withTimeout(2_000) { while (ship.channel.streamIdleMs > 1_000) delay(20) }
+        repo.catchUp()
+        delay(500)
+        assertTrue(ship.scried.none { "init-posts" in it || it.startsWith("activity/") }, "${ship.scried}")
+    }
+
+    @Test
+    fun `a stream gone quiet is caught up`() = live {
+        repo.catchUp()
+        kotlinx.coroutines.withTimeout(3_000) { while (ship.scried.none { it.startsWith("activity/") }) delay(20) }
+    }
 }
 

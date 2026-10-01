@@ -10,8 +10,6 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -55,17 +53,20 @@ class TalonSyncService : Service() {
     private fun registerNetworkCallback() {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return
-        val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-            .build()
+        // The default network only, and only when it changes: every matching
+        // network's arrival (cellular coming back while on Wi-Fi) tore down
+        // a working socket. The first call is the network we already have.
         val callback = object : ConnectivityManager.NetworkCallback() {
+            private var current: Network? = null
             override fun onAvailable(network: Network) {
-                Log.i(TAG, "network available; force-reconnect")
+                val was = current
+                current = network
+                if (was == null || was == network) return
+                Log.i(TAG, "default network changed; force-reconnect")
                 applicationOrNull()?.repo?.forceReconnect()
             }
         }
-        runCatching { cm.registerNetworkCallback(request, callback) }
+        runCatching { cm.registerDefaultNetworkCallback(callback) }
             .onSuccess { networkCallback = callback }
             .onFailure { Log.w(TAG, "registerNetworkCallback failed", it) }
     }
