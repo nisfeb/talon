@@ -1384,6 +1384,12 @@ fun TalonApp(
     androidx.compose.runtime.CompositionLocalProvider(
         // The density setting and the font scale, as App.kt provides them.
         *io.nisfeb.talon.ui.chatDensityLocals(app.uiSettings),
+        io.nisfeb.talon.ui.LocalFontRepo provides io.nisfeb.talon.ui.rememberFontRepo(
+            app.uiSettings, app.ktorHttp,
+            shipUrl = { app.sessionStore.active()?.shipUrl },
+            cookie = { app.sessionStore.active()?.let { "${it.cookieName}=${it.cookieValue}" } },
+            scope = app.repo.pushScope,
+        ),
         // Null until the nexus answers, so nothing offers mail on a ship
         // that has none.
         // Mail lives in the same desk as the link handler's app, so the

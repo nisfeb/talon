@@ -24,3 +24,8 @@ actual val tempDirPath: String =
     System.getProperty("java.io.tmpdir")?.trimEnd('/') ?: "/data/local/tmp"
 
 actual val cacheDirPath: String get() = System.getProperty("java.io.tmpdir")?.trimEnd('/') ?: tempDirPath
+
+// The runtime sets java.io.tmpdir to the app's cache dir,
+// /data/user/<n>/<package>/cache; its files dir is the sibling.
+actual val dataDirPath: String get() =
+    java.io.File(cacheDirPath).parentFile?.let { java.io.File(it, "files").absolutePath } ?: cacheDirPath

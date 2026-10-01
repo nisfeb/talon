@@ -1500,7 +1500,16 @@ fun App(
             }
         }
         val themeSettings by uiSettings.themeSettings.collectAsState()
-        TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active) {
+        val fontRepo = io.nisfeb.talon.ui.rememberFontRepo(
+            uiSettings, http,
+            shipUrl = { sessionStore.active()?.shipUrl },
+            cookie = { sessionStore.active()?.let { "${it.cookieName}=${it.cookieValue}" } },
+            scope = repo.pushScope,
+        )
+        TalonTheme(
+            darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active,
+            fontFamily = io.nisfeb.talon.ui.rememberAppFontFamily(uiSettings, fontRepo.files),
+        ) {
           // urb:// links: check lattice is installed on our ship,
           // offer to install it (from ~ricsul-bilwyt) if not, then
           // resolve — webview popover on mobile, system browser on
@@ -1633,6 +1642,7 @@ fun App(
               },
               io.nisfeb.talon.mail.LocalGrubberyInstall provides grubberyInstall,
               *io.nisfeb.talon.ui.chatDensityLocals(uiSettings),
+              io.nisfeb.talon.ui.LocalFontRepo provides fontRepo,
               io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
               io.nisfeb.talon.ui.LocalUrbFetcher provides urbFetcher,
               io.nisfeb.talon.ui.LocalShipUrl provides sessionStore.active()?.shipUrl,

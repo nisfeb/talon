@@ -162,7 +162,10 @@ class MainActivity : ComponentActivity() {
             androidx.compose.runtime.LaunchedEffect(app) {
                 app.uiSettings.micProcessing.collect { io.nisfeb.talon.call.MicProcessingSettings.current = it }
             }
-            TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active) {
+            TalonTheme(
+                darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active,
+                fontFamily = io.nisfeb.talon.ui.rememberAppFontFamily(app.uiSettings),
+            ) {
                 CompositionLocalProvider(LocalImageDownloader provides imageDownloader) {
                     TalonApp(
                         initialForShip = forShip,
