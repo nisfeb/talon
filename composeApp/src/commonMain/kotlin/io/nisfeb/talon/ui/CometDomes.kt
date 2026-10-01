@@ -218,7 +218,7 @@ fun GroundwireLine(ship: String) {
             color = if (!r.isNullOrEmpty() && !checking) androidx.compose.material3.MaterialTheme.colorScheme.primary
             else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        androidx.compose.material3.TextButton(
+        TextButton(
             enabled = !checking,
             onClick = {
                 checking = true
