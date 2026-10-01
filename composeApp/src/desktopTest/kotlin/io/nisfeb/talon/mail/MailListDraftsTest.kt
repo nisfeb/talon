@@ -72,7 +72,8 @@ class MailListDraftsTest {
         }
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("\"Lunch\" was not sent", substring = true).fetchSemanticsNodes().isNotEmpty() }
         assertTrue(onAllNodesWithText("It is in Drafts.", substring = true).fetchSemanticsNodes().isNotEmpty(), "it says where the message is")
-        onAllNodesWithText("Tap to dismiss", substring = true)[0].performClick()
+        // That line, by its words: the listing's line can be put away too, and shows above it.
+        onAllNodesWithText("\"Lunch\" was not sent", substring = true)[0].performClick()
         waitForIdle()
         assertTrue(onAllNodesWithText("was not sent", substring = true).fetchSemanticsNodes().isEmpty())
         assertNull(mail.sendProblem.value)

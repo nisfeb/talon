@@ -209,6 +209,8 @@ fun CalendarScreen(
     var month by remember { mutableStateOf(today.monthNumber) }
     var selected by remember { mutableStateOf(today) }
     var editing by remember { mutableStateOf<Pair<String?, EventDraft>?>(null) }
+    /** Why the last save did not go, shown in the editor it reopened. */
+    var editFailed by remember { mutableStateOf<String?>(null) }
     /** The row being looked at; editing starts from here. */
     var viewing by remember { mutableStateOf<CalendarRow?>(null) }
     var editingIdx by remember { mutableStateOf<Int?>(null) }
@@ -366,7 +368,7 @@ fun CalendarScreen(
         // Done, only the "doing" line goes: what the body said of how it
         // went stays. It used to be cleared too, so a group share never
         // said whom it mailed, nor that it could mail nobody.
-        scope.launch { val ok = body(); status = if (!ok) failed else status.takeUnless { it == doing } }
+        scope.launch { val ok = body(); status = if (!ok) repo.failedLine(failed) else status.takeUnless { it == doing } }
     }
     fun act(doing: String, failed: String, body: suspend () -> Boolean) {
         editing = null
@@ -1001,8 +1003,10 @@ fun CalendarScreen(
             postToLabel = if (id == null && chat != null && db != null) (postTo?.let { labelOf(it) } ?: "") else null,
             onChoosePostTo = { pickingPostTo = true },
             onClearPostTo = { postTo = null },
-            onDismiss = { editing = null; postTo = null },
+            failed = editFailed,
+            onDismiss = { editing = null; postTo = null; editFailed = null },
             onSave = onSave@{ d, editScope ->
+                editFailed = null
                 // A new task goes on the list at once and is written behind it.
                 if (id == null && d.cat == EventCat.TODO && postTo == null) {
                     editing = null
@@ -1041,6 +1045,12 @@ fun CalendarScreen(
                     val ok = written?.ok == true
                     if (ghost != null) pendingRows = pendingRows - ghost
                     if (id != null) pendingEdits = pendingEdits - id
+                    // Not saved: the editor back with what was typed, and why.
+                    // It closed for good, and a ship down for a restart lost the edit.
+                    if (!ok && editing == null) {
+                        editFailed = repo.failedLine("The ship did not take the change.")
+                        editing = id to d
+                    }
                     if (ok) {
                         // Saved, and said so now; shown as saved until the
                         // ship's own copy comes back in.
@@ -1180,6 +1190,8 @@ private fun EventEditor(
     postToLabel: String? = null,
     onChoosePostTo: () -> Unit = {},
     onClearPostTo: () -> Unit = {},
+    /** Why the save this editor reopened from did not go. */
+    failed: String? = null,
     onDismiss: () -> Unit,
     onSave: (EventDraft, EditScope) -> Unit,
     onDelete: (() -> Unit)?,
@@ -1190,7 +1202,7 @@ private fun EventEditor(
     var zoneText by remember { mutableStateOf(initial.zone.orEmpty()) }
     var pickingDate by remember { mutableStateOf(false) }
     var pickingUntil by remember { mutableStateOf(false) }
-    var problem by remember { mutableStateOf<String?>(null) }
+    var problem by remember { mutableStateOf(failed) }
     val time = rememberTimePickerState(initialHour = initial.minuteOfDay / 60, initialMinute = initial.minuteOfDay % 60, is24Hour = twentyFourHour)
     val fieldFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }

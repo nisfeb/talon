@@ -564,7 +564,7 @@ class OrreryApi(
             o["note"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
                 ?: o["error"]?.jsonPrimitive?.contentOrNull
         }.getOrNull()
-            ?: text.take(160).ifBlank { "no reason given" }
+            ?: io.nisfeb.talon.mail.bodyAsReason(text, 160)
 
     companion object {
         /**

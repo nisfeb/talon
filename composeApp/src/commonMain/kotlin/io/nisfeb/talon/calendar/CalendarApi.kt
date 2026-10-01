@@ -202,7 +202,7 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
             throw c
         } catch (t: Throwable) {
             throw AuspexError.Unreachable(t)
-        }
+        }.also(AuspexApi::throwIfShipDown)
         return resp.status.isSuccess()
     }
     /** Every refusal and conflict logged by the Google and CalDAV syncs. */
@@ -253,7 +253,7 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
             throw c
         } catch (t: Throwable) {
             throw AuspexError.Unreachable(t)
-        }
+        }.also(AuspexApi::throwIfShipDown)
         if (!resp.status.isSuccess()) return null
         return runCatching { AuspexApi.json.parseToJsonElement(resp.bodyAsText()) as? JsonObject }.getOrNull()
     }
@@ -268,7 +268,7 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
             throw c
         } catch (t: Throwable) {
             throw AuspexError.Unreachable(t)
-        }
+        }.also(AuspexApi::throwIfShipDown)
         return resp.status.isSuccess()
     }
 
@@ -279,9 +279,9 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
             throw c
         } catch (t: Throwable) {
             throw AuspexError.Unreachable(t)
-        }
+        }.also(AuspexApi::throwIfShipDown)
         val text = try { resp.bodyAsText() } catch (c: CancellationException) { throw c } catch (t: Throwable) { throw AuspexError.Garbled(t) }
-        if (!resp.status.isSuccess()) throw AuspexError.Refused(resp.status.value, text.take(200))
+        if (!resp.status.isSuccess()) throw AuspexError.Refused(resp.status.value, AuspexApi.reasonOf(text))
         return text
     }
 

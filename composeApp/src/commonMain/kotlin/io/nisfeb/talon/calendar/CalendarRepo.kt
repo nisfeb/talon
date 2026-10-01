@@ -409,7 +409,7 @@ class CalendarRepo(
             }
             // Why first, then the stand-in goes: the other way round, a
             // screen watching the list saw it leave before it heard why.
-            if (!ok) onFailed("The ship did not take \"${d.name.trim()}\".")
+            if (!ok) onFailed(failedLine("The ship did not take \"${d.name.trim()}\"."))
             _pendingTasks.value = _pendingTasks.value - ghost
         }
         return ghost
@@ -588,10 +588,24 @@ class CalendarRepo(
     }
 
     /** A write and nothing read back: the caller knows what it changed. False when refused. */
+    // ponytail: the last write's only; two saves failing at once for different reasons share one
+    @kotlin.concurrent.Volatile private var lastWriteError: io.nisfeb.talon.mail.AuspexError? = null
+
+    /**
+     * What to say of a write that did not land: [refused] when the ship
+     * said no, and that the ship is not answering when it never got there.
+     * Every failure said the ship would not take the change, a ship down
+     * for a restart included.
+     */
+    fun failedLine(refused: String): String =
+        (lastWriteError as? io.nisfeb.talon.mail.AuspexError.Unreachable)?.let { it.said() + " Nothing was changed." } ?: refused
+
     private suspend fun write(body: JsonObject): Boolean {
         val a = api ?: return false
         if (ball.isEmpty()) ball = runSuspendCatching { a.config().ball }.getOrDefault("")
-        val ok = runSuspendCatching { a.poke(ball, body) }.getOrDefault(false)
+        val tried = runSuspendCatching { a.poke(ball, body) }
+        lastWriteError = tried.exceptionOrNull() as? io.nisfeb.talon.mail.AuspexError
+        val ok = tried.getOrDefault(false)
         if (ok) {
             // What was read of an event the write may have changed is
             // no longer what the ship says.

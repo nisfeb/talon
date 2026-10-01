@@ -488,7 +488,7 @@ internal fun catalogOf(e: kotlinx.serialization.json.JsonElement): List<CatalogR
 internal fun armillaryReason(text: String): String =
     runCatching { Json.parseToJsonElement(text).jsonObject["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content }.getOrNull()
         ?: runCatching { Json.parseToJsonElement(text).jsonObject["error"]?.jsonPrimitive?.content }.getOrNull()
-        ?: text.take(160).ifBlank { "no reason given" }
+        ?: io.nisfeb.talon.mail.bodyAsReason(text, 160)
 
 /**
  * Microdollars as money, to the cent. Under half a cent is said in
