@@ -13,6 +13,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.LocalDate
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.buildJsonObject
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.test.Test
@@ -304,5 +306,18 @@ class CalendarWriteTest {
             repo.refresh()
             assertTrue(ship.asked("/google.json") && ship.asked("/conflicts.json"), ship.reads.toString())
         }
+    }
+
+    // The beat the nexus takes to apply a poke is the reading's to wait:
+    // waited inside the write, every save stayed on screen that much longer.
+    @Test
+    fun `a save is answered as soon as the ship takes it, the beat left to the reading`() = calendar { repo, _ ->
+        repo.refreshTasks()
+        val started = System.nanoTime()
+        val w = repo.writeEvent(buildJsonObject { put("action", "edit-event"); put("id", "t1"); put("cat", "todo"); put("cal", "default"); put("meta", buildJsonObject { put("name", "Buy oat milk") }) })
+        val tookMs = (System.nanoTime() - started) / 1_000_000
+        assertTrue(w.ok)
+        assertTrue(tookMs < CalendarRepo.APPLY_BEAT_MS, "answered in $tookMs ms")
+        assertEquals("Buy oat milk", repo.tasks.value?.first { it.id == "t1" }?.name, "in the list already")
     }
 }

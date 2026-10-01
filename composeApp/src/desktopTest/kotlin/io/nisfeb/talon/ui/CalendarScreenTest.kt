@@ -29,6 +29,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -47,6 +48,8 @@ class CalendarScreenTest {
     @Volatile private var down = false
     /** The ship says no to every write. */
     @Volatile private var refuse = false
+    /** Writes wait for this: a busy ship, until it completes. */
+    @Volatile private var shipTakes: kotlinx.coroutines.CompletableDeferred<Unit>? = null
     /** The ship's one-event read never answers: a busy ship, at its worst. */
     @Volatile private var holdDetail = false
     /** The ship's calendar keeps reminders: its rows, its event read and its config say so. */
@@ -64,8 +67,9 @@ class CalendarScreenTest {
         if (!path.startsWith("/grubbery/api/poke/")) reads += path
         if (holdDetail && path.endsWith("/event.json")) kotlinx.coroutines.awaitCancellation()
         when {
-            path.startsWith("/grubbery/api/poke/") && refuse -> respond("", HttpStatusCode.BadRequest)
+            path.startsWith("/grubbery/api/poke/") && refuse -> { shipTakes?.await(); respond("", HttpStatusCode.BadRequest) }
             path.startsWith("/grubbery/api/poke/") -> {
+                shipTakes?.await()
                 writes += path to req.body.toByteArray().decodeToString()
                 json("")
             }
@@ -229,6 +233,51 @@ class CalendarScreenTest {
                 "a task's save reads the lists it changed, not the calendars: $reads",
             )
             assertTrue(reads.none { it.endsWith("/window.json") }, "an undated task is in no window: $reads")
+        }
+    }
+
+    // "saving a todo edit takes way too long": the task list kept the old
+    // task until the ship had answered, seconds on a busy one.
+    private fun ComposeUiTest.renameMilk() {
+        onNodeWithContentDescription("Tasks").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Buy milk") }
+        onNodeWithText("Buy milk").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Edit").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 2_000) { shows("Edit task") }
+        field("Name").performTextReplacement("Buy oat milk")
+        onAllNodesWithText("Save")[0].performClick()
+    }
+
+    @Test
+    fun `a task edit is in the task list at Save, before a slow ship answers`() {
+        holdDetail = true
+        val takes = kotlinx.coroutines.CompletableDeferred<Unit>()
+        shipTakes = takes
+        calendar {
+            renameMilk()
+            waitUntil(timeoutMillis = 2_000) { shows("Buy oat milk") && !shows("Edit task") }
+            assertTrue(!shows("Buy milk"), "the old name is gone")
+            assertTrue(writes.isEmpty(), "and the ship has not taken it yet")
+            tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy oat milk"}}]"""
+            takes.complete(Unit)
+            waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
+            waitForIdle()
+            assertTrue(shows("Buy oat milk"))
+        }
+    }
+
+    @Test
+    fun `a task edit the ship refuses goes back to what it was`() {
+        holdDetail = true
+        refuse = true
+        calendar { repo ->
+            renameMilk()
+            waitUntil(timeoutMillis = 5_000) { shows("did not take") }
+            // The list is back as it was; the change waits in the editor it
+            // reopened, to try again.
+            assertEquals("Buy milk", repo.tasks.value?.single { it.id == "t1" }?.name)
+            assertTrue(onAllNodes(hasSetTextAction() and hasText("Buy oat milk")).fetchSemanticsNodes().isNotEmpty())
         }
     }
 
