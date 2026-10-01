@@ -151,10 +151,10 @@ class FontRepo(
      * files of fonts removed elsewhere. Run on start and when the list
      * changes. A file fetched is kept only if it is the one listed.
      */
-    suspend fun sync() = lock.withLock {
+    suspend fun sync(): Int = lock.withLock {
         val s = settings.fontSettings.value
         for (id in s.removed) if (files.has(id)) files.delete(id)
-        if (s.fonts.isEmpty()) { _status.value = null; return@withLock }
+        if (s.fonts.isEmpty()) { _status.value = null; return@withLock 0 }
         // Asked once; a ship that will not say is treated as having none.
         val onShip = runCatching { ship.ids() }.getOrDefault(emptySet())
         var missing = 0
@@ -170,7 +170,28 @@ class FontRepo(
             if (!fontLoads(files.path(f.id).toString())) { files.delete(f.id); missing++ }
         }
         _status.value = if (missing == 0) null
-        else "$missing font file${if (missing == 1) "" else "s"} could not be fetched from your ship; text uses the system font until ${if (missing == 1) "it arrives" else "they arrive"}."
+        else "$missing font file${if (missing == 1) "" else "s"} could not be fetched from your ship yet; text uses the system font until ${if (missing == 1) "it arrives" else "they arrive"}."
+        io.nisfeb.talon.util.Log.i("FontRepo", "fonts: ${s.fonts.size} listed, ${s.fonts.size - missing} here, $missing missing")
+        missing
+    }
+
+    /**
+     * [sync] until every listed font is here, waiting longer between
+     * tries. A fetch that failed (a busy ship at start, a dropped
+     * request) was not tried again until the list changed or the app
+     * restarted, while the page said the font would arrive.
+     */
+    suspend fun keepInLine(waits: List<Long> = RETRY_WAITS_MS) {
+        var i = 0
+        while (sync() > 0) {
+            kotlinx.coroutines.delay(waits[minOf(i, waits.lastIndex)])
+            i++
+        }
+    }
+
+    companion object {
+        /** 30 s, then doubling, at most ten minutes: one small listing a try. */
+        val RETRY_WAITS_MS = listOf(30_000L, 60_000L, 120_000L, 300_000L, 600_000L)
     }
 }
 
@@ -192,6 +213,6 @@ fun rememberFontRepo(
 ): FontRepo {
     val repo = androidx.compose.runtime.remember(settings, http, scope) { FontRepo(settings, FontShip(http, shipUrl, cookie), scope) }
     val listed = settings.fontSettings.collectAsState().value
-    androidx.compose.runtime.LaunchedEffect(repo, listed.fonts, listed.removed) { runCatching { repo.sync() } }
+    androidx.compose.runtime.LaunchedEffect(repo, listed.fonts, listed.removed) { runCatching { repo.keepInLine() } }
     return repo
 }

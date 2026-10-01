@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import okio.Path.Companion.toPath
@@ -170,6 +171,27 @@ class FontRepoTest {
         assertTrue(!there.files.has(id))
         assertTrue(there.status.value?.contains("could not be fetched") == true, there.status.value)
         assertNull(appFontFamily(listed.fontSettings.value, there.files), "the system's until it arrives")
+    }
+
+    // The desktop learned of a font installed on the phone at a busy start,
+    // and a fetch that failed was not tried again that session.
+    @Test
+    fun `a font that could not be fetched is tried again until it arrives`() = runBlocking<Unit> {
+        val font = realFont ?: return@runBlocking println("no TrueType font on this machine; skipped")
+        val bytes = font.readBytes()
+        val id = fontId(bytes)
+        dirs += "talon"; dirs += "talon/fonts"
+        ball["talon/fonts/$id.font"] = bytes
+        grubbery = false // the ship does not answer at first
+        val listed = InMemoryUiSettings().apply { setFontSettings(FontSettings(listOf(InstalledFont(id, "X")), family = "X")) }
+        val there = device("desktop", listed)
+        val keeping = scope.launch { there.keepInLine(waits = listOf(50L)) }
+        settled { asked.size >= 2 }
+        assertTrue(!there.files.has(id))
+        grubbery = true
+        settled { there.files.has(id) }
+        settled { keeping.isCompleted }
+        assertNull(there.status.value)
     }
 
     @Test
