@@ -614,6 +614,38 @@ class MailRepo(
     /** A file going out with a message, uploaded before it is sent. */
     class Outgoing(val bytes: ByteArray, val name: String, val mime: String)
 
+    /** A send under way: which message, and where it has got to. */
+    data class Sending(val draftId: String, val subject: String, val stage: String)
+
+    private val _outbox = MutableStateFlow<List<Sending>>(emptyList())
+
+    /**
+     * Sends under way, for a line on the list. The composer closes at
+     * Send: it held the reading pane until the ship took the message, and
+     * no other mail could be opened meanwhile.
+     */
+    val outbox: StateFlow<List<Sending>> = _outbox.asStateFlow()
+
+    /** A message that did not go, whole: why, and its text and files, to open again. */
+    class Unsent(val line: String, val draft: Draft, val files: List<Outgoing>)
+
+    private val _unsent = MutableStateFlow<List<Unsent>>(emptyList())
+
+    /**
+     * Every message that did not go, oldest first. Its draft may not have
+     * reached the ship either (a ship that is down takes no draft), and its
+     * files never did: this is where they are kept. All of them, since two
+     * sent to a ship that is down both fail, and the first is not to be
+     * written over by the second.
+     */
+    val unsent: StateFlow<List<Unsent>> = _unsent.asStateFlow()
+
+    /** [message] put away, opened again or dismissed. */
+    fun dismiss(message: Unsent) {
+        _unsent.update { it - message }
+        _sendProblem.value = _unsent.value.lastOrNull()?.line
+    }
+
     private val _sendProblem = MutableStateFlow<String?>(null)
 
     /** A send that failed, said on the mail list until dismissed, since its composer may be gone. */
@@ -621,6 +653,7 @@ class MailRepo(
 
     fun clearSendProblem() {
         _sendProblem.value = null
+        _unsent.value = emptyList()
     }
 
     private val _problem = MutableStateFlow<String?>(null)
@@ -649,30 +682,43 @@ class MailRepo(
      */
     fun sendMessage(draft: Draft, files: List<Outgoing>, progress: (String?) -> Unit = {}): Deferred<String?> =
         scope.async {
-            val errorBefore = _error.value
-            fun why(fallback: String) = _error.value?.takeIf { it != errorBefore } ?: fallback
-            var kept = false
-            val problem = run {
-                if (!saveDraft(draft)) return@run why("the message did not reach the ship.")
-                kept = true
-                val refs = mutableListOf<AttachRef>()
-                for ((i, f) in files.withIndex()) {
-                    progress("Uploading ${i + 1} of ${files.size}")
-                    val hash = runSuspendCatching { uploadBlob(f.bytes) }
-                        .getOrElse { return@run "${f.name}: ${it.message ?: "the upload gave no reason"}." }
-                    refs += AttachRef(name = f.name, mime = f.mime, hash = hash)
+            fun stage(s: String?) {
+                progress(s)
+                _outbox.update { list ->
+                    list.filterNot { it.draftId == draft.id } +
+                        listOfNotNull(s?.let { Sending(draft.id, draft.subject, it) })
                 }
-                progress("Sending")
-                if (!send(draft.to, draft.subject, draft.body, draft.prev, refs)) return@run why("the ship did not take it.")
-                runSuspendCatching { deleteDraft(draft.id) }
-                null
             }
-            progress(null)
-            problem?.also {
-                val what = draft.subject.ifBlank { "A message" }.let { s -> if (s == "A message") s else "\"$s\"" }
-                _sendProblem.value = "$what was not sent: $it" + if (kept) " It is in Drafts." else ""
-            }
+            try { sendNow(draft, files, ::stage) } finally { stage(null) }
         }
+
+    private suspend fun sendNow(draft: Draft, files: List<Outgoing>, progress: (String?) -> Unit): String? {
+        progress("Saving")
+        val errorBefore = _error.value
+        fun why(fallback: String) = _error.value?.takeIf { it != errorBefore } ?: fallback
+        var kept = false
+        val problem = run {
+            if (!saveDraft(draft)) return@run why("the message did not reach the ship.")
+            kept = true
+            val refs = mutableListOf<AttachRef>()
+            for ((i, f) in files.withIndex()) {
+                progress("Uploading ${i + 1} of ${files.size}")
+                val hash = runSuspendCatching { uploadBlob(f.bytes) }
+                    .getOrElse { return@run "${f.name}: ${it.message ?: "the upload gave no reason"}." }
+                refs += AttachRef(name = f.name, mime = f.mime, hash = hash)
+            }
+            progress("Sending")
+            if (!send(draft.to, draft.subject, draft.body, draft.prev, refs)) return@run why("the ship did not take it.")
+            runSuspendCatching { deleteDraft(draft.id) }
+            null
+        }
+        return problem?.also {
+            val what = draft.subject.ifBlank { "A message" }.let { s -> if (s == "A message") s else "\"$s\"" }
+            val line = "$what was not sent: $it" + if (kept) " It is in Drafts." else ""
+            _unsent.update { list -> list + Unsent(line, draft, files) }
+            _sendProblem.value = line
+        }
+    }
 
     /** Distinguishes two phantom replies minted inside one millisecond. */
     private var localSeq = 0
