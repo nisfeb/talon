@@ -537,7 +537,10 @@ class TlonChatRepo(
             // groups, never, since refreshInvites ran only when the
             // Invites screen was opened.
             SubSpec("chat", "/dm/invited"),
-            SubSpec("groups", "/gangs/updates"),
+            // /v1/foreigns is where Tlon's client hears of group invites;
+            // the desk marks /gangs/updates deprecated (12.3.0). The same
+            // change goes out on both, a flag-keyed map either way.
+            SubSpec("groups", "/v1/foreigns", fallbacks = listOf("/gangs/updates")),
         ).map { spec ->
             async {
                 runCatching { ch.subscribe(spec.app, spec.path) }
@@ -3345,10 +3348,11 @@ class TlonChatRepo(
             return
         }
 
-        // %groups /gangs/updates — a bare map of {flag: {claim, preview,
-        // invite}}. A gang gaining an invite means someone just invited
-        // us to a group. Re-scry the foreign list (cheap, and rare) to
-        // refresh the badge + list, and toast the new ones.
+        // %groups /v1/foreigns (foreigns-1) or, on an older ship,
+        // /gangs/updates: a bare map of flag → that group's invites,
+        // preview and join progress. Someone invited us, or a join moved.
+        // Re-scry the foreign list (cheap, and rare) to refresh the badge
+        // + list, and toast the new ones.
         if (looksLikeGangsFact(payload)) {
             scope.launch {
                 runCatching { refreshInvites(notify = true) }
@@ -4947,8 +4951,8 @@ internal fun directoryFields(entry: JsonObject): JsonObject {
 }
 
 /**
- * A `%groups /gangs/updates` fact is the only diff shaped as a bare
- * `flag → object` map. Every other agent's fact carries literal keys
+ * A `%groups /v1/foreigns` (foreigns-1) or `/gangs/updates` fact is the
+ * only diff shaped as a bare `flag → object` map. Every other agent's fact carries literal keys
  * (`whom`, `nest`, `flag`, `put-entry`, `init`, `here`…), whereas a
  * gang fact's keys are the group flags themselves (`~ship/name`). So
  * "every key is flag-shaped" identifies it without colliding with any

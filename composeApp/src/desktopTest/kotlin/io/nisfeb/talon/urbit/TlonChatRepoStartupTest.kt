@@ -163,18 +163,19 @@ class TlonChatRepoStartupTest {
 
     @Test
     fun `an older ship's activity and groups subscriptions walk back to what it has`() = started(prepare = {
-        refuseWatch = { w -> if (w == "activity/v6" || w == "activity/v5" || w == "groups/v3/groups") "no such path" else null }
+        refuseWatch = { w -> if (w == "activity/v6" || w == "activity/v5" || w == "groups/v3/groups" || w == "groups/v1/foreigns") "no such path" else null }
     }) {
         until("activity on /v4") { "activity/v4" in ship.subscribed }
         until("groups on /v1") { "groups/v1/groups" in ship.subscribed }
+        until("invites on /gangs/updates") { "groups/gangs/updates" in ship.subscribed }
         val activity = ship.subscribed.filter { it.startsWith("activity/") }
         assertEquals(listOf("activity/v6", "activity/v5", "activity/v4"), activity, "in turn")
     }
 
     @Test
     fun `a current ship is watched on the paths Tlon's client uses`() = started(prepare = {}) {
-        until("subscriptions") { "groups/v3/groups" in ship.subscribed && "activity/v6" in ship.subscribed }
-        assertTrue(ship.subscribed.none { it == "activity/v5" || it == "groups/v1/groups" })
+        until("subscriptions") { "groups/v3/groups" in ship.subscribed && "activity/v6" in ship.subscribed && "groups/v1/foreigns" in ship.subscribed }
+        assertTrue(ship.subscribed.none { it == "activity/v5" || it == "groups/v1/groups" || it == "groups/gangs/updates" })
     }
 
     // "Notebook unread indicators": activity /v6 (12.1.0) has notebook
@@ -204,4 +205,23 @@ class TlonChatRepoStartupTest {
         assertTrue("groups/v2/groups" !in ship.scried, "${ship.scried}")
         assertTrue("contacts/v1/self" !in ship.scried, "ours came with the directory: ${ship.scried}")
     }
+
+    // A foreigns-1 fact (desk/app/groups.hoon gives one on /v1/foreigns
+    // where it gives the gang on /gangs/updates): someone invited us.
+    @Test
+    fun `an invite heard on v1 foreigns is shown and announced`() = started(prepare = {
+        scries["groups-ui/v10/init"] = """{"groups":{},"foreigns":{}}"""
+    }) { repo ->
+        val announced = java.util.concurrent.CopyOnWriteArrayList<String>()
+        repo.groupInviteListener = { announced += it.flag }
+        until("a first read of invites") { repo.invitesFlow.value != null }
+        val foreign = """{"invites":[{"flag":"~bus/garden","time":1,"from":"~bus","token":null,"note":null,"preview":null,"valid":true}],
+            "lookup":null,"preview":{"meta":{"title":"The Garden","description":"","image":"","cover":""},"member-count":3,"privacy":"secret"},
+            "progress":null,"token":null}"""
+        ship.scries["groups-ui/v10/init"] = """{"groups":{},"foreigns":{"~bus/garden":$foreign}}"""
+        repo.applyEvent(kotlinx.serialization.json.Json.parseToJsonElement("""{"id":9,"response":"diff","json":{"~bus/garden":$foreign}}"""))
+        until("the invite") { repo.invitesFlow.value?.any { it.flag == "~bus/garden" && it.title == "The Garden" } == true }
+        until("its announcement") { "~bus/garden" in announced }
+    }
 }
+
