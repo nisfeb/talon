@@ -45,6 +45,11 @@ class CalendarScreenTest {
     private val reads: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     /** The ship's one-event read never answers: a busy ship, at its worst. */
     @Volatile private var holdDetail = false
+    /** The ship's calendar keeps reminders: its rows, its event read and its config say so. */
+    @Volatile private var reminders = false
+    /** The heads-up the ship holds, where it keeps reminders. */
+    @Volatile private var leadMin = 30
+    private fun alarms(json: String) = if (reminders) ",\"alarms\":$json" else ""
     @Volatile private var tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"}}]"""
     private val soon = java.time.LocalDate.now().atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
 
@@ -60,18 +65,18 @@ class CalendarScreenTest {
             }
             path.endsWith("/window.json") -> json(
                 """{"rows":[
-                {"id":"e1","cal":"default","meta":{"name":"Dentist","location":"12 High Street","note":"Ring 020 7946 0958 first, or book at https://dent.example/book"},"l":$soon,"r":${soon + 30 * 60_000L}},
-                {"id":"s1","cal":"default","idx":3,"kind":"daily","meta":{"name":"Standup"},"l":${soon + HOUR},"r":${soon + HOUR + 15 * 60_000L}},
-                {"id":"b1","cal":"~nec/work","meta":{"name":"Board meeting"},"l":${soon + 2 * HOUR},"r":${soon + 3 * HOUR}}
+                {"id":"e1","cal":"default","meta":{"name":"Dentist","location":"12 High Street","note":"Ring 020 7946 0958 first, or book at https://dent.example/book"},"l":$soon,"r":${soon + 30 * 60_000L}${alarms("""[{"kind":"before","s":900,"desc":""}]""")}},
+                {"id":"s1","cal":"default","idx":3,"kind":"daily","meta":{"name":"Standup"},"l":${soon + HOUR},"r":${soon + HOUR + 15 * 60_000L}${alarms("[]")}},
+                {"id":"b1","cal":"~nec/work","meta":{"name":"Board meeting"},"l":${soon + 2 * HOUR},"r":${soon + 3 * HOUR}${alarms("[]")}}
                 ]}""",
             )
             path.endsWith("/event.json") -> json(
-                """{"id":"s1","cal":"default","cat":"timed","kind":"daily","start_ms":${soon + HOUR},"dur_min":15,"args":{"at":600},"zone":"none","meta":{"name":"Standup"}}""",
+                """{"id":"s1","cal":"default","cat":"timed","kind":"daily","start_ms":${soon + HOUR},"dur_min":15,"args":{"at":600},"zone":"none","meta":{"name":"Standup"}${alarms("""[{"kind":"offset","from":"end","after":true,"s":0,"desc":"wrap up"}]""")}}""",
             )
             path.endsWith("/events.json") -> json(tasksJson)
             path.endsWith("/calendars.json") ->
                 json("""[{"id":"default","name":"Personal","kind":"local"},{"id":"~nec/work","name":"Work","kind":"local"}]""")
-            path.endsWith("/config.json") -> json("""{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
+            path.endsWith("/config.json") -> json(if (reminders) """{"title":"Calendar","zone":"UTC","ball":"abc123","lead_min":$leadMin}""" else """{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
             path.endsWith("/share/shares.json") ->
                 json("""{"shares":{},"offers":{},"accepted":{"~nec/work":{"key":"~nec/work","mode":"read"}}}""")
             path.endsWith("/google.json") -> json("""{"connected":false,"linked":{}}""")
@@ -250,6 +255,113 @@ class CalendarScreenTest {
         open("Board meeting")
         assertTrue(shows("Work · shared with you, read-only"))
         for (gone in listOf("Edit", "More", "Done")) assertTrue(onAllNodesWithText(gone).fetchSemanticsNodes().isEmpty(), gone)
+    }
+
+    // ─── reminders ─────────────────────────────────────────────────
+
+    // "add reminder configuration and editing to talon".
+    @Test
+    fun `an event's reminders show on its row and in its details, and a new one can have one`() {
+        reminders = true
+        calendar {
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Has reminders").fetchSemanticsNodes().size == 1 }
+            open("Dentist")
+            assertTrue(shows("15 min before"))
+            onNodeWithText("Close").performClick()
+            newEvent()
+            field("Name").performTextInput("Lunch with Bus")
+            chip("+ 30 min before")
+            assertTrue(onAllNodesWithContentDescription("Remove 30 min before").fetchSemanticsNodes().size == 1)
+            save()
+            val body = wrote("Lunch with Bus")
+            assertTrue(""""alarms":[{"kind":"before","s":1800,"desc":""}]""" in body, body)
+        }
+    }
+
+    // An edit that does not touch them sends none, and the ship keeps
+    // them; one that does sends the whole list, a kind this app does not
+    // edit going back as it came.
+    @Test
+    fun `an edit that leaves the reminders alone sends none, and the ship keeps them`() {
+        reminders = true
+        calendar {
+            open("Standup")
+            onNodeWithText("Edit").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("At the end") }
+            field("Name").performTextReplacement("Standup, renamed")
+            save()
+            assertTrue("alarms" !in wrote("Standup, renamed"), "untouched, not sent")
+        }
+    }
+
+    @Test
+    fun `an edit to the reminders sends the whole list, keeping a kind this app does not edit`() {
+        reminders = true
+        calendar {
+            open("Standup")
+            onNodeWithText("Edit").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("At the end") }
+            chip("+ 5 min before")
+            save()
+            val body = wrote("edit-event")
+            assertTrue(""""alarms":[{"kind":"offset","from":"end","after":true,"s":0,"desc":"wrap up"},{"kind":"before","s":300,"desc":""}]""" in body, body)
+        }
+    }
+
+    @Test
+    fun `this one only takes the series' reminders with it`() {
+        reminders = true
+        calendar {
+            open("Standup")
+            onNodeWithText("Edit").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("This change applies to") }
+            onNodeWithText("This one only").performScrollTo().performClick()
+            field("Name").performTextReplacement("Standup, moved")
+            save()
+            val added = wrote("Standup, moved")
+            assertTrue(""""alarms":[{"kind":"offset","from":"end","after":true,"s":0,"desc":"wrap up"}]""" in added, added)
+        }
+    }
+
+    // A calendar older than reminders shows none and is sent none: one set
+    // there would go nowhere.
+    @Test
+    fun `a calendar that does not keep reminders is offered none`() = calendar {
+        waitForIdle()
+        assertTrue(onAllNodesWithContentDescription("Has reminders").fetchSemanticsNodes().isEmpty())
+        newEvent()
+        assertTrue(!shows("Reminders") && !shows("before"))
+        field("Name").performTextInput("Lunch with Bus")
+        save()
+        assertTrue("alarms" !in wrote("Lunch with Bus"))
+        onNodeWithContentDescription("Calendars").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("New calendar") }
+        assertTrue(!shows("Heads-up before every timed event"))
+    }
+
+    // Set elsewhere to a value this page does not offer, it still shows as the one chosen.
+    @Test
+    fun `a heads-up set elsewhere shows as chosen`() {
+        reminders = true
+        leadMin = 120
+        calendar {
+            onNodeWithContentDescription("Calendars").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Heads-up before every timed event") }
+            assertTrue(onAllNodes(hasText("120 min") and androidx.compose.ui.test.isSelected()).fetchSemanticsNodes().size == 1)
+        }
+    }
+
+    @Test
+    fun `the heads-up before every timed event is set, or turned off`() {
+        reminders = true
+        calendar { repo ->
+            onNodeWithContentDescription("Calendars").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Heads-up before every timed event") }
+            chip("Off")
+            val body = wrote("lead_min")
+            assertTrue("""{"action":"config","lead_min":0}""" == body, body)
+            waitUntil(timeoutMillis = 5_000) { repo.leadMin.value == 0 }
+        }
     }
 
     // ─── the new event form ────────────────────────────────────────

@@ -40,6 +40,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material3.InputChip
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
@@ -185,6 +188,8 @@ fun CalendarScreen(
         defaultCalendar.takeIf { d -> calendars.any { it.id == d && it.id !in hidden && it.id !in readOnly } }
             ?: calendars.firstOrNull { it.id !in hidden && it.id !in readOnly }?.id
     val zoneId by repo.zone.collectAsState()
+    val remindersKnown by repo.remindersKnown.collectAsState()
+    val leadMin by repo.leadMin.collectAsState()
     val error by repo.error.collectAsState()
     val notice by repo.notice.collectAsState()
     val zone = zoneFor(zoneId)
@@ -295,7 +300,10 @@ fun CalendarScreen(
     fun openNew() {
         val nowHere = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(zone)
         val minute = if (selected == nowHere.date && nowHere.hour < 23) (nowHere.hour + 1) * 60 else 9 * 60
-        editing = null to EventDraft(date = selected, minuteOfDay = minute, cal = newEventCalendar())
+        editing = null to EventDraft(
+            date = selected, minuteOfDay = minute, cal = newEventCalendar(),
+            alarms = if (remindersKnown) emptyList() else null,
+        )
         editingIdx = null
         editingStartMs = null
         editingAllDay = false
@@ -721,6 +729,9 @@ fun CalendarScreen(
                                         .filter { it.isNotBlank() }.joinToString(" · ")
                                     if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
+                                if (!r.alarms.isNullOrEmpty()) {
+                                    Icon(Icons.Filled.Notifications, contentDescription = "Has reminders", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+                                }
                                 Text(if (ghost) "syncing…" else spanLabel(r, dayNow, zone, twentyFourHour), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             HorizontalDivider(Modifier.padding(start = 36.dp))
@@ -787,6 +798,12 @@ fun CalendarScreen(
                         }
                     }
                     Text(whenText, style = MaterialTheme.typography.bodyMedium)
+                    r.alarms?.let { io.nisfeb.talon.calendar.alarmsOf(it) }?.takeIf { it.isNotEmpty() }?.let { alarms ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Filled.Notifications, contentDescription = "Reminders", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                            Text(alarms.joinToString(", ") { io.nisfeb.talon.calendar.alarmLabel(it, zone, twentyFourHour) }, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
                     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
                     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
                     fun open(uri: String) { runCatching { uriHandler.openUri(uri) }.onFailure { status = "Nothing here opens that." } }
@@ -975,6 +992,7 @@ fun CalendarScreen(
             zones = zones,
             allTags = allTags,
             twentyFourHour = twentyFourHour,
+            zone = zone,
             postToLabel = if (id == null && chat != null && db != null) (postTo?.let { labelOf(it) } ?: "") else null,
             onChoosePostTo = { pickingPostTo = true },
             onClearPostTo = { postTo = null },
@@ -1072,6 +1090,8 @@ fun CalendarScreen(
             onSetDefaultCalendar = { repo.defaultCalendar.value = it },
             deviceZone = deviceZone,
             onSetZone = { z -> act("Setting the zone…", "The ship did not take the zone.") { repo.setZone(z) } },
+            leadMin = leadMin,
+            onSetLeadMin = { m -> act("Saving…", "The ship did not take the change.") { repo.setLeadMin(m) } },
             onDismiss = { managing = false },
             status = status,
             onMakeLocal = { id -> say("Making it local…", "The ship would not make that calendar local.") { repo.makeLocal(id) } },
@@ -1149,6 +1169,8 @@ private fun EventEditor(
     /** Every tag in use, offered as the field is typed in. */
     allTags: List<String>,
     twentyFourHour: Boolean,
+    /** Where a reminder set for a moment is read. */
+    zone: TimeZone,
     /** For a new event: the chat it will be posted to, "" for none yet, null when posting is off. */
     postToLabel: String? = null,
     onChoosePostTo: () -> Unit = {},
@@ -1290,6 +1312,36 @@ private fun EventEditor(
                         }
                     }
                 }
+                // Reminders, where the calendar keeps them. A task's are
+                // kept as they are and not shown: they are relative to a
+                // start a task does not have.
+                d.alarms?.takeIf { d.cat != EventCat.TODO }?.let { alarms ->
+                    Text("Reminders", style = MaterialTheme.typography.labelMedium)
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        alarms.forEachIndexed { i, a ->
+                            val label = io.nisfeb.talon.calendar.alarmLabel(a, zone, twentyFourHour)
+                            InputChip(
+                                selected = false,
+                                onClick = { d = d.copy(alarms = alarms.filterIndexed { j, _ -> j != i }, alarmsChanged = true) },
+                                label = { Text(label) },
+                                trailingIcon = { Icon(Icons.Filled.Close, contentDescription = "Remove $label", modifier = Modifier.size(16.dp)) },
+                            )
+                        }
+                        io.nisfeb.talon.calendar.ALARM_PRESETS
+                            .filter { s -> alarms.none { it.kind == "before" && it.s == s } }
+                            .forEach { s ->
+                                FilterChip(
+                                    selected = false,
+                                    onClick = { d = d.copy(alarms = alarms + io.nisfeb.talon.calendar.CalAlarm.before(s), alarmsChanged = true) },
+                                    label = { Text("+ " + if (s == 0L) "at the start" else io.nisfeb.talon.calendar.alarmSpan(s) + " before") },
+                                )
+                            }
+                    }
+                    Text(
+                        "Your ship sends these as browser notifications where you have allowed them, and to the calendars it syncs with.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 OutlinedTextField(value = d.location, onValueChange = { d = d.copy(location = it) }, label = { Text("Place") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = d.note, onValueChange = { d = d.copy(note = it) }, label = { Text("Note") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
                 var tagText by remember { mutableStateOf(d.tags.joinToString(", ")) }
@@ -1415,6 +1467,9 @@ private fun CalendarsDialog(
     onSetDefaultCalendar: (String) -> Unit,
     deviceZone: String?,
     onSetZone: (String) -> Unit,
+    /** Minutes of the heads-up before every timed event, 0 for none; null from a calendar too old to say. */
+    leadMin: Int? = null,
+    onSetLeadMin: (Int) -> Unit = {},
     onDismiss: () -> Unit,
     /** What is happening, or what was refused; shown at the top. */
     status: String?,
@@ -1605,6 +1660,25 @@ private fun CalendarsDialog(
                     TextButton(enabled = wanted in zones && wanted != zone, onClick = { onSetZone(wanted); onDismiss() }) { Text("Set zone") }
                 }
                 HorizontalDivider()
+                if (leadMin != null) {
+                    // A reminder nobody set: the ship's own, before every
+                    // timed event, on top of each event's reminders.
+                    Text("Heads-up before every timed event", style = MaterialTheme.typography.labelMedium)
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        // Plus whatever the ship holds, set elsewhere (it takes up to a week).
+                        (listOf(0, 5, 10, 15, 30, 60) + leadMin).distinct().sorted().forEach { m ->
+                            FilterChip(
+                                selected = leadMin == m,
+                                onClick = { if (leadMin != m) onSetLeadMin(m) },
+                                label = { Text(if (m == 0) "Off" else "$m min") },
+                            )
+                        }
+                    }
+                    Text(
+                        "Sent by your ship as well as each event's own reminders.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Text("New calendar", style = MaterialTheme.typography.labelMedium)
                 OutlinedTextField(value = newName, onValueChange = { newName = it }, label = { Text("Name") }, singleLine = true)
                 OutlinedTextField(value = newColour, onValueChange = { newColour = it }, label = { Text("Colour, #rrggbb") }, singleLine = true)
