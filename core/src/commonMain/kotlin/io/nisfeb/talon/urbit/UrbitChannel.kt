@@ -206,6 +206,28 @@ class UrbitChannel internal constructor(
         return id
     }
 
+    /**
+     * Several subscriptions in one PUT, answering their request ids in the
+     * order given. One PUT each, as it was, was an event on the ship for
+     * every one of them, on every connect.
+     */
+    suspend fun subscribeAll(watches: List<Pair<String, String>>): List<Long> {
+        if (watches.isEmpty()) return emptyList()
+        val ids = watches.map { nextRequestId() }
+        put(buildJsonArray {
+            watches.forEachIndexed { i, (app, path) ->
+                add(buildJsonObject {
+                    put("id", ids[i])
+                    put("action", "subscribe")
+                    put("ship", ship)
+                    put("app", app)
+                    put("path", path)
+                })
+            }
+        })
+        return ids
+    }
+
     suspend fun unsubscribe(subscriptionId: Long) {
         val id = nextRequestId()
         val msg = buildJsonObject {

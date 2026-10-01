@@ -272,5 +272,14 @@ class TlonChatRepoStartupTest {
         delay(500)
         assertTrue(ship.acked.size - before <= 2, "${ship.acked.size - before} acks for 30 facts")
     }
+
+    // One PUT per subscription was an event on the ship for each, on
+    // every connect.
+    @Test
+    fun `a connect's subscriptions go to the ship in one request`() = started(prepare = {}) {
+        // chat, channels, activity, contacts, groups, presence, DM requests, group invites
+        until("subscriptions") { ship.subscribed.size >= 8 }
+        assertEquals(8, ship.subscribePuts.first(), "the first carried them all: ${ship.subscribePuts}")
+    }
 }
 

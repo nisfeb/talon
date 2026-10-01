@@ -547,20 +547,24 @@ class TlonChatRepo(
             // the desk marks /gangs/updates deprecated (12.3.0). The same
             // change goes out on both, a flag-keyed map either way.
             subSpecs[2],
-        ).map { spec ->
-            async {
-                // Where this ship stopped refusing last time, if it did: a
-                // reconnect walked the refusals again, every time.
+        ).let { specs ->
+            // Where this ship stopped refusing last time, if it did: a
+            // reconnect walked the refusals again, every time.
+            val plans = specs.map { spec ->
                 val all = listOf(spec.path) + spec.fallbacks
-                val from = subServed["${spec.app}${spec.path}"] ?: 0
-                runCatching { ch.subscribe(spec.app, all[from]) }
-                    .onSuccess { id ->
+                Triple(spec, all, subServed["${spec.app}${spec.path}"] ?: 0)
+            }
+            // All in one PUT: one each was an event on the ship apiece.
+            runCatching { ch.subscribeAll(plans.map { (spec, all, from) -> spec.app to all[from] }) }
+                .onSuccess { ids ->
+                    ids.zip(plans).forEach { (id, plan) ->
+                        val (spec, all, from) = plan
                         val rest = all.drop(from + 1)
                         if (rest.isNotEmpty()) subFallbacks[id] = spec.app to rest
                     }
-                    .onFailure { Log.e(TAG, "${spec.app} subscribe failed", it) }
-            }
-        }.awaitAll()
+                }
+                .onFailure { Log.e(TAG, "subscribe failed", it) }
+        }
 
         // Re-scry init-posts + activity every reconnect so we catch up on
         // anything that landed while the stream was down. The

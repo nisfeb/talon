@@ -213,4 +213,13 @@ class NotesRepoTest {
         notes.bootstrap()
         assertTrue(ship.api.none { it.startsWith("GET ") }, "silence says nothing of the path: ${ship.api}")
     }
+
+    @Test
+    fun `every notebook's stream is watched in one request`() = live {
+        ship.scries["notes/v0/notebooks"] = "[${summary()},${summary().replace("recipes", "drinks").replace("Recipes", "Drinks")}]"
+        notes.bootstrap()
+        assertTrue("notes/v0/notes/~bus/recipes/stream" in ship.subscribed && "notes/v0/notes/~bus/drinks/stream" in ship.subscribed)
+        assertTrue(2 in ship.subscribePuts, "${ship.subscribePuts}")
+    }
 }
+

@@ -114,9 +114,10 @@ class NotesRepo(
                 )
             },
         )
+        // Every notebook's stream in one PUT: one each was an event apiece.
+        ensureSubscribedAll(summaries.map { it.flag })
         var reread = 0
         summaries.forEach { s ->
-            ensureSubscribed(s.flag)
             val known = knownStamps[s.flag.flagString]
             if (known == null || known != s.notebook.updatedAtMs) {
                 reread++
@@ -211,6 +212,17 @@ class NotesRepo(
             )
         }
         db.notes().replaceTree(key, folders, notes)
+    }
+
+    private suspend fun ensureSubscribedAll(flags: List<NotesFlag>) {
+        val ch = channel ?: return
+        val fresh = subLock.withLock { flags.filter { subscribed.add(it.flagString) } }
+        if (fresh.isEmpty()) return
+        runCatching { ch.subscribeAll(fresh.map { NotesPaths.APP to NotesPaths.stream(it) }) }
+            .onFailure {
+                subLock.withLock { fresh.forEach { f -> subscribed.remove(f.flagString) } }
+                Log.w(TAG, "notes subscribe failed for ${fresh.size} notebook(s)", it)
+            }
     }
 
     private suspend fun ensureSubscribed(flag: NotesFlag) {

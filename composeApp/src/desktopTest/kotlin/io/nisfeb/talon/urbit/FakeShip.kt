@@ -44,6 +44,8 @@ internal class FakeShip(val us: String = "~zod") {
 
     /** Every subscription opened, as `app/path`. */
     val subscribed: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    /** How many subscriptions each PUT that carried any carried. */
+    val subscribePuts: MutableList<Int> = java.util.concurrent.CopyOnWriteArrayList()
     /** The event ids each ack named, in order. */
     val acked: MutableList<Long> = java.util.concurrent.CopyOnWriteArrayList()
 
@@ -141,7 +143,9 @@ internal class FakeShip(val us: String = "~zod") {
         requests += "${req.method.value} $path"
         when {
             req.method == HttpMethod.Put && path.startsWith("/~/channel/") -> {
-                for (msg in Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonArray) {
+                val batch = Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonArray
+                batch.count { it.jsonObject["action"]?.jsonPrimitive?.content == "subscribe" }.takeIf { it > 0 }?.let { subscribePuts += it }
+                for (msg in batch) {
                     val o = msg.jsonObject
                     val id = o["id"]!!.jsonPrimitive.long
                     when (o["action"]?.jsonPrimitive?.content) {
