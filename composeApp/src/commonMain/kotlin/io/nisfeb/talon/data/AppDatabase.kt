@@ -64,7 +64,7 @@ import androidx.room.RoomDatabaseConstructor
         CometDomeEntity::class,
         UrbUnfurlEntity::class,
     ],
-    version = 50,
+    version = 51,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)

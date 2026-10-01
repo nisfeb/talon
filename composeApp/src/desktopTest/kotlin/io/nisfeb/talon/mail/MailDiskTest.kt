@@ -19,6 +19,7 @@ import io.nisfeb.talon.data.ORRERY_HANDOFF_MIGRATION
 import io.nisfeb.talon.data.ORRERY_SHIP_WORK_MIGRATION
 import io.nisfeb.talon.data.MESSAGE_SEARCH_TEXT_MIGRATION
 import io.nisfeb.talon.data.URB_UNFURLS_MIGRATION
+import io.nisfeb.talon.data.MESSAGE_STATUS_INDEX_MIGRATION
 import io.nisfeb.talon.data.MAIL_ROWS_MIGRATION
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -53,7 +54,7 @@ class MailDiskTest {
     // No destructive fallback: a migration that does not match the entity fails here.
     private fun db() = Room.databaseBuilder<AppDatabase>(name = dbPath)
         .setDriver(BundledSQLiteDriver())
-        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION, COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION)
+        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION, COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION)
         .build()
 
     @Test

@@ -24,7 +24,10 @@ object BotLiveness {
     /** What [ship]'s contact [fields] say, replacing what was known. */
     fun record(ship: String, fields: JsonObject) {
         val up = botLivenessOf(ship, fields)
-        _online.update { if (up == null) it - ship else if (it[ship] == up) it else it + (ship to up) }
+        // Nearly every contact: no bot, nothing known of it, nothing to do.
+        // It runs for each of thousands in a contacts bootstrap.
+        if (_online.value[ship] == up) return
+        _online.update { if (up == null) it - ship else it + (ship to up) }
     }
 }
 

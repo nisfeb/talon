@@ -223,5 +223,42 @@ class TlonChatRepoStartupTest {
         until("the invite") { repo.invitesFlow.value?.any { it.flag == "~bus/garden" && it.title == "The Garden" } == true }
         until("its announcement") { "~bus/garden" in announced }
     }
+
+    // ─── what the newer paths may cost (rc9 felt slower) ─────────────
+
+    @Test
+    fun `a newer path that times out is not followed by the older one`() = started(prepare = {
+        loseScry = { p -> if (p == "groups/v3/groups") kotlinx.io.IOException("Request timeout has expired") else null }
+        scries["groups/v2/groups"] = """{"~bus/garden":{"meta":{"title":"The Garden"},"channels":{}}}"""
+    }) {
+        until("the groups read was tried") { "groups/v3/groups" in ship.scried }
+        delay(500)
+        assertTrue("groups/v2/groups" !in ship.scried, "a busy ship asked twice: ${ship.scried}")
+    }
+
+    @Test
+    fun `an older ship's missing path is asked once a session, not every time`() = started(prepare = {
+        scries["groups/v2/groups"] = """{"~bus/garden":{"meta":{"title":"The Garden"},"channels":{}}}"""
+        scries["groups/v2/groups/~bus/garden"] = """{"meta":{"title":"The Garden"},"channels":{},"seats":{},"roles":{},"admins":[],
+            "admissions":{"privacy":"public","banned":{"ships":[],"ranks":[]},"pending":{},"requests":{},"tokens":{},"referrals":{},"invited":{}}}"""
+    }) { repo ->
+        until("the groups") { db.groups().allGroups().any { it.flag == "~bus/garden" } }
+        runCatching { repo.fetchAdminGroupsLive() }
+        runCatching { repo.fetchAdminGroupsLive() }
+        val newer = ship.scried.count { it.startsWith("groups/v3/groups") }
+        assertEquals(1, newer, "the family asked once, the per-group reads included: ${ship.scried}")
+    }
+
+    // groups /v1/foreigns: the invites alone. The groups-ui init it was read
+    // from is the ship's largest scry, read whole at each start for them.
+    @Test
+    fun `invites are read from the foreigns alone, not the whole init`() = started(prepare = {
+        scries["groups/v1/foreigns"] = """{"~bus/garden":{"invites":[{"flag":"~bus/garden","time":1,"from":"~bus","token":null,"note":null,"preview":null,"valid":true}],
+            "lookup":null,"preview":{"meta":{"title":"The Garden","description":"","image":"","cover":""},"member-count":3,"privacy":"secret"},
+            "progress":null,"token":null}}"""
+    }) { repo ->
+        until("the invite") { repo.invitesFlow.value?.any { it.flag == "~bus/garden" } == true }
+        assertTrue(ship.scried.none { it.startsWith("groups-ui/") && it.endsWith("/init") }, "${ship.scried}")
+    }
 }
 

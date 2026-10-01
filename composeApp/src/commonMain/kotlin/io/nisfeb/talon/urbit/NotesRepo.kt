@@ -144,17 +144,23 @@ class NotesRepo(
     }
 
     /**
-     * A %notes read over its HTTP surface ([get], as Tlon's client reads it,
-     * 12.2.0), else the /v0 [scry] an older ship has. The two answer the
-     * same JSON from the same encoders; Tlon's client no longer calls the
-     * scries, which leaves them removable under its N-1 policy.
+     * A %notes read: the /v0 [scry] first, and its HTTP twin [get] only on a
+     * ship that does not serve the scry. The two answer the same JSON from
+     * the same encoders, but a scry is a read and an HTTP request is an
+     * event on the ship, written to its log: read over HTTP, refreshing the
+     * notebooks cost the ship an event per notebook and per list, and the
+     * whole app slowed with it. %notes' own page still reads the scries,
+     * so Tlon's N-1 policy is unlikely to take them soon.
      */
     private suspend fun readNotes(ch: UrbitChannel, get: String, scry: String): kotlinx.serialization.json.JsonElement =
-        // Every one of these answers a list; anything else from the GET
-        // (an error body, a route this ship lacks) is asked of the scry.
-        io.nisfeb.talon.util.runSuspendCatching { ch.apiJson(method = "GET", path = get) }.getOrNull()
-            ?.takeIf { it is kotlinx.serialization.json.JsonArray }
-            ?: ch.scry(NotesPaths.APP, scry)
+        try {
+            ch.scry(NotesPaths.APP, scry)
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            if (!notServed(t)) throw t
+            ch.apiJson(method = "GET", path = get).takeIf { it is kotlinx.serialization.json.JsonArray } ?: throw t
+        }
 
     /** Re-read one notebook's folder tree + notes and swap it in. */
     suspend fun refreshNotebook(flag: NotesFlag) {

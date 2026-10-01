@@ -239,4 +239,33 @@ class TlonChatRepoQueueTest {
         draining.join()
         assertEquals(listOf(null, null), listOf(first, second).map { db.messages().getOne("~bus", stored(it))?.status })
     }
+
+    // ─── what the queue may cost a slow ship (rc9 felt slower) ───────
+
+    @Test
+    fun `a channel post queued behind another was never sent, so the channel is not read to ask`() = live {
+        ship.lose = { lost }
+        repo.send(nest, "first")
+        ship.lose = { null }
+        repo.send(nest, "second")
+        ship.scries["channels/v4/$nest/posts/newest/30/post"] = """{"posts":{}}"""
+        repo.drainQueue()
+        assertEquals(2, ship.pokesTo("channels").size)
+        assertEquals(1, ship.scried.count { it == "channels/v4/$nest/posts/newest/30/post" }, "asked for the first only: ${ship.scried}")
+    }
+
+    @Test
+    fun `a drain asleep in its backoff goes as soon as the ship answers`() = live {
+        ship.lose = { lost }
+        val id = repo.send("~bus", "waiting")
+        assertEquals("queued", db.messages().getOne("~bus", stored(id))?.status)
+        // The ship is back: a send elsewhere goes through.
+        ship.lose = { null }
+        val answeredAt = System.currentTimeMillis()
+        repo.send("~nec", "hello")
+        kotlinx.coroutines.withTimeout(5_000) { while (db.messages().getOne("~bus", stored(id))?.status != null) delay(10) }
+        val tookMs = System.currentTimeMillis() - answeredAt
+        assertTrue(tookMs < 800, "went in $tookMs ms, not after the backoff (1 to 3 s)")
+    }
 }
+

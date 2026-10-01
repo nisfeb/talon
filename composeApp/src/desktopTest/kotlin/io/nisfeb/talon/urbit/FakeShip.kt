@@ -74,6 +74,8 @@ internal class FakeShip(val us: String = "~zod") {
     @Volatile var answerApi: (method: String, path: String, body: String) -> String? = { _, _, _ -> null }
     /** A scry the ship fails on (500), as a crashed or busy agent does; unlike one it has no answer for (404). */
     @Volatile var failScry: (path: String) -> Boolean = { false }
+    /** A scry that never comes back: the connection dropped, or a busy ship timed out. */
+    @Volatile var loseScry: (path: String) -> Throwable? = { null }
     /** How long a poke waits before the ship takes it: a slow ship, at work. */
     @Volatile var holdPoke: Long = 0
     /** How long a channel's delete waits for an answer: a dead socket, as an iOS app finds coming back. */
@@ -179,6 +181,11 @@ internal class FakeShip(val us: String = "~zod") {
                 respond("", HttpStatusCode.ServiceUnavailable)
             req.method == HttpMethod.Get && path.startsWith("/~/channel/") ->
                 respond(writing.withLock { pipeOf(path) }.stream, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+            path.startsWith("/~/scry/") && loseScry(path.removePrefix("/~/scry/").removeSuffix(".json")) != null -> {
+                val asked = path.removePrefix("/~/scry/").removeSuffix(".json")
+                scried += asked
+                throw loseScry(asked)!!
+            }
             path.startsWith("/~/scry/") && failScry(path.removePrefix("/~/scry/").removeSuffix(".json")) ->
                 respond("", HttpStatusCode.InternalServerError)
             path.startsWith("/~/scry/") ->

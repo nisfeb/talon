@@ -279,6 +279,9 @@ class TlonChatRepoSendTest {
         val marks = ship.pokesTo("activity").map { it.mark }
         assertEquals(listOf("activity-action-2", "activity-action"), marks)
         assertEquals(ship.pokesTo("activity")[0].json, ship.pokesTo("activity")[1].json, "the same read")
+        // Remembered: the next read is not refused first.
+        repo.markRead("~nec")
+        assertEquals(listOf("activity-action-2", "activity-action", "activity-action"), ship.pokesTo("activity").map { it.mark })
     }
 
     // Wire pinned against desk/lib/activity-json.hoon's read decoder (ot
@@ -334,6 +337,18 @@ class TlonChatRepoSendTest {
         val last = ship.pokesTo("groups").takeLast(2)
         assertEquals(listOf("group-action-5", "group-action-4"), last.map { it.mark })
         assertEquals(last[0].json, last[1].json, "the same action")
+        repo.kickFromGroup("~bus/garden", "~wex")
+        assertEquals("group-action-4", ship.pokesTo("groups").last().mark, "remembered")
+        assertEquals(4, ship.pokesTo("groups").size)
+    }
+
+    // /v1/self is our own card alone; the directory is every contact.
+    @Test
+    fun `our own card is re-read alone, not with the whole directory`() = live {
+        ship.scries["contacts/v1/self"] = """{"nickname":{"type":"text","value":"Zed"}}"""
+        repo.refreshSelf()
+        assertEquals("Zed", db.contacts().get("~zod")?.nickname)
+        assertTrue("contacts/v1/directory" !in ship.scried, "${ship.scried}")
     }
 
     // Our own card's change on /v1/news, applied as it comes: it was read
