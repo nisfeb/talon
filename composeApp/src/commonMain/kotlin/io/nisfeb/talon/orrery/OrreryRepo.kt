@@ -488,7 +488,9 @@ class OrreryRepo(
         watching = scope.launch {
             while (isActive) {
                 delay(ACTIONS_EVERY_MS)
-                if (_availability.value == OrreryAvailability.PRESENT) refreshWaiting()
+                // The net only where the beacon may have died: one that sent
+                // anything in the interval is alive and told us of every move.
+                if (_availability.value == OrreryAvailability.PRESENT && now() - beaconHeardMs > ACTIONS_EVERY_MS) refreshWaiting()
             }
         }
     }
@@ -499,6 +501,9 @@ class OrreryRepo(
      * opened again after a pause that grows, with jitter; a quiet one is
      * left alone, since quiet is not dead.
      */
+    /** When the beacon last sent anything, keepalives included. */
+    @kotlin.concurrent.Volatile private var beaconHeardMs = 0L
+
     private fun watchBeacon(shipUrl: String) {
         beacon?.cancel()
         beacon = scope.launch {
@@ -515,6 +520,7 @@ class OrreryRepo(
                         val reader = BeaconReader()
                         while (isActive) {
                             val line = body.readUTF8Line() ?: break
+                            beaconHeardMs = now()
                             val rev = reader.feed(line) ?: continue
                             // The first revision on a connection is where
                             // things stand: a read only if it moved while
