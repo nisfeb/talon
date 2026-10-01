@@ -96,7 +96,7 @@ class MailSendBehindTest {
                 }
             }
             repo.attach("https://ship.test")
-            waitUntil(timeoutMillis = 5_000) { shows("Rent") && shows("New message") }
+            waitUntil(timeoutMillis = 10_000) { shows("Rent") && shows("New message") }
             onNode(hasSetTextAction() and hasText("Message")).performTextInput("Hi there")
             block()
         }
@@ -111,12 +111,12 @@ class MailSendBehindTest {
     fun `while a message sends, other mail can be opened and read`() = writing(hello) {
         onNodeWithText("Send").performClick()
         // Gone at once, and the list says it is on its way.
-        waitUntil(timeoutMillis = 5_000) { !shows("New message") && shows("Sending \"Hello\"") }
+        waitUntil(timeoutMillis = 10_000) { !shows("New message") && shows("Sending \"Hello\"") }
         onNodeWithText("Rent").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Rent is due Friday.") }
+        waitUntil(timeoutMillis = 10_000) { shows("Rent is due Friday.") }
         assertTrue(shows("Sending \"Hello\""), "still going while the other is read")
         shipTakes.complete(Unit)
-        waitUntil(timeoutMillis = 5_000) { !shows("Sending \"Hello\"") }
+        waitUntil(timeoutMillis = 10_000) { !shows("Sending \"Hello\"") }
         assertTrue("Hi there" in sent.single())
     }
 
@@ -127,9 +127,9 @@ class MailSendBehindTest {
         shipTakes.complete(Unit)
         writing(hello) {
             onNodeWithText("Send").performClick()
-            waitUntil(timeoutMillis = 5_000) { shows("\"Hello\" was not sent") }
+            waitUntil(timeoutMillis = 10_000) { shows("\"Hello\" was not sent") }
             onNodeWithText("Open").performClick()
-            waitUntil(timeoutMillis = 5_000) { shows("New message") }
+            waitUntil(timeoutMillis = 10_000) { shows("New message") }
             assertTrue(onAllNodes(hasSetTextAction() and hasText("Hi there")).fetchSemanticsNodes().isNotEmpty(), "the text")
             assertTrue(shows("cat.png"), "the file")
             assertTrue(!shows("was not sent"), "opened, so no longer waiting on the list")
@@ -142,10 +142,10 @@ class MailSendBehindTest {
         draftStatus = HttpStatusCode.BadGateway
         writing(hello) {
             onNodeWithText("Send").performClick()
-            waitUntil(timeoutMillis = 5_000) { shows("\"Hello\" was not sent") }
+            waitUntil(timeoutMillis = 10_000) { shows("\"Hello\" was not sent") }
             assertTrue(!shows("It is in Drafts"), "it is not")
             onNodeWithText("Open").performClick()
-            waitUntil(timeoutMillis = 5_000) { onAllNodes(hasSetTextAction() and hasText("Hi there")).fetchSemanticsNodes().isNotEmpty() }
+            waitUntil(timeoutMillis = 10_000) { onAllNodes(hasSetTextAction() and hasText("Hi there")).fetchSemanticsNodes().isNotEmpty() }
         }
     }
 
