@@ -126,9 +126,6 @@ import io.nisfeb.talon.ai.hasModelFor
  *   - TlonChatRepo.stop calls scope.cancel which permanently dies;
  *     the rebuild gets a fresh scope per ship.
  */
-/** Asks per group open, 2s then 6s apart. Enough for a host that is
- *  briefly asleep, few enough not to hammer one that is gone. */
-private const val PEEK_ATTEMPTS = 3
 
 @Composable
 fun App(
@@ -2648,25 +2645,9 @@ fun App(
                                 // the host announced never heard about
                                 // it, and before this the only cure was
                                 // an admin toggling the line off and on.
-                                LaunchedEffect(groupRoom, knownInvites.keys, hostedRooms.keys) {
+                                LaunchedEffect(groupRoom) {
                                     val (h, n) = groupRoom ?: return@LaunchedEffect
-                                    val key = "$h/$n"
-                                    // A few widening attempts, then
-                                    // stop. One try per group open was
-                                    // enough only when the host
-                                    // happened to be reachable at that
-                                    // instant; an ames round trip to a
-                                    // sleeping ship is not.
-                                    var wait = 2_000L
-                                    repeat(PEEK_ATTEMPTS) { attempt ->
-                                        if (hostedRooms.containsKey(key)) return@LaunchedEffect
-                                        if (knownInvites.containsKey(key)) return@LaunchedEffect
-                                        callController?.peekRoom(h, n)
-                                        if (attempt < PEEK_ATTEMPTS - 1) {
-                                            kotlinx.coroutines.delay(wait)
-                                            wait *= 3
-                                        }
-                                    }
+                                    callController?.lookForLine(h, n)
                                 }
                                 val partyRoomHere = groupRoom?.takeIf { (h, n) ->
                                     hostedRooms.containsKey("$h/$n") ||

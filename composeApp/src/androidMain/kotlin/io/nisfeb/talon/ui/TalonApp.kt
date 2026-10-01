@@ -89,9 +89,6 @@ import io.nisfeb.talon.urbit.MediaCategory
 import kotlinx.coroutines.launch
 import io.nisfeb.talon.ai.hasModelFor
 
-/** How many times to ask a group's host whether a party line exists
- *  before giving up — same widening backoff App.kt uses. */
-private const val PEEK_ATTEMPTS = 3
 
 /** Cheap substring test — Story mention spans serialize as {"ship":"~patp"}. */
 /**
@@ -2529,23 +2526,9 @@ fun TalonApp(
                 // %trunk when the host announced never heard about it,
                 // and before this the only cure was an admin toggling
                 // the line off and on. Mirrors App.kt.
-                LaunchedEffect(groupRoom, knownInvites.keys, hostedRooms.keys) {
+                LaunchedEffect(groupRoom) {
                     val (h, n) = groupRoom ?: return@LaunchedEffect
-                    val key = "$h/$n"
-                    // A few widening attempts, then stop. One try per
-                    // group open was enough only when the host happened
-                    // to be reachable at that instant; an ames round
-                    // trip to a sleeping ship is not.
-                    var wait = 2_000L
-                    repeat(PEEK_ATTEMPTS) { attempt ->
-                        if (hostedRooms.containsKey(key)) return@LaunchedEffect
-                        if (knownInvites.containsKey(key)) return@LaunchedEffect
-                        callController?.peekRoom(h, n)
-                        if (attempt < PEEK_ATTEMPTS - 1) {
-                            kotlinx.coroutines.delay(wait)
-                            wait *= 3
-                        }
-                    }
+                    callController?.lookForLine(h, n)
                 }
                 val partyRoomHere = groupRoom?.takeIf { (h, n) ->
                     hostedRooms.containsKey("$h/$n") || knownInvites.containsKey("$h/$n")

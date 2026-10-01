@@ -300,6 +300,7 @@ class CallController(
                 _connected.value = false
                 val ch = session.openChannel()
                 channel = ch
+                lookedFor.value = emptySet()
                 // The six reads at once: one after another they held the
                 // subscription, and with it every call, six round trips back.
                 kotlinx.coroutines.coroutineScope {
@@ -1299,6 +1300,32 @@ class CallController(
     private val _peekFailed = MutableStateFlow<Map<String, String>>(emptyMap())
     val peekFailed: StateFlow<Map<String, String>> = _peekFailed.asStateFlow()
 
+    /** Lines looked for since this connect; each opening of a group looked anew. */
+    private val lookedFor = MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * Ask [host] whether its line [name] exists, while we hold no room or
+     * invite for it: a few widening tries (an ames round trip to a sleeping
+     * host can miss one), once a connect rather than on every opening of
+     * the group. A member whose ship had no %trunk when the host announced
+     * never heard of the line; before this the only cure was an admin
+     * toggling it off and on.
+     */
+    suspend fun lookForLine(host: String, name: String) {
+        val key = "$host/$name"
+        if (key in lookedFor.value) return
+        var wait = 2_000L
+        repeat(PEEK_ATTEMPTS) { attempt ->
+            if (_rooms.value.containsKey(key) || _invites.value.containsKey(key)) return
+            peekRoom(host, name)
+            if (attempt < PEEK_ATTEMPTS - 1) {
+                delay(wait)
+                wait *= 3
+            }
+        }
+        lookedFor.update { it + key }
+    }
+
     suspend fun peekRoom(host: String, name: String) {
         val ch = channel ?: return
         val key = "$host/$name"
@@ -1840,6 +1867,10 @@ class CallController(
     }
 
     companion object {
+        /** Peeks for a line per connect, 2 s then 6 s apart: enough for a host
+         *  briefly asleep, few enough not to hammer one that is gone. */
+        const val PEEK_ATTEMPTS = 3
+
         /** An %on-line this long after our ask was not its answer. */
         const val ANSWER_WINDOW_MS = 10_000L
         private const val TAG = "Trunk"
