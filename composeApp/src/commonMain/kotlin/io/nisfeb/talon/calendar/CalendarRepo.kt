@@ -709,8 +709,9 @@ class CalendarRepo(
             restore()
             refresh()
             while (isActive) {
-                delay(pollIntervalMs)
-                if (foreground && _availability.value != CalendarAvailability.SIGNED_OUT) refresh()
+                // Jittered, so devices that started together do not ask together.
+                delay(io.nisfeb.talon.urbit.jittered(pollIntervalMs))
+                if (foreground && _availability.value != CalendarAvailability.SIGNED_OUT) refreshIfStale(0)
             }
         }
     }
@@ -764,7 +765,46 @@ class CalendarRepo(
                 api?.let { a -> runSuspendCatching { a.syncShares() } }
                 delay(1500)
             }
-            refresh()
+            // Not on every alt-tab: a full read is up to nine requests of
+            // the ship's one thread, about a second each.
+            refreshIfStale(FOCUS_FRESH_MS)
+        }
+    }
+
+    /** When the events and tasks, and when everything, was last read. */
+    @kotlin.concurrent.Volatile private var lastReadMs = 0L
+    @kotlin.concurrent.Volatile private var lastFullMs = 0L
+
+    /**
+     * Read again what may have moved: everything past an hour (the
+     * calendars, shares, sync, tags and config change rarely), else the
+     * events and tasks past [freshMs], else nothing. Focus, the poll and
+     * opening the calendar each ran a full read, every time.
+     */
+    suspend fun refreshIfStale(freshMs: Long) {
+        val now = nowMs()
+        when {
+            now - lastFullMs > FULL_READ_EVERY_MS -> refresh()
+            now - lastReadMs >= freshMs -> refreshLight()
+        }
+    }
+
+    /** The events and tasks: two requests, where a full read is up to nine. */
+    suspend fun refreshLight() = gate.withLock {
+        val a = api ?: return@withLock
+        try {
+            val now = nowMs()
+            val w = a.window(now - BEHIND_MS, now + AHEAD_MS)
+            _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
+            details.clear()
+            _tasks.value = runSuspendCatching { a.tasks() }.getOrNull() ?: _tasks.value
+            keep()
+            noteReminders(w.rows)
+            _availability.value = CalendarAvailability.PRESENT
+            _error.value = null
+            lastReadMs = now
+        } catch (e: AuspexError) {
+            readFailed(e)
         }
     }
 
@@ -823,19 +863,25 @@ class CalendarRepo(
             noteReminders(w.rows)
             _availability.value = CalendarAvailability.PRESENT
             _error.value = null
+            lastReadMs = now
+            lastFullMs = now
             adoptZoneIfNone()
         } catch (e: AuspexError) {
-            when {
-                e.isSignedOut -> {
-                    _availability.value = CalendarAvailability.SIGNED_OUT
-                    poller?.cancel(); poller = null
-                }
-                e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND ->
-                    _availability.value = CalendarAvailability.ABSENT
-                else -> {
-                    _error.value = e.message
-                    Log.w(TAG, "calendar refresh failed", e)
-                }
+            readFailed(e)
+        }
+    }
+
+    private fun readFailed(e: AuspexError) {
+        when {
+            e.isSignedOut -> {
+                _availability.value = CalendarAvailability.SIGNED_OUT
+                poller?.cancel(); poller = null
+            }
+            e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND ->
+                _availability.value = CalendarAvailability.ABSENT
+            else -> {
+                _error.value = e.message
+                Log.w(TAG, "calendar refresh failed", e)
             }
         }
     }
@@ -848,6 +894,12 @@ class CalendarRepo(
         const val BEHIND_MS = 6 * 60 * 60 * 1000L
         const val AHEAD_MS = 30L * 24 * 60 * 60 * 1000L
         const val SHARE_SYNC_GAP_MS = 5 * 60 * 1000L
+        /** A read on coming back only past this. */
+        const val FOCUS_FRESH_MS = 3 * 60 * 1000L
+        /** A read on opening the calendar only past this. */
+        const val OPEN_FRESH_MS = 60 * 1000L
+        /** The calendars, shares, sync, tags and config, read whole this often. */
+        const val FULL_READ_EVERY_MS = 60 * 60 * 1000L
         /** Read-backs after a write before taking the ship at its word: about 30s of waiting. */
         const val AFTER_WRITE_READS = 6
     }

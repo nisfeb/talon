@@ -127,4 +127,5 @@ fun PermitsBanner(http: HttpClient?, shipUrl: String?) {
 
 // ponytail: fixed intervals; a push from the ship when grubbery offers one.
 private const val RECHECK_MS = 30L * 60 * 1000
-private const val FOCUS_RECHECK_MS = 60L * 1000
+// Two grubbery reads; a minute had them on most alt-tabs.
+private const val FOCUS_RECHECK_MS = 10L * 60 * 1000

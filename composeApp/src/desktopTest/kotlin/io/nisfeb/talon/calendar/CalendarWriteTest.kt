@@ -320,4 +320,22 @@ class CalendarWriteTest {
         assertTrue(tookMs < CalendarRepo.APPLY_BEAT_MS, "answered in $tookMs ms")
         assertEquals("Buy oat milk", repo.tasks.value?.first { it.id == "t1" }?.name, "in the list already")
     }
+
+    // A full read is up to nine requests of the ship's one thread, about a
+    // second each, and it ran on every focus: every alt-tab on desktop.
+    @Test
+    fun `coming back minutes after a read asks the ship nothing`() = calendar { repo, ship ->
+        repo.setForeground(false)
+        repo.setForeground(true)
+        kotlinx.coroutines.delay(300)
+        assertTrue(ship.reads.isEmpty(), "${ship.reads}")
+    }
+
+    @Test
+    fun `a stale read asks for the events and tasks, not the rest`() = calendar { repo, ship ->
+        repo.refreshIfStale(0)
+        assertTrue(ship.asked("/window.json") && ship.asked("/events.json"), "${ship.reads}")
+        assertTrue(ship.reads.none { r -> listOf("/calendars.json", "/config.json", "/shares.json", "/tags.json", "/google.json").any { r.substringBefore('?').endsWith(it) } }, "${ship.reads}")
+    }
 }
+
