@@ -2528,9 +2528,9 @@ class TlonChatRepo(
             uploadViaStorage(ch, client, bytes, contentType, safeLengthName)
         }.onSuccess { return@withContext it }.exceptionOrNull()
 
-        error(
-            "image upload failed: memex=${memexErr?.message}; " +
-                "storage=${storageErr?.message}"
+        throw UploadFailed(
+            uploadFailureLine(memexErr, storageErr),
+            IllegalStateException("image upload failed: memex=${memexErr?.message}; storage=${storageErr?.message}"),
         )
     }
 
