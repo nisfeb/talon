@@ -161,6 +161,8 @@ class ComposerState(initialDraftText: String) {
         val slow = io.nisfeb.talon.util.isShipSlow(err)
         sendError = if (slow) {
             "Your ship is slow, so the ${noun(what)} didn't go through. Try again when it's back."
+        } else if (err is io.nisfeb.talon.urbit.UploadFailed) {
+            err.message
         } else {
             "$what failed: " + ((err as? io.nisfeb.talon.urbit.PokeNacked)?.let { "the ship refused it" }
                 ?: (err.message ?: err::class.simpleName).orEmpty().lineSequence().first().take(120))
