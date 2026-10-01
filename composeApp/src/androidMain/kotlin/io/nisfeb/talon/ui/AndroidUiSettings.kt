@@ -83,6 +83,13 @@ class AndroidUiSettings(
         prefs.edit().putString(KEY_THEMES, settings.toJson()).apply()
         _themeSettings.value = settings
     }
+    private val _fontSettings = MutableStateFlow(FontSettings.fromJson(prefs.getString(KEY_FONTS, null)) ?: FontSettings())
+    override val fontSettings: StateFlow<FontSettings> = _fontSettings.asStateFlow()
+    override fun setFontSettings(settings: FontSettings) {
+        if (_fontSettings.value == settings) return
+        prefs.edit().putString(KEY_FONTS, settings.toJson()).apply()
+        _fontSettings.value = settings
+    }
     private val _micProcessing = MutableStateFlow(
         io.nisfeb.talon.call.MicProcessing(
             noiseSuppression = prefs.getBoolean(KEY_MIC_NS, true),
@@ -416,6 +423,7 @@ class AndroidUiSettings(
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_ACCENT_HEX = "accent_hex"
         private const val KEY_THEMES = "custom_themes"
+        private const val KEY_FONTS = "fonts"
 private const val KEY_MIC_NS = "mic_noise_suppression"
 private const val KEY_MIC_AEC = "mic_echo_cancellation"
 private const val KEY_MIC_AGC = "mic_auto_gain"

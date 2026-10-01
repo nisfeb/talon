@@ -16,6 +16,8 @@ import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
+import io.ktor.client.engine.mock.respond
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.runComposeUiTest
@@ -55,10 +57,12 @@ class SettingsScreenTest {
         calls: CallController? = null,
         pinCandidates: List<Pair<String, String>> = emptyList(),
         ai: FakeAiSettings = FakeAiSettings(),
+        fontRepo: FontRepo? = null,
         block: ComposeUiTest.() -> Unit,
     ) = runComposeUiTest {
         setContent {
             CompositionLocalProvider(
+                LocalFontRepo provides fontRepo,
                 LocalClipboardManager provides object : ClipboardManager {
                     override fun getText(): AnnotatedString? = null
                     override fun setText(annotatedString: AnnotatedString) { did += "copied ${annotatedString.text}" }
@@ -104,6 +108,52 @@ class SettingsScreenTest {
         assertEquals(ThemePreference.Mode.Light, theme.mode.value)
         tap("System")
         assertEquals(ThemePreference.Mode.System, theme.mode.value)
+    }
+
+    // "the ability for the user to change the font and font size".
+    @Test
+    fun `the font is chosen for every device, and the text size for this one`() = settings {
+        tap("Serif")
+        assertEquals(FontSettings.SERIF, ui.fontSettings.value.family)
+        // The font's System, not the theme's, which comes first.
+        onAllNodesWithText("System").let { it[it.fetchSemanticsNodes().size - 1] }.performScrollTo().performClick()
+        assertEquals(null, ui.fontSettings.value.family)
+        onNode(androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsActions.SetProgress))
+            .performScrollTo()
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(1.5f) }
+        assertEquals(1.5f, ui.fontScale.value, 0.001f)
+        assertTrue(shows("Text size · 150%"))
+    }
+
+    @Test
+    fun `an installed font is listed, chosen, and removed from all devices after asking`() {
+        ui.setFontSettings(FontSettings(listOf(InstalledFont("f1", "Testa"), InstalledFont("f2", "Testa", 700)), family = null))
+        val tmp = kotlin.io.path.createTempDirectory(prefix = "talon-fonts-ui-").toFile()
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob())
+        val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
+            did += "${req.method.value} ${req.url.encodedPath}"
+            respond("", io.ktor.http.HttpStatusCode.OK)
+        })
+        val repo = FontRepo(ui, FontShip(http, { "https://ship.test" }, { null }), scope, FontFiles(okio.Path.Companion.run { tmp.absolutePath.toPath() }))
+        try {
+            settings(fontRepo = repo) {
+                assertTrue(shows("Testa · 2 files"))
+                tap("Testa")
+                assertEquals("Testa", ui.fontSettings.value.family)
+                tap("Remove")
+                assertTrue(shows("Remove Testa?"))
+                onAllNodesWithText("Remove").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
+                waitForIdle()
+                assertTrue(ui.fontSettings.value.fonts.isEmpty())
+                assertEquals(listOf("f1", "f2"), ui.fontSettings.value.removed)
+                assertEquals(null, ui.fontSettings.value.family)
+                waitUntil(timeoutMillis = 5_000) { did.count { it.startsWith("DELETE") } == 2 }
+                assertTrue("DELETE /grubbery/api/file/talon/fonts/f1.font" in did, did.toString())
+            }
+        } finally {
+            scope.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+            tmp.deleteRecursively()
+        }
     }
 
     @Test

@@ -116,6 +116,10 @@ class SettingsSyncImpl(
         const val ENTRY_HIDE_COMPOSER_BUTTONS = "hide-composer-buttons"
         const val ENTRY_ACCENT = "accent"
         const val ENTRY_THEMES = "themes"
+        // Installed fonts and the chosen family; the files themselves
+        // live on the ship's grubbery (see FontRepo). Text size stays
+        // per device, like density.
+        const val ENTRY_FONTS = "fonts"
         // Assistant history (Stage 2). Conversation metadata + append-only
         // turns, keyed by global id; embeddings stay device-local.
         const val BUCKET_ASSISTANT_CONVERSATIONS = "assistant-conversations"
@@ -280,7 +284,10 @@ class SettingsSyncImpl(
         watch(settings.railItemOrder, ENTRY_RAIL_ITEM_ORDER, ::encodeRailItemOrder)
         watch(settings.accentSettings, ENTRY_ACCENT, ::encodeAccent)
         watch(settings.themeSettings, ENTRY_THEMES, ::encodeThemes)
+        watch(settings.fontSettings, ENTRY_FONTS, ::encodeFonts)
     }
+
+    private fun encodeFonts(f: io.nisfeb.talon.ui.FontSettings): JsonElement = Json.parseToJsonElement(f.toJson())
 
     private fun encodeRailItemOrder(order: List<RailItem>): JsonElement =
         buildJsonObject {
@@ -364,6 +371,16 @@ class SettingsSyncImpl(
             ENTRY_THEMES -> io.nisfeb.talon.ui.theme.ThemeSettings.fromJson(obj.toString())
                 ?.keepingLocalExtras(settings.themeSettings.value)
                 ?.let { themes -> applyLocal(entry, encodeThemes(themes)) { settings.setThemeSettings(themes) } }
+            // Merged, never replaced: a list without a font this device has
+            // does not take it off; only a removal it carries does. What
+            // this device adds goes back up, so the ship holds the union.
+            // The union is the same from either side, so this settles.
+            ENTRY_FONTS -> io.nisfeb.talon.ui.FontSettings.fromJson(obj.toString())?.let { remote ->
+                val merged = settings.fontSettings.value.mergedWith(remote)
+                val encoded = encodeFonts(merged)
+                applyLocal(entry, encoded) { settings.setFontSettings(merged) }
+                if (merged != remote) pushScope?.launch { runCatching { pokePutEntry(BUCKET_UI_PREFS, entry, encoded) } }
+            }
         }
     }
 
@@ -707,6 +724,7 @@ class SettingsSyncImpl(
             push(ENTRY_RAIL_ITEM_ORDER, encodeRailItemOrder(settings.railItemOrder.value))
             push(ENTRY_ACCENT, encodeAccent(settings.accentSettings.value))
             push(ENTRY_THEMES, encodeThemes(settings.themeSettings.value))
+            push(ENTRY_FONTS, encodeFonts(settings.fontSettings.value))
         }
         pushAlwaysPatp(io.nisfeb.talon.ui.ShipNames.alwaysPatp.value)
         pushNonCometNames(io.nisfeb.talon.ui.AzimuthNames.enabled.value)

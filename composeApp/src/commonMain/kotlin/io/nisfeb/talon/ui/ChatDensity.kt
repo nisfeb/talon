@@ -1,6 +1,12 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ProvidedValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -84,3 +90,26 @@ data class ChatDensity(
  *  previews) gets the existing layout. App.kt provides the real value
  *  via `CompositionLocalProvider`. */
 val LocalChatDensity = staticCompositionLocalOf { ChatDensity.Comfortable }
+
+/**
+ * What the density setting provides, for a shell's root provider: the
+ * spacing rows read ([LocalChatDensity]), and [LocalDensity] with every
+ * `sp` scaled by the preset and the user's own font scale. Only the
+ * font scale: scaling `density` itself would resize icons, images and
+ * the gaps that are no part of it. One function for both shells; the
+ * Android one provided neither, and the setting did nothing there.
+ */
+@Composable
+fun chatDensityLocals(uiSettings: UiSettings): Array<ProvidedValue<*>> {
+    val mode by uiSettings.density.collectAsState()
+    val userFontScale by uiSettings.fontScale.collectAsState()
+    val chat = ChatDensity.forMode(mode)
+    val base = LocalDensity.current
+    val scaled = remember(base, chat, userFontScale) {
+        androidx.compose.ui.unit.Density(
+            density = base.density,
+            fontScale = base.fontScale * chat.fontScaleMultiplier * userFontScale,
+        )
+    }
+    return arrayOf(LocalChatDensity provides chat, LocalDensity provides scaled)
+}

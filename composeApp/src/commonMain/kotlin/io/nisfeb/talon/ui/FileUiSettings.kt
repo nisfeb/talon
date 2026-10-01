@@ -78,6 +78,8 @@ class FileUiSettings(
         val nonCometNames: Boolean = false,
         /** [io.nisfeb.talon.ui.theme.ThemeSettings] as JSON text. */
         val customThemes: String = "",
+        /** [FontSettings] as JSON text. */
+        val fonts: String = "",
         val micNoiseSuppression: Boolean = true,
         val micEchoCancellation: Boolean = true,
         val micAutoGainControl: Boolean = true,
@@ -114,6 +116,13 @@ class FileUiSettings(
     override fun setThemeSettings(settings: io.nisfeb.talon.ui.theme.ThemeSettings) {
         if (_themeSettings.value == settings) return
         _themeSettings.value = settings
+        persistCurrent()
+    }
+    private val _fontSettings = MutableStateFlow(FontSettings.fromJson(initial.fonts) ?: FontSettings())
+    override val fontSettings: StateFlow<FontSettings> = _fontSettings.asStateFlow()
+    override fun setFontSettings(settings: FontSettings) {
+        if (_fontSettings.value == settings) return
+        _fontSettings.value = settings
         persistCurrent()
     }
     private val _micProcessing = MutableStateFlow(
@@ -387,6 +396,7 @@ class FileUiSettings(
                 alwaysPatp = ShipNames.alwaysPatp.value,
                 nonCometNames = AzimuthNames.enabled.value,
                 customThemes = _themeSettings.value.toJson(),
+                fonts = _fontSettings.value.toJson(),
                 micNoiseSuppression = _micProcessing.value.noiseSuppression,
                 micEchoCancellation = _micProcessing.value.echoCancellation,
                 micAutoGainControl = _micProcessing.value.autoGainControl,

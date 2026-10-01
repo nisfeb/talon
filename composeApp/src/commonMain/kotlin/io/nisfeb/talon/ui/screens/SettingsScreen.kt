@@ -391,6 +391,8 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(8.dp))
+            FontSection(uiSettings)
+            Spacer(Modifier.height(8.dp))
 
             // ── Ship naming ─────────────────────────────────────────
             val alwaysPatp by io.nisfeb.talon.ui.ShipNames.alwaysPatp.collectAsState()
@@ -2308,4 +2310,90 @@ private fun HomeWidgetRow(
             }
         }
     }
+}
+
+/**
+ * The font text is set in, and its size. The font travels to the
+ * owner's other devices (one they install is kept on their ship); the
+ * size stays with this device, whose screen it is for.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
+    val fonts by uiSettings.fontSettings.collectAsState()
+    val scale by uiSettings.fontScale.collectAsState()
+    val repo = io.nisfeb.talon.ui.LocalFontRepo.current
+    val status = repo?.status?.collectAsState()?.value
+    val pick = io.nisfeb.talon.util.rememberAnyFilePicker()
+    val scope = rememberCoroutineScope()
+    var removing by remember { mutableStateOf<String?>(null) }
+    val files = repo?.files ?: io.nisfeb.talon.ui.FontFiles.default
+    Text("Font", style = MaterialTheme.typography.bodyMedium)
+    Text(
+        "Set on all your devices. A font you add is kept on your ship, private to you, and your other devices fetch it.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val choices = listOf<Pair<String?, String>>(
+            null to "System",
+            io.nisfeb.talon.ui.FontSettings.SERIF to "Serif",
+            io.nisfeb.talon.ui.FontSettings.MONOSPACE to "Monospace",
+        ) + fonts.families.map { it to it }
+        choices.forEach { (family, label) ->
+            // Each named in its own face, so the choice can be seen.
+            val face = remember(fonts, family) { io.nisfeb.talon.ui.appFontFamily(fonts.copy(family = family), files) }
+            FilterChip(
+                selected = fonts.family == family,
+                onClick = { uiSettings.setFontSettings(fonts.copy(family = family)) },
+                label = { Text(label, fontFamily = face) },
+            )
+        }
+    }
+    if (repo != null) {
+        TextButton(onClick = {
+            scope.launch {
+                val f = runCatching { pick() }.getOrNull() ?: return@launch
+                repo.install(f.bytes, f.displayName)
+            }
+        }) { Text("Add a font (.ttf or .otf)…") }
+        fonts.families.forEach { family ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val n = fonts.fonts.count { it.family == family }
+                Text(
+                    "$family · $n file${if (n == 1) "" else "s"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { removing = family }) { Text("Remove") }
+            }
+        }
+        status?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    removing?.let { family ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("Remove $family?") },
+            text = { Text("It goes from all your devices and from your ship. To use it again, add the file again.") },
+            confirmButton = { TextButton(onClick = { repo?.remove(family); removing = null }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("Keep") } },
+        )
+    }
+    Spacer(Modifier.height(8.dp))
+    Text("Text size · ${(scale * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
+    Text(
+        "On this device only.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    androidx.compose.material3.Slider(
+        value = scale,
+        onValueChange = { uiSettings.setFontScale(it) },
+        valueRange = io.nisfeb.talon.ui.FONT_SCALE_MIN..io.nisfeb.talon.ui.FONT_SCALE_MAX,
+        // One stop per step of the keyboard's Ctrl +/-.
+        steps = kotlin.math.round((io.nisfeb.talon.ui.FONT_SCALE_MAX - io.nisfeb.talon.ui.FONT_SCALE_MIN) / io.nisfeb.talon.ui.FONT_SCALE_STEP).toInt() - 1,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }

@@ -32,6 +32,10 @@ interface UiSettings {
     val themeSettings: StateFlow<io.nisfeb.talon.ui.theme.ThemeSettings>
     fun setThemeSettings(settings: io.nisfeb.talon.ui.theme.ThemeSettings)
 
+    /** Installed fonts and the one text is set in; synced with the other ui-prefs. */
+    val fontSettings: StateFlow<FontSettings>
+    fun setFontSettings(settings: FontSettings)
+
     /** Microphone processing for calls. Per device: it depends on the mic, not the person. */
     val micProcessing: StateFlow<io.nisfeb.talon.call.MicProcessing>
     fun setMicProcessing(value: io.nisfeb.talon.call.MicProcessing)
@@ -312,6 +316,11 @@ class InMemoryUiSettings(
     }
     private val _themeSettings = MutableStateFlow(io.nisfeb.talon.ui.theme.ThemeSettings())
     override val themeSettings: StateFlow<io.nisfeb.talon.ui.theme.ThemeSettings> = _themeSettings.asStateFlow()
+    private val _fontSettings = MutableStateFlow(FontSettings())
+    override val fontSettings: StateFlow<FontSettings> = _fontSettings.asStateFlow()
+    override fun setFontSettings(settings: FontSettings) {
+        _fontSettings.value = settings
+    }
     override fun setThemeSettings(settings: io.nisfeb.talon.ui.theme.ThemeSettings) {
         _themeSettings.value = settings
     }
