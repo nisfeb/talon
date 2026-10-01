@@ -131,4 +131,31 @@ class TlonChatRepoStartupTest {
         val took = System.currentTimeMillis() - t0
         assertTrue(took < 1_500, "took ${took}ms")
     }
+
+    // On every connect the directory is read whole. A nickname a peer
+    // removed went from the ship but stayed here for good: the merge
+    // kept it, and an empty book row written after the directory's
+    // could stand over the directory's own.
+    @Test
+    fun `a nickname removed while away is gone after the connect, and a book name still wins`() = runBlocking<Unit> {
+        db.contacts().upsertAll(listOf(
+            io.nisfeb.talon.data.ContactEntity("~bus", nickname = "Bus", bio = "old", avatarUrl = null),
+            io.nisfeb.talon.data.ContactEntity("~nec", nickname = "Nec", bio = null, avatarUrl = null),
+            io.nisfeb.talon.data.ContactEntity("~wex", nickname = "Wex", bio = null, avatarUrl = null),
+        ))
+        started(prepare = {
+            scries["groups-ui/v6/init-posts/10/10"] = initPosts
+            scries["contacts/v1/directory"] = """{"~bus":{"status":{"type":"text","value":"here"}},"~nec":{}}"""
+            // ~bus in the book with an empty page; ~nec with our own name for
+            // them; ~wex only in the book, with nothing known of them.
+            scries["contacts/v1/book"] = """{"~bus":[{},{}],"~nec":[{},{"nickname":{"type":"text","value":"Necky"}}],"~wex":[{},{}]}"""
+        }) { _ ->
+            until("the directory read") { db.contacts().get("~bus")?.status == "here" }
+            val bus = db.contacts().get("~bus")!!
+            assertNull(bus.nickname, "removed by them")
+            assertNull(bus.bio)
+            assertEquals("Necky", db.contacts().get("~nec")?.nickname, "our own name for them")
+            assertEquals("Wex", db.contacts().get("~wex")?.nickname, "nothing known of them, so nothing changes")
+        }
+    }
 }

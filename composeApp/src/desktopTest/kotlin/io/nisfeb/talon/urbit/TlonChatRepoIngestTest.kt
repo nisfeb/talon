@@ -269,4 +269,29 @@ class TlonChatRepoIngestTest {
         assertEquals("Nec" to "a galaxy", db.contacts().get("~nec")?.let { it.nickname to it.bio })
         assertTrue("~nec" !in repo.bookContacts.value)
     }
+
+    // "he removed his nickname entirely but the change did not propagate
+    // to other users": %contacts drops a removed field from the profile,
+    // and the merge read the gap as "not sent" and kept the old name.
+    @Test
+    fun `a nickname a peer removed goes here too, and their bio and avatar likewise`() = runBlocking<Unit> {
+        fact("""{"peer":{"who":"~nec","contact":{"nickname":${text("Nec")},"bio":${text("a galaxy")},"avatar":{"type":"look","value":"https://x.test/a.png"}}}}""")
+        fact("""{"peer":{"who":"~nec","contact":{"status":${text("here")}}}}""")
+        val row = assertNotNull(db.contacts().get("~nec"))
+        assertEquals(listOf(null, null, null), listOf(row.nickname, row.bio, row.avatarUrl))
+        assertEquals("here", row.status)
+    }
+
+    // A book page carries the peer's profile and our own overlay on it;
+    // the overlay was dropped here, so a pet name set in another client
+    // waited for a restart.
+    @Test
+    fun `a book page's own name for them wins, and a name they removed goes`() = runBlocking<Unit> {
+        fact("""{"page":{"kip":"~bus","contact":{"nickname":${text("Bus")}},"mod":{}}}""")
+        assertEquals("Bus", db.contacts().get("~bus")?.nickname)
+        fact("""{"page":{"kip":"~bus","contact":{},"mod":{"nickname":${text("Bussy")}}}}""")
+        assertEquals("Bussy", db.contacts().get("~bus")?.nickname, "our name for them")
+        fact("""{"page":{"kip":"~bus","contact":{},"mod":{}}}""")
+        assertNull(db.contacts().get("~bus")?.nickname, "no name from them or us")
+    }
 }
