@@ -713,23 +713,17 @@ class TlonChatRepo(
         // (the next thing this function does) starts immediately
         // rather than waiting on a network call we don't need to
         // complete before showing the UI.
-        if (firstRun) {
+        // Only with nothing kept, or nothing newer than a day: otherwise
+        // the ten above and the read on opening a chat cover it, and this
+        // is 50 posts from every channel on every launch. The admin
+        // groups (a scry per group) are read when a group message's menu
+        // opens, not here.
+        if (firstRun && needsDeepHistory(db.messages().newestSentMs(), nowMs())) {
             launch {
                 Log.i(TAG, "deep-history scry starting (count=$DEEP_PAGE_COUNT)")
                 runCatching { bootstrap(ch, count = DEEP_PAGE_COUNT) }
                     .onSuccess { Log.i(TAG, "deep-history scry complete") }
                     .onFailure { Log.w(TAG, "deep-history scry failed", it) }
-            }
-            // Populate adminGroupsFlow so the pin gate in the message
-            // action menu can hide "Pin" for users who aren't admin in
-            // the group. Heavy (~N scries for N groups, semaphored at 8)
-            // so it runs in the background after first paint. Until it
-            // lands, canPinInGroup falls back to "is the user the
-            // group host?" — which catches the most common case
-            // (host-admins see the option immediately).
-            launch {
-                runCatching { refreshAdminGroups() }
-                    .onFailure { Log.w(TAG, "bootstrap admin-groups refresh failed", it) }
             }
         }
 

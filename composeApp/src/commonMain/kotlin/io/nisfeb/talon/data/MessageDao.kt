@@ -136,6 +136,10 @@ abstract class MessageDao {
     """)
     abstract fun streamLatestSentMsAcross(whoms: List<String>): Flow<Long?>
 
+    /** When the newest message kept here was sent; null when none is. */
+    @Query("SELECT MAX(sentMs) FROM messages")
+    abstract suspend fun newestSentMs(): Long?
+
     /** Newest non-deleted top-level post id for a conversation (refresh cursor). */
     @Query("""
         SELECT id FROM messages

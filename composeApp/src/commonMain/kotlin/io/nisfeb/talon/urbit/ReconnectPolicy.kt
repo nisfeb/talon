@@ -30,3 +30,7 @@ const val BOOTSTRAP_MIN_GAP_MS = 60_000L
  */
 fun shouldBootstrap(firstRun: Boolean, lastBootstrapMs: Long, nowMs: Long): Boolean =
     firstRun || lastBootstrapMs == 0L || nowMs - lastBootstrapMs >= BOOTSTRAP_MIN_GAP_MS
+
+/** The deep history pass: nothing kept here, or the newest is over a day old. */
+fun needsDeepHistory(newestSentMs: Long?, nowMs: Long): Boolean =
+    newestSentMs == null || nowMs - newestSentMs > 24 * 60 * 60 * 1000L

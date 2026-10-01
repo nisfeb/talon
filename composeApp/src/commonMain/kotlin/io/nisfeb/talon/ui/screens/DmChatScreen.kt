@@ -892,8 +892,8 @@ fun DmChatScreen(
             )
         }
         val chatDensity = io.nisfeb.talon.ui.LocalChatDensity.current
-        // Admin-groups cache for the pin gate. Null until the
-        // bootstrap refresh in App.kt completes; we fall back to
+        // Admin-groups cache for the pin gate. Null until the menu's
+        // first open reads it (below); we fall back to
         // "is the user the group host?" until it lands so the
         // option still appears immediately for host-admins. See
         // [io.nisfeb.talon.urbit.canPinInGroup].
@@ -906,6 +906,8 @@ fun DmChatScreen(
         // bookmark/pinned lookups don't run for every list row.
         val clipboardManager = LocalClipboardManager.current
         val messageActionMenuFor: @Composable (MessageEntity) -> Unit = { target ->
+            // Read here, not at launch: a scry per group, cached 5 minutes.
+            if (whom.startsWith("chat/")) LaunchedEffect(Unit) { runCatching { repo.refreshAdminGroups() } }
             val isBookmarked by remember(target.whom, target.id) {
                 db.bookmarks().isBookmarked(target.whom, target.id)
             }.collectAsState(initial = false)

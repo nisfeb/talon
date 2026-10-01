@@ -41,4 +41,14 @@ class ReconnectPolicyTest {
         assertTrue(shouldBootstrap(firstRun = false, lastBootstrapMs = 0L, nowMs = 1_000L))
     }
 
+    // Fifty posts from every channel on every launch, a full store or not.
+    @Test
+    fun `the deep history pass runs on an empty store or after a day away, not otherwise`() {
+        val day = 24 * 60 * 60 * 1000L
+        assertTrue(needsDeepHistory(null, nowMs = 10 * day))
+        assertTrue(needsDeepHistory(newestSentMs = 8 * day, nowMs = 10 * day))
+        assertFalse(needsDeepHistory(newestSentMs = 10 * day - 60_000, nowMs = 10 * day))
+        assertFalse(needsDeepHistory(newestSentMs = 9 * day, nowMs = 10 * day), "exactly a day: not yet")
+    }
 }
+

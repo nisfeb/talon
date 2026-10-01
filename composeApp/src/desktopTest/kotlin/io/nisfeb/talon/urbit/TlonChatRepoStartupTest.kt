@@ -281,5 +281,22 @@ class TlonChatRepoStartupTest {
         until("subscriptions") { ship.subscribed.size >= 8 }
         assertEquals(8, ship.subscribePuts.first(), "the first carried them all: ${ship.subscribePuts}")
     }
+
+    // Fifty posts from every channel, on every launch, a full store or not.
+    @Test
+    fun `a launch with recent history kept reads ten a channel, not fifty`() = runBlocking<Unit> {
+        db.messages().upsertWithMedia(db.messageMedia(), io.nisfeb.talon.data.MessageEntity("~bus", "~bus/170.141.184", "~bus", io.nisfeb.talon.util.nowMs() - 60_000, "hi", "/chat"))
+        ship.scries[init] = initPosts
+        started(prepare = {}) { repo ->
+            until("the progress bar clears") { !repo.bootstrapping.value }
+            delay(500)
+            assertTrue(ship.scried.none { "init-posts/50" in it }, "${ship.scried}")
+        }
+    }
+
+    @Test
+    fun `a first launch reads fifty a channel`() = started(prepare = { scries[init] = initPosts }) { repo ->
+        until("the deep pass") { ship.scried.any { "init-posts/50" in it } }
+    }
 }
 
