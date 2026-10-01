@@ -24,6 +24,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.updateAndGet
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -403,13 +405,34 @@ class OrreryRepo(
         db.orrerySent().get(s, "decide:$day")?.value
             ?.let { runCatching { Json.decodeFromString(DecideDay.serializer(), it) }.getOrNull() } ?: DecideDay()
 
+    /**
+     * Answers given here that the ship's list has not shown yet: the status
+     * sent, and when. Orrery applies an answer after it replies, so a list
+     * read meanwhile (the home screen's, the poll's, the one after an
+     * earlier answer) still had them open, and it replaced the lists: "I
+     * just quickly approved a bunch of facts ... they all reappeared a few
+     * seconds later". Each is kept over the ship's list until that list
+     * shows it, or [ANSWER_GRACE_MS] passes with the ship never showing it.
+     */
+    private val answering = MutableStateFlow<Map<String, Pair<String, Long>>>(emptyMap())
+
     /** The open list as the ship just said it, and what that means for notifications. */
-    private fun published(list: List<OrreryAction>) {
+    private fun published(fromShip: List<OrreryAction>) {
         // Approved and gone with no answer from here: the ship carried it
         // out, or could not. Only the second is news, and it said so
         // nowhere Talon looked.
         val left = _actions.value.filter { it.status == "approved" || it.status == "claimed" }
-            .map { it.id }.filter { id -> list.none { it.id == id } }
+            .map { it.id }.filter { id -> fromShip.none { it.id == id } }
+        val now = nowMs()
+        val waiting = answering.updateAndGet { m ->
+            m.filter { (id, sent) ->
+                val there = fromShip.firstOrNull { it.id == id }
+                // Shown: gone from the open list, or no longer a proposal.
+                val shown = there == null || there.status != "proposed"
+                !shown && now - sent.second < ANSWER_GRACE_MS
+            }
+        }
+        val list = waiting.entries.fold(fromShip) { l, (id, sent) -> settledActions(l, id, sent.first) }
         _actions.value = list
         val news = diffActionNotifications(list, seenProposals)
         seenProposals = news.seen
@@ -693,6 +716,7 @@ class OrreryRepo(
         // Nothing of the ship left is waiting on the owner: with Orrery off,
         // or another ship, its proposals and their notifications go.
         val shown = _actions.value.map { it.id }.toSet()
+        answering.value = emptyMap()
         _actions.value = emptyList()
         if (shown.isNotEmpty()) onActions?.invoke(emptyList(), shown)
     }
@@ -1830,6 +1854,7 @@ class OrreryRepo(
         // This install's key where it has one, else the owner's own say.
         val token = db.orreryAccounts().get(s)?.token
         a.transition(token, id, status, note)
+        answering.update { it + (id to (status to nowMs())) }
         _actions.value = settledActions(_actions.value, id, status)
         // The mirror reads every action and the whole calendar before it
         // makes the todo: seconds on a busy ship, so it runs behind the
@@ -1870,11 +1895,13 @@ class OrreryRepo(
     fun answer(id: String, status: String, note: String = "") {
         _answerProblem.value = null
         val was = _actions.value.firstOrNull { it.id == id }
+        answering.update { it + (id to (status to nowMs())) }
         _actions.value = settledActions(_actions.value, id, status)
         // Answered here: its notification goes now, not on the next read.
         onActions?.invoke(emptyList(), setOf(id))
         scope.launch {
             setAction(id, status, note).onFailure { e ->
+                answering.update { it - id }
                 if (was != null) _actions.value = listOf(was) + _actions.value.filterNot { it.id == id }
                 _answerProblem.value = "Orrery did not take that answer: ${e.message ?: "no reason given"}"
                 Log.w(TAG, "answer $status on $id refused: ${e.message}")
@@ -1991,6 +2018,9 @@ class OrreryRepo(
         private val rowLock = kotlinx.coroutines.sync.Mutex()
         /** What the ship calls open: the three statuses `?status=open` answers with. */
         val OPEN_STATUSES = setOf("proposed", "approved", "claimed")
+
+        /** How long an answer is kept over a ship's list that does not show it. */
+        const val ANSWER_GRACE_MS = 5 * 60_000L
 
         /** When the key's scope was last measured against the ship's schema. */
         private const val SCOPE_KEY = "scope:checked"
