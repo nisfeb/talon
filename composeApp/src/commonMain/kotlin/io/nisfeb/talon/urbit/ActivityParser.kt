@@ -3,6 +3,7 @@ package io.nisfeb.talon.urbit
 import io.nisfeb.talon.data.ThreadUnreadEntity
 import io.nisfeb.talon.data.UnreadEntity
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -404,3 +405,18 @@ internal fun activityReadAction(source: JsonObject, deep: Boolean = false): Json
             })
         })
     }
+
+/**
+ * %chat's chat-dm-status fact (12.3.0, on /v4): `{"ship":"~zod","net":…}`,
+ * net one of inviting, invited, archive, done, or null for a DM that is
+ * gone. Null for anything else: only these two keys make one.
+ */
+internal fun dmStatusOf(p: JsonObject): Pair<String, String?>? {
+    if (p.keys != setOf("ship", "net")) return null
+    val ship = (p["ship"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.startsWith("~") } ?: return null
+    val net = p["net"]
+    if (net is kotlinx.serialization.json.JsonNull) return ship to null
+    val s = (net as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+    return if (s in setOf("inviting", "invited", "archive", "done")) ship to s else null
+}
+

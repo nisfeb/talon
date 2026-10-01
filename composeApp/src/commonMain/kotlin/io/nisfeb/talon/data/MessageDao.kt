@@ -184,6 +184,14 @@ abstract class MessageDao {
     @Query("SELECT COUNT(*) FROM messages WHERE whom = :whom AND status = 'queued'")
     abstract suspend fun queuedIn(whom: String): Int
 
+    /** A conversation's messages, all of them: one the ship no longer has. */
+    @Query("DELETE FROM messages WHERE whom = :whom")
+    abstract suspend fun deleteConversation(whom: String)
+
+    /** Whether anything of a conversation is kept here. */
+    @Query("SELECT EXISTS(SELECT 1 FROM messages WHERE whom = :whom)")
+    abstract suspend fun hasConversation(whom: String): Boolean
+
     /** How many messages are waiting for the ship. */
     @Query("SELECT COUNT(*) FROM messages WHERE status = 'queued'")
     abstract fun queuedCount(): Flow<Int>

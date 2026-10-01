@@ -3237,6 +3237,7 @@ class TlonChatRepo(
         // drop is why brand-new DMs were invisible.
         (outer["json"] as? JsonArray)?.let { applyDmInvites(it, notify = true); return }
         val payload = outer["json"] as? JsonObject ?: return
+        dmStatusOf(payload)?.let { (ship, net) -> applyDmStatus(ship, net); return }
 
         // %chat writ-response-4: { whom, id, response }
         val whom = payload["whom"].asStr()
@@ -3782,6 +3783,31 @@ class TlonChatRepo(
         // until the next full bootstrap. Declined, the DM is gone and
         // the accepted-DM scry does not name it.
         if (notify && removed.isNotEmpty()) scope.launch { adoptAcceptedDms(removed) }
+    }
+
+    /**
+     * %chat's word on one DM (12.3.0, chat-dm-status on /v4): it began,
+     * changed, or is gone. Gone is our own decline or leave, made on
+     * another device: %chat has dropped the DM and its messages, and so
+     * does this one; it used to linger until reinstalled. Started or
+     * accepted elsewhere, its messages are read now rather than at the
+     * next full bootstrap. An invite needs nothing here: the invite list
+     * fact comes with it ([applyDmInvites]).
+     */
+    internal suspend fun applyDmStatus(ship: String, net: String?) {
+        when (net) {
+            null -> {
+                db.dmInvites().delete(ship)
+                db.messages().deleteConversation(ship)
+                db.unreads().delete(ship)
+            }
+            "inviting", "done" -> if (!db.messages().hasConversation(ship)) {
+                scope.launch {
+                    runCatching { refreshConversation(ship) }
+                        .onFailure { Log.w(TAG, "refreshConversation($ship) after dm-status $net failed", it) }
+                }
+            }
+        }
     }
 
     private suspend fun adoptAcceptedDms(ships: Set<String>) {
