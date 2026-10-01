@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -299,85 +300,103 @@ class CallController(
                 _connected.value = false
                 val ch = session.openChannel()
                 channel = ch
-                // The ship's advertised ICE servers (its sidecar / its
-                // sponsor's). Best-effort: no config means Tier 0 only.
-                val ice = runCatching { ch.scry(TrunkWire.AGENT, "/ice") }
-                    .onFailure { Log.w(TAG, "ice scry failed (Tier 0 only)", it) }
-                    .getOrNull()
-                if (ice != null) {
-                    _ice.value = TrunkWire.parseIce(ice)
-                    Log.i(TAG, "ice config: ${iceServers.size} servers")
+                // The six reads at once: one after another they held the
+                // subscription, and with it every call, six round trips back.
+                kotlinx.coroutines.coroutineScope {
+                    listOf(
+                        async {
+                            // The ship's advertised ICE servers (its sidecar / its
+                            // sponsor's). Best-effort: no config means Tier 0 only.
+                            val ice = runCatching { ch.scry(TrunkWire.AGENT, "/ice") }
+                                .onFailure { Log.w(TAG, "ice scry failed (Tier 0 only)", it) }
+                                .getOrNull()
+                            if (ice != null) {
+                                _ice.value = TrunkWire.parseIce(ice)
+                                Log.i(TAG, "ice config: ${iceServers.size} servers")
+                            }
+                            // Only a ship that answered it has none takes the default:
+                            // a failed read, or an answer in another shape, replaced
+                            // the servers someone had set, for every device on it.
+                            // Guarded like every other step here. It is internally
+                            // safe today, but a throw between opening the channel
+                            // and subscribing is the worst failure this loop has:
+                            // `channel` is already assigned, so pokes keep working
+                            // and the ship looks reachable while no fact ever
+                            // arrives again.
+                            // Off the connect path: the poke's ack comes down the event
+                            // stream, which is read only once this loop subscribes
+                            // below, so waiting for it here held calls up for the
+                            // poke's whole 15s timeout. It reads /ice again itself.
+                            if (ice is kotlinx.serialization.json.JsonArray && ice.isEmpty()) {
+                                scope.launch {
+                                    runCatching { adoptDefaultIce(ch) }
+                                        .onFailure { Log.w(TAG, "adopting default ice failed", it) }
+                                }
+                            }
+                        },
+                        async {
+                            // No %trunk (or a desk predating policy) leaves this
+                            // null, and the settings editor stays hidden.
+                            runCatching { _policy.value = TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy")) }
+                                .onFailure {
+                                    Log.w(TAG, "policy scry failed; hiding the editor", it)
+                                    // eyre answers 404 for an agent that isn't there.
+                                    // Anything else is a hiccup this loop retries on
+                                    // its own, and must not trigger an install.
+                                    if (it.message?.contains("HTTP 404") == true) autoInstallTrunk()
+                                }
+                        },
+                        async {
+                            // A ship running an older wire than we speak is the
+                            // failure that looks like nothing happening: pokes
+                            // gall cannot cast, switches that do not move. Say so
+                            // instead.
+                            runCatching {
+                                val shipWire = TrunkWire.parseWireVersion(
+                                    ch.scry(TrunkWire.AGENT, "/version"),
+                                )
+                                _wire.value = shipWire
+                                if (shipWire < TrunkWire.WIRE_VERSION &&
+                                    _install.value == TrunkInstall.Hidden
+                                ) {
+                                    Log.w(TAG, "ship speaks wire $shipWire; we speak ${TrunkWire.WIRE_VERSION}")
+                                    _install.value =
+                                        TrunkInstall.Outdated(shipWire, TrunkWire.WIRE_VERSION)
+                                }
+                            }.onFailure { Log.w(TAG, "version scry failed; assuming an old desk", it) }
+                        },
+                        async {
+                            // A ship with no sidecar of its own gets the one this
+                            // build ships with, so party lines work without any
+                            // setup. Group admins can point their group elsewhere;
+                            // a ship that already has an SFU is left alone.
+                            runCatching {
+                                val sfu = ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject
+                                // Only a ship that answered it has none takes the default,
+                                // and off the connect path, like the ICE above.
+                                if (sfu != null && sfu["configured"]?.jsonPrimitive?.content != "true" && defaults.sfuBase.isNotEmpty()) {
+                                    _shipSfuBase.value = defaults.sfuBase
+                                    scope.launch { adoptDefaultSfu(ch) }
+                                } else {
+                                    _shipSfuBase.value = sfu?.get("base")?.jsonPrimitive?.content.orEmpty()
+                                }
+                            }.onFailure { Log.w(TAG, "sfu scry failed", it) }
+                        },
+                        async {
+                            runCatching {
+                                val ours = session.shipName.orEmpty()
+                                _rooms.value = TrunkWire.parseRooms(ch.scry(TrunkWire.AGENT, "/rooms"))
+                                    .associateBy { "$ours/${it.name}" }
+                            }.onFailure { Log.w(TAG, "rooms scry failed", it) }
+                        },
+                        async {
+                            runCatching {
+                                _invites.value = TrunkWire.parseLines(ch.scry(TrunkWire.AGENT, "/lines"))
+                                    .associateBy { "${it.host}/${it.name}" }
+                            }.onFailure { Log.w(TAG, "lines scry failed", it) }
+                        },
+                    ).forEach { it.await() }
                 }
-                // Only a ship that answered it has none takes the default:
-                // a failed read, or an answer in another shape, replaced
-                // the servers someone had set, for every device on it.
-                // Guarded like every other step here. It is internally
-                // safe today, but a throw between opening the channel
-                // and subscribing is the worst failure this loop has:
-                // `channel` is already assigned, so pokes keep working
-                // and the ship looks reachable while no fact ever
-                // arrives again.
-                // Off the connect path: the poke's ack comes down the event
-                // stream, which is read only once this loop subscribes
-                // below, so waiting for it here held calls up for the
-                // poke's whole 15s timeout. It reads /ice again itself.
-                if (ice is kotlinx.serialization.json.JsonArray && ice.isEmpty()) {
-                    scope.launch {
-                        runCatching { adoptDefaultIce(ch) }
-                            .onFailure { Log.w(TAG, "adopting default ice failed", it) }
-                    }
-                }
-                // No %trunk (or a desk predating policy) leaves this
-                // null, and the settings editor stays hidden.
-                runCatching { _policy.value = TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy")) }
-                    .onFailure {
-                        Log.w(TAG, "policy scry failed; hiding the editor", it)
-                        // eyre answers 404 for an agent that isn't there.
-                        // Anything else is a hiccup this loop retries on
-                        // its own, and must not trigger an install.
-                        if (it.message?.contains("HTTP 404") == true) autoInstallTrunk()
-                    }
-                // A ship with no sidecar of its own gets the one this
-                // build ships with, so party lines work without any
-                // setup. Group admins can point their group elsewhere;
-                // a ship that already has an SFU is left alone.
-                // A ship running an older wire than we speak is the
-                // failure that looks like nothing happening: pokes
-                // gall cannot cast, switches that do not move. Say so
-                // instead.
-                runCatching {
-                    val shipWire = TrunkWire.parseWireVersion(
-                        ch.scry(TrunkWire.AGENT, "/version"),
-                    )
-                    _wire.value = shipWire
-                    if (shipWire < TrunkWire.WIRE_VERSION &&
-                        _install.value == TrunkInstall.Hidden
-                    ) {
-                        Log.w(TAG, "ship speaks wire $shipWire; we speak ${TrunkWire.WIRE_VERSION}")
-                        _install.value =
-                            TrunkInstall.Outdated(shipWire, TrunkWire.WIRE_VERSION)
-                    }
-                }.onFailure { Log.w(TAG, "version scry failed; assuming an old desk", it) }
-                runCatching {
-                    val sfu = ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject
-                    // Only a ship that answered it has none takes the default,
-                    // and off the connect path, like the ICE above.
-                    if (sfu != null && sfu["configured"]?.jsonPrimitive?.content != "true" && defaults.sfuBase.isNotEmpty()) {
-                        _shipSfuBase.value = defaults.sfuBase
-                        scope.launch { adoptDefaultSfu(ch) }
-                    } else {
-                        _shipSfuBase.value = sfu?.get("base")?.jsonPrimitive?.content.orEmpty()
-                    }
-                }.onFailure { Log.w(TAG, "sfu scry failed", it) }
-                runCatching {
-                    val ours = session.shipName.orEmpty()
-                    _rooms.value = TrunkWire.parseRooms(ch.scry(TrunkWire.AGENT, "/rooms"))
-                        .associateBy { "$ours/${it.name}" }
-                }.onFailure { Log.w(TAG, "rooms scry failed", it) }
-                runCatching {
-                    _invites.value = TrunkWire.parseLines(ch.scry(TrunkWire.AGENT, "/lines"))
-                        .associateBy { "${it.host}/${it.name}" }
-                }.onFailure { Log.w(TAG, "lines scry failed", it) }
                 ch.events().let { events ->
                     ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH)
                     backoff = 2_000L
