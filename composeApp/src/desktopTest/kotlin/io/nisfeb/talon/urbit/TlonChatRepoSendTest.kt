@@ -322,4 +322,28 @@ class TlonChatRepoSendTest {
         assertNull(db.threadUnreads().getOne("~bus", "~bus/170141184506"))
         assertEquals(1, ship.pokesTo("activity").size)
     }
+
+    // group-action-5 (12.2.0): the mark Tlon's client sends, the body the
+    // same as -4's (a-groups:v11 is v8's plus a blob variant).
+    @Test
+    fun `a group action goes under group-action-5, and again under -4 where a ship lacks it`() = live {
+        repo.kickFromGroup("~bus/garden", "~nec")
+        assertEquals("group-action-5", ship.pokesTo("groups").single().mark)
+        ship.refuse = { p -> if (p.mark == "group-action-5") "no mark group-action-5" else null }
+        repo.kickFromGroup("~bus/garden", "~dev")
+        val last = ship.pokesTo("groups").takeLast(2)
+        assertEquals(listOf("group-action-5", "group-action-4"), last.map { it.mark })
+        assertEquals(last[0].json, last[1].json, "the same action")
+    }
+
+    // Our own card's change on /v1/news, applied as it comes: it was read
+    // back from /v1/self, a path Tlon's client no longer calls.
+    @Test
+    fun `our own profile's change is applied off the fact`() = live {
+        repo.applyEvent(kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"id":1,"response":"diff","json":{"self":{"contact":{"nickname":{"type":"text","value":"Zed"}}}}}""",
+        ))
+        assertEquals("Zed", db.contacts().get("~zod")?.nickname)
+        assertTrue(ship.scried.none { it.startsWith("contacts/") }, "${ship.scried}")
+    }
 }

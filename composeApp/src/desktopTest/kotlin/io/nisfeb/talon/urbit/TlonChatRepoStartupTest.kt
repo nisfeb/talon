@@ -186,5 +186,22 @@ class TlonChatRepoStartupTest {
     }) { repo ->
         until("the notebook's unread") { db.unreads().getOne("notes/~bus/recipes")?.count == 3 }
     }
-}
 
+    // A current ship is read where Tlon's client reads it (12.2.0's /v3
+    // groups, /v10 init, the directory for our own card); the older paths,
+    // which its N-1 policy lets it drop, are not asked. The tests above
+    // give only the older ones, and pass: an older ship still loads.
+    @Test
+    fun `a current ship is read on the paths Tlon's client uses`() = started(prepare = {
+        scries["groups-ui/v6/init-posts/10/10"] = initPosts
+        scries["groups/v3/groups"] = """{"~bus/garden":{"meta":{"title":"The Garden"},"blob":null,
+            "channels":{"chat/~bus/general":{"meta":{"title":"general"}}}}}"""
+        scries["groups-ui/v10/init"] = """{"groups":{},"foreigns":{}}"""
+        scries["contacts/v1/directory"] = """{"~zod":{"isContact":true,"contact":{"nickname":{"type":"text","value":"Zed"}},"mod":{}}}"""
+    }) {
+        until("the group") { db.groups().allGroups().any { it.flag == "~bus/garden" } }
+        until("our own card") { db.contacts().get("~zod")?.nickname == "Zed" }
+        assertTrue("groups/v2/groups" !in ship.scried, "${ship.scried}")
+        assertTrue("contacts/v1/self" !in ship.scried, "ours came with the directory: ${ship.scried}")
+    }
+}

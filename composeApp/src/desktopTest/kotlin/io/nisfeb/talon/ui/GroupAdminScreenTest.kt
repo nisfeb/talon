@@ -124,7 +124,7 @@ class GroupAdminScreenTest {
 
     /** Open General's settings; [writers] is what this ship's %channels says of who may post, null for nothing. */
     private fun ComposeUiTest.openGeneral(ship: FakeShip, writers: String? = "[]") {
-        writers?.let { ship.scries["channels/v4/$nest/perm"] = """{"writers":$it,"group":"$flag"}""" }
+        writers?.let { ship.scries["channels/v5/$nest/perm"] = """{"writers":$it,"group":"$flag"}""" }
         onNodeWithText("Settings").performScrollTo().performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Who can post") }
         waitUntil(timeoutMillis = 5_000) { !shows("Asking your ship…") }
@@ -470,7 +470,7 @@ class GroupAdminScreenTest {
         }
         newChannel(kind = "Notebook", title = "Plans")
         waitUntil(timeoutMillis = 5_000) { ship.api.any { it.startsWith("POST /notes/~/v1/notebooks") } }
-        assertTrue(ship.api.single().contains("\"flagName\":\"garden\""), "made in this group")
+        assertTrue(ship.api.single { !it.startsWith("GET ") }.contains("\"flagName\":\"garden\""), "made in this group")
         assertTrue(ship.pokesTo("channels").isEmpty())
     }
 

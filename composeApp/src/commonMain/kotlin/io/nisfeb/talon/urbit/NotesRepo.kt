@@ -79,7 +79,7 @@ class NotesRepo(
             val cleared = db.notes().clearAllPending()
             if (cleared > 0) Log.i(TAG, "cleared $cleared stale in-flight note mark(s)")
         }
-        val body = runCatching { ch.scry(NotesPaths.APP, NotesPaths.NOTEBOOKS) }
+        val body = runCatching { readNotes(ch, NotesPaths.V1_NOTEBOOKS, NotesPaths.NOTEBOOKS) }
             .onFailure {
                 // A ship on webapp <v12 has no %notes agent at all. That's
                 // the expected state until the user updates, so don't
@@ -143,16 +143,26 @@ class NotesRepo(
         joinNotebook(flag)
     }
 
+    /**
+     * A %notes read over its HTTP surface ([get], as Tlon's client reads it,
+     * 12.2.0), else the /v0 [scry] an older ship has. The two answer the
+     * same JSON from the same encoders; Tlon's client no longer calls the
+     * scries, which leaves them removable under its N-1 policy.
+     */
+    private suspend fun readNotes(ch: UrbitChannel, get: String, scry: String): kotlinx.serialization.json.JsonElement =
+        io.nisfeb.talon.util.runSuspendCatching { ch.apiJson(method = "GET", path = get) }
+            .getOrElse { ch.scry(NotesPaths.APP, scry) }
+
     /** Re-read one notebook's folder tree + notes and swap it in. */
     suspend fun refreshNotebook(flag: NotesFlag) {
         val ch = channel ?: return
         val key = flag.flagString
-        val foldersJson = runCatching { ch.scry(NotesPaths.APP, NotesPaths.folders(flag)) }
+        val foldersJson = runCatching { readNotes(ch, NotesPaths.v1Folders(flag), NotesPaths.folders(flag)) }
             .getOrElse {
                 Log.w(TAG, "notes folders scry failed for $key", it)
                 return
             }
-        val notesJson = runCatching { ch.scry(NotesPaths.APP, NotesPaths.notes(flag)) }
+        val notesJson = runCatching { readNotes(ch, NotesPaths.v1Notes(flag), NotesPaths.notes(flag)) }
             .getOrElse {
                 Log.w(TAG, "notes scry failed for $key", it)
                 return
