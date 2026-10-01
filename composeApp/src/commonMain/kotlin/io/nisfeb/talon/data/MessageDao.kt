@@ -180,6 +180,10 @@ abstract class MessageDao {
     @Query("SELECT * FROM messages WHERE status = 'queued' ORDER BY sentMs ASC")
     abstract suspend fun queued(): List<MessageEntity>
 
+    /** How many of one conversation's messages are waiting for the ship. */
+    @Query("SELECT COUNT(*) FROM messages WHERE whom = :whom AND status = 'queued'")
+    abstract suspend fun queuedIn(whom: String): Int
+
     /** How many messages are waiting for the ship. */
     @Query("SELECT COUNT(*) FROM messages WHERE status = 'queued'")
     abstract fun queuedCount(): Flow<Int>

@@ -1096,6 +1096,16 @@ class TlonChatRepo(
      * and the resend makes sure of it without a second copy.
      */
     private suspend fun sendOrQueue(whom: String, id: String, out: Outgoing) = pushScope.async {
+        // Behind a message of this conversation that is waiting for the
+        // ship: queued too, so it is counted with it and goes after it.
+        // Sent straight on, it sat greyed out and uncounted beside "1
+        // queued", and in a channel, where the ship numbers posts as they
+        // arrive, could land ahead of the one written before it.
+        if (db.messages().queuedIn(whom) > 0) {
+            db.messages().setStatus(whom, id, "queued")
+            scheduleDrain(0)
+            return@async
+        }
         val ch = channel ?: return@async queueMessage(whom, id, IllegalStateException("not connected to the ship"))
         try {
             val start = nowMs()
@@ -1187,30 +1197,39 @@ class TlonChatRepo(
      */
     internal suspend fun drainQueue() = drainLock.withLock {
         val ch = channel ?: return@withLock
-        for (row in db.messages().queued()) {
-            val now = db.messages().getOne(row.whom, row.id) ?: continue
-            if (now.status != "queued") continue
-            val out = resendPoke(now)
-            if (out == null) {
-                db.messages().setStatus(now.whom, now.id, "failed")
-                continue
-            }
-            try {
-                if (isChannelNest(now.whom) && landedAlready(now)) continue
-                db.messages().setStatus(now.whom, now.id, if (isChannelNest(now.whom)) "pending" else null)
-                ch.poke(app = out.app, mark = out.mark, payload = out.payload)
-            } catch (c: kotlinx.coroutines.CancellationException) {
-                db.messages().setStatus(now.whom, now.id, "queued")
-                throw c
-            } catch (t: Throwable) {
-                if (t is PokeNacked) {
+        // Read again until none are left: one queued while this ran, behind
+        // one of its own conversation, waited otherwise for the next round.
+        val tried = mutableSetOf<Pair<String, String>>()
+        while (true) {
+            val batch = db.messages().queued().filter { (it.whom to it.id) !in tried }
+            if (batch.isEmpty()) break
+            for (row in batch) {
+                tried += row.whom to row.id
+                val now = db.messages().getOne(row.whom, row.id) ?: continue
+                if (now.status != "queued") continue
+                val out = resendPoke(now)
+                if (out == null) {
                     db.messages().setStatus(now.whom, now.id, "failed")
                     continue
                 }
-                db.messages().setStatus(now.whom, now.id, "queued")
-                drainJob = null
-                stillSlow(t)
-                return@withLock
+                try {
+                    if (isChannelNest(now.whom) && landedAlready(now)) continue
+                    // Queued until the ship takes it, label and count with it:
+                    // marked sent before the send, it lost its label and stood
+                    // grey and unexplained for as long as a slow ship took.
+                    ch.poke(app = out.app, mark = out.mark, payload = out.payload)
+                    db.messages().setStatus(now.whom, now.id, if (isChannelNest(now.whom)) "pending" else null)
+                } catch (c: kotlinx.coroutines.CancellationException) {
+                    throw c
+                } catch (t: Throwable) {
+                    if (t is PokeNacked) {
+                        db.messages().setStatus(now.whom, now.id, "failed")
+                        continue
+                    }
+                    drainJob = null
+                    stillSlow(t)
+                    return@withLock
+                }
             }
         }
         for (r in queuedReacts.value.values) {

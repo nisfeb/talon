@@ -9,6 +9,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.io.IOException
 import java.io.File
 import kotlin.io.path.createTempDirectory
@@ -133,9 +135,14 @@ class TlonChatRepoQueueTest {
         assertEquals("queued", db.messages().getOne("~bus", stored(id))?.status)
         ship.lose = { null }
         ship.refuse = { "nope" }
-        assertFailsWith<PokeNacked> { repo.send("~bus", "refused") }
+        // A conversation with nothing waiting hears the refusal at once.
+        assertFailsWith<PokeNacked> { repo.send("~nec", "refused") }
+        // One behind the queued message waits with it, and hears it there.
+        val behind = repo.send("~bus", "behind")
+        assertEquals("queued", db.messages().getOne("~bus", stored(behind))?.status)
         repo.drainQueue()
         assertEquals("failed", db.messages().getOne("~bus", stored(id))?.status, "refused once it reached the ship")
+        assertEquals("failed", db.messages().getOne("~bus", stored(behind))?.status)
     }
 
     @Test
@@ -185,5 +192,51 @@ class TlonChatRepoQueueTest {
         val sent = ship.pokesTo("chat").map { it.json.toString() }
         assertEquals(1, sent.size, "$sent")
         assertTrue("del-react" in sent.single())
+    }
+
+    // "the UI said one message was queued. I sent another. the ui never
+    // updated to say 2 messages were queued even though the second message
+    // remained greyed out."
+    @Test
+    fun `one sent while another of its conversation waits is queued behind it, counted, and goes after it`() = live {
+        ship.lose = { lost }
+        val first = repo.send("~bus", "first")
+        ship.lose = { null }
+        val second = repo.send("~bus", "second")
+        assertEquals("queued", db.messages().getOne("~bus", stored(second))?.status)
+        assertEquals(2, repo.shipSlow.first { (it?.queued ?: 0) == 2 }!!.queued)
+        repo.drainQueue()
+        assertEquals(listOf(null, null), listOf(first, second).map { db.messages().getOne("~bus", stored(it))?.status })
+        val sent = ship.pokesTo("chat").map { it.json.toString() }
+        assertEquals(2, sent.size, sent.toString())
+        assertTrue("first" in sent[0] && "second" in sent[1], "in the order written: $sent")
+    }
+
+    // "the first message lost its queued text but remained gray for over a
+    // minute before turning white."
+    @Test
+    fun `a queued message keeps its label while it goes again, until the ship takes it`() = live {
+        ship.lose = { lost }
+        val id = repo.send("~bus", "are you there")
+        ship.lose = { null }
+        ship.holdPoke = 800
+        val draining = launch(kotlinx.coroutines.Dispatchers.Default) { repo.drainQueue() }
+        delay(300)
+        assertEquals("queued", db.messages().getOne("~bus", stored(id))?.status, "still waiting on the ship")
+        draining.join()
+        assertNull(db.messages().getOne("~bus", stored(id))?.status)
+    }
+
+    @Test
+    fun `one queued while the queue goes out goes with it, not at the next try`() = live {
+        ship.lose = { lost }
+        val first = repo.send("~bus", "first")
+        ship.lose = { null }
+        ship.holdPoke = 600
+        val draining = launch(kotlinx.coroutines.Dispatchers.Default) { repo.drainQueue() }
+        delay(200)
+        val second = repo.send("~bus", "second") // behind the first, still going
+        draining.join()
+        assertEquals(listOf(null, null), listOf(first, second).map { db.messages().getOne("~bus", stored(it))?.status })
     }
 }
