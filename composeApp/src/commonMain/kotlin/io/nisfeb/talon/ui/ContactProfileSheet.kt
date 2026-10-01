@@ -27,6 +27,7 @@ import io.nisfeb.talon.ui.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -138,6 +139,14 @@ fun ContactProfileSheet(
             }
             // Asked of the ship once per comet, ever: see [CometDomes].
             GroundwireLine(ship)
+            // A bot's ship says whether its gateway is up (Tlon 12.3.0, bot-liveness).
+            io.nisfeb.talon.urbit.BotLiveness.online.collectAsState().value[ship]?.let { up ->
+                Text(
+                    if (up) "Bot · Online" else "Bot · Offline",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (up) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             copied?.let {
                 Text(
                     "Copied $it",

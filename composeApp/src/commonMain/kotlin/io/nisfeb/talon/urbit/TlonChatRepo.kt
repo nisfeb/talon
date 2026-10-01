@@ -4343,6 +4343,8 @@ class TlonChatRepo(
         fields: JsonObject,
         modAtMs: Long? = null,
     ): ContactEntity {
+        // Every contact path comes through here, so a bot's liveness does too.
+        BotLiveness.record(ship, fields)
         // Tlon's contacts /v1 wire shape wraps each field as
         //   {type: <tag>, value: <payload>}
         // where <tag> is the value-type tag from sur/contacts.hoon —

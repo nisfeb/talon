@@ -752,7 +752,7 @@ private fun ThreadMessage(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        "$authorLabel · $stamp",
+                        contactMap.byline(m.author, authorLabel, stamp),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
