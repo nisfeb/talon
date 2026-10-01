@@ -150,8 +150,11 @@ class NotesRepo(
      * scries, which leaves them removable under its N-1 policy.
      */
     private suspend fun readNotes(ch: UrbitChannel, get: String, scry: String): kotlinx.serialization.json.JsonElement =
-        io.nisfeb.talon.util.runSuspendCatching { ch.apiJson(method = "GET", path = get) }
-            .getOrElse { ch.scry(NotesPaths.APP, scry) }
+        // Every one of these answers a list; anything else from the GET
+        // (an error body, a route this ship lacks) is asked of the scry.
+        io.nisfeb.talon.util.runSuspendCatching { ch.apiJson(method = "GET", path = get) }.getOrNull()
+            ?.takeIf { it is kotlinx.serialization.json.JsonArray }
+            ?: ch.scry(NotesPaths.APP, scry)
 
     /** Re-read one notebook's folder tree + notes and swap it in. */
     suspend fun refreshNotebook(flag: NotesFlag) {
