@@ -171,7 +171,7 @@ fun MailList(
                     onFolders = if (roomForColumn) null else ({ pickingFolder = true }),
                 )
                 HorizontalDivider()
-                error?.let { MailNotice(it) }
+                error?.let { MailNotice(it, onDismiss = repo::clearError) }
                 // A send that failed after its composer was closed.
                 sendProblem?.let { MailNotice(it, onDismiss = repo::clearSendProblem) }
                 problem?.let { MailNotice(it, onDismiss = repo::clearProblem) }

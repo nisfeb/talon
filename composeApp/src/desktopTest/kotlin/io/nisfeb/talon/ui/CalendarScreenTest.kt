@@ -43,6 +43,10 @@ class CalendarScreenTest {
     private val HOUR = 3_600_000L
     /** Every read the screen made, by path. */
     private val reads: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    /** The ship is down, and nginx in front of it answers every request with its 502 page. */
+    @Volatile private var down = false
+    /** The ship says no to every write. */
+    @Volatile private var refuse = false
     /** The ship's one-event read never answers: a busy ship, at its worst. */
     @Volatile private var holdDetail = false
     /** The ship's calendar keeps reminders: its rows, its event read and its config say so. */
@@ -56,9 +60,11 @@ class CalendarScreenTest {
     private val http = HttpClient(MockEngine { req ->
         val path = req.url.encodedPath
         val json = { body: String -> respond(body, HttpStatusCode.OK, headersOf("Content-Type", "application/json")) }
+        if (down) return@MockEngine respond(io.nisfeb.talon.mail.NGINX_502, HttpStatusCode.BadGateway, headersOf("Content-Type", "text/html"))
         if (!path.startsWith("/grubbery/api/poke/")) reads += path
         if (holdDetail && path.endsWith("/event.json")) kotlinx.coroutines.awaitCancellation()
         when {
+            path.startsWith("/grubbery/api/poke/") && refuse -> respond("", HttpStatusCode.BadRequest)
             path.startsWith("/grubbery/api/poke/") -> {
                 writes += path to req.body.toByteArray().decodeToString()
                 json("")
@@ -432,6 +438,36 @@ class CalendarScreenTest {
     private fun ComposeUiTest.save() = onAllNodesWithText("Save")[0].performClick()
 
     private fun sentMatching(pattern: String) = writes.any { Regex(pattern).containsMatchIn(it.second) }
+
+    // "now calendar says the ship isn't taking my changes to events": the
+    // ship was down for a restart. Said as that, and the edit is kept.
+    @Test
+    fun `a save while the ship is down says so, and the editor comes back with the change to try again`() = calendar {
+        open("Dentist")
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Repeats") }
+        field("Name").performTextReplacement("Dentist, moved")
+        down = true
+        save()
+        waitUntil(timeoutMillis = 5_000) { shows("Your ship isn't answering") }
+        assertTrue(onAllNodes(hasSetTextAction() and hasText("Dentist, moved")).fetchSemanticsNodes().isNotEmpty(), "the edit is still there")
+        assertTrue(!shows("did not take") && !shows("<html"), "not a refusal, and no markup")
+        assertTrue(writes.isEmpty())
+        down = false
+        save()
+        wrote("Dentist, moved")
+    }
+
+    @Test
+    fun `a save the ship refuses still says the ship did not take it`() = calendar {
+        open("Dentist")
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Repeats") }
+        refuse = true
+        save()
+        waitUntil(timeoutMillis = 5_000) { shows("The ship did not take the change") }
+        assertTrue(!shows("isn't answering"))
+    }
 
     @Test
     fun `an event needs a name before it goes`() = calendar {

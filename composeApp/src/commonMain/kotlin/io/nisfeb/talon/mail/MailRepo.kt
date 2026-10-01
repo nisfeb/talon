@@ -77,6 +77,8 @@ class MailRepo(
     private val rows: io.nisfeb.talon.data.MailRowDao? = null,
     /** This ship's thread directory, from [MailThreadFiles.dirFor]. Null keeps none. */
     threadDir: String? = null,
+    /** The first wait before asking again a ship that did not answer. */
+    private val firstRetryMs: Long = FIRST_RETRY_MS,
 ) {
     private val files = threadDir?.let { MailThreadFiles(it.toPath()) }
     private var api: AuspexApi? = null
@@ -277,6 +279,7 @@ class MailRepo(
     }
 
     fun detach() {
+        askAgain?.cancel()
         poller?.cancel()
         poller = null
         api = null
@@ -330,11 +333,7 @@ class MailRepo(
                 // Mail still works; filing to Lattice is what breaks,
                 // and a quiet null there reads as "no address" rather
                 // than a failure. Say which it was.
-                _error.value = when (e) {
-                    is AuspexError.Refused -> e.reason
-                    is AuspexError.Garbled -> "The ship answered something we could not read."
-                    is AuspexError.Unreachable -> "No answer from the ship."
-                }
+                _error.value = e.said()
                 null
             }
         }
@@ -365,6 +364,7 @@ class MailRepo(
             // Somebody who changed folder while this was on its way sees the new one.
             if (pageKey() == key) _page.value = p
             _error.value = null
+            askAgainMs = firstRetryMs
             return p
         } catch (e: AuspexError) {
             onFailure(e, probeAbsentApp = true)
@@ -426,16 +426,35 @@ class MailRepo(
                 _error.value = null
             }
             else -> {
-                _error.value = said(e)
+                _error.value = e.said()
                 Log.w(TAG, "mail refresh failed", e)
+                if (e is AuspexError.Unreachable) askAgainSoon()
             }
         }
     }
 
-    private fun said(e: AuspexError): String = when (e) {
-        is AuspexError.Refused -> e.reason
-        is AuspexError.Garbled -> "The ship answered something we could not read."
-        is AuspexError.Unreachable -> "No answer from the ship."
+    @kotlin.concurrent.Volatile private var askAgain: Job? = null
+    @kotlin.concurrent.Volatile private var askAgainMs = firstRetryMs
+
+    /**
+     * No answer: ask again soon, a little later each time, rather than at
+     * the next poll ten minutes on. A ship back from a restart cleared the
+     * line only then, and it read as stuck.
+     */
+    private fun askAgainSoon() {
+        if (askAgain?.isActive == true) return
+        val wait = askAgainMs
+        askAgainMs = (wait * 2).coerceAtMost(MAX_RETRY_MS)
+        askAgain = scope.launch {
+            delay(jittered(wait))
+            askAgain = null
+            if (foreground) refresh()
+        }
+    }
+
+    /** The listing line put away; the next read that fails says it again. */
+    fun clearError() {
+        _error.value = null
     }
 
     /** True while there is more of this view than we have asked for. */
@@ -731,7 +750,8 @@ class MailRepo(
                     }
                     // Signed out is the whole app's state; anything else is
                     // this one write, said until dismissed.
-                    if (e.isSignedOut) onFailure(e) else _problem.value = "The ship did not do that: ${said(e)}"
+                    if (e.isSignedOut) onFailure(e) else _problem.value =
+                        if (e is AuspexError.Unreachable) e.said() + " That was not done." else "The ship did not do that: ${e.said()}"
                     return@launch
                 }
                 if (relist) relistSoon()
@@ -947,6 +967,8 @@ class MailRepo(
         /** Mail is considered correspondence, not chat. The refresh
          *  control covers the case where the reader knows better. */
         const val DEFAULT_POLL_MS = 10 * 60 * 1000L
+        const val FIRST_RETRY_MS = 15_000L
+        private const val MAX_RETRY_MS = 2 * 60_000L
 
         /** How long the listing waits after a write before it is read again. */
         const val RELIST_AFTER_MS = 1_500L
