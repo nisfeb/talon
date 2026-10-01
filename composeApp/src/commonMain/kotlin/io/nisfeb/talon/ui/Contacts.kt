@@ -36,7 +36,13 @@ data class ContactMap(
     /** Bumped as looked-up names arrive or the setting for them flips,
      *  so a map built before is not equal to one built after. */
     val namesGeneration: Int = 0,
+    /** Bot ship to whether its gateway is up ([io.nisfeb.talon.urbit.BotLiveness]); absent is unknown. */
+    val botOnline: Map<String, Boolean> = emptyMap(),
 ) {
+    /** A message's byline: the name, "Bot · Offline" for a bot that is, and the time. */
+    fun byline(ship: String, name: String, stamp: String): String =
+        if (botOnline[ship] == false) "$name · Bot · Offline · $stamp" else "$name · $stamp"
+
     private val byShip: Map<String, ContactEntity> =
         contacts.associateBy(ContactEntity::ship)
     private val byClub: Map<String, ClubEntity> = clubs.associateBy(ClubEntity::id)
@@ -241,17 +247,19 @@ fun contactMapFlow(
     /** Ticks as looked-up names arrive, so a row drawn before the
      *  answer landed is redrawn once it has. */
     namesGenerationFlow: Flow<Int> = AzimuthNames.generation,
+    botOnlineFlow: Flow<Map<String, Boolean>> = io.nisfeb.talon.urbit.BotLiveness.online,
 ): Flow<ContactMap> = combine(
     contactsFlow.distinctUntilChanged(::sameContactDisplay),
     clubsFlow.distinctUntilChanged(),
     groupsFlow.distinctUntilChanged(),
     channelGroupsFlow.distinctUntilChanged(),
-    // Two naming inputs ride one slot: `combine` only types five.
+    // Three inputs ride one slot: `combine` only types five.
     combine(
         alwaysPatpFlow.distinctUntilChanged(),
         namesGenerationFlow.distinctUntilChanged(),
-    ) { patp, gen -> patp to gen },
-) { c, cl, g, cg, (patp, gen) -> ContactMap(c, cl, g, cg, patp, gen) }
+        botOnlineFlow.distinctUntilChanged(),
+    ) { patp, gen, bots -> Triple(patp, gen, bots) },
+) { c, cl, g, cg, (patp, gen, bots) -> ContactMap(c, cl, g, cg, patp, gen, bots) }
     .onEach {
         LastContactMap.remember(it)
         // Story parsing runs outside composition (StoryCache, ingest),

@@ -154,4 +154,20 @@ class GroupEventRouterTest {
         }
     }
 
+    // ─── kinds Talon cannot open (Tlon 12.3.0's %buckets) ───────
+
+    @Test
+    fun `a buckets channel added to a group is not stored`() {
+        val intent = classify("""{"flag":"~host/g","r-group":{"channel":{"nest":"buckets/~host/files","r-channel":{"add":{"meta":{"title":"files"}}}}}}""")
+        kotlin.test.assertTrue(intent is GroupEventIntent.Unknown, "$intent")
+        val edit = classify("""{"flag":"~host/g","r-group":{"channel":{"nest":"buckets/~host/files","r-channel":{"edit":{"meta":{"title":"files 2"}}}}}}""")
+        kotlin.test.assertTrue(edit is GroupEventIntent.Unknown, "$edit")
+    }
+
+    @Test
+    fun `a new group's buckets channels are left out of it`() {
+        val intent = classify("""{"flag":"~host/g","r-group":{"create":{"meta":{"title":"G"},"channels":{
+            "chat/~host/general":{"meta":{"title":"general"}},"buckets/~host/files":{"meta":{"title":"files"}}}}}}""") as GroupEventIntent.CreateGroup
+        assertEquals(setOf("chat/~host/general"), intent.channels.keys)
+    }
 }

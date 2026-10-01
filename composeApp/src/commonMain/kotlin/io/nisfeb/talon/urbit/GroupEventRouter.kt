@@ -74,7 +74,7 @@ internal fun classifyGroupEvent(event: JsonObject): GroupEventIntent? {
             flag = flag,
             title = meta?.get("title").asStr()?.takeIf { it.isNotBlank() },
             image = meta?.get("image").asStr()?.takeIf { it.isNotBlank() },
-            channels = channels.mapValues { (_, ch) ->
+            channels = channels.filterKeys(::isSupportedChannel).mapValues { (_, ch) ->
                 val chObj = ch as? JsonObject
                 val chMeta = chObj?.get("meta") as? JsonObject
                 chMeta?.get("title").asStr()?.takeIf { it.isNotBlank() }
@@ -98,6 +98,9 @@ internal fun classifyGroupEvent(event: JsonObject): GroupEventIntent? {
     (r["channel"] as? JsonObject)?.let { channel ->
         val nest = channel["nest"].asStr()
             ?: return GroupEventIntent.Unknown(flag, channel.keys)
+        // A kind Talon cannot open is not stored: see [isSupportedChannel].
+        // One stored by an older Talon goes at the next bootstrap's reconcile.
+        if (!isSupportedChannel(nest)) return GroupEventIntent.Unknown(flag, setOf("unsupported channel $nest"))
         val rChannel = channel["r-channel"] as? JsonObject
             ?: return GroupEventIntent.Unknown(flag, channel.keys)
         (rChannel["add"] as? JsonObject)?.let { added ->

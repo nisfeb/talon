@@ -139,7 +139,7 @@ class NotebookScreensTest {
         showing("Pho")
         add("New note", "Laksa")
         showing("Laksa")
-        assertEquals(listOf("""POST /notes/~/v1/notebooks/~bus/recipes/notes {"folder":9,"title":"Laksa","body":""}"""), ship.api.toList())
+        assertEquals(listOf("""POST /notes/~/v1/notebooks/~bus/recipes/notes {"folder":9,"title":"Laksa","body":""}"""), ship.api.filterNot { it.startsWith("GET ") })
     }
 
     @Test
@@ -154,7 +154,7 @@ class NotebookScreensTest {
         add("New folder", "Stocks")
         showing("Stocks")
         // folderName, not name: the route's path has a name already.
-        assertEquals(listOf("""POST /notes/~/v1/notebooks/~bus/recipes/folders {"folderName":"Stocks","parent":8}"""), ship.api.toList())
+        assertEquals(listOf("""POST /notes/~/v1/notebooks/~bus/recipes/folders {"folderName":"Stocks","parent":8}"""), ship.api.filterNot { it.startsWith("GET ") })
     }
 
     @Test
@@ -229,7 +229,7 @@ class NotebookScreensTest {
         onNode(hasSetTextAction()).performTextInput("Simmer all day.")
         onNodeWithContentDescription("Save").performClick()
         waitUntil(timeoutMillis = 5_000) { !shows("Markdown") }
-        val sent = ship.api.single()
+        val sent = ship.api.single { !it.startsWith("GET ") }
         assertTrue("\"expectedRevision\":3" in sent && "Simmer all day." in sent, sent)
     }
 

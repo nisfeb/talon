@@ -109,7 +109,7 @@ class NotesRepoTest {
             if (method == "PUT" && path == "/notes/~/v1/notebooks/~bus/recipes/notes/11") """{"body":{"type":"ok"}}""" else null
         }
         assertTrue(notes.updateNote(book, 11, "Simmer all day.", expectedRevision = 3))
-        val sent = ship.api.single()
+        val sent = ship.api.single { !it.startsWith("GET ") }
         assertTrue("\"expectedRevision\":3" in sent && "Simmer all day." in sent, sent)
         assertEquals(false, db.notes().note(book.flagString, 11)?.pending, "no longer marked in flight")
 
@@ -165,7 +165,7 @@ class NotesRepoTest {
             } else null
         }
         assertEquals("notes/~bus/team-notes-3", notes.createGroupNotebook("~bus/garden", "Team notes"))
-        val asked = ship.api.single()
+        val asked = ship.api.single { !it.startsWith("GET ") }
         assertTrue("\"host\":\"~bus\"" in asked && "\"flagName\":\"garden\"" in asked, asked)
         assertNull(notes.createGroupNotebook("not a flag", "x"))
     }
@@ -184,4 +184,24 @@ class NotesRepoTest {
         notes.bootstrap()
         assertTrue(db.notes().allNotebooks().isEmpty())
     }
+
+    // %notes' HTTP reads (12.2.0), as Tlon's client makes them: the same
+    // JSON as the /v0 scries, bare. The scries are kept for an older ship
+    // (the tests above answer only those) and not asked of a current one.
+    @Test
+    fun `a current ship's notebooks are read over its HTTP surface`() = live {
+        ship.answerApi = { method, path, _ ->
+            if (method != "GET") null
+            else when (path) {
+                "/notes/~/v1/notebooks" -> ship.scries["notes/v0/notebooks"]
+                "/notes/~/v1/notebooks/~bus/recipes/folders" -> ship.scries["notes/v0/folders/~bus/recipes"]
+                "/notes/~/v1/notebooks/~bus/recipes/notes" -> ship.scries["notes/v0/notes/~bus/recipes"]
+                else -> null
+            }
+        }
+        notes.bootstrap()
+        assertEquals(listOf("Pho"), titles())
+        assertTrue(ship.scried.none { it.startsWith("notes/v0/notebooks") || it.startsWith("notes/v0/folders") || it.startsWith("notes/v0/notes/~bus/recipes") && !it.endsWith("/stream") }, "${ship.scried}")
+    }
 }
+

@@ -519,9 +519,15 @@ class TlonChatRepo(
         listOf(
             SubSpec("chat", "/v4"),
             SubSpec("channels", "/v4"),
-            SubSpec("activity", "/v5", fallback = "/v4"),
+            // /v6 (12.1.0) carries notebook and note sources, which v5
+            // and v4 leave out: notebooks had no unreads here.
+            SubSpec("activity", "/v6", fallbacks = listOf("/v5", "/v4")),
             SubSpec("contacts", "/v1/news"),
-            SubSpec("groups", "/v1/groups"),
+            // /v3 (12.2.0) is what Tlon's own client watches: same
+            // envelope, plus `blob` and `active-channel`, which go to
+            // Unknown. /v1 is no longer called by Tlon's clients, which
+            // makes it removable under its N-1 policy.
+            SubSpec("groups", "/v3/groups", fallbacks = listOf("/v1/groups")),
             SubSpec("presence", "/v1"),
             // Invites live here, not on the content subscriptions above:
             // %chat pushes the pending-DM list on /dm/invited (never on
@@ -531,12 +537,15 @@ class TlonChatRepo(
             // groups, never, since refreshInvites ran only when the
             // Invites screen was opened.
             SubSpec("chat", "/dm/invited"),
-            SubSpec("groups", "/gangs/updates"),
+            // /v1/foreigns is where Tlon's client hears of group invites;
+            // the desk marks /gangs/updates deprecated (12.3.0). The same
+            // change goes out on both, a flag-keyed map either way.
+            SubSpec("groups", "/v1/foreigns", fallbacks = listOf("/gangs/updates")),
         ).map { spec ->
             async {
                 runCatching { ch.subscribe(spec.app, spec.path) }
                     .onSuccess { id ->
-                        spec.fallback?.let { subFallbacks[id] = spec.app to it }
+                        if (spec.fallbacks.isNotEmpty()) subFallbacks[id] = spec.app to spec.fallbacks
                     }
                     .onFailure { Log.e(TAG, "${spec.app} subscribe failed", it) }
             }
@@ -1467,7 +1476,7 @@ class TlonChatRepo(
      */
     suspend fun fetchAdminGroupsLive(): List<AdminGroup> {
         val ch = channel ?: error("not connected")
-        val body = ch.scry("groups", "/v2/groups") as? JsonObject
+        val body = scryNewest(ch, "groups", "/v3/groups", "/v2/groups") as? JsonObject
             ?: error("The ship's list of groups could not be read.")
         val me = ourPatp
         Log.i(TAG, "fetchAdminGroups: ${body.size} total groups, me=$me")
@@ -1492,7 +1501,7 @@ class TlonChatRepo(
                     gate.acquire()
                     try {
                         val full = runCatching {
-                            ch.scry("groups", "/v2/groups/$flag") as? JsonObject
+                            scryNewest(ch, "groups", "/v3/groups/$flag", "/v2/groups/$flag") as? JsonObject
                         }.getOrNull()
                         if (full == null) Log.w(TAG, "  $flag: full scry returned null")
                         flag to full
@@ -1529,7 +1538,7 @@ class TlonChatRepo(
      */
     suspend fun fetchGroupAdmin(flag: String): AdminGroup? {
         val ch = channel ?: error("not connected")
-        val body = ch.scry("groups", "/v2/groups/$flag") as? JsonObject ?: return null
+        val body = scryNewest(ch, "groups", "/v3/groups/$flag", "/v2/groups/$flag") as? JsonObject ?: return null
         return parseAdminGroup(flag, body)
     }
 
@@ -1541,7 +1550,7 @@ class TlonChatRepo(
      */
     suspend fun fetchGroupRoles(flag: String): Map<String, String> {
         val ch = channel ?: error("not connected")
-        val body = ch.scry("groups", "/v2/groups/$flag") as? JsonObject
+        val body = scryNewest(ch, "groups", "/v3/groups/$flag", "/v2/groups/$flag") as? JsonObject
             ?: error("the group's record was not readable")
         val roles = (body["roles"] ?: body["cabals"]) as? JsonObject ?: return emptyMap()
         return roles.mapValues { (id, v) ->
@@ -1663,7 +1672,7 @@ class TlonChatRepo(
      */
     suspend fun fetchChannelWriters(nest: String): ChannelWriters {
         val ch = channel ?: return ChannelWriters.NoAnswer("not connected")
-        val perm = runCatching { ch.scry("channels", "/v4/$nest/perm") }.getOrElse { e ->
+        val perm = runCatching { ch.scry("channels", "/v5/$nest/perm") }.getOrElse { e ->
             // ponytail: the status read off our own scry error; a typed error if another caller needs it.
             return if ("HTTP 404" in e.message.orEmpty()) ChannelWriters.NotJoined
             else ChannelWriters.NoAnswer(e.message ?: e::class.simpleName.orEmpty())
@@ -1736,13 +1745,21 @@ class TlonChatRepo(
      */
     suspend fun inviteToGroup(flag: String, ship: String): Boolean {
         val ch = channel ?: error("not connected")
-        ch.poke(
-            app = "groups",
-            mark = "group-action-4",
-            payload = groupAction4InviteAdd(flag, ship),
-            confirm = true,
-        )
+        pokeGroupAction(ch, groupAction4InviteAdd(flag, ship))
         return true
+    }
+
+    /**
+     * A group action under group-action-5 (12.2.0), the mark Tlon's client
+     * sends, and again under group-action-4 where an older ship refuses
+     * it. The two bodies are the same; -5 only adds a `blob` variant.
+     */
+    private suspend fun pokeGroupAction(ch: UrbitChannel, payload: JsonObject) {
+        try {
+            ch.poke(app = "groups", mark = "group-action-5", payload = payload, confirm = true)
+        } catch (n: PokeNacked) {
+            ch.poke(app = "groups", mark = "group-action-4", payload = payload, confirm = true)
+        }
     }
 
     /** Remove a ship from the group (kick). */
@@ -1810,7 +1827,7 @@ class TlonChatRepo(
      * so we can pin down the working path from a single round-trip.
      */
     /**
-     * Fetch inbound invites from the `groups-ui /v7/init` scry and
+     * Fetch inbound invites from the `groups-ui /v10/init` scry (or /v7) and
      * filter to foreigns that have at least one valid invite. The
      * init response also contains everything else the client needs,
      * but we only read `foreigns` here.
@@ -1825,8 +1842,8 @@ class TlonChatRepo(
         val known = _invites.value?.mapTo(mutableSetOf()) { it.flag } ?: mutableSetOf()
         // No answer is not "no invites": stored as one, a failed refresh
         // wiped the invites being shown. Callers catch and say so.
-        val body = runCatching { ch.scry("groups-ui", "/v7/init") }
-            .onFailure { Log.w(TAG, "scry groups-ui/v7/init failed", it) }
+        val body = runCatching { scryNewest(ch, "groups-ui", "/v10/init", "/v7/init") }
+            .onFailure { Log.w(TAG, "scry groups-ui init failed", it) }
             .getOrThrow() as? JsonObject
             ?: error("the ship's answer about invites was not readable")
         val foreigns = body["foreigns"] as? JsonObject
@@ -2047,15 +2064,29 @@ class TlonChatRepo(
      */
     private suspend fun pokeAGroup(flag: String, aGroup: JsonObject) {
         val ch = channel ?: error("not connected")
-        ch.poke(
-            app = "groups",
-            mark = "group-action-4",
-            payload = groupAction4(flag, aGroup),
-            // Every one of these is an admin acting on somebody else's
-            // membership and being shown the result: a kick, a ban, an
-            // ask resolved. None of them may report a silence as done.
-            confirm = true,
-        )
+        // Every one of these is an admin acting on somebody else's
+        // membership and being shown the result: a kick, a ban, an ask
+        // resolved. None of them may report a silence as done (confirm).
+        pokeGroupAction(ch, groupAction4(flag, aGroup))
+    }
+
+    /**
+     * The first of [paths] the ship answers, newest first. Tlon's N-1
+     * policy (12.3.0) lets a desk drop a path its own client no longer
+     * calls, and a ship older than the newest has only the ones before it.
+     */
+    private suspend fun scryNewest(ch: UrbitChannel, app: String, vararg paths: String): JsonElement {
+        var last: Throwable? = null
+        for (p in paths) {
+            try {
+                return ch.scry(app, p)
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                last = t
+            }
+        }
+        throw last ?: IllegalStateException("no path to scry")
     }
 
     suspend fun updateProfile(
@@ -2300,23 +2331,16 @@ class TlonChatRepo(
     }
 
     /**
-     * Scry a reply under a channel post. v4 mark-declaration is the
-     * one that actually works; v5 is misaligned on current Tlon ships.
+     * A quoted reply, read off its parent post, as Tlon's client reads one
+     * (/v5/<nest>/posts/post/<id>, its replies in the seal). The reply
+     * scry this used answers `{seal, revision, memo}` (channel-reply-2),
+     * not the `reply-essay` it looked for, so a quoted reply never loaded;
+     * and Tlon's client does not call it, which makes it removable.
      */
     suspend fun fetchCiteReply(nest: String, parentDa: String, replyDa: String): MessageEntity? {
-        val ch = channel ?: return null
-        val path = "/v4/$nest/posts/post/id/$parentDa/replies/reply/id/$replyDa"
-        val body = runCatching { ch.scry("channels", path) }
-            .getOrNull() as? JsonObject ?: return null
-        val seal = body["seal"] as? JsonObject ?: return null
-        val id = seal["id"].asStr() ?: return null
-        val parentId = seal["parent-id"].asStr()
-            ?: seal["parent"].asStr()
-            ?: return null
-        val essay = body["reply-essay"] as? JsonObject ?: return null
-        val entity = toReplyEntity(nest, parentId, id, essay)
-        db.messages().upsertWithMedia(db.messageMedia(), entity)
-        return entity
+        if (channel == null) return null
+        fetchThread(nest, parentDa.replace(".", ""))
+        return db.messages().getOne(nest, replyDa.replace(".", ""))
     }
 
     /**
@@ -3218,10 +3242,12 @@ class TlonChatRepo(
                 // than the wire version we asked for. Retry the path we
                 // registered as this request's fallback, once.
                 if (response == "subscribe" && pokeIdLong != null) {
-                    subFallbacks.remove(pokeIdLong)?.let { (app, path) ->
+                    subFallbacks.remove(pokeIdLong)?.let { (app, paths) ->
+                        val path = paths.first()
                         Log.w(TAG, "$app subscribe rejected; falling back to $path")
                         scope.launch {
                             runCatching { channel?.subscribe(app, path) }
+                                .onSuccess { id -> if (id != null && paths.size > 1) subFallbacks[id] = app to paths.drop(1) }
                                 .onFailure { Log.e(TAG, "$app fallback subscribe failed", it) }
                         }
                     }
@@ -3237,6 +3263,7 @@ class TlonChatRepo(
         // drop is why brand-new DMs were invisible.
         (outer["json"] as? JsonArray)?.let { applyDmInvites(it, notify = true); return }
         val payload = outer["json"] as? JsonObject ?: return
+        dmStatusOf(payload)?.let { (ship, net) -> applyDmStatus(ship, net); return }
 
         // %chat writ-response-4: { whom, id, response }
         val whom = payload["whom"].asStr()
@@ -3321,10 +3348,11 @@ class TlonChatRepo(
             return
         }
 
-        // %groups /gangs/updates — a bare map of {flag: {claim, preview,
-        // invite}}. A gang gaining an invite means someone just invited
-        // us to a group. Re-scry the foreign list (cheap, and rare) to
-        // refresh the badge + list, and toast the new ones.
+        // %groups /v1/foreigns (foreigns-1) or, on an older ship,
+        // /gangs/updates: a bare map of flag → that group's invites,
+        // preview and join progress. Someone invited us, or a join moved.
+        // Re-scry the foreign list (cheap, and rare) to refresh the badge
+        // + list, and toast the new ones.
         if (looksLikeGangsFact(payload)) {
             scope.launch {
                 runCatching { refreshInvites(notify = true) }
@@ -3620,7 +3648,9 @@ class TlonChatRepo(
         // and `dm-thread/<whom>/<author>/<da>` sources never surface,
         // and ThreadUnreadEntity never populates — leaving the
         // per-row indicator tint and in-thread "New" divider perma-off.
-        val body = channel.scry("activity", "/v4/activity/full", BOOTSTRAP_TIMEOUT_SECS)
+        // /v6 (12.1.0) has notebook sources; an older ship has only /v4.
+        val body = io.nisfeb.talon.util.runSuspendCatching { channel.scry("activity", "/v6/activity/full", BOOTSTRAP_TIMEOUT_SECS) }
+            .getOrElse { channel.scry("activity", "/v4/activity/full", BOOTSTRAP_TIMEOUT_SECS) }
         val obj = body as? JsonObject
         if (obj == null) {
             Log.w(
@@ -3784,6 +3814,31 @@ class TlonChatRepo(
         if (notify && removed.isNotEmpty()) scope.launch { adoptAcceptedDms(removed) }
     }
 
+    /**
+     * %chat's word on one DM (12.3.0, chat-dm-status on /v4): it began,
+     * changed, or is gone. Gone is our own decline or leave, made on
+     * another device: %chat has dropped the DM and its messages, and so
+     * does this one; it used to linger until reinstalled. Started or
+     * accepted elsewhere, its messages are read now rather than at the
+     * next full bootstrap. An invite needs nothing here: the invite list
+     * fact comes with it ([applyDmInvites]).
+     */
+    internal suspend fun applyDmStatus(ship: String, net: String?) {
+        when (net) {
+            null -> {
+                db.dmInvites().delete(ship)
+                db.messages().deleteConversation(ship)
+                db.unreads().delete(ship)
+            }
+            "inviting", "done" -> if (!db.messages().hasConversation(ship)) {
+                scope.launch {
+                    runCatching { refreshConversation(ship) }
+                        .onFailure { Log.w(TAG, "refreshConversation($ship) after dm-status $net failed", it) }
+                }
+            }
+        }
+    }
+
     private suspend fun adoptAcceptedDms(ships: Set<String>) {
         val ch = channel ?: return
         val accepted = runCatching { ch.scry("chat", "/dm") }
@@ -3873,6 +3928,9 @@ class TlonChatRepo(
                 Log.w(TAG, "markRead: no group flag for $whom; skipping poke")
                 return
             }
+        } else if (whom.startsWith("notes/")) {
+            // A notebook may be in no group: its source says so with null.
+            db.groups().channelGroupFor(whom)?.groupFlag
         } else null
         val source = activityReadSource(whom, groupFlag) ?: return
         pokeActivityRead(ch, whom, source)
@@ -3915,13 +3973,21 @@ class TlonChatRepo(
         val maxAttempts = 4
         var attempt = 0
         var lastErr: Throwable? = null
+        // A notebook's badge is its notes': only a deep read clears them.
+        val notebook = source.containsKey("notebook")
+        val action = activityReadAction(source, deep = notebook)
         while (attempt < maxAttempts) {
             val outcome = runCatching {
-                ch.poke(
-                    app = "activity",
-                    mark = "activity-action",
-                    payload = activityReadAction(source),
-                )
+                // activity-action-2 (12.1.0) is the mark Tlon's client sends,
+                // and the only one that names a notebook. A ship that is
+                // older refuses it; the original mark says the same of
+                // anything else.
+                try {
+                    ch.poke(app = "activity", mark = "activity-action-2", payload = action)
+                } catch (n: PokeNacked) {
+                    if (notebook) throw n
+                    ch.poke(app = "activity", mark = "activity-action", payload = action)
+                }
             }
             if (outcome.isSuccess) return
             lastErr = outcome.exceptionOrNull()
@@ -3950,11 +4016,12 @@ class TlonChatRepo(
     private data class SubSpec(
         val app: String,
         val path: String,
-        val fallback: String? = null,
+        /** Older paths to try in turn, each on the one before's nack. */
+        val fallbacks: List<String> = emptyList(),
     )
 
-    /** subscribe request id → (app, fallback path), pending a nack. */
-    private val subFallbacks = ConcurrentMap<Long, Pair<String, String>>()
+    /** subscribe request id → (app, the fallback paths left), pending a nack. */
+    private val subFallbacks = ConcurrentMap<Long, Pair<String, List<String>>>()
 
     // ───────── presence (typing indicators) ─────────
 
@@ -4119,9 +4186,10 @@ class TlonChatRepo(
      * failure, so the next rename is loud.
      */
     internal suspend fun bootstrapContacts(channel: UrbitChannel) = coroutineScope {
-        // The directory (every known peer) and /v1/self (our own contact
-        // card) are independent network round-trips. Run them in parallel
-        // so the whole bootstrap doesn't pay both serially.
+        // The directory: every known peer, and our own card with them,
+        // as Tlon's client reads it. /v1/self, which Tlon's client no
+        // longer calls (removable under its N-1 policy, 12.3.0), is asked
+        // only where a directory leaves us out.
         val allJob = async {
             scryFirstMatching(
                 channel,
@@ -4130,16 +4198,16 @@ class TlonChatRepo(
                 "contacts directory",
             )
         }
-        val selfJob = async { runCatching { channel.scry("contacts", "/v1/self") }.getOrNull() }
         // /v1/book is our curated contact book (kip -> [con, mod] page),
         // a subset of the directory. Drives `bookContacts` + Contacts screen.
         val bookJob = async { runCatching { channel.scry("contacts", "/v1/book") }.getOrNull() }
         val allBody = allJob.await()
-        val selfBody = selfJob.await()
+        val selfBody = if ((allBody as? JsonObject)?.get(ourPatp) != null) null
+        else runCatching { channel.scry("contacts", "/v1/self") }.getOrNull()
         val bookBody = bookJob.await()
 
         // One row per ship: its published profile from the directory (ours
-        // from /v1/self), with its book page laid over it. Two rows for one
+        // too, or from /v1/self where it lacks us), with its book page laid over it. Two rows for one
         // ship, written in turn, let an empty book row stand over the
         // directory's, which is why the merge kept old values at all.
         val fields = LinkedHashMap<String, JsonObject>()
@@ -4238,16 +4306,11 @@ class TlonChatRepo(
             db.contacts().upsert(mergeContact(parseContact(who, contact, modAt), full = true))
             return
         }
-        // Our own profile is the ship's own, kept apart from the
-        // directory: the bootstrap reads it from /v1/self rather than
-        // /v1/all, and its change arrives here on its own. Handled by
-        // reading it back rather than off the fact, since only the
-        // bootstrap's own path knows how self is shaped, and the two
-        // must not drift.
-        if (event.containsKey("self")) {
-            refreshSelf()
-            return
-        }
+        // Our own profile's change, `{"self":{"contact":{…}}}`: applied
+        // as it comes, unwrapped as a directory entry is, so the two
+        // cannot drift. It was read back from /v1/self, a path Tlon's
+        // client no longer calls.
+        (event["self"] as? JsonObject)?.let { applySelf(it); return }
     }
 
     /**
@@ -4261,8 +4324,17 @@ class TlonChatRepo(
      */
     suspend fun refreshSelf() {
         val ch = channel ?: return
-        val body = runCatching { ch.scry("contacts", "/v1/self") }.getOrNull() as? JsonObject ?: return
-        db.contacts().upsert(mergeContact(parseContact(ourPatp, directoryFields(body), parseContactModAt(body)), full = true))
+        // Ours in the directory, as Tlon's client reads it; /v1/self on
+        // an older ship whose directory leaves us out.
+        val entry = (runCatching { ch.scry("contacts", "/v1/directory") }.getOrNull() as? JsonObject)?.get(ourPatp) as? JsonObject
+            ?: runCatching { ch.scry("contacts", "/v1/self") }.getOrNull() as? JsonObject
+            ?: return
+        applySelf(entry)
+    }
+
+    /** Our own card, from a directory entry, a self fact or /v1/self alike. */
+    private suspend fun applySelf(entry: JsonObject) {
+        db.contacts().upsert(mergeContact(parseContact(ourPatp, directoryFields(entry), parseContactModAt(entry)), full = true))
     }
 
     /**
@@ -4317,6 +4389,8 @@ class TlonChatRepo(
         fields: JsonObject,
         modAtMs: Long? = null,
     ): ContactEntity {
+        // Every contact path comes through here, so a bot's liveness does too.
+        BotLiveness.record(ship, fields)
         // Tlon's contacts /v1 wire shape wraps each field as
         //   {type: <tag>, value: <payload>}
         // where <tag> is the value-type tag from sur/contacts.hoon —
@@ -4438,7 +4512,7 @@ class TlonChatRepo(
     }
 
     private suspend fun bootstrapGroups(channel: UrbitChannel) {
-        val body = channel.scry("groups", "/v2/groups")
+        val body = scryNewest(channel, "groups", "/v3/groups", "/v2/groups")
         val obj = body as? JsonObject ?: return
         // Pure parse extracted to GroupsScryParser.kt for unit-test
         // coverage of the wire-shape contract — including the
@@ -4877,8 +4951,8 @@ internal fun directoryFields(entry: JsonObject): JsonObject {
 }
 
 /**
- * A `%groups /gangs/updates` fact is the only diff shaped as a bare
- * `flag → object` map. Every other agent's fact carries literal keys
+ * A `%groups /v1/foreigns` (foreigns-1) or `/gangs/updates` fact is the
+ * only diff shaped as a bare `flag → object` map. Every other agent's fact carries literal keys
  * (`whom`, `nest`, `flag`, `put-entry`, `init`, `here`…), whereas a
  * gang fact's keys are the group flags themselves (`~ship/name`). So
  * "every key is flag-shaped" identifies it without colliding with any
