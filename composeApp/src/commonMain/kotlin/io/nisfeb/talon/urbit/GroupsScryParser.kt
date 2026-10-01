@@ -20,6 +20,17 @@ data class GroupsScryResult(
     val channelGroups: List<ChannelGroupEntity>,
 )
 
+/**
+ * The channel kinds Talon can open. A group may list others: Tlon's
+ * %buckets (12.3.0) registers file spaces in %groups as `buckets/...`,
+ * and stored, each showed as a chat row that loaded nothing and could
+ * not send. Left out instead; CLAUDE.md, "don't fake a feature; gate it".
+ */
+internal val SUPPORTED_CHANNEL_KINDS = setOf("chat", "heap", "diary", "notes")
+
+/** Whether Talon can open the channel at [nest] (`kind/~host/name`). */
+internal fun isSupportedChannel(nest: String): Boolean = nest.substringBefore('/') in SUPPORTED_CHANNEL_KINDS
+
 internal fun parseGroupsScry(obj: JsonObject): GroupsScryResult {
     val groups = mutableListOf<GroupEntity>()
     val channelGroups = mutableListOf<ChannelGroupEntity>()
@@ -33,6 +44,7 @@ internal fun parseGroupsScry(obj: JsonObject): GroupsScryResult {
         )
         val channels = groupObj["channels"] as? JsonObject ?: continue
         channels.entries.forEachIndexed { idx, (nest, channel) ->
+            if (!isSupportedChannel(nest)) return@forEachIndexed
             val channelObj = channel as? JsonObject
             val channelMeta = channelObj?.get("meta") as? JsonObject
             val channelTitle = channelMeta?.get("title").asStr()
