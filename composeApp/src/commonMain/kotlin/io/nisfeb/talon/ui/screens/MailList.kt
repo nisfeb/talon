@@ -75,6 +75,8 @@ fun MailList(
     onOpenThread: (threadId: String) -> Unit,
     onCompose: (() -> Unit)? = null,
     onOpenDraft: ((io.nisfeb.talon.mail.Draft) -> Unit)? = null,
+    /** Open again a message that did not go, its text and files with it. */
+    onReopen: ((io.nisfeb.talon.mail.MailRepo.Unsent) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -82,7 +84,8 @@ fun MailList(
     val page by repo.page.collectAsState()
     val loading by repo.loading.collectAsState()
     val error by repo.error.collectAsState()
-    val sendProblem by repo.sendProblem.collectAsState()
+    val unsent by repo.unsent.collectAsState()
+    val outbox by repo.outbox.collectAsState()
     val problem by repo.problem.collectAsState()
     val drafts by repo.drafts.collectAsState()
     val labels by repo.knownLabels.collectAsState()
@@ -177,7 +180,14 @@ fun MailList(
                 HorizontalDivider()
                 error?.let { MailNotice(it, onDismiss = repo::clearError) }
                 // A send that failed after its composer was closed.
-                sendProblem?.let { MailNotice(it, onDismiss = repo::clearSendProblem) }
+                outbox.forEach { MailSendingLine(it) }
+                unsent.forEach { u ->
+                    MailNotice(
+                        u.line,
+                        onDismiss = { repo.dismiss(u) },
+                        action = onReopen?.let { reopen -> "Open" to { repo.dismiss(u); reopen(u) } },
+                    )
+                }
                 problem?.let { MailNotice(it, onDismiss = repo::clearProblem) }
                 MailBody(
                     installing = installing,
@@ -417,17 +427,37 @@ private fun MailToolbar(
 }
 
 @Composable
-private fun MailNotice(text: String, onDismiss: (() -> Unit)? = null) {
+private fun MailNotice(text: String, onDismiss: (() -> Unit)? = null, action: Pair<String, () -> Unit>? = null) {
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
         modifier = Modifier.fillMaxWidth().then(if (onDismiss != null) Modifier.clickable(onClick = onDismiss) else Modifier),
     ) {
-        Text(
-            text + if (onDismiss != null) " Tap to dismiss." else "",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onErrorContainer,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text + if (onDismiss != null) " Tap to dismiss." else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f).padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            action?.let { (label, act) -> io.nisfeb.talon.ui.TextButton(onClick = act) { Text(label) } }
+        }
+    }
+}
+
+/** A message on its way, with where it has got to: the composer is gone by now. */
+@Composable
+private fun MailSendingLine(s: io.nisfeb.talon.mail.MailRepo.Sending) {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Sending " + s.subject.ifBlank { "a message" }.let { if (s.subject.isBlank()) it else "\"$it\"" } +
+                    if (s.stage == "Sending" || s.stage == "Saving") "…" else " · ${s.stage}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
