@@ -485,13 +485,21 @@ class CalendarRepo(
      * reading back going on behind it. A save waited for that reading, three
      * requests and more of seconds each on a busy ship, before it said saved;
      * a screen now says so at once and keeps the change on show till then.
-     * A task the ship took is changed in the task list straight away.
+     * A task is changed in the task list at once, and put back if refused.
      */
     suspend fun writeEvent(body: JsonObject, readBack: Boolean = true): Written = carry {
         val reach = reachOf(body)
         val putBack = dropDeleted(body)
+        // An edit is in the task list at Save, everywhere it shows, and
+        // back only if the ship refuses: shown once the ship had answered,
+        // it looked unsaved for as long as a busy ship took ("saving a todo
+        // edit takes way too long"). A tick or a delete still waits for the
+        // ship: a ticked task stays, ticked, until the ship has it done.
+        val editing = (body["action"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "edit-event"
+        val unassume = if (editing) assumeTask(body) else ({})
         val ok = write(body)
-        if (ok) assumeTask(body) else putBack()
+        if (ok && !editing) assumeTask(body)
+        if (!ok) { putBack(); unassume() }
         val shown = if (ok && readBack) scope.launch { afterItemWrite(reach) } else Job().also { it.complete() }
         Written(ok, shown)
     }
@@ -502,15 +510,15 @@ class CalendarRepo(
      * only once the reading back came in. The reading puts the ship's own
      * copy in its place.
      */
-    private fun assumeTask(body: JsonObject) {
+    private fun assumeTask(body: JsonObject): () -> Unit {
         fun str(k: String) = (body[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
-        val list = _tasks.value ?: return
-        val id = str("id") ?: return
-        val old = list.firstOrNull { it.id == id } ?: return
+        val list = _tasks.value ?: return {}
+        val id = str("id") ?: return {}
+        val old = list.firstOrNull { it.id == id } ?: return {}
         val new = when (str("action")) {
-            "done-event" -> old.copy(done = str("done")?.toBooleanStrictOrNull() ?: return)
+            "done-event" -> old.copy(done = str("done")?.toBooleanStrictOrNull() ?: return {})
             "del-event" -> null
-            "edit-event" -> if (str("cat") != "todo") return else old.copy(
+            "edit-event" -> if (str("cat") != "todo") return {} else old.copy(
                 cal = str("cal") ?: old.cal,
                 meta = body["meta"] as? JsonObject ?: old.meta,
                 dueMs = str("due_ms")?.toLongOrNull(),
@@ -518,9 +526,12 @@ class CalendarRepo(
                 // Absent keeps it, as the ship does.
                 priority = str("priority")?.toIntOrNull() ?: old.priority,
             )
-            else -> return
+            else -> return {}
         }
-        _tasks.value = if (new == null) list - old else list.map { if (it.id == id) new else it }
+        val assumed = if (new == null) list - old else list.map { if (it.id == id) new else it }
+        _tasks.value = assumed
+        // Unless a read has put the ship's own copy in since.
+        return { _tasks.compareAndSet(assumed, list) }
     }
 
     /**
@@ -581,6 +592,7 @@ class CalendarRepo(
     suspend fun poke(body: JsonObject): Boolean = carry {
         write(body).also { ok ->
             if (ok) {
+                delay(APPLY_BEAT_MS)
                 refresh()
                 range?.let { (f, t) -> loadRange(f, t) }
             }
@@ -606,13 +618,11 @@ class CalendarRepo(
         val tried = runSuspendCatching { a.poke(ball, body) }
         lastWriteError = tried.exceptionOrNull() as? io.nisfeb.talon.mail.AuspexError
         val ok = tried.getOrDefault(false)
-        if (ok) {
-            // What was read of an event the write may have changed is
-            // no longer what the ship says.
-            details.clear()
-            // The nexus applies a poke after it answers; give it a beat.
-            delay(400)
-        }
+        // What was read of an event the write may have changed is no
+        // longer what the ship says. Nothing waits here: the beat the
+        // nexus needs to apply a poke is the reading's to wait, before it
+        // reads; waited here, it held every save on screen.
+        if (ok) details.clear()
         return ok
     }
 
@@ -628,6 +638,8 @@ class CalendarRepo(
         // A task listing nothing has read has nothing to bring up to date.
         val tasks = reach.tasks && reach.before.first != null
         if (!tasks && !reach.rows) { keep(); return }
+        // The nexus applies a poke after it answers; give it a beat.
+        delay(APPLY_BEAT_MS)
         // The ship answers a write before it applies it, and a busy one
         // applies it seconds later: read once, the old copy came back,
         // the edit's stand-in went, and the change was not shown until
@@ -829,6 +841,9 @@ class CalendarRepo(
     }
 
     companion object {
+        /** How long the nexus takes to apply a poke it has answered, read after. */
+        const val APPLY_BEAT_MS = 400L
+
         private const val TAG = "CalendarRepo"
         const val BEHIND_MS = 6 * 60 * 60 * 1000L
         const val AHEAD_MS = 30L * 24 * 60 * 60 * 1000L
