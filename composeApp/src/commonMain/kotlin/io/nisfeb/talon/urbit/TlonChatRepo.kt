@@ -4119,32 +4119,44 @@ class TlonChatRepo(
         val selfBody = selfJob.await()
         val bookBody = bookJob.await()
 
-        val fresh = mutableListOf<ContactEntity>()
-
+        // One row per ship: its published profile from the directory (ours
+        // from /v1/self), with its book page laid over it. Two rows for one
+        // ship, written in turn, let an empty book row stand over the
+        // directory's, which is why the merge kept old values at all.
+        val fields = LinkedHashMap<String, JsonObject>()
+        val modAt = mutableMapOf<String, Long?>()
         (allBody as? JsonObject)?.forEach { (ship, entry) ->
             val obj = entry as? JsonObject ?: return@forEach
-            fresh.add(parseContact(ship, directoryFields(obj), parseContactModAt(obj)))
+            fields[ship] = directoryFields(obj)
+            modAt[ship] = parseContactModAt(obj)
         }
-
         (selfBody as? JsonObject)?.let { obj ->
-            fresh.add(parseContact(ourPatp, directoryFields(obj), parseContactModAt(obj)))
+            fields[ourPatp] = directoryFields(obj)
+            modAt[ourPatp] = parseContactModAt(obj)
         }
 
         // Book: keys are `~ship` (or `0v<cid>` for id-pages, which we
         // skip — Talon only books ships). Each value is the [con, mod]
         // page; we display mod-over-con so a local pet-name wins.
         val book = mutableSetOf<String>()
+        // Book members we have no profile of at all: their row says
+        // nothing of one, so what is stored stays.
+        val unknown = mutableSetOf<String>()
         (bookBody as? JsonObject)?.forEach { (kip, page) ->
             if (!kip.startsWith("~")) return@forEach
             book.add(kip)
-            // Always seed a row (even for an empty page) so every book
-            // member is renderable in the Contacts screen, which filters
-            // the contacts table by the book set.
-            fresh.add(parseContact(kip, pageFields(page) ?: JsonObject(emptyMap()), null))
+            val overlay = pageFields(page)
+            when {
+                overlay != null -> fields[kip] = JsonObject(fields[kip].orEmpty() + overlay)
+                // Always seed a row (even for an empty page) so every book
+                // member is renderable in the Contacts screen, which filters
+                // the contacts table by the book set.
+                kip !in fields -> { fields[kip] = JsonObject(emptyMap()); unknown += kip }
+            }
         }
 
-        if (fresh.isNotEmpty()) {
-            val merged = fresh.map { mergeContact(it) }
+        if (fields.isNotEmpty()) {
+            val merged = fields.map { (ship, f) -> mergeContact(parseContact(ship, f, modAt[ship]), full = ship !in unknown) }
             db.contacts().upsertAll(merged)
         }
         // No answer is not an empty book: read as one, every contact
@@ -4184,7 +4196,11 @@ class TlonChatRepo(
             // observation time — we know the status just changed since
             // this fact is the change event itself.
             val modAt = parseContactModAt(page) ?: nowMs()
-            db.contacts().upsert(mergeContact(parseContact(kip, contact, modAt)))
+            // The peer's profile with our own overlay on it, mod winning,
+            // as the bootstrap reads a book page: the overlay was dropped
+            // here, so a pet name set in another client waited for a restart.
+            val mod = page["mod"] as? JsonObject
+            db.contacts().upsert(mergeContact(parseContact(kip, JsonObject(contact + mod.orEmpty()), modAt), full = true))
             return
         }
         (event["wipe"] as? JsonObject)?.let { wipe ->
@@ -4200,7 +4216,7 @@ class TlonChatRepo(
             if (!who.startsWith("~")) return
             val contact = peer["contact"] as? JsonObject ?: return
             val modAt = parseContactModAt(peer) ?: nowMs()
-            db.contacts().upsert(mergeContact(parseContact(who, contact, modAt)))
+            db.contacts().upsert(mergeContact(parseContact(who, contact, modAt), full = true))
             return
         }
         // Our own profile is the ship's own, kept apart from the
@@ -4227,13 +4243,21 @@ class TlonChatRepo(
     suspend fun refreshSelf() {
         val ch = channel ?: return
         val body = runCatching { ch.scry("contacts", "/v1/self") }.getOrNull() as? JsonObject ?: return
-        db.contacts().upsert(mergeContact(parseContact(ourPatp, directoryFields(body), parseContactModAt(body))))
+        db.contacts().upsert(mergeContact(parseContact(ourPatp, directoryFields(body), parseContactModAt(body)), full = true))
     }
 
     /**
-     * Merge an incoming contact record with what we already have. Keeps
-     * avatar/bio/nickname intact when the incoming row doesn't supply
-     * them, and resolves `statusUpdatedMs` against the existing row so
+     * Merge an incoming contact record with what we already have.
+     *
+     * A [full] record is a whole published profile (the directory, our
+     * own, a peer's or a book page's update): %contacts keeps a profile
+     * as a map and deletes a field by dropping it, so a nickname, bio or
+     * avatar it lacks was removed, and goes here too. Keeping the old one
+     * left a removed nickname on everybody else's screen for good. Only
+     * a record that says nothing of the profile (a book entry for a ship
+     * we have no profile of) keeps what we have.
+     *
+     * Resolves `statusUpdatedMs` against the existing row so
      * a re-bootstrap on app upgrade can't blow away timestamps we
      * already trust.
      *
@@ -4248,12 +4272,12 @@ class TlonChatRepo(
      *     nothing on the wire to anchor it → stamp now so the feed
      *     can sort recent updates above silent old entries.
      */
-    internal suspend fun mergeContact(incoming: ContactEntity): ContactEntity {
+    internal suspend fun mergeContact(incoming: ContactEntity, full: Boolean = false): ContactEntity {
         val existing = db.contacts().get(incoming.ship)
         return incoming.copy(
-            nickname = incoming.nickname ?: existing?.nickname,
-            bio = incoming.bio ?: existing?.bio,
-            avatarUrl = incoming.avatarUrl ?: existing?.avatarUrl,
+            nickname = if (full) incoming.nickname else incoming.nickname ?: existing?.nickname,
+            bio = if (full) incoming.bio else incoming.bio ?: existing?.bio,
+            avatarUrl = if (full) incoming.avatarUrl else incoming.avatarUrl ?: existing?.avatarUrl,
             statusUpdatedMs = when {
                 incoming.status.isNullOrBlank() -> null
                 incoming.statusUpdatedMs != null -> incoming.statusUpdatedMs
