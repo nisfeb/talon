@@ -515,6 +515,8 @@ class CalendarRepo(
                 meta = body["meta"] as? JsonObject ?: old.meta,
                 dueMs = str("due_ms")?.toLongOrNull(),
                 done = body.containsKey("done_ms"),
+                // Absent keeps it, as the ship does.
+                priority = str("priority")?.toIntOrNull() ?: old.priority,
             )
             else -> return
         }

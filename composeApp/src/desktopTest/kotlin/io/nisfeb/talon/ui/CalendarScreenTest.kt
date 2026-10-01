@@ -132,6 +132,62 @@ class CalendarScreenTest {
         assertTrue("Lunch with Bus" in body, body)
     }
 
+    // ─── task priority ────────────────────────────────────────────
+
+    // "b4bp calendar is adding priority to tasks. talon should too".
+    @Test
+    fun `tasks show their priority, most pressing first, and the editor sets it`() {
+        tasksJson = """[
+            {"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"},"priority":0},
+            {"id":"t2","cal":"default","cat":"todo","meta":{"name":"Pay rent"},"priority":1}]"""
+        calendar {
+            onNodeWithContentDescription("Tasks").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Pay rent") }
+            assertTrue(shows("High"))
+            val top = { name: String -> onNodeWithText(name).fetchSemanticsNode().boundsInRoot.top }
+            assertTrue(top("Pay rent") < top("Buy milk"), "the high one first, as the calendar's page has it")
+            onNodeWithText("Buy milk").performClick()
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Edit").fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("Edit").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Priority") }
+            chip("Medium")
+            save()
+            val body = wrote("edit-event")
+            assertTrue("\"priority\":5" in body, body)
+        }
+    }
+
+    @Test
+    fun `a task edit that leaves the priority alone sends none, and the ship keeps it`() {
+        tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"},"priority":3}]"""
+        calendar {
+            onNodeWithContentDescription("Tasks").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Buy milk") }
+            onNodeWithText("Buy milk").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("High priority") }
+            onNodeWithText("Edit").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Priority") }
+            field("Name").performTextReplacement("Buy oat milk")
+            save()
+            assertTrue("priority" !in wrote("Buy oat milk"), "a 3 it did not set goes back untouched")
+        }
+    }
+
+    // A calendar older than priority is offered none and sent none.
+    @Test
+    fun `a calendar that does not keep a priority is offered none`() = calendar {
+        onNodeWithContentDescription("Tasks").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Buy milk") }
+        onNodeWithText("Buy milk").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Edit").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Edit task") }
+        assertTrue(!shows("Priority"))
+        field("Name").performTextReplacement("Buy oat milk")
+        save()
+        assertTrue("priority" !in wrote("Buy oat milk"))
+    }
+
     @Test
     fun `an open task is listed, and ticking it writes it done`() = calendar {
         onNodeWithContentDescription("Tasks").performClick()

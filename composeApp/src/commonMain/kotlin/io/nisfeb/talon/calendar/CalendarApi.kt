@@ -43,6 +43,8 @@ data class CalendarRow(
     val done: Boolean = false,
     /** Its reminders ([CalAlarm]); null from a calendar too old to say. */
     val alarms: kotlinx.serialization.json.JsonArray? = null,
+    /** A task's priority, iCalendar's: 1 highest, 9 lowest, 0 none; null from a calendar too old to say. */
+    val priority: Int? = null,
 ) {
     /** One of a series: timed or all-day with a repeating kind. */
     val repeats: Boolean get() = (cat == "timed" || cat == "allday") && kind != "once"
@@ -68,6 +70,8 @@ data class CalendarTask(
     val cat: String = "timed",
     @SerialName("due_ms") val dueMs: Long? = null,
     val done: Boolean = false,
+    /** iCalendar's priority: 1 highest, 9 lowest, 0 none; null from a calendar too old to say. */
+    val priority: Int? = null,
 ) {
     val name: String get() = meta.metaStr("name")
     val note: String get() = meta.metaStr("note")

@@ -23,10 +23,12 @@ class TaskListTest {
         note: String = "",
         tags: List<String> = emptyList(),
         place: String = "",
+        priority: Int? = null,
     ) = CalendarTask(
         id = name,
         cat = "todo",
         done = done,
+        priority = priority,
         meta = buildJsonObject {
             put("name", JsonPrimitive(name))
             put("note", JsonPrimitive(note))
@@ -52,6 +54,32 @@ class TaskListTest {
         assertEquals(listOf("Overdue", "Today", "This week", "Later", "No date", "Done"), groups.map { it.label })
         assertEquals(listOf("yesterday"), groups[0].tasks.map { it.name })
         assertEquals(listOf("friday"), groups[2].tasks.map { it.name })
+    }
+
+    // "b4bp calendar is adding priority to tasks. talon should too": the
+    // calendar's page groups by due and, under each heading, puts priority
+    // 1 first and none last, then the name. The two lists agree.
+    @Test
+    fun `under each heading the most pressing comes first, then by name, as on the calendar's page`() {
+        val tomorrow = LocalDate(2026, 9, 24)
+        val groups = groupTasks(
+            listOf(
+                task("b none", today), task("a none", today), task("low", today, priority = 9),
+                task("high", today, priority = 1), task("odd three", today, priority = 3), task("medium", today, priority = 5),
+                task("tomorrow's", tomorrow),
+            ),
+            today,
+        )
+        assertEquals(listOf("Today", "Tomorrow"), groups.map { it.label })
+        assertEquals(listOf("high", "odd three", "medium", "low", "a none", "b none"), groups[0].tasks.map { it.name })
+        assertEquals(listOf("tomorrow's"), groups[1].tasks.map { it.name })
+    }
+
+    // The home page's list runs by day; priority orders a day's tasks.
+    @Test
+    fun `the home page's tasks run by day, then by priority`() {
+        val order = taskOrder(listOf(task("later high", LocalDate(2026, 9, 25), priority = 1), task("today none", today), task("today low", today, priority = 9)))
+        assertEquals(listOf("today low", "today none", "later high"), order.map { it.name })
     }
 
     @Test

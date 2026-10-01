@@ -112,6 +112,10 @@ data class EventDraft(
      * was read. A new event sends them always.
      */
     val alarmsChanged: Boolean = false,
+    /** A task's priority, 0 to 9 ([PRIORITY_CHOICES]); null where the calendar does not say, and then none is shown or sent. */
+    val priority: Int? = null,
+    /** Whether [priority] was changed here: an edit sends it only then, as with reminders. */
+    val priorityChanged: Boolean = false,
 ) {
     val repeats: Boolean get() = cat != EventCat.TODO && cat != EventCat.DATE && (rawKind != null || repeat != Repeat.ONCE)
 }
@@ -158,6 +162,7 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
     d.cal?.let { put("cal", it) }
     d.alarms?.let { a -> if (id == null || d.alarmsChanged) put("alarms", JsonArray(a.map { it.raw })) }
     if (d.cat == EventCat.TODO) {
+        d.priority?.let { p -> if (id == null || d.priorityChanged) put("priority", p) }
         d.due?.let { put("due_ms", it.utcMidnightMs()) }
         if (d.done) put("done_ms", d.doneMs ?: nowMs())
         return@buildJsonObject
@@ -243,6 +248,7 @@ fun taskDraft(r: CalendarRow, zone: TimeZone, today: LocalDate): EventDraft? = d
         put("cal", r.cal)
         put("meta", r.meta)
         put("done", r.done)
+        r.priority?.let { put("priority", it) }
         if (r.l > 0) {
             val due = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(zone).date
             put("due_ms", due.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds())
@@ -271,6 +277,7 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
             date = due ?: today, due = due,
             done = e["done"]?.jsonPrimitive?.booleanOrNull ?: false,
             doneMs = e["done_ms"]?.jsonPrimitive?.longOrNull,
+            priority = e["priority"]?.jsonPrimitive?.intOrNull?.takeIf { it in 0..9 },
         )
     }
     if (cat == EventCat.DATE) {
@@ -436,3 +443,17 @@ fun alarmLabel(a: CalAlarm, zone: TimeZone, twentyFourHour: Boolean): String = w
     else -> "A reminder of a kind this app does not know"
 }
 
+/**
+ * What the editor offers, as the calendar's page does: none, and one of
+ * each of iCalendar's three bands. Any other number stays as it came
+ * unless the owner picks one of these.
+ */
+val PRIORITY_CHOICES: List<Pair<Int, String>> = listOf(0 to "None", 1 to "High", 5 to "Medium", 9 to "Low")
+
+/** A priority's band, as RFC 5545 has them (1-4 high, 5 medium, 6-9 low); null for none. */
+fun priorityBand(p: Int?): String? = when (p) {
+    in 1..4 -> "High"
+    5 -> "Medium"
+    in 6..9 -> "Low"
+    else -> null
+}
