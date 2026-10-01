@@ -7,8 +7,11 @@ import io.ktor.client.statement.readRawBytes
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.CometDomeEntity
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 
 /**
  * Whether a comet is on Groundwire, as the signed-in ship's Jael knows
@@ -69,23 +72,51 @@ class CometDomes(
         return try {
             db.cometDomes().get(comet)?.let { return it.registry.also { r -> if (r.isNotEmpty()) Mnemonym.markGroundwire(comet) } }
             if (noDome) return null
-            // Eyre's scry of Jael: care `j`, path `/dome/<ship>`.
-            val resp = http.get("${baseUrl.trimEnd('/')}/_~_/=/dome/=/j/$comet")
-            // Eyre answers a scry the ship does not have with a 500
-            // "scry failed", for every ship alike (a Jael without
-            // Groundwire's %dome), and a 404 where the path is not
-            // served at all. Either way there is nothing to ask here.
-            if (resp.status.value == 404 || resp.status.value == 500) { noDome = true; return null }
-            if (resp.status.value != 200) return null
-            val answer = registryOf(resp.readRawBytes()) ?: run { noDome = true; return null }
-            db.cometDomes().put(CometDomeEntity(comet, answer))
-            if (answer.isNotEmpty()) Mnemonym.markGroundwire(comet)
-            answer
+            ask(comet)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             null
         }
+    }
+
+    /** Whether this ship's Jael can say: false once it has shown it has no `%dome`. */
+    val canTell: Boolean get() = !noDome
+
+    /**
+     * Ask again, whatever was kept: the profile's "Check again". A
+     * Groundwire Jael says `~` of a comet it has not learned of yet, and
+     * that was kept for good: two attested comets wore ".." on the
+     * user's own Groundwire comet. On the repo's scope, so closing the
+     * profile does not stop it. Null when the ship can't tell.
+     */
+    suspend fun recheck(comet: String): String? {
+        if (!isComet(comet)) return null
+        return scope.async {
+            try {
+                oneAtATime.withLock { ask(comet) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+        }.await()
+    }
+
+    /** One question to the ship's Jael, its answer kept and worn by the name. */
+    private suspend fun ask(comet: String): String? {
+        // Eyre's scry of Jael: care `j`, path `/dome/<ship>`.
+        val resp = http.get("${baseUrl.trimEnd('/')}/_~_/=/dome/=/j/$comet")
+        // Eyre answers a scry the ship does not have with a 500
+        // "scry failed", for every ship alike (a Jael without
+        // Groundwire's %dome), and a 404 where the path is not
+        // served at all. Either way there is nothing to ask here.
+        if (resp.status.value == 404 || resp.status.value == 500) { noDome = true; return null }
+        if (resp.status.value != 200) return null
+        val answer = registryOf(resp.readRawBytes()) ?: run { noDome = true; return null }
+        db.cometDomes().put(CometDomeEntity(comet, answer))
+        if (answer.isNotEmpty()) Mnemonym.markGroundwire(comet) else Mnemonym.unmarkGroundwire(comet)
+        return answer
     }
 
     internal companion object {
@@ -160,16 +191,39 @@ class CometDomes(
 /** The signed-in ship's [CometDomes], or null before there is one. */
 val LocalCometDomes = staticCompositionLocalOf<CometDomes?> { null }
 
-/** "Groundwire comet" under a comet's name, where the ship's Jael says it is one. */
+/**
+ * Under a comet's name: what the ship's Jael says of it, and "Check
+ * again", which asks afresh ("add a manual recheck on the profile
+ * interface for comets only"). Nothing where the Jael cannot say.
+ */
 @androidx.compose.runtime.Composable
 fun GroundwireLine(ship: String) {
-    val domes = LocalCometDomes.current
-    val registry = androidx.compose.runtime.produceState<String?>(null, ship, domes) { value = domes?.registry(ship) }.value
-    if (!registry.isNullOrEmpty()) {
+    val domes = LocalCometDomes.current ?: return
+    if (!isComet(ship)) return
+    var registry by androidx.compose.runtime.remember(ship, domes) { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var checking by androidx.compose.runtime.remember(ship, domes) { androidx.compose.runtime.mutableStateOf(true) }
+    androidx.compose.runtime.LaunchedEffect(ship, domes) { registry = domes.registry(ship); checking = false }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val r = registry
+    if (!checking && r == null && !domes.canTell) return
+    androidx.compose.foundation.layout.Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         androidx.compose.material3.Text(
-            "Groundwire comet",
+            when {
+                checking -> "Asking your ship about Groundwire…"
+                r == null -> "Your ship did not answer about Groundwire."
+                r.isNotEmpty() -> "Groundwire comet"
+                else -> "Not on Groundwire, as your ship knows it"
+            },
             style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
-            color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
+            color = if (!r.isNullOrEmpty() && !checking) androidx.compose.material3.MaterialTheme.colorScheme.primary
+            else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        androidx.compose.material3.TextButton(
+            enabled = !checking,
+            onClick = {
+                checking = true
+                scope.launch { registry = domes.recheck(ship); checking = false }
+            },
+        ) { androidx.compose.material3.Text("Check again") }
     }
 }
