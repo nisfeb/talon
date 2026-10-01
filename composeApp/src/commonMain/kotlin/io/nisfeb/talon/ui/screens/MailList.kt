@@ -101,7 +101,11 @@ fun MailList(
     val chosen = remember(picked, listed) { picked.intersect(listed.map { it.id }.toSet()) }
     var confirmingDelete by remember { mutableStateOf(false) }
     io.nisfeb.talon.ui.PlatformBackHandler(enabled = chosen.isNotEmpty()) { picked = emptySet() }
-    fun toggle(id: String) { picked = if (id in chosen) chosen - id else chosen + id }
+    // The selection read at the tap, never closed over: a row keeps the
+    // first handler it was given, so a toggle that captured `chosen` saw
+    // the selection as it stood when that row was drawn, and each box
+    // picked only itself.
+    val toggle: (String) -> Unit = { id -> picked = picked.let { if (id in it) it - id else it + id } }
     if (confirmingDelete) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirmingDelete = false },
@@ -200,7 +204,7 @@ fun MailList(
                     onOpenThread = { id -> if (chosen.isNotEmpty()) toggle(id) else onOpenThread(id) },
                     onOpenDraft = onOpenDraft,
                     picked = chosen,
-                    onPick = ::toggle,
+                    onPick = toggle,
                 )
             }
         }

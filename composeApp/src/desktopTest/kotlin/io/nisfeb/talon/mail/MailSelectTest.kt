@@ -104,6 +104,30 @@ class MailSelectTest {
         assertEquals(before + 1, reads(), "one read for the whole selection")
     }
 
+    // "I see a bunch of checkboxes but only one at a time can be selected.
+    // and Select All selects all but then next time I click a box it
+    // unchecks everything except the one I clicked." The boxes ran a copy
+    // of the toggle that still saw the selection as it was when the row
+    // was first drawn; a tap on the row itself was right, and was all the
+    // other tests clicked.
+    @Test
+    fun `boxes add to the selection, and a box after Select all takes out only its own`() = list {
+        fun ComposeUiTest.picked(n: Int) = waitUntil(timeoutMillis = 3_000) { shows("$n selected") }
+        onNodeWithText("Lunch").performTouchInput { longClick() }
+        picked(1)
+        onNodeWithContentDescription("Select Rent").performClick()
+        picked(2)
+        onNodeWithContentDescription("Select Tickets").performClick()
+        picked(3)
+        onNodeWithContentDescription("Select Rent").performClick()
+        picked(2)
+        onNodeWithText("Select all").performClick()
+        picked(3)
+        onNodeWithContentDescription("Select Lunch").performClick()
+        picked(2)
+        assertTrue(shows("Rent") && shows("Tickets"))
+    }
+
     @Test
     fun `select all picks every thread listed, and clearing ends the selection`() = list {
         onNodeWithText("Rent").performTouchInput { longClick() }
