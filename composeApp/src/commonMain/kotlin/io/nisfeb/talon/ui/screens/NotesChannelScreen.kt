@@ -28,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -72,6 +73,15 @@ fun NotesChannelScreen(
             Text("Not a notebook: $whom")
         }
         return
+    }
+
+    // Open, the notebook is read: on the way in, on the way out, and as
+    // notes come while it is shown. Never called here, a notebook's
+    // unread (a mention in a note among it) could not be cleared at all.
+    DisposableEffect(whom) {
+        homeSnapshotZeroUnread(whom)
+        repo.setOpenChat(whom)
+        onDispose { repo.setOpenChat(null) }
     }
 
     val scope = rememberCoroutineScope()
