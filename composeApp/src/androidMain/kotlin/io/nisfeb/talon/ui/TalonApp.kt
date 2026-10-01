@@ -2577,12 +2577,10 @@ fun TalonApp(
                         nameFor = { contactMap.displayName(it) },
                     )
                 }
+                // Asked once: the host announces every roster change since wire 9.
                 LaunchedEffect(partyRoomHere) {
                     val (h, n) = partyRoomHere ?: return@LaunchedEffect
-                    while (true) {
-                        callController?.occupancyOf(h, n)
-                        kotlinx.coroutines.delay(20_000)
-                    }
+                    callController?.occupancyOf(h, n)
                 }
                 val partyStateFlow = remember(partyLine) {
                     partyLine?.state

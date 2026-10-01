@@ -514,6 +514,11 @@ class CallController(
                                 // the host, so the set's size is the
                                 // count, not a guess at it.
                                 _presence.value = _presence.value + (key to up.who.size)
+                                // Long after any ask of ours: the host pushed it, so it
+                                // tells of every roster change and needs no polling.
+                                if (nowMs() - (askedAt[up.from] ?: 0L) > ANSWER_WINDOW_MS) {
+                                    _announces.value = _announces.value + up.from
+                                }
                             }
                             is TrunkUpdate.Recorders ->
                                 _recording.value = _recording.value +
@@ -823,6 +828,7 @@ class CallController(
      *  The answer lands in [presence]. Fire-and-forget; a wire-5 host
      *  just nacks and presence stays absent. */
     suspend fun occupancyOf(host: String, name: String) {
+        askedAt[host] = nowMs()
         val ch = channel ?: return
         runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.occupancyOfAction(host, name)) }
             .onFailure { Log.i(TAG, "occupancy-of declined (older host?): ${it.message}") }
@@ -831,6 +837,7 @@ class CallController(
     /** Ask [host] who is on its line [name]; the answer lands in
      *  [onLine]. Wire 8 on our ship; an older host simply never answers. */
     suspend fun whoIsOn(host: String, name: String) {
+        askedAt[host] = nowMs()
         if (_wire.value < TrunkWire.WIRE_VERSION_WHO) return
         val ch = channel ?: return
         runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.whoIsOnAction(host, name)) }
@@ -1334,6 +1341,13 @@ class CallController(
     private val _onLine = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
     val onLine: StateFlow<Map<String, Set<String>>> = _onLine.asStateFlow()
 
+    /** When we last asked each host who is on: an %on-line long after is a push. */
+    private val askedAt = io.nisfeb.talon.util.ConcurrentMap<String, Long>()
+    private val _announces = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Hosts seen pushing a roster nobody asked for (wire 9): asked once, then heard. */
+    fun announces(host: String): Boolean = host in _announces.value
+
     /** Per line ("~host/name"), the ships recording it right now, for
      *  the recording badge every member on the line sees. Fed by
      *  %recorders facts (wire 7). */
@@ -1807,6 +1821,8 @@ class CallController(
     }
 
     companion object {
+        /** An %on-line this long after our ask was not its answer. */
+        const val ANSWER_WINDOW_MS = 10_000L
         private const val TAG = "Trunk"
 
         /** Default life of a listen link. Short on purpose: the link

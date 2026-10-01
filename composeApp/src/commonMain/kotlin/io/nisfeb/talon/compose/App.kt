@@ -2705,12 +2705,12 @@ fun App(
                                         nameFor = { callContacts.displayName(it) },
                                     )
                                 }
+                                // Asked once: the host announces every roster change
+                                // since wire 9. Each ask was an ames message to the
+                                // host, every 20 s, from every member with it open.
                                 LaunchedEffect(partyRoomHere) {
                                     val (h, n) = partyRoomHere ?: return@LaunchedEffect
-                                    while (true) {
-                                        callController?.occupancyOf(h, n)
-                                        kotlinx.coroutines.delay(20_000)
-                                    }
+                                    callController?.occupancyOf(h, n)
                                 }
                                 // Presence itself is announced by the
                                 // controller from the moment we join —

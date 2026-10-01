@@ -69,13 +69,17 @@ fun PartyLinesList(
     val rows = remember(rooms, invites, groups) { partyLineRows(rooms, invites, groups) }
 
     // Refresh counts and names while the list is on screen. Old hosts
-    // answer the count only; older own-ships answer neither.
+    // answer the count only; older own-ships answer neither. A host seen
+    // announcing its roster is asked once; only one too old to keeps the poll.
     LaunchedEffect(rows.map { it.key }) {
+        var first = true
         while (true) {
             for (r in rows) {
+                if (!first && callController?.announces(r.host) == true) continue
                 callController?.occupancyOf(r.host, r.name)
                 callController?.whoIsOn(r.host, r.name)
             }
+            first = false
             delay(20_000)
         }
     }

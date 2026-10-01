@@ -14,6 +14,7 @@ import io.nisfeb.talon.call.PartyLine
 import io.nisfeb.talon.call.RecordedCall
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 
 /** The recording controls a party bar needs: our state, who's recording
  *  (the room-wide badge), and the toggle (null when unsupported). */
@@ -57,12 +58,17 @@ fun rememberPartyRecording(
     // "N on the line" with no hint it was being recorded — while a
     // joiner's up link is tapped the moment its offer reaches the
     // recorder. Trunk only answers an ask, so nothing else would tell.
+    // Only while the window is in front: in the background it asked the
+    // host every 15 s for a badge nobody saw. Back in front asks at once.
+    val window = androidx.compose.ui.platform.LocalWindowInfo.current
     LaunchedEffect(partyRoomHere) {
         val (h, n) = partyRoomHere ?: return@LaunchedEffect
         val cc = callController ?: return@LaunchedEffect
-        while (true) {
-            cc.recordersOf(h, n)
-            delay(15_000)
+        androidx.compose.runtime.snapshotFlow { window.isWindowFocused }.collectLatest { front ->
+            while (front) {
+                cc.recordersOf(h, n)
+                delay(15_000)
+            }
         }
     }
 
