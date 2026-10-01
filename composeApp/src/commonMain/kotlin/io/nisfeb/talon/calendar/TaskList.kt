@@ -59,21 +59,27 @@ data class TaskGroup(val label: String, val tasks: List<CalendarTask>)
 
 /**
  * The list under headings, in the order a person works down it: what
- * was due before today first, then today, then the rest of the week by
- * day, then everything later, then what was never given a date, and
- * what is done at the end.
+ * was due before today first, then today, tomorrow, the rest of the
+ * week, everything later, what was never given a date, and what is done
+ * at the end. Under each heading the most pressing first (priority 1,
+ * none last), then by name: the calendar's own page sorts them so, and
+ * the two should agree.
  */
 fun groupTasks(tasks: List<CalendarTask>, today: LocalDate): List<TaskGroup> {
     val (finished, open) = tasks.partition { it.done }
-    val order = taskOrder(open)
-    val overdue = order.filter { it.dueDate()?.let { d -> d < today } == true }
-    val now = order.filter { it.dueDate() == today }
-    val week = order.filter { it.dueDate()?.let { d -> d > today && d <= endOfWeek(today) } == true }
-    val later = order.filter { it.dueDate()?.let { d -> d > endOfWeek(today) } == true }
-    val undated = order.filter { it.dueDate() == null }
+    val tomorrow = today.plus(1, DateTimeUnit.DAY)
+    fun of(pick: (LocalDate?) -> Boolean) =
+        open.filter { pick(it.dueDate()) }.sortedWith(compareBy({ it.priorityRank }, { it.name.lowercase() }))
+    val overdue = of { it != null && it < today }
+    val now = of { it == today }
+    val next = of { it == tomorrow }
+    val week = of { it != null && it > tomorrow && it <= endOfWeek(today) }
+    val later = of { it != null && it > maxOf(tomorrow, endOfWeek(today)) }
+    val undated = of { it == null }
     return buildList {
         if (overdue.isNotEmpty()) add(TaskGroup("Overdue", overdue))
         if (now.isNotEmpty()) add(TaskGroup("Today", now))
+        if (next.isNotEmpty()) add(TaskGroup("Tomorrow", next))
         if (week.isNotEmpty()) add(TaskGroup("This week", week))
         if (later.isNotEmpty()) add(TaskGroup("Later", later))
         if (undated.isNotEmpty()) add(TaskGroup("No date", undated))

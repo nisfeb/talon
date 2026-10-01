@@ -1352,6 +1352,7 @@ private fun CalendarPanel(
                                 modifier = Modifier.size(32.dp),
                             )
                             Text(t.name.ifBlank { "(untitled)" }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            PriorityMark(t.priority)
                             Text(
                                 when {
                                     late -> "overdue"

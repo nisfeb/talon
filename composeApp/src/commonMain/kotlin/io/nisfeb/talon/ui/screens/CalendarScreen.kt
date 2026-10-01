@@ -173,6 +173,8 @@ fun CalendarScreen(
     val tagged = { tags: List<String> -> tagFilter.isEmpty() || tags.any { it in tagFilter } }
     val rows by repo.rangeRows.collectAsState()
     val tasks by repo.tasks.collectAsState()
+    // Whether the calendar keeps a priority: its tasks say one, 0 or more.
+    val priorityKnown = tasks?.any { it.priority != null } == true
     var showTasks by remember { mutableStateOf(false) }
     /** The top half: the month's grid, or the selected day's week by the hour. */
     val weekView by repo.weekView.collectAsState()
@@ -303,6 +305,7 @@ fun CalendarScreen(
         editing = null to EventDraft(
             date = selected, minuteOfDay = minute, cal = newEventCalendar(),
             alarms = if (remindersKnown) emptyList() else null,
+            priority = if (priorityKnown) 0 else null,
         )
         editingIdx = null
         editingStartMs = null
@@ -594,7 +597,7 @@ fun CalendarScreen(
                 onOpen = { t ->
                     // The row's day is midnight in the calendar's zone, as the window feed has it.
                     val dayMs = t.dueDate()?.atTime(0, 0)?.toInstant(zone)?.toEpochMilliseconds() ?: 0L
-                    view(CalendarRow(id = t.id, cal = t.cal, meta = t.meta, cat = "todo", kind = "todo", all = true, l = dayMs, r = dayMs, done = t.done))
+                    view(CalendarRow(id = t.id, cal = t.cal, meta = t.meta, cat = "todo", kind = "todo", all = true, l = dayMs, r = dayMs, done = t.done, priority = t.priority))
                 },
                 pending = pendingTasks,
                 onAdd = ::addTask,
@@ -602,6 +605,7 @@ fun CalendarScreen(
                     editing = null to EventDraft(
                         name = n, note = note, cat = EventCat.TODO, date = due ?: today, due = due,
                         cal = c, tags = tagFilter.toList(),
+                        priority = if (priorityKnown) 0 else null,
                     )
                     editingIdx = null
                     editingStartMs = null
@@ -789,7 +793,8 @@ fun CalendarScreen(
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val whenText = when {
-                        r.isTask -> (r.dueLabel(zone) ?: "No due date") + if (r.done) " · done" else ""
+                        r.isTask -> (r.dueLabel(zone) ?: "No due date") + (if (r.done) " · done" else "") +
+                            (io.nisfeb.talon.calendar.priorityBand(r.priority)?.let { " · $it priority" } ?: "")
                         else -> {
                             // The row's own day, not whatever day is selected now.
                             val day = daysOf(r, zone).first()
@@ -1139,7 +1144,7 @@ private fun CalendarRow.dueLabel(zone: TimeZone): String? {
 
 /** When a row is, on the day being looked at. */
 private fun spanLabel(r: CalendarRow, day: LocalDate, zone: TimeZone, twentyFourHour: Boolean): String {
-    if (r.isTask) return if (r.done) "Done" else "Due"
+    if (r.isTask) return listOfNotNull(if (r.done) "Done" else "Due", io.nisfeb.talon.calendar.priorityBand(r.priority)).joinToString(" · ")
     if (r.all) return "All day"
     val s = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(zone)
     val e = Instant.fromEpochMilliseconds(r.r).toLocalDateTime(zone)
@@ -1218,6 +1223,21 @@ private fun EventEditor(
                         if (d.due != null) TextButton(onClick = { d = d.copy(due = null) }) { Text("clear") }
                     }
                     FilterChip(selected = d.done, onClick = { d = d.copy(done = !d.done) }, label = { Text(if (d.done) "Done" else "To do") })
+                    // Where the calendar keeps it. A number it holds that is not
+                    // one of these shows as its band and goes back unchanged
+                    // unless one is picked.
+                    d.priority?.let { p ->
+                        Text("Priority", style = MaterialTheme.typography.labelMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            io.nisfeb.talon.calendar.PRIORITY_CHOICES.forEach { (v, label) ->
+                                FilterChip(
+                                    selected = io.nisfeb.talon.calendar.priorityBand(p) == io.nisfeb.talon.calendar.priorityBand(v),
+                                    onClick = { d = d.copy(priority = v, priorityChanged = true) },
+                                    label = { Text(label) },
+                                )
+                            }
+                        }
+                    }
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(if (d.cat == EventCat.DATE) "Date (the year is ignored)" else "Date", style = MaterialTheme.typography.labelMedium)
@@ -1920,6 +1940,7 @@ private fun TaskLine(
             val line = listOf(t.note, t.tags.joinToString(" ") { "#$it" }).filter { it.isNotBlank() }.joinToString(" · ")
             if (line.isNotBlank()) Text(line, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        PriorityMark(t.priority)
         if (pending) {
             // In flight: written, and not yet read back from the ship.
             androidx.compose.material3.CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
@@ -2093,4 +2114,20 @@ internal fun agoLabel(ms: Long): String {
         d < 48 * 60 -> "yesterday"
         else -> "${d / (24 * 60)} days ago"
     }
+}
+
+/** A task's priority, as the word for its band in that band's colour; nothing for none. */
+@Composable
+internal fun PriorityMark(p: Int?) {
+    val band = io.nisfeb.talon.calendar.priorityBand(p) ?: return
+    Text(
+        band,
+        style = MaterialTheme.typography.labelSmall,
+        color = when (band) {
+            "High" -> MaterialTheme.colorScheme.error
+            "Medium" -> MaterialTheme.colorScheme.tertiary
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        modifier = Modifier.padding(end = 6.dp),
+    )
 }

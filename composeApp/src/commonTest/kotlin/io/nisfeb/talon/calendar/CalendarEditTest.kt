@@ -308,4 +308,34 @@ class CalendarEditTest {
         assertEquals("At 09:00 on 2026-10-01", say("""{"kind":"at","at_ms":${oct1.atTime(9, 0).toInstant(z).toEpochMilliseconds()}}"""))
         assertEquals("A reminder of a kind this app does not know", say("""{"kind":"geofence"}"""))
     }
+
+    // ─── task priority ───────────────────────────────────────────
+
+    // As the calendar takes it (version 25): absent keeps, a number sets,
+    // 0 clears; on a todo only.
+    @Test
+    fun `a task's priority goes on the wire only where the calendar keeps one and it changed`() {
+        val t = EventDraft(name = "Pay rent", cat = EventCat.TODO, date = oct1, cal = "default", priority = 1)
+        assertEquals("1", eventBody(t)["priority"].toString(), "a new task")
+        assertNull(eventBody(t, "t1")["priority"], "an edit that left it alone")
+        assertEquals("0", eventBody(t.copy(priority = 0, priorityChanged = true), "t1")["priority"].toString(), "cleared")
+        assertNull(eventBody(t.copy(priority = null))["priority"], "a calendar older than priority")
+        assertNull(eventBody(t.copy(cat = EventCat.TIMED))["priority"], "an event has none")
+    }
+
+    @Test
+    fun `a task's priority is read, from the event and from its row`() {
+        val e = kotlinx.serialization.json.Json.parseToJsonElement("""{"cat":"todo","meta":{"name":"x"},"priority":3}""").jsonObject
+        assertEquals(3, draftFromEvent(e, oct1)!!.priority)
+        val old = kotlinx.serialization.json.Json.parseToJsonElement("""{"cat":"todo","meta":{"name":"x"}}""").jsonObject
+        assertNull(draftFromEvent(old, oct1)!!.priority)
+        val row = CalendarRow(id = "t1", cat = "todo", kind = "todo", all = true, l = 0, r = 0, priority = 9)
+        assertEquals(9, taskDraft(row, TimeZone.UTC, oct1)!!.priority)
+    }
+
+    @Test
+    fun `priorities read as the RFC's bands`() {
+        assertEquals(listOf("High", "High", "Medium", "Low", "Low", null, null),
+            listOf(1, 4, 5, 6, 9, 0, null).map { priorityBand(it) })
+    }
 }
