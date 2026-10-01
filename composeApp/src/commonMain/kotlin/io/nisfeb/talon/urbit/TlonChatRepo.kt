@@ -251,8 +251,9 @@ class TlonChatRepo(
         val prev = openThread
         openThread = next
         if (prev != null && prev != next) {
-            // Leaving: a final read for replies that landed while open.
-            scope.launch { runCatching { markThreadRead(prev.first, prev.second) } }
+            // Leaving: the read waiting for replies that landed while open,
+            // if there is one; nothing new, nothing to tell the ship.
+            flushReadSoon("${prev.first}#${prev.second}") { markThreadRead(prev.first, prev.second, force = true) }
         }
         if (next != null && prev != next) {
             scope.launch { runCatching { markThreadRead(next.first, next.second) } }
@@ -264,9 +265,10 @@ class TlonChatRepo(
         openWhom = whom
         io.nisfeb.talon.notify.NotificationFocus.openWhom = whom
         if (prev != null && prev != whom) {
-            // Exiting: final mark-read to catch anything that arrived
-            // between the last activity event and now.
-            scope.launch { runCatching { markRead(prev) } }
+            // Leaving: the read waiting for what arrived while it was open,
+            // if there is one. It used to poke the ship on every exit,
+            // nothing new or not.
+            flushReadSoon(prev) { markRead(prev, force = true) }
         }
         if (whom != null && prev != whom) {
             scope.launch { runCatching { markRead(whom) } }
@@ -2108,9 +2110,33 @@ class TlonChatRepo(
         if (whoms.isEmpty()) return
         kotlinx.coroutines.coroutineScope {
             whoms.forEach { whom ->
-                launch { runCatching { markRead(whom) } }
+                // Asked for: told whatever the local count says.
+                launch { runCatching { markRead(whom, force = true) } }
             }
         }
+    }
+
+    /** Reads waiting for the chat or thread in view, by whom or whom#parent. */
+    private val readSoon = ConcurrentMap<String, Job>()
+
+    /**
+     * Read [key] soon, once for whatever arrives meanwhile: a busy channel
+     * open on screen poked the ship once per message, three events each.
+     */
+    private fun markReadSoon(key: String, read: suspend () -> Unit) {
+        if (readSoon[key]?.isActive == true) return
+        readSoon[key] = scope.launch {
+            delay(FOCUSED_READ_EVERY_MS)
+            readSoon.remove(key)
+            runCatching { read() }
+        }
+    }
+
+    /** The read waiting for [key], sent now, if one is. */
+    private fun flushReadSoon(key: String, read: suspend () -> Unit) {
+        val waiting = readSoon.remove(key) ?: return
+        waiting.cancel()
+        scope.launch { runCatching { read() } }
     }
 
     /**
@@ -3804,7 +3830,7 @@ class TlonChatRepo(
                 // suppression hid it from us but not from anyone else.
                 if (row.whom == focused) {
                     if (row.count > 0 || row.notifyCount > 0) {
-                        scope.launch { runCatching { markRead(row.whom) } }
+                        markReadSoon(row.whom) { markRead(row.whom, force = true) }
                     }
                     row.copy(count = 0, notifyCount = 0)
                 } else row
@@ -3820,7 +3846,7 @@ class TlonChatRepo(
                 if (focusedThreadNow != null && row.whom == focusedThreadNow.first &&
                     row.parentPostId == focusedThreadNow.second && row.count > 0
                 ) {
-                    scope.launch { runCatching { markThreadRead(row.whom, row.parentPostId) } }
+                    markReadSoon("${row.whom}#${row.parentPostId}") { markThreadRead(row.whom, row.parentPostId, force = true) }
                     row.copy(count = 0, notifyCount = 0)
                 } else row
             }
@@ -3846,7 +3872,7 @@ class TlonChatRepo(
                         // are unreads here while we're focused, send a
                         // markRead so other clients agree.
                         if (row.count > 0 || row.notifyCount > 0) {
-                            scope.launch { runCatching { markRead(row.whom) } }
+                            markReadSoon(row.whom) { markRead(row.whom, force = true) }
                         }
                         row.copy(count = 0, notifyCount = 0)
                     } else row
@@ -3984,8 +4010,14 @@ class TlonChatRepo(
      * Poke %activity to mark a conversation read. Channels require the
      * enclosing group flag; for v1 we only mark DMs (ship / club).
      */
-    suspend fun markRead(whom: String) {
+    suspend fun markRead(whom: String, force: Boolean = false) {
         val ch = channel ?: return
+        // What the ship last said of it. Nothing unread, the poke said
+        // nothing new: it went on every open, every exit and every focus.
+        // Should the ship disagree, its next activity raises the count and
+        // the next read goes.
+        val had = db.unreads().getOne(whom)
+        val unread = force || (had != null && (had.count > 0 || had.notifyCount > 0))
 
         // Clear the badge locally immediately so the list flips the moment
         // the user enters the conversation. The server fact will confirm.
@@ -4028,6 +4060,7 @@ class TlonChatRepo(
             // A notebook may be in no group: its source says so with null.
             db.groups().channelGroupFor(whom)?.groupFlag
         } else null
+        if (!unread) return
         val source = activityReadSource(whom, groupFlag) ?: return
         pokeActivityRead(ch, whom, source)
     }
@@ -4040,8 +4073,11 @@ class TlonChatRepo(
      * the parent row; a parent we have not mirrored yet cannot be read
      * (nothing to show the user either).
      */
-    suspend fun markThreadRead(whom: String, parentPostId: String) {
+    suspend fun markThreadRead(whom: String, parentPostId: String, force: Boolean = false) {
+        val had = db.threadUnreads().getOne(whom, parentPostId)
         db.threadUnreads().deleteOne(whom, parentPostId)
+        // Nothing unread here, as the ship last said: nothing to tell it.
+        if (!force && (had == null || (had.count == 0 && had.notifyCount == 0))) return
         val ch = channel ?: return
         val isChannel = whom.startsWith("chat/") || whom.startsWith("diary/") || whom.startsWith("heap/")
         val groupFlag = if (isChannel) {
@@ -4843,6 +4879,9 @@ class TlonChatRepo(
     }
 
     companion object {
+        /** At most one read this often for the chat or thread in view. */
+        const val FOCUSED_READ_EVERY_MS = 3_000L
+
         /** The first wait before a queued write is tried again; it doubles to [MAX_DRAIN_PAUSE_MS]. */
         private const val FIRST_DRAIN_PAUSE_MS = 2_000L
         private const val MAX_DRAIN_PAUSE_MS = 60_000L
