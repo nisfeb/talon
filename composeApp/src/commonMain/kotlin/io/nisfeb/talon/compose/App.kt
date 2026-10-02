@@ -1747,6 +1747,11 @@ fun App(
                         ) return@onKeyEvent false
                         when {
                             sections.anyOpen -> sections.closeLast()
+                            // In the order they are drawn: an image is over
+                            // the chat. It closes itself when it has focus,
+                            // but the shell can take focus back from it.
+                            viewerImageList != null -> viewerImageList = null
+                            viewerImageUrl != null -> viewerImageUrl = null
                             openThreadParent != null -> {
                                 openThreadParent = null
                                 openThreadReplyAnchor = null
