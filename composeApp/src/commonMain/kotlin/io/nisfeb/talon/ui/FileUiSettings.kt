@@ -83,6 +83,8 @@ class FileUiSettings(
         val micNoiseSuppression: Boolean = true,
         val micEchoCancellation: Boolean = true,
         val micAutoGainControl: Boolean = true,
+        /** [UiSettings.keybinds]. */
+        val keybinds: Map<String, KeyCombo?> = emptyMap(),
     )
 
     private val initial = loadInitial()
@@ -123,6 +125,13 @@ class FileUiSettings(
     override fun setFontSettings(settings: FontSettings) {
         if (_fontSettings.value == settings) return
         _fontSettings.value = settings
+        persistCurrent()
+    }
+    private val _keybinds = MutableStateFlow(initial.keybinds)
+    override val keybinds: StateFlow<Map<String, KeyCombo?>> = _keybinds.asStateFlow()
+    override fun setKeybinds(binds: Map<String, KeyCombo?>) {
+        if (_keybinds.value == binds) return
+        _keybinds.value = binds
         persistCurrent()
     }
     private val _micProcessing = MutableStateFlow(
@@ -402,6 +411,7 @@ class FileUiSettings(
                 micNoiseSuppression = _micProcessing.value.noiseSuppression,
                 micEchoCancellation = _micProcessing.value.echoCancellation,
                 micAutoGainControl = _micProcessing.value.autoGainControl,
+                keybinds = _keybinds.value,
             ),
         )
     }

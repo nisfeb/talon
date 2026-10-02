@@ -23,8 +23,19 @@ class KeyboardShortcutsTest {
     }
 
     @Test
-    fun `Ctrl+Comma maps to OpenSettings`() {
-        assertEquals(ShortcutAction.OpenSettings, keyEventToShortcut(ctrlKeyDown(Key.Comma)))
+    fun `Ctrl+Comma opens Settings`() {
+        assertEquals(ShortcutAction.Open(RailItem.Settings), keyEventToShortcut(ctrlKeyDown(Key.Comma)))
+    }
+
+    // The owner sets their own: any area of the app, any key held with
+    // Ctrl, Cmd or Alt, and a default they unbind does nothing.
+    @Test
+    fun `a binding the owner set opens its area, and one they removed does nothing`() {
+        val binds = effectiveKeybinds(mapOf("open:Mail" to KeyCombo("M", alt = true), "search" to null), isMacHost = false)
+        assertEquals(ShortcutAction.Open(RailItem.Mail), keyEventToShortcut(makeEvent(Key.M, isAlt = true), binds = binds))
+        assertNull(keyEventToShortcut(ctrlKeyDown(Key.K), binds = binds), "Search was unbound")
+        assertEquals(ShortcutAction.NewDm, keyEventToShortcut(ctrlKeyDown(Key.N), binds = binds), "the rest keep their defaults")
+        assertEquals(ShortcutAction.SwitchShip(0), keyEventToShortcut(ctrlKeyDown(Key.One), binds = binds), "ships stay fixed")
     }
 
     @Test

@@ -600,6 +600,12 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(8.dp))
 
+            // Where there is a keyboard to press them on.
+            if (!io.nisfeb.talon.ui.isTouchPrimary) {
+                KeybindsSection(uiSettings)
+                Spacer(Modifier.height(8.dp))
+            }
+
             }
             if (safeTab == SettingsTab.Home) {
             Text(
