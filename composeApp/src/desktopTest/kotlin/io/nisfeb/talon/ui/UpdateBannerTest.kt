@@ -47,7 +47,7 @@ class UpdateBannerTest {
     @Test
     fun `a mandatory update cannot be put off, and one with no notes just says tap`() =
         banner(UpdateStatus.Available(manifest.copy(mandatory = true, changelog = " "))) {
-            assertTrue(shows("Tap to update."))
+            assertTrue(shows("Click to update."))
             assertTrue(onAllNodesWithContentDescription("Dismiss").fetchSemanticsNodes().isEmpty())
         }
 
@@ -61,19 +61,19 @@ class UpdateBannerTest {
     @Test
     fun `a downloaded update taps to install`() = banner(UpdateStatus.Ready(manifest, "/tmp/t.apk", "Android will ask to confirm.")) {
         assertTrue(shows("Android will ask to confirm."))
-        onNodeWithText("Tap to install 1.9.0").performClick()
+        onNodeWithText("Click to install 1.9.0").performClick()
         assertEquals(listOf("tap"), did.toList())
     }
 
     @Test
     fun `a failure is its own words, and taps to retry`() = banner(UpdateStatus.Failed(manifest, "Couldn't verify the download.")) {
-        assertTrue(shows("Couldn't verify the download.") && shows("Tap to retry."))
+        assertTrue(shows("Couldn't verify the download.") && shows("Click to try again."))
         onNodeWithText("Couldn't verify the download.").performClick()
         assertEquals(listOf("tap"), did.toList())
     }
 
     @Test
     fun `with nothing to say there is no banner`() = banner(UpdateStatus.Idle) {
-        assertTrue(!shows("Talon") && !shows("Tap"))
+        assertTrue(!shows("Talon") && !shows("Click"))
     }
 }

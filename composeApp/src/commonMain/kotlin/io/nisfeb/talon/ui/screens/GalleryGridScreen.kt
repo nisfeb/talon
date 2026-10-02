@@ -145,7 +145,7 @@ fun GalleryGridScreen(
 
             posts.isEmpty() -> Text(
                 if (unread) "Your ship did not send these posts. Open the channel again to retry."
-                else "No posts yet — tap + to share something.",
+                else "No posts yet. ${io.nisfeb.talon.ui.tapWord} + to share something.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(24.dp),

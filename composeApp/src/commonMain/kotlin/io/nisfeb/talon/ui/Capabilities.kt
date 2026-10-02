@@ -281,6 +281,12 @@ expect val isDrawerNavigation: Boolean
  */
 expect val isTouchPrimary: Boolean
 
+/** "Tap" where touch is the way in, "Click" where a pointer is: hints said tap on desktop. */
+val tapWord: String get() = if (isTouchPrimary) "Tap" else "Click"
+
+/** How a thing's own menu is opened: "Long-press" on touch, "Right-click" with a pointer. */
+val holdWord: String get() = if (isTouchPrimary) "Long-press" else "Right-click"
+
 /**
  * Whether emoji need an explicit font span to render in colour.
  *

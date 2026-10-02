@@ -151,9 +151,9 @@ fun BookmarksList(
         if (filtered.isEmpty()) {
             Text(
                 if (bookmarks.isEmpty())
-                    "No bookmarks yet. Long-press a message to bookmark it."
+                    "No bookmarks yet. ${io.nisfeb.talon.ui.holdWord} a message to bookmark it."
                 else
-                    "No bookmarks in this folder yet. Long-press a bookmark below to add it.",
+                    "No bookmarks in this folder yet. ${io.nisfeb.talon.ui.holdWord} a bookmark below to add it.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(24.dp),

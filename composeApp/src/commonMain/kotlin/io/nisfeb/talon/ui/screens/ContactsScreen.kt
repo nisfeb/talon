@@ -162,7 +162,7 @@ fun ContactsScreen(
 
         when {
             bookContacts.isEmpty() -> Text(
-                "No contacts yet. Add someone by ~patp above, or tap " +
+                "No contacts yet. Add someone by ~patp above, or ${io.nisfeb.talon.ui.tapWord.lowercase()} " +
                     "\"Add to contacts\" on a profile.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -128,7 +128,7 @@ fun RecordingResultDialog(
                 if (confirmDiscard) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "This is the only copy. Tap Discard again to delete it.",
+                        "This is the only copy. ${io.nisfeb.talon.ui.tapWord} Discard again to delete it.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )

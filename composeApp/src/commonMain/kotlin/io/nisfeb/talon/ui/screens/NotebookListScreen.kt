@@ -145,7 +145,7 @@ fun NotebookListScreen(
 
             posts.isEmpty() -> Text(
                 if (unread) "Your ship did not send these posts. Open the channel again to retry."
-                else "No posts yet — tap the edit icon to write one.",
+                else "No posts yet. ${io.nisfeb.talon.ui.tapWord} the edit icon to write one.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(24.dp),

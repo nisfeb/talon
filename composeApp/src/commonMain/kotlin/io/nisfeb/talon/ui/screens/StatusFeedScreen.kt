@@ -118,7 +118,7 @@ internal fun SelfStatusRow(
                 )
             } else {
                 Text(
-                    "Tap to set a status",
+                    "${io.nisfeb.talon.ui.tapWord} to set a status",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

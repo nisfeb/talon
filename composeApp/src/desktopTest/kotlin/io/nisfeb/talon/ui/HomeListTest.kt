@@ -314,7 +314,7 @@ class HomeListTest {
         onNode(hasSetTextAction() and hasText("Name")).performTextInput("Friends")
         onNodeWithText("Create").performClick()
         tap("Friends")
-        shows("This folder is empty. Long-press a chat or group to add it.")
+        shows("This folder is empty. Right-click a chat or group to add it.")
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("settings").any { "Friends" in it.json.toString() } }
     }
 

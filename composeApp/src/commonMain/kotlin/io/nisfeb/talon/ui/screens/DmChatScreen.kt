@@ -1916,7 +1916,7 @@ private fun PartyNoteRow(text: String, onDismiss: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            "Only you can see this. Tap to dismiss.",
+            "Only you can see this. ${io.nisfeb.talon.ui.tapWord} to dismiss.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             modifier = Modifier.padding(top = 2.dp),

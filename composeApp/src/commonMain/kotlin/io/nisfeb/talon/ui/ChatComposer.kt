@@ -814,7 +814,7 @@ fun ChatComposer(
                         onSlashMic()
                     } else {
                         state.sendError =
-                            "/mic: tap the mic button instead — slash trigger isn't wired here"
+                            "/mic: ${io.nisfeb.talon.ui.tapWord.lowercase()} the mic button instead."
                     }
                     true
                 }
@@ -1393,7 +1393,7 @@ private fun VoicePreviewRow(
             voicePlayer(pending.path, sending)
         }
         val label = if (voicePlayer != null) "🎙 ${seconds}s"
-        else "🎙 ${seconds}s recorded — preview not available, tap send when ready"
+        else "🎙 ${seconds}s recorded — preview not available, ${io.nisfeb.talon.ui.tapWord.lowercase()} send when ready"
         Text(
             label,
             style = MaterialTheme.typography.bodySmall,

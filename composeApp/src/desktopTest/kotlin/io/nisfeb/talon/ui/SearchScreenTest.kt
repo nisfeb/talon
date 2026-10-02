@@ -109,7 +109,7 @@ class SearchScreenTest {
         // order; the first message alone is not all of them.
         waitUntil(timeoutMillis = 5_000) { shows("Lunch Crew") && shows("Lunch Club") && shows("lunch plans tomorrow") }
         assertTrue(shows("GROUPS") && shows("Lunch Crew"))
-        assertTrue(shows("PEOPLE") && shows("Lunch Club") && shows("Tap to start a DM"), "a contact never written to says how to start")
+        assertTrue(shows("PEOPLE") && shows("Lunch Club") && shows("Click to start a DM"), "a contact never written to says how to start")
         assertTrue(shows("lunch plans tomorrow"))
         assertTrue(top("lunch at noon") < top("lunch plans tomorrow"), "newest first")
         assertTrue(!shows("lunch deleted") && !shows("dinner later"))

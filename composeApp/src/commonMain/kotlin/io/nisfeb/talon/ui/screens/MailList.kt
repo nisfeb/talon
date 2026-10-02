@@ -434,7 +434,7 @@ private fun MailNotice(text: String, onDismiss: (() -> Unit)? = null, action: Pa
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text + if (onDismiss != null) " Tap to dismiss." else "",
+                text + if (onDismiss != null) " ${io.nisfeb.talon.ui.tapWord} to dismiss." else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 modifier = Modifier.weight(1f).padding(horizontal = 16.dp, vertical = 8.dp),

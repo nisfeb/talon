@@ -470,7 +470,7 @@ private fun PersonRow(
                     maxLines = 1,
                 )
                 !hasChatHistory -> Text(
-                    "Tap to start a DM",
+                    "${io.nisfeb.talon.ui.tapWord} to start a DM",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -480,7 +480,7 @@ private fun PersonRow(
             // we still want the hint somewhere; tuck it under the patp.
             if (showShipSubtitle && !hasChatHistory) {
                 Text(
-                    "Tap to start a DM",
+                    "${io.nisfeb.talon.ui.tapWord} to start a DM",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

@@ -76,7 +76,7 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
     SlashCommandSpec(
         name = "mic",
         synopsis = "/mic",
-        description = "Start a voice recording (tap Stop to send, Cancel to discard)",
+        description = "Start a voice recording (${io.nisfeb.talon.ui.tapWord.lowercase()} Stop to send, Cancel to discard)",
     ),
     SlashCommandSpec(
         name = "nick",

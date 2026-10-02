@@ -106,7 +106,7 @@ class StoryRendererTest {
         assertEquals(listOf<StoryPart>(StoryPart.PollWidget("Lunch?", listOf("pizza", "tacos"))), p)
         val votes = listOf(ReactionEntity("~bus", "1", "~nec", VOTE_EMOJIS[1]), ReactionEntity("~bus", "1", "~zod", VOTE_EMOJIS[1]))
         render(p, reactions = votes) {
-            assertTrue(shows("📊 Lunch?") && shows("2 votes · tap to change."))
+            assertTrue(shows("📊 Lunch?") && shows("2 votes · click to change."))
             assertTrue(!shows("[poll|"), "the tag is not shown")
             onNodeWithText("pizza").performClick()
             assertEquals(listOf("vote ${VOTE_EMOJIS[0]}"), did)

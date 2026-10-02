@@ -1910,7 +1910,7 @@ private fun TasksView(
                         // The way to add one is an icon now, so an empty
                         // list says where it is rather than leaving the
                         // screen blank.
-                        if (query.isNotBlank()) "Nothing matches \"${query.trim()}\"." else "Nothing to do. Tap + to add a task.",
+                        if (query.isNotBlank()) "Nothing matches \"${query.trim()}\"." else "Nothing to do. ${io.nisfeb.talon.ui.tapWord} + to add a task.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(16.dp),

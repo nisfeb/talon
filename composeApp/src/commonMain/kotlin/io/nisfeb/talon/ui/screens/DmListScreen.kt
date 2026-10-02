@@ -1295,7 +1295,7 @@ fun DmListScreen(
                     // gesture (long-press a chat) is undiscoverable —
                     // say so instead of rendering a blank list.
                     item(key = "__folder_empty") {
-                        SpecialEmpty("This folder is empty. Long-press a chat or group to add it.")
+                        SpecialEmpty("This folder is empty. ${io.nisfeb.talon.ui.holdWord} a chat or group to add it.")
                     }
                 }
                 var i = 0
@@ -1477,7 +1477,7 @@ fun DmListScreen(
                             when {
                                 bootstrapping && homeRows.isEmpty() -> "Loading your chats and groups…"
                                 selectedHomeTab == HomeTab.Groups -> "No groups yet."
-                                else -> "No direct messages yet. Tap + to start one."
+                                else -> "No direct messages yet. ${io.nisfeb.talon.ui.tapWord} + to start one."
                             }
                         )
                     }
