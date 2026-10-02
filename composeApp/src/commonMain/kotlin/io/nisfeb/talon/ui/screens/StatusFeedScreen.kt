@@ -197,15 +197,25 @@ internal fun StatusRow(c: ContactEntity, onClick: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // One line each. A long nickname took the row's width and
+                // left the @p beside it a column one letter wide, spelled
+                // down the side of the row.
                 Text(
                     label,
                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
-                if (!c.nickname.isNullOrBlank()) {
+                // Not where the nickname already says it ("~nomryg-nilref (Jack Fox)").
+                val handle = shipHandle(c.ship)
+                if (!c.nickname.isNullOrBlank() && handle !in label) {
                     Text(
-                        shipHandle(c.ship),
+                        handle,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        softWrap = false,
                     )
                 }
             }
