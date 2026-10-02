@@ -1,6 +1,8 @@
 @file:OptIn(DelicateCoroutinesApi::class)
 
 package io.nisfeb.talon.compose
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import io.nisfeb.talon.data.latestPerConversation
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.ai.triagePrivateSlot
@@ -1666,21 +1668,25 @@ fun App(
                     ?: kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.CallUiState.None)
             }
             val callUi by callUiFlow.collectAsState()
-            val partyUiFlow = remember(partyLine) {
-                partyLine?.state
-                    ?: kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.PartyState.Idle)
-            }
-            val partyUi by partyUiFlow.collectAsState()
+            // Only what this level decides on, (live, idle): the line's
+            // state moves whenever anyone starts or stops speaking, and
+            // each move recomposed the whole window.
+            val partyPhase by remember(partyLine) {
+                (partyLine?.state ?: kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.PartyState.Idle))
+                    .map { (it is io.nisfeb.talon.call.PartyState.Live) to (it is io.nisfeb.talon.call.PartyState.Idle) }
+                    .distinctUntilChanged()
+            }.collectAsState(initial = false to true)
+            val (partyLive, partyIdle) = partyPhase
             // Desktop meeting view: the call view over the whole window.
             var meetingOpen by remember { mutableStateOf(false) }
-            LaunchedEffect(partyUi) {
-                if (partyUi !is io.nisfeb.talon.call.PartyState.Live) meetingOpen = false
+            LaunchedEffect(partyLive) {
+                if (!partyLive) meetingOpen = false
             }
             val callFloats = !inlineCallUiShown.value &&
                 (callUi is io.nisfeb.talon.call.CallUiState.Active ||
                     callUi is io.nisfeb.talon.call.CallUiState.Ended)
             val partyFloats = !inlineCallUiShown.value &&
-                partyUi !is io.nisfeb.talon.call.PartyState.Idle && !meetingOpen
+                !partyIdle && !meetingOpen
             val floats = callFloats || partyFloats
             // Keys are handled here, above the call strip, the party-line
             // bar and the meeting view as well as the screens, so nothing
