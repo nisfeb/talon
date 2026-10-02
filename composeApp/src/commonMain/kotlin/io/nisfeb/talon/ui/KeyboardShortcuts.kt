@@ -84,3 +84,21 @@ fun keyEventToShortcut(event: KeyEvent, isMacHost: Boolean = false): ShortcutAct
         else -> null
     }
 }
+
+/**
+ * The shortcuts as Settings lists them, (keys, what they do), beside the
+ * mapping above so the two do not drift. They were found only by trying.
+ */
+fun shortcutList(isMacHost: Boolean): List<Pair<String, String>> {
+    val mod = if (isMacHost) "⌘" else "Ctrl+"
+    return listOf(
+        "${mod}K" to "Search",
+        "${mod}N" to "New message",
+        "$mod," to "Settings",
+        "${mod}1 to ${mod}9" to "Switch to a ship",
+        "$mod= and $mod-" to "Larger and smaller text",
+        "${mod}0" to "Text at its usual size",
+        "Esc" to "Back",
+    )
+}
+

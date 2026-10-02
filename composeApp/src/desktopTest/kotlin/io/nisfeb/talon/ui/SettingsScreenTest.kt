@@ -451,4 +451,16 @@ class SettingsScreenTest {
         tap("Login QR generator")
         assertEquals(listOf("login qr"), did.toList())
     }
+
+    // They were found only by trying them; a menu bar was not wanted.
+    @Test
+    fun `the keyboard shortcuts are listed under Appearance`() {
+        settings {
+            tap("Appearance")
+            val (keys, does) = shortcutList(io.nisfeb.talon.util.isMacOsHost).first()
+            onAllNodesWithText("Keyboard shortcuts")[0].performScrollTo()
+            assertTrue(onAllNodesWithText(keys).fetchSemanticsNodes().isNotEmpty() && onAllNodesWithText(does).fetchSemanticsNodes().isNotEmpty())
+        }
+    }
 }
+
