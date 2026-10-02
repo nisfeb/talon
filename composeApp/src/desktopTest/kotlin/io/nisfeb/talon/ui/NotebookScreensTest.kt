@@ -53,6 +53,8 @@ class NotebookScreensTest {
         published: String? = "[]",
         /** The note's markdown. */
         body: String = "Simmer **long**.",
+        /** The notebook has something unread: a read is sent only then. */
+        unread: Boolean = false,
         content: @androidx.compose.runtime.Composable (TlonChatRepo) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-nbui-").toFile()
@@ -73,6 +75,7 @@ class NotebookScreensTest {
         ship.channel.events().launchIn(scope)
         try {
             runBlocking { repo.notes.bootstrap() }
+            if (unread) runBlocking { db.unreads().upsertAll(listOf(io.nisfeb.talon.data.UnreadEntity(whom = whom, count = 1, notifyCount = 1, recencyMs = 1_000))) }
             runComposeUiTest {
                 setContent { TalonTheme(darkTheme = false) { content(repo) } }
                 block(ship, repo)
@@ -88,11 +91,11 @@ class NotebookScreensTest {
         }
     }
 
-    private fun channel(moreFolders: String = "", block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block, moreFolders) { repo ->
+    private fun channel(moreFolders: String = "", unread: Boolean = false, block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block, moreFolders, unread = unread) { repo ->
         NotesChannelScreen(repo = repo, whom = whom, onBack = { did += "back" }, onOpenNote = { did += "note $it" })
     }
 
-    private fun note(published: String? = "[]", body: String = "Simmer **long**.", block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block, published = published, body = body) { repo ->
+    private fun note(published: String? = "[]", body: String = "Simmer **long**.", unread: Boolean = false, block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block, published = published, body = body, unread = unread) { repo ->
         NoteScreen(repo = repo, whom = whom, noteId = 11, onBack = { did += "back" })
     }
 
@@ -341,7 +344,7 @@ class NotebookScreensTest {
     // the notes screens never marked their notebook read, so its unread,
     // a mention among it, stayed whatever was opened.
     @Test
-    fun `opening a notebook reads it, notes and all`() = channel { ship, _ ->
+    fun `opening a notebook reads it, notes and all`() = channel(unread = true) { ship, _ ->
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("activity").isNotEmpty() }
         val read = ship.pokesTo("activity").first()
         assertEquals("activity-action-2", read.mark)
@@ -352,7 +355,7 @@ class NotebookScreensTest {
     }
 
     @Test
-    fun `opening a note reads its notebook`() = note { ship, _ ->
+    fun `opening a note reads its notebook`() = note(unread = true) { ship, _ ->
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("activity").any { "\"notebook\"" in it.json.toString() } }
     }
 }
