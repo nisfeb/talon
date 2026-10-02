@@ -253,8 +253,13 @@ abstract class MessageDao {
     /** Stable pagination across the entire messages table — used by
      *  the embedding indexer's backfill pass. Includes soft-deleted
      *  rows so the indexer can mark them seen and skip on re-runs. */
-    @Query("SELECT * FROM messages ORDER BY whom, id LIMIT :limit OFFSET :offset")
-    abstract suspend fun pageAll(offset: Int, limit: Int): List<MessageEntity>
+    /**
+     * Every row, [limit] at a time in key order, after ([whom], [id]) (""
+     * and "" for the first page). Found by the primary key: an OFFSET
+     * read every row before the page again, so a pass was quadratic.
+     */
+    @Query("SELECT * FROM messages WHERE (whom, id) > (:whom, :id) ORDER BY whom, id LIMIT :limit")
+    abstract suspend fun pageAfter(whom: String, id: String, limit: Int): List<MessageEntity>
 
     /**
      * Reap our own `local_*` optimistic-insert twin for a post that the

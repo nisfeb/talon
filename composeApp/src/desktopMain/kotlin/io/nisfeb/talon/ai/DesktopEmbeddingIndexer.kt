@@ -54,12 +54,13 @@ class DesktopEmbeddingIndexer(
         var indexed = existing.size
         _progress.value = Progress(total = totalSoFar, indexed = indexed, running = true)
 
-        var offset = 0
+        var after = "" to ""
         val pageSize = 500
         val pendingRows = mutableListOf<MessageEmbeddingEntity>()
         while (true) {
-            val page = db.messages().pageAll(offset, pageSize)
+            val page = db.messages().pageAfter(after.first, after.second, pageSize)
             if (page.isEmpty()) break
+            after = page.last().whom to page.last().id
             totalSoFar += page.count { keyOf(it.whom, it.id) !in existing }
             for (m in page) {
                 yield()
@@ -93,7 +94,6 @@ class DesktopEmbeddingIndexer(
                 }
             }
             if (page.size < pageSize) break
-            offset += pageSize
         }
         if (pendingRows.isNotEmpty()) db.embeddings().upsertAll(pendingRows)
         _progress.value = Progress(totalSoFar, indexed, running = false)
