@@ -18,6 +18,7 @@ import io.nisfeb.talon.urbit.asText
 import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.Icons
@@ -1133,7 +1134,7 @@ private fun ModelPicker(
             val q = query.trim()
             providers.forEach { p ->
                 val all = p.offered().filter(only)
-                val shown = all.filter { q.isEmpty() || it.id.contains(q, true) || it.name.contains(q, true) }.take(80)
+                val shown = rankModels(q, all).take(80)
                 Text(p.label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                 shown.forEach { m ->
                     DropdownMenuItem(
@@ -1154,6 +1155,63 @@ private fun ModelPicker(
                     onClick = { open = false; query = ""; onPick(ModelRef(p.id, q)) },
                 )
                 if (all.isEmpty() && q.isEmpty()) Quiet("   No models fetched. Type a model's id.")
+            }
+        }
+    }
+}
+
+/**
+ * [models] that fit [query], best first: each word of it fuzzily in the
+ * model's id or name (its letters in order, gaps allowed), a word the id
+ * or name starts with before one inside it before letters strewn through.
+ * "cl son" finds anthropic/claude-sonnet-4, "gpt4o" openai/gpt-4o. A
+ * plain substring filter missed both. All of them, as listed, for none.
+ */
+internal fun rankModels(query: String, models: List<ModelInfo>): List<ModelInfo> {
+    val words = query.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (words.isEmpty()) return models
+    return models.mapNotNull { m ->
+        val id = m.id.lowercase()
+        val name = m.name.lowercase()
+        var score = 0
+        for (w in words) score += io.nisfeb.talon.ui.fuzzyScore(w, id, name, id.substringAfterLast('/')) ?: return@mapNotNull null
+        m to score
+    }.sortedBy { it.second }.map { it.first }
+}
+
+/**
+ * A model's id typed by hand, with [models] (one provider's) that fit what
+ * is typed offered under it as it is typed, best first. It was a bare box:
+ * one slip from an id that exists, and nothing said so.
+ */
+@Composable
+private fun ModelIdField(label: String, value: String, models: List<ModelInfo>, onValue: (String) -> Unit) {
+    var offering by remember { mutableStateOf(false) }
+    val matches = remember(value, models) { rankModels(value, models).filter { it.id != value.trim() }.take(8) }
+    androidx.compose.foundation.layout.Box {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { onValue(it); offering = true },
+            label = { Text(label) }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused) offering = false },
+        )
+        DropdownMenu(
+            expanded = offering && value.isNotBlank() && matches.isNotEmpty(),
+            onDismissRequest = { offering = false },
+            // Typing goes on in the box while the list is open.
+            properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+            modifier = Modifier.heightIn(max = 320.dp),
+        ) {
+            matches.forEach { m ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(m.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (m.name != m.id) Text(m.id, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        }
+                    },
+                    onClick = { onValue(m.id); offering = false },
+                )
             }
         }
     }
@@ -1797,13 +1855,13 @@ private fun JevRow(orrery: OrreryRepo?, profile: AiProfile, on: Boolean, orreryH
     val dc = orrery?.decide
     if (orrery != null && dc != null && orreryHere && on) {
         TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Hide advanced" else "Advanced") }
-        if (advanced) JevAdvanced(orrery, dc)
+        if (advanced) JevAdvanced(orrery, dc, jev?.models.orEmpty())
     }
 }
 
 /** The thresholds and the checks that choose them, and today's tally. */
 @Composable
-private fun JevAdvanced(orrery: OrreryRepo, dc: DecideControl) {
+private fun JevAdvanced(orrery: OrreryRepo, dc: DecideControl, models: List<ModelInfo>) {
     val d by dc.settings.collectAsState()
     val run by orrery.gateCheck.collectAsState()
     val checking = run != null && run?.result == null
@@ -1837,7 +1895,7 @@ private fun JevAdvanced(orrery: OrreryRepo, dc: DecideControl) {
     }
     // The route is alpha and may move: it and the model are settings, not code.
     OutlinedTextField(value = d.url, onValueChange = { dc.set(d.copy(url = it.trim())) }, label = { Text("Decisions route") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-    OutlinedTextField(value = d.model, onValueChange = { dc.set(d.copy(model = it.trim())) }, label = { Text("Jev model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    ModelIdField("Jev model", d.model, models) { dc.set(d.copy(model = it.trim())) }
     run?.takeIf { it.result == null }?.let { r ->
         Quiet(if (r.total == 0) "Choosing the messages to check." else "Checked ${r.done} of ${r.total}.")
         if (r.total > 0) LinearProgressIndicator(progress = { r.done.toFloat() / r.total }, modifier = Modifier.fillMaxWidth())

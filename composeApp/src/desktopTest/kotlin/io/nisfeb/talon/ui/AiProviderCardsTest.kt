@@ -204,4 +204,22 @@ class AiProviderCardsTest {
             .minBy { kotlin.math.abs(switches[it].fetchSemanticsNode().boundsInRoot.center.y - y) }
         return switches[nearest]
     }
+
+    // A plain substring filter missed "cl son" and "gpt4o".
+    @Test
+    fun `the picker finds a model by fuzzy words`() =
+        section(home.copy(baseUrl = address, models = listOf(
+            ModelInfo("anthropic/claude-3-haiku", "Claude 3 Haiku"),
+            ModelInfo("anthropic/claude-sonnet-4", "Claude Sonnet 4"),
+            ModelInfo("openai/gpt-4o", "GPT-4o"),
+        ))) { ai ->
+            onNodeWithText("None chosen").performClick()
+            onNode(hasSetTextAction() and hasText("Search, or type a model's id")).performTextInput("cl son")
+            waitForIdle()
+            assertTrue(onAllNodesWithText("Claude Sonnet 4").fetchSemanticsNodes().isNotEmpty())
+            assertTrue(onAllNodesWithText("Claude 3 Haiku").fetchSemanticsNodes().isEmpty() && onAllNodesWithText("GPT-4o").fetchSemanticsNodes().isEmpty())
+            onNodeWithText("Claude Sonnet 4").performClick()
+            waitForIdle()
+            assertEquals(ModelRef("srv", "anthropic/claude-sonnet-4"), ai.state.value.savedProfile!!.defaultModel)
+        }
 }
