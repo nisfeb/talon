@@ -350,14 +350,23 @@ fun SettingsScreen(
                 }) { Text("New theme") }
                 themeSettings.active?.let { t ->
                     io.nisfeb.talon.ui.OutlinedButton(onClick = { themeDraft = t }) { Text("Edit") }
-                    TextButton(onClick = {
-                        uiSettings.setThemeSettings(
-                            themeSettings.copy(
-                                themes = themeSettings.themes.filter { it.id != t.id },
-                                activeId = null,
-                            ),
-                        )
-                    }) { Text("Delete") }
+                    var deletingTheme by remember { mutableStateOf(false) }
+                    TextButton(onClick = { deletingTheme = true }) { Text("Delete") }
+                    // A theme is a few minutes of picking colors, and gone here
+                    // and on every device it travelled to with one tap.
+                    if (deletingTheme) io.nisfeb.talon.ui.ConfirmDestructive(
+                        title = "Delete ${t.name}?",
+                        text = "It goes from this device and every device your settings reach.",
+                        onConfirm = {
+                            uiSettings.setThemeSettings(
+                                themeSettings.copy(
+                                    themes = themeSettings.themes.filter { it.id != t.id },
+                                    activeId = null,
+                                ),
+                            )
+                        },
+                        onDismiss = { deletingTheme = false },
+                    )
                 }
             }
             themeDraft?.let { d ->

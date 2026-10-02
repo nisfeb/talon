@@ -216,6 +216,9 @@ class SettingsScreenTest {
         assertTrue(!shows("Save and use"), "the editor closes")
 
         tap("Delete")
+        assertTrue(ui.themeSettings.value.themes.isNotEmpty(), "asked first")
+        onAllNodesWithText("Delete").onLast().performClick()
+        waitForIdle()
         assertTrue(ui.themeSettings.value.themes.isEmpty() && ui.themeSettings.value.activeId == null)
     }
 

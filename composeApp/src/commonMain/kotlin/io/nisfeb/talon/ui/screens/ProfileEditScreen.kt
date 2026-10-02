@@ -75,6 +75,8 @@ fun ProfileEditScreen(
     var saving by remember { mutableStateOf(false) }
     var uploading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
+    /** The profile as last read, to tell an edit from none. */
+    var loaded by remember { mutableStateOf<List<String?>>(listOf("", "", "", null, null)) }
     var shipKeys by remember(ourPatp) { mutableStateOf<io.nisfeb.talon.ui.AzimuthRpc.Keys?>(null) }
     var keysProblem by remember(ourPatp) { mutableStateOf<String?>(null) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -112,7 +114,19 @@ fun ProfileEditScreen(
         bio = c.bio.orEmpty()
         avatarUrl = c.avatarUrl
         color = c.color
+        loaded = listOf(nickname, status, bio, avatarUrl, color)
     }
+    // Back left with whatever was typed and said nothing; it asks now.
+    val dirty = listOf(nickname, status, bio, avatarUrl, color) != loaded
+    var confirmDiscard by remember { mutableStateOf(false) }
+    io.nisfeb.talon.ui.PlatformBackHandler(enabled = dirty && !saving) { confirmDiscard = true }
+    if (confirmDiscard) io.nisfeb.talon.ui.ConfirmDestructive(
+        title = "Discard your changes?",
+        text = "What you changed here is not saved.",
+        confirm = "Discard",
+        onConfirm = onBack,
+        onDismiss = { confirmDiscard = false },
+    )
 
     val pickImage = rememberImagePicker()
     val onPickAvatar: () -> Unit = {
@@ -152,7 +166,7 @@ fun ProfileEditScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
+            IconButton(onClick = { if (dirty && !saving) confirmDiscard = true else onBack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(

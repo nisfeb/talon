@@ -79,3 +79,23 @@ fun TextButton(
     interactionSource: MutableInteractionSource? = null,
     content: @Composable RowScope.() -> Unit,
 ) = androidx.compose.material3.TextButton(onClick, modifier, enabled, shape, colors, elevation, border, contentPadding, interactionSource, content)
+
+/**
+ * Asked before something that cannot be taken back: [title] ("Delete
+ * this theme?"), [text] saying what goes, [confirm] in the error colour.
+ */
+@Composable
+fun ConfirmDestructive(
+    title: String,
+    text: String,
+    confirm: String = "Delete",
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) = androidx.compose.material3.AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { androidx.compose.material3.Text(title) },
+    text = { androidx.compose.material3.Text(text) },
+    confirmButton = { DestructiveTextButton(onClick = { onDismiss(); onConfirm() }) { androidx.compose.material3.Text(confirm) } },
+    dismissButton = { TextButton(onClick = onDismiss) { androidx.compose.material3.Text("Cancel") } },
+)
+

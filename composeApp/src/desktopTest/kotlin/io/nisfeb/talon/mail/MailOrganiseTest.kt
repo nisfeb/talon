@@ -6,6 +6,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -96,6 +97,9 @@ class MailOrganiseTest {
     @Test
     fun `deleting a filter asks the ship to`() = organise {
         onAllNodesWithText("Delete")[0].performClick()
+        // Asked first: it goes from the ship, for every device.
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Delete this rule?").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("Delete").onLast().performClick()
         assertEquals("""{"id":"r1"}""", posted("/api/rule-delete"))
     }
 

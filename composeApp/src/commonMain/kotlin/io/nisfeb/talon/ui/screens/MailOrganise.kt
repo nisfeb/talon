@@ -55,6 +55,16 @@ import kotlinx.coroutines.launch
 @Composable
 fun MailOrganiseSheet(repo: MailRepo, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
+    // A rule or a list, asked about before it goes from the ship: what to say, and what to do.
+    var deleting by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+    deleting?.let { (what, go) ->
+        io.nisfeb.talon.ui.ConfirmDestructive(
+            title = "Delete $what?",
+            text = "It goes from your ship, for every device.",
+            onConfirm = go,
+            onDismiss = { deleting = null },
+        )
+    }
     val rules by repo.rules.collectAsState()
     val lists by repo.lists.collectAsState()
 
@@ -92,7 +102,7 @@ fun MailOrganiseSheet(repo: MailRepo, onDismiss: () -> Unit) {
                             )
                         }
                     }
-                    TextButton(onClick = { scope.launch { repo.deleteRule(r.id) } }) {
+                    TextButton(onClick = { deleting = "this rule" to { scope.launch { repo.deleteRule(r.id) }; Unit } }) {
                         Text("Delete")
                     }
                 }
@@ -118,7 +128,7 @@ fun MailOrganiseSheet(repo: MailRepo, onDismiss: () -> Unit) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    TextButton(onClick = { scope.launch { repo.deleteList(l.name) } }) {
+                    TextButton(onClick = { deleting = "the list ${l.name}" to { scope.launch { repo.deleteList(l.name) }; Unit } }) {
                         Text("Delete")
                     }
                 }

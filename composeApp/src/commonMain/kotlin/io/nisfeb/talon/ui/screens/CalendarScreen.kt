@@ -1209,9 +1209,13 @@ private fun EventEditor(
     val time = rememberTimePickerState(initialHour = initial.minuteOfDay / 60, initialMinute = initial.minuteOfDay % 60, is24Hour = twentyFourHour)
     val fieldFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
+    // A tap outside closes it only while nothing has changed: a slip of
+    // the thumb lost a half-written event. Cancel always closes it.
+    val untouched = d == initial && zoneText == initial.zone.orEmpty() &&
+        time.hour * 60 + time.minute == initial.minuteOfDay
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (untouched) onDismiss() },
         title = { Text(if (d.cat == EventCat.TODO) (if (existing) "Edit task" else "New task") else if (existing) "Edit event" else "New event") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -9,6 +9,10 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
@@ -705,4 +709,28 @@ class CalendarScreenTest {
         assertTrue(ship.pokesTo("channels").any { "Dentist" in it.json.toString() })
         assertTrue(!shows("The group could not be reached."))
     }
+
+    // A slip of the thumb outside the dialog lost a half-written event.
+    @Test
+    fun `a dismiss closes the editor only while nothing was written in it`() = calendar {
+        onAllNodesWithContentDescription("New event")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Repeats") }
+        field("Name").performTextInput("Lunch with Bus")
+        tapOutside()
+        assertTrue(shows("Repeats"), "kept open with something written in it")
+        onAllNodesWithText("Cancel")[0].performClick()
+        waitForIdle()
+        assertTrue(!shows("Repeats"), "Cancel still closes it")
+
+        onAllNodesWithContentDescription("New event")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Repeats") }
+        tapOutside()
+        assertTrue(!shows("Repeats"), "nothing written: it closes")
+    }
+
+    private fun ComposeUiTest.tapOutside() {
+        onAllNodes(androidx.compose.ui.test.isRoot())[0].performTouchInput { click(androidx.compose.ui.geometry.Offset(2f, 2f)) }
+        waitForIdle()
+    }
 }
+
