@@ -56,7 +56,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Semaphore
+import io.nisfeb.talon.data.latestPerConversation
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -4286,15 +4288,28 @@ class TlonChatRepo(
      * transient presence: it needs no v11.4.0 peer and doesn't flicker,
      * unlike the typing signal [presenceIn] drives inside a channel.
      */
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun groupLastActive(flag: String): Flow<Long?> =
-        db.groups().streamChannelsForGroup(flag)
-            .flatMapLatest { chans ->
-                val nests = chans.map { it.nest }
-                if (nests.isEmpty()) flowOf(null)
-                else db.messages().streamLatestSentMsAcross(nests)
+        groupsLastActive.map { it[flag] }.distinctUntilChanged()
+
+    /**
+     * Every group's newest top-level post, from the one shared newest-per-
+     * conversation read: each group row on the home list ran two queries
+     * of its own, again on every write.
+     */
+    private val groupsLastActive: Flow<Map<String, Long>> by lazy {
+        combine(
+            db.latestPerConversation(),
+            db.groups().streamChannelGroups(),
+        ) { latest, links ->
+            val groupOf = links.associate { it.nest to it.groupFlag }
+            val out = HashMap<String, Long>()
+            for (m in latest) {
+                val g = groupOf[m.whom] ?: continue
+                if (m.sentMs > (out[g] ?: Long.MIN_VALUE)) out[g] = m.sentMs
             }
-            .distinctUntilChanged()
+            out as Map<String, Long>
+        }.shareIn(scope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000), replay = 1)
+    }
 
     /** When we last announced a given (context, topic). */
     private val lastPresencePoke = ConcurrentMap<Pair<String, String>, Long>()
