@@ -231,10 +231,10 @@ fun SearchScreen(
                 if (smartMode) {
                     val p = indexProgress
                     val status = when {
-                        semanticBusy -> "embedding query…"
-                        p.running && p.total > 0 -> "indexing ${p.indexed}/${p.total}…"
-                        p.running -> "scanning local archive…"
-                        p.total == 0 -> "no messages indexed yet"
+                        semanticBusy -> "Searching…"
+                        p.running && p.total > 0 -> "Indexing ${p.indexed} of ${p.total}…"
+                        p.running -> "Reading your messages…"
+                        p.total == 0 -> "No messages indexed yet"
                         else -> "${p.indexed} messages indexed"
                     }
                     Text(

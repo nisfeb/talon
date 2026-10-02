@@ -467,7 +467,7 @@ private fun ClickableLinkText(
  * the underlying message for anything we don't recognise — which is
  * still better than `IllegalStateException: login HTTP 401`.
  */
-private fun friendlyError(err: Throwable): String {
+internal fun friendlyError(err: Throwable): String {
     val msg = err.message.orEmpty()
     return when {
         // Eyre answers a wrong +code with 400.
@@ -492,7 +492,11 @@ private fun friendlyError(err: Throwable): String {
             "That address answered, but no ship signed you in there. Check the URL."
         "ConnectException" in err::class.simpleName.orEmpty() ->
             "Connection refused — is the ship running?"
-        msg.isNotBlank() -> "Couldn't sign in: $msg"
-        else -> "Couldn't sign in: ${err::class.simpleName ?: "unknown error"}"
+        // A timeout or a dropped connection: the network or a busy ship,
+        // not the code. It read as "Couldn't sign in: Request timeout has
+        // expired [url=…]".
+        io.nisfeb.talon.util.isTransientNetworkError(err) ->
+            "The ship didn't answer in time. Check your connection and try again."
+        else -> "Couldn't sign in: " + (io.nisfeb.talon.util.readableReason(msg) ?: "something went wrong.")
     }
 }
