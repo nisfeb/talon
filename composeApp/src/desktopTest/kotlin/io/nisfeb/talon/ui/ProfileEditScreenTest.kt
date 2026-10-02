@@ -143,5 +143,26 @@ class ProfileEditScreenTest {
         onNodeWithText("Discard").performClick()
         assertTrue("back" in did)
     }
+
+    // The form sat empty while the ship was asked: seconds on a busy one.
+    private val slowSelf: FakeShip.() -> Unit = {
+        scries["contacts/v1/self"] = """{"nickname":{"type":"text","value":"Zeta"},"bio":{"type":"text","value":"from the ship"}}"""
+        holdScry = { if (it == "contacts/v1/self") 2_000 else 0 }
+    }
+
+    @Test
+    fun `the form shows what is kept at once, then what the ship says`() = profile(prepare = slowSelf) { _ ->
+        // The harness saw "Zod" before the ship's answer, two seconds off.
+        assertEquals("runs the place", fieldText("Bio"))
+        waitUntil(timeoutMillis = 5_000) { fieldText("Nickname") == "Zeta" }
+        assertEquals("from the ship", fieldText("Bio"))
+    }
+
+    @Test
+    fun `a field typed in before the ship answers keeps what was typed`() = profile(prepare = slowSelf) { _ ->
+        onNode(hasSetTextAction() and hasText("Bio")).performTextReplacement("mine")
+        waitUntil(timeoutMillis = 5_000) { fieldText("Nickname") == "Zeta" }
+        assertEquals("mine", fieldText("Bio"))
+    }
 }
 
