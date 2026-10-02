@@ -9,6 +9,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonElevation
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
 
@@ -98,4 +100,23 @@ fun ConfirmDestructive(
     confirmButton = { DestructiveTextButton(onClick = { onDismiss(); onConfirm() }) { androidx.compose.material3.Text(confirm) } },
     dismissButton = { TextButton(onClick = onDismiss) { androidx.compose.material3.Text("Cancel") } },
 )
+
+/**
+ * Copies [text] and reads "Copied" for a moment: most copy buttons said
+ * nothing, and people pasted somewhere to see whether they had worked.
+ */
+@Composable
+fun CopyButton(text: () -> String, label: String = "Copy", modifier: Modifier = Modifier) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var copied by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(copied) {
+        if (copied) { kotlinx.coroutines.delay(COPIED_FOR_MS); copied = false }
+    }
+    TextButton(onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(text())); copied = true }, modifier = modifier) {
+        androidx.compose.material3.Text(if (copied) "Copied" else label)
+    }
+}
+
+/** How long a copy says "Copied". */
+const val COPIED_FOR_MS = 2_000L
 

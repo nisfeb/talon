@@ -18,8 +18,6 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import io.nisfeb.talon.ui.isCallsSupported
 import androidx.compose.material3.Switch
 import androidx.compose.foundation.rememberScrollState
@@ -1022,7 +1020,6 @@ private fun PartyLineSection(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val clipboard = LocalClipboardManager.current
             if (link == null) {
                 OutlinedButton(onClick = { scope.launch { controller.shareRoom(host, roomName) } }) {
                     Text("Create listen link")
@@ -1035,9 +1032,7 @@ private fun PartyLineSection(
                     maxLines = 1,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { clipboard.setText(AnnotatedString(link!!.url)) }) {
-                    Text("Copy")
-                }
+                link?.url?.let { url -> io.nisfeb.talon.ui.CopyButton({ url }) }
                 // Links expire, so there has to be a way to get
                 // another one — the button used to vanish for good
                 // after the first press.

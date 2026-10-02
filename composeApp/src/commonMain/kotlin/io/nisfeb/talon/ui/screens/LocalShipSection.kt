@@ -29,8 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardActions
@@ -81,7 +79,6 @@ fun LocalShipSection(localShip: LocalShip) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(8.dp))
-        val clipboard = LocalClipboardManager.current
         // Selectable, and the two things people paste elsewhere get a
         // Copy of their own.
         SelectionContainer {
@@ -95,7 +92,7 @@ fun LocalShipSection(localShip: LocalShip) {
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             info.ship?.let { ship ->
-                TextButton(onClick = { clipboard.setText(AnnotatedString(ship)) }) { Text("Copy ship name") }
+                io.nisfeb.talon.ui.CopyButton({ ship }, "Copy ship name")
             }
             if (running) {
                 OutlinedButton(
@@ -136,7 +133,7 @@ fun LocalShipSection(localShip: LocalShip) {
                     )
                 }
                 code?.let { c ->
-                    TextButton(onClick = { clipboard.setText(AnnotatedString(c)) }) { Text("Copy") }
+                    io.nisfeb.talon.ui.CopyButton({ c })
                 }
             }
         }

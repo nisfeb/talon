@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -34,8 +36,12 @@ internal fun NoteLine(text: String, calm: Boolean, details: String?, onCopy: (St
             modifier = Modifier.weight(1f).padding(vertical = 4.dp),
         )
         if (details != null) {
-            TextButton(onClick = { onCopy(details) }) {
-                Text("Copy error details", style = MaterialTheme.typography.labelSmall)
+            var copied by androidx.compose.runtime.remember(details) { androidx.compose.runtime.mutableStateOf(false) }
+            androidx.compose.runtime.LaunchedEffect(copied) {
+                if (copied) { kotlinx.coroutines.delay(COPIED_FOR_MS); copied = false }
+            }
+            TextButton(onClick = { onCopy(details); copied = true }) {
+                Text(if (copied) "Copied" else "Copy error details", style = MaterialTheme.typography.labelSmall)
             }
         }
     }
