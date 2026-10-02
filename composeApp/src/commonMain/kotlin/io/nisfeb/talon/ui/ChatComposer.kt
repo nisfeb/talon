@@ -1288,7 +1288,7 @@ private fun QuotePreviewRow(
                 maxLines = 2,
             )
         }
-        io.nisfeb.talon.ui.IconButton(tip = "Cancel quote", onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+        io.nisfeb.talon.ui.IconButton(tip = "Cancel quote", onClick = onDismiss, modifier = if (isTouchPrimary) Modifier else Modifier.size(28.dp)) {
             Icon(
                 imageVector = Icons.Filled.Close,
                 contentDescription = "Cancel quote",

@@ -675,7 +675,7 @@ private fun MailMessageCard(
             // reply that swallows itself is not what a reader means by
             // folding a thread.
             if (foldable) {
-                io.nisfeb.talon.ui.IconButton(tip = if (folded) "Unfold replies" else "Fold replies", onClick = onFold, modifier = Modifier.size(22.dp)) {
+                io.nisfeb.talon.ui.IconButton(tip = if (folded) "Unfold replies" else "Fold replies", onClick = onFold, modifier = if (io.nisfeb.talon.ui.isTouchPrimary) Modifier else Modifier.size(22.dp)) {
                     Icon(
                         if (folded) Icons.AutoMirrored.Filled.KeyboardArrowRight
                         else Icons.Filled.KeyboardArrowDown,

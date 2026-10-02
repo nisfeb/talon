@@ -69,6 +69,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -2466,7 +2468,9 @@ internal fun MenuBadgeDot(modifier: Modifier = Modifier) {
         modifier = modifier
             .size(8.dp)
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary),
+            .background(MaterialTheme.colorScheme.primary)
+            // A dot is color alone: a screen reader said nothing of it.
+            .semantics { contentDescription = "Unread" },
     )
 }
 

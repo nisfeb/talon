@@ -29,6 +29,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
@@ -396,7 +397,10 @@ fun MailComposer(
                                 Icon(
                                     androidx.compose.material.icons.Icons.Filled.Close,
                                     contentDescription = "Remove ${nameFor(r)}",
-                                    modifier = Modifier.size(16.dp).clickable(enabled = !sending) { recipients.remove(r) },
+                                    // A 16dp target on a phone; 48 where a finger aims.
+                                    modifier = Modifier.clickable(enabled = !sending) { recipients.remove(r) }
+                                        .then(if (io.nisfeb.talon.ui.isTouchPrimary) Modifier.minimumInteractiveComponentSize() else Modifier)
+                                        .size(16.dp),
                                 )
                             },
                         )
