@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.submitOnEnter
 import io.nisfeb.talon.ui.shipHandle
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -111,6 +112,12 @@ fun ContactsScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                val canAdd = isValidPatp && !alreadyInBook
+                val add = {
+                    onAddContact(asPatp, newName.trim().takeIf { it.isNotBlank() })
+                    newPatp = ""
+                    newName = ""
+                }
                 OutlinedTextField(
                     value = newPatp,
                     onValueChange = { newPatp = it },
@@ -118,22 +125,22 @@ fun ContactsScreen(
                     // A twelve-word name fits without scrolling inside the box.
                     singleLine = false,
                     maxLines = 6,
-                    modifier = Modifier.weight(1f),
+                    keyboardOptions = io.nisfeb.talon.ui.GoKeyboard,
+                    keyboardActions = io.nisfeb.talon.ui.goActions { if (canAdd) add() },
+                    modifier = Modifier.weight(1f).submitOnEnter(canAdd, add),
                 )
                 OutlinedTextField(
                     value = newName,
                     onValueChange = { newName = it },
                     placeholder = { Text("nickname") },
                     singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    keyboardOptions = io.nisfeb.talon.ui.GoKeyboard,
+                    keyboardActions = io.nisfeb.talon.ui.goActions { if (canAdd) add() },
+                    modifier = Modifier.weight(1f).submitOnEnter(canAdd, add),
                 )
                 TextButton(
-                    enabled = isValidPatp && !alreadyInBook,
-                    onClick = {
-                        onAddContact(asPatp, newName.trim().takeIf { it.isNotBlank() })
-                        newPatp = ""
-                        newName = ""
-                    },
+                    enabled = canAdd,
+                    onClick = add,
                 ) { Text("Add") }
             }
             io.nisfeb.talon.ui.ShipSuggestions(newPatp, onPick = { newPatp = it }, Modifier.padding(top = 4.dp))

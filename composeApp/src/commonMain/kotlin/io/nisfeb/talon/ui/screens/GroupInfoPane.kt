@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.submitOnEnter
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -107,6 +108,20 @@ fun GroupInfoPane(
         )
     }
     if (inviteOpen) {
+        // The invite, from its button or Enter in the name.
+        val inviteTo = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
+        val canInvite = !inviteBusy && inviteTo != null && groupFlag != null
+        val sendInvite: () -> Unit = send@{
+            val flag = groupFlag ?: return@send
+            val ship = inviteTo ?: return@send
+            inviteBusy = true
+            inviteResult = null
+            scope.launch {
+                inviteResult = runCatching { repo.inviteToGroup(flag, ship) }
+                    .fold({ "Invited ${io.nisfeb.talon.ui.shipHandle(ship)}." }, { e -> io.nisfeb.talon.ui.inviteFailure(e) })
+                inviteBusy = false
+            }
+        }
         AlertDialog(
             onDismissRequest = { if (!inviteBusy) { inviteOpen = false; inviteResult = null } },
             title = { Text("Invite someone") },
@@ -129,7 +144,9 @@ fun GroupInfoPane(
                         singleLine = false,
                         maxLines = 6,
                         enabled = !inviteBusy,
-                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = io.nisfeb.talon.ui.GoKeyboard,
+                        keyboardActions = io.nisfeb.talon.ui.goActions { if (canInvite) sendInvite() },
+                        modifier = Modifier.fillMaxWidth().submitOnEnter(canInvite, sendInvite),
                     )
                     io.nisfeb.talon.ui.ShipSuggestions(inviteShip, onPick = { inviteShip = it; inviteResult = null }, Modifier.padding(top = 4.dp))
                     val landed = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
@@ -143,21 +160,7 @@ fun GroupInfoPane(
                 }
             },
             confirmButton = {
-                val ship = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
-                TextButton(
-                    enabled = !inviteBusy && ship != null && groupFlag != null,
-                    onClick = {
-                        val flag = groupFlag ?: return@TextButton
-                        if (ship == null) return@TextButton
-                        inviteBusy = true
-                        inviteResult = null
-                        scope.launch {
-                            inviteResult = runCatching { repo.inviteToGroup(flag, ship) }
-                                .fold({ "Invited ${io.nisfeb.talon.ui.shipHandle(ship)}." }, { e -> io.nisfeb.talon.ui.inviteFailure(e) })
-                            inviteBusy = false
-                        }
-                    },
-                ) { Text(if (inviteBusy) "Inviting…" else "Invite") }
+                TextButton(enabled = canInvite, onClick = sendInvite) { Text(if (inviteBusy) "Inviting…" else "Invite") }
             },
             dismissButton = {
                 TextButton(enabled = !inviteBusy, onClick = { inviteOpen = false; inviteResult = null }) { Text("Close") }

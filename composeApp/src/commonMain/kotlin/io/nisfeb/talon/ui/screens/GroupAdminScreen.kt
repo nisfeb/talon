@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.submitOnEnter
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.foundation.ExperimentalFoundationApi
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
@@ -696,11 +697,17 @@ private fun AdminBody(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            val invite = {
+                invitePatp?.let { onInvite(it) }
+                inviteText = ""
+            }
             OutlinedTextField(
                 value = inviteText,
                 onValueChange = { inviteText = it },
                 label = { Text("~ship, or a word name") },
-                modifier = Modifier.weight(1f),
+                keyboardOptions = io.nisfeb.talon.ui.GoKeyboard,
+                keyboardActions = io.nisfeb.talon.ui.goActions { if (invitePatp != null) invite() },
+                modifier = Modifier.weight(1f).submitOnEnter(invitePatp != null, invite),
                 // A comet's @p is fifty-six characters and its full
                 // name twelve words; on one line you could not see what
                 // you had pasted, and in three the rest had to scroll
@@ -710,10 +717,7 @@ private fun AdminBody(
             )
             Button(
                 enabled = invitePatp != null,
-                onClick = {
-                    invitePatp?.let { onInvite(it) }
-                    inviteText = ""
-                },
+                onClick = invite,
             ) { Text("Invite") }
         }
         // Contacts, offered as you type. A short name keeps two words

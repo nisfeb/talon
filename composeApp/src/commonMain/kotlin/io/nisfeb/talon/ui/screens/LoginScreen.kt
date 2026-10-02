@@ -240,12 +240,35 @@ fun LoginScreen(
                 ) {
                     val usernameAutofillModifier = usernameAutofill { shipUrl = it }
                     val passwordAutofillModifier = passwordAutofill { code = it }
+                    // Connect, from its button or Enter in the code: the code
+                    // was typed and then the mouse fetched to click.
+                    val connect: () -> Unit = connect@{
+                        if (connecting) return@connect
+                        status = "Connecting…"
+                        statusIsError = false
+                        connecting = true
+                        scope.launch {
+                            session.login(shipUrl, code)
+                                .onSuccess { ship ->
+                                    // login() keeps the leading ~ on the
+                                    // ship name — don't prepend another.
+                                    status = "Connected as $ship"
+                                    LoginDraft.clear()
+                                    onLoggedIn(ship)
+                                }
+                                .onFailure { err ->
+                                    status = friendlyError(err)
+                                    statusIsError = true
+                                }
+                            connecting = false
+                        }
+                    }
                     OutlinedTextField(
                         value = shipUrl,
                         onValueChange = { shipUrl = it },
                         label = { Text("Ship URL") },
                         placeholder = { Text("https://your-ship.example.com") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = androidx.compose.ui.text.input.ImeAction.Next),
                         enabled = !connecting,
                         singleLine = true,
                         modifier = usernameAutofillModifier.fillMaxWidth(),
@@ -256,7 +279,8 @@ fun LoginScreen(
                         label = { Text("+code") },
                         visualTransformation = if (codeVisible) VisualTransformation.None
                             else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = androidx.compose.ui.text.input.ImeAction.Go),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { connect() }),
                         enabled = !connecting,
                         singleLine = true,
                         trailingIcon = {
@@ -308,26 +332,7 @@ fun LoginScreen(
                         }
                     }
                     Button(
-                        onClick = {
-                            status = "Connecting…"
-                            statusIsError = false
-                            connecting = true
-                            scope.launch {
-                                session.login(shipUrl, code)
-                                    .onSuccess { ship ->
-                                        // login() keeps the leading ~ on the
-                                        // ship name — don't prepend another.
-                                        status = "Connected as $ship"
-                                        LoginDraft.clear()
-                                        onLoggedIn(ship)
-                                    }
-                                    .onFailure { err ->
-                                        status = friendlyError(err)
-                                        statusIsError = true
-                                    }
-                                connecting = false
-                            }
-                        },
+                        onClick = connect,
                         enabled = !connecting,
                         shape = RoundedCornerShape(12.dp),
                         contentPadding = ButtonDefaults.ContentPadding,
