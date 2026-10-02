@@ -1555,24 +1555,19 @@ class TlonChatRepo(
             ?: error("The ship's list of groups could not be read.")
         val me = ourPatp
         Log.i(TAG, "fetchAdminGroups: ${body.size} total groups, me=$me")
-        // The `/v2/groups` scry can return a lightweight listing where
-        // `fleet`/`bloc` are absent. Re-scry each flag individually via
-        // `/v2/groups/<flag>` to get the full group state every time.
-        //
-        // Fan the per-flag scries out concurrently — sequential
-        // `for (flag in body) { scry … }` was a sentinel-bug for the
-        // Administration screen: a user in N groups paid N round-trips
-        // back-to-back (3-15s of pure wait for an active member).
-        // Semaphore caps in-flight requests at 8 so we don't blow past
-        // OkHttp's per-host pool while still getting near-linear
-        // speedup. coroutineScope { } means a single failure cancels
-        // the rest cleanly; the per-flag runCatching keeps one
-        // returned-null group from torpedoing the whole list.
-        val flags = body.keys.toList()
+        // The list is every group whole: %groups encodes each entry of
+        // /v3/groups (groups-3) with the same encoder as /v3/groups/<flag>
+        // (group-3), seats and roles in it. Each was read again on its own
+        // anyway, a scry per group of the ship's one thread, and the page
+        // waited ten to twenty seconds for someone in a few dozen groups.
+        // Only an entry without its members (a light listing, from an older
+        // ship) is read on its own, eight at a time.
         val gate = Semaphore(permits = 8)
         val parsed = coroutineScope {
-            flags.map { flag ->
+            body.entries.map { (flag, entry) ->
                 async {
+                    val whole = (entry as? JsonObject)?.takeIf { it["seats"] != null || it["fleet"] != null }
+                    if (whole != null) return@async flag to whole
                     gate.acquire()
                     try {
                         val full = runCatching {
