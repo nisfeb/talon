@@ -41,6 +41,8 @@ class IosShipDataEraser : ShipDataEraser {
             check(!fm.fileExistsAtPath(base)) { "database survived deletion: $base" }
         }
         IosFiles.delete(IosDraftStore.fileFor(ship))
+        // The drawer's seen dots for this ship, as desktop's eraser does.
+        IosFiles.delete(io.nisfeb.talon.ui.menuSeenFileName(ship))
         io.nisfeb.talon.mail.MailThreadFiles.erase(ship)
         if (IosFiles.read(PENDING_FILE)?.trim() == ship) IosFiles.delete(PENDING_FILE)
         Log.i(TAG, "erased $ship ($gone files)")
