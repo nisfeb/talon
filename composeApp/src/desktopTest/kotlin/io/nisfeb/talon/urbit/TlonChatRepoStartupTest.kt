@@ -315,5 +315,30 @@ class TlonChatRepoStartupTest {
         until("watched again on the new channel") { ship.subscribed.count { it == "notes/v0/notes/~bus/recipes/stream" } > watches }
         assertEquals(lists, ship.scried.count { it == "notes/v0/notebooks" }, "the list not read again")
     }
+
+    // Each invite heard read the whole foreigns list again. The fact is
+    // the one group that moved, in the shape the scry gives.
+    @Test
+    fun `an invite heard on v1 foreigns is applied as it came, not read again`() = started(prepare = {
+        scries["groups/v1/foreigns"] = "{}"
+    }) { repo ->
+        val announced = java.util.concurrent.CopyOnWriteArrayList<String>()
+        repo.groupInviteListener = { announced += it.flag }
+        until("a first read of invites") { repo.invitesFlow.value != null }
+        val reads = ship.scried.count { it == "groups/v1/foreigns" }
+        val foreign = """{"invites":[{"flag":"~bus/garden","time":1,"from":"~bus","token":null,"note":null,"preview":null,"valid":true}],
+            "lookup":null,"preview":{"meta":{"title":"The Garden","description":"","image":"","cover":""},"member-count":3,"privacy":"secret"},
+            "progress":null,"token":null}"""
+        repo.applyEvent(kotlinx.serialization.json.Json.parseToJsonElement("""{"id":9,"response":"diff","json":{"~bus/garden":$foreign}}"""))
+        until("the invite") { repo.invitesFlow.value?.any { it.flag == "~bus/garden" && it.title == "The Garden" } == true }
+        until("its announcement") { "~bus/garden" in announced }
+        assertEquals(reads, ship.scried.count { it == "groups/v1/foreigns" }, "not read again")
+
+        // Joined: the host's answer, then done, and the invite goes.
+        val done = foreign.replace("\"progress\":null", "\"progress\":\"done\"")
+        repo.applyEvent(kotlinx.serialization.json.Json.parseToJsonElement("""{"id":10,"response":"diff","json":{"~bus/garden":$done}}"""))
+        until("the invite gone") { repo.invitesFlow.value?.none { it.flag == "~bus/garden" } == true }
+        assertEquals(1, announced.size, "announced once")
+    }
 }
 

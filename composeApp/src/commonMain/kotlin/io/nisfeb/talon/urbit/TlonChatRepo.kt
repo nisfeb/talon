@@ -1962,42 +1962,8 @@ class TlonChatRepo(
         val out = mutableListOf<InviteSummary>()
         val joining = mutableListOf<InviteSummary>()
         for ((flag, foreign) in foreigns) {
-            val f = foreign as? JsonObject ?: continue
             if (flag in joined) continue
-            // Where the ship is with joining it: a join under way was
-            // answered already, and one that is done is a group.
-            val progress = f["progress"].asStr()
-            if (progress == "done") continue
-            val under = progress == "join" || progress == "watch"
-            // invites is an array of {from, token, valid, ...}
-            // (lib/groups-json +invite); an invite to answer needs at
-            // least one still valid.
-            val firstValid = (f["invites"] as? JsonArray).orEmpty().asSequence()
-                .mapNotNull { it as? JsonObject }
-                .firstOrNull { (it["valid"] as? JsonPrimitive)?.content == "true" }
-            if (firstValid == null && !under) continue
-            val inviter = firstValid?.get("from").asStr()
-            val preview = f["preview"] as? JsonObject
-            val meta = preview?.get("meta") as? JsonObject
-            fun metaStr(k: String) = meta?.get(k).asStr()
-                ?.takeIf { it.isNotBlank() }
-            // member-count + privacy are siblings of `meta` in the group
-            // preview (sur/groups.hoon +$preview). Older ships spell the
-            // count `count`; either way it's a plain JSON number.
-            val memberCount = (preview?.get("member-count") ?: preview?.get("count"))
-                ?.let { (it as? JsonPrimitive)?.content?.toIntOrNull() }
-            val summary = InviteSummary(
-                flag = flag,
-                inviter = inviter,
-                title = metaStr("title"),
-                description = metaStr("description"),
-                image = metaStr("image"),
-                cover = metaStr("cover"),
-                memberCount = memberCount,
-                privacy = preview?.get("privacy").asStr()?.takeIf { it.isNotBlank() },
-                failed = progress == "error",
-                hostAnswered = progress == "watch",
-            )
+            val (summary, under) = inviteOf(flag, foreign as? JsonObject ?: continue) ?: continue
             if (under) joining += summary else out += summary
         }
         _joining.value = joining.sortedBy { (it.title ?: it.flag).lowercase() }
@@ -2006,6 +1972,74 @@ class TlonChatRepo(
             out.filter { it.flag !in known }
                 .forEach { runCatching { groupInviteListener?.invoke(it) } }
         }
+    }
+
+    /**
+     * A /v1/foreigns fact: the one group that moved (groups.hoon
+     * +fi-give-update gives `(my flag^foreign ~)`), in the shape the scry
+     * gives. Applied as it is; the whole list was read again for each.
+     * A list never read, or an older ship's /gangs/updates shape, is read.
+     */
+    private suspend fun applyForeigns(payload: JsonObject) {
+        val shown = _invites.value
+        if (shown == null || (subServed["groups/v1/foreigns"] ?: 0) != 0) {
+            refreshInvites(notify = true)
+            return
+        }
+        val joined = db.groups().allGroups().mapTo(mutableSetOf()) { it.flag }
+        val out = shown.filter { it.flag !in payload }.toMutableList()
+        val joining = _joining.value.filter { it.flag !in payload }.toMutableList()
+        val fresh = mutableListOf<InviteSummary>()
+        for ((flag, foreign) in payload) {
+            if (flag in joined) continue
+            val (summary, under) = inviteOf(flag, foreign as? JsonObject ?: continue) ?: continue
+            if (under) joining += summary
+            else {
+                out += summary
+                if (shown.none { it.flag == flag }) fresh += summary
+            }
+        }
+        _joining.value = joining.sortedBy { (it.title ?: it.flag).lowercase() }
+        _invites.value = out.sortedBy { (it.title ?: it.flag).lowercase() }
+        fresh.forEach { runCatching { groupInviteListener?.invoke(it) } }
+    }
+
+    /** One group's invite or join under way, and whether it is the join; null when neither. */
+    private fun inviteOf(flag: String, f: JsonObject): Pair<InviteSummary, Boolean>? {
+        // Where the ship is with joining it: a join under way was
+        // answered already, and one that is done is a group.
+        val progress = f["progress"].asStr()
+        if (progress == "done") return null
+        val under = progress == "join" || progress == "watch"
+        // invites is an array of {from, token, valid, ...}
+        // (lib/groups-json +invite); an invite to answer needs at
+        // least one still valid.
+        val firstValid = (f["invites"] as? JsonArray).orEmpty().asSequence()
+            .mapNotNull { it as? JsonObject }
+            .firstOrNull { (it["valid"] as? JsonPrimitive)?.content == "true" }
+        if (firstValid == null && !under) return null
+        val inviter = firstValid?.get("from").asStr()
+        val preview = f["preview"] as? JsonObject
+        val meta = preview?.get("meta") as? JsonObject
+        fun metaStr(k: String) = meta?.get(k).asStr()
+            ?.takeIf { it.isNotBlank() }
+        // member-count + privacy are siblings of `meta` in the group
+        // preview (sur/groups.hoon +$preview). Older ships spell the
+        // count `count`; either way it's a plain JSON number.
+        val memberCount = (preview?.get("member-count") ?: preview?.get("count"))
+            ?.let { (it as? JsonPrimitive)?.content?.toIntOrNull() }
+        return InviteSummary(
+            flag = flag,
+            inviter = inviter,
+            title = metaStr("title"),
+            description = metaStr("description"),
+            image = metaStr("image"),
+            cover = metaStr("cover"),
+            memberCount = memberCount,
+            privacy = preview?.get("privacy").asStr()?.takeIf { it.isNotBlank() },
+            failed = progress == "error",
+            hostAnswered = progress == "watch",
+        ) to under
     }
 
     /** Accept an inbound group invite: join it, and move it to the groups being joined. */
@@ -3511,12 +3545,11 @@ class TlonChatRepo(
         // %groups /v1/foreigns (foreigns-1) or, on an older ship,
         // /gangs/updates: a bare map of flag → that group's invites,
         // preview and join progress. Someone invited us, or a join moved.
-        // Re-scry the foreign list (cheap, and rare) to refresh the badge
-        // + list, and toast the new ones.
+        // Applied to the badge and list, and the new ones toasted.
         if (looksLikeGangsFact(payload)) {
             scope.launch {
-                runCatching { refreshInvites(notify = true) }
-                    .onFailure { Log.w(TAG, "refreshInvites on gang update failed", it) }
+                runCatching { applyForeigns(payload) }
+                    .onFailure { Log.w(TAG, "invites on gang update failed", it) }
             }
             return
         }
