@@ -964,18 +964,8 @@ class TlonChatRepo(
         quotedNest: String,
         quotedPostId: String,
     ): String {
-        val quoteBlock = buildJsonObject {
-            put("block", buildJsonObject {
-                put("cite", buildJsonObject {
-                    put("chan", buildJsonObject {
-                        put("nest", quotedNest)
-                        put("where", "/msg/$quotedPostId")
-                    })
-                })
-            })
-        }
         val content = buildJsonArray {
-            add(quoteBlock)
+            add(citeBlock(quotedNest, quotedPostId))
             if (text.isNotBlank()) {
                 textToStory(text).forEach { add(it) }
             }
@@ -983,11 +973,23 @@ class TlonChatRepo(
         return postContent(whom, content)
     }
 
+    private fun citeBlock(nest: String, postId: String) = buildJsonObject {
+        put("block", buildJsonObject {
+            put("cite", buildJsonObject {
+                put("chan", buildJsonObject {
+                    put("nest", nest)
+                    put("where", "/msg/$postId")
+                })
+            })
+        })
+    }
+
     /**
      * Send an image message. `src` is the hosted URL returned by
      * uploadImage; width/height are the image's natural dimensions (0 if
      * unknown); alt is a short description (often the filename); caption
      * is text written with it, which goes under it in the same message.
+     * A quote ([quotedNest], [quotedPostId]) leads it, as in [sendQuote].
      */
     suspend fun sendImage(
         whom: String,
@@ -996,7 +998,15 @@ class TlonChatRepo(
         height: Int,
         alt: String,
         caption: String = "",
-    ): String = postContent(whom, imageStory(src, width, height, alt, caption))
+        quotedNest: String? = null,
+        quotedPostId: String? = null,
+    ): String = postContent(
+        whom,
+        buildJsonArray {
+            if (quotedNest != null && quotedPostId != null) add(citeBlock(quotedNest, quotedPostId))
+            imageStory(src, width, height, alt, caption).forEach { add(it) }
+        },
+    )
 
     /**
      * Post a notebook entry to a `diary/~host/slug` channel. Title is

@@ -697,6 +697,17 @@ fun DmChatScreen(
             ) {
                 repo.sendQuote(whom, body, quoteWhom, quoteId)
             }
+            override suspend fun sendImageQuote(
+                src: String,
+                width: Int,
+                height: Int,
+                alt: String,
+                caption: String,
+                quoteWhom: String,
+                quoteId: String,
+            ) {
+                repo.sendImage(whom, src, width, height, alt, caption, quotedNest = quoteWhom, quotedPostId = quoteId)
+            }
         }
     }
 
