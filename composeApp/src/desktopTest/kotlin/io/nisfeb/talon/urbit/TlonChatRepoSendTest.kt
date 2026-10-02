@@ -432,5 +432,17 @@ class TlonChatRepoSendTest {
         repo.catchUp()
         kotlinx.coroutines.withTimeout(3_000) { while (ship.scried.none { it.startsWith("activity/") }) delay(20) }
     }
+
+    // A ship serving only an older version was walked through every newer
+    // one, both marks each, on every chat opened. Remembered per login.
+    @Test
+    fun `the version a ship answers a conversation on is asked first after`() = live {
+        ship.scries["chat/v3/dm/~bus/writs/newest/50/heavy"] = """{"writs":{}}"""
+        ship.scries["chat/v3/dm/~nec/writs/newest/50/heavy"] = """{"writs":{}}"""
+        repo.refreshOnOpen("~bus")
+        val before = ship.scried.size
+        repo.refreshOnOpen("~nec")
+        assertEquals(listOf("chat/v3/dm/~nec/writs/newest/50/heavy"), ship.scried.drop(before))
+    }
 }
 

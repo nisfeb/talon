@@ -379,6 +379,7 @@ class TlonChatRepo(
         // reconnect: a new login may be another ship, or this one upgraded.
         servedPath.clear()
         subServed.clear()
+        walkServed.clear()
         groupActionMark = "group-action-5"
         activityReadMark = "activity-action-2"
         http = session.http
@@ -2599,7 +2600,7 @@ class TlonChatRepo(
             }
         }
 
-        val probe = scryFirstMatching(ch, app, paths, label = "refreshConversation($whom)")
+        val probe = scryFirstMatching(ch, app, paths, label = "refreshConversation($whom)", memo = "$app/$postsKey")
         val obj = probe as? JsonObject ?: error("the ship did not send $whom")
         val posts = obj[postsKey] as? JsonObject
         if (posts == null) {
@@ -2684,7 +2685,7 @@ class TlonChatRepo(
             else -> return false
         }
 
-        val body = scryFirstMatching(ch, app, paths, label = "loadOlder $whom") as? JsonObject
+        val body = scryFirstMatching(ch, app, paths, label = "loadOlder $whom", memo = "$app/$postsKey") as? JsonObject
             ?: error("the ship did not send older messages of $whom")
 
         val posts = body[postsKey] as? JsonObject
@@ -4239,6 +4240,9 @@ class TlonChatRepo(
     /** app + newest path → the index of the path this ship took, kept for the login. */
     private val subServed = ConcurrentMap<String, Int>()
 
+    /** Per kind of conversation read ("chat/writs"), the version and mark that answered last. */
+    private val walkServed = ConcurrentMap<String, Pair<String, String>>()
+
     private fun subFamilyOf(app: String, path: String): Pair<String, Int>? =
         subSpecs.firstOrNull { it.app == app && path in it.fallbacks }
             ?.let { "${it.app}${it.path}" to (it.fallbacks.indexOf(path) + 1) }
@@ -4927,16 +4931,26 @@ class TlonChatRepo(
         app: String,
         paths: List<String>,
         label: String,
+        memo: String? = null,
     ): JsonElement? {
         val deadline = nowMs() + SCRY_PROBE_BUDGET_MS
         var lastErr: Throwable? = null
-        for (path in paths) {
+        // The version and mark that answered last time first: a ship that
+        // stopped serving the first ones was walked through them per read.
+        val served = memo?.let { walkServed[it] }
+        val order = if (served == null) paths else paths.sortedBy { p ->
+            (if (p.split('/').getOrNull(1) == served.first) 0 else 2) + (if (p.substringAfterLast('/') == served.second) 0 else 1)
+        }
+        for (path in order) {
             if (nowMs() >= deadline) {
                 Log.w(TAG, "$label: ${SCRY_PROBE_BUDGET_MS}ms budget exhausted, giving up; last err: ${lastErr?.message}")
                 return null
             }
             val attempt = io.nisfeb.talon.util.runSuspendCatching { ch.scry(app, path, SCRY_PROBE_PER_CALL_SECS) }
-            if (attempt.isSuccess) return attempt.getOrNull()
+            if (attempt.isSuccess) {
+                memo?.let { walkServed[it] = path.split('/')[1] to path.substringAfterLast('/') }
+                return attempt.getOrNull()
+            }
             val err = attempt.exceptionOrNull()
             lastErr = err
             if (isTransientNetworkError(err)) {
