@@ -158,6 +158,8 @@ class AssistantSession(internal val scope: kotlinx.coroutines.CoroutineScope) {
     internal var busy by mutableStateOf(false)
     internal var error by mutableStateOf<io.nisfeb.talon.util.Problem?>(null)
     internal var pending by mutableStateOf<Pending?>(null)
+    /** "Allow all" was pressed in this answer: its calendar adds and edits go ahead. */
+    internal var allowAll by mutableStateOf(false)
     internal var convId by mutableStateOf<Long?>(null)
     internal var convGid by mutableStateOf<String?>(null)
     internal var centroid by mutableStateOf<FloatArray?>(null)
@@ -453,7 +455,7 @@ fun AssistantScreen(
         val q = questionField.text.trim()
         if (q.isEmpty() || busy) return
         questionField = TextFieldValue("")
-        busy = true; error = null
+        busy = true; error = null; session.allowAll = false
         transcript.add(Line.You(q))
         var finalAnswer = ""
         // Snapshot the conversation this question belongs to. The run below
@@ -513,13 +515,18 @@ fun AssistantScreen(
                     question = q,
                     priorTurns = priorTurns,
                     confirm = { call, tool ->
-                        val gate = CompletableDeferred<Boolean>()
-                        pending = Pending(call, tool, gate)
-                        // It cannot go on without the owner: say so.
-                        session.tell()
-                        val ok = gate.await()
-                        pending = null
-                        ok
+                        if (session.allowAll && call.name in io.nisfeb.talon.ai.ALLOW_ALL_TOOLS) {
+                            transcript.add(Line.Note("✓ ${describe(call, contactMap, calendar)} (allowed with Allow all)"))
+                            true
+                        } else {
+                            val gate = CompletableDeferred<Boolean>()
+                            pending = Pending(call, tool, gate)
+                            // It cannot go on without the owner: say so.
+                            session.tell()
+                            val ok = gate.await()
+                            pending = null
+                            ok
+                        }
                     },
                     onEvent = { ev ->
                         if (ev is AgentLoop.Event.Answer) finalAnswer = ev.text
@@ -616,6 +623,7 @@ fun AssistantScreen(
                 }
             }
             busy = false
+            session.allowAll = false
             session.tell()
         }
     }
@@ -800,6 +808,9 @@ fun AssistantScreen(
                 ConfirmCard(
                     summary = describe(p.call, contactMap, calendar),
                     onAllow = { p.gate.complete(true) },
+                    onAllowAll = if (p.call.name in io.nisfeb.talon.ai.ALLOW_ALL_TOOLS) {
+                        { session.allowAll = true; p.gate.complete(true) }
+                    } else null,
                     onDeny = { p.gate.complete(false) },
                 )
             }
@@ -1149,14 +1160,22 @@ private fun ConversationRow(
 }
 
 @Composable
-private fun ConfirmCard(summary: String, onAllow: () -> Unit, onDeny: () -> Unit) {
+private fun ConfirmCard(summary: String, onAllow: () -> Unit, onAllowAll: (() -> Unit)?, onDeny: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Allow this action?", style = MaterialTheme.typography.titleSmall)
             Text(summary, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onAllow) { Text("Allow") }
+                onAllowAll?.let { OutlinedButton(onClick = it) { Text("Allow all") } }
                 OutlinedButton(onClick = onDeny) { Text("Deny") }
+            }
+            if (onAllowAll != null) {
+                Text(
+                    "Allow all lets the rest of this answer's calendar adds and edits go ahead. Deletes, messages and mail still ask.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
