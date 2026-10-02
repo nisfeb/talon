@@ -77,6 +77,8 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Talon adds the images you download to your photos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Talon needs access to your photos so you can attach images to messages.</string>
 	<key>NSAppTransportSecurity</key>

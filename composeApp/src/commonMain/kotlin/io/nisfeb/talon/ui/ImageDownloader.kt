@@ -1,6 +1,8 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.runtime.staticCompositionLocalOf
+import io.ktor.client.request.get
+import io.ktor.client.statement.readRawBytes
 
 /**
  * Save a posted image to the user's local device. Backends differ by
@@ -59,6 +61,17 @@ object NoopImageDownloader : ImageDownloader {
  * caller. Hosts bind it once in their App composable.
  */
 val LocalImageDownloader = staticCompositionLocalOf<ImageDownloader> { NoopImageDownloader }
+
+/**
+ * A posted image's bytes, for a saver that fetches with Ktor (iOS), or
+ * why not in words. Common, so its branches are tested once.
+ */
+suspend fun fetchImageBytes(http: io.ktor.client.HttpClient, url: String): Result<ByteArray> =
+    io.nisfeb.talon.util.runSuspendCatching {
+        val resp = http.get(url)
+        if (resp.status.value !in 200..299) error("The server answered ${resp.status.value}.")
+        resp.readRawBytes().also { if (it.isEmpty()) error("The image was empty.") }
+    }.recoverCatching { throw IllegalStateException(io.nisfeb.talon.util.problemOf("Couldn't download the image", it).line, it) }
 
 /** A media type from a file name, for the kinds people attach or pick. */
 internal fun mimeForName(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {

@@ -67,6 +67,7 @@ fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.Na
         IosFiles.write("last-crash.txt", report)
     }
     val http = createAppHttpClient()
+    val imageDownloader = io.nisfeb.talon.ui.IosImageDownloader(http)
     val sessionStore = createSessionStore()
     val aiSettings = createAiSettings()
     val themePreference = IosThemePreference()
@@ -155,6 +156,8 @@ fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.Na
             pushTokenProvider = pushTokenProvider,
             appForeground = IosAppLifecycle.foreground,
             notifier = notifier,
+            // Without one the viewer hid its download: nothing could save.
+            imageDownloader = imageDownloader,
         )
         // Back gesture. A Compose view controller gets none of UIKit's
         // navigation edge-swipe, so we draw our own: a narrow strip on
