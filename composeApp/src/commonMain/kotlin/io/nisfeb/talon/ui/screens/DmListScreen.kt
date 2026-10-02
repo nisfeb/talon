@@ -292,29 +292,29 @@ fun DmListScreen(
             mentionUnreads = notifyUnreads
             return@LaunchedEffect
         }
-        val filtered = mutableListOf<UnreadEntity>()
-        for (u in notifyUnreads) {
-            // Not runCatching: it caught the cancellation of a scan the
-            // next emission replaced, every row after it read as having
-            // nothing cached and so passed, and the stale list was shown.
-            val recent = try {
-                db.messages().latestAnyFor(u.whom, MENTION_SCAN_LIMIT)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                emptyList()
-            }
-            val include = if (recent.isEmpty()) {
-                true
-            } else {
-                recent.any { m ->
-                    val text = StoryCache.textFor(m.id, m.contentJson)
-                    io.nisfeb.talon.ui.MentionMatcher.containsMention(text, patp)
+        // Off the main thread: up to 50 posts a chat, every unread change.
+        mentionUnreads = kotlinx.coroutines.withContext(Dispatchers.Default) {
+            val filtered = mutableListOf<UnreadEntity>()
+            for (u in notifyUnreads) {
+                // Not runCatching: it caught the cancellation of a scan the
+                // next emission replaced, every row after it read as having
+                // nothing cached and so passed, and the stale list was shown.
+                val recent = try {
+                    db.messages().latestAnyFor(u.whom, MENTION_SCAN_LIMIT)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    emptyList()
                 }
+                val include = if (recent.isEmpty()) {
+                    true
+                } else {
+                    recent.any { m -> io.nisfeb.talon.ui.MentionMatcher.mentionsIn(m.contentJson, patp) }
+                }
+                if (include) filtered.add(u)
             }
-            if (include) filtered.add(u)
+            filtered
         }
-        mentionUnreads = filtered
     }
     val mentionCounts = remember(mentionUnreads) {
         val out = HashMap<String, Int>(mentionUnreads.size)

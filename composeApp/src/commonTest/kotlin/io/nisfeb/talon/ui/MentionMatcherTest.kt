@@ -43,4 +43,15 @@ class MentionMatcherTest {
         assertTrue(MentionMatcher.containsMention(
             "x~mister-foo then ~mister-foo", "mister-foo"))
     }
+
+    // Read from the story JSON: the words as shown said a nickname
+    // where the post named the ship, and the mention was missed.
+    @Test
+    fun `a mention inline counts however it is shown, a ship in a cite's path does not`() {
+        assertTrue(MentionMatcher.mentionsIn("""[{"inline":["hi ",{"ship":"~zod"}]}]""", "zod"))
+        assertTrue(MentionMatcher.mentionsIn("""[{"inline":["ping ~zod please"]}]""", "zod"))
+        assertFalse(MentionMatcher.mentionsIn("""[{"block":{"cite":{"chan":{"nest":"chat/~zod/general","where":"/msg/~zod/170.141.184"}}}}]""", "zod"))
+        assertFalse(MentionMatcher.mentionsIn("""[{"inline":[{"ship":"~zodbus"}]}]""", "zod"))
+    }
 }
+
