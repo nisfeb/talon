@@ -225,7 +225,9 @@ fun CalendarScreen(
     val grid = remember(year, month) { monthGrid(year, month) }
     // The page is read again on opening: ten minutes is a long time
     // after a change made on the calendar's page or another device.
-    LaunchedEffect(Unit) { repo.refresh() }
+    // Not every opening: past a minute, the events and tasks; past an
+    // hour, everything.
+    LaunchedEffect(Unit) { repo.refreshIfStale(io.nisfeb.talon.calendar.CalendarRepo.OPEN_FRESH_MS) }
     // Opening the task list reads the tasks, not the nine things a full
     // refresh reads: the calendars, the shares, the conflicts and the
     // rest have not changed because somebody tapped Tasks.

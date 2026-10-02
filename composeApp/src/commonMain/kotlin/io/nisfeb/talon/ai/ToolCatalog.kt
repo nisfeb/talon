@@ -160,7 +160,7 @@ object ToolCatalog {
             write = true,
         ) { args ->
             val whom = args.str("whom") ?: return@Tool "Error: whom is required."
-            repo.markRead(whom)
+            repo.markRead(whom, force = true)
             "Marked read."
         },
         // Web search — only present when the caller passes a client (the

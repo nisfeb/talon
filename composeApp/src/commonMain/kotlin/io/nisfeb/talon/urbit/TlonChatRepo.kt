@@ -251,8 +251,9 @@ class TlonChatRepo(
         val prev = openThread
         openThread = next
         if (prev != null && prev != next) {
-            // Leaving: a final read for replies that landed while open.
-            scope.launch { runCatching { markThreadRead(prev.first, prev.second) } }
+            // Leaving: the read waiting for replies that landed while open,
+            // if there is one; nothing new, nothing to tell the ship.
+            flushReadSoon("${prev.first}#${prev.second}") { markThreadRead(prev.first, prev.second, force = true) }
         }
         if (next != null && prev != next) {
             scope.launch { runCatching { markThreadRead(next.first, next.second) } }
@@ -264,9 +265,10 @@ class TlonChatRepo(
         openWhom = whom
         io.nisfeb.talon.notify.NotificationFocus.openWhom = whom
         if (prev != null && prev != whom) {
-            // Exiting: final mark-read to catch anything that arrived
-            // between the last activity event and now.
-            scope.launch { runCatching { markRead(prev) } }
+            // Leaving: the read waiting for what arrived while it was open,
+            // if there is one. It used to poke the ship on every exit,
+            // nothing new or not.
+            flushReadSoon(prev) { markRead(prev, force = true) }
         }
         if (whom != null && prev != whom) {
             scope.launch { runCatching { markRead(whom) } }
@@ -377,6 +379,7 @@ class TlonChatRepo(
         // reconnect: a new login may be another ship, or this one upgraded.
         servedPath.clear()
         subServed.clear()
+        walkServed.clear()
         groupActionMark = "group-action-5"
         activityReadMark = "activity-action-2"
         http = session.http
@@ -522,6 +525,8 @@ class TlonChatRepo(
         // event, not just reactions. So ask for /v5 and let the nack
         // walk us back to /v4.
         subFallbacks.clear()
+        // What streamed while away is not in an opened chat yet: read again.
+        readOnOpen.clear()
         listOf(
             SubSpec("chat", "/v4"),
             SubSpec("channels", "/v4"),
@@ -547,20 +552,24 @@ class TlonChatRepo(
             // the desk marks /gangs/updates deprecated (12.3.0). The same
             // change goes out on both, a flag-keyed map either way.
             subSpecs[2],
-        ).map { spec ->
-            async {
-                // Where this ship stopped refusing last time, if it did: a
-                // reconnect walked the refusals again, every time.
+        ).let { specs ->
+            // Where this ship stopped refusing last time, if it did: a
+            // reconnect walked the refusals again, every time.
+            val plans = specs.map { spec ->
                 val all = listOf(spec.path) + spec.fallbacks
-                val from = subServed["${spec.app}${spec.path}"] ?: 0
-                runCatching { ch.subscribe(spec.app, all[from]) }
-                    .onSuccess { id ->
+                Triple(spec, all, subServed["${spec.app}${spec.path}"] ?: 0)
+            }
+            // All in one PUT: one each was an event on the ship apiece.
+            runCatching { ch.subscribeAll(plans.map { (spec, all, from) -> spec.app to all[from] }) }
+                .onSuccess { ids ->
+                    ids.zip(plans).forEach { (id, plan) ->
+                        val (spec, all, from) = plan
                         val rest = all.drop(from + 1)
                         if (rest.isNotEmpty()) subFallbacks[id] = spec.app to rest
                     }
-                    .onFailure { Log.e(TAG, "${spec.app} subscribe failed", it) }
-            }
-        }.awaitAll()
+                }
+                .onFailure { Log.e(TAG, "subscribe failed", it) }
+        }
 
         // Re-scry init-posts + activity every reconnect so we catch up on
         // anything that landed while the stream was down. The
@@ -705,23 +714,17 @@ class TlonChatRepo(
         // (the next thing this function does) starts immediately
         // rather than waiting on a network call we don't need to
         // complete before showing the UI.
-        if (firstRun) {
+        // Only with nothing kept, or nothing newer than a day: otherwise
+        // the ten above and the read on opening a chat cover it, and this
+        // is 50 posts from every channel on every launch. The admin
+        // groups (a scry per group) are read when a group message's menu
+        // opens, not here.
+        if (firstRun && needsDeepHistory(db.messages().newestSentMs(), nowMs())) {
             launch {
                 Log.i(TAG, "deep-history scry starting (count=$DEEP_PAGE_COUNT)")
                 runCatching { bootstrap(ch, count = DEEP_PAGE_COUNT) }
                     .onSuccess { Log.i(TAG, "deep-history scry complete") }
                     .onFailure { Log.w(TAG, "deep-history scry failed", it) }
-            }
-            // Populate adminGroupsFlow so the pin gate in the message
-            // action menu can hide "Pin" for users who aren't admin in
-            // the group. Heavy (~N scries for N groups, semaphored at 8)
-            // so it runs in the background after first paint. Until it
-            // lands, canPinInGroup falls back to "is the user the
-            // group host?" — which catches the most common case
-            // (host-admins see the option immediately).
-            launch {
-                runCatching { refreshAdminGroups() }
-                    .onFailure { Log.w(TAG, "bootstrap admin-groups refresh failed", it) }
             }
         }
 
@@ -733,9 +736,13 @@ class TlonChatRepo(
         // lost forever — the watchdog at the bottom of this function
         // restores the connection but not the missed payload, and the
         // user only catches up on a full app kill+relaunch.
+        // A reconnect nobody asked for, inside a minute of the last full
+        // pass, only watches again: the gap is that minute, and a whole
+        // desk and the notebook list per reconnect is what a loop costs.
+        val watchOnly = skipBootstrap && !forced
         settingsSync?.attach(ch)
         if (settingsSync != null) {
-            runCatching { settingsSync.bootstrap() }
+            runCatching { if (watchOnly) settingsSync.resubscribe() else settingsSync.bootstrap() }
                 .onFailure { Log.e(TAG, "settings bootstrap failed", it) }
         }
 
@@ -744,7 +751,7 @@ class TlonChatRepo(
         // such agent — bootstrap logs and returns, leaving the tables
         // empty, so this is safe to run unconditionally.
         notes.attach(ch)
-        runCatching { notes.bootstrap() }
+        runCatching { if (watchOnly) notes.resubscribe() else notes.bootstrap() }
             .onFailure { Log.w(TAG, "notes bootstrap failed", it) }
 
         // Watchdog: if nothing at all arrives on the stream for 90s the
@@ -765,7 +772,8 @@ class TlonChatRepo(
         // arriving a beat behind ingestion.
         val ackQueue = Channel<Long>(Channel.UNLIMITED)
         val ackJob = launch {
-            for (id in ackQueue) runCatching { ch.ack(id) }
+            // In batches: one ack covers every event before it.
+            ackInBatches(ackQueue) { ch.ack(it) }
         }
         val collectJob = launch {
             try {
@@ -853,6 +861,24 @@ class TlonChatRepo(
     @Volatile private var lastReconnectMs: Long = 0L
 
     /**
+     * Reconnect only if the stream has gone quiet. Eyre sends something at
+     * least every ~20 s, so bytes within [STREAM_FRESH_MS] mean the socket
+     * is live and nothing was missed. Android's foreground service keeps
+     * the socket up, and tearing it down on every return to the app (back
+     * from the image picker included) cost a delete, every subscribe and
+     * the catch-up reads. iOS and desktop keep [forceReconnect]: there the
+     * socket is usually dead on return.
+     */
+    fun reconnectIfStale() {
+        val ch = channel
+        if (ch != null && ch.streamIdleMs < STREAM_FRESH_MS) {
+            Log.i(TAG, "reconnect skipped: stream live (${ch.streamIdleMs} ms)")
+            return
+        }
+        forceReconnect()
+    }
+
+    /**
      * Re-scry init-posts + activity without reopening the channel. Cheap
      * enough to call every time the app comes to the foreground — closes
      * the "messages came in while I was away" gap that doze sometimes
@@ -860,6 +886,10 @@ class TlonChatRepo(
      */
     fun catchUp() {
         val ch = channel ?: return
+        // A stream with bytes in the last half minute has missed nothing:
+        // a screen-on or the 15-minute worker re-read the recent slice of
+        // every chat and the whole activity anyway, a healthy socket or not.
+        if (ch.streamIdleMs < STREAM_FRESH_MS) return
         scope.launch {
             // catchUp pulls just the recent slice — anything older was
             // already covered by the deep-history scry on the original
@@ -1933,42 +1963,8 @@ class TlonChatRepo(
         val out = mutableListOf<InviteSummary>()
         val joining = mutableListOf<InviteSummary>()
         for ((flag, foreign) in foreigns) {
-            val f = foreign as? JsonObject ?: continue
             if (flag in joined) continue
-            // Where the ship is with joining it: a join under way was
-            // answered already, and one that is done is a group.
-            val progress = f["progress"].asStr()
-            if (progress == "done") continue
-            val under = progress == "join" || progress == "watch"
-            // invites is an array of {from, token, valid, ...}
-            // (lib/groups-json +invite); an invite to answer needs at
-            // least one still valid.
-            val firstValid = (f["invites"] as? JsonArray).orEmpty().asSequence()
-                .mapNotNull { it as? JsonObject }
-                .firstOrNull { (it["valid"] as? JsonPrimitive)?.content == "true" }
-            if (firstValid == null && !under) continue
-            val inviter = firstValid?.get("from").asStr()
-            val preview = f["preview"] as? JsonObject
-            val meta = preview?.get("meta") as? JsonObject
-            fun metaStr(k: String) = meta?.get(k).asStr()
-                ?.takeIf { it.isNotBlank() }
-            // member-count + privacy are siblings of `meta` in the group
-            // preview (sur/groups.hoon +$preview). Older ships spell the
-            // count `count`; either way it's a plain JSON number.
-            val memberCount = (preview?.get("member-count") ?: preview?.get("count"))
-                ?.let { (it as? JsonPrimitive)?.content?.toIntOrNull() }
-            val summary = InviteSummary(
-                flag = flag,
-                inviter = inviter,
-                title = metaStr("title"),
-                description = metaStr("description"),
-                image = metaStr("image"),
-                cover = metaStr("cover"),
-                memberCount = memberCount,
-                privacy = preview?.get("privacy").asStr()?.takeIf { it.isNotBlank() },
-                failed = progress == "error",
-                hostAnswered = progress == "watch",
-            )
+            val (summary, under) = inviteOf(flag, foreign as? JsonObject ?: continue) ?: continue
             if (under) joining += summary else out += summary
         }
         _joining.value = joining.sortedBy { (it.title ?: it.flag).lowercase() }
@@ -1977,6 +1973,74 @@ class TlonChatRepo(
             out.filter { it.flag !in known }
                 .forEach { runCatching { groupInviteListener?.invoke(it) } }
         }
+    }
+
+    /**
+     * A /v1/foreigns fact: the one group that moved (groups.hoon
+     * +fi-give-update gives `(my flag^foreign ~)`), in the shape the scry
+     * gives. Applied as it is; the whole list was read again for each.
+     * A list never read, or an older ship's /gangs/updates shape, is read.
+     */
+    private suspend fun applyForeigns(payload: JsonObject) {
+        val shown = _invites.value
+        if (shown == null || (subServed["groups/v1/foreigns"] ?: 0) != 0) {
+            refreshInvites(notify = true)
+            return
+        }
+        val joined = db.groups().allGroups().mapTo(mutableSetOf()) { it.flag }
+        val out = shown.filter { it.flag !in payload }.toMutableList()
+        val joining = _joining.value.filter { it.flag !in payload }.toMutableList()
+        val fresh = mutableListOf<InviteSummary>()
+        for ((flag, foreign) in payload) {
+            if (flag in joined) continue
+            val (summary, under) = inviteOf(flag, foreign as? JsonObject ?: continue) ?: continue
+            if (under) joining += summary
+            else {
+                out += summary
+                if (shown.none { it.flag == flag }) fresh += summary
+            }
+        }
+        _joining.value = joining.sortedBy { (it.title ?: it.flag).lowercase() }
+        _invites.value = out.sortedBy { (it.title ?: it.flag).lowercase() }
+        fresh.forEach { runCatching { groupInviteListener?.invoke(it) } }
+    }
+
+    /** One group's invite or join under way, and whether it is the join; null when neither. */
+    private fun inviteOf(flag: String, f: JsonObject): Pair<InviteSummary, Boolean>? {
+        // Where the ship is with joining it: a join under way was
+        // answered already, and one that is done is a group.
+        val progress = f["progress"].asStr()
+        if (progress == "done") return null
+        val under = progress == "join" || progress == "watch"
+        // invites is an array of {from, token, valid, ...}
+        // (lib/groups-json +invite); an invite to answer needs at
+        // least one still valid.
+        val firstValid = (f["invites"] as? JsonArray).orEmpty().asSequence()
+            .mapNotNull { it as? JsonObject }
+            .firstOrNull { (it["valid"] as? JsonPrimitive)?.content == "true" }
+        if (firstValid == null && !under) return null
+        val inviter = firstValid?.get("from").asStr()
+        val preview = f["preview"] as? JsonObject
+        val meta = preview?.get("meta") as? JsonObject
+        fun metaStr(k: String) = meta?.get(k).asStr()
+            ?.takeIf { it.isNotBlank() }
+        // member-count + privacy are siblings of `meta` in the group
+        // preview (sur/groups.hoon +$preview). Older ships spell the
+        // count `count`; either way it's a plain JSON number.
+        val memberCount = (preview?.get("member-count") ?: preview?.get("count"))
+            ?.let { (it as? JsonPrimitive)?.content?.toIntOrNull() }
+        return InviteSummary(
+            flag = flag,
+            inviter = inviter,
+            title = metaStr("title"),
+            description = metaStr("description"),
+            image = metaStr("image"),
+            cover = metaStr("cover"),
+            memberCount = memberCount,
+            privacy = preview?.get("privacy").asStr()?.takeIf { it.isNotBlank() },
+            failed = progress == "error",
+            hostAnswered = progress == "watch",
+        ) to under
     }
 
     /** Accept an inbound group invite: join it, and move it to the groups being joined. */
@@ -2103,9 +2167,33 @@ class TlonChatRepo(
         if (whoms.isEmpty()) return
         kotlinx.coroutines.coroutineScope {
             whoms.forEach { whom ->
-                launch { runCatching { markRead(whom) } }
+                // Asked for: told whatever the local count says.
+                launch { runCatching { markRead(whom, force = true) } }
             }
         }
+    }
+
+    /** Reads waiting for the chat or thread in view, by whom or whom#parent. */
+    private val readSoon = ConcurrentMap<String, Job>()
+
+    /**
+     * Read [key] soon, once for whatever arrives meanwhile: a busy channel
+     * open on screen poked the ship once per message, three events each.
+     */
+    private fun markReadSoon(key: String, read: suspend () -> Unit) {
+        if (readSoon[key]?.isActive == true) return
+        readSoon[key] = scope.launch {
+            delay(FOCUSED_READ_EVERY_MS)
+            readSoon.remove(key)
+            runCatching { read() }
+        }
+    }
+
+    /** The read waiting for [key], sent now, if one is. */
+    private fun flushReadSoon(key: String, read: suspend () -> Unit) {
+        val waiting = readSoon.remove(key) ?: return
+        waiting.cancel()
+        scope.launch { runCatching { read() } }
     }
 
     /**
@@ -2433,6 +2521,21 @@ class TlonChatRepo(
         return db.messages().getOne(nest, replyDa.replace(".", ""))
     }
 
+    /** Conversations read on opening since this connect; the stream keeps them current after. */
+    private val readOnOpen = ConcurrentMap<String, Boolean>()
+
+    /**
+     * A conversation read as it opens: its newest [OPEN_READ_COUNT], once a
+     * connect. It read 500 on every open, a reopen seconds later with the
+     * stream live included, and rewrote them all; scrolling back loads the
+     * rest page by page, and a reconnect's catch-up covers a gap.
+     */
+    suspend fun refreshOnOpen(whom: String) {
+        if (readOnOpen[whom] == true) return
+        refreshConversation(whom, count = OPEN_READ_COUNT)
+        readOnOpen[whom] = true
+    }
+
     /**
      * Fill holes in a conversation by re-fetching the last `count` posts
      * ending at the current newest known post. Uses the same older-than-
@@ -2497,7 +2600,7 @@ class TlonChatRepo(
             }
         }
 
-        val probe = scryFirstMatching(ch, app, paths, label = "refreshConversation($whom)")
+        val probe = scryFirstMatching(ch, app, paths, label = "refreshConversation($whom)", memo = "$app/$postsKey")
         val obj = probe as? JsonObject ?: error("the ship did not send $whom")
         val posts = obj[postsKey] as? JsonObject
         if (posts == null) {
@@ -2582,7 +2685,7 @@ class TlonChatRepo(
             else -> return false
         }
 
-        val body = scryFirstMatching(ch, app, paths, label = "loadOlder $whom") as? JsonObject
+        val body = scryFirstMatching(ch, app, paths, label = "loadOlder $whom", memo = "$app/$postsKey") as? JsonObject
             ?: error("the ship did not send older messages of $whom")
 
         val posts = body[postsKey] as? JsonObject
@@ -3443,12 +3546,11 @@ class TlonChatRepo(
         // %groups /v1/foreigns (foreigns-1) or, on an older ship,
         // /gangs/updates: a bare map of flag → that group's invites,
         // preview and join progress. Someone invited us, or a join moved.
-        // Re-scry the foreign list (cheap, and rare) to refresh the badge
-        // + list, and toast the new ones.
+        // Applied to the badge and list, and the new ones toasted.
         if (looksLikeGangsFact(payload)) {
             scope.launch {
-                runCatching { refreshInvites(notify = true) }
-                    .onFailure { Log.w(TAG, "refreshInvites on gang update failed", it) }
+                runCatching { applyForeigns(payload) }
+                    .onFailure { Log.w(TAG, "invites on gang update failed", it) }
             }
             return
         }
@@ -3799,7 +3901,7 @@ class TlonChatRepo(
                 // suppression hid it from us but not from anyone else.
                 if (row.whom == focused) {
                     if (row.count > 0 || row.notifyCount > 0) {
-                        scope.launch { runCatching { markRead(row.whom) } }
+                        markReadSoon(row.whom) { markRead(row.whom, force = true) }
                     }
                     row.copy(count = 0, notifyCount = 0)
                 } else row
@@ -3815,7 +3917,7 @@ class TlonChatRepo(
                 if (focusedThreadNow != null && row.whom == focusedThreadNow.first &&
                     row.parentPostId == focusedThreadNow.second && row.count > 0
                 ) {
-                    scope.launch { runCatching { markThreadRead(row.whom, row.parentPostId) } }
+                    markReadSoon("${row.whom}#${row.parentPostId}") { markThreadRead(row.whom, row.parentPostId, force = true) }
                     row.copy(count = 0, notifyCount = 0)
                 } else row
             }
@@ -3841,7 +3943,7 @@ class TlonChatRepo(
                         // are unreads here while we're focused, send a
                         // markRead so other clients agree.
                         if (row.count > 0 || row.notifyCount > 0) {
-                            scope.launch { runCatching { markRead(row.whom) } }
+                            markReadSoon(row.whom) { markRead(row.whom, force = true) }
                         }
                         row.copy(count = 0, notifyCount = 0)
                     } else row
@@ -3979,8 +4081,14 @@ class TlonChatRepo(
      * Poke %activity to mark a conversation read. Channels require the
      * enclosing group flag; for v1 we only mark DMs (ship / club).
      */
-    suspend fun markRead(whom: String) {
+    suspend fun markRead(whom: String, force: Boolean = false) {
         val ch = channel ?: return
+        // What the ship last said of it. Nothing unread, the poke said
+        // nothing new: it went on every open, every exit and every focus.
+        // Should the ship disagree, its next activity raises the count and
+        // the next read goes.
+        val had = db.unreads().getOne(whom)
+        val unread = force || (had != null && (had.count > 0 || had.notifyCount > 0))
 
         // Clear the badge locally immediately so the list flips the moment
         // the user enters the conversation. The server fact will confirm.
@@ -4023,6 +4131,7 @@ class TlonChatRepo(
             // A notebook may be in no group: its source says so with null.
             db.groups().channelGroupFor(whom)?.groupFlag
         } else null
+        if (!unread) return
         val source = activityReadSource(whom, groupFlag) ?: return
         pokeActivityRead(ch, whom, source)
     }
@@ -4035,8 +4144,11 @@ class TlonChatRepo(
      * the parent row; a parent we have not mirrored yet cannot be read
      * (nothing to show the user either).
      */
-    suspend fun markThreadRead(whom: String, parentPostId: String) {
+    suspend fun markThreadRead(whom: String, parentPostId: String, force: Boolean = false) {
+        val had = db.threadUnreads().getOne(whom, parentPostId)
         db.threadUnreads().deleteOne(whom, parentPostId)
+        // Nothing unread here, as the ship last said: nothing to tell it.
+        if (!force && (had == null || (had.count == 0 && had.notifyCount == 0))) return
         val ch = channel ?: return
         val isChannel = whom.startsWith("chat/") || whom.startsWith("diary/") || whom.startsWith("heap/")
         val groupFlag = if (isChannel) {
@@ -4127,6 +4239,9 @@ class TlonChatRepo(
 
     /** app + newest path → the index of the path this ship took, kept for the login. */
     private val subServed = ConcurrentMap<String, Int>()
+
+    /** Per kind of conversation read ("chat/writs"), the version and mark that answered last. */
+    private val walkServed = ConcurrentMap<String, Pair<String, String>>()
 
     private fun subFamilyOf(app: String, path: String): Pair<String, Int>? =
         subSpecs.firstOrNull { it.app == app && path in it.fallbacks }
@@ -4816,16 +4931,26 @@ class TlonChatRepo(
         app: String,
         paths: List<String>,
         label: String,
+        memo: String? = null,
     ): JsonElement? {
         val deadline = nowMs() + SCRY_PROBE_BUDGET_MS
         var lastErr: Throwable? = null
-        for (path in paths) {
+        // The version and mark that answered last time first: a ship that
+        // stopped serving the first ones was walked through them per read.
+        val served = memo?.let { walkServed[it] }
+        val order = if (served == null) paths else paths.sortedBy { p ->
+            (if (p.split('/').getOrNull(1) == served.first) 0 else 2) + (if (p.substringAfterLast('/') == served.second) 0 else 1)
+        }
+        for (path in order) {
             if (nowMs() >= deadline) {
                 Log.w(TAG, "$label: ${SCRY_PROBE_BUDGET_MS}ms budget exhausted, giving up; last err: ${lastErr?.message}")
                 return null
             }
             val attempt = io.nisfeb.talon.util.runSuspendCatching { ch.scry(app, path, SCRY_PROBE_PER_CALL_SECS) }
-            if (attempt.isSuccess) return attempt.getOrNull()
+            if (attempt.isSuccess) {
+                memo?.let { walkServed[it] = path.split('/')[1] to path.substringAfterLast('/') }
+                return attempt.getOrNull()
+            }
             val err = attempt.exceptionOrNull()
             lastErr = err
             if (isTransientNetworkError(err)) {
@@ -4838,6 +4963,15 @@ class TlonChatRepo(
     }
 
     companion object {
+        /** At most one read this often for the chat or thread in view. */
+        const val FOCUSED_READ_EVERY_MS = 3_000L
+
+        /** A stream with bytes this recently is live: eyre sends at least every ~20 s. */
+        const val STREAM_FRESH_MS = 30_000L
+
+        /** Posts read as a conversation opens. */
+        const val OPEN_READ_COUNT = 50
+
         /** The first wait before a queued write is tried again; it doubles to [MAX_DRAIN_PAUSE_MS]. */
         private const val FIRST_DRAIN_PAUSE_MS = 2_000L
         private const val MAX_DRAIN_PAUSE_MS = 60_000L

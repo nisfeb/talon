@@ -40,6 +40,9 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
      */
     fun attachUiSettings(settings: io.nisfeb.talon.ui.UiSettings, scope: kotlinx.coroutines.CoroutineScope) {}
     suspend fun bootstrap()
+
+    /** A quick reconnect's: watch the desk again, without reading it whole. */
+    suspend fun resubscribe() = bootstrap()
     suspend fun applySettingsEvent(payload: JsonObject)
 
     /**

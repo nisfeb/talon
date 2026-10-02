@@ -531,9 +531,14 @@ class SettingsSyncImpl(
         }
 
         // Subscribe for live updates from other devices.
+        resubscribe()
+        Log.i(TAG, "bootstrap done")
+    }
+
+    override suspend fun resubscribe() {
+        val ch = channel ?: return
         runCatching { ch.subscribe("settings", "/desk/$DESK") }
             .onFailure { Log.w(TAG, "subscribe failed", it) }
-        Log.i(TAG, "bootstrap done")
     }
 
     private fun JsonObject?.isNullOrEmpty(): Boolean = bucketIsMissingOrEmpty(this)
@@ -1133,10 +1138,10 @@ class SettingsSyncImpl(
     /** Read the lease for [gid] → (holder deviceId, claimedAt ms), or null
      *  if unclaimed / unreadable. */
     private suspend fun readClaim(ch: UrbitChannel, gid: String): Pair<String, Long>? {
-        val body = runCatching { ch.scry("settings", "/desk/$DESK") }.getOrNull() as? JsonObject
-        val deskMap = (body?.get("desk") as? JsonObject) ?: body
-        val claims = deskMap?.get(BUCKET_AUTOMATION_CLAIMS) as? JsonObject ?: return null
-        val obj = unwrap(claims[gid]) as? JsonObject ?: return null
+        // The one entry, not the whole desk: %settings' /x/entry/desk/bucket/key
+        // answers {"entry": value}, and 404 where there is none.
+        val body = runCatching { ch.scry("settings", "/entry/$DESK/$BUCKET_AUTOMATION_CLAIMS/$gid") }.getOrNull() as? JsonObject
+        val obj = unwrap(body?.get("entry")) as? JsonObject ?: return null
         val holder = obj["holder"].asStr()?.takeIf { it.isNotBlank() } ?: return null
         return holder to (obj["claimedAt"].asLong() ?: 0L)
     }

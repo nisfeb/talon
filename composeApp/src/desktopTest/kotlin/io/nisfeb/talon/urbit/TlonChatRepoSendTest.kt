@@ -11,6 +11,7 @@ import io.nisfeb.talon.data.ThreadUnreadEntity
 import io.nisfeb.talon.data.UnreadEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -275,6 +276,8 @@ class TlonChatRepoSendTest {
     @Test
     fun `a ship too old for activity-action-2 is told under the mark it has`() = live {
         ship.refuse = { p -> if (p.mark == "activity-action-2") "no mark activity-action-2" else null }
+        db.unreads().upsert(UnreadEntity("~bus", count = 1, notifyCount = 0, recencyMs = 1))
+        db.unreads().upsert(UnreadEntity("~nec", count = 1, notifyCount = 0, recencyMs = 1))
         repo.markRead("~bus")
         val marks = ship.pokesTo("activity").map { it.mark }
         assertEquals(listOf("activity-action-2", "activity-action"), marks)
@@ -304,6 +307,7 @@ class TlonChatRepoSendTest {
     @Test
     fun `a notebook in no group is read with a null group, and not under the old mark`() = live {
         ship.refuse = { p -> if (p.mark == "activity-action-2") "no mark activity-action-2" else null }
+        db.unreads().upsert(UnreadEntity("notes/~bus/loose", count = 1, notifyCount = 0, recencyMs = 1))
         repo.markRead("notes/~bus/loose")
         val sent = ship.pokesTo("activity")
         assertEquals(1, sent.size, "the old mark cannot name a notebook: not sent again under it")
@@ -361,4 +365,84 @@ class TlonChatRepoSendTest {
         assertEquals("Zed", db.contacts().get("~zod")?.nickname)
         assertTrue(ship.scried.none { it.startsWith("contacts/") }, "${ship.scried}")
     }
+
+    // ─── reads the ship is told of (each a poke and two events) ──────
+
+    @Test
+    fun `opening a chat with nothing unread tells the ship nothing`() = live {
+        repo.setOpenChat("~bus")
+        delay(300)
+        repo.setOpenChat(null)
+        delay(300)
+        assertTrue(ship.pokesTo("activity").isEmpty(), "opened and left with nothing new: ${ship.pokesTo("activity")}")
+    }
+
+    @Test
+    fun `messages arriving in the chat in view are read once, not once each`() = live {
+        repo.setForeground(true)
+        repo.setOpenChat("~bus")
+        repeat(5) { n ->
+            repo.applyActivityUpdate(kotlinx.serialization.json.Json.parseToJsonElement(
+                """{"activity":{"ship/~bus":{"recency":${1_000 + n},"count":${n + 1},"notify-count":0,"notify":false,"unread":{"id":"~bus/170.141.184.50$n","time":"1","count":${n + 1},"notify":false}}}}""",
+            ) as kotlinx.serialization.json.JsonObject)
+        }
+        delay(300)
+        assertTrue(ship.pokesTo("activity").isEmpty(), "paced, not sent at once")
+        kotlinx.coroutines.withTimeout(TlonChatRepo.FOCUSED_READ_EVERY_MS + 2_000) { while (ship.pokesTo("activity").isEmpty()) delay(50) }
+        delay(300)
+        assertEquals(1, ship.pokesTo("activity").size, "one read for five messages")
+    }
+
+    @Test
+    fun `leaving sends the read that was waiting, at once`() = live {
+        repo.setForeground(true)
+        repo.setOpenChat("~bus")
+        repo.applyActivityUpdate(kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"activity":{"ship/~bus":{"recency":1000,"count":1,"notify-count":0,"notify":false,"unread":{"id":"~bus/170.141.184.501","time":"1","count":1,"notify":false}}}}""",
+        ) as kotlinx.serialization.json.JsonObject)
+        repo.setOpenChat(null)
+        kotlinx.coroutines.withTimeout(1_000) { while (ship.pokesTo("activity").isEmpty()) delay(20) }
+        delay(TlonChatRepo.FOCUSED_READ_EVERY_MS + 300)
+        assertEquals(1, ship.pokesTo("activity").size, "sent on leaving, and not again when its time came")
+    }
+
+    // Every open read 500 posts, a reopen seconds later included.
+    @Test
+    fun `a chat is read as it opens once a connect, its newest fifty`() = live {
+        ship.scries["chat/v4/dm/~bus/writs/newest/50/heavy"] = """{"writs":{}}"""
+        repo.refreshOnOpen("~bus")
+        repo.refreshOnOpen("~bus")
+        assertEquals(1, ship.scried.count { it.startsWith("chat/") && "/writs/newest/" in it }, "${ship.scried}")
+        assertTrue(ship.scried.any { it.endsWith("/newest/50/heavy") })
+    }
+
+    // A screen-on and the 15-minute worker re-read every chat's recent
+    // slice and the whole activity, a healthy socket or not.
+    @Test
+    fun `a live stream is not caught up again`() = live {
+        ship.emit("""{"nothing":1}""")
+        kotlinx.coroutines.withTimeout(2_000) { while (ship.channel.streamIdleMs > 1_000) delay(20) }
+        repo.catchUp()
+        delay(500)
+        assertTrue(ship.scried.none { "init-posts" in it || it.startsWith("activity/") }, "${ship.scried}")
+    }
+
+    @Test
+    fun `a stream gone quiet is caught up`() = live {
+        repo.catchUp()
+        kotlinx.coroutines.withTimeout(3_000) { while (ship.scried.none { it.startsWith("activity/") }) delay(20) }
+    }
+
+    // A ship serving only an older version was walked through every newer
+    // one, both marks each, on every chat opened. Remembered per login.
+    @Test
+    fun `the version a ship answers a conversation on is asked first after`() = live {
+        ship.scries["chat/v3/dm/~bus/writs/newest/50/heavy"] = """{"writs":{}}"""
+        ship.scries["chat/v3/dm/~nec/writs/newest/50/heavy"] = """{"writs":{}}"""
+        repo.refreshOnOpen("~bus")
+        val before = ship.scried.size
+        repo.refreshOnOpen("~nec")
+        assertEquals(listOf("chat/v3/dm/~nec/writs/newest/50/heavy"), ship.scried.drop(before))
+    }
 }
+

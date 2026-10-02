@@ -260,5 +260,85 @@ class TlonChatRepoStartupTest {
         until("the invite") { repo.invitesFlow.value?.any { it.flag == "~bus/garden" } == true }
         assertTrue(ship.scried.none { it.startsWith("groups-ui/") && it.endsWith("/init") }, "${ship.scried}")
     }
+
+    // One PUT per event made each fact cost the ship a second event.
+    @Test
+    fun `a run of facts is acked in one request, not one each`() = started(prepare = {}) {
+        until("subscriptions") { ship.subscribed.isNotEmpty() }
+        delay(300)
+        val before = ship.acked.size
+        repeat(30) { ship.emit("""{"nothing":$it}""") }
+        until("the run acked") { ship.acked.size > before }
+        delay(500)
+        assertTrue(ship.acked.size - before <= 2, "${ship.acked.size - before} acks for 30 facts")
+    }
+
+    // One PUT per subscription was an event on the ship for each, on
+    // every connect.
+    @Test
+    fun `a connect's subscriptions go to the ship in one request`() = started(prepare = {}) {
+        // chat, channels, activity, contacts, groups, presence, DM requests, group invites
+        until("subscriptions") { ship.subscribed.size >= 8 }
+        assertEquals(8, ship.subscribePuts.first(), "the first carried them all: ${ship.subscribePuts}")
+    }
+
+    // Fifty posts from every channel, on every launch, a full store or not.
+    @Test
+    fun `a launch with recent history kept reads ten a channel, not fifty`() = runBlocking<Unit> {
+        db.messages().upsertWithMedia(db.messageMedia(), io.nisfeb.talon.data.MessageEntity("~bus", "~bus/170.141.184", "~bus", io.nisfeb.talon.util.nowMs() - 60_000, "hi", "/chat"))
+        ship.scries[init] = initPosts
+        started(prepare = {}) { repo ->
+            until("the progress bar clears") { !repo.bootstrapping.value }
+            delay(500)
+            assertTrue(ship.scried.none { "init-posts/50" in it }, "${ship.scried}")
+        }
+    }
+
+    @Test
+    fun `a first launch reads fifty a channel`() = started(prepare = { scries[init] = initPosts }) { repo ->
+        until("the deep pass") { ship.scried.any { "init-posts/50" in it } }
+    }
+
+    // A dropped stream inside a minute of the last full pass read the
+    // notebook list again, and each loop of a reconnect storm with it.
+    @Test
+    fun `a quick reconnect nobody asked for watches the notebooks without reading them`() = started(prepare = {
+        scries[init] = initPosts
+        scries["notes/v0/notebooks"] = """[{"flagName":"recipes","host":"~bus","notebook":{"title":"Recipes","id":7,"rootFolderId":8,
+            "createdBy":"~bus","createdAt":1784592399,"updatedAt":1784592399,"updatedBy":"~bus"},"visibility":"private"}]"""
+    }) { repo ->
+        until("the notebook watched") { "notes/v0/notes/~bus/recipes/stream" in ship.subscribed }
+        until("the progress bar clears") { !repo.bootstrapping.value }
+        val lists = ship.scried.count { it == "notes/v0/notebooks" }
+        val watches = ship.subscribed.count { it == "notes/v0/notes/~bus/recipes/stream" }
+        ship.endStreams()
+        until("watched again on the new channel") { ship.subscribed.count { it == "notes/v0/notes/~bus/recipes/stream" } > watches }
+        assertEquals(lists, ship.scried.count { it == "notes/v0/notebooks" }, "the list not read again")
+    }
+
+    // Each invite heard read the whole foreigns list again. The fact is
+    // the one group that moved, in the shape the scry gives.
+    @Test
+    fun `an invite heard on v1 foreigns is applied as it came, not read again`() = started(prepare = {
+        scries["groups/v1/foreigns"] = "{}"
+    }) { repo ->
+        val announced = java.util.concurrent.CopyOnWriteArrayList<String>()
+        repo.groupInviteListener = { announced += it.flag }
+        until("a first read of invites") { repo.invitesFlow.value != null }
+        val reads = ship.scried.count { it == "groups/v1/foreigns" }
+        val foreign = """{"invites":[{"flag":"~bus/garden","time":1,"from":"~bus","token":null,"note":null,"preview":null,"valid":true}],
+            "lookup":null,"preview":{"meta":{"title":"The Garden","description":"","image":"","cover":""},"member-count":3,"privacy":"secret"},
+            "progress":null,"token":null}"""
+        repo.applyEvent(kotlinx.serialization.json.Json.parseToJsonElement("""{"id":9,"response":"diff","json":{"~bus/garden":$foreign}}"""))
+        until("the invite") { repo.invitesFlow.value?.any { it.flag == "~bus/garden" && it.title == "The Garden" } == true }
+        until("its announcement") { "~bus/garden" in announced }
+        assertEquals(reads, ship.scried.count { it == "groups/v1/foreigns" }, "not read again")
+
+        // Joined: the host's answer, then done, and the invite goes.
+        val done = foreign.replace("\"progress\":null", "\"progress\":\"done\"")
+        repo.applyEvent(kotlinx.serialization.json.Json.parseToJsonElement("""{"id":10,"response":"diff","json":{"~bus/garden":$done}}"""))
+        until("the invite gone") { repo.invitesFlow.value?.none { it.flag == "~bus/garden" } == true }
+        assertEquals(1, announced.size, "announced once")
+    }
 }
 

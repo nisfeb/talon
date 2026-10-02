@@ -89,9 +89,6 @@ import io.nisfeb.talon.urbit.MediaCategory
 import kotlinx.coroutines.launch
 import io.nisfeb.talon.ai.hasModelFor
 
-/** How many times to ask a group's host whether a party line exists
- *  before giving up — same widening backoff App.kt uses. */
-private const val PEEK_ATTEMPTS = 3
 
 /** Cheap substring test — Story mention spans serialize as {"ship":"~patp"}. */
 /**
@@ -1219,7 +1216,8 @@ fun TalonApp(
                     // Foreground: a chat left open now counts as actively
                     // viewed again (gates auto-mark-read in the repo).
                     app.repo.setForeground(true)
-                    app.repo.forceReconnect()
+                    // The service keeps the socket up: reconnect only if it went quiet.
+                    app.repo.reconnectIfStale()
                     // Coming back is one of the four things that makes the
                     // mailbox ask again; a ten-minute timer alone cannot
                     // cover the moment somebody actually looks at it.
@@ -2528,23 +2526,9 @@ fun TalonApp(
                 // %trunk when the host announced never heard about it,
                 // and before this the only cure was an admin toggling
                 // the line off and on. Mirrors App.kt.
-                LaunchedEffect(groupRoom, knownInvites.keys, hostedRooms.keys) {
+                LaunchedEffect(groupRoom) {
                     val (h, n) = groupRoom ?: return@LaunchedEffect
-                    val key = "$h/$n"
-                    // A few widening attempts, then stop. One try per
-                    // group open was enough only when the host happened
-                    // to be reachable at that instant; an ames round
-                    // trip to a sleeping ship is not.
-                    var wait = 2_000L
-                    repeat(PEEK_ATTEMPTS) { attempt ->
-                        if (hostedRooms.containsKey(key)) return@LaunchedEffect
-                        if (knownInvites.containsKey(key)) return@LaunchedEffect
-                        callController?.peekRoom(h, n)
-                        if (attempt < PEEK_ATTEMPTS - 1) {
-                            kotlinx.coroutines.delay(wait)
-                            wait *= 3
-                        }
-                    }
+                    callController?.lookForLine(h, n)
                 }
                 val partyRoomHere = groupRoom?.takeIf { (h, n) ->
                     hostedRooms.containsKey("$h/$n") || knownInvites.containsKey("$h/$n")
@@ -2576,12 +2560,10 @@ fun TalonApp(
                         nameFor = { contactMap.displayName(it) },
                     )
                 }
+                // Asked once: the host announces every roster change since wire 9.
                 LaunchedEffect(partyRoomHere) {
                     val (h, n) = partyRoomHere ?: return@LaunchedEffect
-                    while (true) {
-                        callController?.occupancyOf(h, n)
-                        kotlinx.coroutines.delay(20_000)
-                    }
+                    callController?.occupancyOf(h, n)
                 }
                 val partyStateFlow = remember(partyLine) {
                     partyLine?.state

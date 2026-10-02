@@ -44,6 +44,9 @@ internal class TrunkHarness(ship: String = "~nec") {
      *  Runs on the engine's thread — keep it tiny. */
     var onPut: ((String) -> Unit)? = null
 
+    /** How long each scry takes to answer: a slow ship. */
+    @Volatile var scryDelayMs = 0L
+
     private val sse = ByteChannel(autoFlush = true)
     private val emitLock = Mutex()
     // Well clear of the request ids echoed back in poke acks.
@@ -75,8 +78,10 @@ internal class TrunkHarness(ship: String = "~nec") {
                 for (id in pokeIds) emit("""{"id":$id,"response":"poke","ok":true}""")
                 respond("", HttpStatusCode.NoContent)
             }
-            req.url.encodedPath.startsWith("/~/scry") ->
+            req.url.encodedPath.startsWith("/~/scry") -> {
+                if (scryDelayMs > 0) kotlinx.coroutines.delay(scryDelayMs)
                 respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+            }
             else -> respond(
                 sse, HttpStatusCode.OK,
                 headersOf(HttpHeaders.ContentType, "text/event-stream"),
