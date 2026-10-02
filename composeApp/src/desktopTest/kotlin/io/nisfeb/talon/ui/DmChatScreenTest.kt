@@ -16,6 +16,10 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.onFirst
+import io.nisfeb.talon.data.ChannelGroupEntity
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
@@ -53,6 +57,7 @@ class DmChatScreenTest {
         seed: suspend AppDatabase.() -> Unit = {},
         whom: String = "~bus",
         prepare: FakeShip.() -> Unit = {},
+        jumpTo: String? = null,
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-dmchat-").toFile()
@@ -74,6 +79,7 @@ class DmChatScreenTest {
                             ourPatp = "~zod", whom = whom,
                             onBack = {}, onOpenThread = { threads += it }, onOpenConversation = {},
                             onOpenImage = {}, onOpenSelfProfile = {},
+                            initialScrollMessageId = jumpTo,
                         )
                     }
                 }
@@ -388,4 +394,46 @@ class DmChatScreenTest {
         val edit = ship.pokesTo("channels").single().json.toString()
         assertTrue("\"edit\"" in edit && "170.141.184.507" in edit && "newest, fixed" in edit, edit)
     }
+
+    // ─── the window: a long chat is not read whole on every write ─────
+
+    private fun long(n: Int): suspend AppDatabase.() -> Unit = {
+        messages().upsertAll((0 until n).map { i -> msg("~bus/1701411845%03d".format(i), "~bus", "post %03d".format(i), 1_000L * (i + 1)) })
+    }
+
+    @Test
+    fun `a long chat shows its newest, and scrolling back shows the rest kept here, not asked of the ship`() = chat(seed = long(260)) { ship, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("post 259").fetchSemanticsNodes().isNotEmpty() }
+        // The first window: the newest 200 and the day's divider. At its top
+        // the rest kept here is taken in, and the ship is not asked.
+        onNode(hasScrollAction()).performScrollToIndex(200)
+        waitUntil(timeoutMillis = 5_000) { runCatching { onNode(hasScrollAction()).performScrollToIndex(260) }.isSuccess }
+        assertTrue(ship.scried.none { "/older/" in it && "/30/" in it }, "posts kept here were asked of the ship: ${ship.scried.filter { "/older/" in it }}")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("post 000").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun `a jump to a post older than the window lands on it`() = chat(seed = long(260), jumpTo = "~bus/1701411845005") { _, _ ->
+        waitUntil(timeoutMillis = 10_000) { onAllNodesWithText("post 005").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("post 005").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a pinned post older than the window is gone to from the banner`() = chat(
+        whom = "chat/~bus/general",
+        seed = {
+            messages().upsertAll((0 until 260).map { i ->
+                MessageEntity("chat/~bus/general", "1701411845%03d".format(i), "~bus", 1_000L * (i + 1), """[{"inline":["post %03d"]}]""".format(i), "/chat")
+            })
+            groups().upsertChannelGroups(listOf(ChannelGroupEntity("chat/~bus/general", "~bus/garden", pinnedPostId = "1701411845005")))
+        },
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("post 259").fetchSemanticsNodes().isNotEmpty() }
+        // The banner may show the post's words; the row itself is not drawn.
+        val before = onAllNodesWithText("post 005").fetchSemanticsNodes().size
+        onAllNodesWithContentDescription("Pinned").onFirst().performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("post 005").fetchSemanticsNodes().size > before }
+        onAllNodesWithText("Pinned message is older than what's loaded", substring = true).assertCountEquals(0)
+    }
 }
+

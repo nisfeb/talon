@@ -67,7 +67,9 @@ internal fun CharSequence.codePointAtCommon(index: Int): Int {
 
 fun String.applyEmojiSpans(): AnnotatedString {
     val text = this
-    if (text.isEmpty()) return AnnotatedString(text)
+    // Android and iOS draw colour emoji in the default family: nothing to
+    // do, and the scan and copy ran for every line of text drawn.
+    if (text.isEmpty() || !needsEmojiFontSpans) return AnnotatedString(text)
     return buildAnnotatedString {
         append(text)
         var i = 0
@@ -91,7 +93,7 @@ fun String.applyEmojiSpans(): AnnotatedString {
  */
 fun AnnotatedString.applyEmojiSpans(): AnnotatedString {
     val source = this
-    if (source.isEmpty()) return source
+    if (source.isEmpty() || !needsEmojiFontSpans) return source
     return buildAnnotatedString {
         append(source)
         var i = 0

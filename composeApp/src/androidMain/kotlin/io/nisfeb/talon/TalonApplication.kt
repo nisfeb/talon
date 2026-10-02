@@ -15,6 +15,7 @@ import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.urbit.UrbitSession
+import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -147,6 +148,11 @@ class TalonApplication : Application() {
         // Module-visible app context for the few leaf helpers that have
         // no Context of their own (e.g. saveWavFile's MediaStore write).
         talonAppContext = applicationContext
+        // The encrypted AI settings: the Keystore unwrap and the decrypt
+        // of every value ran on the main thread before the first frame.
+        // Begun here on another thread, while the rest is set up, and
+        // waited for only where they are first wanted below.
+        val aiSettingsOpening = appScope.async { io.nisfeb.talon.ai.AndroidAiSettings(this@TalonApplication) }
         // Live calls and party lines rejoin the moment the default
         // network changes (wifi to cellular), rather than when ICE
         // gives up half a minute later.
@@ -192,7 +198,7 @@ class TalonApplication : Application() {
                 }
             }
         }
-        aiSettings = io.nisfeb.talon.ai.AndroidAiSettings(this)
+        aiSettings = kotlinx.coroutines.runBlocking { aiSettingsOpening.await() }
         // uiSettings is constructed below once buildShipScoped has set
         // up the per-ship `db` field — AndroidUiSettings derives its
         // railVisibility flow from the rail_item_prefs Room table.

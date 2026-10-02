@@ -207,8 +207,8 @@ private fun NotebookCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(10.dp))
-                val excerpt = remember(post.id, post.contentJson) {
-                    plainTextExcerpt(post.id, post.contentJson, limit = 240)
+                val excerpt = remember(post.id, post.contentJson, post.searchText) {
+                    excerptOf(post, limit = 240)
                 }
                 if (excerpt.isNotBlank()) {
                     Text(
@@ -223,16 +223,25 @@ private fun NotebookCard(
     }
 }
 
-private fun plainTextExcerpt(id: String, contentJson: String, limit: Int): String {
-    val parts = StoryCache.partsFor(id, contentJson)
-    val text = parts.joinToString(" ") { p ->
-        when (p) {
-            is io.nisfeb.talon.urbit.StoryPart.Text -> p.text.text
-            else -> ""
+/**
+ * The post's words as stored for search, less the title shown above
+ * them: no story parsed for each row drawn. A row from before
+ * searchText existed is parsed, as all were.
+ */
+private fun excerptOf(post: io.nisfeb.talon.data.MessageEntity, limit: Int): String {
+    val stored = post.searchText
+    val words = if (stored == null) {
+        StoryCache.partsFor(post.id, post.contentJson).joinToString(" ") { p ->
+            if (p is io.nisfeb.talon.urbit.StoryPart.Text) p.text.text else ""
         }
-    }.replace(Regex("\\s+"), " ").trim()
+    } else {
+        post.title?.trim()?.takeIf { it.isNotEmpty() }?.let { stored.removePrefix(it) } ?: stored
+    }
+    val text = words.replace(SPACES, " ").trim()
     return if (text.length <= limit) text else text.take(limit - 1) + "…"
 }
+
+private val SPACES = Regex("\\s+")
 
 private fun formatDate(ms: Long): String = formatMonthDayYear(ms)
 

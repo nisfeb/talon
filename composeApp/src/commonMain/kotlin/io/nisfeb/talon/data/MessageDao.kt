@@ -50,8 +50,56 @@ abstract class MessageDao {
     @Upsert
     protected abstract suspend fun upsertAllRaw(messages: List<MessageEntity>)
 
+    @Query("SELECT * FROM messages WHERE whom = :whom AND id IN (:ids)")
+    protected abstract suspend fun getMany(whom: String, ids: List<String>): List<MessageEntity>
+
+    /**
+     * [messages] as they would be stored, less those stored exactly so.
+     * A page read again (a chat opened, a catch-up) rewrote every row and
+     * woke every screen watching the table, for nothing new.
+     */
+    open suspend fun changedOf(messages: List<MessageEntity>): List<MessageEntity> {
+        val incoming = messages.map { it.normalized().searchable() }
+        val stored = HashMap<Pair<String, String>, MessageEntity>(incoming.size)
+        for ((whom, rows) in incoming.groupBy { it.whom }) {
+            for (ids in rows.map { it.id }.chunked(500)) getMany(whom, ids).forEach { stored[it.whom to it.id] = it }
+        }
+        return incoming.filter { stored[it.whom to it.id] != it }
+    }
+
+    /**
+     * Rows as [changedOf] gives them, and their media, in one transaction:
+     * one commit and one wake for the screens, where each row's media was
+     * a transaction of its own.
+     */
+    @Transaction
+    open suspend fun upsertPage(media: MessageMediaDao, messages: List<MessageEntity>) {
+        upsertAllRaw(messages)
+        for (m in messages) media.replaceForMessage(m.whom, m.id, io.nisfeb.talon.urbit.MediaClassifier.extractMedia(m))
+    }
+
     @Query("UPDATE messages SET isDeleted = 1 WHERE whom = :whom AND id = :id")
     abstract suspend fun softDelete(whom: String, id: String)
+
+    /**
+     * Top-level messages in one conversation sent from [fromMs] on, oldest
+     * first: a chat's window. The whole conversation was read and its rows
+     * rebuilt on every write to the table.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE whom = :whom AND isDeleted = 0 AND parentId IS NULL AND sentMs >= :fromMs
+        ORDER BY sentMs ASC
+    """)
+    abstract fun streamFrom(whom: String, fromMs: Long): Flow<List<MessageEntity>>
+
+    /** When the top-level post [skip] after the newest was sent; null with no more kept. */
+    @Query("""
+        SELECT sentMs FROM messages
+        WHERE whom = :whom AND isDeleted = 0 AND parentId IS NULL
+        ORDER BY sentMs DESC LIMIT 1 OFFSET :skip
+    """)
+    abstract suspend fun sentMsAfterNewest(whom: String, skip: Int): Long?
 
     /** Top-level messages in one conversation, oldest first. */
     @Query("""
@@ -122,19 +170,6 @@ abstract class MessageDao {
         LIMIT :count
     """)
     abstract suspend fun latestAnyFor(whom: String, count: Int): List<MessageEntity>
-
-    /** Wall-clock of the newest non-deleted top-level message across a
-     *  set of conversations — drives the "active Nm ago" liveness line
-     *  on a group's home-list row (its channels as [whoms]). Top-level
-     *  only so it agrees with the "Most recent" ordering, which sorts
-     *  by [conversationLatest]; counting replies here put a group
-     *  labelled "1h ago" below one labelled "12h ago". Null when none
-     *  have any message. */
-    @Query("""
-        SELECT MAX(sentMs) FROM messages
-        WHERE whom IN (:whoms) AND isDeleted = 0 AND parentId IS NULL
-    """)
-    abstract fun streamLatestSentMsAcross(whoms: List<String>): Flow<Long?>
 
     /** When the newest message kept here was sent; null when none is. */
     @Query("SELECT MAX(sentMs) FROM messages")
@@ -225,8 +260,13 @@ abstract class MessageDao {
     /** Stable pagination across the entire messages table — used by
      *  the embedding indexer's backfill pass. Includes soft-deleted
      *  rows so the indexer can mark them seen and skip on re-runs. */
-    @Query("SELECT * FROM messages ORDER BY whom, id LIMIT :limit OFFSET :offset")
-    abstract suspend fun pageAll(offset: Int, limit: Int): List<MessageEntity>
+    /**
+     * Every row, [limit] at a time in key order, after ([whom], [id]) (""
+     * and "" for the first page). Found by the primary key: an OFFSET
+     * read every row before the page again, so a pass was quadratic.
+     */
+    @Query("SELECT * FROM messages WHERE (whom, id) > (:whom, :id) ORDER BY whom, id LIMIT :limit")
+    abstract suspend fun pageAfter(whom: String, id: String, limit: Int): List<MessageEntity>
 
     /**
      * Reap our own `local_*` optimistic-insert twin for a post that the
@@ -303,23 +343,20 @@ abstract class MessageDao {
 
     /**
      * Latest top-level message per conversation — drives the DM list.
-     * Correlated-subquery form picks exactly one row per whom using id
-     * as a tiebreaker when two posts share the same sentMs (which
-     * happens more often than you'd think — scry replies, bulk imports).
+     * One row per whom, id the tiebreaker when two posts share a sentMs
+     * (scry replies, bulk imports). The subquery runs once a conversation
+     * (the distinct whoms come off the index), where it ran once a
+     * message, every write. Collect [latestPerConversation], which shares
+     * one run among every screen.
      */
     @Query("""
-        SELECT m.*
-        FROM messages m
-        WHERE m.isDeleted = 0
-          AND m.parentId IS NULL
-          AND m.id = (
-              SELECT m2.id FROM messages m2
-              WHERE m2.whom = m.whom
-                AND m2.isDeleted = 0
-                AND m2.parentId IS NULL
-              ORDER BY m2.sentMs DESC, m2.id DESC
-              LIMIT 1
-          )
+        SELECT m.* FROM (SELECT DISTINCT whom FROM messages) w
+        JOIN messages m ON m.rowid = (
+            SELECT m2.rowid FROM messages m2
+            WHERE m2.whom = w.whom AND m2.parentId IS NULL AND m2.isDeleted = 0
+            ORDER BY m2.sentMs DESC, m2.id DESC
+            LIMIT 1
+        )
         ORDER BY m.sentMs DESC
     """)
     abstract fun conversationLatest(): Flow<List<MessageEntity>>

@@ -12,6 +12,8 @@ import io.nisfeb.talon.data.UnreadEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -443,6 +445,25 @@ class TlonChatRepoSendTest {
         val before = ship.scried.size
         repo.refreshOnOpen("~nec")
         assertEquals(listOf("chat/v3/dm/~nec/writs/newest/50/heavy"), ship.scried.drop(before))
+    }
+
+    // Each group row ran two queries of its own on every write; it reads
+    // the newest of its channels' newest posts from the shared list now.
+    @Test
+    fun `a group was last active when its newest channel post was sent`() = live {
+        db.groups().upsertChannelGroups(listOf(
+            io.nisfeb.talon.data.ChannelGroupEntity("chat/~bus/a", "~bus/garden"),
+            io.nisfeb.talon.data.ChannelGroupEntity("chat/~bus/b", "~bus/garden"),
+            io.nisfeb.talon.data.ChannelGroupEntity("chat/~nec/c", "~nec/shed"),
+        ))
+        db.messages().upsertAll(listOf(
+            MessageEntity("chat/~bus/a", "1", "~bus", 1_000, "[]", "/chat"),
+            MessageEntity("chat/~bus/b", "2", "~bus", 5_000, "[]", "/chat"),
+            MessageEntity("chat/~bus/b", "3", "~bus", 9_000, "[]", "/chat", parentId = "2"), // a reply
+            MessageEntity("chat/~nec/c", "4", "~nec", 7_000, "[]", "/chat"),
+        ))
+        assertEquals(5_000L, repo.groupLastActive("~bus/garden").filterNotNull().first())
+        assertEquals(7_000L, repo.groupLastActive("~nec/shed").filterNotNull().first())
     }
 }
 

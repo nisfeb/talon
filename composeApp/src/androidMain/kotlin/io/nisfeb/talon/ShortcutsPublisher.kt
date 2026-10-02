@@ -1,5 +1,6 @@
 package io.nisfeb.talon
 
+import io.nisfeb.talon.data.latestPerConversation
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.Person
@@ -7,8 +8,10 @@ import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import io.nisfeb.talon.data.AppDatabase
-import io.nisfeb.talon.ui.ContactMap
-import io.nisfeb.talon.ui.contactMapFlow
+import io.nisfeb.talon.ui.contactMap
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,26 +40,23 @@ class ShortcutsPublisher(private val context: Context, private val db: AppDataba
     fun start() {
         if (job?.isActive == true) return
         job = scope.launch {
-            combine(
-                db.messages().conversationLatest()
-                .map { rows -> rows.filterNot { it.whom.startsWith("diary/") || it.whom.startsWith("notes/") } },
-                contactMapFlow(
-                    db.contacts().stream(),
-                    db.clubs().stream(),
-                    db.groups().streamGroups(),
-                    db.groups().streamChannelGroups(),
-                ),
-            ) { conversations, contactMap -> conversations to contactMap }
-                .distinctUntilChanged { (aC, aM), (bC, bM) ->
-                    // Cheap keyed comparison — only the top-N whoms drive
-                    // shortcut identity. Re-publishing on every minor change
-                    // is noisy and rate-limited by the system.
-                    aC.take(TOP_N).map { it.whom } == bC.take(TOP_N).map { it.whom } &&
-                        aM === bM
+            // Only while the app is in sight: in the background this ran
+            // on every message the service took in, for a share sheet
+            // nobody was opening. Coming back publishes where things stand.
+            ProcessLifecycleOwner.get().lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(
+                    db.latestPerConversation()
+                        .map { rows -> rows.filterNot { it.whom.startsWith("diary/") || it.whom.startsWith("notes/") } },
+                    db.contactMap(),
+                ) { conversations, contactMap ->
+                    conversations.take(TOP_N).map { it.whom to contactMap.conversationLabel(it.whom) }
                 }
-                .collect { (conversations, contactMap) ->
-                    publish(conversations.take(TOP_N), contactMap)
-                }
+                    // What a shortcut shows: the top whoms and their names.
+                    // A new contact map came with any contact or group
+                    // change, and each republished all five.
+                    .distinctUntilChanged()
+                    .collect { publish(it) }
+            }
         }
     }
 
@@ -68,25 +68,22 @@ class ShortcutsPublisher(private val context: Context, private val db: AppDataba
         ShortcutManagerCompat.removeAllDynamicShortcuts(context)
     }
 
-    private fun publish(
-        conversations: List<io.nisfeb.talon.data.MessageEntity>,
-        contactMap: ContactMap,
-    ) {
+    /** [top] as (whom, label). */
+    private fun publish(top: List<Pair<String, String>>) {
         val icon = IconCompat.createWithResource(context, R.drawable.ic_shortcut_chat)
-        val shortcuts = conversations.map { m ->
-            val label = contactMap.conversationLabel(m.whom)
+        val shortcuts = top.map { (whom, label) ->
             val person = Person.Builder()
-                .setKey(m.whom)
+                .setKey(whom)
                 .setName(label)
                 .setImportant(true)
                 .build()
 
             val intent = Intent(context, MainActivity::class.java).apply {
                 action = Intent.ACTION_VIEW
-                putExtra(Notifications.EXTRA_OPEN_WHOM, m.whom)
+                putExtra(Notifications.EXTRA_OPEN_WHOM, whom)
             }
 
-            ShortcutInfoCompat.Builder(context, m.whom)
+            ShortcutInfoCompat.Builder(context, whom)
                 .setShortLabel(label)
                 .setLongLabel(label)
                 .setIcon(icon)

@@ -42,20 +42,19 @@ object MediaBackfillWorker {
             Log.i("MediaBackfill", "skip — message_media already populated")
             return
         }
-        var offset = 0
+        var after = "" to ""
         var totalProcessed = 0
         var totalMedia = 0
         while (true) {
-            // MessageDao.pageAll uses (offset, limit) parameter order.
-            val chunk: List<MessageEntity> = db.messages().pageAll(offset, CHUNK_SIZE)
+            val chunk: List<MessageEntity> = db.messages().pageAfter(after.first, after.second, CHUNK_SIZE)
             if (chunk.isEmpty()) break
+            after = chunk.last().whom to chunk.last().id
             val rows = chunk.flatMap { MediaClassifier.extractMedia(it) }
             if (rows.isNotEmpty()) {
                 mediaDao.insertAll(rows)
             }
             totalProcessed += chunk.size
             totalMedia += rows.size
-            offset += CHUNK_SIZE
             Log.i("MediaBackfill", "processed=$totalProcessed mediaRows=$totalMedia")
         }
         Log.i("MediaBackfill", "complete — processed=$totalProcessed mediaRows=$totalMedia")

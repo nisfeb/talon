@@ -27,10 +27,11 @@ internal suspend fun semanticSearch(
     // Heap-style top-K via sorted insertion. K is small (≤30) so a
     // sorted ArrayList is faster than overhead of a real PriorityQueue.
     val top = ArrayList<SemanticHit>(k + 1)
-    var offset = 0
+    var after = "" to ""
     while (true) {
-        val page = embeddings.page(pageSize, offset)
+        val page = embeddings.pageAfter(after.first, after.second, pageSize)
         if (page.isEmpty()) break
+        after = page.last().whom to page.last().id
         for (row in page) {
             val v = unpackEmbedding(row.vector, row.dim)
             if (v.size != queryVector.size) continue
@@ -42,7 +43,6 @@ internal suspend fun semanticSearch(
             insertTopK(top, SemanticHit(row.whom, row.id, score), k)
         }
         if (page.size < pageSize) break
-        offset += pageSize
     }
     return top
 }

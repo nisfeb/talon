@@ -12,6 +12,10 @@ import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.data.GroupEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlin.concurrent.Volatile
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.onEach
@@ -294,17 +298,23 @@ internal fun sameContactDisplay(a: List<ContactEntity>, b: List<ContactEntity>):
     return true
 }
 
+private val sharedContactMaps = io.nisfeb.talon.util.OneSlot<AppDatabase, StateFlow<ContactMap>> { db ->
+    contactMapFlow(
+        db.contacts().stream(),
+        db.clubs().stream(),
+        db.groups().streamGroups(),
+        db.groups().streamChannelGroups(),
+    ).stateIn(io.nisfeb.talon.data.sharing, SharingStarted.WhileSubscribed(5_000), LastContactMap.value)
+}
+
 /**
- * The contact map, as every screen wants it: built once per database,
- * starting from the last one anybody had rather than from none.
+ * The contact map, built once per database and shared, starting from the
+ * last one anybody had rather than from none. Each of the ~19 screens
+ * holding one ran its four queries and built its maps on every write.
  */
+fun AppDatabase.contactMap(): StateFlow<ContactMap> = sharedContactMaps.of(this)
+
+/** [contactMap], as a screen holds it: not collected while the app is out of sight. */
 @Composable
 fun rememberContactMap(db: AppDatabase): State<ContactMap> =
-    remember(db) {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(LastContactMap.value)
+    db.contactMap().collectAsStateWithLifecycle()
