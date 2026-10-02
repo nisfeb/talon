@@ -304,7 +304,7 @@ fun GalleryPostScreen(
             title = { Text("Delete post?") },
             text = { Text("This is permanent.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     confirmDelete = false
                     scope.launch {
                         runCatching { repo.delete(whom, postId) }

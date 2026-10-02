@@ -115,9 +115,9 @@ fun MailList(
             title = { Text("Delete ${chosen.size} thread${if (chosen.size == 1) "" else "s"}?") },
             text = { Text("They are deleted from your ship. This cannot be undone.") },
             confirmButton = {
-                io.nisfeb.talon.ui.TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     repo.deleteMany(chosen); picked = emptySet(); confirmingDelete = false
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Delete") }
             },
             dismissButton = { io.nisfeb.talon.ui.TextButton(onClick = { confirmingDelete = false }) { Text("Keep") } },
         )

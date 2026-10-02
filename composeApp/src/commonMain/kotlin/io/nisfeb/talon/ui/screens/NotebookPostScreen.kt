@@ -337,7 +337,7 @@ fun NotebookPostScreen(
             title = { Text("Delete post?") },
             text = { Text("This is permanent and visible to every reader.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     confirmDelete = false
                     actionError = null
                     scope.launch {

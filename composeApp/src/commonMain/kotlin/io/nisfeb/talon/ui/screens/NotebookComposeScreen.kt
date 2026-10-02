@@ -250,7 +250,7 @@ fun NotebookComposeScreen(
             title = { Text("Discard this draft?") },
             text = { Text("Your changes will be lost.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     confirmDiscard = false
                     onBack()
                 }) { Text("Discard") }

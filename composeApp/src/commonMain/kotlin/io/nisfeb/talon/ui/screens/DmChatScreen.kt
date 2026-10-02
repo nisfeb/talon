@@ -1335,29 +1335,16 @@ fun DmChatScreen(
     }
 
     confirmingDelete?.let { target ->
-        AlertDialog(
-            onDismissRequest = { confirmingDelete = null },
-            title = { Text("Delete message?") },
-            text = {
-                Text(
-                    "This will remove the message for everyone in the chat. " +
-                        "Channel admins can delete other users' messages; otherwise " +
-                        "the server only allows deleting your own.",
-                )
+        DeleteMessageDialog(
+            mine = target.author == ourPatp,
+            onDelete = {
+                confirmingDelete = null
+                scope.launch {
+                    runCatching { repo.delete(whom, target.id, target.parentId) }
+                        .onFailure { composerState.failed("delete", it) }
+                }
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    val toDelete = target
-                    confirmingDelete = null
-                    scope.launch {
-                        runCatching { repo.delete(whom, toDelete.id, toDelete.parentId) }
-                            .onFailure { composerState.failed("delete", it) }
-                    }
-                }) { Text("Delete") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingDelete = null }) { Text("Cancel") }
-            },
+            onDismiss = { confirmingDelete = null },
         )
     }
 
@@ -2850,4 +2837,22 @@ internal fun SendFailedNote() {
             color = MaterialTheme.colorScheme.error,
         )
     }
+}
+
+/**
+ * Deleting a message, said the same wherever it is asked: the chat and
+ * a thread worded it differently, and only one of them in red.
+ * Another's message is deleted as an admin, and says so.
+ */
+@Composable
+internal fun DeleteMessageDialog(mine: Boolean, onDelete: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete message?") },
+        text = { Text("It goes for everyone in the chat. This cannot be undone.") },
+        confirmButton = {
+            io.nisfeb.talon.ui.DestructiveTextButton(onClick = onDelete) { Text(if (mine) "Delete" else "Delete (admin)") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

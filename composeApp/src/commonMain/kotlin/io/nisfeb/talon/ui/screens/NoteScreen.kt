@@ -337,7 +337,7 @@ fun NoteScreen(
             title = { Text("Delete note?") },
             text = { Text("This removes it for everyone in the notebook.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     confirmDelete = false
                     actionError = null
                     scope.launch {

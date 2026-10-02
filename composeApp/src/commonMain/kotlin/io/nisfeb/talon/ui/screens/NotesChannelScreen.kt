@@ -301,7 +301,7 @@ fun NotesChannelScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     val id = target.folderId
                     deleteFolder = null
                     scope.launch { repo.notes.deleteFolder(flag, id, recursive = true) }

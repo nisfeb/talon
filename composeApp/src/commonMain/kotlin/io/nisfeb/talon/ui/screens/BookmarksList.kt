@@ -222,7 +222,7 @@ fun BookmarksList(
                 Text("This deletes the folder and removes its bookmark groupings. The bookmarks themselves stay.")
             },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     val target = f
                     confirmDeleteFolder = null
                     if (selectedFolderId == target.id) selectedFolderId = null

@@ -325,7 +325,7 @@ fun GroupAdminScreen(
             title = { Text("Kick $ship?") },
             text = { Text("They'll be removed from the group but can re-join.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     val s = ship
                     pendingKick = null
                     scope.launch {
@@ -352,7 +352,7 @@ fun GroupAdminScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     val s = ship
                     pendingBan = null
                     scope.launch {
@@ -1511,7 +1511,7 @@ private fun ChannelSettingsDialog(
             title = { Text("Delete ${c.title.ifBlank { "this channel" }}?") },
             text = { Text("It leaves the group for every member.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     confirmDelete = false
                     act({ repo.deleteChannel(flag, c.nest) }, after = onDismiss)
                 }) { Text("Delete") }

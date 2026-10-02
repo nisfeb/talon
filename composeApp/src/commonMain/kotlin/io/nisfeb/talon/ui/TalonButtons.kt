@@ -47,6 +47,25 @@ fun OutlinedButton(
     content: @Composable RowScope.() -> Unit,
 ) = androidx.compose.material3.OutlinedButton(onClick, modifier, enabled, shape, colors, elevation, border, contentPadding, interactionSource, content)
 
+/**
+ * The confirm of something that cannot be taken back (delete, remove,
+ * kick, ban, leave, discard), in the error colour: one look for every
+ * such button, where some were red and most were not.
+ */
+@Composable
+fun DestructiveTextButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit,
+) = TextButton(
+    onClick = onClick,
+    modifier = modifier,
+    enabled = enabled,
+    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+    content = content,
+)
+
 @Composable
 fun TextButton(
     onClick: () -> Unit,

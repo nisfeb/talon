@@ -271,7 +271,7 @@ fun GroupHomeScreen(
                 }
             },
             confirmButton = {
-                TextButton(
+                io.nisfeb.talon.ui.DestructiveTextButton(
                     enabled = !leaving,
                     onClick = {
                         leaving = true

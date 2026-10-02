@@ -1030,7 +1030,7 @@ private fun ConversationsTab(
             title = { Text("Delete all conversations?") },
             text = { Text("This also removes them from your ship.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     confirmClear = false
                     onClearAll()
                 }) { Text("Delete") }

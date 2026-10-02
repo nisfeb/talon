@@ -314,7 +314,7 @@ fun GalleryComposeScreen(
             title = { Text("Discard this post?") },
             text = { Text("What you've added here will be lost.") },
             confirmButton = {
-                TextButton(onClick = { confirmDiscard = false; onBack() }) { Text("Discard") }
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirmDiscard = false; onBack() }) { Text("Discard") }
             },
             dismissButton = {
                 TextButton(onClick = { confirmDiscard = false }) { Text("Keep editing") }

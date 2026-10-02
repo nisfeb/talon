@@ -514,33 +514,16 @@ fun ThreadList(
             pendingDelete = null
             return@let
         }
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("Delete this message?") },
-            text = { Text("This cannot be undone.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    val t = target
-                    pendingDelete = null
-                    scope.launch {
-                        runCatching {
-                            repo.delete(whom, t.id, parentId = t.parentId)
-                        }.onFailure {
-                            composerState.failed("delete", it)
-                        }
-                    }
-                }) {
-                    Text(
-                        if (isMine) "Delete" else "Delete (admin)",
-                        color = MaterialTheme.colorScheme.error,
-                    )
+        DeleteMessageDialog(
+            mine = isMine,
+            onDelete = {
+                pendingDelete = null
+                scope.launch {
+                    runCatching { repo.delete(whom, target.id, parentId = target.parentId) }
+                        .onFailure { composerState.failed("delete", it) }
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) {
-                    Text("Cancel")
-                }
-            },
+            onDismiss = { pendingDelete = null },
         )
     }
 

@@ -755,7 +755,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             title = { Text("Delete your Armillary account?") },
             text = { Text(deleteAccountWarning(a)) },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     confirmDelete = false
                     note = null
                     // A deletion the ship took takes this card with it; the
@@ -765,7 +765,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
                             ?.onSuccess { answer -> deleteRefusedLine(answer, a.vendor)?.let { note = it to true } }
                             ?.onFailure { note = (it.message ?: "The ship did not answer.") to true }
                     }
-                }) { Text("Delete account", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Delete account") }
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Keep it") } },
         )

@@ -423,8 +423,8 @@ fun GroupInfoPane(
                 }
             },
             confirmButton = {
-                TextButton(enabled = !leaving, onClick = {
-                    val flag = groupFlag ?: return@TextButton
+                io.nisfeb.talon.ui.DestructiveTextButton(enabled = !leaving, onClick = {
+                    val flag = groupFlag ?: return@DestructiveTextButton
                     leaving = true
                     leaveError = null
                     scope.launch {

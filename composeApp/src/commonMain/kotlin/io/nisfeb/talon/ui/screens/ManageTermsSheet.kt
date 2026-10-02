@@ -200,7 +200,7 @@ fun ManageTermsSheet(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     scope.launch { runCatching { watchwords.remove(term.id) } }
                     pendingDelete = null
                 }) { Text("Delete") }

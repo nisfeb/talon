@@ -1792,7 +1792,7 @@ fun DmListScreen(
             title = { Text("Delete '${folder.name}'?") },
             text = { Text("The conversations themselves stay; they just leave this folder.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     scope.launch {
                         repo.settingsSync?.deleteFolder(folder.id)
                     }
@@ -1958,8 +1958,8 @@ internal fun ShipSwitcherDrawer(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { confirmForget = null; onForget?.invoke(ship) }) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirmForget = null; onForget?.invoke(ship) }) {
+                    Text("Delete")
                 }
             },
             dismissButton = {
@@ -2141,8 +2141,8 @@ private fun FolderRenameDialog(
         },
         confirmButton = {
             Row {
-                TextButton(onClick = onDelete) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = onDelete) {
+                    Text("Delete")
                 }
                 Spacer(Modifier.width(8.dp))
                 TextButton(

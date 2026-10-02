@@ -475,7 +475,7 @@ fun LoopDetail(
                     title = { Text("Delete '${loop.name}'?") },
                     text = { Text("Its run history is removed too.") },
                     confirmButton = {
-                        TextButton(onClick = {
+                        io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                             confirmDelete = false
                             scope.launch {
                                 val gid = loop.gid

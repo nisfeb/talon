@@ -2386,7 +2386,7 @@ private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
             onDismissRequest = { removing = null },
             title = { Text("Remove $family?") },
             text = { Text("It goes from all your devices and from your ship. To use it again, add the file again.") },
-            confirmButton = { TextButton(onClick = { repo?.remove(family); removing = null }) { Text("Remove") } },
+            confirmButton = { io.nisfeb.talon.ui.DestructiveTextButton(onClick = { repo?.remove(family); removing = null }) { Text("Remove") } },
             dismissButton = { TextButton(onClick = { removing = null }) { Text("Keep") } },
         )
     }

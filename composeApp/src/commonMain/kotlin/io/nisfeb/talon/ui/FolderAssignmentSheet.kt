@@ -159,7 +159,7 @@ fun FolderAssignmentSheet(
                 }
             },
             confirmButton = {
-                TextButton(enabled = !leaving, onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(enabled = !leaving, onClick = {
                     leaving = true
                     leaveError = null
                     scope.launch {
@@ -169,7 +169,7 @@ fun FolderAssignmentSheet(
                         leaving = false
                     }
                 }) {
-                    Text(if (leaving) "Leaving…" else "Leave", color = MaterialTheme.colorScheme.error)
+                    Text(if (leaving) "Leaving…" else "Leave")
                 }
             },
             dismissButton = {

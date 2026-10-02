@@ -487,7 +487,7 @@ private fun ThreadActions(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { confirming = false; onDelete() }) { Text("Delete") }
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirming = false; onDelete() }) { Text("Delete") }
             },
             dismissButton = {
                 TextButton(onClick = { confirming = false }) { Text("Keep") }
