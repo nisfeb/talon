@@ -137,6 +137,30 @@ class SettingsSyncUiPrefsTest {
         settled { ui.fontSettings.value.fonts.isEmpty() }
     }
 
+    // Fonts installed through Talon were on the ship, offered nowhere
+    // else: the list's one push had gone, and a ship whose ui-prefs held
+    // other entries was never sent it again.
+    @Test
+    fun `a font list the ship never got goes up when the device connects`() = live {
+        // Installed before anything listened: its push never went.
+        ui.setFontSettings(io.nisfeb.talon.ui.FontSettings.fromJson(fontJson("aaaa1111", family = "F-aaaa1111"))!!)
+        sync.attachUiSettings(ui, watchers)
+        delay(300)
+        assertTrue(pushed("fonts").isEmpty())
+        ship.scries["settings/desk/talon"] = """{"desk":{"ui-prefs":{"power-features":${JsonPrimitive("""{"enabled":true}""")}}}}"""
+        sync.bootstrap()
+        settled { pushed("fonts").any { "aaaa1111" in it } }
+    }
+
+    @Test
+    fun `a device with no fonts sends no list`() = live {
+        sync.attachUiSettings(ui, watchers)
+        ship.scries["settings/desk/talon"] = """{"desk":{"ui-prefs":{"power-features":${JsonPrimitive("""{"enabled":true}""")}}}}"""
+        sync.bootstrap()
+        delay(300)
+        assertTrue(pushed("fonts").isEmpty(), "${ship.pokesTo("settings")}")
+    }
+
     @Test
     fun `a font list that changes nothing here is not sent back`() = live {
         watching()

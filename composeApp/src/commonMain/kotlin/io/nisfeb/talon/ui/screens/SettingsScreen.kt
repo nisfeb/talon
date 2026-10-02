@@ -2353,7 +2353,7 @@ private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
     val files = repo?.files ?: io.nisfeb.talon.ui.FontFiles.default
     Text("Font", style = MaterialTheme.typography.bodyMedium)
     Text(
-        "Set on all your devices. A font you add is kept on your ship, private to you, and your other devices fetch it.",
+        "Set on all your devices. A font you add is kept on your ship, private to you, and your other devices fetch it. A .ttf or .otf put in talon/fonts on your ship's grubbery is offered too.",
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

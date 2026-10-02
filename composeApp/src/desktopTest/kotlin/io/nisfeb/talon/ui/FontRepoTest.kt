@@ -243,4 +243,101 @@ class FontRepoTest {
         settled { here.status.value?.contains("all your devices") == true }
         assertTrue(ball.containsKey("talon/fonts/${fontId(font.readBytes())}.font"))
     }
+
+    // ─── fonts found on the ship ───────────────────────────────────
+    // A user put several fonts in talon/fonts through grubbery's page and
+    // none was offered: Talon fetched only what its synced list named.
+
+    private fun shipHas(name: String, bytes: ByteArray) {
+        dirs += "talon"; dirs += "talon/fonts"
+        ball["talon/fonts/$name"] = bytes
+    }
+
+    @Test
+    fun `a font put in talon fonts by hand is offered, here and on every device`() = runBlocking<Unit> {
+        val font = realFont ?: return@runBlocking println("no TrueType font on this machine; skipped")
+        val bytes = font.readBytes()
+        val family = readFontInfo(bytes).getOrThrow().family
+        shipHas("dejavu-sans.ttf", bytes)
+        shipHas("readme.txt", "not a font".encodeToByteArray())
+        val settings = InMemoryUiSettings()
+        val here = device("desktop", settings)
+        here.sync()
+        val listed = settings.fontSettings.value
+        assertEquals(listOf(family), listed.families, "offered")
+        assertEquals("dejavu-sans.ttf", listed.fonts.single().shipName)
+        assertTrue(here.files.has(fontId(bytes)))
+        assertTrue(asked.none { it.startsWith("PUT") }, "kept under its own name, not copied: $asked")
+        assertTrue("GET file/talon/fonts/readme.txt" !in asked, "what is not a font is not fetched")
+        // Known now: a start asks only for the list.
+        asked.clear()
+        here.sync()
+        assertEquals(listOf("GET kids/talon/fonts"), asked.toList())
+        // Another device, given the list by settings sync, fetches it by its own name.
+        val there = device("phone", InMemoryUiSettings().apply { setFontSettings(listed) })
+        there.sync()
+        assertTrue(there.files.read(fontId(bytes)).contentEquals(bytes))
+        assertNull(there.status.value)
+    }
+
+    @Test
+    fun `a font Talon put on the ship is offered where its list never arrived`() = runBlocking<Unit> {
+        val font = realFont ?: return@runBlocking println("no TrueType font on this machine; skipped")
+        val bytes = font.readBytes()
+        val id = fontId(bytes)
+        shipHas("$id.font", bytes)
+        val settings = InMemoryUiSettings()
+        device("desktop", settings).sync()
+        val f = settings.fontSettings.value.fonts.single()
+        assertEquals(id, f.id)
+        assertNull(f.shipName, "its name is Talon's own")
+    }
+
+    @Test
+    fun `a removed font left on the ship does not come back, and nothing is deleted`() = runBlocking<Unit> {
+        val font = realFont ?: return@runBlocking println("no TrueType font on this machine; skipped")
+        val bytes = font.readBytes()
+        val id = fontId(bytes)
+        shipHas("$id.font", bytes)
+        shipHas("copy.ttf", bytes)
+        val settings = InMemoryUiSettings().apply { setFontSettings(FontSettings(removed = listOf(id))) }
+        device("desktop", settings).sync()
+        assertTrue(settings.fontSettings.value.fonts.isEmpty())
+        assertTrue(ball.containsKey("talon/fonts/$id.font") && ball.containsKey("talon/fonts/copy.ttf"))
+        assertTrue(asked.none { it.startsWith("DELETE") }, "$asked")
+        assertTrue("GET file/talon/fonts/$id.font" !in asked, "a removed one by its id is not fetched")
+    }
+
+    @Test
+    fun `two files for one weight and style give one choice, and neither is removed`() = runBlocking<Unit> {
+        val font = realFont ?: return@runBlocking println("no TrueType font on this machine; skipped")
+        val bytes = font.readBytes()
+        // The same face, another file: a different build of it.
+        shipHas("a.ttf", bytes)
+        shipHas("b.ttf", bytes + byteArrayOf(0))
+        val settings = InMemoryUiSettings()
+        val here = device("desktop", settings)
+        here.sync()
+        here.sync()
+        assertEquals(1, settings.fontSettings.value.fonts.size)
+        assertTrue(settings.fontSettings.value.removed.isEmpty(), "they would take turns removing each other")
+        assertTrue(ball.containsKey("talon/fonts/a.ttf") && ball.containsKey("talon/fonts/b.ttf"))
+    }
+
+    @Test
+    fun `a font put there by hand and removed goes from the ship by its own name`() = runBlocking<Unit> {
+        val font = realFont ?: return@runBlocking println("no TrueType font on this machine; skipped")
+        val bytes = font.readBytes()
+        val family = readFontInfo(bytes).getOrThrow().family
+        shipHas("dejavu-sans.ttf", bytes)
+        val settings = InMemoryUiSettings()
+        val here = device("desktop", settings)
+        here.sync()
+        here.remove(family)
+        settled { !ball.containsKey("talon/fonts/dejavu-sans.ttf") }
+        assertEquals(listOf(fontId(bytes)), settings.fontSettings.value.removed)
+        here.sync()
+        assertTrue(settings.fontSettings.value.fonts.isEmpty(), "and does not come back")
+    }
 }
+
