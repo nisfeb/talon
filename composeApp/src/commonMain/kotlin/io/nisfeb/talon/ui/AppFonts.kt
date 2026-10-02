@@ -34,7 +34,16 @@ data class InstalledFont(
     val italic: Boolean = false,
     /** What the file was called, for the list. */
     val fileName: String = "",
-)
+    /**
+     * Its name in the ship's talon/fonts where the owner put it there
+     * themselves (grubbery's page keeps a file's own name); null for one
+     * Talon put there, as `<id>.font`.
+     */
+    val shipName: String? = null,
+) {
+    /** The file's name in the ship's talon/fonts. */
+    val shipFile: String get() = shipName ?: "$id.font"
+}
 
 /**
  * The fonts the owner installed and the one the app is set in, synced

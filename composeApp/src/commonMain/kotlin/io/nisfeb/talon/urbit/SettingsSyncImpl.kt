@@ -483,6 +483,17 @@ class SettingsSyncImpl(
                 Log.i(TAG, "ship missing ui-prefs bucket — seeding from local")
                 runCatching { pushUiPrefsFromLocal() }
                     .onFailure { Log.w(TAG, "ui-prefs seed push failed", it) }
+            } else if ((deskMap[BUCKET_UI_PREFS] as? JsonObject)?.containsKey(ENTRY_FONTS) != true) {
+                // A list that never got up (its push went while the channel
+                // was down) was not sent again: the fonts' files sat on the
+                // ship and no other device offered them. The list merges,
+                // so this device's can always go up; one with none sends
+                // nothing.
+                ui?.fontSettings?.value?.takeIf { it.fonts.isNotEmpty() || it.removed.isNotEmpty() }?.let { f ->
+                    val encoded = encodeFonts(f)
+                    noteSyncedUiPref(ENTRY_FONTS, encoded)
+                    runCatching { pokePutEntry(BUCKET_UI_PREFS, ENTRY_FONTS, encoded) }
+                }
             }
         }
 
