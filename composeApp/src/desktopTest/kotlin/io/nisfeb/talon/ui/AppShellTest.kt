@@ -52,7 +52,6 @@ class AppShellTest {
     private fun app(
         seed: suspend AppDatabase.() -> Unit = {},
         ai: FakeAiSettings = FakeAiSettings(),
-        menu: kotlinx.coroutines.flow.Flow<ShortcutAction>? = null,
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -85,7 +84,6 @@ class AppShellTest {
                             },
                             drafts = InMemoryDraftStore(),
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
-                            menuShortcuts = menu,
                         )
                     }
                 }
@@ -246,17 +244,6 @@ class AppShellTest {
         // The parent, in the chat and again at the head of its thread.
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("shall we meet").fetchSemanticsNodes().size >= 2 }
         assertTrue(onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size >= 2, "the chat's composer and the thread's, side by side")
-    }
-
-    // The shortcuts were only to be found by trying them; the desktop menu
-    // bar lists them, and a pick there runs as the key does.
-    @Test
-    fun `a shortcut picked from the menu bar runs as its key does`() {
-        val menu = kotlinx.coroutines.flow.MutableSharedFlow<ShortcutAction>(extraBufferCapacity = 1)
-        app(menu = menu) {
-            menu.tryEmit(ShortcutAction.OpenSettings)
-            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Appearance").fetchSemanticsNodes().isNotEmpty() }
-        }
     }
 }
 

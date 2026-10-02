@@ -152,8 +152,6 @@ fun App(
      * sockets die. Null means window focus is the signal (desktop).
      */
     appForeground: kotlinx.coroutines.flow.Flow<Boolean>? = null,
-    /** Shortcuts picked from the desktop menu bar, run as the keys would run them. */
-    menuShortcuts: kotlinx.coroutines.flow.Flow<io.nisfeb.talon.ui.ShortcutAction>? = null,
     /** Builds a SettingsSync bound to the per-ship db. Null on platforms
      *  without %settings sync wired. */
     createSettingsSync: ((AppDatabase) -> SettingsSync)? = null,
@@ -1699,7 +1697,7 @@ fun App(
             val rootFocusRequester = remember { FocusRequester() }
             var rootFocusLost by remember { mutableStateOf(0) }
             LaunchedEffect(rootFocusLost) { runCatching { rootFocusRequester.requestFocus() } }
-            /** A shortcut, from the keys or the desktop menu bar. Back is the Column's own. */
+            /** A shortcut from the keys. Back is the Column's own. */
             fun runShortcut(action: io.nisfeb.talon.ui.ShortcutAction) {
                 when (action) {
                     io.nisfeb.talon.ui.ShortcutAction.Back -> Unit
@@ -1725,7 +1723,6 @@ fun App(
                     }
                 }
             }
-            LaunchedEffect(menuShortcuts) { menuShortcuts?.collect { runShortcut(it) } }
             androidx.compose.foundation.layout.Column(
                 Modifier
                     .fillMaxSize()
