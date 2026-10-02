@@ -53,6 +53,16 @@ class TlonChatRepoCiteTest {
         assertTrue(sent.indexOf("cite") < sent.indexOf("agreed"), "the quote leads")
     }
 
+    // A pasted picture sent with a staged quote: one post, the quote
+    // leading, the picture, then the words written with it.
+    @Test
+    fun `a picture with a quote goes as one post, the cite first`() = live {
+        repo.sendImage("~bus", "https://cdn.test/cat.png", 400, 300, "cat.png", "look", quotedNest = nest, quotedPostId = "170141184506")
+        val sent = ship.pokesTo("chat").single().json.toString()
+        assertTrue("\"where\":\"/msg/170141184506\"" in sent && "\"src\":\"https://cdn.test/cat.png\"" in sent && "look" in sent, sent)
+        assertTrue(sent.indexOf("cite") < sent.indexOf("cat.png") && sent.indexOf("cat.png") < sent.indexOf("look"), sent)
+    }
+
     @Test
     fun `a quoted post not here is fetched, kept, and brings its reactions`() = live {
         ship.scries["channels/v5/$nest/posts/post/170.141.184.506"] =

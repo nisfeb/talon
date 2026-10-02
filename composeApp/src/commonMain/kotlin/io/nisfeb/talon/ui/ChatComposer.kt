@@ -275,6 +275,10 @@ interface ChatSendStrategy {
 
     /** Only invoked when [supportsQuote] is true. */
     suspend fun sendQuote(body: String, quoteWhom: String, quoteId: String)
+
+    /** [sendImage] with a quote leading it, in one message. Only invoked when [supportsQuote] is true. */
+    suspend fun sendImageQuote(src: String, width: Int, height: Int, alt: String, caption: String, quoteWhom: String, quoteId: String): Unit =
+        throw UnsupportedOperationException("this surface does not carry a quote")
 }
 
 @Composable
@@ -431,26 +435,31 @@ fun ChatComposer(
             state.uploading = true
             state.sendError = null
             val caption = state.draft.text.trim()
+            // A staged quote goes with them, as it does with text: left
+            // staged, the next Enter sent the quoted post again on its own.
+            val quote = state.pendingQuote
+            val quoted = quote?.takeIf { strategy.supportsQuote }
             scope.launch {
                 runCatching {
                     val hostedUrl = repo.uploadImage(pending.bytes, pending.mimeType, pending.displayName)
                     if (pending.isImage) {
                         val dims = decodeImageDimensions(pending.bytes)
-                        strategy.sendImage(
-                            src = hostedUrl,
-                            width = dims?.first ?: 0,
-                            height = dims?.second ?: 0,
-                            alt = pending.displayName,
-                            caption = caption,
-                        )
+                        val w = dims?.first ?: 0
+                        val h = dims?.second ?: 0
+                        if (quoted != null) strategy.sendImageQuote(hostedUrl, w, h, pending.displayName, caption, quoted.whom, quoted.id)
+                        else strategy.sendImage(src = hostedUrl, width = w, height = h, alt = pending.displayName, caption = caption)
                     } else {
-                        strategy.sendText(if (caption.isEmpty()) hostedUrl else "$caption\n\n$hostedUrl")
+                        val text = if (caption.isEmpty()) hostedUrl else "$caption\n\n$hostedUrl"
+                        if (quoted != null) strategy.sendQuote(text, quoted.whom, quoted.id) else strategy.sendText(text)
                     }
                     // Sent, the text with it: clear the stage and the draft
                     // so the conversation list stops advertising "Draft:".
                     // Only if the box still says what went: the box stays
                     // open during the upload, and a line typed meanwhile is
-                    // not the one that was sent.
+                    // not the one that was sent. The quote likewise, unless
+                    // another was picked meanwhile; one a surface cannot
+                    // carry is dropped, as a text send drops it.
+                    if (quote != null && state.pendingQuote?.id == quote.id) state.pendingQuote = null
                     state.pendingAttachment = null
                     if (state.draft.text.trim() == caption) {
                         state.draft = TextFieldValue("")
@@ -746,7 +755,7 @@ fun ChatComposer(
                 return@doSend true
             }
             // A staged attachment goes with whatever is written, as one
-            // message, text or none. A staged quote waits for the next.
+            // message, text or none, and with a staged quote.
             if (state.pendingAttachment != null) {
                 if (!canSend || state.uploading) return@doSend false
                 sendAttachment()
