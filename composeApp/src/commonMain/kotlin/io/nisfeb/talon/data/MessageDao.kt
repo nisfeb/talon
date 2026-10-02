@@ -303,23 +303,20 @@ abstract class MessageDao {
 
     /**
      * Latest top-level message per conversation — drives the DM list.
-     * Correlated-subquery form picks exactly one row per whom using id
-     * as a tiebreaker when two posts share the same sentMs (which
-     * happens more often than you'd think — scry replies, bulk imports).
+     * One row per whom, id the tiebreaker when two posts share a sentMs
+     * (scry replies, bulk imports). The subquery runs once a conversation
+     * (the distinct whoms come off the index), where it ran once a
+     * message, every write. Collect [latestPerConversation], which shares
+     * one run among every screen.
      */
     @Query("""
-        SELECT m.*
-        FROM messages m
-        WHERE m.isDeleted = 0
-          AND m.parentId IS NULL
-          AND m.id = (
-              SELECT m2.id FROM messages m2
-              WHERE m2.whom = m.whom
-                AND m2.isDeleted = 0
-                AND m2.parentId IS NULL
-              ORDER BY m2.sentMs DESC, m2.id DESC
-              LIMIT 1
-          )
+        SELECT m.* FROM (SELECT DISTINCT whom FROM messages) w
+        JOIN messages m ON m.rowid = (
+            SELECT m2.rowid FROM messages m2
+            WHERE m2.whom = w.whom AND m2.parentId IS NULL AND m2.isDeleted = 0
+            ORDER BY m2.sentMs DESC, m2.id DESC
+            LIMIT 1
+        )
         ORDER BY m.sentMs DESC
     """)
     abstract fun conversationLatest(): Flow<List<MessageEntity>>

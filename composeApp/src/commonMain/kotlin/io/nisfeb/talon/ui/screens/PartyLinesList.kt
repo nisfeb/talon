@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.data.latestPerConversation
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -63,7 +64,7 @@ fun PartyLinesList(
         callController?.onLine ?: MutableStateFlow(emptyMap())
     }.collectAsState()
     val live = partyLine?.state?.collectAsState()?.value as? PartyState.Live
-    val latest by remember(db) { db.messages().conversationLatest() }
+    val latest by remember(db) { db.latestPerConversation() }
         .collectAsState(initial = emptyList())
     val groups = contacts.allGroups()
     val rows = remember(rooms, invites, groups) { partyLineRows(rooms, invites, groups) }

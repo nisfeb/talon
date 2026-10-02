@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.nisfeb.talon.data.latestPerConversation
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -189,8 +191,8 @@ fun HomeScreen(
     onOpenMail: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val latest by remember(db) { db.messages().conversationLatest() }
-        .collectAsState(initial = emptyList())
+    val latest by remember(db) { db.latestPerConversation() }
+        .collectAsStateWithLifecycle(initialValue = emptyList())
     val unreads by remember(db) { db.unreads().stream() }
         .collectAsState(initial = emptyList())
 

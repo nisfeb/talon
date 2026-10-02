@@ -1,4 +1,6 @@
 package io.nisfeb.talon.ui.screens
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.nisfeb.talon.data.latestPerConversation
 import io.nisfeb.talon.ui.reorderHandle
 import kotlin.concurrent.Volatile
 import io.nisfeb.talon.util.ConcurrentMap
@@ -242,7 +244,7 @@ fun DmListScreen(
     }.collectAsState(initial = emptyList())
     val rows by remember {
         combine(
-            db.messages().conversationLatest().distinctUntilChanged(),
+            db.latestPerConversation().distinctUntilChanged(),
             db.unreads().stream().distinctUntilChanged(),
         ) { messages, unreads ->
             val unreadMap = HashMap<String, Int>(unreads.size)
@@ -260,7 +262,7 @@ fun DmListScreen(
             snap.rows = result
             result
         }.flowOn(Dispatchers.Default)
-    }.collectAsState(initial = snap.rows)
+    }.collectAsStateWithLifecycle(initialValue = snap.rows)
 
     // Mention-bearing unread rows from %activity. We collect the full
     // entities (not just counts) so the Mentions tab can render rows

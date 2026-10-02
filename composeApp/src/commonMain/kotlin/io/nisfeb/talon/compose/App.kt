@@ -1,6 +1,7 @@
 @file:OptIn(DelicateCoroutinesApi::class)
 
 package io.nisfeb.talon.compose
+import io.nisfeb.talon.data.latestPerConversation
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.ai.triagePrivateSlot
 import io.nisfeb.talon.util.ioDispatcher
@@ -1393,7 +1394,7 @@ fun App(
                 var lastSeenIds: Map<String, String> = emptyMap()
                 var seeded = false
                 kotlinx.coroutines.flow.combine(
-                    db.messages().conversationLatest(),
+                    db.latestPerConversation(),
                     db.notifyPrefs().streamAll(),
                     repo.bootstrapping,
                 ) { rows, prefs, bootstrapping ->

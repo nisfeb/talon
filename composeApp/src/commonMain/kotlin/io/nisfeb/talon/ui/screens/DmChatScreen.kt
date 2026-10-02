@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.util.formatMonthDay
 import io.nisfeb.talon.util.ConcurrentMap
@@ -286,7 +287,7 @@ fun DmChatScreen(
                 ChatRowsSnapshot.put(whom, items)
             }
             .flowOn(Dispatchers.Default)
-    }.collectAsState(initial = ChatRowsSnapshot.get(whom))
+    }.collectAsStateWithLifecycle(initialValue = ChatRowsSnapshot.get(whom))
 
     // Unread COUNT — drives the catch-me-up banner only. Captured on
     // entry; not used for the divider anymore (see dividerAnchorId).
