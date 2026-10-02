@@ -103,17 +103,29 @@ fun ProfileEditScreen(
     }
 
     LaunchedEffect(ourPatp) {
-        // Ask the ship before showing it: this screen is where an edit
-        // made in another client of the same ship would otherwise be
-        // overwritten with what Talon last saw.
+        // What is kept here at once: the form sat empty while the ship was
+        // asked, seconds on a busy one.
+        db.contacts().get(ourPatp)?.let { c ->
+            nickname = c.nickname.orEmpty()
+            status = c.status.orEmpty()
+            bio = c.bio.orEmpty()
+            avatarUrl = c.avatarUrl
+            color = c.color
+            loaded = listOf(nickname, status, bio, avatarUrl, color)
+        }
+        // Then the ship's own copy: an edit made in another client of the
+        // same ship would otherwise be saved over with what Talon last saw.
+        // It fills each field nobody has typed in since; one typed in keeps
+        // what was typed.
         runCatching { repo.refreshSelf() }
         val c = db.contacts().get(ourPatp) ?: return@LaunchedEffect
-        nickname = c.nickname.orEmpty()
-        status = c.status.orEmpty()
-        bio = c.bio.orEmpty()
-        avatarUrl = c.avatarUrl
-        color = c.color
-        loaded = listOf(nickname, status, bio, avatarUrl, color)
+        val was = loaded
+        if (nickname == was[0]) nickname = c.nickname.orEmpty()
+        if (status == was[1]) status = c.status.orEmpty()
+        if (bio == was[2]) bio = c.bio.orEmpty()
+        if (avatarUrl == was[3]) avatarUrl = c.avatarUrl
+        if (color == was[4]) color = c.color
+        loaded = listOf(c.nickname.orEmpty(), c.status.orEmpty(), c.bio.orEmpty(), c.avatarUrl, c.color)
     }
     // Back left with whatever was typed and said nothing; it asks now.
     val dirty = listOf(nickname, status, bio, avatarUrl, color) != loaded
