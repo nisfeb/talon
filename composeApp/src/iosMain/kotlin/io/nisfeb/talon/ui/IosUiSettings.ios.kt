@@ -18,5 +18,11 @@ private object IosUiSettingsStore : UiSettingsStore {
     override fun write(text: String) = IosFiles.write(FILE, text)
 }
 
+/** A JSON file in Application Support, beside ui.json. */
+internal class IosTextStore(private val file: String) : UiSettingsStore {
+    override fun read(): String? = IosFiles.read(file)
+    override fun write(text: String) = IosFiles.write(file, text)
+}
+
 fun createUiSettings(db: AppDatabase, scope: CoroutineScope): UiSettings =
     FileUiSettings(IosUiSettingsStore, db, scope)
