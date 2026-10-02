@@ -68,6 +68,18 @@ fun formatMonthDayYear(ms: Long): String = MONTH_DAY_YEAR.format(local(ms))
 /** "MMM d" — e.g. "Jul 10". */
 fun formatMonthDay(ms: Long): String = MONTH_DAY.format(local(ms))
 
+/** The 12 or 24 hour clock the owner chose (Settings, Appearance, Time), set by the platform UiSettings. */
+object ClockStyle {
+    val twentyFourHour = kotlinx.coroutines.flow.MutableStateFlow(false)
+}
+
+/** A time of day as the owner reads clocks: "13:26" or "1:26 PM". */
+fun formatClock(ms: Long, zone: TimeZone = TimeZone.currentSystemDefault()): String =
+    (if (ClockStyle.twentyFourHour.value) TIME_24 else TIME_12).format(localIn(ms, zone))
+
+/** "Jul 10 13:26" or "Jul 10 1:26 PM", as the owner reads clocks. */
+fun formatMonthDayClock(ms: Long): String = "${formatMonthDay(ms)} ${formatClock(ms)}"
+
 /** "HH:mm" — 24-hour, e.g. "13:26". */
 fun formatTime24(ms: Long): String = TIME_24.format(local(ms))
 

@@ -1,5 +1,5 @@
 package io.nisfeb.talon.ui.screens
-import io.nisfeb.talon.util.formatMonthDayTime
+import io.nisfeb.talon.util.formatMonthDayClock
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -692,7 +692,7 @@ private fun ThreadMessage(
     flashAmber: Boolean = false,
 ) {
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
-    val stamp = remember(m.sentMs) { formatMonthDayTime(m.sentMs) }
+    val stamp = remember(m.sentMs) { formatMonthDayClock(m.sentMs) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
     val grouped = remember(reactions) {
         // Normalize on read too: rows stored before we normalized on write

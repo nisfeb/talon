@@ -3,7 +3,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.util.formatMonthDay
 import kotlinx.coroutines.flow.update
-import io.nisfeb.talon.util.formatMonthDayTime
+import io.nisfeb.talon.util.formatMonthDayClock
 import io.nisfeb.talon.util.formatMonthDayYear
 import kotlin.time.Clock
 import kotlinx.datetime.DateTimeUnit
@@ -61,7 +61,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
@@ -1464,7 +1463,7 @@ fun DmChatScreen(
                                     val entries = (listOf(target) + replies).map {
                                         io.nisfeb.talon.urbit.StoryToGemtext.Entry(
                                             byline = contactMap.displayName(it.author) +
-                                                " · " + io.nisfeb.talon.util.formatMonthDayTime(it.sentMs),
+                                                " · " + io.nisfeb.talon.util.formatMonthDayClock(it.sentMs),
                                             contentJson = it.contentJson,
                                         )
                                     }
@@ -1560,7 +1559,7 @@ private fun MessageRow(
 ) {
     val m = row.m
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
-    val stamp = remember(m.sentMs) { formatMonthDayTime(m.sentMs) }
+    val stamp = remember(m.sentMs) { formatMonthDayClock(m.sentMs) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
     val avatarUrl = remember(m.author, contactMap) { contactMap.avatar(m.author) }
     val avatarColor = remember(m.author, contactMap) { contactMap.shipColor(m.author) }

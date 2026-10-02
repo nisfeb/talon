@@ -1,5 +1,5 @@
 package io.nisfeb.talon.ui.screens
-import io.nisfeb.talon.util.formatMonthDayTime
+import io.nisfeb.talon.util.formatMonthDayClock
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -189,7 +189,7 @@ private fun ActivityRow(
         }
     }
     val timestamp = remember(item.sentMs) {
-        if (item.sentMs > 0) formatMonthDayTime(item.sentMs) else ""
+        if (item.sentMs > 0) formatMonthDayClock(item.sentMs) else ""
     }
 
     Row(

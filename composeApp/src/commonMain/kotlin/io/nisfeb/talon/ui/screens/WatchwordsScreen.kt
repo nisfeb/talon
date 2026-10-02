@@ -1,5 +1,5 @@
 package io.nisfeb.talon.ui.screens
-import io.nisfeb.talon.util.formatMonthDayTime
+import io.nisfeb.talon.util.formatMonthDayClock
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -204,7 +204,7 @@ private fun HitRow(
     onClick: () -> Unit,
 ) {
     val convoLabel = remember(hit.whom, contactMap) { contactMap.conversationLabel(hit.whom) }
-    val timeLabel = remember(hit.sentMs) { formatMonthDayTime(hit.sentMs) }
+    val timeLabel = remember(hit.sentMs) { formatMonthDayClock(hit.sentMs) }
     Column(
         modifier = Modifier
             .fillMaxWidth()

@@ -1,6 +1,6 @@
 package io.nisfeb.talon.ui.screens
 import io.nisfeb.talon.ui.shipHandle
-import io.nisfeb.talon.util.formatMonthDayTime
+import io.nisfeb.talon.util.formatMonthDayClock
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
@@ -356,7 +356,7 @@ private fun ResultRow(m: MessageEntity, contactMap: ContactMap, onClick: () -> U
     }
     val title = remember(m.whom, contactMap) { contactMap.conversationLabel(m.whom) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
-    val stamp = remember(m.sentMs) { formatMonthDayTime(m.sentMs) }
+    val stamp = remember(m.sentMs) { formatMonthDayClock(m.sentMs) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -499,7 +499,7 @@ private fun ParsedFilterChips(filter: io.nisfeb.talon.ui.SearchFilter) {
     val chips = buildList {
         filter.fromShip?.let { add("from $it") }
         filter.inWhom?.let { add("in $it") }
-        filter.sinceMs?.let { add("since " + formatMonthDayTime(it)) }
+        filter.sinceMs?.let { add("since " + formatMonthDayClock(it)) }
         if (filter.hasImage) add("has image")
         if (filter.hasLink) add("has link")
     }

@@ -571,6 +571,27 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(8.dp))
 
+            // Every time shown, not only the dial's: it sat under Home's
+            // clock while the chats, search and calendar went their own way.
+            Text(
+                "Time",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = !homeTwentyFourHour,
+                    onClick = { uiSettings.setHomeTwentyFourHour(false) },
+                    label = { Text("12-hour") },
+                )
+                FilterChip(
+                    selected = homeTwentyFourHour,
+                    onClick = { uiSettings.setHomeTwentyFourHour(true) },
+                    label = { Text("24-hour") },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+
             }
             if (safeTab == SettingsTab.Home) {
             Text(
@@ -588,7 +609,7 @@ fun SettingsScreen(
                 modifier = Modifier.padding(top = 4.dp),
             )
             Text(
-                "How the dial reads out temperature and the hour. Kept on this " +
+                "How the dial reads out temperature. Kept on this " +
                     "device rather than on the ship: which units somebody reads " +
                     "is a fact about them, not about their identity.",
                 style = MaterialTheme.typography.bodySmall,
@@ -606,20 +627,8 @@ fun SettingsScreen(
                     label = { Text("Celsius") },
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = !homeTwentyFourHour,
-                    onClick = { uiSettings.setHomeTwentyFourHour(false) },
-                    label = { Text("12-hour") },
-                )
-                FilterChip(
-                    selected = homeTwentyFourHour,
-                    onClick = { uiSettings.setHomeTwentyFourHour(true) },
-                    label = { Text("24-hour") },
-                )
-            }
             Text(
-                "The place the dial uses is set on the dial itself.",
+                "The hour reads as set under Appearance, Time. The place the dial uses is set on the dial itself.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),

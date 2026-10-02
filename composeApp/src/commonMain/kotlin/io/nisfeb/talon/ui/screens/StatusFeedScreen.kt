@@ -1,7 +1,7 @@
 package io.nisfeb.talon.ui.screens
 import io.nisfeb.talon.ui.shipHandle
 import io.nisfeb.talon.util.formatMonthDay
-import io.nisfeb.talon.util.formatTime24
+import io.nisfeb.talon.util.formatClock
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
@@ -234,7 +234,7 @@ private fun formatRelative(ms: Long): String {
     return when {
         diff < 60_000L -> "now"
         diff < 3600_000L -> "${diff / 60_000L}m"
-        diff < 24 * 3600_000L -> formatTime24(ms)
+        diff < 24 * 3600_000L -> formatClock(ms)
         else -> formatMonthDay(ms)
     }
 }

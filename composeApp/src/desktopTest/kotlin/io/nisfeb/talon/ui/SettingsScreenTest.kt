@@ -36,6 +36,7 @@ import io.nisfeb.talon.urbit.FakeAiSettings
 import io.nisfeb.talon.urbit.FakeShip
 import io.nisfeb.talon.urbit.UrbitSession
 import kotlin.test.Test
+import kotlinx.datetime.toInstant
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -266,8 +267,7 @@ class SettingsScreenTest {
         settings(pinCandidates = listOf("~bus" to "Bus", "~nec" to "Nec")) {
             tap("Home")
             tap("Celsius")
-            tap("24-hour")
-            assertTrue(!ui.homeFahrenheit.value && ui.homeTwentyFourHour.value)
+            assertTrue(!ui.homeFahrenheit.value)
 
             tap("8")
             assertEquals(8, widget(HomeWidgetKind.MESSAGES).count)
@@ -279,6 +279,24 @@ class SettingsScreenTest {
             switchBeside("Chat").performClick()
             waitForIdle()
             assertTrue(!widget(HomeWidgetKind.MESSAGES).visible)
+        }
+    }
+
+    // The hour sat under Home's dial, while chats, search and the calendar
+    // each kept a clock of their own.
+    @Test
+    fun `the clock is chosen once, under Appearance, and every time shown follows it`() {
+        settings {
+            tap("Appearance")
+            tap("24-hour")
+            assertTrue(ui.homeTwentyFourHour.value)
+            val oneTwentySixPm = kotlinx.datetime.LocalDateTime(2026, 7, 10, 13, 26)
+                .toInstant(kotlinx.datetime.TimeZone.currentSystemDefault()).toEpochMilliseconds()
+            io.nisfeb.talon.util.ClockStyle.twentyFourHour.value = ui.homeTwentyFourHour.value
+            assertEquals("13:26", io.nisfeb.talon.util.formatClock(oneTwentySixPm))
+            tap("12-hour")
+            io.nisfeb.talon.util.ClockStyle.twentyFourHour.value = ui.homeTwentyFourHour.value
+            assertEquals("1:26 PM", io.nisfeb.talon.util.formatClock(oneTwentySixPm))
         }
     }
 

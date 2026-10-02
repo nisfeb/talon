@@ -5,7 +5,7 @@ import io.nisfeb.talon.ui.reorderHandle
 import kotlin.concurrent.Volatile
 import io.nisfeb.talon.util.ConcurrentMap
 import io.nisfeb.talon.util.formatMonthDay
-import io.nisfeb.talon.util.formatTime24
+import io.nisfeb.talon.util.formatClock
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -2481,7 +2481,7 @@ private const val MENTION_SCAN_LIMIT = 50
 private fun formatRelative(ms: Long): String {
     val diff = nowMs() - ms
     return when {
-        diff < 24 * 3600_000L -> formatTime24(ms)
+        diff < 24 * 3600_000L -> formatClock(ms)
         else -> formatMonthDay(ms)
     }
 }

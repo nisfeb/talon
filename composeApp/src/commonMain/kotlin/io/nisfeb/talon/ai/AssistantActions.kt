@@ -65,7 +65,7 @@ internal fun eventWhenLine(startMs: Long, endMs: Long, allDay: Boolean, zone: Ti
         return day(first) + if (days > 1) " · $days days" else " · all day"
     }
     val s = Instant.fromEpochMilliseconds(startMs).toLocalDateTime(zone)
-    return "${day(s.date)} · ${io.nisfeb.talon.util.formatTime12(startMs, zone)}–${io.nisfeb.talon.util.formatTime12(endMs, zone)}"
+    return "${day(s.date)} · ${io.nisfeb.talon.util.formatClock(startMs, zone)}–${io.nisfeb.talon.util.formatClock(endMs, zone)}"
 }
 
 private val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
