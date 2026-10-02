@@ -1697,11 +1697,16 @@ fun App(
             val rootFocusRequester = remember { FocusRequester() }
             var rootFocusLost by remember { mutableStateOf(0) }
             LaunchedEffect(rootFocusLost) { runCatching { rootFocusRequester.requestFocus() } }
+            // The owner's shortcuts over the defaults; an area a binding asks
+            // for is opened by the rail's own handler, further in (railRequest).
+            val storedKeybinds by uiSettings.keybinds.collectAsState()
+            val keybinds = remember(storedKeybinds) { io.nisfeb.talon.ui.effectiveKeybinds(storedKeybinds, isMacHost) }
+            var railRequest by remember { mutableStateOf<RailItem?>(null) }
             /** A shortcut from the keys. Back is the Column's own. */
             fun runShortcut(action: io.nisfeb.talon.ui.ShortcutAction) {
                 when (action) {
                     io.nisfeb.talon.ui.ShortcutAction.Back -> Unit
-                    io.nisfeb.talon.ui.ShortcutAction.OpenSettings -> showSettings = true
+                    is io.nisfeb.talon.ui.ShortcutAction.Open -> railRequest = action.item
                     io.nisfeb.talon.ui.ShortcutAction.NewDm -> showNewDmRequest = true
                     io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
                     io.nisfeb.talon.ui.ShortcutAction.IncreaseFontSize ->
@@ -1736,7 +1741,8 @@ fun App(
                     // first, the last opened first, by the registry that
                     // knows every one of them.
                     .onKeyEvent { event ->
-                        if (io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost) !=
+                        if (io.nisfeb.talon.ui.KeybindCapture.active) return@onKeyEvent false
+                        if (io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost, binds = keybinds) !=
                             io.nisfeb.talon.ui.ShortcutAction.Back
                         ) return@onKeyEvent false
                         when {
@@ -1751,7 +1757,9 @@ fun App(
                         true
                     }
                     .onPreviewKeyEvent { event ->
-                        val action = io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost)
+                        // Settings is taking down a new shortcut: the keys are its.
+                        if (io.nisfeb.talon.ui.KeybindCapture.active) return@onPreviewKeyEvent false
+                        val action = io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost, binds = keybinds)
                             ?: return@onPreviewKeyEvent false
                         if (action == io.nisfeb.talon.ui.ShortcutAction.Back) return@onPreviewKeyEvent false
                         runShortcut(action)
@@ -3117,6 +3125,16 @@ fun App(
                                 RailItem.Home, RailItem.Chats, RailItem.Mail, RailItem.Calendar,
                                 RailItem.Statuses, RailItem.Bookmarks, RailItem.Activity -> Unit
                             }
+                        }
+                        // An area a shortcut asked for, opened as its rail item
+                        // is; one that is gated off (no assistant model, no
+                        // Orrery) is not. A hidden one still opens, as the
+                        // overflow menu opens it.
+                        LaunchedEffect(railRequest) {
+                            val item = railRequest ?: return@LaunchedEffect
+                            railRequest = null
+                            val gated = (item == RailItem.Assistant && !assistantEnabled) || (item == RailItem.Actions && !orreryOn)
+                            if (!gated) onRailItemClicked(item)
                         }
                         val railListSlot: @Composable () -> Unit = {
                             when (activeRailTab) {

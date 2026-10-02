@@ -52,6 +52,7 @@ class AppShellTest {
     private fun app(
         seed: suspend AppDatabase.() -> Unit = {},
         ai: FakeAiSettings = FakeAiSettings(),
+        ui: UiSettings = InMemoryUiSettings(),
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -84,6 +85,7 @@ class AppShellTest {
                             },
                             drafts = InMemoryDraftStore(),
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
+                            createUiSettings = { ui },
                         )
                     }
                 }
@@ -244,6 +246,17 @@ class AppShellTest {
         // The parent, in the chat and again at the head of its thread.
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("shall we meet").fetchSemanticsNodes().size >= 2 }
         assertTrue(onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size >= 2, "the chat's composer and the thread's, side by side")
+    }
+
+    // Areas of the app get shortcuts the owner sets: pressed anywhere, the
+    // area opens as its rail item would open it.
+    @Test
+    fun `a shortcut the owner set opens its area`() {
+        val ui = InMemoryUiSettings().apply { setKeybinds(mapOf("open:Settings" to null, "open:Contacts" to null, "open:Profile" to KeyCombo("P", alt = true))) }
+        app(ui = ui) {
+            onAllNodes(androidx.compose.ui.test.isRoot())[0].performKeyInput { withKeyDown(Key.AltLeft) { pressKey(Key.P) } }
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Edit profile").fetchSemanticsNodes().isNotEmpty() }
+        }
     }
 }
 

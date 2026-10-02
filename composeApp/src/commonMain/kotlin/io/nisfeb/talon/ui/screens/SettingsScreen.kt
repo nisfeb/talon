@@ -602,17 +602,7 @@ fun SettingsScreen(
 
             // Where there is a keyboard to press them on.
             if (!io.nisfeb.talon.ui.isTouchPrimary) {
-                Text(
-                    "Keyboard shortcuts",
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-                io.nisfeb.talon.ui.shortcutList(io.nisfeb.talon.util.isMacOsHost).forEach { (keys, does) ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(keys, style = MaterialTheme.typography.bodyMedium, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, modifier = Modifier.width(150.dp))
-                        Text(does, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
+                KeybindsSection(uiSettings)
                 Spacer(Modifier.height(8.dp))
             }
 

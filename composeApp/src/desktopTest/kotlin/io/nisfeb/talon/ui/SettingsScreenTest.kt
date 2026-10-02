@@ -15,6 +15,10 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.withKeyDown
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import io.ktor.client.engine.mock.respond
@@ -452,14 +456,31 @@ class SettingsScreenTest {
         assertEquals(listOf("login qr"), did.toList())
     }
 
-    // They were found only by trying them; a menu bar was not wanted.
+    // Shortcuts are set here: click one, press its keys. A combo another
+    // action had moves, and says so; a key alone is refused.
     @Test
-    fun `the keyboard shortcuts are listed under Appearance`() {
+    fun `a shortcut is set by pressing its keys, and moves from the action that had it`() {
+        val mac = io.nisfeb.talon.util.isMacOsHost
         settings {
             tap("Appearance")
-            val (keys, does) = shortcutList(io.nisfeb.talon.util.isMacOsHost).first()
-            onAllNodesWithText("Keyboard shortcuts")[0].performScrollTo()
-            assertTrue(onAllNodesWithText(keys).fetchSemanticsNodes().isNotEmpty() && onAllNodesWithText(does).fetchSemanticsNodes().isNotEmpty())
+            val search = defaultKeybinds(mac).getValue("search").label(mac)
+            onAllNodesWithText(search)[0].performScrollTo()
+            // Mail: a key on its own is typing, and is refused.
+            onAllNodesWithText("None")[2].performScrollTo().performClick()
+            waitForIdle()
+            onAllNodesWithText("Press keys…")[0].performKeyInput { pressKey(Key.M) }
+            waitForIdle()
+            assertTrue(onAllNodesWithText("a key on its own is typing", substring = true).fetchSemanticsNodes().isNotEmpty())
+            // Search's own keys: Mail takes them, Search has none.
+            onAllNodesWithText("Press keys…")[0].performKeyInput {
+                withKeyDown(if (mac) Key.MetaLeft else Key.CtrlLeft) { pressKey(Key.K) }
+            }
+            waitForIdle()
+            assertEquals(defaultKeybinds(mac)["search"], ui.keybinds.value["open:Mail"])
+            assertTrue("search" in ui.keybinds.value && ui.keybinds.value["search"] == null)
+            assertTrue(onAllNodesWithText("was for Search", substring = true).fetchSemanticsNodes().isNotEmpty())
+            tap("Restore the defaults")
+            assertTrue(ui.keybinds.value.isEmpty())
         }
     }
 }
