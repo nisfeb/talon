@@ -20,6 +20,8 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.unit.dp
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
@@ -186,6 +188,27 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
         onNode(hasSetTextAction()).performClick() // typing in the chat
         onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Escape) }
+        waitUntil(timeoutMillis = 5_000) { showing("Select a chat to begin") }
+    }
+
+    // One Escape closed the image and the chat with it: the image took
+    // the click's focus, went with the post when the viewer replaced it,
+    // and the shell took focus back from the viewer.
+    @Test
+    fun `Escape closes an open image first, and the chat on the second`() = app(seed = {
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"block":{"image":{"src":"https://x.test/cat.png","alt":"a cat","height":300,"width":400}}}]""", "/chat"))
+    }) {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("~bus").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("~bus")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("a cat").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithContentDescription("a cat")[0].performMouseInput { click() }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Close").fetchSemanticsNodes().isNotEmpty() }
+        waitForIdle()
+        onAllNodes(androidx.compose.ui.test.isRoot())[0].performKeyInput { pressKey(Key.Escape) }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Close").fetchSemanticsNodes().isEmpty() }
+        assertTrue(!showing("Select a chat to begin"), "the chat is still open")
+        onAllNodes(androidx.compose.ui.test.isRoot())[0].performKeyInput { pressKey(Key.Escape) }
         waitUntil(timeoutMillis = 5_000) { showing("Select a chat to begin") }
     }
 
