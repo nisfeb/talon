@@ -83,13 +83,13 @@ fun GroupHomeScreen(
     }.collectAsState(initial = emptyList())
 
     var joining by remember { mutableStateOf(false) }
-    var joinError by remember { mutableStateOf<String?>(null) }
+    var joinError by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     var joinRequested by remember { mutableStateOf(false) }
 
     var menuOpen by remember { mutableStateOf(false) }
     var confirmLeave by remember { mutableStateOf(false) }
     var leaving by remember { mutableStateOf(false) }
-    var leaveError by remember { mutableStateOf<String?>(null) }
+    var leaveError by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
 
     val title = group?.title ?: flag
     val isMember = group != null
@@ -235,7 +235,7 @@ fun GroupHomeScreen(
                                 runCatching { repo.knockGroup(flag) }
                                     .onSuccess { joinRequested = true }
                                     .onFailure {
-                                        joinError = it.message ?: it::class.simpleName
+                                        joinError = io.nisfeb.talon.util.problemOf("Couldn't join the group", it)
                                     }
                                 joining = false
                             }
@@ -250,13 +250,7 @@ fun GroupHomeScreen(
                         }
                         Text("Join group")
                     }
-                    joinError?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
+                    joinError?.let { io.nisfeb.talon.ui.ProblemLine(it) }
                 }
             }
         }
@@ -273,13 +267,7 @@ fun GroupHomeScreen(
                             "You can rejoin later if it's public, or ask for a new invite.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    leaveError?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
+                    leaveError?.let { io.nisfeb.talon.ui.ProblemLine(it) }
                 }
             },
             confirmButton = {
@@ -296,7 +284,7 @@ fun GroupHomeScreen(
                                     onBack()
                                 }
                                 .onFailure {
-                                    leaveError = it.message ?: it::class.simpleName
+                                    leaveError = io.nisfeb.talon.util.problemOf("Couldn't leave the group", it)
                                     leaving = false
                                 }
                         }

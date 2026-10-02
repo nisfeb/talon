@@ -104,7 +104,7 @@ class ProfileEditScreenTest {
     fun `a save the ship refuses says so and stays`() = profile(prepare = { refuse = { if (it.app == "contacts") "not now" else null } }) {
         onNode(hasSetTextAction() and hasText("Nickname")).performTextReplacement("Zed")
         onNodeWithText("Save").performScrollTo().performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("save failed") }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Couldn't save your profile", substring = true).fetchSemanticsNodes().isNotEmpty() }
         assertTrue("back" !in did)
     }
 

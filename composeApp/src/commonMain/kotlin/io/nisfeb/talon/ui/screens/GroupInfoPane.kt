@@ -87,7 +87,7 @@ fun GroupInfoPane(
     val isPublic = group.public
     var pendingLeave by remember(whom) { mutableStateOf(false) }
     var leaving by remember(whom) { mutableStateOf(false) }
-    var leaveError by remember(whom) { mutableStateOf<String?>(null) }
+    var leaveError by remember(whom) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     var inviteOpen by remember(whom) { mutableStateOf(false) }
     var inviteShip by remember(whom) { mutableStateOf("") }
     var inviteBusy by remember(whom) { mutableStateOf(false) }
@@ -419,9 +419,7 @@ fun GroupInfoPane(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("You'll be removed from every channel in the group.")
-                    leaveError?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    }
+                    leaveError?.let { io.nisfeb.talon.ui.ProblemLine(it) }
                 }
             },
             confirmButton = {
@@ -432,7 +430,7 @@ fun GroupInfoPane(
                     scope.launch {
                         runCatching { repo.leaveGroup(flag) }
                             .onSuccess { pendingLeave = false }
-                            .onFailure { leaveError = it.message ?: it::class.simpleName }
+                            .onFailure { leaveError = io.nisfeb.talon.util.problemOf("Couldn't leave the group", it) }
                         leaving = false
                     }
                 }) { Text(if (leaving) "Leaving…" else "Leave") }

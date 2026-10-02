@@ -246,7 +246,7 @@ fun DmChatScreen(
     }
     var catchUpSummary by remember(whom) { mutableStateOf<String?>(null) }
     var catchingUp by remember(whom) { mutableStateOf(false) }
-    var catchUpError by remember(whom) { mutableStateOf<String?>(null) }
+    var catchUpError by remember(whom) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     // Latches once a summary succeeds — unreadSnapshot never clears, so
     // without this the banner reoffered (and would re-spend an AI call
     // on) the exact content the user just dismissed.
@@ -882,7 +882,7 @@ fun DmChatScreen(
                             catchUpSummary = it
                             caughtUp = true
                         }
-                            .onFailure { catchUpError = it.message ?: it::class.simpleName }
+                            .onFailure { catchUpError = io.nisfeb.talon.ai.modelProblem("Couldn't catch you up", it) }
                         catchingUp = false
                     }
                 },
@@ -1325,11 +1325,11 @@ fun DmChatScreen(
         AlertDialog(
             onDismissRequest = { catchUpError = null },
             title = { Text("Catch me up failed") },
-            text = { Text(err) },
+            text = { io.nisfeb.talon.ui.ProblemLine(err) },
             confirmButton = {
                 TextButton(onClick = { catchUpError = null }) { Text("OK") }
             },
-            dismissButton = if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(err)) ({
+            dismissButton = if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(err.line)) ({
                 TextButton(onClick = { catchUpError = null; onTopUp() }) { Text("Top up") }
             }) else null,
         )
@@ -1411,7 +1411,7 @@ fun DmChatScreen(
         }
         var publishing by remember(target.id) { mutableStateOf(false) }
         var resultUrb by remember(target.id) { mutableStateOf<String?>(null) }
-        var pubError by remember(target.id) { mutableStateOf<String?>(null) }
+        var pubError by remember(target.id) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
         AlertDialog(
             onDismissRequest = { if (!publishing) publishTarget = null },
             title = { Text(if (resultUrb != null) "Published to Lattice" else "Publish to Lattice") },
@@ -1435,10 +1435,7 @@ fun DmChatScreen(
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        pubError?.let {
-                            Text(it, color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall)
-                        }
+                        pubError?.let { io.nisfeb.talon.ui.ProblemLine(it) }
                     }
                 }
             },
@@ -1479,7 +1476,7 @@ fun DmChatScreen(
                                     )
                                 }.onSuccess { resultUrb = it }
                                     .onFailure {
-                                        pubError = "Publish failed: ${it.message ?: it::class.simpleName}"
+                                        pubError = io.nisfeb.talon.util.problemOf("Couldn't publish", it)
                                     }
                                 publishing = false
                             }

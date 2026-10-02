@@ -46,6 +46,42 @@ fun isShipSlow(t: Throwable): Boolean =
             t.message.orEmpty().let { it.startsWith("channel PUT: HTTP 5") || it.startsWith("not connected") }
         )
 
+/**
+ * A failure as the person is told it: [line] in words, the error whole in
+ * [details] behind "Copy error details", and [calm] where the ship was
+ * only slow, drawn quietly rather than in the error colour.
+ */
+data class Problem(val line: String, val details: String? = null, val calm: Boolean = false)
+
+/**
+ * [what] ("Couldn't save the channel") did not go through, said in words:
+ * a slow or unreachable ship calmly, as something to try again; a refusal
+ * as one, with the ship's reason; anything else by what it said, if that
+ * reads as a sentence. A
+ * URL, an exception's name, a raw reply or a dump never reaches the line;
+ * it is in the details.
+ */
+fun problemOf(what: String, err: Throwable): Problem {
+    val slow = isShipSlow(err)
+    val why = when {
+        slow -> "your ship is slow or out of reach. Try again when it's back."
+        // Its reason where that reads as words ("banned", "not an admin"),
+        // which is why it refused; a trace stays in the details.
+        err is io.nisfeb.talon.urbit.PokeNacked ->
+            readableReason(err.reason)?.let { "the ship refused it ($it)." } ?: "the ship refused it."
+        else -> readableReason(err.message) ?: "something went wrong."
+    }
+    return Problem("$what: $why", errorDetailsOf(err), calm = slow)
+}
+
+/** [message]'s first line when it reads as words, else null. */
+internal fun readableReason(message: String?): String? {
+    val first = message?.lineSequence()?.firstOrNull()?.trim().orEmpty()
+    val technical = first.isEmpty() || first.length > 160 ||
+        listOf("://", "Exception", "{", "<", "[url=").any { it in first }
+    return first.takeUnless { technical }
+}
+
 /** A failure whole, causes and all, for "Copy error details". */
 fun errorDetailsOf(t: Throwable): String =
     generateSequence(t) { it.cause }.take(4).joinToString("\ncaused by: ") { "${it::class.simpleName}: ${it.message}" }

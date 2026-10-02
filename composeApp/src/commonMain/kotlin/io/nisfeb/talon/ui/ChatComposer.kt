@@ -157,6 +157,13 @@ class ComposerState(initialDraftText: String) {
      * details, not in the line: "Request timeout has expired [url=…]" was
      * the line.
      */
+    /** [problem] over the composer, its error whole behind Copy error details. */
+    fun show(problem: io.nisfeb.talon.util.Problem) {
+        shownError = problem.line
+        sendErrorDetails = problem.details
+        sendErrorCalm = problem.calm
+    }
+
     fun failed(what: String, err: Throwable) {
         val slow = io.nisfeb.talon.util.isShipSlow(err)
         sendError = if (slow) {
@@ -165,7 +172,7 @@ class ComposerState(initialDraftText: String) {
             err.message
         } else {
             "$what failed: " + ((err as? io.nisfeb.talon.urbit.PokeNacked)?.let { "the ship refused it" }
-                ?: (err.message ?: err::class.simpleName).orEmpty().lineSequence().first().take(120))
+                ?: io.nisfeb.talon.util.readableReason(err.message) ?: "something went wrong")
         }
         sendErrorDetails = io.nisfeb.talon.util.errorDetailsOf(err)
         sendErrorCalm = slow
@@ -392,7 +399,7 @@ fun ChatComposer(
             picking = true
             val picked = runCatching { pickImage() }
                 .also { picking = false }
-                .onFailure { state.sendError = "couldn't read image: ${it.message ?: it::class.simpleName}" }
+                .onFailure { state.show(io.nisfeb.talon.util.problemOf("Couldn't read the image", it)) }
                 .getOrNull() ?: return@launch
             stage(picked.bytes, picked.mimeType, picked.displayName, true)
         }
@@ -404,7 +411,7 @@ fun ChatComposer(
             picking = true
             val picked = runCatching { pickAnyFile() }
                 .also { picking = false }
-                .onFailure { state.sendError = "couldn't read file: ${it.message ?: it::class.simpleName}" }
+                .onFailure { state.show(io.nisfeb.talon.util.problemOf("Couldn't read the file", it)) }
                 .getOrNull() ?: return@launch
             stage(
                 picked.bytes, picked.mimeType, picked.displayName,
@@ -1428,23 +1435,3 @@ private fun VoicePreviewRow(
     }
 }
 
-/** A line over the composer, with the error whole behind "Copy error details" where there is one. */
-@Composable
-private fun NoteLine(text: String, calm: Boolean, details: String?, onCopy: (String) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (calm) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
-            modifier = Modifier.weight(1f).padding(vertical = 4.dp),
-        )
-        if (details != null) {
-            TextButton(onClick = { onCopy(details) }) {
-                Text("Copy error details", style = MaterialTheme.typography.labelSmall)
-            }
-        }
-    }
-}

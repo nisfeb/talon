@@ -95,8 +95,11 @@ class GroupAdminListScreenTest {
         }
 
     @Test
-    fun `a list the ship will not give says it failed, rather than spinning`() = admin(prepare = { scries.remove("groups/v2/groups") }) {
+    fun `a list the ship will not give says it failed, rather than spinning, and Try again asks again`() = admin(prepare = { scries.remove("groups/v2/groups") }) { ship ->
         showing("Couldn't load groups")
+        ship.scries["groups/v2/groups"] = """{"~zod/garden":{},"~nec/book-club":{},"~bus/elsewhere":{}}"""
+        onNodeWithText("Try again").performClick()
+        showing("The Garden")
     }
 
     @Test

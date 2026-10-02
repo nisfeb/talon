@@ -160,9 +160,12 @@ class GroupInvitesScreenTest {
     }
 
     @Test
-    fun `invites the ship will not give say so rather than spinning`() = invites(prepare = { scries.remove("groups-ui/v7/init") }) {
+    fun `invites the ship will not give say so rather than spinning, and Try again asks again`() = invites(prepare = { scries.remove("groups-ui/v7/init") }) { ship ->
         waitUntil(timeoutMillis = 5_000) { shows("Couldn't load invites") }
         assertTrue(!shows("No pending invites."), "no answer is not no invites")
+        ship.scries["groups-ui/v7/init"] = init
+        onNodeWithText("Try again").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("from ~nec") }
     }
 
     @Test

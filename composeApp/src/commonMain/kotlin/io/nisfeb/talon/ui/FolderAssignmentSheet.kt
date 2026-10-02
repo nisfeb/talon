@@ -62,7 +62,7 @@ fun FolderAssignmentSheet(
     var newName by remember { mutableStateOf("") }
     var confirmLeave by remember { mutableStateOf(false) }
     var leaving by remember { mutableStateOf(false) }
-    var leaveError by remember { mutableStateOf<String?>(null) }
+    var leaveError by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     val scope = rememberCoroutineScope()
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -155,9 +155,7 @@ fun FolderAssignmentSheet(
                             "You can rejoin later if it's public, or ask for a new invite.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    leaveError?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    }
+                    leaveError?.let { ProblemLine(it) }
                 }
             },
             confirmButton = {
@@ -167,7 +165,7 @@ fun FolderAssignmentSheet(
                     scope.launch {
                         runCatching { onLeaveGroup() }
                             .onSuccess { confirmLeave = false; onDismiss() }
-                            .onFailure { leaveError = it.message ?: it::class.simpleName }
+                            .onFailure { leaveError = io.nisfeb.talon.util.problemOf("Couldn't leave the group", it) }
                         leaving = false
                     }
                 }) {

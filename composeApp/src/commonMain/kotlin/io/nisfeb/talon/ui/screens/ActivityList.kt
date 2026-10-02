@@ -68,7 +68,7 @@ fun ActivityList(
     var tab by rememberSaveable { mutableStateOf(TlonChatRepo.ActivityTab.ALL) }
     val items = cached?.forTab(tab) ?: emptyList()
     var refreshing by remember { mutableStateOf(cached == null) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<Throwable?>(null) }
     // Bumped by the error-state Retry button; re-keys the fetch effect.
     // Without it a failed first load was terminal on the desktop rail,
     // where the tab stays mounted and the effect never re-ran.
@@ -82,7 +82,7 @@ fun ActivityList(
         refreshing = true
         error = null
         runCatching { repo.fetchActivityFeed() }
-            .onFailure { error = it.message ?: it::class.simpleName }
+            .onFailure { error = it }
         refreshing = false
     }
 
@@ -125,19 +125,8 @@ fun ActivityList(
                 modifier = Modifier.padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text(
-                    "Couldn't load activity. Check your connection.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                error?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                TextButton(onClick = { retryCount++ }) { Text("Retry") }
+                io.nisfeb.talon.ui.ProblemLine(io.nisfeb.talon.util.problemOf("Couldn't load activity", error!!))
+                TextButton(onClick = { retryCount++ }) { Text("Try again") }
             }
 
             items.isEmpty() -> Text(

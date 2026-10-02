@@ -141,7 +141,8 @@ fun inviteFailure(e: Throwable): String = when {
     // asking the other ship why nothing arrived.
     e is io.nisfeb.talon.urbit.PokeUnacked ->
         "Your ship did not confirm the invite. It may still have gone: check the group's members before inviting again."
-    e !is io.nisfeb.talon.urbit.PokeNacked -> "Could not send the invite: ${e.message ?: "no answer from your ship"}"
+    e !is io.nisfeb.talon.urbit.PokeNacked ->
+        "Could not send the invite: ${io.nisfeb.talon.util.readableReason(e.message) ?: "no answer from your ship"}"
     PERMISSION.containsMatchIn(e.reason) -> "The host refused it: only admins invite to this group. (${e.reason})"
     else -> "Your ship refused the invite: ${e.reason}"
 }

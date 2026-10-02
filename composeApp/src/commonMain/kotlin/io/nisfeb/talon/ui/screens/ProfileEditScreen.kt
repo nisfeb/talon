@@ -74,7 +74,7 @@ fun ProfileEditScreen(
     var color by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
     var uploading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     var shipKeys by remember(ourPatp) { mutableStateOf<io.nisfeb.talon.ui.AzimuthRpc.Keys?>(null) }
     var keysProblem by remember(ourPatp) { mutableStateOf<String?>(null) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -125,7 +125,7 @@ fun ProfileEditScreen(
             uploading = true
             error = null
             val picked = runCatching { pickImage() }
-                .onFailure { error = "couldn't read image: ${it.message ?: it::class.simpleName}" }
+                .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't read the image", it) }
                 .getOrNull()
             if (picked == null) {
                 uploading = false
@@ -141,7 +141,7 @@ fun ProfileEditScreen(
                 }
                 avatarUrl = repo.uploadImage(picked.bytes, picked.mimeType, picked.displayName)
             }.onFailure { e ->
-                error = "avatar upload failed: ${e.message ?: e::class.simpleName}"
+                error = io.nisfeb.talon.util.problemOf("Couldn't upload the avatar", e)
             }
             uploading = false
         }
@@ -246,13 +246,7 @@ fun ProfileEditScreen(
                 )
             }
 
-            error?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
+            error?.let { io.nisfeb.talon.ui.ProblemLine(it) }
 
             Spacer(Modifier.height(8.dp))
 
@@ -271,7 +265,7 @@ fun ProfileEditScreen(
                                 color = color.orEmpty(),
                             )
                         }.onFailure { e ->
-                            error = "save failed: ${e.message ?: e::class.simpleName}"
+                            error = io.nisfeb.talon.util.problemOf("Couldn't save your profile", e)
                         }.onSuccess { onBack() }
                         saving = false
                     }

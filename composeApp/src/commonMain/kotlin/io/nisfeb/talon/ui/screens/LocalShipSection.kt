@@ -53,7 +53,7 @@ fun LocalShipSection(localShip: LocalShip) {
     val state by localShip.state.collectAsState()
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     var codeShown by remember { mutableStateOf(false) }
     var pierBytes by remember { mutableStateOf<Long?>(null) }
     var update by remember { mutableStateOf<RuntimeUpdate?>(null) }
@@ -103,7 +103,7 @@ fun LocalShipSection(localShip: LocalShip) {
                     onClick = {
                         busy = true; error = null
                         scope.launch {
-                            runCatching { localShip.stop() }.onFailure { error = it.message }
+                            runCatching { localShip.stop() }.onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't stop the ship", it) }
                             busy = false
                         }
                     },
@@ -114,7 +114,7 @@ fun LocalShipSection(localShip: LocalShip) {
                     onClick = {
                         busy = true; error = null
                         scope.launch {
-                            runCatching { localShip.start() }.onFailure { error = it.message }
+                            runCatching { localShip.start() }.onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't start the ship", it) }
                             busy = false
                         }
                     },
@@ -158,7 +158,7 @@ fun LocalShipSection(localShip: LocalShip) {
                             scope.launch {
                                 runCatching { localShip.upgradeRuntime(u.latest) }
                                     .onSuccess { update = null; checked = false }
-                                    .onFailure { error = it.message }
+                                    .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't upgrade the runtime", it) }
                                 busy = false
                             }
                         },
@@ -172,7 +172,7 @@ fun LocalShipSection(localShip: LocalShip) {
                             scope.launch {
                                 runCatching { localShip.checkRuntimeUpdate() }
                                     .onSuccess { update = it; checked = true }
-                                    .onFailure { error = "Could not check for a runtime update: ${it.message}" }
+                                    .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't check for a runtime update", it) }
                                 busy = false
                             }
                         },
@@ -195,7 +195,7 @@ fun LocalShipSection(localShip: LocalShip) {
         )
         error?.let {
             Spacer(Modifier.height(4.dp))
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            io.nisfeb.talon.ui.ProblemLine(it)
         }
 
         // ── dojo ──
