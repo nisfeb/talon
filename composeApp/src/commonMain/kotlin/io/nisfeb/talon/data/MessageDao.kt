@@ -50,6 +50,34 @@ abstract class MessageDao {
     @Upsert
     protected abstract suspend fun upsertAllRaw(messages: List<MessageEntity>)
 
+    @Query("SELECT * FROM messages WHERE whom = :whom AND id IN (:ids)")
+    protected abstract suspend fun getMany(whom: String, ids: List<String>): List<MessageEntity>
+
+    /**
+     * [messages] as they would be stored, less those stored exactly so.
+     * A page read again (a chat opened, a catch-up) rewrote every row and
+     * woke every screen watching the table, for nothing new.
+     */
+    open suspend fun changedOf(messages: List<MessageEntity>): List<MessageEntity> {
+        val incoming = messages.map { it.normalized().searchable() }
+        val stored = HashMap<Pair<String, String>, MessageEntity>(incoming.size)
+        for ((whom, rows) in incoming.groupBy { it.whom }) {
+            for (ids in rows.map { it.id }.chunked(500)) getMany(whom, ids).forEach { stored[it.whom to it.id] = it }
+        }
+        return incoming.filter { stored[it.whom to it.id] != it }
+    }
+
+    /**
+     * Rows as [changedOf] gives them, and their media, in one transaction:
+     * one commit and one wake for the screens, where each row's media was
+     * a transaction of its own.
+     */
+    @Transaction
+    open suspend fun upsertPage(media: MessageMediaDao, messages: List<MessageEntity>) {
+        upsertAllRaw(messages)
+        for (m in messages) media.replaceForMessage(m.whom, m.id, io.nisfeb.talon.urbit.MediaClassifier.extractMedia(m))
+    }
+
     @Query("UPDATE messages SET isDeleted = 1 WHERE whom = :whom AND id = :id")
     abstract suspend fun softDelete(whom: String, id: String)
 

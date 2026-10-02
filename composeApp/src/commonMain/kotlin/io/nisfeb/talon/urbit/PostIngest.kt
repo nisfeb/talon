@@ -213,24 +213,18 @@ internal suspend fun MessageDao.upsertWithMedia(
 }
 
 /**
- * Upsert a batch of messages + sync each one's media-index rows.
- * `replaceForMessage` is per-message so a partial-batch fixup can't
- * leave the index out of sync with one message but in sync with
- * another.
+ * Upsert a batch of messages + sync each one's media-index rows, in one
+ * transaction, writing only what differs from what is stored.
  */
 internal suspend fun MessageDao.upsertAllWithMedia(
     media: MessageMediaDao,
     messages: List<MessageEntity>,
 ) {
     if (messages.isEmpty()) return
-    upsertAll(messages)
-    for (m in messages) {
-        media.replaceForMessage(
-            whom = m.whom,
-            messageId = m.id,
-            rows = MediaClassifier.extractMedia(m),
-        )
-    }
+    // ponytail: an unchanged row keeps its media rows, so a MediaClassifier
+    // change reaches stored rows only through a reindex (MediaBackfillWorker).
+    val fresh = changedOf(messages)
+    if (fresh.isNotEmpty()) upsertPage(media, fresh)
 }
 
 /**
