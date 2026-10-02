@@ -27,6 +27,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -65,6 +66,13 @@ fun NoteScreen(
             Text("Not a notebook: $whom")
         }
         return
+    }
+
+    // A note is read in its notebook: see [NotesChannelScreen].
+    DisposableEffect(whom) {
+        homeSnapshotZeroUnread(whom)
+        repo.setOpenChat(whom)
+        onDispose { repo.setOpenChat(null) }
     }
 
     val scope = rememberCoroutineScope()
