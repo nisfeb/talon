@@ -81,6 +81,26 @@ abstract class MessageDao {
     @Query("UPDATE messages SET isDeleted = 1 WHERE whom = :whom AND id = :id")
     abstract suspend fun softDelete(whom: String, id: String)
 
+    /**
+     * Top-level messages in one conversation sent from [fromMs] on, oldest
+     * first: a chat's window. The whole conversation was read and its rows
+     * rebuilt on every write to the table.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE whom = :whom AND isDeleted = 0 AND parentId IS NULL AND sentMs >= :fromMs
+        ORDER BY sentMs ASC
+    """)
+    abstract fun streamFrom(whom: String, fromMs: Long): Flow<List<MessageEntity>>
+
+    /** When the top-level post [skip] after the newest was sent; null with no more kept. */
+    @Query("""
+        SELECT sentMs FROM messages
+        WHERE whom = :whom AND isDeleted = 0 AND parentId IS NULL
+        ORDER BY sentMs DESC LIMIT 1 OFFSET :skip
+    """)
+    abstract suspend fun sentMsAfterNewest(whom: String, skip: Int): Long?
+
     /** Top-level messages in one conversation, oldest first. */
     @Query("""
         SELECT * FROM messages

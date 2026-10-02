@@ -137,6 +137,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
@@ -251,10 +253,22 @@ fun DmChatScreen(
     var caughtUp by remember(whom) { mutableStateOf(false) }
     var topicsSheetOpen by remember(whom) { mutableStateOf(false) }
     val composerState = io.nisfeb.talon.ui.rememberComposerState(whom, drafts)
+    // The chat's window: its posts sent from this time on, the newest
+    // CHAT_WINDOW at first. New posts fall inside it; scrolling back and
+    // jumping to an older post move it back (see [reach]).
+    var windowFromMs by remember(whom) { mutableStateOf<Long?>(null) }
+    fun widenTo(fromMs: Long) { windowFromMs = minOf(windowFromMs ?: Long.MAX_VALUE, fromMs) }
+    /** Take in [id]'s post, if it is kept here and older than the window. */
+    suspend fun reach(id: String) { db.messages().getOne(whom, id)?.sentMs?.let(::widenTo) }
+    LaunchedEffect(whom) { widenTo(db.messages().sentMsAfterNewest(whom, CHAT_WINDOW - 1) ?: Long.MIN_VALUE) }
+    LaunchedEffect(initialScrollMessageId) { initialScrollMessageId?.let { reach(it) } }
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val rows by remember(whom) {
         var prevByMsgId: Map<String, DisplayRow> = emptyMap()
         kotlinx.coroutines.flow.combine(
-            db.messages().stream(whom).distinctUntilChanged(),
+            snapshotFlow { windowFromMs }.filterNotNull().distinctUntilChanged()
+                .flatMapLatest { from -> db.messages().streamFrom(whom, from) }
+                .distinctUntilChanged(),
             db.reactions().stream(whom).distinctUntilChanged()
                 .onStart { emit(emptyList()) },
             db.messages().streamReplyCounts(whom).distinctUntilChanged()
@@ -379,6 +393,20 @@ fun DmChatScreen(
     // for the chat they're already in (hasAnchored is already true from
     // the initial bottom-snap). Keyed on whom so a chat switch resets.
     var lastAppliedAnchor by remember(whom) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    // A post jumped to (the pin, a topic) that the window is taking in.
+    var pendingJump by remember(whom) { mutableStateOf<String?>(null) }
+    LaunchedEffect(displayRows.size, pendingJump) {
+        val id = pendingJump ?: return@LaunchedEffect
+        val idx = displayRows.indexOfFirst { it is ChatListItem.Message && it.row.m.id == id }
+        if (idx >= 0) {
+            // In the screen's scope: clearing the key below ends this effect,
+            // and a scroll run inside it went with it.
+            scope.launch { listState.animateScrollToItem(displayRows.size - 1 - idx) }
+            flashMessageId = id
+            pendingJump = null
+        }
+    }
     LaunchedEffect(displayRows.size, initialScrollMessageId, dividerResolved) {
         if (displayRows.isEmpty()) return@LaunchedEffect
         if (initialScrollMessageId != null && initialScrollMessageId != lastAppliedAnchor) {
@@ -502,6 +530,8 @@ fun DmChatScreen(
             val u = db.unreads().getOne(whom)
             unreadSnapshot = u?.count ?: 0
             dividerAnchorId = u?.firstUnreadId
+            // The first unread may be further back than the window.
+            u?.firstUnreadId?.let { reach(it) }
             dividerResolved = true
         }
         repo.setOpenChat(whom)
@@ -557,16 +587,23 @@ fun DmChatScreen(
                 !paginationExhausted
             ) {
                 paginating = true
-                // A failed page is not the bottom: the next scroll asks again.
-                runSuspendCatching { repo.loadOlder(whom) }
-                    .onSuccess { if (!it) paginationExhausted = true }
-                    .onFailure { Log.w("DmChatScreen", "older $whom failed: ${it.message}") }
+                // Older posts kept here first; the ship only past them.
+                val shown = rows.count { it is ChatListItem.Message }
+                if (db.messages().sentMsAfterNewest(whom, shown) != null) {
+                    // Up to another window of them, or all that are left.
+                    widenTo(db.messages().sentMsAfterNewest(whom, shown + CHAT_WINDOW - 1) ?: Long.MIN_VALUE)
+                } else {
+                    widenTo(Long.MIN_VALUE)
+                    // A failed page is not the bottom: the next scroll asks again.
+                    runSuspendCatching { repo.loadOlder(whom) }
+                        .onSuccess { if (!it) paginationExhausted = true }
+                        .onFailure { Log.w("DmChatScreen", "older $whom failed: ${it.message}") }
+                }
                 paginating = false
             }
         }
     }
 
-    val scope = rememberCoroutineScope()
 
     // ── message action sheet state ──
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
@@ -870,10 +907,18 @@ fun DmChatScreen(
                         scope.launch { listState.animateScrollToItem(reverseIdx) }
                         flashMessageId = pinId
                     } else {
-                        // Pinned post sits outside the loaded window —
-                        // say so instead of a dead tap.
-                        composerState.sendError =
-                            "Pinned message is older than what's loaded — scroll up to load more"
+                        // Older than the window: take it in and go there.
+                        // Not kept here at all, say so instead of a dead tap.
+                        pendingJump = pinId
+                        scope.launch {
+                            reach(pinId)
+                            kotlinx.coroutines.delay(2_000)
+                            if (pendingJump == pinId) {
+                                pendingJump = null
+                                composerState.sendError =
+                                    "Pinned message is older than what's loaded — scroll up to load more"
+                            }
+                        }
                     }
                 },
             )
@@ -1467,6 +1512,9 @@ fun DmChatScreen(
                         val reverseIdx = displayRows.size - 1 - idx
                         scope.launch { listState.scrollToItem(reverseIdx) }
                         flashMessageId = msgId
+                    } else {
+                        pendingJump = msgId
+                        scope.launch { reach(msgId) }
                     }
                 }
             },
@@ -1921,6 +1969,9 @@ private val AVATAR_SIZE = 36.dp
 private const val GROUP_GAP_MS = 5L * 60_000L
 
 private const val STORY_WARM_TAIL = 30
+
+/** Posts a chat shows at first, and adds from what is kept as it is scrolled back. */
+private const val CHAT_WINDOW = 200
 
 /**
  * Minimum unread count before the catch-me-up banner appears. Below
