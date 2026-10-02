@@ -137,14 +137,12 @@ class TlonChatRepo(
      */
     val notificationHealth: io.nisfeb.talon.notify.NotificationHealth =
         io.nisfeb.talon.notify.NotificationHealth(),
-    /** The device's "mirror watchwords to %settings" switch. */
-    watchwordsSyncEnabled: StateFlow<Boolean> = MutableStateFlow(true),
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     /**
      * Scope for fire-and-forget ship pokes (folder reorder,
-     * watchword exclude, etc.) that should complete even if the
+     * notify preferences, etc.) that should complete even if the
      * caller's composition disposes mid-flight. Common case the
      * main `scope` doesn't cover: user drags a folder, then
      * rotates the device — composition disposes, the drag
@@ -317,18 +315,9 @@ class TlonChatRepo(
      */
     @Volatile var messageListener: ((MessageEntity, Boolean) -> Unit)? = null
 
-    /** This ship's watchwords. Every live message goes past them. */
-    val watchwords by lazy {
-        io.nisfeb.talon.ai.Watchwords(db, { ourPatp }, scope, settingsSync, watchwordsSyncEnabled)
-    }
-
-    /** Called when a live message matches watchwords set to notify. */
-    @Volatile var watchwordListener: ((MessageEntity, io.nisfeb.talon.ai.WatchwordNotice) -> Unit)? = null
-
-    /** A live message from someone else: the listener, then the watchwords. */
-    private suspend fun heard(entity: MessageEntity, replyToUs: Boolean) {
+    /** A live message from someone else, to the listener. */
+    private fun heard(entity: MessageEntity, replyToUs: Boolean) {
         messageListener?.invoke(entity, replyToUs)
-        runCatching { watchwords.heard(entity) }.getOrNull()?.let { watchwordListener?.invoke(entity, it) }
     }
 
     /**
@@ -2995,7 +2984,6 @@ class TlonChatRepo(
             // we'd previously regressed by trusting it.
             db.messages().softDeleteWithMedia(db.messageMedia(), whom, postId)
             db.reactions().clearForPost(whom, postId)
-            db.watchwords().clearHitsForPost(whom, postId)
         }
         // Channel-action-2 `id` / `del` fields dejs through
         // `slav %ud`, which requires dot-grouped decimals.
@@ -3636,7 +3624,6 @@ class TlonChatRepo(
         response["del"]?.let {
             db.messages().softDeleteWithMedia(db.messageMedia(), whom, id)
             db.reactions().clearForPost(whom, id)
-            db.watchwords().clearHitsForPost(whom, id)
             return
         }
         (response["add-react"] as? JsonObject)?.let { ar ->
@@ -3680,7 +3667,6 @@ class TlonChatRepo(
         delta["del"]?.let {
             db.messages().softDeleteWithMedia(db.messageMedia(), whom, replyId)
             db.reactions().clearForPost(whom, replyId)
-            db.watchwords().clearHitsForPost(whom, replyId)
             return
         }
         (delta["add-react"] as? JsonObject)?.let { ar ->
@@ -3769,7 +3755,6 @@ class TlonChatRepo(
                 }
                 db.messages().softDeleteWithMedia(db.messageMedia(), nest, id)
                 db.reactions().clearForPost(nest, id)
-                db.watchwords().clearHitsForPost(nest, id)
             }
             is ChannelDeltaIntent.PostReactions -> {
                 db.reactions().clearForPost(nest, intent.id)
@@ -3820,7 +3805,6 @@ class TlonChatRepo(
             is ReplyIntent.Tombstone, is ReplyIntent.Deleted -> {
                 db.messages().softDeleteWithMedia(db.messageMedia(), whom, replyId)
                 db.reactions().clearForPost(whom, replyId)
-                db.watchwords().clearHitsForPost(whom, replyId)
             }
             is ReplyIntent.Reactions -> {
                 db.reactions().clearForPost(whom, replyId)
@@ -4847,7 +4831,6 @@ class TlonChatRepo(
         result.tombstones.forEach { id ->
             db.messages().softDeleteWithMedia(db.messageMedia(), whom, id)
             db.reactions().clearForPost(whom, id)
-            db.watchwords().clearHitsForPost(whom, id)
         }
     }
 

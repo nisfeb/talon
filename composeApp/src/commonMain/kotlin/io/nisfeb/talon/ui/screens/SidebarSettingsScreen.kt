@@ -224,7 +224,6 @@ private fun sidebarRowState(item: RailItem): SidebarRowState = when (item) {
     // gated on it being enabled (App.kt / the kebab's onOpenAssistant).
     RailItem.Assistant -> SidebarRowState("Assistant", null, false, false)
     RailItem.Profile -> SidebarRowState("My profile", null, false, false)
-    RailItem.Watchwords -> SidebarRowState("Watchwords", null, false, false)
     RailItem.Administration -> SidebarRowState("Administration", null, false, false)
     RailItem.Invites -> SidebarRowState("Invites", null, false, false)
     RailItem.Actions -> SidebarRowState("Actions", null, false, false)

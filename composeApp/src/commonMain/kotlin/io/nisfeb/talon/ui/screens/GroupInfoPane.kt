@@ -22,7 +22,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
@@ -185,12 +184,6 @@ fun GroupInfoPane(
 
     val notifyPref by remember(whom) { db.notifyPrefs().stream(whom) }
         .collectAsState(initial = null)
-    val excludedWhoms by remember {
-        db.watchwords().streamExcludes()
-    }.collectAsState(initial = emptyList())
-    val isExcludedFromWatchwords = remember(excludedWhoms, whom) {
-        excludedWhoms.any { it.whom == whom }
-    }
     val countsList by remember(whom) {
         db.messageMedia().streamCounts(whom)
     }.collectAsState(initial = emptyList())
@@ -237,9 +230,6 @@ fun GroupInfoPane(
             //   ALL       — every message in the channel
             //   MENTIONS  — only when our patp is referenced (default)
             //   NONE      — muted; nothing surfaces
-            // Plus a watchword-exclusion toggle so chats the user
-            // doesn't want scanned for watchword hits can opt out
-            // even when the level is ALL/MENTIONS.
             val level = levelNow
             val canMutate = repo.settingsSync != null
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -288,23 +278,6 @@ fun GroupInfoPane(
                         }
                     },
                 )
-                Spacer(Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Exclude from watchwords",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Switch(
-                        checked = isExcludedFromWatchwords,
-                        onCheckedChange = { exclude ->
-                            scope.launch { runCatching { repo.watchwords.excludeChat(whom, exclude) } }
-                        },
-                    )
-                }
             }
             HorizontalDivider()
         }

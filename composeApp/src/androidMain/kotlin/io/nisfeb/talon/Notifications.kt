@@ -28,7 +28,6 @@ object Notifications {
     const val CHANNEL_MAIL = "mail"
     const val CHANNEL_ORRERY = "orrery"
     const val CHANNEL_SYNC = "sync"
-    const val CHANNEL_WATCHWORDS = "watchwords"
     const val CHANNEL_LOOPS = "loops"
     // v2: the Ringer owns sound and vibration now, so the channel must
     // do neither. A channel's alerting cannot be changed after it is
@@ -154,19 +153,9 @@ object Notifications {
                 ).apply { description = "Proposals waiting for your answer" },
             )
         }
-        if (mgr.getNotificationChannel(CHANNEL_WATCHWORDS) == null) {
-            mgr.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_WATCHWORDS,
-                    "Watchwords",
-                    NotificationManager.IMPORTANCE_HIGH,
-                ).apply {
-                    description = "Hits on user-defined watchword terms"
-                    enableLights(true)
-                    enableVibration(true)
-                }
-            )
-        }
+        // Watchwords were taken out; their channel would stay in the
+        // phone's settings with nothing ever posted to it.
+        mgr.deleteNotificationChannel("watchwords")
         if (mgr.getNotificationChannel(CHANNEL_LOOPS) == null) {
             mgr.createNotificationChannel(
                 NotificationChannel(
@@ -458,67 +447,6 @@ object Notifications {
     }
 
     /**
-     * Watchword-hit notification. Same tap intent shape as [showMessage]
-     * but on a separate channel and tag namespace so it can be tuned
-     * independently and never collides with regular chat notifications.
-     */
-    fun showWatchwordHit(
-        context: Context,
-        whom: String,
-        postId: String?,
-        parentId: String? = null,
-        /** The ship this arrived for. A tap switches to it first. */
-        forShip: String? = null,
-        terms: List<String>,
-        label: String,
-        body: String,
-        sentMs: Long,
-    ) {
-        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
-            ?: return
-
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_OPEN_WHOM, whom)
-            if (forShip != null) putExtra(EXTRA_FOR_SHIP, forShip)
-            if (parentId != null) {
-                putExtra(EXTRA_OPEN_THREAD, parentId)
-                if (postId != null) putExtra(EXTRA_THREAD_ANCHOR, postId)
-            } else if (postId != null) {
-                putExtra(EXTRA_SCROLL_TO_MESSAGE, postId)
-            }
-        }
-        val pending = PendingIntent.getActivity(
-            context,
-            // The ship is part of the identity, as in showMessage.
-            ("watchword:" + forShip.orEmpty() + whom).hashCode(),
-            tapIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
-        val title = "${terms.joinToString(", ")} in $label"
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_WATCHWORDS)
-            .setSmallIcon(R.drawable.ic_stat_talon)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setContentIntent(pending)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setWhen(sentMs)
-            .setShowWhen(true)
-            .build()
-
-        // Tag = "watchword:<ship><whom>" so repeated hits in the same
-        // chat collapse into one row, but never collide with
-        // showMessage's row for the same chat — or with the same
-        // chat's watchword row on another ship.
-        mgr.notify("watchword:" + forShip.orEmpty() + whom, NOTIFICATION_ID, notification)
-    }
-
-    /**
      * New mail. Its own channel because mail is considered
      * correspondence and a person may reasonably want it quieter than
      * chat, or louder, without touching the other.
@@ -637,8 +565,7 @@ object Notifications {
     }
 
     /** Cancel all notifications associated with a chat — called when the
-     *  user opens the conversation. Also cancels the watchword tag for the
-     *  same chat so both notification rows disappear together.
+     *  user opens the conversation.
      *
      *  Rows are tagged with the ship they were posted for, and
      *  [forShip] is the ship the open conversation belongs to. The
@@ -650,11 +577,7 @@ object Notifications {
             ?: return
         val tagged = forShip.orEmpty() + whom
         mgr.cancel(tagged, NOTIFICATION_ID)
-        mgr.cancel("watchword:$tagged", NOTIFICATION_ID)
-        if (forShip != null) {
-            mgr.cancel(whom, NOTIFICATION_ID)
-            mgr.cancel("watchword:$whom", NOTIFICATION_ID)
-        }
+        if (forShip != null) mgr.cancel(whom, NOTIFICATION_ID)
     }
 
     private const val NOTIFICATION_ID = 1001

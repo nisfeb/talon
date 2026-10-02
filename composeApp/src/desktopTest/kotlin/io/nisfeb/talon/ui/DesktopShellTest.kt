@@ -162,7 +162,6 @@ private fun railLabel(item: RailItem): String = when (item) {
     RailItem.Activity -> "Activity"
     RailItem.Assistant -> "Assistant"
     RailItem.Profile -> "My profile"
-    RailItem.Watchwords -> "Watchwords"
     RailItem.Administration -> "Administration"
     RailItem.Invites -> "Invites"
     RailItem.Actions -> "Actions"

@@ -27,7 +27,7 @@ data class MenuBadges(
     /**
      * Read-site helper: returns true if [item]'s rail icon should
      * show a badge dot. Items without a freshness concept (Chats /
-     * Bookmarks / Activity / Profile / Watchwords / Administration /
+     * Bookmarks / Activity / Profile / Administration /
      * Settings) always return false.
      */
     fun forItem(item: RailItem): Boolean = when (item) {

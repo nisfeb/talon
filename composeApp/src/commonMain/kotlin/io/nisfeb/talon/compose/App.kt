@@ -51,8 +51,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.update
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ui.parseHexColor
-import io.nisfeb.talon.ai.InMemoryWatchwordsSyncSettings
-import io.nisfeb.talon.ai.WatchwordsSyncSettings
 import io.nisfeb.talon.notify.NoopNotifier
 import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.data.AppDatabase
@@ -103,7 +101,6 @@ import io.nisfeb.talon.ui.screens.SettingsScreen
 import io.nisfeb.talon.ui.screens.SidebarSettingsScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
-import io.nisfeb.talon.ui.screens.WatchwordsScreen
 import io.nisfeb.talon.ui.theme.InMemoryThemePreference
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.ui.theme.ThemePreference
@@ -155,10 +152,6 @@ fun App(
     /** Builds a SettingsSync bound to the per-ship db. Null on platforms
      *  without %settings sync wired. */
     createSettingsSync: ((AppDatabase) -> SettingsSync)? = null,
-    /** Source of truth for the "mirror watchwords to %settings" toggle.
-     *  Defaults to in-memory; desktop passes a JSON-backed impl so the
-     *  flag survives restart. */
-    watchwordsSync: WatchwordsSyncSettings = InMemoryWatchwordsSyncSettings(),
     /** Per-device theme override (System / Light / Dark). In-memory by
      *  default; desktop passes a JSON-backed impl so the choice
      *  survives restart. */
@@ -380,7 +373,6 @@ fun App(
     }
     var showNewDm by remember { sections.flag() }
     var showContacts by remember { sections.flag() }
-    var showWatchwords by remember { sections.flag() }
     var showGroupAdminList by remember { sections.flag() }
     var openGroupAdminFlag by remember { mutableStateOf<String?>(null) }
     var openGroupHomeFlag by remember { mutableStateOf<String?>(null) }
@@ -423,11 +415,6 @@ fun App(
         openThreadReplyAnchor = null
         openChat = who
     }
-    // Watchwords-sync flag. Backed by [watchwordsSync] (caller-supplied)
-    // so desktop's JSON-file impl can persist across restarts and
-    // production Android can wire its SharedPreferences variant in
-    // when composeApp lands there.
-    val watchwordsSyncEnabled = watchwordsSync.enabled
     // Hoisted at App level (not inside the key block) so it survives
     // the re-key triggered by tryRestore-failure recovery. Cleared
     // automatically once the user successfully signs back in.
@@ -597,7 +584,6 @@ fun App(
     PlatformBackHandler(enabled = showAssistant) { showAssistant = false }
     PlatformBackHandler(enabled = showSearch) { showSearch = false }
     PlatformBackHandler(enabled = showNewDm) { showNewDm = false }
-    PlatformBackHandler(enabled = showWatchwords) { showWatchwords = false }
     PlatformBackHandler(enabled = showActions) { showActions = false }
     PlatformBackHandler(enabled = showContacts) { showContacts = false }
     PlatformBackHandler(
@@ -624,7 +610,7 @@ fun App(
         notebookEditPostId = null
     }
     // A deep link into a gallery / notebook (search hit, bookmark,
-    // watchword, notification) names the post; the chat screen is the
+    // notification) names the post; the chat screen is the
     // only consumer of the anchor otherwise, so open the post here.
     LaunchedEffect(openChat, openChatFocusMessageId) {
         val anchor = openChatFocusMessageId ?: return@LaunchedEffect
@@ -713,7 +699,6 @@ fun App(
                 db = db,
                 settingsSync = settingsSync,
                 notificationHealth = notificationHealth,
-                watchwordsSyncEnabled = watchwordsSync.enabled,
             )
         }
         // Let user-shaped preferences ride %settings to this user's
@@ -1358,22 +1343,9 @@ fun App(
                     val from = invite.inviter?.let { " from " + callContacts.displayName(it) } ?: ""
                     runCatching { notifier.notify(name, "invited you to a group$from") }
                 }
-                // A live message matched watchwords set to notify; the
-                // repo kept the hits. Quiet for the chat open in a
-                // focused window, as messages are.
-                repo.watchwordListener = { m, notice ->
-                    if (!(windowInfo.isWindowFocused && openChat == m.whom)) runCatching {
-                        notifier.notify(
-                            "${notice.terms.joinToString(", ")} in ${callContacts.conversationLabel(m.whom)}",
-                            notice.text.replace('\n', ' ').take(160),
-                            m.whom,
-                        )
-                    }
-                }
                 onDispose {
                     repo.dmInviteListener = null
                     repo.groupInviteListener = null
-                    repo.watchwordListener = null
                 }
             }
 
@@ -2407,18 +2379,6 @@ fun App(
                         },
                         twentyFourHour = uiSettings.homeTwentyFourHour.collectAsState().value,
                     ) { a -> openAction = a }
-                    showWatchwords -> WatchwordsScreen(
-                        db = db,
-                        watchwords = repo.watchwords,
-                        watchwordsSyncEnabled = watchwordsSyncEnabled,
-                        onSetWatchwordsSyncEnabled = watchwordsSync::setEnabled,
-                        onBack = { showWatchwords = false },
-                        onOpenConversation = { other, postId ->
-                            showWatchwords = false
-                            openChatFocusMessageId = postId
-                            openChat = other
-                        },
-                    )
                     openGroupAdminFlag != null -> GroupAdminScreen(
                         db = db,
                         repo = repo,
@@ -3121,7 +3081,6 @@ fun App(
                             } ?: when (item) {
                                 RailItem.Assistant -> openAssistantAction()
                                 RailItem.Profile -> showSelfProfile = true
-                                RailItem.Watchwords -> showWatchwords = true
                                 RailItem.Administration -> showGroupAdminList = true
                                 RailItem.Invites -> showInvites = true
                                 RailItem.Actions -> showActions = true
@@ -3210,7 +3169,6 @@ fun App(
                                         onOpenActivity = onOpenActivity,
                                         onOpenCalendar = onOpenCalendar,
                                         onOpenContacts = { showContacts = true },
-                                        onOpenWatchwords = { showWatchwords = true },
                                         onOpenAdministration = { showGroupAdminList = true },
                                         onOpenSettings = { showSettings = true },
                                         onOpenSidebarSettings = {

@@ -136,7 +136,6 @@ fun DmListScreen(
     /** Open the curated Contacts (book) screen. Always shown in the
      *  overflow menu (not a rail item). */
     onOpenContacts: () -> Unit = {},
-    onOpenWatchwords: () -> Unit = {},
     /** Open the home page. Null where the host has no Home surface,
      *  which hides the entry rather than offering a dead one. */
     onOpenHome: (() -> Unit)? = null,
@@ -971,15 +970,6 @@ fun DmListScreen(
                             onOpenContacts()
                         },
                     )
-                    if (RailItem.Watchwords in kebabItems) {
-                        DropdownMenuItem(
-                            text = { Text("Watchwords") },
-                            onClick = {
-                                menuOpen = false
-                                onOpenWatchwords()
-                            },
-                        )
-                    }
                     if (RailItem.Administration in kebabItems) {
                         DropdownMenuItem(
                             text = { Text("Administration") },

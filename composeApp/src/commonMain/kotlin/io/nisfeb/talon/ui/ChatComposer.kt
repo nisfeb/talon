@@ -181,7 +181,6 @@ class ComposerState(initialDraftText: String) {
         "send" -> "message"
         "react" -> "reaction"
         "notify" -> "notification setting"
-        "watchword toggle" -> "watchword change"
         "voice send" -> "voice message"
         else -> what
     }

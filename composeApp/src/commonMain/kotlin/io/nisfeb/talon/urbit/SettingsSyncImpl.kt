@@ -86,8 +86,6 @@ class SettingsSyncImpl(
         const val BUCKET_BOOKMARK_FOLDERS = "bookmark-folders"
         const val BUCKET_BOOKMARK_FOLDER_MEMBERS = "bookmark-folder-members"
         const val BUCKET_AI_SETTINGS = "ai-settings"
-        const val BUCKET_WATCHWORDS = "watchwords"
-        const val BUCKET_WATCHWORD_EXCLUDES = "watchword-excludes"
         const val BUCKET_STATUS_SEEN = "status-seen"
         // Cross-device UI preferences that don't warrant a Room table.
         // One entry per pref.
@@ -147,7 +145,6 @@ class SettingsSyncImpl(
             BUCKET_GROUP_ORDERS, BUCKET_FOLDERS, BUCKET_FOLDER_MEMBERS,
             BUCKET_NOTIFY_PREFS, BUCKET_RAIL_ITEMS,
             BUCKET_BOOKMARKS, BUCKET_BOOKMARK_FOLDERS, BUCKET_BOOKMARK_FOLDER_MEMBERS,
-            BUCKET_WATCHWORDS, BUCKET_WATCHWORD_EXCLUDES,
         )
 
         private const val CLAIM_SETTLE_MS = 3_000L
@@ -447,8 +444,6 @@ class SettingsSyncImpl(
                 // connected when it changed, and a fresh login kept its
                 // local defaults.
                 BUCKET_UI_PREFS,
-                // Pulled so a fresh login has the ship's terms.
-                BUCKET_WATCHWORDS, BUCKET_WATCHWORD_EXCLUDES,
                 BUCKET_STATUS_SEEN,
                 // Upserted, not replaced, so conversations made offline here
                 // survive; conversations before turns, so turns resolve
@@ -564,9 +559,6 @@ class SettingsSyncImpl(
         seedBookmarks()
         seedBookmarkFolders()
         seedBookmarkFolderMembers()
-        // Watchwords key on a sanitized term rather than a Room id, so
-        // they ride their own per-entry push path.
-        pushAllWatchwords()
         // UI prefs live in the UiSettings flows + name-display
         // singletons, not Room.
         pushUiPrefsFromLocal()
@@ -584,10 +576,6 @@ class SettingsSyncImpl(
             BUCKET_BOOKMARKS -> seedBookmarks()
             BUCKET_BOOKMARK_FOLDERS -> seedBookmarkFolders()
             BUCKET_BOOKMARK_FOLDER_MEMBERS -> seedBookmarkFolderMembers()
-            // One flush covers both watchword buckets; put-entry is an
-            // upsert, so re-pushing the half the ship already has is
-            // harmless.
-            BUCKET_WATCHWORDS, BUCKET_WATCHWORD_EXCLUDES -> pushAllWatchwords()
         }
     }
 
@@ -1420,78 +1408,6 @@ class SettingsSyncImpl(
         }
     }
 
-    override suspend fun mirrorWatchword(change: io.nisfeb.talon.ai.WatchwordChange) {
-        when (change) {
-            is io.nisfeb.talon.ai.WatchwordChange.Upsert -> pushWatchwordEntry(change.term)
-            is io.nisfeb.talon.ai.WatchwordChange.Remove -> deleteWatchwordEntry(change.termText)
-            is io.nisfeb.talon.ai.WatchwordChange.Exclude -> pushWatchwordExclude(change.whom)
-            is io.nisfeb.talon.ai.WatchwordChange.Unexclude -> deleteWatchwordExclude(change.whom)
-            is io.nisfeb.talon.ai.WatchwordChange.SyncToggled ->
-                if (change.on) pushAllWatchwords() else clearWatchwordsOnShip()
-        }
-    }
-
-    /** Mirror one watchword term to the ship's settings. */
-    suspend fun pushWatchwordEntry(term: io.nisfeb.talon.data.WatchwordEntity) {
-        val key = io.nisfeb.talon.ai.sanitizeTerm(term.term)
-        if (key.isEmpty()) return
-        // Route through pokePutEntry so the value is stringified to a
-        // cord like every other bucket — %settings's mark dejs expects
-        // the cord shape; bypassing it caused cross-device sync to
-        // silently no-op on stricter dejs builds.
-        pokePutEntry(
-            BUCKET_WATCHWORDS, key,
-            buildJsonObject {
-                put("term", term.term)
-                put("notify", term.notify)
-                put("createdMs", term.createdMs)
-            },
-        )
-    }
-
-    suspend fun deleteWatchwordEntry(termText: String) {
-        val key = io.nisfeb.talon.ai.sanitizeTerm(termText)
-        if (key.isEmpty()) return
-        pokeDelEntry(BUCKET_WATCHWORDS, key)
-    }
-
-    suspend fun pushWatchwordExclude(whom: String) {
-        // Cord-stringified value, matching every other bucket. The
-        // value itself is unused on the apply side (presence-of-key is
-        // the signal); we send `true` for parity.
-        pokePutEntry(BUCKET_WATCHWORD_EXCLUDES, whom, JsonPrimitive(true))
-    }
-
-    suspend fun deleteWatchwordExclude(whom: String) {
-        pokeDelEntry(BUCKET_WATCHWORD_EXCLUDES, whom)
-    }
-
-    /** One-shot full flush of watchwords + excludes when sync is enabled. */
-    suspend fun pushAllWatchwords() {
-        db.watchwords().streamTerms().firstOrNull()?.forEach { pushWatchwordEntry(it) }
-        db.watchwords().excludesAsList().forEach { pushWatchwordExclude(it) }
-    }
-
-    suspend fun clearWatchwordsOnShip() {
-        val ch = channel ?: return
-        runCatching {
-            ch.poke("settings", "settings-event", buildJsonObject {
-                put("del-bucket", buildJsonObject {
-                    put("desk", DESK)
-                    put("bucket-key", BUCKET_WATCHWORDS)
-                })
-            })
-            ch.poke("settings", "settings-event", buildJsonObject {
-                put("del-bucket", buildJsonObject {
-                    put("desk", DESK)
-                    put("bucket-key", BUCKET_WATCHWORD_EXCLUDES)
-                })
-            })
-        }.onFailure { Log.w(TAG, "clearWatchwordsOnShip failed", it) }
-    }
-
-
-
     // ───────── inbound appliers ─────────
 
     /**
@@ -1667,54 +1583,6 @@ class SettingsSyncImpl(
                 (unwrap(entries?.get(AI_ENTRY)) as? JsonObject)?.let { applyAiEntry(it) }
                 (unwrap(entries?.get(AI_KEYS_ENTRY)) as? JsonObject)?.let { applyAiEntry(it) }
             }
-            BUCKET_WATCHWORDS -> {
-                // Apply each entry; we don't have a "deleteAllTerms" since
-                // the local watchwords table also feeds the live runtime.
-                // Per-entry upsert + drop-if-not-in-bucket.
-                val incoming = entries?.entries?.mapNotNull { (key, value) ->
-                    // Values arrive as cord-stringified JsonObject (see
-                    // pokePutEntry stringification). unwrap parses the
-                    // cord back into the inner JsonObject.
-                    val obj = unwrap(value) as? JsonObject ?: return@mapNotNull null
-                    val termText = obj["term"].asStr() ?: return@mapNotNull null
-                    val notify = (obj["notify"] as? JsonPrimitive)?.booleanOrNull ?: true
-                    val createdMs = (obj["createdMs"] as? JsonPrimitive)?.longOrNull
-                        ?: nowMs()
-                    Triple(key, termText, notify to createdMs)
-                }.orEmpty()
-                val incomingTermTexts = incoming.map { it.second }.toHashSet()
-                val existing = db.watchwords().streamTerms().firstOrNull().orEmpty()
-                // Drop locals that aren't present in the remote bucket
-                existing.filter { it.term !in incomingTermTexts }.forEach {
-                    db.watchwords().deleteTermById(it.id)
-                }
-                // Upsert remotes
-                incoming.forEach { (_, termText, meta) ->
-                    val (notify, createdMs) = meta
-                    val match = db.watchwords().getTermByText(termText)
-                    if (match == null) {
-                        db.watchwords().upsertTerm(
-                            io.nisfeb.talon.data.WatchwordEntity(
-                                term = termText,
-                                notify = notify,
-                                createdMs = createdMs,
-                            )
-                        )
-                    } else if (match.notify != notify) {
-                        db.watchwords().setNotify(match.id, notify)
-                    }
-                }
-            }
-            BUCKET_WATCHWORD_EXCLUDES -> {
-                val incomingWhoms = entries?.keys?.toHashSet().orEmpty()
-                val existing = db.watchwords().excludesAsList().toHashSet()
-                (existing - incomingWhoms).forEach { db.watchwords().deleteExclude(it) }
-                (incomingWhoms - existing).forEach {
-                    db.watchwords().upsertExclude(
-                        io.nisfeb.talon.data.WatchwordChatExcludeEntity(it)
-                    )
-                }
-            }
             BUCKET_STATUS_SEEN -> {
                 val v = entries?.get(STATUS_SEEN_ENTRY) ?: return
                 val ms = (unwrap(v) as? JsonObject)?.get("ms").asLong() ?: return
@@ -1804,42 +1672,6 @@ class SettingsSyncImpl(
                     (unwrapped as? JsonObject)?.let { applyAiEntry(it) }
                 }
             }
-            BUCKET_WATCHWORDS -> {
-                val obj = unwrapped as? JsonObject ?: return
-                val termText = obj["term"].asStr() ?: return
-                val notify = (obj["notify"] as? JsonPrimitive)?.booleanOrNull ?: true
-                val createdMs = (obj["createdMs"] as? JsonPrimitive)?.longOrNull
-                    ?: nowMs()
-                // Upsert via term-text uniqueness — preserves local id.
-                val existing = db.watchwords().getTermByText(termText)
-                if (existing == null) {
-                    db.watchwords().upsertTerm(
-                        io.nisfeb.talon.data.WatchwordEntity(
-                            term = termText,
-                            notify = notify,
-                            createdMs = createdMs,
-                        )
-                    )
-                    // No backfill on remote-applied terms — the originating
-                    // device already populated its own hits feed; this
-                    // device picks up future matches from the live listener.
-                } else if (existing.notify != notify) {
-                    db.watchwords().setNotify(existing.id, notify)
-                }
-            }
-            BUCKET_WATCHWORD_EXCLUDES -> {
-                // Honor the value: explicit `false` means "not excluded"
-                // and shouldn't create the row. Treat any other shape
-                // (true, missing, non-boolean) as the legacy "presence
-                // == excluded" semantics. Removal still routes through
-                // del-entry, but defending against a stale `false`
-                // writer keeps the row from being recreated.
-                val v = (unwrapped as? JsonPrimitive)?.booleanOrNull
-                if (v == false) return
-                db.watchwords().upsertExclude(
-                    io.nisfeb.talon.data.WatchwordChatExcludeEntity(entry)
-                )
-            }
             BUCKET_STATUS_SEEN -> {
                 val ms = (unwrapped as? JsonObject)?.get("ms").asLong() ?: return
                 bumpStatusesSeen(ms)
@@ -1890,16 +1722,6 @@ class SettingsSyncImpl(
             // or as the profile the owner saved (hasCredentials). A device
             // with keys puts the credentials entry back on its next connect.
             BUCKET_AI_SETTINGS -> Unit
-            BUCKET_WATCHWORDS -> {
-                // entry-key is sanitized form; delete by matching sanitization.
-                val terms = db.watchwords().streamTerms().firstOrNull().orEmpty()
-                terms.firstOrNull {
-                    io.nisfeb.talon.ai.sanitizeTerm(it.term) == entry
-                }?.let { db.watchwords().deleteTermById(it.id) }
-            }
-            BUCKET_WATCHWORD_EXCLUDES -> {
-                db.watchwords().deleteExclude(entry)
-            }
             BUCKET_ASSISTANT_CONVERSATIONS -> {
                 // Deleting a conversation cascades to its turns locally.
                 db.assistantConversations().getByGid(entry)?.let {
@@ -2047,11 +1869,6 @@ class SettingsSyncImpl(
                 io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(false)
                 io.nisfeb.talon.ui.AzimuthNames.setEnabled(false)
             }
-            // Only a device switching watchword sync off deletes these
-            // buckets: it takes the ship's copy away, not anyone's terms.
-            // Mirroring it here erased every other device's terms and
-            // excludes the moment one of them opted out.
-            BUCKET_WATCHWORDS, BUCKET_WATCHWORD_EXCLUDES -> Unit
             // A peer cleared assistant history (del-bucket) — mirror it
             // locally. Either bucket's del-bucket wipes both tables; turns
             // can't outlive their conversations.

@@ -12,7 +12,6 @@ import io.nisfeb.talon.data.GroupOrderEntity
 import io.nisfeb.talon.data.NotifyLevel
 import io.nisfeb.talon.data.NotifyPreferenceEntity
 import io.nisfeb.talon.data.RailItemPrefEntity
-import io.nisfeb.talon.data.WatchwordEntity
 import io.nisfeb.talon.ui.InMemoryUiSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -80,7 +79,6 @@ class SettingsSyncBootstrapTest {
     fun `a ship's settings land here, and a bucket it lacks is filled from here`() = live {
         db.folders().upsert(FolderEntity(id = 1, name = "Work", sortOrder = 0))
         db.notifyPrefs().upsert(NotifyPreferenceEntity("~bus", NotifyLevel.NONE))
-        db.watchwords().upsertTerm(WatchwordEntity(term = "mars", notify = true, createdMs = 1))
         ship.scries["settings/desk/talon"] = """{"desk":{
             "folders":{"5":"{\"name\":\"From the ship\",\"sortOrder\":0}"},
             "group-orders":{"~bus/garden":"{\"ordinal\":3}"}}}"""
@@ -90,9 +88,7 @@ class SettingsSyncBootstrapTest {
         // What the ship lacks is kept here and sent up: it used to be
         // applied as empty first, erasing it before the seed read it.
         assertEquals(NotifyLevel.NONE, db.notifyPrefs().levelFor("~bus"))
-        assertEquals(listOf("mars"), db.watchwords().streamTerms().first().map { it.term })
         assertTrue(sent().any { "\"bucket-key\":\"notify-prefs\"" in it && "~bus" in it }, "the ship had none: this device's go up")
-        assertTrue(sent().any { "\"bucket-key\":\"watchwords\"" in it && "mars" in it })
         assertTrue(sent().none { "put-bucket" in it && "\"bucket-key\":\"folders\"" in it }, "the ship's folders are not overwritten")
     }
 
@@ -150,14 +146,6 @@ class SettingsSyncBootstrapTest {
         assertEquals(null, db.notifyPrefs().levelFor("~nec"))
         fact("""{"put-bucket":{"desk":"talon","bucket-key":"folders","bucket":{"7":"{\"name\":\"Replaced\",\"sortOrder\":0}"}}}""")
         assertEquals(listOf("Replaced"), folders())
-    }
-
-    @Test
-    fun `another device switching watchword sync off leaves the terms here`() = live {
-        db.watchwords().upsertTerm(WatchwordEntity(term = "mars", notify = true, createdMs = 1))
-        fact("""{"del-bucket":{"desk":"talon","bucket-key":"watchwords"}}""")
-        fact("""{"del-bucket":{"desk":"talon","bucket-key":"watchword-excludes"}}""")
-        assertEquals(listOf("mars"), db.watchwords().streamTerms().first().map { it.term })
     }
 
     @Test

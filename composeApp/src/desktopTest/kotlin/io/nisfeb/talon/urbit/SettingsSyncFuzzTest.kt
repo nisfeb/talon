@@ -45,8 +45,6 @@ class SettingsSyncFuzzTest {
         SettingsSyncImpl.BUCKET_BOOKMARK_FOLDERS,
         SettingsSyncImpl.BUCKET_BOOKMARK_FOLDER_MEMBERS,
         SettingsSyncImpl.BUCKET_AI_SETTINGS,
-        SettingsSyncImpl.BUCKET_WATCHWORDS,
-        SettingsSyncImpl.BUCKET_WATCHWORD_EXCLUDES,
         // unknown buckets — must also be a no-op rather than a throw
         "unknown-bucket",
         "",

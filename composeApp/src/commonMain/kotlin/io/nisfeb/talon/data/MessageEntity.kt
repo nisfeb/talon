@@ -62,7 +62,7 @@ data class MessageEntity(
      */
     val status: String? = null,
     /**
-     * What search and watchword scans match: the title and the words as
+     * What search matches: the title and the words as
      * shown. [MessageDao]'s writes fill it; null only on rows from before
      * it existed, until [TlonChatRepo] start fills those in.
      */

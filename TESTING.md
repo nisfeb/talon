@@ -20,8 +20,6 @@ in the manual fakezod runbook (`scripts/fakezod/`).
 - **ID normalization** — dotted vs undotted post ids across DB ↔ wire.
 - **Daily digest selection + prompt** — pure scoring + prompt-shape
   helpers.
-- **Watchword sanitization** — input cleaning + dedup that runs the
-  same on every platform.
 
 ## What's NOT tested at the JVM level
 
@@ -56,7 +54,7 @@ composeApp/src/
 ├── commonTest/kotlin/io/nisfeb/talon/...      # platform-agnostic logic
 ├── desktopTest/
 │   ├── kotlin/io/nisfeb/talon/urbit/          # parser / shape tests
-│   ├── kotlin/io/nisfeb/talon/ai/             # AI helpers, watchword sanitize, etc.
+│   ├── kotlin/io/nisfeb/talon/ai/             # AI helpers, etc.
 │   ├── kotlin/io/nisfeb/talon/ui/             # widget decoder tests
 │   └── resources/fixtures/                    # captured JSON payloads
 │       ├── activity/                          # %activity updates

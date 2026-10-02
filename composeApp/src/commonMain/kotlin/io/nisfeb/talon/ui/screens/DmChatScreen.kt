@@ -359,13 +359,6 @@ fun DmChatScreen(
         .collectAsState(initial = null)
     val notifyLevel = notifyPref?.level ?: NotifyLevel.DEFAULT
 
-    val excludedWhoms by remember {
-        db.watchwords().streamExcludes()
-    }.collectAsState(initial = emptyList())
-    val isExcludedFromWatchwords = remember(excludedWhoms, whom) {
-        excludedWhoms.any { it.whom == whom }
-    }
-
     // Fall back to locally-owned state when the caller doesn't hoist it.
     // Both are always created (no conditional composable calls) so the
     // fallback stays valid across recompositions.
@@ -842,20 +835,10 @@ fun DmChatScreen(
                 NotifyLevelDropdown(
                     level = notifyLevel,
                     enabled = repo.settingsSync != null,
-                    isExcludedFromWatchwords = isExcludedFromWatchwords,
                     onSelect = { level ->
                         scope.launch {
                             runCatching { repo.settingsSync?.setNotifyLevel(whom, level) }
                                 .onFailure { composerState.failed("notify", it) }
-                        }
-                    },
-                    onToggleWatchwordExclude = {
-                        scope.launch {
-                            runCatching {
-                                repo.watchwords.excludeChat(whom, !isExcludedFromWatchwords)
-                            }.onFailure {
-                                composerState.failed("watchword toggle", it)
-                            }
                         }
                     },
                 )
@@ -2181,9 +2164,7 @@ private fun CatchMeUpBanner(
 private fun NotifyLevelDropdown(
     level: String,
     enabled: Boolean,
-    isExcludedFromWatchwords: Boolean,
     onSelect: (String) -> Unit,
-    onToggleWatchwordExclude: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -2207,16 +2188,6 @@ private fun NotifyLevelDropdown(
             DropdownMenuItem(
                 text = { Text(if (level == NotifyLevel.NONE) "✓ Mute" else "Mute") },
                 onClick = { open = false; onSelect(NotifyLevel.NONE) },
-            )
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        if (isExcludedFromWatchwords) "Include in watchwords"
-                        else "Exclude from watchwords"
-                    )
-                },
-                onClick = { open = false; onToggleWatchwordExclude() },
             )
         }
     }
