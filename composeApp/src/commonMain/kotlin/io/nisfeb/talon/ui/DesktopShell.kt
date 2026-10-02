@@ -24,7 +24,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -284,7 +283,6 @@ internal fun railIcon(item: RailItem): ImageVector? = when (item) {
     // Null → rendered as the letter "A" in RailIconButton.
     RailItem.Assistant -> null
     RailItem.Profile -> Icons.Filled.AccountCircle
-    RailItem.Watchwords -> Icons.Filled.Search
     RailItem.Administration -> Icons.Filled.Build
     // Not an envelope: that reads as mail. An invite is to a group.
     RailItem.Invites -> TalonIcons.GroupAdd
@@ -302,7 +300,6 @@ internal fun railLabel(item: RailItem): String = when (item) {
     RailItem.Activity -> "Activity"
     RailItem.Assistant -> "Assistant"
     RailItem.Profile -> "My profile"
-    RailItem.Watchwords -> "Watchwords"
     RailItem.Administration -> "Administration"
     RailItem.Invites -> "Invites"
     RailItem.Actions -> "Actions"

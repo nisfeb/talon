@@ -1032,7 +1032,7 @@ private fun ConversationsTab(
     modifier: Modifier = Modifier,
 ) {
     // Clearing wipes every conversation locally AND on the ship, with no
-    // undo — gate it behind a confirmation like watchword-term deletion.
+    // undo — gate it behind a confirmation.
     var confirmClear by remember { mutableStateOf(false) }
     if (confirmClear) {
         AlertDialog(

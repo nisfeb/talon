@@ -106,31 +106,6 @@ class TalonApplication : Application() {
     lateinit var searchEmbedderClient: io.nisfeb.talon.ai.AndroidSearchEmbedderClient
         private set
 
-    // Both lazy so neither touches Context until after attachBaseContext()
-    // / onCreate() — eager property initializers run during the
-    // Application constructor, before Context is wired up, and
-    // getSharedPreferences would NPE.
-    private val watchwordsPrefs by lazy {
-        getSharedPreferences("talon_watchwords", MODE_PRIVATE)
-    }
-
-    // Default true: new installs and existing users who never touched
-    // the toggle should mirror watchwords across devices out of the
-    // box. Users who explicitly turned it off keep the off setting
-    // because SharedPreferences only returns the default when the key
-    // is absent.
-    private val _watchwordsSyncEnabled by lazy {
-        MutableStateFlow(watchwordsPrefs.getBoolean(KEY_WATCHWORDS_SYNC, true))
-    }
-    val watchwordsSyncEnabled: StateFlow<Boolean>
-        get() = _watchwordsSyncEnabled.asStateFlow()
-
-    fun setWatchwordsSyncEnabled(enabled: Boolean) {
-        if (_watchwordsSyncEnabled.value == enabled) return
-        watchwordsPrefs.edit().putBoolean(KEY_WATCHWORDS_SYNC, enabled).apply()
-        _watchwordsSyncEnabled.value = enabled
-    }
-
     private val _activeShip = MutableStateFlow<String?>(null)
     /** Active ship patp, or null if none logged in. Changes on switch
      *  so UI can re-key its tree and pick up the new ship's data. */
@@ -380,7 +355,6 @@ class TalonApplication : Application() {
             db = db,
             settingsSync = settingsSync,
             notificationHealth = notificationHealth,
-            watchwordsSyncEnabled = watchwordsSyncEnabled,
         )
         drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
         menuSeen = io.nisfeb.talon.ui.AndroidMenuSeenStore(this, ship)
@@ -587,7 +561,4 @@ class TalonApplication : Application() {
         _allShips.value = sessionStore.all().map { it.ship }
     }
 
-    private companion object {
-        private const val KEY_WATCHWORDS_SYNC = "sync_enabled"
-    }
 }

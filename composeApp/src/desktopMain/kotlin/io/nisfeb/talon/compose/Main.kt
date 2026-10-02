@@ -15,8 +15,6 @@ import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.notify.SystemNotifier
 import org.jetbrains.skia.Image as SkiaImage
 import io.nisfeb.talon.ai.AiSettingsRepository
-import io.nisfeb.talon.ai.DesktopWatchwordsSyncSettings
-import io.nisfeb.talon.ai.WatchwordsSyncSettings
 import io.nisfeb.talon.ai.createAiSettings
 import io.nisfeb.talon.ui.DesktopUiSettings
 import io.nisfeb.talon.ui.UiSettings
@@ -79,7 +77,6 @@ private class DesktopAppGraph {
     /** The comet Talon runs on this machine, if the user set one up. */
     val localShip = io.nisfeb.talon.comet.DesktopLocalShip(ktorHttp)
     val aiSettings: AiSettingsRepository = createAiSettings()
-    val watchwordsSync: WatchwordsSyncSettings = DesktopWatchwordsSyncSettings()
     val themePreference: ThemePreference = DesktopThemePreference()
     val relaySettings: io.nisfeb.talon.notify.RelaySettings =
         io.nisfeb.talon.notify.DesktopRelaySettings()
@@ -486,7 +483,6 @@ fun main() {
                     drafts = graph.drafts,
                     updateState = graph.updateState,
                     createSettingsSync = graph.createSettingsSync,
-                    watchwordsSync = graph.watchwordsSync,
                     themePreference = graph.themePreference,
                     callEngineProvider = io.nisfeb.talon.call.DesktopCallEngineProvider,
                     peerLinkFactory = io.nisfeb.talon.call.DesktopPeerLinkFactory,

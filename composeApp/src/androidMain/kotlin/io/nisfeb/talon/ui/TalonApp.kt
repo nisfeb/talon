@@ -84,7 +84,6 @@ import io.nisfeb.talon.ui.screens.GroupInfoScreen
 import io.nisfeb.talon.ui.screens.MediaListScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
-import io.nisfeb.talon.ui.screens.WatchwordsScreen
 import io.nisfeb.talon.ui.RightPaneState
 import io.nisfeb.talon.ui.RightPaneStateReducer
 import io.nisfeb.talon.urbit.MediaCategory
@@ -662,7 +661,6 @@ fun TalonApp(
     var assistantListen by remember { mutableStateOf(false) }
     var activityOpen by remember { sections.flag() }
     var contactsOpen by remember { sections.flag() }
-    var watchwordsOpen by remember { sections.flag() }
     // Curated contact book (%contacts /v1/book) — gates add affordances
     // and backs the Contacts screen.
     val bookContacts by app.repo.bookContacts.collectAsState()
@@ -1148,24 +1146,6 @@ fun TalonApp(
                 }
             }
         }
-        // A live message matched watchwords set to notify. The repo
-        // did the matching and kept the hits; this only shows it.
-        app.repo.watchwordListener = { m, notice ->
-            val foreground = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-            if (!(foreground && openWhomState.value == m.whom)) appScope.launch {
-                Notifications.showWatchwordHit(
-                    context = context,
-                    whom = m.whom,
-                    forShip = loggedInShip,
-                    postId = m.id,
-                    parentId = m.parentId,
-                    terms = notice.terms,
-                    label = contactMap.conversationLabel(m.whom),
-                    body = notice.text.take(160).replace('\n', ' '),
-                    sentMs = m.sentMs,
-                )
-            }
-        }
         // New pending DM request → notify. Always fires (there's no
         // "open" state for an unaccepted request), so a brand-new DM no
         // longer arrives silently.
@@ -1201,7 +1181,6 @@ fun TalonApp(
         }
         onDispose {
             app.repo.messageListener = null
-            app.repo.watchwordListener = null
             app.repo.dmInviteListener = null
             app.repo.groupInviteListener = null
         }
@@ -1522,7 +1501,6 @@ fun TalonApp(
         BackHandler(enabled = calendarOpen) { calendarOpen = false }
         BackHandler(enabled = activityOpen) { activityOpen = false }
         BackHandler(enabled = contactsOpen) { contactsOpen = false }
-        BackHandler(enabled = watchwordsOpen) { watchwordsOpen = false }
         BackHandler(enabled = homeOpen) { homeOpen = false }
         BackHandler(enabled = settingsOpen) { settingsOpen = false }
         BackHandler(enabled = assistantOpen) { assistantOpen = false }
@@ -1606,7 +1584,6 @@ fun TalonApp(
             activityOpen -> "Activity"
             groupInfoDrilldown != null -> "MediaList"
             groupInfoOpenFor != null -> "GroupInfo"
-            watchwordsOpen -> "Watchwords"
             homeOpen -> "Home"
             adminGroupFlag != null -> "GroupAdmin($adminGroupFlag)"
             adminListOpen -> "AdminList"
@@ -1697,7 +1674,6 @@ fun TalonApp(
                             io.nisfeb.talon.ui.RailItem.Activity -> activityOpen = true
                             io.nisfeb.talon.ui.RailItem.Assistant -> assistantOpen = true
                             io.nisfeb.talon.ui.RailItem.Profile -> editingProfile = true
-                            io.nisfeb.talon.ui.RailItem.Watchwords -> watchwordsOpen = true
                             io.nisfeb.talon.ui.RailItem.Administration -> adminListOpen = true
                             io.nisfeb.talon.ui.RailItem.Invites -> invitesOpen = true
                             io.nisfeb.talon.ui.RailItem.Actions -> actionsOpen = true
@@ -2017,20 +1993,6 @@ fun TalonApp(
                     openWhom = whom
                 },
                 onBack = { activityOpen = false },
-                modifier = mod,
-            )
-
-            watchwordsOpen -> WatchwordsScreen(
-                db = app.db,
-                watchwords = app.repo.watchwords,
-                watchwordsSyncEnabled = app.watchwordsSyncEnabled,
-                onSetWatchwordsSyncEnabled = { app.setWatchwordsSyncEnabled(it) },
-                onBack = { watchwordsOpen = false },
-                onOpenConversation = { whom, postId ->
-                    openWhom = whom
-                    pendingScrollMessageId = postId
-                    watchwordsOpen = false
-                },
                 modifier = mod,
             )
 
@@ -2922,7 +2884,6 @@ fun TalonApp(
                 onOpenActivity = { activityOpen = true },
                 onOpenCalendar = { calendarOpen = true },
                 onOpenContacts = { contactsOpen = true },
-                onOpenWatchwords = { watchwordsOpen = true },
                 onOpenHome = { homeOpen = true },
                 onOpenAdministration = { adminListOpen = true },
                 onOpenInvites = { invitesOpen = true },

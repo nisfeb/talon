@@ -1,6 +1,5 @@
 package io.nisfeb.talon.ui
 
-import io.nisfeb.talon.ai.WatchwordsSyncSettings
 import io.nisfeb.talon.notify.RelaySettings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -11,9 +10,8 @@ import kotlinx.serialization.json.Json
 /*
  * Small settings kept as JSON in a [UiSettingsStore] (a file on desktop,
  * Application Support on iOS). They lived in desktop code only, so iOS
- * fell back to in-memory copies and forgot all three on every launch: the
- * relay's endpoint and registration, the watchword-sync switch, and which
- * drawer dots had been seen.
+ * fell back to in-memory copies and forgot both on every launch: the
+ * relay's endpoint and registration, and which drawer dots had been seen.
  */
 
 private val JSON = Json { ignoreUnknownKeys = true }
@@ -54,21 +52,6 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
     }
 
     private fun save() = store.write(JSON.encodeToString(Persisted(_endpoint.value, deviceIds.toMap())))
-}
-
-/** The "mirror watchwords to %settings" switch; on until turned off. */
-class StoredWatchwordsSyncSettings(private val store: UiSettingsStore) : WatchwordsSyncSettings {
-    @Serializable
-    private data class Persisted(val enabled: Boolean = true)
-
-    private val _enabled = MutableStateFlow(store.load(Persisted()).enabled)
-    override val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
-
-    override fun setEnabled(value: Boolean) {
-        if (_enabled.value == value) return
-        store.write(JSON.encodeToString(Persisted(value)))
-        _enabled.value = value
-    }
 }
 
 /** One ship's [MenuSeenState]. */

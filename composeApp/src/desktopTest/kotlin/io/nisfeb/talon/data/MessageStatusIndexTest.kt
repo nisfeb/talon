@@ -25,7 +25,7 @@ class MessageStatusIndexTest {
         // No destructive fallback: a migration that does not match the entity fails here.
         fun db() = Room.databaseBuilder<AppDatabase>(name = path)
             .setDriver(BundledSQLiteDriver())
-            .addMigrations(MESSAGE_STATUS_INDEX_MIGRATION)
+            .addMigrations(MESSAGE_STATUS_INDEX_MIGRATION, io.nisfeb.talon.data.WATCHWORDS_DROP_MIGRATION)
             .build()
         try {
             db().also { it.messages().upsert(MessageEntity("~bus", "~bus/1", "~bus", 1_000, "[]", "/chat", status = "queued")); it.close() }

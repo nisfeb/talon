@@ -31,7 +31,6 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun reactionUsage(): ReactionUsageDao
     actual abstract fun embeddings(): EmbeddingDao
     actual abstract fun bookmarkFolders(): BookmarkFolderDao
-    actual abstract fun watchwords(): WatchwordsDao
     actual abstract fun messageMedia(): MessageMediaDao
     actual abstract fun railItemPrefs(): RailItemPrefDao
     actual abstract fun dmInvites(): DmInviteDao
@@ -115,7 +114,7 @@ fun createAppDatabase(shipKey: String): AppDatabase {
         // creating a folder from the tab strip — was not.
         .setQueryCoroutineContext(io.nisfeb.talon.util.ioDispatcher)
         // Migrations from 41 on; older databases still rebuild. See AppDatabase.desktop.kt.
-        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION, COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION)
+        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION, COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, WATCHWORDS_DROP_MIGRATION)
         .fallbackToDestructiveMigration(dropAllTables = true)
         .build()
 }

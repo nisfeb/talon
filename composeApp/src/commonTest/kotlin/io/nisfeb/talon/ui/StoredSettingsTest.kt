@@ -30,14 +30,6 @@ class StoredSettingsTest {
     }
 
     @Test
-    fun `the watchword switch is on until turned off, and stays off`() {
-        val store = Store()
-        assertTrue(StoredWatchwordsSyncSettings(store).enabled.value)
-        StoredWatchwordsSyncSettings(store).setEnabled(false)
-        assertFalse(StoredWatchwordsSyncSettings(store).enabled.value)
-    }
-
-    @Test
     fun `seen dots stay seen, and a store that cannot be read starts fresh`() {
         val store = Store()
         StoredMenuSeenStore(store).apply { markStatusesSeenAt(42L); markInvitesSeen("abc") }

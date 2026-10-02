@@ -22,7 +22,6 @@ enum class RailItem(val isPaneTab: Boolean) {
     Activity(true),
     Assistant(false),
     Profile(false),
-    Watchwords(false),
     Administration(false),
     Invites(false),
     /** Orrery's proposals, waiting for a yes or a no. */
