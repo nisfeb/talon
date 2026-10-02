@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
+import io.nisfeb.talon.ui.theme.hex
 import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
@@ -1233,8 +1234,8 @@ private fun EventEditor(
                 if (d.cat == EventCat.TODO) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Due", style = MaterialTheme.typography.labelMedium)
-                        TextButton(onClick = { pickingDate = true }) { Text(d.due?.toString() ?: "no date") }
-                        if (d.due != null) TextButton(onClick = { d = d.copy(due = null) }) { Text("clear") }
+                        TextButton(onClick = { pickingDate = true }) { Text(d.due?.let { io.nisfeb.talon.util.formatDate(it) } ?: "No date") }
+                        if (d.due != null) TextButton(onClick = { d = d.copy(due = null) }) { Text("Clear") }
                     }
                     FilterChip(selected = d.done, onClick = { d = d.copy(done = !d.done) }, label = { Text(if (d.done) "Done" else "To do") })
                     // Where the calendar keeps it. A number it holds that is not
@@ -1255,7 +1256,9 @@ private fun EventEditor(
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(if (d.cat == EventCat.DATE) "Date (the year is ignored)" else "Date", style = MaterialTheme.typography.labelMedium)
-                        TextButton(onClick = { pickingDate = true }) { Text(d.date.toString()) }
+                        TextButton(onClick = { pickingDate = true }) {
+                            Text(if (d.cat == EventCat.DATE) io.nisfeb.talon.util.formatDateNoYear(d.date) else io.nisfeb.talon.util.formatDate(d.date))
+                        }
                     }
                 }
                 if (d.cat == EventCat.TIMED) {
@@ -1341,8 +1344,8 @@ private fun EventEditor(
                                 modifier = Modifier.width(110.dp),
                             )
                             Text("or until", style = MaterialTheme.typography.labelMedium)
-                            TextButton(onClick = { pickingUntil = true }) { Text(d.until?.toString() ?: "never") }
-                            if (d.until != null) TextButton(onClick = { d = d.copy(until = null) }) { Text("clear") }
+                            TextButton(onClick = { pickingUntil = true }) { Text(d.until?.let { io.nisfeb.talon.util.formatDate(it) } ?: "Never") }
+                            if (d.until != null) TextButton(onClick = { d = d.copy(until = null) }) { Text("Clear") }
                         }
                     }
                 }
@@ -1401,13 +1404,16 @@ private fun EventEditor(
                 }
                 // Its own colour, or the calendar's. The calendar keeps any
                 // colour, so one set elsewhere shows as chosen here too.
-                Text("Colour", style = MaterialTheme.typography.labelMedium)
+                Text("Color", style = MaterialTheme.typography.labelMedium)
+                var colorWheel by remember { mutableStateOf(false) }
                 androidx.compose.foundation.layout.FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     FilterChip(selected = d.color.isBlank(), onClick = { d = d.copy(color = "") }, label = { Text("Calendar's") })
+                    // Any color, not only the eight: the wheel the themes use.
+                    FilterChip(selected = colorWheel, onClick = { colorWheel = !colorWheel }, label = { Text("Custom") })
                     (ENTRY_COLOURS + listOf(d.color).filter { it.isNotBlank() && it !in ENTRY_COLOURS }).forEach { hex ->
                         val c = calendarHexColor(hex) ?: return@forEach
                         Box(
@@ -1421,10 +1427,17 @@ private fun EventEditor(
                         )
                     }
                 }
+                if (colorWheel) {
+                    io.nisfeb.talon.ui.ColorWheel(
+                        color = calendarHexColor(d.color) ?: MaterialTheme.colorScheme.primary,
+                        onColor = { d = d.copy(color = it.hex()) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 if (postToLabel != null) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         TextButton(onClick = onChoosePostTo) { Text(if (postToLabel.isEmpty()) "Also post to a chat…" else "Posts to ${postToLabel}") }
-                        if (postToLabel.isNotEmpty()) TextButton(onClick = onClearPostTo) { Text("clear") }
+                        if (postToLabel.isNotEmpty()) TextButton(onClick = onClearPostTo) { Text("Clear") }
                     }
                 }
                 if (recurringOccurrence) {
@@ -1557,7 +1570,7 @@ private fun CalendarsDialog(
                 calendars.forEach { c ->
                     if (editingId == c.id) {
                         OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text("Name") }, singleLine = true)
-                        OutlinedTextField(value = editColour, onValueChange = { editColour = it }, label = { Text("Colour, #rrggbb") }, singleLine = true)
+                        ColorRow("Color", editColour) { editColour = it }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             TextButton(onClick = { onEdit(c.id, editName, editColour); editingId = null }) { Text("Save") }
                             TextButton(onClick = { editingId = null }) { Text("Cancel") }
@@ -1715,7 +1728,7 @@ private fun CalendarsDialog(
                 }
                 Text("New calendar", style = MaterialTheme.typography.labelMedium)
                 OutlinedTextField(value = newName, onValueChange = { newName = it }, label = { Text("Name") }, singleLine = true)
-                OutlinedTextField(value = newColour, onValueChange = { newColour = it }, label = { Text("Colour, #rrggbb") }, singleLine = true)
+                ColorRow("Color", newColour) { newColour = it }
                 TextButton(enabled = newName.isNotBlank(), onClick = { onAdd(newName.trim(), newColour.trim()); newName = "" }) { Text("Add") }
                 if (onOpenWebSettings != null) {
                     HorizontalDivider()

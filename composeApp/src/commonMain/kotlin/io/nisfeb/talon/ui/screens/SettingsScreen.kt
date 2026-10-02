@@ -2059,7 +2059,7 @@ private fun SettingsTabRow(
 
 /** A hex field with a swatch; tapping the swatch opens a colour wheel under the row. */
 @Composable
-private fun ColorRow(label: String, value: String, onValue: (String) -> Unit) {
+internal fun ColorRow(label: String, value: String, onValue: (String) -> Unit) {
     val parsed = io.nisfeb.talon.ui.parseHexColor(value)
     var wheelOpen by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

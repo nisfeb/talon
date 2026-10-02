@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -97,7 +98,8 @@ class CalendarsDialogTest {
     @Test
     fun `a new calendar is made with its name and colour`() = calendars {
         onAllNodes(hasSetTextAction() and hasText("Name")).onLast().performScrollTo().performTextInput("Book Club")
-        onAllNodes(hasSetTextAction() and hasText("Colour, #rrggbb")).onLast().performTextInput("#336699")
+        // The new calendar's color field, the hex beside the wheel's swatch.
+        onAllNodes(hasSetTextAction() and hasText("#1e3a5f")).onLast().performTextReplacement("#336699")
         onAllNodesWithText("Add").onLast().performScrollTo().performClick()
         val add = wrote("add-calendar")
         assertTrue("\"id\":\"book-club\"" in add && "\"name\":\"Book Club\"" in add && "#336699" in add, add)

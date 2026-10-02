@@ -50,6 +50,20 @@ private val WEEKDAY_MONTH_DAY = LocalDateTime.Format {
 private val TIME_12 = LocalDateTime.Format {
     amPmHour(Padding.NONE); char(':'); minute(); char(' '); amPmMarker("AM", "PM")
 }
+private val DATE_LONG = kotlinx.datetime.LocalDate.Format {
+    dayOfWeek(DayOfWeekNames.ENGLISH_ABBREVIATED); chars(", ")
+    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); dayOfMonth(Padding.NONE); chars(", "); year()
+}
+private val DATE_NO_YEAR = kotlinx.datetime.LocalDate.Format {
+    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); dayOfMonth(Padding.NONE)
+}
+
+/** "Fri, Jul 10, 2026": a calendar date in words, where "2026-07-10" was shown. */
+fun formatDate(date: kotlinx.datetime.LocalDate): String = DATE_LONG.format(date)
+
+/** "Jul 10": a date whose year does not matter, as a birthday's. */
+fun formatDateNoYear(date: kotlinx.datetime.LocalDate): String = DATE_NO_YEAR.format(date)
+
 private val WEEKDAY_SHORT = LocalDateTime.Format {
     dayOfWeek(DayOfWeekNames.ENGLISH_ABBREVIATED)
 }
