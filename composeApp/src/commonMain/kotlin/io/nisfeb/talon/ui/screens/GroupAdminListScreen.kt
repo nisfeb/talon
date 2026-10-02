@@ -22,7 +22,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -86,14 +85,12 @@ fun GroupAdminListScreen(
                     strokeWidth = 2.dp,
                 )
             }
-            IconButton(
-                enabled = !creating,
+            io.nisfeb.talon.ui.IconButton(tip = "New group", enabled = !creating,
                 onClick = { newGroupOpen = true },
             ) {
                 Icon(Icons.Filled.Add, contentDescription = "New group")
             }
-            IconButton(
-                enabled = !refreshing,
+            io.nisfeb.talon.ui.IconButton(tip = "Refresh", enabled = !refreshing,
                 onClick = { scope.launch { refresh(force = true) } },
             ) {
                 Icon(Icons.Filled.Refresh, contentDescription = "Refresh")

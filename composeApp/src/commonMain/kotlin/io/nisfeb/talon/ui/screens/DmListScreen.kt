@@ -51,7 +51,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -798,12 +797,12 @@ fun DmListScreen(
                 )
             }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = onOpenSearch) {
+            io.nisfeb.talon.ui.IconButton(tip = "Search", onClick = onOpenSearch) {
                 Icon(Icons.Filled.Search, contentDescription = "Search")
             }
             // Assistant moved off the top bar — it's now a rail / kebab item
             // ("A"), unifying it with the other panel-based features.
-            IconButton(onClick = { editMode = !editMode }) {
+            io.nisfeb.talon.ui.IconButton(tip = if (editMode) "Finish reordering" else "Reorder", onClick = { editMode = !editMode }) {
                 Icon(
                     imageVector = if (editMode) Icons.Filled.Done else Icons.Filled.Edit,
                     contentDescription = if (editMode) "Finish reordering" else "Reorder",
@@ -862,7 +861,7 @@ fun DmListScreen(
             // the drawer, and two ways to one set of sections is
             // one way too many.
             if (!io.nisfeb.talon.ui.isDrawerNavigation) Box {
-                IconButton(onClick = { menuOpen = true }) {
+                io.nisfeb.talon.ui.IconButton(tip = "More", onClick = { menuOpen = true }) {
                     Box {
                         Icon(Icons.Filled.MoreVert, contentDescription = "More")
                         if (anyMenuBadge) MenuBadgeDot(
@@ -1889,7 +1888,7 @@ internal fun ShipSwitcherDrawer(
                     if (onSignOut != null || onForget != null) {
                         Spacer(Modifier.weight(1f))
                         Box {
-                            IconButton(onClick = { menuFor = ship }) {
+                            io.nisfeb.talon.ui.IconButton(tip = "What to do with $ship", onClick = { menuFor = ship }) {
                                 Icon(
                                     Icons.Filled.MoreVert,
                                     contentDescription = "What to do with $ship",

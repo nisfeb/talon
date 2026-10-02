@@ -11,7 +11,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -106,7 +105,7 @@ private fun BannerSurface(
             }
         }
         if (onDismiss != null) {
-            IconButton(onClick = onDismiss) {
+            io.nisfeb.talon.ui.IconButton(tip = "Dismiss", onClick = onDismiss) {
                 Icon(
                     Icons.Filled.Close,
                     contentDescription = "Dismiss",

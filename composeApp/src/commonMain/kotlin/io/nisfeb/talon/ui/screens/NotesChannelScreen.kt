@@ -22,7 +22,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -150,8 +149,7 @@ fun NotesChannelScreen(
             // handlers need a parent folder, so confirming earlier would
             // silently do nothing.
             Box {
-                IconButton(
-                    enabled = currentFolderId != null,
+                io.nisfeb.talon.ui.IconButton(tip = "Add", enabled = currentFolderId != null,
                     onClick = { addMenuOpen = true },
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = "Add")
@@ -354,7 +352,7 @@ private fun FolderRow(
         Spacer(Modifier.width(12.dp))
         Text(folder.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         Box {
-            IconButton(onClick = { menuOpen = true }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Folder actions", onClick = { menuOpen = true }) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "Folder actions")
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {

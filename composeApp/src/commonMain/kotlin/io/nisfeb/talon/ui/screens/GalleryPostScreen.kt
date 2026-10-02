@@ -25,7 +25,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -119,7 +118,7 @@ fun GalleryPostScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
+            io.nisfeb.talon.ui.IconButton(tip = "Back", onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
@@ -129,7 +128,7 @@ fun GalleryPostScreen(
             )
             if (isOurs) {
                 androidx.compose.foundation.layout.Box {
-                    IconButton(onClick = { menuOpen = true }) {
+                    io.nisfeb.talon.ui.IconButton(tip = "More", onClick = { menuOpen = true }) {
                         Icon(Icons.Filled.MoreVert, contentDescription = "More")
                     }
                     DropdownMenu(
@@ -269,8 +268,7 @@ fun GalleryPostScreen(
                 modifier = Modifier.weight(1f),
                 enabled = !sending,
             )
-            IconButton(
-                enabled = replyText.trim().isNotEmpty() && !sending,
+            io.nisfeb.talon.ui.IconButton(tip = "Send", enabled = replyText.trim().isNotEmpty() && !sending,
                 onClick = {
                     val text = replyText.trim()
                     replyText = ""

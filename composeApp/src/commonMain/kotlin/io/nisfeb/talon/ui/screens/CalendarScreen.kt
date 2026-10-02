@@ -463,11 +463,11 @@ fun CalendarScreen(
     val title = if (showTasks) "Tasks" else "${MonthNames.ENGLISH_ABBREVIATED.names[month - 1]} $year"
     val monthSteps: @Composable () -> Unit = {
         if (!showTasks) {
-            IconButton(onClick = { if (weekView) step(-7) else if (month == 1) { month = 12; year -= 1 } else month -= 1 }) {
+            io.nisfeb.talon.ui.IconButton(tip = if (weekView) "Previous week" else "Previous month", onClick = { if (weekView) step(-7) else if (month == 1) { month = 12; year -= 1 } else month -= 1 }) {
                 Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = if (weekView) "Previous week" else "Previous month")
             }
             TextButton(onClick = { year = today.year; month = today.monthNumber; selected = today }) { Text("Today") }
-            IconButton(onClick = { if (weekView) step(7) else if (month == 12) { month = 1; year += 1 } else month += 1 }) {
+            io.nisfeb.talon.ui.IconButton(tip = if (weekView) "Next week" else "Next month", onClick = { if (weekView) step(7) else if (month == 12) { month = 1; year += 1 } else month += 1 }) {
                 Icon(Icons.Filled.KeyboardArrowRight, contentDescription = if (weekView) "Next week" else "Next month")
             }
             TextButton(onClick = { repo.weekView.value = !weekView }) { Text(if (weekView) "Month" else "Week") }
@@ -495,10 +495,10 @@ fun CalendarScreen(
                 if (showTasks) Icon(TalonIcons.CalendarMonth, contentDescription = "Month")
                 else Icon(TalonIcons.Checklist, contentDescription = "Tasks")
             }
-            IconButton(onClick = { say("Refreshing…", "The ship did not answer.") { repo.refreshAll(); repo.error.value == null } }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Refresh", onClick = { say("Refreshing…", "The ship did not answer.") { repo.refreshAll(); repo.error.value == null } }) {
                 Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
             }
-            IconButton(onClick = { managing = true }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Calendars", onClick = { managing = true }) {
                 Icon(TalonIcons.Tune, contentDescription = "Calendars")
             }
         }
@@ -687,7 +687,7 @@ fun CalendarScreen(
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = ::openNew) { Icon(Icons.Filled.Add, contentDescription = "New event") }
+                io.nisfeb.talon.ui.IconButton(tip = "New event", onClick = ::openNew) { Icon(Icons.Filled.Add, contentDescription = "New event") }
             }
             status?.let {
                 if (it.endsWith("…")) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
@@ -825,7 +825,7 @@ fun CalendarScreen(
                             androidx.compose.foundation.text.selection.SelectionContainer(Modifier.weight(1f)) {
                                 Text(r.location, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.clickable { open(mapsSearchUri(r.location)) })
                             }
-                            IconButton(onClick = { copy(r.location) }, modifier = Modifier.size(32.dp)) {
+                            io.nisfeb.talon.ui.IconButton(tip = "Copy the place", onClick = { copy(r.location) }, modifier = Modifier.size(32.dp)) {
                                 Icon(TalonIcons.ContentCopy, contentDescription = "Copy the place", modifier = Modifier.size(16.dp))
                             }
                         }
@@ -835,7 +835,7 @@ fun CalendarScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.Filled.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                             Text(phone, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).clickable { open(telUri(phone)) })
-                            IconButton(onClick = { copy(phone) }, modifier = Modifier.size(32.dp)) {
+                            io.nisfeb.talon.ui.IconButton(tip = "Copy the number", onClick = { copy(phone) }, modifier = Modifier.size(32.dp)) {
                                 Icon(TalonIcons.ContentCopy, contentDescription = "Copy the number", modifier = Modifier.size(16.dp))
                             }
                         }
@@ -845,7 +845,7 @@ fun CalendarScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(TalonIcons.Link, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                             Text(url, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).clickable { open(openableUrl(url)) })
-                            IconButton(onClick = { copy(url) }, modifier = Modifier.size(32.dp)) {
+                            io.nisfeb.talon.ui.IconButton(tip = "Copy the link", onClick = { copy(url) }, modifier = Modifier.size(32.dp)) {
                                 Icon(TalonIcons.ContentCopy, contentDescription = "Copy the link", modifier = Modifier.size(16.dp))
                             }
                         }
@@ -1806,7 +1806,7 @@ private fun TasksView(
     }
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = {
+            io.nisfeb.talon.ui.IconButton(tip = if (searching) "Close the search" else "Search tasks", onClick = {
                 searching = !searching
                 // A search left behind a closed field would go on
                 // narrowing the list with nothing on screen saying so.
@@ -1832,7 +1832,7 @@ private fun TasksView(
                     )
                 }
             }
-            IconButton(onClick = { adding = !adding }) {
+            io.nisfeb.talon.ui.IconButton(tip = if (adding) "Close the new task" else "New task", onClick = { adding = !adding }) {
                 Icon(
                     if (adding) Icons.Filled.Clear else Icons.Filled.Add,
                     contentDescription = if (adding) "Close the new task" else "New task",
@@ -1847,7 +1847,7 @@ private fun TasksView(
                 singleLine = true,
                 trailingIcon = {
                     if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, contentDescription = "Clear the search") }
+                        io.nisfeb.talon.ui.IconButton(tip = "Clear the search", onClick = { query = "" }) { Icon(Icons.Filled.Clear, contentDescription = "Clear the search") }
                     }
                 },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).focusRequester(searchFocus),
@@ -1862,7 +1862,7 @@ private fun TasksView(
                     keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { add() }),
                 )
                 TextButton(onClick = { picking = true }) { Text(due?.let { "${it.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[it.monthNumber - 1]}" } ?: "Due") }
-                IconButton(onClick = ::add, enabled = name.isNotBlank()) { Icon(Icons.Filled.Add, contentDescription = "Add task") }
+                io.nisfeb.talon.ui.IconButton(tip = "Add task", onClick = ::add, enabled = name.isNotBlank()) { Icon(Icons.Filled.Add, contentDescription = "Add task") }
             }
             // A description as soon as there is something to describe; the
             // rest of what a task carries is one tap further, in the editor.

@@ -22,7 +22,6 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -132,7 +131,7 @@ fun GalleryGridScreen(
                 modifier = Modifier.padding(start = 4.dp).weight(1f),
                 maxLines = 1,
             )
-            IconButton(onClick = onCompose) {
+            io.nisfeb.talon.ui.IconButton(tip = "New post", onClick = onCompose) {
                 Icon(Icons.Filled.Add, contentDescription = "New post")
             }
         }

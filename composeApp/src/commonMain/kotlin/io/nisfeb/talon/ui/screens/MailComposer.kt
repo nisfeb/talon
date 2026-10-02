@@ -28,7 +28,6 @@ import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -252,8 +251,7 @@ fun MailComposer(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(
-                onClick = {
+            io.nisfeb.talon.ui.IconButton(tip = "Close", onClick = {
                     // Closing is instant. What is written is kept by the
                     // dispose above, on the repo's scope; waiting here for
                     // the save and the re-read that follows it meant the

@@ -120,3 +120,32 @@ fun CopyButton(text: () -> String, label: String = "Copy", modifier: Modifier = 
 /** How long a copy says "Copied". */
 const val COPIED_FOR_MS = 2_000L
 
+/**
+ * An icon button whose [tip], the icon's own description, shows on
+ * hover where there is a pointer: an icon alone said nothing on desktop
+ * until it was clicked.
+ */
+@Composable
+fun IconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tip: String? = null,
+    content: @Composable () -> Unit,
+) {
+    if (tip == null) {
+        androidx.compose.material3.IconButton(onClick = onClick, modifier = modifier, enabled = enabled, content = content)
+    } else {
+        HoverTip(tip) {
+            androidx.compose.material3.IconButton(onClick = onClick, modifier = modifier, enabled = enabled, content = content)
+        }
+    }
+}
+
+/**
+ * [content] with [tip] shown while a pointer rests on it; [content] alone
+ * where nothing hovers (touch). Hover only: material3's TooltipBox takes
+ * the anchor's presses, and a button under it stopped answering touches.
+ */
+@Composable
+expect fun HoverTip(tip: String, content: @Composable () -> Unit)

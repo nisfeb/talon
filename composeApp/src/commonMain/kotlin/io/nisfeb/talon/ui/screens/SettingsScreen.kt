@@ -32,7 +32,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.Surface
@@ -787,7 +786,7 @@ fun SettingsScreen(
                     visualTransformation = if (revealBrave) VisualTransformation.None
                     else PasswordVisualTransformation(),
                     trailingIcon = {
-                        IconButton(onClick = { revealBrave = !revealBrave }) {
+                        io.nisfeb.talon.ui.IconButton(tip = if (revealBrave) "Hide key" else "Show key", onClick = { revealBrave = !revealBrave }) {
                             Icon(
                                 imageVector = if (revealBrave) TalonIcons.VisibilityOff
                                 else TalonIcons.Visibility,

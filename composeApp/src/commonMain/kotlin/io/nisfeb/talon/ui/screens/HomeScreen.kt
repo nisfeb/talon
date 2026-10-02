@@ -37,7 +37,6 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -648,8 +647,7 @@ private fun BoxScope.ResizeHandles(
         }
     }
 
-    IconButton(
-        onClick = onRemove,
+    io.nisfeb.talon.ui.IconButton(tip = "Take ${title(widget.kind)} off the home page", onClick = onRemove,
         modifier = Modifier.align(Alignment.TopEnd).size(HANDLE),
     ) {
         Icon(

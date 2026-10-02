@@ -29,7 +29,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -146,7 +145,7 @@ fun GroupHomeScreen(
             // non-members the screen's whole purpose is the join CTA.
             if (isMember) {
                 Box {
-                    IconButton(onClick = { menuOpen = true }) {
+                    io.nisfeb.talon.ui.IconButton(tip = "More", onClick = { menuOpen = true }) {
                         Icon(Icons.Filled.MoreVert, contentDescription = "More")
                     }
                     DropdownMenu(

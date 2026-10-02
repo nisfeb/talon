@@ -22,7 +22,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -132,7 +131,7 @@ fun NoteScreen(
             Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { if (editing) editing = false else onBack() }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Back", onClick = { if (editing) editing = false else onBack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Column(Modifier.weight(1f)) {
@@ -150,8 +149,7 @@ fun NoteScreen(
                 }
             }
             if (editing) {
-                IconButton(
-                    enabled = !saving,
+                io.nisfeb.talon.ui.IconButton(tip = "Save", enabled = !saving,
                     onClick = {
                         val body = draft
                         saving = true
@@ -169,10 +167,10 @@ fun NoteScreen(
                     }
                 }
             } else {
-                IconButton(onClick = { editing = true }) {
+                io.nisfeb.talon.ui.IconButton(tip = "Edit", onClick = { editing = true }) {
                     Icon(Icons.Filled.Edit, contentDescription = "Edit")
                 }
-                if (published != null) IconButton(onClick = {
+                if (published != null) io.nisfeb.talon.ui.IconButton(tip = if (published == true) "Unpublish" else "Publish to web", onClick = {
                     if (published == true) {
                         actionError = null
                         scope.launch {
@@ -198,7 +196,7 @@ fun NoteScreen(
                         },
                     )
                 }
-                IconButton(onClick = { confirmDelete = true }) {
+                io.nisfeb.talon.ui.IconButton(tip = "Delete", onClick = { confirmDelete = true }) {
                     Icon(Icons.Filled.Delete, contentDescription = "Delete")
                 }
             }

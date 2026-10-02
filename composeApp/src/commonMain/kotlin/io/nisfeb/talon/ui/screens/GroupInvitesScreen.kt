@@ -20,7 +20,6 @@ import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.Text
@@ -84,8 +83,7 @@ fun GroupInvitesScreen(
                     strokeWidth = 2.dp,
                 )
             }
-            IconButton(
-                enabled = !refreshing,
+            io.nisfeb.talon.ui.IconButton(tip = "Refresh", enabled = !refreshing,
                 onClick = { scope.launch { refresh() } },
             ) {
                 Icon(Icons.Filled.Refresh, contentDescription = "Refresh")

@@ -72,7 +72,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -775,7 +774,7 @@ fun DmChatScreen(
             // non-null only for 1:1 DMs on platforms with a call
             // engine (isCallsSupported gates the wiring upstream).
             if (onStartCall != null) {
-                IconButton(onClick = onStartCall) {
+                io.nisfeb.talon.ui.IconButton(tip = "Voice call", onClick = onStartCall) {
                     Icon(Icons.Filled.Call, contentDescription = "Voice call")
                 }
             }
@@ -787,7 +786,11 @@ fun DmChatScreen(
                         }
                     },
                 ) {
-                    IconButton(onClick = onPartyLine) {
+                    io.nisfeb.talon.ui.IconButton(tip = if (partyPresent > 0) {
+                                "Party line — $partyPresent on the line"
+                            } else {
+                                "Party line"
+                            }, onClick = onPartyLine) {
                         Icon(
                             TalonIcons.Groups,
                             contentDescription = if (partyPresent > 0) {
@@ -801,7 +804,7 @@ fun DmChatScreen(
             }
             val hasInfoPane = onOpenGroupInfo != null && whom.startsWith("chat/")
             if (hasInfoPane) {
-                IconButton(onClick = onOpenGroupInfo) {
+                io.nisfeb.talon.ui.IconButton(tip = "Info", onClick = onOpenGroupInfo) {
                     Icon(Icons.Filled.Info, contentDescription = "Info")
                 }
             }
@@ -816,7 +819,7 @@ fun DmChatScreen(
                     io.nisfeb.talon.ai.AiSettings.Feature.SmartFeatures,
                 )
             ) {
-                IconButton(onClick = { topicsSheetOpen = true }) {
+                io.nisfeb.talon.ui.IconButton(tip = "Topics in this chat", onClick = { topicsSheetOpen = true }) {
                     Icon(TalonIcons.Topic, contentDescription = "Topics in this chat")
                 }
             }
@@ -2173,7 +2176,7 @@ private fun NotifyLevelDropdown(
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { if (enabled) open = true }, enabled = enabled) {
+        io.nisfeb.talon.ui.IconButton(tip = "Notifications", onClick = { if (enabled) open = true }, enabled = enabled) {
             Icon(
                 imageVector = if (level == NotifyLevel.NONE)
                     TalonIcons.NotificationsOff
@@ -2297,8 +2300,7 @@ private fun MessageActionMenu(
                         .weight(1f)
                         .padding(start = 4.dp),
                 )
-                IconButton(
-                    onClick = {
+                io.nisfeb.talon.ui.IconButton(tip = "Search emojis", onClick = {
                         searchOpen = !searchOpen
                         if (!searchOpen) searchQuery = ""
                     },

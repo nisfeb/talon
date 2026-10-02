@@ -20,7 +20,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -1006,8 +1005,7 @@ fun ChatComposer(
                     }
                 }
                 if (hasImage) {
-                    IconButton(
-                        onClick = {
+                    io.nisfeb.talon.ui.IconButton(tip = "Paste image", onClick = {
                             readClipboardImageOrNull()?.let(stageDropped)
                         },
                         modifier = Modifier.size(36.dp),
@@ -1021,8 +1019,7 @@ fun ChatComposer(
                 }
             }
             if (!hideComposerButtons) {
-                IconButton(
-                    onClick = onPickImage,
+                io.nisfeb.talon.ui.IconButton(tip = "Attach image", onClick = onPickImage,
                     enabled = canSend && !state.uploading,
                     modifier = Modifier.size(36.dp),
                 ) {
@@ -1039,8 +1036,7 @@ fun ChatComposer(
                         )
                     }
                 }
-                IconButton(
-                    onClick = onPickFile,
+                io.nisfeb.talon.ui.IconButton(tip = "Attach file", onClick = onPickFile,
                     enabled = canSend && !state.uploading,
                     modifier = Modifier.size(36.dp),
                 ) {
@@ -1233,8 +1229,7 @@ fun ChatComposer(
             val sendable = canSend &&
                 (state.draft.text.isNotBlank() || state.pendingQuote != null ||
                     (state.pendingAttachment != null && !state.uploading))
-            IconButton(
-                onClick = { doSend() },
+            io.nisfeb.talon.ui.IconButton(tip = if (isEditing) "Save edit" else "Send", onClick = { doSend() },
                 enabled = sendable,
                 modifier = Modifier.size(36.dp),
             ) {
@@ -1293,7 +1288,7 @@ private fun QuotePreviewRow(
                 maxLines = 2,
             )
         }
-        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+        io.nisfeb.talon.ui.IconButton(tip = "Cancel quote", onClick = onDismiss, modifier = Modifier.size(28.dp)) {
             Icon(
                 imageVector = Icons.Filled.Close,
                 contentDescription = "Cancel quote",
@@ -1361,7 +1356,7 @@ internal fun AttachmentStrip(
         if (sending) {
             CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
         } else {
-            IconButton(onClick = onCancel, modifier = Modifier.size(36.dp)) {
+            io.nisfeb.talon.ui.IconButton(tip = "Discard attachment", onClick = onCancel, modifier = Modifier.size(36.dp)) {
                 Icon(
                     Icons.Filled.Close,
                     contentDescription = "Discard attachment",
@@ -1402,8 +1397,7 @@ private fun VoicePreviewRow(
                 .weight(1f)
                 .padding(horizontal = 8.dp),
         )
-        IconButton(
-            onClick = onCancel,
+        io.nisfeb.talon.ui.IconButton(tip = "Discard recording", onClick = onCancel,
             enabled = !sending,
             modifier = Modifier.size(36.dp),
         ) {
@@ -1413,8 +1407,7 @@ private fun VoicePreviewRow(
                 modifier = Modifier.size(22.dp),
             )
         }
-        IconButton(
-            onClick = onSend,
+        io.nisfeb.talon.ui.IconButton(tip = "Send recording", onClick = onSend,
             enabled = !sending,
             modifier = Modifier.size(36.dp),
         ) {

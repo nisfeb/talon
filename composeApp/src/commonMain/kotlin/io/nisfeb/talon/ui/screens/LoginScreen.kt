@@ -31,7 +31,6 @@ import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -261,7 +260,7 @@ fun LoginScreen(
                         enabled = !connecting,
                         singleLine = true,
                         trailingIcon = {
-                            IconButton(onClick = { codeVisible = !codeVisible }) {
+                            io.nisfeb.talon.ui.IconButton(tip = if (codeVisible) "Hide code" else "Show code", onClick = { codeVisible = !codeVisible }) {
                                 Icon(
                                     imageVector = if (codeVisible) TalonIcons.VisibilityOff
                                         else TalonIcons.Visibility,

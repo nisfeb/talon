@@ -9,7 +9,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -32,7 +31,7 @@ fun ShipPageSheet(title: String, pageUrl: String, shipUrl: String, cookie: Strin
             Column {
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = "Close") }
+                    io.nisfeb.talon.ui.IconButton(tip = "Close", onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = "Close") }
                 }
                 HorizontalDivider()
                 UrbWebView(url = pageUrl, origin = shipUrl, cookie = cookie, modifier = Modifier.weight(1f).fillMaxWidth())

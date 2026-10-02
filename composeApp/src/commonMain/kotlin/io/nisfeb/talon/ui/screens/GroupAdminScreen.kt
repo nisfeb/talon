@@ -31,7 +31,6 @@ import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -117,7 +116,7 @@ fun GroupAdminScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
+            io.nisfeb.talon.ui.IconButton(tip = "Back", onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
@@ -126,8 +125,7 @@ fun GroupAdminScreen(
                 modifier = Modifier.padding(start = 4.dp).weight(1f),
                 maxLines = 1,
             )
-            IconButton(
-                enabled = !creatingChannel,
+            io.nisfeb.talon.ui.IconButton(tip = "New channel", enabled = !creatingChannel,
                 onClick = { newChannelOpen = true },
             ) {
                 Icon(Icons.Filled.Add, contentDescription = "New channel")
@@ -1632,7 +1630,7 @@ private fun MemberRow(
             }
         }
         if (onManage != null) {
-            androidx.compose.material3.IconButton(onClick = onManage, modifier = Modifier.size(32.dp)) {
+            io.nisfeb.talon.ui.IconButton(tip = "Manage ${contactMap.displayName(member.ship)}", onClick = onManage, modifier = Modifier.size(32.dp)) {
                 androidx.compose.material3.Icon(
                     androidx.compose.material.icons.Icons.Filled.MoreVert,
                     contentDescription = "Manage ${contactMap.displayName(member.ship)}",

@@ -96,7 +96,7 @@ fun OrreryActionsScreen(
                     modifier = Modifier.padding(12.dp).size(20.dp),
                 )
             } else {
-                androidx.compose.material3.IconButton(onClick = ::refresh) {
+                io.nisfeb.talon.ui.IconButton(tip = "Refresh", onClick = ::refresh) {
                     androidx.compose.material3.Icon(
                         androidx.compose.material.icons.Icons.Filled.Refresh,
                         contentDescription = "Refresh",

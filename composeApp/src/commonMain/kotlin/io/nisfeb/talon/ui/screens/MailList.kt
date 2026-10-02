@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -371,7 +370,7 @@ private fun MailToolbar(
             // Not a hamburger. The app's own is one, and two identical
             // ones stacked down the left of a mail screen is a way of
             // asking somebody to guess which is which.
-            IconButton(onClick = onFolders) {
+            io.nisfeb.talon.ui.IconButton(tip = "Mailboxes", onClick = onFolders) {
                 Icon(TalonIcons.Inbox, contentDescription = "Mailboxes")
             }
         }
@@ -384,8 +383,7 @@ private fun MailToolbar(
                 placeholder = { Text("Search all mail") },
                 singleLine = true,
                 trailingIcon = {
-                    IconButton(
-                        onClick = {
+                    io.nisfeb.talon.ui.IconButton(tip = "Search", onClick = {
                             if (draft.isBlank()) { searching = false; onSearch("") } else onSearch(draft)
                         },
                     ) { Icon(Icons.Filled.Search, contentDescription = "Search") }
@@ -398,7 +396,7 @@ private fun MailToolbar(
                 ),
                 modifier = Modifier.weight(1f).padding(end = 4.dp),
             )
-            IconButton(onClick = { draft = ""; searching = false; onSearch("") }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Clear search", onClick = { draft = ""; searching = false; onSearch("") }) {
                 Icon(Icons.Filled.Close, contentDescription = "Clear search")
             }
         } else {
@@ -407,7 +405,7 @@ private fun MailToolbar(
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.weight(1f).padding(start = if (onFolders != null) 0.dp else 8.dp),
             )
-            IconButton(onClick = { searching = true }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Search mail", onClick = { searching = true }) {
                 Icon(Icons.Filled.Search, contentDescription = "Search mail")
             }
         }
@@ -416,7 +414,7 @@ private fun MailToolbar(
         }
         // The reader always knows better than a ten-minute timer, so the
         // manual ask is a control and not a hidden gesture.
-        IconButton(onClick = onRefresh, enabled = !loading) {
+        io.nisfeb.talon.ui.IconButton(tip = "Check for new mail", onClick = onRefresh, enabled = !loading) {
             if (loading) {
                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             } else {
@@ -678,7 +676,7 @@ private fun MailSelectionBar(
 ) {
     Column(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onClear) { Icon(Icons.Filled.Close, contentDescription = "Clear selection") }
+            io.nisfeb.talon.ui.IconButton(tip = "Clear selection", onClick = onClear) { Icon(Icons.Filled.Close, contentDescription = "Clear selection") }
             Text("$count selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             if (!allPicked) io.nisfeb.talon.ui.TextButton(onClick = onAll) { Text("Select all") }
         }

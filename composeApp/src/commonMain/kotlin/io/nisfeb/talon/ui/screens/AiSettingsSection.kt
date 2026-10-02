@@ -23,7 +23,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
@@ -497,7 +496,7 @@ private fun ProviderCard(
                 singleLine = true,
                 visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
-                    IconButton(onClick = { reveal = !reveal }) {
+                    io.nisfeb.talon.ui.IconButton(tip = if (reveal) "Hide key" else "Show key", onClick = { reveal = !reveal }) {
                         Icon(if (reveal) TalonIcons.VisibilityOff else TalonIcons.Visibility, contentDescription = if (reveal) "Hide key" else "Show key")
                     }
                 },
@@ -1743,7 +1742,7 @@ private fun PreferencesRows(orrery: OrreryRepo) {
     p.list.forEach { item ->
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(item, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            IconButton(onClick = { write { orrery.changePreferences { it - item } } }, enabled = !busy) {
+            io.nisfeb.talon.ui.IconButton(tip = "Remove \"$item\"", onClick = { write { orrery.changePreferences { it - item } } }, enabled = !busy) {
                 Icon(Icons.Filled.Close, contentDescription = "Remove \"$item\"")
             }
         }

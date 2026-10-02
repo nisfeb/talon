@@ -10,7 +10,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -72,8 +71,7 @@ fun RightPaneHost(
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.weight(1f).padding(start = 4.dp),
             )
-            IconButton(
-                onClick = if (content is RightPaneContent.GroupInfoDrilldown) onLeaveCategoryDrilldown
+            io.nisfeb.talon.ui.IconButton(tip = "Close", onClick = if (content is RightPaneContent.GroupInfoDrilldown) onLeaveCategoryDrilldown
                           else onClose,
             ) {
                 Icon(Icons.Filled.Close, contentDescription = "Close")

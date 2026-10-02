@@ -23,7 +23,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -123,7 +122,7 @@ fun NotebookComposeScreen(
         ) {
             // A long-form draft lives only in memory — confirm before an
             // accidental back-tap destroys it.
-            IconButton(onClick = { if (dirty) confirmDiscard = true else onBack() }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Back", onClick = { if (dirty) confirmDiscard = true else onBack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
