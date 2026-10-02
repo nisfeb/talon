@@ -288,6 +288,27 @@ fun isOutOfCredit(message: String?): Boolean = message?.contains(OUT_OF_CREDIT) 
 class ModelHttpError(val status: Int, message: String) : IllegalStateException(message)
 
 /**
+ * [what] failed at the model, said in words: a busy provider (429) or a
+ * failing one (5xx) as something to try again, a key turned away (401,
+ * 403) as one to check, an empty balance as it was worded; anything else
+ * as [io.nisfeb.talon.util.problemOf] says it. "api.example.com 503:
+ * upstream connect error…" was the line.
+ */
+fun modelProblem(what: String, e: Throwable): io.nisfeb.talon.util.Problem {
+    val status = (e as? ModelHttpError)?.status
+    val why = when {
+        status == 402 -> return io.nisfeb.talon.util.Problem(e.message.orEmpty(), io.nisfeb.talon.util.errorDetailsOf(e))
+        status == 429 -> "the model is busy. Try again in a moment."
+        status != null && status >= 500 -> "the model's provider is having trouble. Try again later."
+        status == 401 || status == 403 -> "the provider turned the key away. Check it in Settings, under AI."
+        status == null && io.nisfeb.talon.util.isTransientNetworkError(e) -> "the model did not answer in time. Try again."
+        else -> return io.nisfeb.talon.util.problemOf(what, e)
+    }
+    val calm = status == 429 || (status != null && status >= 500) || status == null
+    return io.nisfeb.talon.util.Problem("$what: $why", io.nisfeb.talon.util.errorDetailsOf(e), calm)
+}
+
+/**
  * No answer from a model that another try may get: the network, out of
  * credit, rate limited, a key revoked or a model unloaded, the
  * provider's own fault. Only a request the provider calls bad, 400, 413

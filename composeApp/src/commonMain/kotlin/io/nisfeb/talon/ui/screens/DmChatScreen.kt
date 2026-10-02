@@ -3,7 +3,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.util.formatMonthDay
 import kotlinx.coroutines.flow.update
-import io.nisfeb.talon.util.formatMonthDayTime
+import io.nisfeb.talon.util.formatMonthDayClock
 import io.nisfeb.talon.util.formatMonthDayYear
 import kotlin.time.Clock
 import kotlinx.datetime.DateTimeUnit
@@ -61,7 +61,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
@@ -73,7 +72,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -246,7 +244,7 @@ fun DmChatScreen(
     }
     var catchUpSummary by remember(whom) { mutableStateOf<String?>(null) }
     var catchingUp by remember(whom) { mutableStateOf(false) }
-    var catchUpError by remember(whom) { mutableStateOf<String?>(null) }
+    var catchUpError by remember(whom) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     // Latches once a summary succeeds — unreadSnapshot never clears, so
     // without this the banner reoffered (and would re-spend an AI call
     // on) the exact content the user just dismissed.
@@ -776,7 +774,7 @@ fun DmChatScreen(
             // non-null only for 1:1 DMs on platforms with a call
             // engine (isCallsSupported gates the wiring upstream).
             if (onStartCall != null) {
-                IconButton(onClick = onStartCall) {
+                io.nisfeb.talon.ui.IconButton(tip = "Voice call", onClick = onStartCall) {
                     Icon(Icons.Filled.Call, contentDescription = "Voice call")
                 }
             }
@@ -788,7 +786,11 @@ fun DmChatScreen(
                         }
                     },
                 ) {
-                    IconButton(onClick = onPartyLine) {
+                    io.nisfeb.talon.ui.IconButton(tip = if (partyPresent > 0) {
+                                "Party line — $partyPresent on the line"
+                            } else {
+                                "Party line"
+                            }, onClick = onPartyLine) {
                         Icon(
                             TalonIcons.Groups,
                             contentDescription = if (partyPresent > 0) {
@@ -802,7 +804,7 @@ fun DmChatScreen(
             }
             val hasInfoPane = onOpenGroupInfo != null && whom.startsWith("chat/")
             if (hasInfoPane) {
-                IconButton(onClick = onOpenGroupInfo) {
+                io.nisfeb.talon.ui.IconButton(tip = "Info", onClick = onOpenGroupInfo) {
                     Icon(Icons.Filled.Info, contentDescription = "Info")
                 }
             }
@@ -817,7 +819,7 @@ fun DmChatScreen(
                     io.nisfeb.talon.ai.AiSettings.Feature.SmartFeatures,
                 )
             ) {
-                IconButton(onClick = { topicsSheetOpen = true }) {
+                io.nisfeb.talon.ui.IconButton(tip = "Topics in this chat", onClick = { topicsSheetOpen = true }) {
                     Icon(TalonIcons.Topic, contentDescription = "Topics in this chat")
                 }
             }
@@ -882,7 +884,7 @@ fun DmChatScreen(
                             catchUpSummary = it
                             caughtUp = true
                         }
-                            .onFailure { catchUpError = it.message ?: it::class.simpleName }
+                            .onFailure { catchUpError = io.nisfeb.talon.ai.modelProblem("Couldn't catch you up", it) }
                         catchingUp = false
                     }
                 },
@@ -1325,40 +1327,27 @@ fun DmChatScreen(
         AlertDialog(
             onDismissRequest = { catchUpError = null },
             title = { Text("Catch me up failed") },
-            text = { Text(err) },
+            text = { io.nisfeb.talon.ui.ProblemLine(err) },
             confirmButton = {
                 TextButton(onClick = { catchUpError = null }) { Text("OK") }
             },
-            dismissButton = if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(err)) ({
+            dismissButton = if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(err.line)) ({
                 TextButton(onClick = { catchUpError = null; onTopUp() }) { Text("Top up") }
             }) else null,
         )
     }
 
     confirmingDelete?.let { target ->
-        AlertDialog(
-            onDismissRequest = { confirmingDelete = null },
-            title = { Text("Delete message?") },
-            text = {
-                Text(
-                    "This will remove the message for everyone in the chat. " +
-                        "Channel admins can delete other users' messages; otherwise " +
-                        "the server only allows deleting your own.",
-                )
+        DeleteMessageDialog(
+            mine = target.author == ourPatp,
+            onDelete = {
+                confirmingDelete = null
+                scope.launch {
+                    runCatching { repo.delete(whom, target.id, target.parentId) }
+                        .onFailure { composerState.failed("delete", it) }
+                }
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    val toDelete = target
-                    confirmingDelete = null
-                    scope.launch {
-                        runCatching { repo.delete(whom, toDelete.id, toDelete.parentId) }
-                            .onFailure { composerState.failed("delete", it) }
-                    }
-                }) { Text("Delete") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingDelete = null }) { Text("Cancel") }
-            },
+            onDismiss = { confirmingDelete = null },
         )
     }
 
@@ -1411,7 +1400,7 @@ fun DmChatScreen(
         }
         var publishing by remember(target.id) { mutableStateOf(false) }
         var resultUrb by remember(target.id) { mutableStateOf<String?>(null) }
-        var pubError by remember(target.id) { mutableStateOf<String?>(null) }
+        var pubError by remember(target.id) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
         AlertDialog(
             onDismissRequest = { if (!publishing) publishTarget = null },
             title = { Text(if (resultUrb != null) "Published to Lattice" else "Publish to Lattice") },
@@ -1435,10 +1424,7 @@ fun DmChatScreen(
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        pubError?.let {
-                            Text(it, color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall)
-                        }
+                        pubError?.let { io.nisfeb.talon.ui.ProblemLine(it) }
                     }
                 }
             },
@@ -1467,7 +1453,7 @@ fun DmChatScreen(
                                     val entries = (listOf(target) + replies).map {
                                         io.nisfeb.talon.urbit.StoryToGemtext.Entry(
                                             byline = contactMap.displayName(it.author) +
-                                                " · " + io.nisfeb.talon.util.formatMonthDayTime(it.sentMs),
+                                                " · " + io.nisfeb.talon.util.formatMonthDayClock(it.sentMs),
                                             contentJson = it.contentJson,
                                         )
                                     }
@@ -1479,7 +1465,7 @@ fun DmChatScreen(
                                     )
                                 }.onSuccess { resultUrb = it }
                                     .onFailure {
-                                        pubError = "Publish failed: ${it.message ?: it::class.simpleName}"
+                                        pubError = io.nisfeb.talon.util.problemOf("Couldn't publish", it)
                                     }
                                 publishing = false
                             }
@@ -1563,7 +1549,7 @@ private fun MessageRow(
 ) {
     val m = row.m
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
-    val stamp = remember(m.sentMs) { formatMonthDayTime(m.sentMs) }
+    val stamp = remember(m.sentMs) { formatMonthDayClock(m.sentMs) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
     val avatarUrl = remember(m.author, contactMap) { contactMap.avatar(m.author) }
     val avatarColor = remember(m.author, contactMap) { contactMap.shipColor(m.author) }
@@ -1933,7 +1919,7 @@ private fun PartyNoteRow(text: String, onDismiss: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            "Only you can see this. Tap to dismiss.",
+            "Only you can see this. ${io.nisfeb.talon.ui.tapWord} to dismiss.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             modifier = Modifier.padding(top = 2.dp),
@@ -2190,7 +2176,7 @@ private fun NotifyLevelDropdown(
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { if (enabled) open = true }, enabled = enabled) {
+        io.nisfeb.talon.ui.IconButton(tip = "Notifications", onClick = { if (enabled) open = true }, enabled = enabled) {
             Icon(
                 imageVector = if (level == NotifyLevel.NONE)
                     TalonIcons.NotificationsOff
@@ -2314,8 +2300,7 @@ private fun MessageActionMenu(
                         .weight(1f)
                         .padding(start = 4.dp),
                 )
-                IconButton(
-                    onClick = {
+                io.nisfeb.talon.ui.IconButton(tip = "Search emojis", onClick = {
                         searchOpen = !searchOpen
                         if (!searchOpen) searchQuery = ""
                     },
@@ -2854,4 +2839,22 @@ internal fun SendFailedNote() {
             color = MaterialTheme.colorScheme.error,
         )
     }
+}
+
+/**
+ * Deleting a message, said the same wherever it is asked: the chat and
+ * a thread worded it differently, and only one of them in red.
+ * Another's message is deleted as an admin, and says so.
+ */
+@Composable
+internal fun DeleteMessageDialog(mine: Boolean, onDelete: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete message?") },
+        text = { Text("It goes for everyone in the chat. This cannot be undone.") },
+        confirmButton = {
+            io.nisfeb.talon.ui.DestructiveTextButton(onClick = onDelete) { Text(if (mine) "Delete" else "Delete (admin)") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }

@@ -25,7 +25,6 @@ import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -74,7 +73,9 @@ fun ProfileEditScreen(
     var color by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
     var uploading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
+    /** The profile as last read, to tell an edit from none. */
+    var loaded by remember { mutableStateOf<List<String?>>(listOf("", "", "", null, null)) }
     var shipKeys by remember(ourPatp) { mutableStateOf<io.nisfeb.talon.ui.AzimuthRpc.Keys?>(null) }
     var keysProblem by remember(ourPatp) { mutableStateOf<String?>(null) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -112,7 +113,19 @@ fun ProfileEditScreen(
         bio = c.bio.orEmpty()
         avatarUrl = c.avatarUrl
         color = c.color
+        loaded = listOf(nickname, status, bio, avatarUrl, color)
     }
+    // Back left with whatever was typed and said nothing; it asks now.
+    val dirty = listOf(nickname, status, bio, avatarUrl, color) != loaded
+    var confirmDiscard by remember { mutableStateOf(false) }
+    io.nisfeb.talon.ui.PlatformBackHandler(enabled = dirty && !saving) { confirmDiscard = true }
+    if (confirmDiscard) io.nisfeb.talon.ui.ConfirmDestructive(
+        title = "Discard your changes?",
+        text = "What you changed here is not saved.",
+        confirm = "Discard",
+        onConfirm = onBack,
+        onDismiss = { confirmDiscard = false },
+    )
 
     val pickImage = rememberImagePicker()
     val onPickAvatar: () -> Unit = {
@@ -125,7 +138,7 @@ fun ProfileEditScreen(
             uploading = true
             error = null
             val picked = runCatching { pickImage() }
-                .onFailure { error = "couldn't read image: ${it.message ?: it::class.simpleName}" }
+                .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't read the image", it) }
                 .getOrNull()
             if (picked == null) {
                 uploading = false
@@ -141,7 +154,7 @@ fun ProfileEditScreen(
                 }
                 avatarUrl = repo.uploadImage(picked.bytes, picked.mimeType, picked.displayName)
             }.onFailure { e ->
-                error = "avatar upload failed: ${e.message ?: e::class.simpleName}"
+                error = io.nisfeb.talon.util.problemOf("Couldn't upload the avatar", e)
             }
             uploading = false
         }
@@ -152,7 +165,7 @@ fun ProfileEditScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
+            io.nisfeb.talon.ui.IconButton(tip = "Back", onClick = { if (dirty && !saving) confirmDiscard = true else onBack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
@@ -246,13 +259,7 @@ fun ProfileEditScreen(
                 )
             }
 
-            error?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
+            error?.let { io.nisfeb.talon.ui.ProblemLine(it) }
 
             Spacer(Modifier.height(8.dp))
 
@@ -271,7 +278,7 @@ fun ProfileEditScreen(
                                 color = color.orEmpty(),
                             )
                         }.onFailure { e ->
-                            error = "save failed: ${e.message ?: e::class.simpleName}"
+                            error = io.nisfeb.talon.util.problemOf("Couldn't save your profile", e)
                         }.onSuccess { onBack() }
                         saving = false
                     }

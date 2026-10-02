@@ -20,7 +20,6 @@ import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.Text
@@ -50,21 +49,22 @@ fun GroupInvitesScreen(
     val invites = cached ?: emptyList()
     val joining by repo.joiningFlow.collectAsState()
     var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<Throwable?>(null) }
     // A failed first load is an error to show, not a spinner to leave running.
     val loading = cached == null && error == null
-    // An accept or decline the ship refused: its own words, since it was
-    // shown as "Couldn't refresh" and read as a network problem.
-    var actionError by remember { mutableStateOf<String?>(null) }
+    // An accept or decline the ship refused, apart from a failed refresh:
+    // it was shown as "Couldn't refresh" and read as a network problem.
+    var actionError by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     var pendingAction by remember { mutableStateOf<Pair<String, String>?>(null) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
-        refreshing = cached == null
-        runCatching { repo.refreshInvites() }
-            .onFailure { error = it.message ?: it::class.simpleName }
+    suspend fun refresh() {
+        refreshing = true
+        error = null
+        runCatching { repo.refreshInvites() }.onFailure { error = it }
         refreshing = false
     }
+    LaunchedEffect(Unit) { refresh() }
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -83,17 +83,8 @@ fun GroupInvitesScreen(
                     strokeWidth = 2.dp,
                 )
             }
-            IconButton(
-                enabled = !refreshing,
-                onClick = {
-                    scope.launch {
-                        refreshing = true
-                        error = null
-                        runCatching { repo.refreshInvites() }
-                            .onFailure { error = it.message ?: it::class.simpleName }
-                        refreshing = false
-                    }
-                },
+            io.nisfeb.talon.ui.IconButton(tip = "Refresh", enabled = !refreshing,
+                onClick = { scope.launch { refresh() } },
             ) {
                 Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
             }
@@ -107,12 +98,10 @@ fun GroupInvitesScreen(
 
             // Full-screen error only when the cache has nothing to show;
             // a failed refresh over a populated list becomes a banner.
-            error != null && invites.isEmpty() && joining.isEmpty() -> Text(
-                "Couldn't load invites: $error",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(24.dp),
-            )
+            error != null && invites.isEmpty() && joining.isEmpty() -> Column(Modifier.padding(vertical = 16.dp)) {
+                io.nisfeb.talon.ui.ProblemLine(io.nisfeb.talon.util.problemOf("Couldn't load invites", error!!))
+                io.nisfeb.talon.ui.TextButton(onClick = { scope.launch { refresh() } }, modifier = Modifier.padding(start = 8.dp)) { Text("Try again") }
+            }
 
             invites.isEmpty() && joining.isEmpty() -> Text(
                 "No pending invites.",
@@ -122,14 +111,8 @@ fun GroupInvitesScreen(
             )
 
             else -> Column {
-                listOfNotNull(error?.let { "Couldn't refresh: $it" }, actionError).forEach {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        maxLines = 2,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    )
+                listOfNotNull(error?.let { io.nisfeb.talon.util.problemOf("Couldn't refresh", it) }, actionError).forEach {
+                    io.nisfeb.talon.ui.ProblemLine(it)
                 }
                 LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -154,7 +137,7 @@ fun GroupInvitesScreen(
                                 actionError = null
                                 scope.launch {
                                     runCatching { repo.cancelJoin(j.flag) }
-                                        .onFailure { actionError = "Couldn't stop joining ${j.title ?: j.flag}: ${it.message ?: it::class.simpleName}" }
+                                        .onFailure { actionError = io.nisfeb.talon.util.problemOf("Couldn't stop joining ${j.title ?: j.flag}", it) }
                                     pendingAction = null
                                 }
                             },
@@ -171,7 +154,7 @@ fun GroupInvitesScreen(
                             actionError = null
                             scope.launch {
                                 runCatching { repo.acceptInvite(inv.flag) }
-                                    .onFailure { actionError = "Couldn't join ${inv.title ?: inv.flag}: ${it.message ?: it::class.simpleName}" }
+                                    .onFailure { actionError = io.nisfeb.talon.util.problemOf("Couldn't join ${inv.title ?: inv.flag}", it) }
                                 pendingAction = null
                             }
                         },
@@ -180,7 +163,7 @@ fun GroupInvitesScreen(
                             actionError = null
                             scope.launch {
                                 runCatching { repo.rejectInvite(inv.flag) }
-                                    .onFailure { actionError = "Couldn't decline ${inv.title ?: inv.flag}: ${it.message ?: it::class.simpleName}" }
+                                    .onFailure { actionError = io.nisfeb.talon.util.problemOf("Couldn't decline ${inv.title ?: inv.flag}", it) }
                                 pendingAction = null
                             }
                         },

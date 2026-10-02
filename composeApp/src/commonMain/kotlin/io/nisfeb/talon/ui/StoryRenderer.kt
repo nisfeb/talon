@@ -733,8 +733,8 @@ private fun PollWidgetBlock(
                 ),
             )
             Text(
-                if (totalVotes == 0) "Tap an option to vote."
-                else "$totalVotes vote${if (totalVotes == 1) "" else "s"} · tap to change.",
+                if (totalVotes == 0) "${io.nisfeb.talon.ui.tapWord} an option to vote."
+                else "$totalVotes vote${if (totalVotes == 1) "" else "s"} · ${io.nisfeb.talon.ui.tapWord.lowercase()} to change.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),

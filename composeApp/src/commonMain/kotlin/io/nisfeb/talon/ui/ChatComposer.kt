@@ -20,7 +20,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -157,6 +156,13 @@ class ComposerState(initialDraftText: String) {
      * details, not in the line: "Request timeout has expired [url=…]" was
      * the line.
      */
+    /** [problem] over the composer, its error whole behind Copy error details. */
+    fun show(problem: io.nisfeb.talon.util.Problem) {
+        shownError = problem.line
+        sendErrorDetails = problem.details
+        sendErrorCalm = problem.calm
+    }
+
     fun failed(what: String, err: Throwable) {
         val slow = io.nisfeb.talon.util.isShipSlow(err)
         sendError = if (slow) {
@@ -165,7 +171,7 @@ class ComposerState(initialDraftText: String) {
             err.message
         } else {
             "$what failed: " + ((err as? io.nisfeb.talon.urbit.PokeNacked)?.let { "the ship refused it" }
-                ?: (err.message ?: err::class.simpleName).orEmpty().lineSequence().first().take(120))
+                ?: io.nisfeb.talon.util.readableReason(err.message) ?: "something went wrong")
         }
         sendErrorDetails = io.nisfeb.talon.util.errorDetailsOf(err)
         sendErrorCalm = slow
@@ -392,7 +398,7 @@ fun ChatComposer(
             picking = true
             val picked = runCatching { pickImage() }
                 .also { picking = false }
-                .onFailure { state.sendError = "couldn't read image: ${it.message ?: it::class.simpleName}" }
+                .onFailure { state.show(io.nisfeb.talon.util.problemOf("Couldn't read the image", it)) }
                 .getOrNull() ?: return@launch
             stage(picked.bytes, picked.mimeType, picked.displayName, true)
         }
@@ -404,7 +410,7 @@ fun ChatComposer(
             picking = true
             val picked = runCatching { pickAnyFile() }
                 .also { picking = false }
-                .onFailure { state.sendError = "couldn't read file: ${it.message ?: it::class.simpleName}" }
+                .onFailure { state.show(io.nisfeb.talon.util.problemOf("Couldn't read the file", it)) }
                 .getOrNull() ?: return@launch
             stage(
                 picked.bytes, picked.mimeType, picked.displayName,
@@ -807,7 +813,7 @@ fun ChatComposer(
                         onSlashMic()
                     } else {
                         state.sendError =
-                            "/mic: tap the mic button instead — slash trigger isn't wired here"
+                            "/mic: ${io.nisfeb.talon.ui.tapWord.lowercase()} the mic button instead."
                     }
                     true
                 }
@@ -999,8 +1005,7 @@ fun ChatComposer(
                     }
                 }
                 if (hasImage) {
-                    IconButton(
-                        onClick = {
+                    io.nisfeb.talon.ui.IconButton(tip = "Paste image", onClick = {
                             readClipboardImageOrNull()?.let(stageDropped)
                         },
                         modifier = Modifier.size(36.dp),
@@ -1014,8 +1019,7 @@ fun ChatComposer(
                 }
             }
             if (!hideComposerButtons) {
-                IconButton(
-                    onClick = onPickImage,
+                io.nisfeb.talon.ui.IconButton(tip = "Attach image", onClick = onPickImage,
                     enabled = canSend && !state.uploading,
                     modifier = Modifier.size(36.dp),
                 ) {
@@ -1032,8 +1036,7 @@ fun ChatComposer(
                         )
                     }
                 }
-                IconButton(
-                    onClick = onPickFile,
+                io.nisfeb.talon.ui.IconButton(tip = "Attach file", onClick = onPickFile,
                     enabled = canSend && !state.uploading,
                     modifier = Modifier.size(36.dp),
                 ) {
@@ -1226,8 +1229,7 @@ fun ChatComposer(
             val sendable = canSend &&
                 (state.draft.text.isNotBlank() || state.pendingQuote != null ||
                     (state.pendingAttachment != null && !state.uploading))
-            IconButton(
-                onClick = { doSend() },
+            io.nisfeb.talon.ui.IconButton(tip = if (isEditing) "Save edit" else "Send", onClick = { doSend() },
                 enabled = sendable,
                 modifier = Modifier.size(36.dp),
             ) {
@@ -1286,7 +1288,7 @@ private fun QuotePreviewRow(
                 maxLines = 2,
             )
         }
-        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+        io.nisfeb.talon.ui.IconButton(tip = "Cancel quote", onClick = onDismiss, modifier = if (isTouchPrimary) Modifier else Modifier.size(28.dp)) {
             Icon(
                 imageVector = Icons.Filled.Close,
                 contentDescription = "Cancel quote",
@@ -1354,7 +1356,7 @@ internal fun AttachmentStrip(
         if (sending) {
             CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
         } else {
-            IconButton(onClick = onCancel, modifier = Modifier.size(36.dp)) {
+            io.nisfeb.talon.ui.IconButton(tip = "Discard attachment", onClick = onCancel, modifier = Modifier.size(36.dp)) {
                 Icon(
                     Icons.Filled.Close,
                     contentDescription = "Discard attachment",
@@ -1386,7 +1388,7 @@ private fun VoicePreviewRow(
             voicePlayer(pending.path, sending)
         }
         val label = if (voicePlayer != null) "🎙 ${seconds}s"
-        else "🎙 ${seconds}s recorded — preview not available, tap send when ready"
+        else "🎙 ${seconds}s recorded — preview not available, ${io.nisfeb.talon.ui.tapWord.lowercase()} send when ready"
         Text(
             label,
             style = MaterialTheme.typography.bodySmall,
@@ -1395,8 +1397,7 @@ private fun VoicePreviewRow(
                 .weight(1f)
                 .padding(horizontal = 8.dp),
         )
-        IconButton(
-            onClick = onCancel,
+        io.nisfeb.talon.ui.IconButton(tip = "Discard recording", onClick = onCancel,
             enabled = !sending,
             modifier = Modifier.size(36.dp),
         ) {
@@ -1406,8 +1407,7 @@ private fun VoicePreviewRow(
                 modifier = Modifier.size(22.dp),
             )
         }
-        IconButton(
-            onClick = onSend,
+        io.nisfeb.talon.ui.IconButton(tip = "Send recording", onClick = onSend,
             enabled = !sending,
             modifier = Modifier.size(36.dp),
         ) {
@@ -1428,23 +1428,3 @@ private fun VoicePreviewRow(
     }
 }
 
-/** A line over the composer, with the error whole behind "Copy error details" where there is one. */
-@Composable
-private fun NoteLine(text: String, calm: Boolean, details: String?, onCopy: (String) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (calm) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
-            modifier = Modifier.weight(1f).padding(vertical = 4.dp),
-        )
-        if (details != null) {
-            TextButton(onClick = { onCopy(details) }) {
-                Text("Copy error details", style = MaterialTheme.typography.labelSmall)
-            }
-        }
-    }
-}

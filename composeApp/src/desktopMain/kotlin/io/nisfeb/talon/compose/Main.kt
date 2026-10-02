@@ -466,6 +466,24 @@ fun main() {
                 }
             },
         ) {
+            // The shortcuts, listed where a desktop app lists them, and
+            // run from there too: they were only to be found by trying.
+            // A menu pick runs as the key would (App's runShortcut).
+            val menuShortcuts = remember { kotlinx.coroutines.flow.MutableSharedFlow<io.nisfeb.talon.ui.ShortcutAction>(extraBufferCapacity = 8) }
+            val mac = io.nisfeb.talon.util.isMacOsHost
+            fun keys(key: androidx.compose.ui.input.key.Key) = androidx.compose.ui.input.key.KeyShortcut(key, ctrl = !mac, meta = mac)
+            MenuBar {
+                Menu("Go") {
+                    Item("Search", shortcut = keys(androidx.compose.ui.input.key.Key.K)) { menuShortcuts.tryEmit(io.nisfeb.talon.ui.ShortcutAction.FocusSearch) }
+                    Item("New message", shortcut = keys(androidx.compose.ui.input.key.Key.N)) { menuShortcuts.tryEmit(io.nisfeb.talon.ui.ShortcutAction.NewDm) }
+                    Item("Settings", shortcut = keys(androidx.compose.ui.input.key.Key.Comma)) { menuShortcuts.tryEmit(io.nisfeb.talon.ui.ShortcutAction.OpenSettings) }
+                }
+                Menu("View") {
+                    Item("Larger text", shortcut = keys(androidx.compose.ui.input.key.Key.Equals)) { menuShortcuts.tryEmit(io.nisfeb.talon.ui.ShortcutAction.IncreaseFontSize) }
+                    Item("Smaller text", shortcut = keys(androidx.compose.ui.input.key.Key.Minus)) { menuShortcuts.tryEmit(io.nisfeb.talon.ui.ShortcutAction.DecreaseFontSize) }
+                    Item("Actual size", shortcut = keys(androidx.compose.ui.input.key.Key.Zero)) { menuShortcuts.tryEmit(io.nisfeb.talon.ui.ShortcutAction.ResetFontSize) }
+                }
+            }
             // Override Compose's default desktop UriHandler. The
             // default delegates to java.awt.Desktop.browse, which
             // throws on Wayland-only Linux setups (Hyprland, Sway,
@@ -478,6 +496,7 @@ fun main() {
                 io.nisfeb.talon.ui.LocalWindowFullScreen provides fullScreen,
             ) {
                 App(
+                    menuShortcuts = menuShortcuts,
                     http = graph.ktorHttp,
                     sessionStore = graph.sessionStore,
                     shipDataEraser = io.nisfeb.talon.data.DesktopShipDataEraser(),

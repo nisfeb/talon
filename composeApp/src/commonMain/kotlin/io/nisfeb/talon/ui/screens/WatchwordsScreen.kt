@@ -1,5 +1,5 @@
 package io.nisfeb.talon.ui.screens
-import io.nisfeb.talon.util.formatMonthDayTime
+import io.nisfeb.talon.util.formatMonthDayClock
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,7 +22,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
@@ -103,7 +102,7 @@ fun WatchwordsScreen(
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.padding(start = 4.dp).weight(1f),
             )
-            IconButton(onClick = { manageOpen = true }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Manage terms", onClick = { manageOpen = true }) {
                 Icon(Icons.Filled.Edit, contentDescription = "Manage terms")
             }
         }
@@ -204,7 +203,7 @@ private fun HitRow(
     onClick: () -> Unit,
 ) {
     val convoLabel = remember(hit.whom, contactMap) { contactMap.conversationLabel(hit.whom) }
-    val timeLabel = remember(hit.sentMs) { formatMonthDayTime(hit.sentMs) }
+    val timeLabel = remember(hit.sentMs) { formatMonthDayClock(hit.sentMs) }
     Column(
         modifier = Modifier
             .fillMaxWidth()

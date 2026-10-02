@@ -60,12 +60,13 @@ class GroupAdminScreenTest {
           "requests":{"~wicrys-bortel":{"requestedAt":0}}}}"""
 
     /** [rooms], when given, is %trunk's list of lines this ship hosts, and turns calling on. */
-    private fun admin(me: String = "~zod", rooms: String? = null, group: String = record, block: ComposeUiTest.(FakeShip) -> Unit) {
+    /** [group] null: the ship will not give the group, until a test sets it. */
+    private fun admin(me: String = "~zod", rooms: String? = null, group: String? = record, block: ComposeUiTest.(FakeShip) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-admin-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
         val ship = FakeShip("~zod").apply {
-            scries["groups/v2/groups/$flag"] = group
+            if (group != null) scries["groups/v2/groups/$flag"] = group
             scries["trunk/version"] = """{"wire":9}"""
             scries["trunk/policy"] = "{}"
             scries["trunk/sfu"] = """{"base":"https://sfu.zod.test","configured":"true"}"""
@@ -87,7 +88,7 @@ class GroupAdminScreenTest {
                         GroupAdminScreen(db = db, repo = repo, flag = flag, onBack = {}, me = me, callController = calls)
                     }
                 }
-                waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("The Garden", substring = true).fetchSemanticsNodes().isNotEmpty() }
+                if (group != null) waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("The Garden", substring = true).fetchSemanticsNodes().isNotEmpty() }
                 block(ship)
             }
         } finally {
@@ -570,4 +571,13 @@ class GroupAdminScreenTest {
         val unmute = trunkPoke(ship, "moderate-member")
         assertTrue("\"who\":\"~bus\"" in unmute && "\"mute\":false" in unmute, unmute)
     }
+
+    @Test
+    fun `a group the ship will not give says so, and Try again asks again`() = admin(group = null) { ship ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Couldn't load the group", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        ship.scries["groups/v2/groups/$flag"] = record
+        onNodeWithText("Try again").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("The Garden", substring = true).fetchSemanticsNodes().isNotEmpty() }
+    }
 }
+

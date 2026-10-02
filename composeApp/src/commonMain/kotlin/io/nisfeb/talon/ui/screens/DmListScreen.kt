@@ -5,7 +5,7 @@ import io.nisfeb.talon.ui.reorderHandle
 import kotlin.concurrent.Volatile
 import io.nisfeb.talon.util.ConcurrentMap
 import io.nisfeb.talon.util.formatMonthDay
-import io.nisfeb.talon.util.formatTime24
+import io.nisfeb.talon.util.formatClock
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -51,7 +51,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -70,6 +69,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -798,12 +799,12 @@ fun DmListScreen(
                 )
             }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = onOpenSearch) {
+            io.nisfeb.talon.ui.IconButton(tip = "Search", onClick = onOpenSearch) {
                 Icon(Icons.Filled.Search, contentDescription = "Search")
             }
             // Assistant moved off the top bar — it's now a rail / kebab item
             // ("A"), unifying it with the other panel-based features.
-            IconButton(onClick = { editMode = !editMode }) {
+            io.nisfeb.talon.ui.IconButton(tip = if (editMode) "Finish reordering" else "Reorder", onClick = { editMode = !editMode }) {
                 Icon(
                     imageVector = if (editMode) Icons.Filled.Done else Icons.Filled.Edit,
                     contentDescription = if (editMode) "Finish reordering" else "Reorder",
@@ -862,7 +863,7 @@ fun DmListScreen(
             // the drawer, and two ways to one set of sections is
             // one way too many.
             if (!io.nisfeb.talon.ui.isDrawerNavigation) Box {
-                IconButton(onClick = { menuOpen = true }) {
+                io.nisfeb.talon.ui.IconButton(tip = "More", onClick = { menuOpen = true }) {
                     Box {
                         Icon(Icons.Filled.MoreVert, contentDescription = "More")
                         if (anyMenuBadge) MenuBadgeDot(
@@ -1295,7 +1296,7 @@ fun DmListScreen(
                     // gesture (long-press a chat) is undiscoverable —
                     // say so instead of rendering a blank list.
                     item(key = "__folder_empty") {
-                        SpecialEmpty("This folder is empty. Long-press a chat or group to add it.")
+                        SpecialEmpty("This folder is empty. ${io.nisfeb.talon.ui.holdWord} a chat or group to add it.")
                     }
                 }
                 var i = 0
@@ -1477,7 +1478,7 @@ fun DmListScreen(
                             when {
                                 bootstrapping && homeRows.isEmpty() -> "Loading your chats and groups…"
                                 selectedHomeTab == HomeTab.Groups -> "No groups yet."
-                                else -> "No direct messages yet. Tap + to start one."
+                                else -> "No direct messages yet. ${io.nisfeb.talon.ui.tapWord} + to start one."
                             }
                         )
                     }
@@ -1792,7 +1793,7 @@ fun DmListScreen(
             title = { Text("Delete '${folder.name}'?") },
             text = { Text("The conversations themselves stay; they just leave this folder.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     scope.launch {
                         repo.settingsSync?.deleteFolder(folder.id)
                     }
@@ -1889,7 +1890,7 @@ internal fun ShipSwitcherDrawer(
                     if (onSignOut != null || onForget != null) {
                         Spacer(Modifier.weight(1f))
                         Box {
-                            IconButton(onClick = { menuFor = ship }) {
+                            io.nisfeb.talon.ui.IconButton(tip = "What to do with $ship", onClick = { menuFor = ship }) {
                                 Icon(
                                     Icons.Filled.MoreVert,
                                     contentDescription = "What to do with $ship",
@@ -1958,8 +1959,8 @@ internal fun ShipSwitcherDrawer(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { confirmForget = null; onForget?.invoke(ship) }) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirmForget = null; onForget?.invoke(ship) }) {
+                    Text("Delete")
                 }
             },
             dismissButton = {
@@ -2141,8 +2142,8 @@ private fun FolderRenameDialog(
         },
         confirmButton = {
             Row {
-                TextButton(onClick = onDelete) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = onDelete) {
+                    Text("Delete")
                 }
                 Spacer(Modifier.width(8.dp))
                 TextButton(
@@ -2467,7 +2468,9 @@ internal fun MenuBadgeDot(modifier: Modifier = Modifier) {
         modifier = modifier
             .size(8.dp)
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary),
+            .background(MaterialTheme.colorScheme.primary)
+            // A dot is color alone: a screen reader said nothing of it.
+            .semantics { contentDescription = "Unread" },
     )
 }
 
@@ -2481,7 +2484,7 @@ private const val MENTION_SCAN_LIMIT = 50
 private fun formatRelative(ms: Long): String {
     val diff = nowMs() - ms
     return when {
-        diff < 24 * 3600_000L -> formatTime24(ms)
+        diff < 24 * 3600_000L -> formatClock(ms)
         else -> formatMonthDay(ms)
     }
 }

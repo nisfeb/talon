@@ -19,7 +19,6 @@ import androidx.compose.material3.AlertDialog
 import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -200,7 +199,7 @@ fun ManageTermsSheet(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     scope.launch { runCatching { watchwords.remove(term.id) } }
                     pendingDelete = null
                 }) { Text("Delete") }
@@ -249,7 +248,7 @@ private fun TermRow(
             onCheckedChange = onNotifyChange,
         )
         Spacer(Modifier.width(4.dp))
-        IconButton(onClick = onDelete) {
+        io.nisfeb.talon.ui.IconButton(tip = "Delete", onClick = onDelete) {
             Icon(
                 Icons.Filled.Delete,
                 contentDescription = "Delete",

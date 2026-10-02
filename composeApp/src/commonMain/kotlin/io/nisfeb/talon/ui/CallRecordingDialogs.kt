@@ -82,7 +82,7 @@ fun RecordingResultDialog(
     var publishedUrl by remember { mutableStateOf<String?>(null) }
     val stt = remember(sttConfig) { CallRecordingPublisher.sttFrom(sttConfig) }
     val canPublish = !rec.isEmpty && stt != null && shipUrl != null && cookie != null
-    val whenLabel = remember { io.nisfeb.talon.util.formatMonthDayTime(io.nisfeb.talon.util.nowMs()) }
+    val whenLabel = remember { io.nisfeb.talon.util.formatMonthDayClock(io.nisfeb.talon.util.nowMs()) }
 
     // Track whether anything has been done with the audio, so "Done"
     // can warn before it becomes the thing that threw it away.
@@ -128,7 +128,7 @@ fun RecordingResultDialog(
                 if (confirmDiscard) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "This is the only copy. Tap Discard again to delete it.",
+                        "This is the only copy. ${io.nisfeb.talon.ui.tapWord} Discard again to delete it.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )

@@ -1,5 +1,5 @@
 package io.nisfeb.talon.ui.screens
-import io.nisfeb.talon.util.formatMonthDayTime
+import io.nisfeb.talon.util.formatMonthDayClock
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -41,7 +41,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -514,33 +513,16 @@ fun ThreadList(
             pendingDelete = null
             return@let
         }
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("Delete this message?") },
-            text = { Text("This cannot be undone.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    val t = target
-                    pendingDelete = null
-                    scope.launch {
-                        runCatching {
-                            repo.delete(whom, t.id, parentId = t.parentId)
-                        }.onFailure {
-                            composerState.failed("delete", it)
-                        }
-                    }
-                }) {
-                    Text(
-                        if (isMine) "Delete" else "Delete (admin)",
-                        color = MaterialTheme.colorScheme.error,
-                    )
+        DeleteMessageDialog(
+            mine = isMine,
+            onDelete = {
+                pendingDelete = null
+                scope.launch {
+                    runCatching { repo.delete(whom, target.id, parentId = target.parentId) }
+                        .onFailure { composerState.failed("delete", it) }
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) {
-                    Text("Cancel")
-                }
-            },
+            onDismiss = { pendingDelete = null },
         )
     }
 
@@ -692,7 +674,7 @@ private fun ThreadMessage(
     flashAmber: Boolean = false,
 ) {
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
-    val stamp = remember(m.sentMs) { formatMonthDayTime(m.sentMs) }
+    val stamp = remember(m.sentMs) { formatMonthDayClock(m.sentMs) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
     val grouped = remember(reactions) {
         // Normalize on read too: rows stored before we normalized on write
@@ -915,8 +897,7 @@ private fun ThreadActionMenu(
                         .weight(1f)
                         .padding(start = 4.dp),
                 )
-                IconButton(
-                    onClick = {
+                io.nisfeb.talon.ui.IconButton(tip = "Search emojis", onClick = {
                         searchOpen = !searchOpen
                         if (!searchOpen) searchQuery = ""
                     },

@@ -230,10 +230,12 @@ class FileUiSettings(
     }
 
     private val _homeTwentyFourHour = MutableStateFlow(initial.homeTwentyFourHour)
+        .also { io.nisfeb.talon.util.ClockStyle.twentyFourHour.value = it.value }
     override val homeTwentyFourHour: StateFlow<Boolean> = _homeTwentyFourHour.asStateFlow()
     override fun setHomeTwentyFourHour(on: Boolean) {
         if (_homeTwentyFourHour.value == on) return
         _homeTwentyFourHour.value = on
+        io.nisfeb.talon.util.ClockStyle.twentyFourHour.value = on
         persistCurrent()
     }
 

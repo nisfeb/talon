@@ -140,7 +140,7 @@ class ContactsAndStatusTest {
         waitUntil(timeoutMillis = 5_000) { shows("here and there") }
         onNodeWithContentDescription("Edit status").performClick()
         onNodeWithText("Clear status").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Tap to set a status") }
+        waitUntil(timeoutMillis = 5_000) { shows("Click to set a status") }
         val sent = ship.pokesTo("contacts").map { it.json.toString() }
         // Cleared is deleted: a null value is %contacts' delete.
         assertTrue(sent.size == 2 && "here and there" in sent[0] && "\"status\":null" in sent[1], sent.toString())

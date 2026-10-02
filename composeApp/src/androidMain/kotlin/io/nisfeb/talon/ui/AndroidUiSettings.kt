@@ -207,10 +207,12 @@ class AndroidUiSettings(
     }
 
     private val _homeTwentyFourHour = MutableStateFlow(prefs.getBoolean(KEY_HOME_24H, false))
+        .also { io.nisfeb.talon.util.ClockStyle.twentyFourHour.value = it.value }
     override val homeTwentyFourHour: StateFlow<Boolean> = _homeTwentyFourHour.asStateFlow()
     override fun setHomeTwentyFourHour(on: Boolean) {
         if (_homeTwentyFourHour.value == on) return
         _homeTwentyFourHour.value = on
+        io.nisfeb.talon.util.ClockStyle.twentyFourHour.value = on
         prefs.edit().putBoolean(KEY_HOME_24H, on).apply()
         nudgeWidget()
     }

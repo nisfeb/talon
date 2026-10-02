@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
+import io.nisfeb.talon.ui.theme.hex
 import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
@@ -462,11 +463,11 @@ fun CalendarScreen(
     val title = if (showTasks) "Tasks" else "${MonthNames.ENGLISH_ABBREVIATED.names[month - 1]} $year"
     val monthSteps: @Composable () -> Unit = {
         if (!showTasks) {
-            IconButton(onClick = { if (weekView) step(-7) else if (month == 1) { month = 12; year -= 1 } else month -= 1 }) {
+            io.nisfeb.talon.ui.IconButton(tip = if (weekView) "Previous week" else "Previous month", onClick = { if (weekView) step(-7) else if (month == 1) { month = 12; year -= 1 } else month -= 1 }) {
                 Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = if (weekView) "Previous week" else "Previous month")
             }
             TextButton(onClick = { year = today.year; month = today.monthNumber; selected = today }) { Text("Today") }
-            IconButton(onClick = { if (weekView) step(7) else if (month == 12) { month = 1; year += 1 } else month += 1 }) {
+            io.nisfeb.talon.ui.IconButton(tip = if (weekView) "Next week" else "Next month", onClick = { if (weekView) step(7) else if (month == 12) { month = 1; year += 1 } else month += 1 }) {
                 Icon(Icons.Filled.KeyboardArrowRight, contentDescription = if (weekView) "Next week" else "Next month")
             }
             TextButton(onClick = { repo.weekView.value = !weekView }) { Text(if (weekView) "Month" else "Week") }
@@ -494,10 +495,10 @@ fun CalendarScreen(
                 if (showTasks) Icon(TalonIcons.CalendarMonth, contentDescription = "Month")
                 else Icon(TalonIcons.Checklist, contentDescription = "Tasks")
             }
-            IconButton(onClick = { say("Refreshing…", "The ship did not answer.") { repo.refreshAll(); repo.error.value == null } }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Refresh", onClick = { say("Refreshing…", "The ship did not answer.") { repo.refreshAll(); repo.error.value == null } }) {
                 Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
             }
-            IconButton(onClick = { managing = true }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Calendars", onClick = { managing = true }) {
                 Icon(TalonIcons.Tune, contentDescription = "Calendars")
             }
         }
@@ -686,7 +687,7 @@ fun CalendarScreen(
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f),
                 )
-                IconButton(onClick = ::openNew) { Icon(Icons.Filled.Add, contentDescription = "New event") }
+                io.nisfeb.talon.ui.IconButton(tip = "New event", onClick = ::openNew) { Icon(Icons.Filled.Add, contentDescription = "New event") }
             }
             status?.let {
                 if (it.endsWith("…")) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
@@ -824,7 +825,7 @@ fun CalendarScreen(
                             androidx.compose.foundation.text.selection.SelectionContainer(Modifier.weight(1f)) {
                                 Text(r.location, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.clickable { open(mapsSearchUri(r.location)) })
                             }
-                            IconButton(onClick = { copy(r.location) }, modifier = Modifier.size(32.dp)) {
+                            io.nisfeb.talon.ui.IconButton(tip = "Copy the place", onClick = { copy(r.location) }, modifier = Modifier.size(32.dp)) {
                                 Icon(TalonIcons.ContentCopy, contentDescription = "Copy the place", modifier = Modifier.size(16.dp))
                             }
                         }
@@ -834,7 +835,7 @@ fun CalendarScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.Filled.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                             Text(phone, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).clickable { open(telUri(phone)) })
-                            IconButton(onClick = { copy(phone) }, modifier = Modifier.size(32.dp)) {
+                            io.nisfeb.talon.ui.IconButton(tip = "Copy the number", onClick = { copy(phone) }, modifier = Modifier.size(32.dp)) {
                                 Icon(TalonIcons.ContentCopy, contentDescription = "Copy the number", modifier = Modifier.size(16.dp))
                             }
                         }
@@ -844,7 +845,7 @@ fun CalendarScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(TalonIcons.Link, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                             Text(url, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).clickable { open(openableUrl(url)) })
-                            IconButton(onClick = { copy(url) }, modifier = Modifier.size(32.dp)) {
+                            io.nisfeb.talon.ui.IconButton(tip = "Copy the link", onClick = { copy(url) }, modifier = Modifier.size(32.dp)) {
                                 Icon(TalonIcons.ContentCopy, contentDescription = "Copy the link", modifier = Modifier.size(16.dp))
                             }
                         }
@@ -1208,9 +1209,13 @@ private fun EventEditor(
     val time = rememberTimePickerState(initialHour = initial.minuteOfDay / 60, initialMinute = initial.minuteOfDay % 60, is24Hour = twentyFourHour)
     val fieldFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
+    // A tap outside closes it only while nothing has changed: a slip of
+    // the thumb lost a half-written event. Cancel always closes it.
+    val untouched = d == initial && zoneText == initial.zone.orEmpty() &&
+        time.hour * 60 + time.minute == initial.minuteOfDay
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (untouched) onDismiss() },
         title = { Text(if (d.cat == EventCat.TODO) (if (existing) "Edit task" else "New task") else if (existing) "Edit event" else "New event") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1233,8 +1238,8 @@ private fun EventEditor(
                 if (d.cat == EventCat.TODO) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Due", style = MaterialTheme.typography.labelMedium)
-                        TextButton(onClick = { pickingDate = true }) { Text(d.due?.toString() ?: "no date") }
-                        if (d.due != null) TextButton(onClick = { d = d.copy(due = null) }) { Text("clear") }
+                        TextButton(onClick = { pickingDate = true }) { Text(d.due?.let { io.nisfeb.talon.util.formatDate(it) } ?: "No date") }
+                        if (d.due != null) TextButton(onClick = { d = d.copy(due = null) }) { Text("Clear") }
                     }
                     FilterChip(selected = d.done, onClick = { d = d.copy(done = !d.done) }, label = { Text(if (d.done) "Done" else "To do") })
                     // Where the calendar keeps it. A number it holds that is not
@@ -1255,7 +1260,9 @@ private fun EventEditor(
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(if (d.cat == EventCat.DATE) "Date (the year is ignored)" else "Date", style = MaterialTheme.typography.labelMedium)
-                        TextButton(onClick = { pickingDate = true }) { Text(d.date.toString()) }
+                        TextButton(onClick = { pickingDate = true }) {
+                            Text(if (d.cat == EventCat.DATE) io.nisfeb.talon.util.formatDateNoYear(d.date) else io.nisfeb.talon.util.formatDate(d.date))
+                        }
                     }
                 }
                 if (d.cat == EventCat.TIMED) {
@@ -1341,8 +1348,8 @@ private fun EventEditor(
                                 modifier = Modifier.width(110.dp),
                             )
                             Text("or until", style = MaterialTheme.typography.labelMedium)
-                            TextButton(onClick = { pickingUntil = true }) { Text(d.until?.toString() ?: "never") }
-                            if (d.until != null) TextButton(onClick = { d = d.copy(until = null) }) { Text("clear") }
+                            TextButton(onClick = { pickingUntil = true }) { Text(d.until?.let { io.nisfeb.talon.util.formatDate(it) } ?: "Never") }
+                            if (d.until != null) TextButton(onClick = { d = d.copy(until = null) }) { Text("Clear") }
                         }
                     }
                 }
@@ -1401,13 +1408,16 @@ private fun EventEditor(
                 }
                 // Its own colour, or the calendar's. The calendar keeps any
                 // colour, so one set elsewhere shows as chosen here too.
-                Text("Colour", style = MaterialTheme.typography.labelMedium)
+                Text("Color", style = MaterialTheme.typography.labelMedium)
+                var colorWheel by remember { mutableStateOf(false) }
                 androidx.compose.foundation.layout.FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     FilterChip(selected = d.color.isBlank(), onClick = { d = d.copy(color = "") }, label = { Text("Calendar's") })
+                    // Any color, not only the eight: the wheel the themes use.
+                    FilterChip(selected = colorWheel, onClick = { colorWheel = !colorWheel }, label = { Text("Custom") })
                     (ENTRY_COLOURS + listOf(d.color).filter { it.isNotBlank() && it !in ENTRY_COLOURS }).forEach { hex ->
                         val c = calendarHexColor(hex) ?: return@forEach
                         Box(
@@ -1421,10 +1431,17 @@ private fun EventEditor(
                         )
                     }
                 }
+                if (colorWheel) {
+                    io.nisfeb.talon.ui.ColorWheel(
+                        color = calendarHexColor(d.color) ?: MaterialTheme.colorScheme.primary,
+                        onColor = { d = d.copy(color = it.hex()) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 if (postToLabel != null) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         TextButton(onClick = onChoosePostTo) { Text(if (postToLabel.isEmpty()) "Also post to a chat…" else "Posts to ${postToLabel}") }
-                        if (postToLabel.isNotEmpty()) TextButton(onClick = onClearPostTo) { Text("clear") }
+                        if (postToLabel.isNotEmpty()) TextButton(onClick = onClearPostTo) { Text("Clear") }
                     }
                 }
                 if (recurringOccurrence) {
@@ -1557,7 +1574,7 @@ private fun CalendarsDialog(
                 calendars.forEach { c ->
                     if (editingId == c.id) {
                         OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text("Name") }, singleLine = true)
-                        OutlinedTextField(value = editColour, onValueChange = { editColour = it }, label = { Text("Colour, #rrggbb") }, singleLine = true)
+                        ColorRow("Color", editColour) { editColour = it }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             TextButton(onClick = { onEdit(c.id, editName, editColour); editingId = null }) { Text("Save") }
                             TextButton(onClick = { editingId = null }) { Text("Cancel") }
@@ -1715,7 +1732,7 @@ private fun CalendarsDialog(
                 }
                 Text("New calendar", style = MaterialTheme.typography.labelMedium)
                 OutlinedTextField(value = newName, onValueChange = { newName = it }, label = { Text("Name") }, singleLine = true)
-                OutlinedTextField(value = newColour, onValueChange = { newColour = it }, label = { Text("Colour, #rrggbb") }, singleLine = true)
+                ColorRow("Color", newColour) { newColour = it }
                 TextButton(enabled = newName.isNotBlank(), onClick = { onAdd(newName.trim(), newColour.trim()); newName = "" }) { Text("Add") }
                 if (onOpenWebSettings != null) {
                     HorizontalDivider()
@@ -1789,7 +1806,7 @@ private fun TasksView(
     }
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = {
+            io.nisfeb.talon.ui.IconButton(tip = if (searching) "Close the search" else "Search tasks", onClick = {
                 searching = !searching
                 // A search left behind a closed field would go on
                 // narrowing the list with nothing on screen saying so.
@@ -1815,7 +1832,7 @@ private fun TasksView(
                     )
                 }
             }
-            IconButton(onClick = { adding = !adding }) {
+            io.nisfeb.talon.ui.IconButton(tip = if (adding) "Close the new task" else "New task", onClick = { adding = !adding }) {
                 Icon(
                     if (adding) Icons.Filled.Clear else Icons.Filled.Add,
                     contentDescription = if (adding) "Close the new task" else "New task",
@@ -1830,7 +1847,7 @@ private fun TasksView(
                 singleLine = true,
                 trailingIcon = {
                     if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, contentDescription = "Clear the search") }
+                        io.nisfeb.talon.ui.IconButton(tip = "Clear the search", onClick = { query = "" }) { Icon(Icons.Filled.Clear, contentDescription = "Clear the search") }
                     }
                 },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).focusRequester(searchFocus),
@@ -1845,7 +1862,7 @@ private fun TasksView(
                     keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { add() }),
                 )
                 TextButton(onClick = { picking = true }) { Text(due?.let { "${it.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[it.monthNumber - 1]}" } ?: "Due") }
-                IconButton(onClick = ::add, enabled = name.isNotBlank()) { Icon(Icons.Filled.Add, contentDescription = "Add task") }
+                io.nisfeb.talon.ui.IconButton(tip = "Add task", onClick = ::add, enabled = name.isNotBlank()) { Icon(Icons.Filled.Add, contentDescription = "Add task") }
             }
             // A description as soon as there is something to describe; the
             // rest of what a task carries is one tap further, in the editor.
@@ -1893,7 +1910,7 @@ private fun TasksView(
                         // The way to add one is an icon now, so an empty
                         // list says where it is rather than leaving the
                         // screen blank.
-                        if (query.isNotBlank()) "Nothing matches \"${query.trim()}\"." else "Nothing to do. Tap + to add a task.",
+                        if (query.isNotBlank()) "Nothing matches \"${query.trim()}\"." else "Nothing to do. ${io.nisfeb.talon.ui.tapWord} + to add a task.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(16.dp),

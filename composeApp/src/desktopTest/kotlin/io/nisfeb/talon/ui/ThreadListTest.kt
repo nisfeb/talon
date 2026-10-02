@@ -211,12 +211,12 @@ class ThreadListTest {
     }) { ship, _ ->
         menuOf("my answer")
         onNodeWithText("Delete").performClick()
-        shows("Delete this message?")
+        shows("Delete message?")
         onNodeWithText("Cancel").performClick()
         assertTrue(ship.pokesTo("chat").isEmpty())
         menuOf("my answer")
         onNodeWithText("Delete").performClick()
-        shows("Delete this message?")
+        shows("Delete message?")
         onAllNodesWithText("Delete").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").isNotEmpty() }
         assertTrue("\"del\"" in ship.pokesTo("chat").single().json.toString())

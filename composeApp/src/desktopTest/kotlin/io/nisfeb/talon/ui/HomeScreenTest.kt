@@ -18,6 +18,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.rightClick
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
@@ -293,4 +295,13 @@ class HomeScreenTest {
         onNodeWithText("Install the calendar").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("The ship would not install it.") }
     }
+
+    // A widget's menu came only from a held press; a mouse right-clicks.
+    @Test
+    fun `a right-click arranges the page, as a long press does`() = home {
+        onAllNodesWithText("Mail")[0].performMouseInput { rightClick() }
+        waitForIdle()
+        assertTrue(onAllNodesWithText("Done").fetchSemanticsNodes().isNotEmpty(), "arranging")
+    }
 }
+

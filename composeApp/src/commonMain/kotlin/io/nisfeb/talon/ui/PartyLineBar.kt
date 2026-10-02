@@ -21,7 +21,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -367,7 +366,7 @@ fun PartyLineBarContent(
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (s.canSpeak) {
-                            IconButton(onClick = { onToggleMute(!s.muted) }) {
+                            io.nisfeb.talon.ui.IconButton(tip = if (s.muted) "Unmute" else "Mute", onClick = { onToggleMute(!s.muted) }) {
                                 Icon(
                                     if (s.muted) TalonIcons.MicOff else TalonIcons.Mic,
                                     contentDescription = if (s.muted) "Unmute" else "Mute",
@@ -392,7 +391,8 @@ fun PartyLineBarContent(
                         // opens — setCameraEnabled returns false before
                         // it reaches a device.
                         if (onToggleCamera != null && s.canSpeak) {
-                            IconButton(onClick = {
+                            io.nisfeb.talon.ui.IconButton(tip = if (cameraOn) "Turn the camera off"
+                                        else "Turn the camera on", onClick = {
                                 // Turning the camera on blind broadcasts a
                                 // framing nobody here can see: the self
                                 // tile lives only in PartyVideoGrid, and
@@ -415,7 +415,9 @@ fun PartyLineBarContent(
                             }
                         }
                         if (expandable) {
-                            IconButton(onClick = {
+                            io.nisfeb.talon.ui.IconButton(tip = if (immersive) "Open the full-screen call"
+                                        else if (expanded) "Hide who's on the line"
+                                        else "Who's on the line", onClick = {
                                 if (immersive) fullScreen = true else expanded = !expanded
                             }) {
                                 Icon(
@@ -657,8 +659,7 @@ private fun Roster(
                     if (m.ship != selfShip && (onMessage != null || ops)) {
                         Box {
                             var menuOpen by remember(m.id) { mutableStateOf(false) }
-                            IconButton(
-                                onClick = { menuOpen = true },
+                            io.nisfeb.talon.ui.IconButton(tip = "Options for ${nameFor(m.ship)}", onClick = { menuOpen = true },
                                 modifier = Modifier.size(24.dp),
                             ) {
                                 Icon(

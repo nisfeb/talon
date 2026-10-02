@@ -1,13 +1,14 @@
 package io.nisfeb.talon.ui.screens
 
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.nisfeb.talon.ui.onSecondaryClick
+import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import io.nisfeb.talon.data.latestPerConversation
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -37,7 +38,6 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -346,7 +346,7 @@ fun HomeScreen(
                         .then(
                             if (editing) Modifier else Modifier.pointerInput(Unit) {
                                 detectTapGestures(onLongPress = { editing = true })
-                            }
+                            }.onSecondaryClick { editing = true }
                         )
                         .then(
                             if (!editing) Modifier else Modifier.border(
@@ -648,8 +648,7 @@ private fun BoxScope.ResizeHandles(
         }
     }
 
-    IconButton(
-        onClick = onRemove,
+    io.nisfeb.talon.ui.IconButton(tip = "Take ${title(widget.kind)} off the home page", onClick = onRemove,
         modifier = Modifier.align(Alignment.TopEnd).size(HANDLE),
     ) {
         Icon(
@@ -899,7 +898,7 @@ private fun QuickRow(
             // a plain clickable fires its click on release no matter
             // how long it was held, so a long press on a row would
             // arrange the page and then walk off it.
-            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .combinedClickableWithSecondary(onClick = onClick, onLongClick = onLongPress)
             .padding(horizontal = 14.dp, vertical = 6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1238,7 +1237,7 @@ private fun AssistantPanel(onOpen: ((Boolean) -> Unit)?, onLongPress: () -> Unit
             modifier = Modifier.size(side),
         ) {
             Box(
-                Modifier.fillMaxSize().combinedClickable(onClick = { onOpen?.invoke(listens) }, onLongClick = onLongPress),
+                Modifier.fillMaxSize().combinedClickableWithSecondary(onClick = { onOpen?.invoke(listens) }, onLongClick = onLongPress),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -1344,7 +1343,7 @@ private fun CalendarPanel(
                         val dueDay = t.dueDate()
                         val late = dueDay != null && dueDay < today
                         Row(
-                            Modifier.fillMaxWidth().combinedClickable(onClick = onOpen ?: {}, onLongClick = onLongPress).padding(start = 6.dp, end = 14.dp),
+                            Modifier.fillMaxWidth().combinedClickableWithSecondary(onClick = onOpen ?: {}, onLongClick = onLongPress).padding(start = 6.dp, end = 14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             androidx.compose.material3.Checkbox(
@@ -1408,7 +1407,7 @@ private fun EventRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .combinedClickableWithSecondary(onClick = onClick, onLongClick = onLongPress)
             .padding(horizontal = 14.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),

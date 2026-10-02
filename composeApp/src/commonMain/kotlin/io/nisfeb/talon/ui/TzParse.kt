@@ -1,6 +1,6 @@
 package io.nisfeb.talon.ui
 
-import io.nisfeb.talon.util.formatTime12
+import io.nisfeb.talon.util.formatClock
 import io.nisfeb.talon.util.formatWeekdayShort
 import io.nisfeb.talon.util.nowMs
 import io.nisfeb.talon.util.timeZoneShortLabel
@@ -154,7 +154,7 @@ fun parseIsoUtc(s: String): Long? =
  */
 fun formatInZone(ms: Long, zoneId: String, nowMs: Long = nowMs()): String {
     val zone = TimeZone.of(zoneId)
-    val time = formatTime12(ms, zone)
+    val time = formatClock(ms, zone)
     val target = Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone).date
     val today = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
     if (target == today) return time

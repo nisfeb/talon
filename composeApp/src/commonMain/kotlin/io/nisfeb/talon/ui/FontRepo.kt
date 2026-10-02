@@ -50,11 +50,11 @@ class FontShip(
         for (dir in listOf("talon", "talon/fonts")) {
             val (status, _) = send(HttpMethod.Put, "dir/$dir")
             if (status == 404) throw NoGrubbery()
-            check(status in 200..299 || status == 409) { "The ship would not make a place for fonts (HTTP $status)." }
+            check(status in 200..299 || status == 409) { "The ship would not make a place for fonts." }
         }
         val (status, _) = send(HttpMethod.Put, "file/talon/fonts/$id.font", bytes)
         if (status == 404) throw NoGrubbery()
-        check(status in 200..299 || status == 409) { "The ship would not keep the font (HTTP $status)." }
+        check(status in 200..299 || status == 409) { "The ship would not keep the font." }
     }
 
     /**
@@ -65,7 +65,7 @@ class FontShip(
     suspend fun ids(): Set<String> {
         val (status, bytes) = send(HttpMethod.Get, "kids/talon/fonts")
         if (status == 404) return emptySet()
-        check(status in 200..299) { "The ship would not list its fonts (HTTP $status)." }
+        check(status in 200..299) { "The ship would not list its fonts." }
         val files = kotlinx.serialization.json.Json.parseToJsonElement(bytes.decodeToString())
             .let { it as? kotlinx.serialization.json.JsonObject }?.get("files") as? kotlinx.serialization.json.JsonArray
         return files.orEmpty().mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content?.removeSuffix(".font") }.toSet()
@@ -75,13 +75,13 @@ class FontShip(
     suspend fun get(id: String): ByteArray? {
         val (status, bytes) = send(HttpMethod.Get, "file/talon/fonts/$id.font")
         if (status == 404) return null
-        check(status in 200..299) { "The ship would not give the font (HTTP $status)." }
+        check(status in 200..299) { "The ship would not give the font." }
         return bytes
     }
 
     suspend fun delete(id: String) {
         val (status, _) = send(HttpMethod.Delete, "file/talon/fonts/$id.font")
-        check(status in 200..299 || status == 404) { "The ship would not remove the font (HTTP $status)." }
+        check(status in 200..299 || status == 404) { "The ship would not remove the font." }
     }
 }
 

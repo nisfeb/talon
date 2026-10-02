@@ -42,7 +42,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
@@ -445,7 +444,7 @@ private fun ThreadActions(
     var confirming by remember { mutableStateOf(false) }
 
     Box {
-        IconButton(onClick = { open = true }) {
+        io.nisfeb.talon.ui.IconButton(tip = "Thread actions", onClick = { open = true }) {
             Icon(Icons.Filled.MoreVert, contentDescription = "Thread actions")
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -487,7 +486,7 @@ private fun ThreadActions(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { confirming = false; onDelete() }) { Text("Delete") }
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirming = false; onDelete() }) { Text("Delete") }
             },
             dismissButton = {
                 TextButton(onClick = { confirming = false }) { Text("Keep") }
@@ -530,7 +529,7 @@ private fun MailThreadHeader(
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (onBack != null) {
-                IconButton(onClick = onBack) {
+                io.nisfeb.talon.ui.IconButton(tip = "Back", onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
             }
@@ -676,7 +675,7 @@ private fun MailMessageCard(
             // reply that swallows itself is not what a reader means by
             // folding a thread.
             if (foldable) {
-                IconButton(onClick = onFold, modifier = Modifier.size(22.dp)) {
+                io.nisfeb.talon.ui.IconButton(tip = if (folded) "Unfold replies" else "Fold replies", onClick = onFold, modifier = if (io.nisfeb.talon.ui.isTouchPrimary) Modifier else Modifier.size(22.dp)) {
                     Icon(
                         if (folded) Icons.AutoMirrored.Filled.KeyboardArrowRight
                         else Icons.Filled.KeyboardArrowDown,
@@ -716,10 +715,10 @@ private fun MailMessageCard(
             // On every message, so answering one never means selecting it
             // and then going back up to the top of the thread.
             if (onAnswer != null) {
-                IconButton(onClick = { onAnswer(false) }, modifier = Modifier.size(30.dp)) {
+                io.nisfeb.talon.ui.IconButton(tip = "Reply", onClick = { onAnswer(false) }, modifier = Modifier.size(30.dp)) {
                     Icon(TalonIcons.Reply, contentDescription = "Reply", modifier = Modifier.size(18.dp))
                 }
-                IconButton(onClick = { onAnswer(true) }, modifier = Modifier.size(30.dp)) {
+                io.nisfeb.talon.ui.IconButton(tip = "Forward", onClick = { onAnswer(true) }, modifier = Modifier.size(30.dp)) {
                     Icon(TalonIcons.Forward, contentDescription = "Forward", modifier = Modifier.size(18.dp))
                 }
             }

@@ -31,7 +31,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -157,7 +156,7 @@ class AssistantSession(internal val scope: kotlinx.coroutines.CoroutineScope) {
     internal val transcript = mutableStateListOf<Line>()
     internal var question by mutableStateOf(TextFieldValue(""))
     internal var busy by mutableStateOf(false)
-    internal var error by mutableStateOf<String?>(null)
+    internal var error by mutableStateOf<io.nisfeb.talon.util.Problem?>(null)
     internal var pending by mutableStateOf<Pending?>(null)
     internal var convId by mutableStateOf<Long?>(null)
     internal var convGid by mutableStateOf<String?>(null)
@@ -608,7 +607,7 @@ fun AssistantScreen(
                 }
             }.onFailure {
                 if (it is CancellationException) throw it
-                error = it.message ?: it::class.simpleName
+                error = io.nisfeb.talon.ai.modelProblem("Couldn't complete", it)
                 // Restore the question so a network timeout doesn't cost
                 // the user their typed text — unless they've started
                 // typing something new while the run was in flight.
@@ -686,7 +685,7 @@ fun AssistantScreen(
                             // conversations/jobs sidebar. Hidden when wide,
                             // where the sidebar is always on-screen.
                             if (!expanded) {
-                                IconButton(onClick = { mobileShowSidebar = true }) {
+                                io.nisfeb.talon.ui.IconButton(tip = "Conversations", onClick = { mobileShowSidebar = true }) {
                                     Icon(Icons.Filled.Menu, contentDescription = "Conversations")
                                 }
                             }
@@ -741,7 +740,7 @@ fun AssistantScreen(
                 enabled = ready && !busy,
                 trailingIcon = if (dictate != null && io.nisfeb.talon.ui.isDictationSupported) {
                     {
-                        androidx.compose.material3.IconButton(onClick = dictate, enabled = ready && !busy) {
+                        io.nisfeb.talon.ui.IconButton(tip = "Speak to your assistant", onClick = dictate, enabled = ready && !busy) {
                             androidx.compose.material3.Icon(
                                 TalonIcons.Mic,
                                 contentDescription = "Speak to your assistant",
@@ -790,12 +789,8 @@ fun AssistantScreen(
             if (busy && pending == null) CircularProgressIndicator()
 
             error?.let {
-                Text(
-                    "Couldn't complete: $it",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(it)) {
+                io.nisfeb.talon.ui.ProblemLine(it)
+                if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(it.line)) {
                     TextButton(onClick = { error = null; onTopUp() }) { Text("Top up") }
                 }
             }
@@ -1034,7 +1029,7 @@ private fun ConversationsTab(
             title = { Text("Delete all conversations?") },
             text = { Text("This also removes them from your ship.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     confirmClear = false
                     onClearAll()
                 }) { Text("Delete") }

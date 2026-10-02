@@ -36,7 +36,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -475,7 +474,7 @@ fun LoopDetail(
                     title = { Text("Delete '${loop.name}'?") },
                     text = { Text("Its run history is removed too.") },
                     confirmButton = {
-                        TextButton(onClick = {
+                        io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                             confirmDelete = false
                             scope.launch {
                                 val gid = loop.gid

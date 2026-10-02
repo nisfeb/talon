@@ -220,4 +220,21 @@ class DesktopUiSettingsTest {
             kotlin.test.assertEquals(normalizeFontScale(1.234f), fontScale.value)
         }
     }
+
+    // Every time shown reads its clock from ClockStyle; the store is
+    // what keeps it, so it sets it at start and on every change.
+    @Test
+    fun `the clock chosen is the one every time is shown in, from the start`() {
+        try {
+            newStore().setHomeTwentyFourHour(true)
+            io.nisfeb.talon.util.ClockStyle.twentyFourHour.value = false
+            newStore()
+            assertTrue(io.nisfeb.talon.util.ClockStyle.twentyFourHour.value, "read back at start")
+            newStore().setHomeTwentyFourHour(false)
+            assertFalse(io.nisfeb.talon.util.ClockStyle.twentyFourHour.value)
+        } finally {
+            io.nisfeb.talon.util.ClockStyle.twentyFourHour.value = false
+        }
+    }
 }
+

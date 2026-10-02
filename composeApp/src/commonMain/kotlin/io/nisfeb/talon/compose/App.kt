@@ -152,6 +152,8 @@ fun App(
      * sockets die. Null means window focus is the signal (desktop).
      */
     appForeground: kotlinx.coroutines.flow.Flow<Boolean>? = null,
+    /** Shortcuts picked from the desktop menu bar, run as the keys would run them. */
+    menuShortcuts: kotlinx.coroutines.flow.Flow<io.nisfeb.talon.ui.ShortcutAction>? = null,
     /** Builds a SettingsSync bound to the per-ship db. Null on platforms
      *  without %settings sync wired. */
     createSettingsSync: ((AppDatabase) -> SettingsSync)? = null,
@@ -1697,6 +1699,33 @@ fun App(
             val rootFocusRequester = remember { FocusRequester() }
             var rootFocusLost by remember { mutableStateOf(0) }
             LaunchedEffect(rootFocusLost) { runCatching { rootFocusRequester.requestFocus() } }
+            /** A shortcut, from the keys or the desktop menu bar. Back is the Column's own. */
+            fun runShortcut(action: io.nisfeb.talon.ui.ShortcutAction) {
+                when (action) {
+                    io.nisfeb.talon.ui.ShortcutAction.Back -> Unit
+                    io.nisfeb.talon.ui.ShortcutAction.OpenSettings -> showSettings = true
+                    io.nisfeb.talon.ui.ShortcutAction.NewDm -> showNewDmRequest = true
+                    io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
+                    io.nisfeb.talon.ui.ShortcutAction.IncreaseFontSize ->
+                        uiSettings.setFontScale(
+                            userFontScale + io.nisfeb.talon.ui.FONT_SCALE_STEP,
+                        )
+                    io.nisfeb.talon.ui.ShortcutAction.DecreaseFontSize ->
+                        uiSettings.setFontScale(
+                            userFontScale - io.nisfeb.talon.ui.FONT_SCALE_STEP,
+                        )
+                    io.nisfeb.talon.ui.ShortcutAction.ResetFontSize ->
+                        uiSettings.setFontScale(1.0f)
+                    is io.nisfeb.talon.ui.ShortcutAction.SwitchShip -> {
+                        sessionStore.all().getOrNull(action.index)?.ship?.let { targetShip ->
+                            leaveShip()
+                            sessionStore.setActive(targetShip)
+                            loggedInShip = targetShip
+                        }
+                    }
+                }
+            }
+            LaunchedEffect(menuShortcuts) { menuShortcuts?.collect { runShortcut(it) } }
             androidx.compose.foundation.layout.Column(
                 Modifier
                     .fillMaxSize()
@@ -1727,29 +1756,8 @@ fun App(
                     .onPreviewKeyEvent { event ->
                         val action = io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost)
                             ?: return@onPreviewKeyEvent false
-                        when (action) {
-                            io.nisfeb.talon.ui.ShortcutAction.Back -> return@onPreviewKeyEvent false
-                            io.nisfeb.talon.ui.ShortcutAction.OpenSettings -> showSettings = true
-                            io.nisfeb.talon.ui.ShortcutAction.NewDm -> showNewDmRequest = true
-                            io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
-                            io.nisfeb.talon.ui.ShortcutAction.IncreaseFontSize ->
-                                uiSettings.setFontScale(
-                                    userFontScale + io.nisfeb.talon.ui.FONT_SCALE_STEP,
-                                )
-                            io.nisfeb.talon.ui.ShortcutAction.DecreaseFontSize ->
-                                uiSettings.setFontScale(
-                                    userFontScale - io.nisfeb.talon.ui.FONT_SCALE_STEP,
-                                )
-                            io.nisfeb.talon.ui.ShortcutAction.ResetFontSize ->
-                                uiSettings.setFontScale(1.0f)
-                            is io.nisfeb.talon.ui.ShortcutAction.SwitchShip -> {
-                                sessionStore.all().getOrNull(action.index)?.ship?.let { targetShip ->
-                                    leaveShip()
-                                    sessionStore.setActive(targetShip)
-                                    loggedInShip = targetShip
-                                }
-                            }
-                        }
+                        if (action == io.nisfeb.talon.ui.ShortcutAction.Back) return@onPreviewKeyEvent false
+                        runShortcut(action)
                         true
                     },
             ) {

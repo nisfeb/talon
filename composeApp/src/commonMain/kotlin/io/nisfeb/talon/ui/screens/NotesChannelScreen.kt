@@ -22,7 +22,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -100,7 +99,13 @@ fun NotesChannelScreen(
     // A notes channel listed in a group isn't readable until we join it
     // on %notes (the host only serves notebooks in our own books map).
     // Joining is idempotent, so this is safe on every open.
-    LaunchedEffect(flag) { repo.notes.ensureJoined(flag) }
+    // While it is asked, an empty notebook is loading, not unsynced: it
+    // said "isn't synced yet" for the moment every notebook took to open.
+    var opening by remember(flag) { mutableStateOf(true) }
+    LaunchedEffect(flag) {
+        runCatching { repo.notes.ensureJoined(flag) }
+        opening = false
+    }
 
     var addMenuOpen by remember { mutableStateOf(false) }
     var renameFolder by remember { mutableStateOf<NotesFolderEntity?>(null) }
@@ -144,8 +149,7 @@ fun NotesChannelScreen(
             // handlers need a parent folder, so confirming earlier would
             // silently do nothing.
             Box {
-                IconButton(
-                    enabled = currentFolderId != null,
+                io.nisfeb.talon.ui.IconButton(tip = "Add", enabled = currentFolderId != null,
                     onClick = { addMenuOpen = true },
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = "Add")
@@ -184,14 +188,17 @@ fun NotesChannelScreen(
 
         if (childFolders.isEmpty() && folderNotes.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    if (notebook == null) {
-                        "This notebook isn't synced yet."
-                    } else {
-                        "Nothing here yet."
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (notebook == null && opening) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        androidx.compose.material3.CircularProgressIndicator()
+                        Text("Opening the notebook…", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
+                    }
+                } else {
+                    Text(
+                        if (notebook == null) "This notebook isn't synced yet." else "Nothing here yet.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
@@ -301,7 +308,7 @@ fun NotesChannelScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     val id = target.folderId
                     deleteFolder = null
                     scope.launch { repo.notes.deleteFolder(flag, id, recursive = true) }
@@ -345,7 +352,7 @@ private fun FolderRow(
         Spacer(Modifier.width(12.dp))
         Text(folder.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         Box {
-            IconButton(onClick = { menuOpen = true }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Folder actions", onClick = { menuOpen = true }) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "Folder actions")
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {

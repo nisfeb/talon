@@ -1,6 +1,6 @@
 package io.nisfeb.talon.ui.screens
 import io.nisfeb.talon.ui.shipHandle
-import io.nisfeb.talon.util.formatMonthDayTime
+import io.nisfeb.talon.util.formatMonthDayClock
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
@@ -231,10 +231,10 @@ fun SearchScreen(
                 if (smartMode) {
                     val p = indexProgress
                     val status = when {
-                        semanticBusy -> "embedding query…"
-                        p.running && p.total > 0 -> "indexing ${p.indexed}/${p.total}…"
-                        p.running -> "scanning local archive…"
-                        p.total == 0 -> "no messages indexed yet"
+                        semanticBusy -> "Searching…"
+                        p.running && p.total > 0 -> "Indexing ${p.indexed} of ${p.total}…"
+                        p.running -> "Reading your messages…"
+                        p.total == 0 -> "No messages indexed yet"
                         else -> "${p.indexed} messages indexed"
                     }
                     Text(
@@ -356,7 +356,7 @@ private fun ResultRow(m: MessageEntity, contactMap: ContactMap, onClick: () -> U
     }
     val title = remember(m.whom, contactMap) { contactMap.conversationLabel(m.whom) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
-    val stamp = remember(m.sentMs) { formatMonthDayTime(m.sentMs) }
+    val stamp = remember(m.sentMs) { formatMonthDayClock(m.sentMs) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -470,7 +470,7 @@ private fun PersonRow(
                     maxLines = 1,
                 )
                 !hasChatHistory -> Text(
-                    "Tap to start a DM",
+                    "${io.nisfeb.talon.ui.tapWord} to start a DM",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -480,7 +480,7 @@ private fun PersonRow(
             // we still want the hint somewhere; tuck it under the patp.
             if (showShipSubtitle && !hasChatHistory) {
                 Text(
-                    "Tap to start a DM",
+                    "${io.nisfeb.talon.ui.tapWord} to start a DM",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -499,7 +499,7 @@ private fun ParsedFilterChips(filter: io.nisfeb.talon.ui.SearchFilter) {
     val chips = buildList {
         filter.fromShip?.let { add("from $it") }
         filter.inWhom?.let { add("in $it") }
-        filter.sinceMs?.let { add("since " + formatMonthDayTime(it)) }
+        filter.sinceMs?.let { add("since " + formatMonthDayClock(it)) }
         if (filter.hasImage) add("has image")
         if (filter.hasLink) add("has link")
     }

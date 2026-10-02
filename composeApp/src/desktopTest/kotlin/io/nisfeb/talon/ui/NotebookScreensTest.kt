@@ -53,6 +53,7 @@ class NotebookScreensTest {
         published: String? = "[]",
         /** The note's markdown. */
         body: String = "Simmer **long**.",
+        prepare: FakeShip.() -> Unit = {},
         content: @androidx.compose.runtime.Composable (TlonChatRepo) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-nbui-").toFile()
@@ -67,7 +68,7 @@ class NotebookScreensTest {
             scries["notes/v0/notes/~bus/recipes"] = """[{"folderId":9,"notebookId":7,"title":"Pho","revision":3,"id":11,"createdBy":"~bus",
                 "createdAt":1784592455,"bodyMd":${kotlinx.serialization.json.JsonPrimitive(body)},"updatedAt":1784592505,"updatedBy":"~bus","slug":null}]"""
             if (published != null) scries["notes/v0/published"] = published
-        }
+        }.apply(prepare)
         val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod"); notes.attach(ship.channel) }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         ship.channel.events().launchIn(scope)
@@ -332,4 +333,17 @@ class NotebookScreensTest {
         onAllNodesWithText("Delete").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
         assertTrue("\"recursive\":true" in notesPoke(ship, "recursive"))
     }
+
+    // Every notebook said "isn't synced yet" for the moment it took to open.
+    @Test
+    fun `a notebook being opened says so, not that it is unsynced`() = notebook(
+        block = { _, _ ->
+            showing("Opening the notebook")
+            assertTrue(!shows("isn't synced yet"))
+        },
+        prepare = { holdPoke = 3_000 },
+    ) { repo ->
+        NotesChannelScreen(repo = repo, whom = "notes/~nec/unjoined", onBack = {}, onOpenNote = {})
+    }
 }
+
