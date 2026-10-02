@@ -2,7 +2,7 @@ package io.nisfeb.talon.ui.screens
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.util.formatMonthDay
-import io.nisfeb.talon.util.ConcurrentMap
+import kotlinx.coroutines.flow.update
 import io.nisfeb.talon.util.formatMonthDayTime
 import io.nisfeb.talon.util.formatMonthDayYear
 import kotlin.time.Clock
@@ -1973,9 +1973,19 @@ private data class DisplayRow(
 )
 
 private object ChatRowsSnapshot {
-    private val byWhom = ConcurrentMap<String, List<ChatListItem>>()
-    fun get(whom: String): List<ChatListItem> = byWhom[whom].orEmpty()
-    fun put(whom: String, rows: List<ChatListItem>) { byWhom[whom] = rows }
+    /** The last few chats shown: each kept all its rows for the life of the process. */
+    private val recent = RecentByKey<List<ChatListItem>>(keep = 6)
+    fun get(whom: String): List<ChatListItem> = recent[whom].orEmpty()
+    fun put(whom: String, rows: List<ChatListItem>) = recent.put(whom, rows)
+}
+
+/** The last [keep] values put, by key; past that, the one put longest ago goes. */
+internal class RecentByKey<V>(private val keep: Int) {
+    private val byKey = kotlinx.coroutines.flow.MutableStateFlow<Map<String, V>>(emptyMap())
+    operator fun get(key: String): V? = byKey.value[key]
+    fun put(key: String, value: V) {
+        byKey.update { m -> (m - key + (key to value)).let { if (it.size > keep) it - it.keys.first() else it } }
+    }
 }
 
 private fun buildChatListItemsReusing(
