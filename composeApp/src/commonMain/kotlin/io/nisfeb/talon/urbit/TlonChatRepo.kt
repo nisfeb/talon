@@ -362,6 +362,9 @@ class TlonChatRepo(
     /** For tests: [stopAndJoin] without waiting for pokes to land. */
     internal suspend fun stopAndJoinForTest() = stopAndJoin(pokeGraceMs = 0)
 
+    /** The ship's word on what is unread, read as a connect reads it. */
+    internal suspend fun bootstrapActivityForTest() = bootstrapActivity(channel!!)
+
     fun start(session: UrbitSession) {
         if (started) return
         started = true
@@ -1193,6 +1196,31 @@ class TlonChatRepo(
     /** The newest intention per post: a reaction queued, then taken off, sends the taking off. */
     private val queuedReacts = MutableStateFlow<Map<String, QueuedReact>>(emptyMap())
 
+    /**
+     * A read the ship has not heard, by whom (or whom#parent for a thread),
+     * with when it was read. A read that timed out was lost: the badge was
+     * already cleared here, so the next open sent nothing, and the ship's
+     * next word brought the same messages back as unread, again and again.
+     */
+    private data class OwedRead(val key: String, val source: JsonObject, val readAtMs: Long)
+
+    private val owedReads = MutableStateFlow<Map<String, OwedRead>>(emptyMap())
+
+    /**
+     * Whether the ship's word on what is unread has been read since this
+     * connection began. Until it has, the counts here may be stale, so a
+     * chat with none here is read on the ship anyway: skipped, its unread
+     * there came back when the slow read of them finally landed.
+     */
+    @kotlin.concurrent.Volatile private var activityKnown = false
+
+    /**
+     * Whether a count from the ship for [key] is one the owner has read and
+     * the ship has not heard of yet: nothing in it newer than the read.
+     */
+    private fun readHere(key: String, recencyMs: Long): Boolean =
+        owedReads.value[key]?.let { recencyMs <= it.readAtMs } == true
+
     /** What the last write that could not reach the ship said, for "Copy error details"; null once the queue is empty. */
     private val slowDetails = MutableStateFlow<String?>(null)
 
@@ -1219,7 +1247,7 @@ class TlonChatRepo(
         // The ship is back: a drain sleeping out its backoff goes now. Left
         // to sleep, a message queued behind one that waited sat out the
         // rest of a backoff of up to a minute with the ship answering.
-        if (queuedReacts.value.isNotEmpty() || slowDetails.value != null) scheduleDrain(0, wake = true)
+        if (queuedReacts.value.isNotEmpty() || owedReads.value.isNotEmpty() || slowDetails.value != null) scheduleDrain(0, wake = true)
     }
 
     /** A write did not reach the ship: say why, and try again later, a little later each time. */
@@ -1325,6 +1353,24 @@ class TlonChatRepo(
                 // Refused now: dropped, and the post's next reading shows the ship's word.
                 if (t is PokeNacked) {
                     queuedReacts.update { m -> if (m[r.key] == r) m - r.key else m }
+                    continue
+                }
+                drainJob = null
+                stillSlow(t)
+                return@withLock
+            }
+        }
+        // Reads the ship did not hear, up to when each was read: what came
+        // in since stays unread.
+        for (r in owedReads.value.values) {
+            try {
+                sendActivityRead(ch, r.source, upTo = r.readAtMs)
+                owedReads.update { m -> if (m[r.key] == r) m - r.key else m }
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                if (t is PokeNacked) {
+                    owedReads.update { m -> if (m[r.key] == r) m - r.key else m }
                     continue
                 }
                 drainJob = null
@@ -3834,6 +3880,9 @@ class TlonChatRepo(
         // and ThreadUnreadEntity never populates — leaving the
         // per-row indicator tint and in-thread "New" divider perma-off.
         // /v6 (12.1.0) has notebook sources; an older ship has only /v4.
+        // Not known again until this read of it lands: what came in while
+        // the connection was down is not in the counts here.
+        activityKnown = false
         val body = scryNewest(channel, "activity", "/v6/activity/full", "/v4/activity/full", timeoutSecs = BOOTSTRAP_TIMEOUT_SECS)
         val obj = body as? JsonObject
         if (obj == null) {
@@ -3850,7 +3899,8 @@ class TlonChatRepo(
         }.map { row ->
             // Respect the focus-override so a post-mark-read scry race
             // doesn't re-bump the badge while the user is still looking.
-            if (row.whom == focused) row.copy(count = 0, notifyCount = 0) else row
+            // Nor one read here that the ship has not heard yet.
+            if (row.whom == focused || readHere(row.whom, row.recencyMs)) row.copy(count = 0, notifyCount = 0) else row
         }
         // Per-thread breakdown — separate table so the message-row
         // thread indicator can tint when its specific thread has
@@ -3868,6 +3918,8 @@ class TlonChatRepo(
         // specific thread (`markThreadReadLocal`).
         val threadRows = obj.entries.mapNotNull { (sourceKey, summary) ->
             toThreadUnread(sourceKey, summary as? JsonObject ?: return@mapNotNull null)
+        }.map { row ->
+            if (readHere("${row.whom}#${row.parentPostId}", row.recencyMs)) row.copy(count = 0, notifyCount = 0) else row
         }
         Log.i(
             TAG,
@@ -3876,6 +3928,7 @@ class TlonChatRepo(
         )
         if (rows.isNotEmpty()) db.unreads().upsertAll(rows)
         if (threadRows.isNotEmpty()) db.threadUnreads().upsertAll(threadRows)
+        activityKnown = true
     }
 
     internal suspend fun applyActivityUpdate(obj: JsonObject) {
@@ -3895,6 +3948,9 @@ class TlonChatRepo(
                         markReadSoon(row.whom) { markRead(row.whom, force = true) }
                     }
                     row.copy(count = 0, notifyCount = 0)
+                } else if (readHere(row.whom, row.recencyMs)) {
+                    // Read here, owed to the ship: its count is from before.
+                    row.copy(count = 0, notifyCount = 0)
                 } else row
             }
             // See bootstrapActivity for the no-focus-override rationale —
@@ -3909,6 +3965,8 @@ class TlonChatRepo(
                     row.parentPostId == focusedThreadNow.second && row.count > 0
                 ) {
                     markReadSoon("${row.whom}#${row.parentPostId}") { markThreadRead(row.whom, row.parentPostId, force = true) }
+                    row.copy(count = 0, notifyCount = 0)
+                } else if (readHere("${row.whom}#${row.parentPostId}", row.recencyMs)) {
                     row.copy(count = 0, notifyCount = 0)
                 } else row
             }
@@ -3936,6 +3994,8 @@ class TlonChatRepo(
                         if (row.count > 0 || row.notifyCount > 0) {
                             markReadSoon(row.whom) { markRead(row.whom, force = true) }
                         }
+                        row.copy(count = 0, notifyCount = 0)
+                    } else if (readHere(row.whom, row.recencyMs)) {
                         row.copy(count = 0, notifyCount = 0)
                     } else row
                     db.unreads().upsert(adjusted)
@@ -4079,7 +4139,10 @@ class TlonChatRepo(
         // Should the ship disagree, its next activity raises the count and
         // the next read goes.
         val had = db.unreads().getOne(whom)
-        val unread = force || (had != null && (had.count > 0 || had.notifyCount > 0))
+        // Told the ship anyway where the counts here are not yet the ship's
+        // (this connection has not read them) or a read of it is owed.
+        val unread = force || !activityKnown || owedReads.value.containsKey(whom) ||
+            (had != null && (had.count > 0 || had.notifyCount > 0))
 
         // Clear the badge locally immediately so the list flips the moment
         // the user enters the conversation. The server fact will confirm.
@@ -4139,7 +4202,9 @@ class TlonChatRepo(
         val had = db.threadUnreads().getOne(whom, parentPostId)
         db.threadUnreads().deleteOne(whom, parentPostId)
         // Nothing unread here, as the ship last said: nothing to tell it.
-        if (!force && (had == null || (had.count == 0 && had.notifyCount == 0))) return
+        // Unless what it last said is not known yet, or a read is owed.
+        val owed = owedReads.value.containsKey("$whom#$parentPostId")
+        if (!force && activityKnown && !owed && (had == null || (had.count == 0 && had.notifyCount == 0))) return
         val ch = channel ?: return
         val isChannel = whom.startsWith("chat/") || whom.startsWith("diary/") || whom.startsWith("heap/")
         val groupFlag = if (isChannel) {
@@ -4164,30 +4229,17 @@ class TlonChatRepo(
      * badge after Talon already cleared it locally.
      */
     private suspend fun pokeActivityRead(ch: UrbitChannel, label: String, source: JsonObject) {
+        val readAt = nowMs()
         val maxAttempts = 4
         var attempt = 0
         var lastErr: Throwable? = null
-        // A notebook's badge is its notes': only a deep read clears them.
-        val notebook = source.containsKey("notebook")
-        val action = activityReadAction(source, deep = notebook)
         while (attempt < maxAttempts) {
-            val outcome = runCatching {
-                // activity-action-2 (12.1.0) is the mark Tlon's client sends,
-                // and the only one that names a notebook. A ship that is
-                // older refuses it; the original mark says the same of
-                // anything else.
-                val mark = if (notebook) "activity-action-2" else activityReadMark
-                try {
-                    ch.poke(app = "activity", mark = mark, payload = action)
-                } catch (n: PokeNacked) {
-                    if (notebook || mark == "activity-action") throw n
-                    ch.poke(app = "activity", mark = "activity-action", payload = action)
-                    // This ship has only the original mark: every read was
-                    // two pokes, one refused, until it was remembered.
-                    activityReadMark = "activity-action"
-                }
+            val outcome = runCatching { sendActivityRead(ch, source) }
+            if (outcome.isSuccess) {
+                // Heard: whatever was owed for it is paid.
+                owedReads.update { it - label }
+                return
             }
-            if (outcome.isSuccess) return
             lastErr = outcome.exceptionOrNull()
             val transient = isTransientNetworkError(lastErr)
             if (!transient) break
@@ -4199,10 +4251,36 @@ class TlonChatRepo(
         lastErr?.let { err ->
             val transient = isTransientNetworkError(err)
             if (transient) {
-                Log.i(TAG, "markRead $label gave up after $attempt attempts: ${err.message}")
+                // Not heard: owed, and sent with the queued writes once the
+                // ship answers, up to when it was read.
+                Log.i(TAG, "markRead $label owed after $attempt attempts: ${err.message}")
+                owedReads.update { it + (label to OwedRead(label, source, readAt)) }
+                stillSlow(err)
             } else {
+                owedReads.update { it - label }
                 Log.w(TAG, "markRead poke failed for $label", err)
             }
+        }
+    }
+
+    /** One read of [source] to %activity, under the mark this ship takes; up to [upTo] ms, or now. */
+    private suspend fun sendActivityRead(ch: UrbitChannel, source: JsonObject, upTo: Long? = null) {
+        // A notebook's badge is its notes': only a deep read clears them.
+        val notebook = source.containsKey("notebook")
+        val action = activityReadAction(source, deep = notebook, upTo = upTo)
+        // activity-action-2 (12.1.0) is the mark Tlon's client sends,
+        // and the only one that names a notebook. A ship that is
+        // older refuses it; the original mark says the same of
+        // anything else.
+        val mark = if (notebook) "activity-action-2" else activityReadMark
+        try {
+            ch.poke(app = "activity", mark = mark, payload = action)
+        } catch (n: PokeNacked) {
+            if (notebook || mark == "activity-action") throw n
+            ch.poke(app = "activity", mark = "activity-action", payload = action)
+            // This ship has only the original mark: every read was
+            // two pokes, one refused, until it was remembered.
+            activityReadMark = "activity-action"
         }
     }
 
