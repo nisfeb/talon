@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -197,4 +198,67 @@ internal fun chatTextToStory(text: String): JsonArray {
     }
 
     return buildJsonArray { verses.forEach { add(it) } }
+}
+
+/**
+ * Where in [text] are the ships it would send as mentions. Asked of
+ * [chatTextToStory] itself, then found in the text in its order, so the
+ * composer can never dress up as a mention what will go as plain text
+ * (a `~ship` in code, a URL's, a shape-alike that is no ship).
+ */
+internal fun mentionRanges(text: String): List<IntRange> {
+    if (!PATP_REGEX.containsMatchIn(text)) return emptyList()
+    val sent = ArrayDeque(shipsIn(chatTextToStory(text)))
+    if (sent.isEmpty()) return emptyList()
+    val code = codeRanges(text) + URL_IN_TEXT.findAll(text).map { it.range }
+    fun patpChar(c: Char) = c.isLetterOrDigit() || c == '-'
+    val out = mutableListOf<IntRange>()
+    for (m in PATP_REGEX.findAll(text)) {
+        val s = m.range.first
+        val e = m.range.last + 1
+        if (s > 0 && patpChar(text[s - 1])) continue
+        if (e < text.length && patpChar(text[e])) continue
+        if (code.any { s in it }) continue
+        if (m.value != sent.firstOrNull()) continue
+        sent.removeFirst()
+        out += m.range
+        if (sent.isEmpty()) break
+    }
+    return out
+}
+
+/** Every ship mentioned in a story, in order. */
+private fun shipsIn(e: JsonElement): List<String> = when (e) {
+    is JsonArray -> e.flatMap(::shipsIn)
+    is JsonObject -> (e["ship"] as? JsonPrimitive)?.takeIf { it.isString }?.let { listOf(it.content) }
+        ?: e.values.flatMap(::shipsIn)
+    else -> emptyList()
+}
+
+/** A link the parser makes of bare text (see Markdown's urlEndAt): a ship in one is part of it. */
+private val URL_IN_TEXT = Regex("(?i)(?:https?|urb)://[^\\s<>\"`]+")
+
+/** Fenced blocks and backtick spans: what goes as code, ships and all. */
+private fun codeRanges(text: String): List<IntRange> {
+    val out = mutableListOf<IntRange>()
+    var at = 0
+    var fence = false
+    for (line in text.split('\n')) {
+        if (line.startsWith("```")) {
+            out += at until at + line.length
+            fence = !fence
+        } else if (fence) {
+            out += at until at + line.length
+        } else {
+            var i = line.indexOf('`')
+            while (i >= 0) {
+                val end = line.indexOf('`', i + 1)
+                if (end < 0) break
+                out += (at + i)..(at + end)
+                i = line.indexOf('`', end + 1)
+            }
+        }
+        at += line.length + 1
+    }
+    return out
 }

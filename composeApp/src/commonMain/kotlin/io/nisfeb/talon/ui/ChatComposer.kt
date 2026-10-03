@@ -527,7 +527,19 @@ fun ChatComposer(
         stage(file.bytes, file.mimeType, file.name, file.isImage)
     }
 
-    val updateDraft: (TextFieldValue) -> Unit = { next ->
+    // A mention reads in the box as it will once sent, by this device's
+    // naming settings; a draft with no @p keeps the plain look (on iOS a
+    // transformation can cost the field its paste menu).
+    val namesVersion by ShipNames.generation.collectAsState()
+    val hasShip = io.nisfeb.talon.urbit.PATP_REGEX.containsMatchIn(state.draft.text)
+    val composerLook = remember(namesVersion, hasShip) {
+        if (hasShip) mentionTransformation { ShipNames.resolve(it) } else EmojiVisualTransformation
+    }
+
+    val updateDraft: (TextFieldValue) -> Unit = { typed ->
+        // A mention shows as a name over its @p: it goes, and is stepped
+        // over, as one piece.
+        val next = keepMentionsWhole(state.draft, typed)
         state.draft = next
         // An edit is not a draft: saving it would bring it back as a new
         // message. The draft it displaced stays saved underneath.
@@ -1069,7 +1081,7 @@ fun ChatComposer(
                 placeholder = { Text(placeholder) },
                 enabled = canSend,
                 textStyle = MaterialTheme.typography.bodyMedium,
-                visualTransformation = EmojiVisualTransformation,
+                visualTransformation = composerLook,
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(fieldFocus)

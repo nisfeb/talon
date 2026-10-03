@@ -163,7 +163,10 @@ class DmChatScreenTest {
             onNode(hasSetTextAction()).performTextInput("hi ..besp")
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("..bespoke...kazoo", substring = true).fetchSemanticsNodes().size > 1 }
             onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) } // takes the pick
-            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("hi $them", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            // The box shows it as it will read once sent, by its short word
+            // name, not its @p, and holds the @p.
+            waitUntil(timeoutMillis = 5_000) { draft().startsWith("hi ..bespoke...kazoo") }
+            assertTrue(held().startsWith("hi $them"), held())
             waitForIdle()
             onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) } // sends
             waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").isNotEmpty() }
@@ -333,8 +336,13 @@ class DmChatScreenTest {
 
     // ─── emoji by name ─────────────────────────────────────────────
 
+    /** What the composer shows. A mention shows as the name it will read as once sent. */
     private fun ComposeUiTest.draft(): String =
         onNode(hasSetTextAction()).fetchSemanticsNode().config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.EditableText)?.text.orEmpty()
+
+    /** What the composer holds, and sends: a mention's @p. */
+    private fun ComposeUiTest.held(): String =
+        onNode(hasSetTextAction()).fetchSemanticsNode().config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.InputText)?.text.orEmpty()
 
     @Test
     fun `a colon and a name offer emoji, Enter takes the first, and the next Enter sends`() = chat { ship, _ ->
@@ -360,14 +368,16 @@ class DmChatScreenTest {
     // ─── people, commands, and the last thing said ─────────────────
 
     @Test
-    fun `an @ and a name offer people, and Enter puts in their @p`() = chat(seed = {
+    fun `an @ and a name offer people, and Enter puts them in, shown by name`() = chat(seed = {
         contacts().upsertAll(listOf(io.nisfeb.talon.data.ContactEntity("~sampel-palnet", "Sam", null, null)))
         messages().upsert(msg("~bus/170141184506", "~bus", "hello", 1_000))
     }) { ship, _ ->
         onNode(hasSetTextAction()).performTextInput("ask @Sa")
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Sam", substring = true).fetchSemanticsNodes().isNotEmpty() }
         onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
-        waitUntil(timeoutMillis = 5_000) { draft() == "ask ~sampel-palnet " }
+        // Shown as it will read once sent; held, and sent, as the @p.
+        waitUntil(timeoutMillis = 5_000) { draft() == "ask Sam " }
+        assertEquals("ask ~sampel-palnet ", held())
         assertTrue(ship.pokesTo("chat").isEmpty())
     }
 
