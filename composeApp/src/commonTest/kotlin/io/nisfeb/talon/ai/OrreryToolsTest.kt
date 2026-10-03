@@ -319,6 +319,16 @@ class OrreryToolsTest {
         assertTrue("cut here, ${lines.length - 6000} more characters" in out, "says how much was left out")
     }
 
+    // Many short elements: the per-element count is what keeps the cut
+    // under the cap, so it has to be counted right.
+    @Test
+    fun `a view of many short elements is cut to within the room`() {
+        val view = "{\"bodies\":[" + (1..3000).joinToString(",") { "\"b$it\"" } + "]}"
+        val out = clipJson(view, 6000)
+        assertTrue(out.length <= 6000, "${out.length}")
+        assertTrue("bodies:" in kotlinx.serialization.json.Json.parseToJsonElement(out).jsonObject.getValue("_cut").jsonPrimitive.content)
+    }
+
     @Test
     fun `a view exactly the room there is is handed over whole`() {
         val view = "{\"bodies\":[" + (1..200).joinToString(",") { "\"b$it\"" } + "]}"
