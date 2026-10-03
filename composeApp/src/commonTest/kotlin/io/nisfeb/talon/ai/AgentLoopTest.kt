@@ -7,6 +7,7 @@ import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
@@ -97,5 +98,52 @@ class AgentLoopTest {
         assertEquals("recovered", loop.run("q", confirm = { _, _ -> true }))
         val said = told.filterIsInstance<AgentMessage.ToolResults>().single().results.single().content
         assertEquals("Error: unknown tool 'ghost'.", said)
+    }
+
+    // ─── an empty message is not an answer ────────────────────────
+
+    @Test
+    fun `an empty final message is nudged once, and the answer that follows is the answer`() = runBlocking {
+        val asked = mutableListOf<List<AgentMessage>>()
+        var i = 0
+        val turns = listOf(AgentTurn.Final(""), AgentTurn.Final("Filed three facts about Rose."))
+        val loop = AgentLoop({ _, msgs, _ -> asked += msgs.toList(); turns[i++] }, emptyList())
+        val events = mutableListOf<AgentLoop.Event>()
+        val out = loop.run("file this", confirm = { _, _ -> true }, onEvent = { events += it })
+        assertEquals("Filed three facts about Rose.", out)
+        assertEquals(2, asked.size, "asked once more, not again and again")
+        val nudge = asked[1].last()
+        assertTrue(nudge is AgentMessage.User && nudge.text == AgentLoop.NUDGE, "the second ask carries the nudge: $nudge")
+        assertTrue(events.any { it is AgentLoop.Event.Thinking && "returned nothing" in it.text }, "the transcript says why it asked again")
+        assertEquals(listOf("Filed three facts about Rose."), events.filterIsInstance<AgentLoop.Event.Answer>().map { it.text })
+    }
+
+    @Test
+    fun `two empty messages running are a failure, not a blank answer`() = runBlocking {
+        val loop = AgentLoop(scripted(AgentTurn.Final(""), AgentTurn.Final("   ")).completer, emptyList())
+        val events = mutableListOf<AgentLoop.Event>()
+        assertFailsWith<AgentLoop.EmptyAnswer> { loop.run("q", confirm = { _, _ -> true }, onEvent = { events += it }) }
+        assertTrue(events.none { it is AgentLoop.Event.Answer }, "no Answer event for nothing")
+    }
+
+    @Test
+    fun `an empty message after tool calls is nudged too`() = runBlocking {
+        val read = Tool(spec("read"), write = false) { "state" }
+        val loop = AgentLoop(
+            scripted(AgentTurn.Calls(null, listOf(call("read"))), AgentTurn.Final(""), AgentTurn.Final("done after reading")).completer,
+            listOf(read),
+        )
+        assertEquals("done after reading", loop.run("q", confirm = { _, _ -> true }))
+    }
+
+    @Test
+    fun `a tool's time is on its finished event`() = runBlocking {
+        val read = Tool(spec("read"), write = false) { "x".repeat(50) }
+        val loop = AgentLoop(scripted(AgentTurn.Calls(null, listOf(call("read"))), AgentTurn.Final("ok")).completer, listOf(read))
+        val events = mutableListOf<AgentLoop.Event>()
+        loop.run("q", confirm = { _, _ -> true }, onEvent = { events += it })
+        val fin = events.filterIsInstance<AgentLoop.Event.ToolFinished>().single()
+        assertEquals(50, fin.result.length)
+        assertTrue(fin.ms >= 0)
     }
 }

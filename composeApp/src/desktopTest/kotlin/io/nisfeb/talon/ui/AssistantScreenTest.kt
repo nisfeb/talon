@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -158,6 +159,36 @@ class AssistantScreenTest {
         ask("anything?")
         waitUntil(timeoutMillis = 10_000) { shows("down for maintenance") }
         assertTrue(!shows("Tuesday, at the library."))
+    }
+
+    @Test
+    fun `a model that returns nothing is asked once more, then said so, with the question kept`() = assistant { db ->
+        answer = ""
+        ask("file this dump about Rose")
+        waitUntil(timeoutMillis = 10_000) { shows("returned nothing, twice") }
+        assertEquals(2, asked.size, "asked once more, not again and again")
+        assertTrue(asked[1].contains("You returned an empty message"), "the second ask carries the nudge")
+        assertTrue(shows("asking it once more"), "the transcript says why it asked again")
+        assertTrue(!shows("(no reply)"), "a blank is not shown as an answer")
+        onNode(hasSetTextAction()).assertTextContains("file this dump about Rose", substring = true)
+        assertTrue(runBlocking { db.assistantConversations().mostRecent() } == null, "nothing is filed as an answer")
+    }
+
+    @Test
+    fun `a turn keeps what its run did`() = assistant { db ->
+        toolCall = postEvent
+        answer = "Posted it to Bus."
+        ask("tell bus about the seed swap")
+        waitUntil(timeoutMillis = 10_000) { shows("Allow this action?") }
+        onNodeWithText("Allow").performClick()
+        waitUntil(timeoutMillis = 10_000) { shows("Posted it to Bus.") }
+        waitUntil(timeoutMillis = 5_000) { runBlocking { db.assistantConversations().mostRecent() } != null }
+        val conv = runBlocking { db.assistantConversations().mostRecent() }!!
+        val turn = runBlocking { db.assistantHistory().forConversation(conv.id) }.single()
+        val log = turn.log.lines()
+        assertTrue(log.any { it.startsWith("→ send_event (write) args ") }, turn.log)
+        assertTrue(log.any { Regex("✓ send_event \\d+ms, result \\d+ chars").matches(it) }, turn.log)
+        assertTrue(log.contains("answer ${"Posted it to Bus.".length} chars"), turn.log)
     }
 
     @Test

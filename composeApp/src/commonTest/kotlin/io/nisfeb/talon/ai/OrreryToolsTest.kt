@@ -3,6 +3,9 @@ package io.nisfeb.talon.ai
 import io.nisfeb.talon.orrery.OrreryApi
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
@@ -27,7 +30,8 @@ class OrreryToolsTest {
         var read: String? = null
 
         override suspend fun find(q: String) = Result.success(hits)
-        override suspend fun state() = Result.success("""{"bodies":[]}""")
+        var stateText = """{"bodies":[]}"""
+        override suspend fun state() = Result.success(stateText)
         override suspend fun body(id: String) = Result.success(listOf("obs=1 attr=status"))
         override suspend fun observe(batch: JsonObject): Result<List<String>> {
             observed = batch
@@ -278,5 +282,39 @@ class OrreryToolsTest {
         for (home in listOf("http://localhost:8080", "https://192.168.1.4", "https://172.20.0.2:8443", "http://my.ship.example")) {
             assertTrue("not a `public_url`" in shipUrlHint(home), home)
         }
+    }
+
+    // ─── the state view reaches the model whole, or cut at a boundary ───
+
+    private fun body(i: Int) = """{"id":"person/p$i","kind":"person","name":"Person $i","aliases":[],"values":{"status":"${"x".repeat(200)}"}}"""
+
+    @Test
+    fun `a brief view that fits is handed over as it came`() = runTest {
+        val tap = Tap(); tap.stateText = """{"bodies":[${body(1)}],"situations":[],"kinds":{"person":["status"]}}"""
+        assertEquals(tap.stateText, tools(tap).getValue("orrery_read").execute(JsonObject(emptyMap())))
+    }
+
+    @Test
+    fun `a view too long loses list elements from the end, stays JSON, and says what was cut`() = runTest {
+        val bodies = (1..400).joinToString(",") { body(it) }   // ~100 KB
+        val tap = Tap(); tap.stateText = """{"bodies":[$bodies],"situations":[{"id":"situation/s1","needs":"a date"}],"kinds":{"person":["status"]}}"""
+        val out = tools(tap).getValue("orrery_read").execute(JsonObject(emptyMap()))
+        assertTrue(out.length <= STATE_CHARS, "within the cap: ${out.length}")
+        val parsed = kotlinx.serialization.json.Json.parseToJsonElement(out).jsonObject
+        val kept = parsed.getValue("bodies").jsonArray
+        assertTrue(kept.size in 1 until 400, "some bodies kept, not all: ${kept.size}")
+        assertEquals("person/p1", kept.first().jsonObject.getValue("id").jsonPrimitive.content, "cut from the end, the first stay")
+        assertEquals(1, parsed.getValue("situations").jsonArray.size, "the small list is whole")
+        assertEquals("""{"person":["status"]}""", parsed.getValue("kinds").toString(), "an object key is whole")
+        val note = parsed.getValue("_cut").jsonPrimitive.content
+        assertTrue("bodies: ${kept.size} of 400 kept" in note && "situations" !in note, note)
+    }
+
+    @Test
+    fun `text that is not an object is cut at a line, with the note`() {
+        val lines = (1..3000).joinToString("\n") { "line $it is here" }
+        val out = clipJson(lines, 6000)
+        assertTrue(out.length <= 6000 + 120 && out.lines().dropLast(1).all { it.startsWith("line ") }, "whole lines only")
+        assertTrue("cut here" in out && "ask for one body" in out)
     }
 }

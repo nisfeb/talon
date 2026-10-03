@@ -29,4 +29,8 @@ data class AssistantHistoryEntity(
     /** The conversation's cross-device id ([AssistantConversationEntity.gid]),
      *  used to re-link turns to the right conversation on a peer device. */
     val convGid: String = "",
+    /** What the run did on the way to [answer], one line per tool call
+     *  with its size and time, so a turn that went wrong can be read
+     *  back. Local only; "" for turns from before it was kept. */
+    @androidx.room.ColumnInfo(defaultValue = "") val log: String = "",
 )

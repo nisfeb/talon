@@ -646,7 +646,8 @@ class OrreryRepo(
     suspend fun readRegistration(name: String): Result<String> = runCatching { attached().registration(name) }
 
     /** The state view under this install's key: bodies and what is known of them. */
-    suspend fun readState(): Result<JsonObject> = runCatching { attached().stateJson(key()) }
+    /** The state view; [brief] is the assistant's, see [OrreryApi.stateJson]. */
+    suspend fun readState(brief: Boolean = false): Result<JsonObject> = runCatching { attached().stateJson(key(), brief) }
 
     /** Ask the ship which body a name means, before writing about it. */
     suspend fun resolveBody(q: String): Result<List<ResolvedBody>> = runCatching { attached().resolve(q, key()) }

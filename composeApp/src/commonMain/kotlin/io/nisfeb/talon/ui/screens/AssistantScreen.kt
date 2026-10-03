@@ -458,6 +458,9 @@ fun AssistantScreen(
         busy = true; error = null; session.allowAll = false
         transcript.add(Line.You(q))
         var finalAnswer = ""
+        // What the run did, kept with the turn: the next "(no reply)" is
+        // read from the row, not reconstructed from the model's bill.
+        val turnLog = StringBuilder()
         // Snapshot the conversation this question belongs to. The run below
         // suspends for seconds-to-minutes, during which the user can select
         // another conversation (or hit New) — re-reading the live state after
@@ -531,6 +534,7 @@ fun AssistantScreen(
                     onEvent = { ev ->
                         if (ev is AgentLoop.Event.Answer) finalAnswer = ev.text
                         transcript.add(ev.toLine())
+                        turnLog.append(ev.toLogLine()).append('\n')
                     },
                 )
 
@@ -604,6 +608,7 @@ fun AssistantScreen(
                         createdAt = now,
                         conversationId = convEntity.id,
                         convGid = convEntity.gid,
+                        log = turnLog.toString(),
                     )
                     historyDao.insert(turnEntity)
                     historyDao.trim(HISTORY_KEEP)
@@ -1172,13 +1177,23 @@ private fun ConfirmCard(summary: String, onAllow: () -> Unit, onAllowAll: (() ->
             }
             if (onAllowAll != null) {
                 Text(
-                    "Allow all lets the rest of this answer's calendar adds and edits go ahead. Deletes, messages and mail still ask.",
+                    "Allow all lets the rest of this answer's calendar adds and edits, and its orrery entries, go ahead. Deletes, messages and mail still ask.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
     }
+}
+
+/** One line of the turn's kept log, sized and timed where the line is a tool. */
+internal fun AgentLoop.Event.toLogLine(): String = when (this) {
+    is AgentLoop.Event.Thinking -> "thinking: ${text.take(200)}"
+    is AgentLoop.Event.ToolStarted -> "→ ${call.name}${if (write) " (write)" else ""} args ${call.args.toString().length} chars"
+    is AgentLoop.Event.ToolFinished -> "✓ ${call.name} ${ms}ms, result ${result.length} chars" +
+        if (result.startsWith("Error:")) ": ${result.take(200)}" else ""
+    is AgentLoop.Event.Declined -> "✗ declined ${call.name}"
+    is AgentLoop.Event.Answer -> "answer ${text.length} chars"
 }
 
 private fun AgentLoop.Event.toLine(): Line = when (this) {

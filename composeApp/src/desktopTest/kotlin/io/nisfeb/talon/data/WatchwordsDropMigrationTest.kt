@@ -25,7 +25,7 @@ class WatchwordsDropMigrationTest {
             // No destructive fallback: an open that succeeds ran the step.
             fun open() = Room.databaseBuilder<AppDatabase>(name = path)
                 .setDriver(BundledSQLiteDriver())
-                .addMigrations(WATCHWORDS_DROP_MIGRATION)
+                .addMigrations(WATCHWORDS_DROP_MIGRATION, ASSISTANT_LOG_MIGRATION, ASSISTANT_LOG_MIGRATION)
                 .build()
             open().apply {
                 messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["kept"]}]""", "/chat"))
@@ -37,6 +37,7 @@ class WatchwordsDropMigrationTest {
                 execSQL("INSERT INTO watchwords VALUES (1, 'mars')")
                 execSQL("CREATE TABLE watchword_hits (id INTEGER PRIMARY KEY NOT NULL, term TEXT NOT NULL)")
                 execSQL("CREATE TABLE watchword_chat_excludes (whom TEXT PRIMARY KEY NOT NULL)")
+                execSQL("ALTER TABLE assistant_history DROP COLUMN log") // added at 53
                 execSQL("PRAGMA user_version = 51")
                 close()
             }

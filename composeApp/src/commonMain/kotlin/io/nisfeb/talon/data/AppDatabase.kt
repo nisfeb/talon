@@ -62,7 +62,7 @@ import androidx.sqlite.execSQL
         CometDomeEntity::class,
         UrbUnfurlEntity::class,
     ],
-    version = 52,
+    version = 53,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -129,3 +129,15 @@ val WATCHWORDS_DROP_MIGRATION = object : androidx.room.migration.Migration(51, 5
     }
 }
 
+/**
+ * 52 to 53: a turn keeps what its run did ([AssistantHistoryEntity.log]).
+ * One column; the fallback would have dropped every table for it.
+ */
+internal const val ASSISTANT_LOG_SQL = "ALTER TABLE `assistant_history` ADD COLUMN `log` TEXT NOT NULL DEFAULT ''"
+
+/** See [ASSISTANT_LOG_SQL]. Android runs the same statement its own way. */
+val ASSISTANT_LOG_MIGRATION = object : androidx.room.migration.Migration(52, 53) {
+    override fun migrate(connection: androidx.sqlite.SQLiteConnection) {
+        connection.execSQL(ASSISTANT_LOG_SQL)
+    }
+}
