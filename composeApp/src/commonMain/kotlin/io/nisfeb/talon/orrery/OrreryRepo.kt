@@ -2143,13 +2143,7 @@ internal const val BEACON_FIRST_PAUSE_MS = 3_000L
 /** A beacon stream that lived this long was healthy; its end is no sign of trouble. */
 internal const val BEACON_HEALTHY_MS = 60_000L
 
-/**
- * The pause before opening the beacon again, given the one so far and how
- * long the stream that just ended lived ([livedMs]; null if it never
- * opened). Short again only after a stream that lived: reset on being let
- * in, a stream accepted and then broken at once came back every three
- * seconds for as long as the ship kept breaking it.
- */
+/** The pause before opening the beacon again; see [io.nisfeb.talon.urbit.pauseAfterStream]. */
 internal fun beaconPauseAfter(pause: Long, livedMs: Long?): Long =
-    if (livedMs != null && livedMs >= BEACON_HEALTHY_MS) BEACON_FIRST_PAUSE_MS else pause
+    io.nisfeb.talon.urbit.pauseAfterStream(pause, livedMs, BEACON_FIRST_PAUSE_MS, BEACON_HEALTHY_MS)
 

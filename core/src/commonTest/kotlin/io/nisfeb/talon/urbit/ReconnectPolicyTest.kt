@@ -1,6 +1,7 @@
 package io.nisfeb.talon.urbit
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -61,6 +62,13 @@ class ReconnectPolicyTest {
     }
 
     // Fifty posts from every channel on every launch, a full store or not.
+    @Test
+    fun `the pause goes back to the first only after a stream that lived`() {
+        assertEquals(2_000L, pauseAfterStream(16_000L, livedMs = 30_000L, first = 2_000L, healthyMs = 30_000L))
+        assertEquals(16_000L, pauseAfterStream(16_000L, livedMs = 29_999L, first = 2_000L, healthyMs = 30_000L), "dropped sooner")
+        assertEquals(16_000L, pauseAfterStream(16_000L, livedMs = null, first = 2_000L, healthyMs = 30_000L), "never opened")
+    }
+
     @Test
     fun `the deep history pass runs on an empty store or after a day away, not otherwise`() {
         val day = 24 * 60 * 60 * 1000L

@@ -46,6 +46,16 @@ fun shouldBootstrap(firstRun: Boolean, lastBootstrapMs: Long, nowMs: Long, lastH
     return !shortOutage || since >= RECONCILE_EVERY_MS
 }
 
+/**
+ * The pause before opening a stream again, given the one so far and how
+ * long the stream that just ended lived ([livedMs]; null if it never
+ * opened). Back to [first] only after a stream that lived [healthyMs]:
+ * reset on being let in, a stream accepted and then broken at once came
+ * back every few seconds for as long as the ship kept breaking it.
+ */
+fun pauseAfterStream(pause: Long, livedMs: Long?, first: Long, healthyMs: Long): Long =
+    if (livedMs != null && livedMs >= healthyMs) first else pause
+
 /** The deep history pass: nothing kept here, or the newest is over a day old. */
 fun needsDeepHistory(newestSentMs: Long?, nowMs: Long): Boolean =
     newestSentMs == null || nowMs - newestSentMs > 24 * 60 * 60 * 1000L
