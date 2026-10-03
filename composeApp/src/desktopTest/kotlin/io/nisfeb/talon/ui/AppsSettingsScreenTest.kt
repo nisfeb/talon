@@ -152,7 +152,7 @@ class AppsSettingsScreenTest {
     fun `permits open on the ship, and Check again asks each app afresh`() = apps {
         row("Lattice", "working")
         onNodeWithText("Open permits on your ship").performClick()
-        assertTrue("open https://zod.test/apps/grubbery/permits" in did, did.toString())
+        assertTrue("open https://zod.test/~/login?redirect=/apps/grubbery/permits" in did, did.toString())
         val asked = did.count { it == "asked lattice" }
         onNodeWithText("Check again").performClick()
         waitUntil(timeoutMillis = 5_000) { did.count { it == "asked lattice" } > asked }
