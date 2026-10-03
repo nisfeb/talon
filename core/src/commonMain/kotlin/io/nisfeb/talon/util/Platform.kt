@@ -72,3 +72,11 @@ expect val tempDirPath: String
  * Caches, and a `cache` folder in the desktop user-data dir.
  */
 expect val cacheDirPath: String
+
+/**
+ * Where the app keeps what it cannot fetch again, as an absolute path:
+ * private to the app and never reclaimed by the system. Android's files
+ * dir, iOS Application Support, the desktop user-data dir. May not
+ * exist yet; a writer creates what it needs under it.
+ */
+expect val dataDirPath: String

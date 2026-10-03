@@ -15,13 +15,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import io.nisfeb.talon.ui.combinedClickableWithSecondary
+import androidx.compose.foundation.background
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -71,6 +74,8 @@ fun MailList(
     onOpenThread: (threadId: String) -> Unit,
     onCompose: (() -> Unit)? = null,
     onOpenDraft: ((io.nisfeb.talon.mail.Draft) -> Unit)? = null,
+    /** Open again a message that did not go, its text and files with it. */
+    onReopen: ((io.nisfeb.talon.mail.MailRepo.Unsent) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -78,7 +83,8 @@ fun MailList(
     val page by repo.page.collectAsState()
     val loading by repo.loading.collectAsState()
     val error by repo.error.collectAsState()
-    val sendProblem by repo.sendProblem.collectAsState()
+    val unsent by repo.unsent.collectAsState()
+    val outbox by repo.outbox.collectAsState()
     val problem by repo.problem.collectAsState()
     val drafts by repo.drafts.collectAsState()
     val labels by repo.knownLabels.collectAsState()
@@ -90,6 +96,31 @@ fun MailList(
     var installing by remember { mutableStateOf(false) }
     var installProblem by remember { mutableStateOf<String?>(null) }
     var pickingFolder by remember { mutableStateOf(false) }
+    // Threads picked for one action on them all. Only those still listed
+    // count: an archived one leaves the inbox, and with it the selection.
+    var picked by remember(folder, query) { mutableStateOf(emptySet<String>()) }
+    val listed = page?.threads.orEmpty()
+    val chosen = remember(picked, listed) { picked.intersect(listed.map { it.id }.toSet()) }
+    var confirmingDelete by remember { mutableStateOf(false) }
+    io.nisfeb.talon.ui.PlatformBackHandler(enabled = chosen.isNotEmpty()) { picked = emptySet() }
+    // The selection read at the tap, never closed over: a row keeps the
+    // first handler it was given, so a toggle that captured `chosen` saw
+    // the selection as it stood when that row was drawn, and each box
+    // picked only itself.
+    val toggle: (String) -> Unit = { id -> picked = picked.let { if (id in it) it - id else it + id } }
+    if (confirmingDelete) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("Delete ${chosen.size} thread${if (chosen.size == 1) "" else "s"}?") },
+            text = { Text("They are deleted from your ship. This cannot be undone.") },
+            confirmButton = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
+                    repo.deleteMany(chosen); picked = emptySet(); confirmingDelete = false
+                }) { Text("Delete") }
+            },
+            dismissButton = { io.nisfeb.talon.ui.TextButton(onClick = { confirmingDelete = false }) { Text("Keep") } },
+        )
+    }
 
     if (organising) {
         MailOrganiseSheet(repo = repo, onDismiss = { organising = false })
@@ -121,7 +152,17 @@ fun MailList(
                 VerticalDivider()
             }
             Column(Modifier.weight(1f).fillMaxHeight()) {
-                MailToolbar(
+                if (chosen.isNotEmpty()) MailSelectionBar(
+                    count = chosen.size,
+                    allPicked = chosen.size == listed.size,
+                    // Unarchive where everything picked is archived already.
+                    archiving = listed.filter { it.id in chosen }.any { !it.archived },
+                    onClear = { picked = emptySet() },
+                    onAll = { picked = listed.map { it.id }.toSet() },
+                    onArchive = { a -> repo.archiveMany(chosen, a); picked = emptySet() },
+                    onRead = { r -> repo.markManyRead(chosen, r); picked = emptySet() },
+                    onDelete = { confirmingDelete = true },
+                ) else MailToolbar(
                     title = if (query.isNotEmpty()) "Results for \"$query\"" else folderName(folder),
                     query = query,
                     onSearch = { repo.search(it) },
@@ -129,16 +170,23 @@ fun MailList(
                     onRefresh = {
                         scope.launch {
                             if (folder is MailFolder.Drafts) repo.refreshDrafts()
-                            else repo.refresh()
+                            else repo.refresh(asked = true)
                         }
                     },
                     onCompose = onCompose,
                     onFolders = if (roomForColumn) null else ({ pickingFolder = true }),
                 )
                 HorizontalDivider()
-                error?.let { MailNotice(it) }
+                error?.let { MailNotice(it, onDismiss = repo::clearError) }
                 // A send that failed after its composer was closed.
-                sendProblem?.let { MailNotice(it, onDismiss = repo::clearSendProblem) }
+                outbox.forEach { MailSendingLine(it) }
+                unsent.forEach { u ->
+                    MailNotice(
+                        u.line,
+                        onDismiss = { repo.dismiss(u) },
+                        action = onReopen?.let { reopen -> "Open" to { repo.dismiss(u); reopen(u) } },
+                    )
+                }
                 problem?.let { MailNotice(it, onDismiss = repo::clearProblem) }
                 MailBody(
                     installing = installing,
@@ -162,8 +210,10 @@ fun MailList(
                     loading = loading,
                     contacts = contacts,
                     ourShip = ourShip,
-                    onOpenThread = onOpenThread,
+                    onOpenThread = { id -> if (chosen.isNotEmpty()) toggle(id) else onOpenThread(id) },
                     onOpenDraft = onOpenDraft,
+                    picked = chosen,
+                    onPick = toggle,
                 )
             }
         }
@@ -196,6 +246,8 @@ private fun MailBody(
     ourShip: String?,
     onOpenThread: (String) -> Unit,
     onOpenDraft: ((io.nisfeb.talon.mail.Draft) -> Unit)?,
+    picked: Set<String> = emptySet(),
+    onPick: (String) -> Unit = {},
 ) {
     when {
         folder is MailFolder.Drafts -> if (drafts.isEmpty()) {
@@ -246,6 +298,9 @@ private fun MailBody(
                     row = row,
                     people = mailPeople(row, ourShip) { contacts.displayName(it) },
                     onClick = { onOpenThread(row.id) },
+                    picking = picked.isNotEmpty(),
+                    picked = row.id in picked,
+                    onPick = { onPick(row.id) },
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 12.dp))
             }
@@ -315,7 +370,7 @@ private fun MailToolbar(
             // Not a hamburger. The app's own is one, and two identical
             // ones stacked down the left of a mail screen is a way of
             // asking somebody to guess which is which.
-            IconButton(onClick = onFolders) {
+            io.nisfeb.talon.ui.IconButton(tip = "Mailboxes", onClick = onFolders) {
                 Icon(TalonIcons.Inbox, contentDescription = "Mailboxes")
             }
         }
@@ -328,8 +383,7 @@ private fun MailToolbar(
                 placeholder = { Text("Search all mail") },
                 singleLine = true,
                 trailingIcon = {
-                    IconButton(
-                        onClick = {
+                    io.nisfeb.talon.ui.IconButton(tip = "Search", onClick = {
                             if (draft.isBlank()) { searching = false; onSearch("") } else onSearch(draft)
                         },
                     ) { Icon(Icons.Filled.Search, contentDescription = "Search") }
@@ -342,7 +396,7 @@ private fun MailToolbar(
                 ),
                 modifier = Modifier.weight(1f).padding(end = 4.dp),
             )
-            IconButton(onClick = { draft = ""; searching = false; onSearch("") }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Clear search", onClick = { draft = ""; searching = false; onSearch("") }) {
                 Icon(Icons.Filled.Close, contentDescription = "Clear search")
             }
         } else {
@@ -351,7 +405,7 @@ private fun MailToolbar(
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.weight(1f).padding(start = if (onFolders != null) 0.dp else 8.dp),
             )
-            IconButton(onClick = { searching = true }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Search mail", onClick = { searching = true }) {
                 Icon(Icons.Filled.Search, contentDescription = "Search mail")
             }
         }
@@ -360,7 +414,7 @@ private fun MailToolbar(
         }
         // The reader always knows better than a ten-minute timer, so the
         // manual ask is a control and not a hidden gesture.
-        IconButton(onClick = onRefresh, enabled = !loading) {
+        io.nisfeb.talon.ui.IconButton(tip = "Check for new mail", onClick = onRefresh, enabled = !loading) {
             if (loading) {
                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             } else {
@@ -371,17 +425,37 @@ private fun MailToolbar(
 }
 
 @Composable
-private fun MailNotice(text: String, onDismiss: (() -> Unit)? = null) {
+private fun MailNotice(text: String, onDismiss: (() -> Unit)? = null, action: Pair<String, () -> Unit>? = null) {
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
         modifier = Modifier.fillMaxWidth().then(if (onDismiss != null) Modifier.clickable(onClick = onDismiss) else Modifier),
     ) {
-        Text(
-            text + if (onDismiss != null) " Tap to dismiss." else "",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onErrorContainer,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text + if (onDismiss != null) " ${io.nisfeb.talon.ui.tapWord} to dismiss." else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f).padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            action?.let { (label, act) -> io.nisfeb.talon.ui.TextButton(onClick = act) { Text(label) } }
+        }
+    }
+}
+
+/** A message on its way, with where it has got to: the composer is gone by now. */
+@Composable
+private fun MailSendingLine(s: io.nisfeb.talon.mail.MailRepo.Sending) {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Sending " + s.subject.ifBlank { "a message" }.let { if (s.subject.isBlank()) it else "\"$it\"" } +
+                    if (s.stage == "Sending" || s.stage == "Saving") "…" else " · ${s.stage}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -403,7 +477,16 @@ internal fun MailAbsent(text: String, actionLabel: String? = null, onAction: (()
 }
 
 @Composable
-private fun MailRow(row: InboxEntry, people: String, onClick: () -> Unit) {
+private fun MailRow(
+    row: InboxEntry,
+    people: String,
+    onClick: () -> Unit,
+    /** A selection is being made: every row shows its box. */
+    picking: Boolean = false,
+    picked: Boolean = false,
+    /** Long-press, or right-click: start a selection, or add to it. */
+    onPick: () -> Unit = {},
+) {
     // Unread has to be seen at a glance down a long list, which a
     // slightly heavier weight was not: a dot in its own gutter, bold,
     // the time in the accent, and the read rows around it quieter.
@@ -424,7 +507,8 @@ private fun MailRow(row: InboxEntry, people: String, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .background(if (picked) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
+            .combinedClickableWithSecondary(onClick = onClick, onLongClick = onPick)
             .padding(
                 start = if (touch) 8.dp else 4.dp,
                 end = if (touch) 16.dp else 12.dp,
@@ -432,6 +516,13 @@ private fun MailRow(row: InboxEntry, people: String, onClick: () -> Unit) {
                 bottom = if (touch) io.nisfeb.talon.ui.LocalChatDensity.current.listRowVertical else 5.dp,
             ),
     ) {
+        if (picking) {
+            androidx.compose.material3.Checkbox(
+                checked = picked,
+                onCheckedChange = { onPick() },
+                modifier = Modifier.size(if (touch) 32.dp else 24.dp).semantics { contentDescription = "Select ${row.subject.ifBlank { "(no subject)" }}" },
+            )
+        }
         // Every row keeps the gutter, so read and unread names line up.
         Box(Modifier.width(8.dp).padding(top = if (touch) 8.dp else 4.dp)) {
             if (row.unread) MenuBadgeDot()
@@ -562,6 +653,38 @@ private fun DraftRow(d: io.nisfeb.talon.mail.Draft, onOpen: () -> Unit) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+/**
+ * In place of the toolbar while threads are picked: how many, all of
+ * them, and what can be done to them all.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun MailSelectionBar(
+    count: Int,
+    allPicked: Boolean,
+    /** Archive, rather than bring back: something picked is not archived yet. */
+    archiving: Boolean,
+    onClear: () -> Unit,
+    onAll: () -> Unit,
+    onArchive: (archived: Boolean) -> Unit,
+    onRead: (read: Boolean) -> Unit,
+    onDelete: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            io.nisfeb.talon.ui.IconButton(tip = "Clear selection", onClick = onClear) { Icon(Icons.Filled.Close, contentDescription = "Clear selection") }
+            Text("$count selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            if (!allPicked) io.nisfeb.talon.ui.TextButton(onClick = onAll) { Text("Select all") }
+        }
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            io.nisfeb.talon.ui.TextButton(onClick = { onArchive(archiving) }) { Text(if (archiving) "Archive" else "Unarchive") }
+            io.nisfeb.talon.ui.TextButton(onClick = { onRead(true) }) { Text("Mark read") }
+            io.nisfeb.talon.ui.TextButton(onClick = { onRead(false) }) { Text("Mark unread") }
+            io.nisfeb.talon.ui.TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) }
         }
     }
 }

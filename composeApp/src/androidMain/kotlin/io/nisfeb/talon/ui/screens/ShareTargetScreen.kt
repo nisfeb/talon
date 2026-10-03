@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.data.latestPerConversation
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -51,7 +52,7 @@ fun ShareTargetScreen(
     modifier: Modifier = Modifier,
 ) {
     val conversations by remember {
-        db.messages().conversationLatest()
+        db.latestPerConversation()
     }.collectAsState(initial = emptyList<MessageEntity>())
     val dedupedConversations = remember(conversations) {
         // A notebook post needs a title; nothing shared has one.

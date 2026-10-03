@@ -53,6 +53,16 @@ class TlonChatRepoCiteTest {
         assertTrue(sent.indexOf("cite") < sent.indexOf("agreed"), "the quote leads")
     }
 
+    // A pasted picture sent with a staged quote: one post, the quote
+    // leading, the picture, then the words written with it.
+    @Test
+    fun `a picture with a quote goes as one post, the cite first`() = live {
+        repo.sendImage("~bus", "https://cdn.test/cat.png", 400, 300, "cat.png", "look", quotedNest = nest, quotedPostId = "170141184506")
+        val sent = ship.pokesTo("chat").single().json.toString()
+        assertTrue("\"where\":\"/msg/170141184506\"" in sent && "\"src\":\"https://cdn.test/cat.png\"" in sent && "look" in sent, sent)
+        assertTrue(sent.indexOf("cite") < sent.indexOf("cat.png") && sent.indexOf("cat.png") < sent.indexOf("look"), sent)
+    }
+
     @Test
     fun `a quoted post not here is fetched, kept, and brings its reactions`() = live {
         ship.scries["channels/v5/$nest/posts/post/170.141.184.506"] =
@@ -69,10 +79,18 @@ class TlonChatRepoCiteTest {
         assertNull(db.messages().getOne(nest, "170141184599"))
     }
 
+    // The parent post as the ship sends it (channel-post-5, post:v10 in
+    // desk/lib/channel-json.hoon): its replies in the seal, each with a
+    // reply-essay. The fixture this replaced made up a reply-essay on the
+    // reply scry, which answers {seal, revision, memo}; Talon read it,
+    // the test passed, and a quoted reply never loaded on a real ship.
     @Test
     fun `a quoted reply is fetched under its parent`() = live {
-        ship.scries["channels/v4/$nest/posts/post/id/170.141.184.506/replies/reply/id/170.141.184.507"] =
-            """{"seal":{"id":"170141184507","parent-id":"170141184506"},"reply-essay":${essay("~nec", "a reply")}}"""
+        ship.scries["channels/v5/$nest/posts/post/170.141.184.506"] =
+            """{"seal":{"id":"170141184506","reacts":{},"meta":{"replyCount":1,"lastReply":null,"lastRepliers":[]},
+                "replies":{"170.141.184.507":{"seal":{"id":"170.141.184.507","parent-id":"170.141.184.506","reacts":{}},
+                "revision":"0","reply-essay":${essay("~nec", "a reply")}}}},
+                "essay":${essay("~bus", "the original")}}"""
         val got = repo.fetchCiteReply(nest, "170.141.184.506", "170.141.184.507")!!
         assertEquals("170141184506", got.parentId)
         assertEquals("~nec", db.messages().getOne(nest, "170141184507")?.author)

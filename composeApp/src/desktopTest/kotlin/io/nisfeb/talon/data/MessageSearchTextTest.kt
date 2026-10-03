@@ -24,7 +24,7 @@ class MessageSearchTextTest {
     // No destructive fallback: a migration that does not match the entity fails here.
     private fun db() = Room.databaseBuilder<AppDatabase>(name = path)
         .setDriver(BundledSQLiteDriver())
-        .addMigrations(MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION)
+        .addMigrations(MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, io.nisfeb.talon.data.WATCHWORDS_DROP_MIGRATION, io.nisfeb.talon.data.ASSISTANT_LOG_MIGRATION)
         .build()
 
     @AfterTest
@@ -54,6 +54,7 @@ class MessageSearchTextTest {
         // Wind the file back to 48: no column, the row as it was.
         BundledSQLiteDriver().open(path).also { c ->
             c.execSQL("ALTER TABLE messages DROP COLUMN searchText")
+            c.execSQL("ALTER TABLE assistant_history DROP COLUMN log") // added at 53
             c.execSQL("PRAGMA user_version = 48")
             c.close()
         }

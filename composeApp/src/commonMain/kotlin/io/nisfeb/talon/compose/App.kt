@@ -1,6 +1,9 @@
 @file:OptIn(DelicateCoroutinesApi::class)
 
 package io.nisfeb.talon.compose
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import io.nisfeb.talon.data.latestPerConversation
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.ai.triagePrivateSlot
 import io.nisfeb.talon.util.ioDispatcher
@@ -48,8 +51,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.update
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ui.parseHexColor
-import io.nisfeb.talon.ai.InMemoryWatchwordsSyncSettings
-import io.nisfeb.talon.ai.WatchwordsSyncSettings
 import io.nisfeb.talon.notify.NoopNotifier
 import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.data.AppDatabase
@@ -100,7 +101,6 @@ import io.nisfeb.talon.ui.screens.SettingsScreen
 import io.nisfeb.talon.ui.screens.SidebarSettingsScreen
 import io.nisfeb.talon.ui.screens.StatusFeedScreen
 import io.nisfeb.talon.ui.screens.ThreadScreen
-import io.nisfeb.talon.ui.screens.WatchwordsScreen
 import io.nisfeb.talon.ui.theme.InMemoryThemePreference
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.ui.theme.ThemePreference
@@ -126,9 +126,6 @@ import io.nisfeb.talon.ai.hasModelFor
  *   - TlonChatRepo.stop calls scope.cancel which permanently dies;
  *     the rebuild gets a fresh scope per ship.
  */
-/** Asks per group open, 2s then 6s apart. Enough for a host that is
- *  briefly asleep, few enough not to hammer one that is gone. */
-private const val PEEK_ATTEMPTS = 3
 
 @Composable
 fun App(
@@ -155,10 +152,6 @@ fun App(
     /** Builds a SettingsSync bound to the per-ship db. Null on platforms
      *  without %settings sync wired. */
     createSettingsSync: ((AppDatabase) -> SettingsSync)? = null,
-    /** Source of truth for the "mirror watchwords to %settings" toggle.
-     *  Defaults to in-memory; desktop passes a JSON-backed impl so the
-     *  flag survives restart. */
-    watchwordsSync: WatchwordsSyncSettings = InMemoryWatchwordsSyncSettings(),
     /** Per-device theme override (System / Light / Dark). In-memory by
      *  default; desktop passes a JSON-backed impl so the choice
      *  survives restart. */
@@ -380,7 +373,6 @@ fun App(
     }
     var showNewDm by remember { sections.flag() }
     var showContacts by remember { sections.flag() }
-    var showWatchwords by remember { sections.flag() }
     var showGroupAdminList by remember { sections.flag() }
     var openGroupAdminFlag by remember { mutableStateOf<String?>(null) }
     var openGroupHomeFlag by remember { mutableStateOf<String?>(null) }
@@ -423,11 +415,6 @@ fun App(
         openThreadReplyAnchor = null
         openChat = who
     }
-    // Watchwords-sync flag. Backed by [watchwordsSync] (caller-supplied)
-    // so desktop's JSON-file impl can persist across restarts and
-    // production Android can wire its SharedPreferences variant in
-    // when composeApp lands there.
-    val watchwordsSyncEnabled = watchwordsSync.enabled
     // Hoisted at App level (not inside the key block) so it survives
     // the re-key triggered by tryRestore-failure recovery. Cleared
     // automatically once the user successfully signs back in.
@@ -597,7 +584,6 @@ fun App(
     PlatformBackHandler(enabled = showAssistant) { showAssistant = false }
     PlatformBackHandler(enabled = showSearch) { showSearch = false }
     PlatformBackHandler(enabled = showNewDm) { showNewDm = false }
-    PlatformBackHandler(enabled = showWatchwords) { showWatchwords = false }
     PlatformBackHandler(enabled = showActions) { showActions = false }
     PlatformBackHandler(enabled = showContacts) { showContacts = false }
     PlatformBackHandler(
@@ -624,7 +610,7 @@ fun App(
         notebookEditPostId = null
     }
     // A deep link into a gallery / notebook (search hit, bookmark,
-    // watchword, notification) names the post; the chat screen is the
+    // notification) names the post; the chat screen is the
     // only consumer of the anchor otherwise, so open the post here.
     LaunchedEffect(openChat, openChatFocusMessageId) {
         val anchor = openChatFocusMessageId ?: return@LaunchedEffect
@@ -713,7 +699,6 @@ fun App(
                 db = db,
                 settingsSync = settingsSync,
                 notificationHealth = notificationHealth,
-                watchwordsSyncEnabled = watchwordsSync.enabled,
             )
         }
         // Let user-shaped preferences ride %settings to this user's
@@ -1358,22 +1343,9 @@ fun App(
                     val from = invite.inviter?.let { " from " + callContacts.displayName(it) } ?: ""
                     runCatching { notifier.notify(name, "invited you to a group$from") }
                 }
-                // A live message matched watchwords set to notify; the
-                // repo kept the hits. Quiet for the chat open in a
-                // focused window, as messages are.
-                repo.watchwordListener = { m, notice ->
-                    if (!(windowInfo.isWindowFocused && openChat == m.whom)) runCatching {
-                        notifier.notify(
-                            "${notice.terms.joinToString(", ")} in ${callContacts.conversationLabel(m.whom)}",
-                            notice.text.replace('\n', ' ').take(160),
-                            m.whom,
-                        )
-                    }
-                }
                 onDispose {
                     repo.dmInviteListener = null
                     repo.groupInviteListener = null
-                    repo.watchwordListener = null
                 }
             }
 
@@ -1396,7 +1368,7 @@ fun App(
                 var lastSeenIds: Map<String, String> = emptyMap()
                 var seeded = false
                 kotlinx.coroutines.flow.combine(
-                    db.messages().conversationLatest(),
+                    db.latestPerConversation(),
                     db.notifyPrefs().streamAll(),
                     repo.bootstrapping,
                 ) { rows, prefs, bootstrapping ->
@@ -1468,10 +1440,6 @@ fun App(
         //   * mode = Brand → null (explicit opt-out also stays brand).
         val accentSettings by uiSettings.accentSettings.collectAsState()
         val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
-        val densityMode by uiSettings.density.collectAsState()
-        val chatDensity = remember(densityMode) {
-            io.nisfeb.talon.ui.ChatDensity.forMode(densityMode)
-        }
         // User font scale (Ctrl/Cmd +/-/0). Layered on top of the
         // density preset's own multiplier below.
         val userFontScale by uiSettings.fontScale.collectAsState()
@@ -1504,25 +1472,16 @@ fun App(
             }
         }
         val themeSettings by uiSettings.themeSettings.collectAsState()
-        TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active) {
-          // Scale the whole app's `sp`-based sizes by the active
-          // density's font multiplier. Compose computes pixel sizes
-          // for sp values as `sp * density * fontScale`, so
-          // multiplying `fontScale` by 0.90 / 1.0 / 1.12 globally
-          // scales every Text without touching individual styles.
-          // We deliberately do NOT scale `density` itself because
-          // that would shrink/grow icons + image previews + Dp-based
-          // gaps that aren't part of the density story (the rail,
-          // image viewer, etc.); per-component dp values stay under
-          // explicit `LocalChatDensity.current` reads.
-          val baseDensity = androidx.compose.ui.platform.LocalDensity.current
-          val scaledDensity = remember(baseDensity, chatDensity, userFontScale) {
-              androidx.compose.ui.unit.Density(
-                  density = baseDensity.density,
-                  fontScale = baseDensity.fontScale *
-                      chatDensity.fontScaleMultiplier * userFontScale,
-              )
-          }
+        val fontRepo = io.nisfeb.talon.ui.rememberFontRepo(
+            uiSettings, http,
+            shipUrl = { sessionStore.active()?.shipUrl },
+            cookie = { sessionStore.active()?.let { "${it.cookieName}=${it.cookieValue}" } },
+            scope = repo.pushScope,
+        )
+        TalonTheme(
+            darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active,
+            fontFamily = io.nisfeb.talon.ui.rememberAppFontFamily(uiSettings, fontRepo.files),
+        ) {
           // urb:// links: check lattice is installed on our ship,
           // offer to install it (from ~ricsul-bilwyt) if not, then
           // resolve — webview popover on mobile, system browser on
@@ -1654,8 +1613,8 @@ fun App(
                   session.baseUrl?.takeIf { it.isNotBlank() }?.let { io.nisfeb.talon.ui.CometDomes(session.http, it, db) }
               },
               io.nisfeb.talon.mail.LocalGrubberyInstall provides grubberyInstall,
-              io.nisfeb.talon.ui.LocalChatDensity provides chatDensity,
-              androidx.compose.ui.platform.LocalDensity provides scaledDensity,
+              *io.nisfeb.talon.ui.chatDensityLocals(uiSettings),
+              io.nisfeb.talon.ui.LocalFontRepo provides fontRepo,
               io.nisfeb.talon.ui.LocalUrbLinkHandler provides urbLinkHandler,
               io.nisfeb.talon.ui.LocalUrbFetcher provides urbFetcher,
               io.nisfeb.talon.ui.LocalShipUrl provides sessionStore.active()?.shipUrl,
@@ -1681,21 +1640,25 @@ fun App(
                     ?: kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.CallUiState.None)
             }
             val callUi by callUiFlow.collectAsState()
-            val partyUiFlow = remember(partyLine) {
-                partyLine?.state
-                    ?: kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.PartyState.Idle)
-            }
-            val partyUi by partyUiFlow.collectAsState()
+            // Only what this level decides on, (live, idle): the line's
+            // state moves whenever anyone starts or stops speaking, and
+            // each move recomposed the whole window.
+            val partyPhase by remember(partyLine) {
+                (partyLine?.state ?: kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.PartyState.Idle))
+                    .map { (it is io.nisfeb.talon.call.PartyState.Live) to (it is io.nisfeb.talon.call.PartyState.Idle) }
+                    .distinctUntilChanged()
+            }.collectAsState(initial = false to true)
+            val (partyLive, partyIdle) = partyPhase
             // Desktop meeting view: the call view over the whole window.
             var meetingOpen by remember { mutableStateOf(false) }
-            LaunchedEffect(partyUi) {
-                if (partyUi !is io.nisfeb.talon.call.PartyState.Live) meetingOpen = false
+            LaunchedEffect(partyLive) {
+                if (!partyLive) meetingOpen = false
             }
             val callFloats = !inlineCallUiShown.value &&
                 (callUi is io.nisfeb.talon.call.CallUiState.Active ||
                     callUi is io.nisfeb.talon.call.CallUiState.Ended)
             val partyFloats = !inlineCallUiShown.value &&
-                partyUi !is io.nisfeb.talon.call.PartyState.Idle && !meetingOpen
+                !partyIdle && !meetingOpen
             val floats = callFloats || partyFloats
             // Keys are handled here, above the call strip, the party-line
             // bar and the meeting view as well as the screens, so nothing
@@ -1706,6 +1669,37 @@ fun App(
             val rootFocusRequester = remember { FocusRequester() }
             var rootFocusLost by remember { mutableStateOf(0) }
             LaunchedEffect(rootFocusLost) { runCatching { rootFocusRequester.requestFocus() } }
+            // The owner's shortcuts over the defaults; an area a binding asks
+            // for is opened by the rail's own handler, further in (railRequest).
+            val storedKeybinds by uiSettings.keybinds.collectAsState()
+            val keybinds = remember(storedKeybinds) { io.nisfeb.talon.ui.effectiveKeybinds(storedKeybinds, isMacHost) }
+            var railRequest by remember { mutableStateOf<RailItem?>(null) }
+            /** A shortcut from the keys. Back is the Column's own. */
+            fun runShortcut(action: io.nisfeb.talon.ui.ShortcutAction) {
+                when (action) {
+                    io.nisfeb.talon.ui.ShortcutAction.Back -> Unit
+                    is io.nisfeb.talon.ui.ShortcutAction.Open -> railRequest = action.item
+                    io.nisfeb.talon.ui.ShortcutAction.NewDm -> showNewDmRequest = true
+                    io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
+                    io.nisfeb.talon.ui.ShortcutAction.IncreaseFontSize ->
+                        uiSettings.setFontScale(
+                            userFontScale + io.nisfeb.talon.ui.FONT_SCALE_STEP,
+                        )
+                    io.nisfeb.talon.ui.ShortcutAction.DecreaseFontSize ->
+                        uiSettings.setFontScale(
+                            userFontScale - io.nisfeb.talon.ui.FONT_SCALE_STEP,
+                        )
+                    io.nisfeb.talon.ui.ShortcutAction.ResetFontSize ->
+                        uiSettings.setFontScale(1.0f)
+                    is io.nisfeb.talon.ui.ShortcutAction.SwitchShip -> {
+                        sessionStore.all().getOrNull(action.index)?.ship?.let { targetShip ->
+                            leaveShip()
+                            sessionStore.setActive(targetShip)
+                            loggedInShip = targetShip
+                        }
+                    }
+                }
+            }
             androidx.compose.foundation.layout.Column(
                 Modifier
                     .fillMaxSize()
@@ -1719,11 +1713,17 @@ fun App(
                     // first, the last opened first, by the registry that
                     // knows every one of them.
                     .onKeyEvent { event ->
-                        if (io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost) !=
+                        if (io.nisfeb.talon.ui.KeybindCapture.active) return@onKeyEvent false
+                        if (io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost, binds = keybinds) !=
                             io.nisfeb.talon.ui.ShortcutAction.Back
                         ) return@onKeyEvent false
                         when {
                             sections.anyOpen -> sections.closeLast()
+                            // In the order they are drawn: an image is over
+                            // the chat. It closes itself when it has focus,
+                            // but the shell can take focus back from it.
+                            viewerImageList != null -> viewerImageList = null
+                            viewerImageUrl != null -> viewerImageUrl = null
                             openThreadParent != null -> {
                                 openThreadParent = null
                                 openThreadReplyAnchor = null
@@ -1734,31 +1734,12 @@ fun App(
                         true
                     }
                     .onPreviewKeyEvent { event ->
-                        val action = io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost)
+                        // Settings is taking down a new shortcut: the keys are its.
+                        if (io.nisfeb.talon.ui.KeybindCapture.active) return@onPreviewKeyEvent false
+                        val action = io.nisfeb.talon.ui.keyEventToShortcut(event, isMacHost = isMacHost, binds = keybinds)
                             ?: return@onPreviewKeyEvent false
-                        when (action) {
-                            io.nisfeb.talon.ui.ShortcutAction.Back -> return@onPreviewKeyEvent false
-                            io.nisfeb.talon.ui.ShortcutAction.OpenSettings -> showSettings = true
-                            io.nisfeb.talon.ui.ShortcutAction.NewDm -> showNewDmRequest = true
-                            io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
-                            io.nisfeb.talon.ui.ShortcutAction.IncreaseFontSize ->
-                                uiSettings.setFontScale(
-                                    userFontScale + io.nisfeb.talon.ui.FONT_SCALE_STEP,
-                                )
-                            io.nisfeb.talon.ui.ShortcutAction.DecreaseFontSize ->
-                                uiSettings.setFontScale(
-                                    userFontScale - io.nisfeb.talon.ui.FONT_SCALE_STEP,
-                                )
-                            io.nisfeb.talon.ui.ShortcutAction.ResetFontSize ->
-                                uiSettings.setFontScale(1.0f)
-                            is io.nisfeb.talon.ui.ShortcutAction.SwitchShip -> {
-                                sessionStore.all().getOrNull(action.index)?.ship?.let { targetShip ->
-                                    leaveShip()
-                                    sessionStore.setActive(targetShip)
-                                    loggedInShip = targetShip
-                                }
-                            }
-                        }
+                        if (action == io.nisfeb.talon.ui.ShortcutAction.Back) return@onPreviewKeyEvent false
+                        runShortcut(action)
                         true
                     },
             ) {
@@ -2398,18 +2379,6 @@ fun App(
                         },
                         twentyFourHour = uiSettings.homeTwentyFourHour.collectAsState().value,
                     ) { a -> openAction = a }
-                    showWatchwords -> WatchwordsScreen(
-                        db = db,
-                        watchwords = repo.watchwords,
-                        watchwordsSyncEnabled = watchwordsSyncEnabled,
-                        onSetWatchwordsSyncEnabled = watchwordsSync::setEnabled,
-                        onBack = { showWatchwords = false },
-                        onOpenConversation = { other, postId ->
-                            showWatchwords = false
-                            openChatFocusMessageId = postId
-                            openChat = other
-                        },
-                    )
                     openGroupAdminFlag != null -> GroupAdminScreen(
                         db = db,
                         repo = repo,
@@ -2661,25 +2630,9 @@ fun App(
                                 // the host announced never heard about
                                 // it, and before this the only cure was
                                 // an admin toggling the line off and on.
-                                LaunchedEffect(groupRoom, knownInvites.keys, hostedRooms.keys) {
+                                LaunchedEffect(groupRoom) {
                                     val (h, n) = groupRoom ?: return@LaunchedEffect
-                                    val key = "$h/$n"
-                                    // A few widening attempts, then
-                                    // stop. One try per group open was
-                                    // enough only when the host
-                                    // happened to be reachable at that
-                                    // instant; an ames round trip to a
-                                    // sleeping ship is not.
-                                    var wait = 2_000L
-                                    repeat(PEEK_ATTEMPTS) { attempt ->
-                                        if (hostedRooms.containsKey(key)) return@LaunchedEffect
-                                        if (knownInvites.containsKey(key)) return@LaunchedEffect
-                                        callController?.peekRoom(h, n)
-                                        if (attempt < PEEK_ATTEMPTS - 1) {
-                                            kotlinx.coroutines.delay(wait)
-                                            wait *= 3
-                                        }
-                                    }
+                                    callController?.lookForLine(h, n)
                                 }
                                 val partyRoomHere = groupRoom?.takeIf { (h, n) ->
                                     hostedRooms.containsKey("$h/$n") ||
@@ -2718,12 +2671,12 @@ fun App(
                                         nameFor = { callContacts.displayName(it) },
                                     )
                                 }
+                                // Asked once: the host announces every roster change
+                                // since wire 9. Each ask was an ames message to the
+                                // host, every 20 s, from every member with it open.
                                 LaunchedEffect(partyRoomHere) {
                                     val (h, n) = partyRoomHere ?: return@LaunchedEffect
-                                    while (true) {
-                                        callController?.occupancyOf(h, n)
-                                        kotlinx.coroutines.delay(20_000)
-                                    }
+                                    callController?.occupancyOf(h, n)
                                 }
                                 // Presence itself is announced by the
                                 // controller from the moment we join —
@@ -3128,7 +3081,6 @@ fun App(
                             } ?: when (item) {
                                 RailItem.Assistant -> openAssistantAction()
                                 RailItem.Profile -> showSelfProfile = true
-                                RailItem.Watchwords -> showWatchwords = true
                                 RailItem.Administration -> showGroupAdminList = true
                                 RailItem.Invites -> showInvites = true
                                 RailItem.Actions -> showActions = true
@@ -3137,6 +3089,16 @@ fun App(
                                 RailItem.Home, RailItem.Chats, RailItem.Mail, RailItem.Calendar,
                                 RailItem.Statuses, RailItem.Bookmarks, RailItem.Activity -> Unit
                             }
+                        }
+                        // An area a shortcut asked for, opened as its rail item
+                        // is; one that is gated off (no assistant model, no
+                        // Orrery) is not. A hidden one still opens, as the
+                        // overflow menu opens it.
+                        LaunchedEffect(railRequest) {
+                            val item = railRequest ?: return@LaunchedEffect
+                            railRequest = null
+                            val gated = (item == RailItem.Assistant && !assistantEnabled) || (item == RailItem.Actions && !orreryOn)
+                            if (!gated) onRailItemClicked(item)
                         }
                         val railListSlot: @Composable () -> Unit = {
                             when (activeRailTab) {
@@ -3207,7 +3169,6 @@ fun App(
                                         onOpenActivity = onOpenActivity,
                                         onOpenCalendar = onOpenCalendar,
                                         onOpenContacts = { showContacts = true },
-                                        onOpenWatchwords = { showWatchwords = true },
                                         onOpenAdministration = { showGroupAdminList = true },
                                         onOpenSettings = { showSettings = true },
                                         onOpenSidebarSettings = {

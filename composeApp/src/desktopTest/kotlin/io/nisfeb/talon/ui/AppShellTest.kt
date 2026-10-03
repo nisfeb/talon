@@ -20,6 +20,8 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.unit.dp
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
@@ -52,6 +54,7 @@ class AppShellTest {
     private fun app(
         seed: suspend AppDatabase.() -> Unit = {},
         ai: FakeAiSettings = FakeAiSettings(),
+        ui: UiSettings = InMemoryUiSettings(),
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -84,6 +87,7 @@ class AppShellTest {
                             },
                             drafts = InMemoryDraftStore(),
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
+                            createUiSettings = { ui },
                         )
                     }
                 }
@@ -113,7 +117,6 @@ class AppShellTest {
     fun `every full-screen section opens from the rail and its Back returns to the list`() = app {
         for ((item, marker) in listOf(
             "My profile" to "Edit profile",
-            "Watchwords" to "Add a watchword",
             "Administration" to "Administration",
             "Invites" to "No pending invites",
             "Settings" to "Appearance",
@@ -187,6 +190,27 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { showing("Select a chat to begin") }
     }
 
+    // One Escape closed the image and the chat with it: the image took
+    // the click's focus, went with the post when the viewer replaced it,
+    // and the shell took focus back from the viewer.
+    @Test
+    fun `Escape closes an open image first, and the chat on the second`() = app(seed = {
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"block":{"image":{"src":"https://x.test/cat.png","alt":"a cat","height":300,"width":400}}}]""", "/chat"))
+    }) {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("~bus").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("~bus")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("a cat").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithContentDescription("a cat")[0].performMouseInput { click() }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Close").fetchSemanticsNodes().isNotEmpty() }
+        waitForIdle()
+        onAllNodes(androidx.compose.ui.test.isRoot())[0].performKeyInput { pressKey(Key.Escape) }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Close").fetchSemanticsNodes().isEmpty() }
+        assertTrue(!showing("Select a chat to begin"), "the chat is still open")
+        onAllNodes(androidx.compose.ui.test.isRoot())[0].performKeyInput { pressKey(Key.Escape) }
+        waitUntil(timeoutMillis = 5_000) { showing("Select a chat to begin") }
+    }
+
     @Test
     fun `closing a section by mouse leaves the keyboard working, and a field keeps its focus`() = app(seed = {
         messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat"))
@@ -245,4 +269,16 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("shall we meet").fetchSemanticsNodes().size >= 2 }
         assertTrue(onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size >= 2, "the chat's composer and the thread's, side by side")
     }
+
+    // Areas of the app get shortcuts the owner sets: pressed anywhere, the
+    // area opens as its rail item would open it.
+    @Test
+    fun `a shortcut the owner set opens its area`() {
+        val ui = InMemoryUiSettings().apply { setKeybinds(mapOf("open:Settings" to null, "open:Contacts" to null, "open:Profile" to KeyCombo("P", alt = true))) }
+        app(ui = ui) {
+            onAllNodes(androidx.compose.ui.test.isRoot())[0].performKeyInput { withKeyDown(Key.AltLeft) { pressKey(Key.P) } }
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Edit profile").fetchSemanticsNodes().isNotEmpty() }
+        }
+    }
 }
+

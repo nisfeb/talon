@@ -9,6 +9,10 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
@@ -29,6 +33,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -43,35 +48,49 @@ class CalendarScreenTest {
     private val HOUR = 3_600_000L
     /** Every read the screen made, by path. */
     private val reads: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    /** The ship is down, and nginx in front of it answers every request with its 502 page. */
+    @Volatile private var down = false
+    /** The ship says no to every write. */
+    @Volatile private var refuse = false
+    /** Writes wait for this: a busy ship, until it completes. */
+    @Volatile private var shipTakes: kotlinx.coroutines.CompletableDeferred<Unit>? = null
     /** The ship's one-event read never answers: a busy ship, at its worst. */
     @Volatile private var holdDetail = false
+    /** The ship's calendar keeps reminders: its rows, its event read and its config say so. */
+    @Volatile private var reminders = false
+    /** The heads-up the ship holds, where it keeps reminders. */
+    @Volatile private var leadMin = 30
+    private fun alarms(json: String) = if (reminders) ",\"alarms\":$json" else ""
     @Volatile private var tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"}}]"""
     private val soon = java.time.LocalDate.now().atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     private val http = HttpClient(MockEngine { req ->
         val path = req.url.encodedPath
         val json = { body: String -> respond(body, HttpStatusCode.OK, headersOf("Content-Type", "application/json")) }
+        if (down) return@MockEngine respond(io.nisfeb.talon.mail.NGINX_502, HttpStatusCode.BadGateway, headersOf("Content-Type", "text/html"))
         if (!path.startsWith("/grubbery/api/poke/")) reads += path
         if (holdDetail && path.endsWith("/event.json")) kotlinx.coroutines.awaitCancellation()
         when {
+            path.startsWith("/grubbery/api/poke/") && refuse -> { shipTakes?.await(); respond("", HttpStatusCode.BadRequest) }
             path.startsWith("/grubbery/api/poke/") -> {
+                shipTakes?.await()
                 writes += path to req.body.toByteArray().decodeToString()
                 json("")
             }
             path.endsWith("/window.json") -> json(
                 """{"rows":[
-                {"id":"e1","cal":"default","meta":{"name":"Dentist","location":"12 High Street","note":"Ring 020 7946 0958 first, or book at https://dent.example/book"},"l":$soon,"r":${soon + 30 * 60_000L}},
-                {"id":"s1","cal":"default","idx":3,"kind":"daily","meta":{"name":"Standup"},"l":${soon + HOUR},"r":${soon + HOUR + 15 * 60_000L}},
-                {"id":"b1","cal":"~nec/work","meta":{"name":"Board meeting"},"l":${soon + 2 * HOUR},"r":${soon + 3 * HOUR}}
+                {"id":"e1","cal":"default","meta":{"name":"Dentist","location":"12 High Street","note":"Ring 020 7946 0958 first, or book at https://dent.example/book"},"l":$soon,"r":${soon + 30 * 60_000L}${alarms("""[{"kind":"before","s":900,"desc":""}]""")}},
+                {"id":"s1","cal":"default","idx":3,"kind":"daily","meta":{"name":"Standup"},"l":${soon + HOUR},"r":${soon + HOUR + 15 * 60_000L}${alarms("[]")}},
+                {"id":"b1","cal":"~nec/work","meta":{"name":"Board meeting"},"l":${soon + 2 * HOUR},"r":${soon + 3 * HOUR}${alarms("[]")}}
                 ]}""",
             )
             path.endsWith("/event.json") -> json(
-                """{"id":"s1","cal":"default","cat":"timed","kind":"daily","start_ms":${soon + HOUR},"dur_min":15,"args":{"at":600},"zone":"none","meta":{"name":"Standup"}}""",
+                """{"id":"s1","cal":"default","cat":"timed","kind":"daily","start_ms":${soon + HOUR},"dur_min":15,"args":{"at":600},"zone":"none","meta":{"name":"Standup"}${alarms("""[{"kind":"offset","from":"end","after":true,"s":0,"desc":"wrap up"}]""")}}""",
             )
             path.endsWith("/events.json") -> json(tasksJson)
             path.endsWith("/calendars.json") ->
                 json("""[{"id":"default","name":"Personal","kind":"local"},{"id":"~nec/work","name":"Work","kind":"local"}]""")
-            path.endsWith("/config.json") -> json("""{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
+            path.endsWith("/config.json") -> json(if (reminders) """{"title":"Calendar","zone":"UTC","ball":"abc123","lead_min":$leadMin}""" else """{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
             path.endsWith("/share/shares.json") ->
                 json("""{"shares":{},"offers":{},"accepted":{"~nec/work":{"key":"~nec/work","mode":"read"}}}""")
             path.endsWith("/google.json") -> json("""{"connected":false,"linked":{}}""")
@@ -127,6 +146,62 @@ class CalendarScreenTest {
         assertTrue("Lunch with Bus" in body, body)
     }
 
+    // ─── task priority ────────────────────────────────────────────
+
+    // "b4bp calendar is adding priority to tasks. talon should too".
+    @Test
+    fun `tasks show their priority, most pressing first, and the editor sets it`() {
+        tasksJson = """[
+            {"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"},"priority":0},
+            {"id":"t2","cal":"default","cat":"todo","meta":{"name":"Pay rent"},"priority":1}]"""
+        calendar {
+            onNodeWithContentDescription("Tasks").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Pay rent") }
+            assertTrue(shows("High"))
+            val top = { name: String -> onNodeWithText(name).fetchSemanticsNode().boundsInRoot.top }
+            assertTrue(top("Pay rent") < top("Buy milk"), "the high one first, as the calendar's page has it")
+            onNodeWithText("Buy milk").performClick()
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Edit").fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("Edit").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Priority") }
+            chip("Medium")
+            save()
+            val body = wrote("edit-event")
+            assertTrue("\"priority\":5" in body, body)
+        }
+    }
+
+    @Test
+    fun `a task edit that leaves the priority alone sends none, and the ship keeps it`() {
+        tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"},"priority":3}]"""
+        calendar {
+            onNodeWithContentDescription("Tasks").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Buy milk") }
+            onNodeWithText("Buy milk").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("High priority") }
+            onNodeWithText("Edit").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Priority") }
+            field("Name").performTextReplacement("Buy oat milk")
+            save()
+            assertTrue("priority" !in wrote("Buy oat milk"), "a 3 it did not set goes back untouched")
+        }
+    }
+
+    // A calendar older than priority is offered none and sent none.
+    @Test
+    fun `a calendar that does not keep a priority is offered none`() = calendar {
+        onNodeWithContentDescription("Tasks").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Buy milk") }
+        onNodeWithText("Buy milk").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Edit").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Edit task") }
+        assertTrue(!shows("Priority"))
+        field("Name").performTextReplacement("Buy oat milk")
+        save()
+        assertTrue("priority" !in wrote("Buy oat milk"))
+    }
+
     @Test
     fun `an open task is listed, and ticking it writes it done`() = calendar {
         onNodeWithContentDescription("Tasks").performClick()
@@ -162,6 +237,51 @@ class CalendarScreenTest {
                 "a task's save reads the lists it changed, not the calendars: $reads",
             )
             assertTrue(reads.none { it.endsWith("/window.json") }, "an undated task is in no window: $reads")
+        }
+    }
+
+    // "saving a todo edit takes way too long": the task list kept the old
+    // task until the ship had answered, seconds on a busy one.
+    private fun ComposeUiTest.renameMilk() {
+        onNodeWithContentDescription("Tasks").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Buy milk") }
+        onNodeWithText("Buy milk").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Edit").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 2_000) { shows("Edit task") }
+        field("Name").performTextReplacement("Buy oat milk")
+        onAllNodesWithText("Save")[0].performClick()
+    }
+
+    @Test
+    fun `a task edit is in the task list at Save, before a slow ship answers`() {
+        holdDetail = true
+        val takes = kotlinx.coroutines.CompletableDeferred<Unit>()
+        shipTakes = takes
+        calendar {
+            renameMilk()
+            waitUntil(timeoutMillis = 2_000) { shows("Buy oat milk") && !shows("Edit task") }
+            assertTrue(!shows("Buy milk"), "the old name is gone")
+            assertTrue(writes.isEmpty(), "and the ship has not taken it yet")
+            tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy oat milk"}}]"""
+            takes.complete(Unit)
+            waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
+            waitForIdle()
+            assertTrue(shows("Buy oat milk"))
+        }
+    }
+
+    @Test
+    fun `a task edit the ship refuses goes back to what it was`() {
+        holdDetail = true
+        refuse = true
+        calendar { repo ->
+            renameMilk()
+            waitUntil(timeoutMillis = 5_000) { shows("did not take") }
+            // The list is back as it was; the change waits in the editor it
+            // reopened, to try again.
+            assertEquals("Buy milk", repo.tasks.value?.single { it.id == "t1" }?.name)
+            assertTrue(onAllNodes(hasSetTextAction() and hasText("Buy oat milk")).fetchSemanticsNodes().isNotEmpty())
         }
     }
 
@@ -252,6 +372,113 @@ class CalendarScreenTest {
         for (gone in listOf("Edit", "More", "Done")) assertTrue(onAllNodesWithText(gone).fetchSemanticsNodes().isEmpty(), gone)
     }
 
+    // ─── reminders ─────────────────────────────────────────────────
+
+    // "add reminder configuration and editing to talon".
+    @Test
+    fun `an event's reminders show on its row and in its details, and a new one can have one`() {
+        reminders = true
+        calendar {
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Has reminders").fetchSemanticsNodes().size == 1 }
+            open("Dentist")
+            assertTrue(shows("15 min before"))
+            onNodeWithText("Close").performClick()
+            newEvent()
+            field("Name").performTextInput("Lunch with Bus")
+            chip("+ 30 min before")
+            assertTrue(onAllNodesWithContentDescription("Remove 30 min before").fetchSemanticsNodes().size == 1)
+            save()
+            val body = wrote("Lunch with Bus")
+            assertTrue(""""alarms":[{"kind":"before","s":1800,"desc":""}]""" in body, body)
+        }
+    }
+
+    // An edit that does not touch them sends none, and the ship keeps
+    // them; one that does sends the whole list, a kind this app does not
+    // edit going back as it came.
+    @Test
+    fun `an edit that leaves the reminders alone sends none, and the ship keeps them`() {
+        reminders = true
+        calendar {
+            open("Standup")
+            onNodeWithText("Edit").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("At the end") }
+            field("Name").performTextReplacement("Standup, renamed")
+            save()
+            assertTrue("alarms" !in wrote("Standup, renamed"), "untouched, not sent")
+        }
+    }
+
+    @Test
+    fun `an edit to the reminders sends the whole list, keeping a kind this app does not edit`() {
+        reminders = true
+        calendar {
+            open("Standup")
+            onNodeWithText("Edit").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("At the end") }
+            chip("+ 5 min before")
+            save()
+            val body = wrote("edit-event")
+            assertTrue(""""alarms":[{"kind":"offset","from":"end","after":true,"s":0,"desc":"wrap up"},{"kind":"before","s":300,"desc":""}]""" in body, body)
+        }
+    }
+
+    @Test
+    fun `this one only takes the series' reminders with it`() {
+        reminders = true
+        calendar {
+            open("Standup")
+            onNodeWithText("Edit").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("This change applies to") }
+            onNodeWithText("This one only").performScrollTo().performClick()
+            field("Name").performTextReplacement("Standup, moved")
+            save()
+            val added = wrote("Standup, moved")
+            assertTrue(""""alarms":[{"kind":"offset","from":"end","after":true,"s":0,"desc":"wrap up"}]""" in added, added)
+        }
+    }
+
+    // A calendar older than reminders shows none and is sent none: one set
+    // there would go nowhere.
+    @Test
+    fun `a calendar that does not keep reminders is offered none`() = calendar {
+        waitForIdle()
+        assertTrue(onAllNodesWithContentDescription("Has reminders").fetchSemanticsNodes().isEmpty())
+        newEvent()
+        assertTrue(!shows("Reminders") && !shows("before"))
+        field("Name").performTextInput("Lunch with Bus")
+        save()
+        assertTrue("alarms" !in wrote("Lunch with Bus"))
+        onNodeWithContentDescription("Calendars").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("New calendar") }
+        assertTrue(!shows("Heads-up before every timed event"))
+    }
+
+    // Set elsewhere to a value this page does not offer, it still shows as the one chosen.
+    @Test
+    fun `a heads-up set elsewhere shows as chosen`() {
+        reminders = true
+        leadMin = 120
+        calendar {
+            onNodeWithContentDescription("Calendars").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Heads-up before every timed event") }
+            assertTrue(onAllNodes(hasText("120 min") and androidx.compose.ui.test.isSelected()).fetchSemanticsNodes().size == 1)
+        }
+    }
+
+    @Test
+    fun `the heads-up before every timed event is set, or turned off`() {
+        reminders = true
+        calendar { repo ->
+            onNodeWithContentDescription("Calendars").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Heads-up before every timed event") }
+            chip("Off")
+            val body = wrote("lead_min")
+            assertTrue("""{"action":"config","lead_min":0}""" == body, body)
+            waitUntil(timeoutMillis = 5_000) { repo.leadMin.value == 0 }
+        }
+    }
+
     // ─── the new event form ────────────────────────────────────────
 
     private fun ComposeUiTest.newEvent() {
@@ -264,6 +491,36 @@ class CalendarScreenTest {
     private fun ComposeUiTest.save() = onAllNodesWithText("Save")[0].performClick()
 
     private fun sentMatching(pattern: String) = writes.any { Regex(pattern).containsMatchIn(it.second) }
+
+    // "now calendar says the ship isn't taking my changes to events": the
+    // ship was down for a restart. Said as that, and the edit is kept.
+    @Test
+    fun `a save while the ship is down says so, and the editor comes back with the change to try again`() = calendar {
+        open("Dentist")
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Repeats") }
+        field("Name").performTextReplacement("Dentist, moved")
+        down = true
+        save()
+        waitUntil(timeoutMillis = 5_000) { shows("Your ship isn't answering") }
+        assertTrue(onAllNodes(hasSetTextAction() and hasText("Dentist, moved")).fetchSemanticsNodes().isNotEmpty(), "the edit is still there")
+        assertTrue(!shows("did not take") && !shows("<html"), "not a refusal, and no markup")
+        assertTrue(writes.isEmpty())
+        down = false
+        save()
+        wrote("Dentist, moved")
+    }
+
+    @Test
+    fun `a save the ship refuses still says the ship did not take it`() = calendar {
+        open("Dentist")
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Repeats") }
+        refuse = true
+        save()
+        waitUntil(timeoutMillis = 5_000) { shows("The ship did not take the change") }
+        assertTrue(!shows("isn't answering"))
+    }
 
     @Test
     fun `an event needs a name before it goes`() = calendar {
@@ -452,4 +709,28 @@ class CalendarScreenTest {
         assertTrue(ship.pokesTo("channels").any { "Dentist" in it.json.toString() })
         assertTrue(!shows("The group could not be reached."))
     }
+
+    // A slip of the thumb outside the dialog lost a half-written event.
+    @Test
+    fun `a dismiss closes the editor only while nothing was written in it`() = calendar {
+        onAllNodesWithContentDescription("New event")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Repeats") }
+        field("Name").performTextInput("Lunch with Bus")
+        tapOutside()
+        assertTrue(shows("Repeats"), "kept open with something written in it")
+        onAllNodesWithText("Cancel")[0].performClick()
+        waitForIdle()
+        assertTrue(!shows("Repeats"), "Cancel still closes it")
+
+        onAllNodesWithContentDescription("New event")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Repeats") }
+        tapOutside()
+        assertTrue(!shows("Repeats"), "nothing written: it closes")
+    }
+
+    private fun ComposeUiTest.tapOutside() {
+        onAllNodes(androidx.compose.ui.test.isRoot())[0].performTouchInput { click(androidx.compose.ui.geometry.Offset(2f, 2f)) }
+        waitForIdle()
+    }
 }
+

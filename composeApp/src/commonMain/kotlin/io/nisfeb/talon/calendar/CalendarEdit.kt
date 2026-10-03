@@ -104,6 +104,18 @@ data class EventDraft(
      * the entry from the fields above and dropped the rest.
      */
     val otherMeta: JsonObject = JsonObject(emptyMap()),
+    /** Its reminders; null where the calendar does not say (one older than reminders), and then none are shown or sent. */
+    val alarms: List<CalAlarm>? = null,
+    /**
+     * Whether [alarms] were changed here. An edit sends them only then:
+     * one sent unchanged would undo a change made elsewhere since this
+     * was read. A new event sends them always.
+     */
+    val alarmsChanged: Boolean = false,
+    /** A task's priority, 0 to 9 ([PRIORITY_CHOICES]); null where the calendar does not say, and then none is shown or sent. */
+    val priority: Int? = null,
+    /** Whether [priority] was changed here: an edit sends it only then, as with reminders. */
+    val priorityChanged: Boolean = false,
 ) {
     val repeats: Boolean get() = cat != EventCat.TODO && cat != EventCat.DATE && (rawKind != null || repeat != Repeat.ONCE)
 }
@@ -148,7 +160,9 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
         if (d.tags.isNotEmpty()) put("tags", JsonArray(d.tags.map { JsonPrimitive(it) }))
     }
     d.cal?.let { put("cal", it) }
+    d.alarms?.let { a -> if (id == null || d.alarmsChanged) put("alarms", JsonArray(a.map { it.raw })) }
     if (d.cat == EventCat.TODO) {
+        d.priority?.let { p -> if (id == null || d.priorityChanged) put("priority", p) }
         d.due?.let { put("due_ms", it.utcMidnightMs()) }
         if (d.done) put("done_ms", d.doneMs ?: nowMs())
         return@buildJsonObject
@@ -234,6 +248,7 @@ fun taskDraft(r: CalendarRow, zone: TimeZone, today: LocalDate): EventDraft? = d
         put("cal", r.cal)
         put("meta", r.meta)
         put("done", r.done)
+        r.priority?.let { put("priority", it) }
         if (r.l > 0) {
             val due = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(zone).date
             put("due_ms", due.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds())
@@ -254,6 +269,7 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
         tags = (meta?.get("tags") as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
         color = metaStr("color"),
         otherMeta = JsonObject(meta.orEmpty().filterKeys { it !in EDITED_META }),
+        alarms = alarmsOf(e["alarms"] as? JsonArray),
     )
     if (cat == EventCat.TODO) {
         val due = e["due_ms"]?.jsonPrimitive?.longOrNull?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date }
@@ -261,6 +277,7 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
             date = due ?: today, due = due,
             done = e["done"]?.jsonPrimitive?.booleanOrNull ?: false,
             doneMs = e["done_ms"]?.jsonPrimitive?.longOrNull,
+            priority = e["priority"]?.jsonPrimitive?.intOrNull?.takeIf { it in 0..9 },
         )
     }
     if (cat == EventCat.DATE) {
@@ -375,4 +392,68 @@ fun daysOf(row: CalendarRow, zone: TimeZone): List<LocalDate> {
     val last = Instant.fromEpochMilliseconds(row.r - 1).toLocalDateTime(z).date
     if (last < first) return listOf(first)
     return generateSequence(first) { d -> d.plus(1, DateTimeUnit.DAY).takeIf { it <= last } }.take(62).toList()
+}
+
+/**
+ * One reminder, as the calendar gives it: before the start ("before",
+ * seconds `s`), at a moment ("at", `at_ms`), or offset from the start
+ * or the end ("offset", `from`, `after`, `s`). Kept whole, so a kind or
+ * a field this app does not edit goes back as it came.
+ */
+data class CalAlarm(val raw: JsonObject) {
+    val kind: String get() = raw["kind"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    val s: Long get() = raw["s"]?.jsonPrimitive?.longOrNull ?: 0L
+
+    companion object {
+        /** [s] seconds before the start: what the editor adds. */
+        fun before(s: Long) = CalAlarm(buildJsonObject { put("kind", "before"); put("s", s); put("desc", "") })
+    }
+}
+
+/** The reminders in a calendar answer, or null where it has none to say (an older calendar). */
+fun alarmsOf(a: JsonArray?): List<CalAlarm>? = a?.mapNotNull { (it as? JsonObject)?.let(::CalAlarm) }
+
+/** What the editor offers to add, in seconds before the start. */
+val ALARM_PRESETS: List<Long> = listOf(0L, 300L, 900L, 1_800L, 3_600L, 86_400L)
+
+/** "15 min", "1 hour", "2 days": a reminder's distance, in the largest whole unit. */
+fun alarmSpan(s: Long): String {
+    fun n(v: Long, one: String, many: String = one + "s") = "$v ${if (v == 1L) one else many}"
+    return when {
+        s >= 86_400 && s % 86_400 == 0L -> n(s / 86_400, "day")
+        s >= 3_600 && s % 3_600 == 0L -> n(s / 3_600, "hour")
+        s >= 60 && s % 60 == 0L -> "${s / 60} min"
+        else -> n(s, "second")
+    }
+}
+
+/** A reminder in words: "15 min before", "At the start", "At 9:00 on 2026-10-01". */
+fun alarmLabel(a: CalAlarm, zone: TimeZone, twentyFourHour: Boolean): String = when (a.kind) {
+    "before" -> if (a.s == 0L) "At the start" else "${alarmSpan(a.s)} before"
+    "at" -> a.raw["at_ms"]?.jsonPrimitive?.longOrNull?.let {
+        val t = Instant.fromEpochMilliseconds(it).toLocalDateTime(zone)
+        "At ${io.nisfeb.talon.ui.SkyClock.clockLabel(t.hour * 60 + t.minute, twentyFourHour)} on ${t.date}"
+    } ?: "At a set time"
+    "offset" -> {
+        val end = a.raw["from"]?.jsonPrimitive?.contentOrNull == "end"
+        val after = a.raw["after"]?.jsonPrimitive?.booleanOrNull ?: false
+        if (a.s == 0L) (if (end) "At the end" else "At the start")
+        else "${alarmSpan(a.s)} ${if (after) "after" else "before"} the ${if (end) "end" else "start"}"
+    }
+    else -> "A reminder of a kind this app does not know"
+}
+
+/**
+ * What the editor offers, as the calendar's page does: none, and one of
+ * each of iCalendar's three bands. Any other number stays as it came
+ * unless the owner picks one of these.
+ */
+val PRIORITY_CHOICES: List<Pair<Int, String>> = listOf(0 to "None", 1 to "High", 5 to "Medium", 9 to "Low")
+
+/** A priority's band, as RFC 5545 has them (1-4 high, 5 medium, 6-9 low); null for none. */
+fun priorityBand(p: Int?): String? = when (p) {
+    in 1..4 -> "High"
+    5 -> "Medium"
+    in 6..9 -> "Low"
+    else -> null
 }

@@ -1,6 +1,6 @@
 package io.nisfeb.talon.ui
 
-import io.nisfeb.talon.util.formatTime12
+import io.nisfeb.talon.util.formatClock
 import io.nisfeb.talon.util.formatWeekdayMonthDay
 import io.nisfeb.talon.util.nowMs
 import io.nisfeb.talon.util.percentDecodeComponent
@@ -204,7 +204,7 @@ fun parseCalText(raw: String, nowMs: Long = nowMs()): CalParseResult {
 /** Human summary line for the chat body, e.g. "Thu, Apr 24 · 2:00 PM – 3:00 PM". */
 fun formatCalSummary(startMs: Long, endMs: Long): String {
     val day = formatWeekdayMonthDay(startMs)
-    return "$day · ${formatTime12(startMs)} – ${formatTime12(endMs)}"
+    return "$day · ${formatClock(startMs)} – ${formatClock(endMs)}"
 }
 
 /** Machine-readable tag appended to the chat body. */

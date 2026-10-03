@@ -41,6 +41,10 @@ data class CalendarRow(
     val r: Long,
     /** A task's tick; false for events. */
     val done: Boolean = false,
+    /** Its reminders ([CalAlarm]); null from a calendar too old to say. */
+    val alarms: kotlinx.serialization.json.JsonArray? = null,
+    /** A task's priority, iCalendar's: 1 highest, 9 lowest, 0 none; null from a calendar too old to say. */
+    val priority: Int? = null,
 ) {
     /** One of a series: timed or all-day with a repeating kind. */
     val repeats: Boolean get() = (cat == "timed" || cat == "allday") && kind != "once"
@@ -66,6 +70,8 @@ data class CalendarTask(
     val cat: String = "timed",
     @SerialName("due_ms") val dueMs: Long? = null,
     val done: Boolean = false,
+    /** iCalendar's priority: 1 highest, 9 lowest, 0 none; null from a calendar too old to say. */
+    val priority: Int? = null,
 ) {
     val name: String get() = meta.metaStr("name")
     val note: String get() = meta.metaStr("note")
@@ -134,7 +140,13 @@ data class GoogleStatus(val connected: Boolean = false, val linked: Map<String, 
 data class CaldavSubscription(val id: String, val url: String = "", @SerialName("last_ms") val lastMs: Long = 0, val error: String = "")
 
 @Serializable
-data class CalendarConfig(val title: String = "", val zone: String? = null, val ball: String = "")
+data class CalendarConfig(
+    val title: String = "",
+    val zone: String? = null,
+    val ball: String = "",
+    /** Minutes of the heads-up the ship sends before every timed event, 0 for none; null from a calendar too old to say. */
+    @SerialName("lead_min") val leadMin: Int? = null,
+)
 
 /**
  * The calendar nexus on the user's ship, at /apps/calendar, over the
@@ -190,7 +202,7 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
             throw c
         } catch (t: Throwable) {
             throw AuspexError.Unreachable(t)
-        }
+        }.also(AuspexApi::throwIfShipDown)
         return resp.status.isSuccess()
     }
     /** Every refusal and conflict logged by the Google and CalDAV syncs. */
@@ -241,7 +253,7 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
             throw c
         } catch (t: Throwable) {
             throw AuspexError.Unreachable(t)
-        }
+        }.also(AuspexApi::throwIfShipDown)
         if (!resp.status.isSuccess()) return null
         return runCatching { AuspexApi.json.parseToJsonElement(resp.bodyAsText()) as? JsonObject }.getOrNull()
     }
@@ -256,7 +268,7 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
             throw c
         } catch (t: Throwable) {
             throw AuspexError.Unreachable(t)
-        }
+        }.also(AuspexApi::throwIfShipDown)
         return resp.status.isSuccess()
     }
 
@@ -267,9 +279,9 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
             throw c
         } catch (t: Throwable) {
             throw AuspexError.Unreachable(t)
-        }
+        }.also(AuspexApi::throwIfShipDown)
         val text = try { resp.bodyAsText() } catch (c: CancellationException) { throw c } catch (t: Throwable) { throw AuspexError.Garbled(t) }
-        if (!resp.status.isSuccess()) throw AuspexError.Refused(resp.status.value, text.take(200))
+        if (!resp.status.isSuccess()) throw AuspexError.Refused(resp.status.value, AuspexApi.reasonOf(text))
         return text
     }
 

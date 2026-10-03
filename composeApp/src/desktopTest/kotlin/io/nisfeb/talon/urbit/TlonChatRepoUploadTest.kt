@@ -77,8 +77,11 @@ class TlonChatRepoUploadTest {
     @Test
     fun `when neither way works, the failure says what each said`() = live {
         ownBucket(presigned = true)
-        val e = assertFailsWith<IllegalStateException> { repo.uploadImage(png, "image/png", "cat.png") }
-        assertTrue("memex=" in e.message!! && "presigned-url mode" in e.message!!, e.message)
+        val e = assertFailsWith<UploadFailed> { repo.uploadImage(png, "image/png", "cat.png") }
+        // Said plainly; what each route said is behind Copy error details.
+        assertTrue(e.message!!.startsWith("The upload didn't go through:") && "memex=" !in e.message!!, e.message)
+        val details = io.nisfeb.talon.util.errorDetailsOf(e)
+        assertTrue("memex=" in details && "presigned-url mode" in details, details)
     }
 
     @Test

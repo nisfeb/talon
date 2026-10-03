@@ -5,7 +5,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
@@ -130,10 +129,10 @@ fun NavIcon(
 ) {
     val open = LocalDrawerOpener.current
     when {
-        open != null -> IconButton(onClick = open) {
+        open != null -> io.nisfeb.talon.ui.IconButton(tip = "Open the menu", onClick = open) {
             Icon(Icons.Filled.Menu, contentDescription = "Open the menu")
         }
-        onBack != null -> IconButton(onClick = onBack) {
+        onBack != null -> io.nisfeb.talon.ui.IconButton(tip = backLabel, onClick = onBack) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = backLabel)
         }
     }

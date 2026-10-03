@@ -29,8 +29,6 @@ describes what Talon does (and doesn't) do with user data.
   app can render offline. Per-ship database file; cleared if the user
   removes the app or signs out.
 - **AI provider settings** (provider, model, API key, base URL). An API key is stored encrypted via `EncryptedSharedPreferences`. The key is sent only to the configured provider, only when the user invokes an AI feature. An Armillary provider stores no key the user typed: the key is minted by the vendor, fetched from the user's own ship, and held for that ship and that device alone. It never travels between devices.
-- **Watchwords** — terms the user wants highlighted in chat. Stored
-  locally; never transmitted.
 - **Daily digest history** — the rolling list of past summaries the
   app has produced for the user. Stored locally; the underlying
   message text is sent to the configured AI provider only at digest

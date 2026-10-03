@@ -15,6 +15,7 @@ import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.urbit.UrbitSession
+import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -105,31 +106,6 @@ class TalonApplication : Application() {
     lateinit var searchEmbedderClient: io.nisfeb.talon.ai.AndroidSearchEmbedderClient
         private set
 
-    // Both lazy so neither touches Context until after attachBaseContext()
-    // / onCreate() — eager property initializers run during the
-    // Application constructor, before Context is wired up, and
-    // getSharedPreferences would NPE.
-    private val watchwordsPrefs by lazy {
-        getSharedPreferences("talon_watchwords", MODE_PRIVATE)
-    }
-
-    // Default true: new installs and existing users who never touched
-    // the toggle should mirror watchwords across devices out of the
-    // box. Users who explicitly turned it off keep the off setting
-    // because SharedPreferences only returns the default when the key
-    // is absent.
-    private val _watchwordsSyncEnabled by lazy {
-        MutableStateFlow(watchwordsPrefs.getBoolean(KEY_WATCHWORDS_SYNC, true))
-    }
-    val watchwordsSyncEnabled: StateFlow<Boolean>
-        get() = _watchwordsSyncEnabled.asStateFlow()
-
-    fun setWatchwordsSyncEnabled(enabled: Boolean) {
-        if (_watchwordsSyncEnabled.value == enabled) return
-        watchwordsPrefs.edit().putBoolean(KEY_WATCHWORDS_SYNC, enabled).apply()
-        _watchwordsSyncEnabled.value = enabled
-    }
-
     private val _activeShip = MutableStateFlow<String?>(null)
     /** Active ship patp, or null if none logged in. Changes on switch
      *  so UI can re-key its tree and pick up the new ship's data. */
@@ -147,6 +123,11 @@ class TalonApplication : Application() {
         // Module-visible app context for the few leaf helpers that have
         // no Context of their own (e.g. saveWavFile's MediaStore write).
         talonAppContext = applicationContext
+        // The encrypted AI settings: the Keystore unwrap and the decrypt
+        // of every value ran on the main thread before the first frame.
+        // Begun here on another thread, while the rest is set up, and
+        // waited for only where they are first wanted below.
+        val aiSettingsOpening = appScope.async { io.nisfeb.talon.ai.AndroidAiSettings(this@TalonApplication) }
         // Live calls and party lines rejoin the moment the default
         // network changes (wifi to cellular), rather than when ICE
         // gives up half a minute later.
@@ -192,7 +173,7 @@ class TalonApplication : Application() {
                 }
             }
         }
-        aiSettings = io.nisfeb.talon.ai.AndroidAiSettings(this)
+        aiSettings = kotlinx.coroutines.runBlocking { aiSettingsOpening.await() }
         // uiSettings is constructed below once buildShipScoped has set
         // up the per-ship `db` field — AndroidUiSettings derives its
         // railVisibility flow from the rail_item_prefs Room table.
@@ -220,11 +201,11 @@ class TalonApplication : Application() {
             now = { System.currentTimeMillis() },
             lastCheckedAtMs = { updatePrefs.getLong("last_http_check_ms", 0L) },
             recordCheckedAt = { updatePrefs.edit().putLong("last_http_check_ms", it).apply() },
-            minIntervalMs = 12L * 60L * 60L * 1000L,
+            minIntervalMs = io.nisfeb.talon.update.UPDATE_MIN_INTERVAL_MS,
         )
         // Re-check on every app-foreground (cold launch AND warm
         // resume), not just process onCreate. HttpUpdateChecker has
-        // its own 12-hour minInterval throttle, so daily users hit
+        // its own six-hour minInterval throttle, so daily users hit
         // the network at most once per day; the lifecycle observer
         // just ensures users who keep the Talon process alive for
         // days (warm-resume only) still get the prompt eventually.
@@ -374,7 +355,6 @@ class TalonApplication : Application() {
             db = db,
             settingsSync = settingsSync,
             notificationHealth = notificationHealth,
-            watchwordsSyncEnabled = watchwordsSyncEnabled,
         )
         drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
         menuSeen = io.nisfeb.talon.ui.AndroidMenuSeenStore(this, ship)
@@ -581,7 +561,4 @@ class TalonApplication : Application() {
         _allShips.value = sessionStore.all().map { it.ship }
     }
 
-    private companion object {
-        private const val KEY_WATCHWORDS_SYNC = "sync_enabled"
-    }
 }

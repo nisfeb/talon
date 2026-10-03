@@ -22,7 +22,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
@@ -101,7 +100,7 @@ fun GalleryComposeScreen(
     var textBody by remember { mutableStateOf("") }
 
     var sending by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     var confirmDiscard by remember { mutableStateOf(false) }
     // Anything typed or picked counts: backing out of a composed post
     // must ask, same as NotebookComposeScreen.
@@ -115,7 +114,7 @@ fun GalleryComposeScreen(
     val onPickImage: () -> Unit = {
         scope.launch {
             val picked = runCatching { pickImage() }
-                .onFailure { error = "couldn't read image: ${it.message ?: it::class.simpleName}" }
+                .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't read the image", it) }
                 .getOrNull() ?: return@launch
             uploading = true
             error = null
@@ -131,7 +130,7 @@ fun GalleryComposeScreen(
                 imageWidth = dims.first
                 imageHeight = dims.second
                 imageAlt = picked.displayName
-            }.onFailure { error = "upload failed: ${it.message ?: it::class.simpleName}" }
+            }.onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't upload the image", it) }
             uploading = false
         }
     }
@@ -147,7 +146,7 @@ fun GalleryComposeScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { if (dirty) confirmDiscard = true else onBack() }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Back", onClick = { if (dirty) confirmDiscard = true else onBack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
@@ -209,7 +208,7 @@ fun GalleryComposeScreen(
                                 sending = false
                                 onPosted()
                             }.onFailure {
-                                error = it.message ?: it::class.simpleName
+                                error = io.nisfeb.talon.util.problemOf("Couldn't post", it)
                                 sending = false
                             }
                     }
@@ -303,13 +302,7 @@ fun GalleryComposeScreen(
                     )
                 }
             }
-            error?.let {
-                Text(
-                    it,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
+            error?.let { io.nisfeb.talon.ui.ProblemLine(it) }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -320,7 +313,7 @@ fun GalleryComposeScreen(
             title = { Text("Discard this post?") },
             text = { Text("What you've added here will be lost.") },
             confirmButton = {
-                TextButton(onClick = { confirmDiscard = false; onBack() }) { Text("Discard") }
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirmDiscard = false; onBack() }) { Text("Discard") }
             },
             dismissButton = {
                 TextButton(onClick = { confirmDiscard = false }) { Text("Keep editing") }

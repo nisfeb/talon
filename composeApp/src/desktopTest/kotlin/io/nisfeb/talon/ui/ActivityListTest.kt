@@ -89,11 +89,11 @@ class ActivityListTest {
 
     @Test
     fun `a feed the ship does not answer for says so, and Retry asks again`() = activity(prepare = {}) { ship ->
-        waitUntil(timeoutMillis = 5_000) { shows("Couldn't load activity.") }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Couldn't load activity", substring = true).fetchSemanticsNodes().isNotEmpty() }
         assertTrue(!shows("No activity yet"), "no answer is not an empty feed")
         val asked = ship.scried.count { it.startsWith("activity/") }
         ship.scries["activity/v6/feed/init/30"] = feed
-        onNodeWithText("Retry").performClick()
+        onNodeWithText("Try again").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("~bus · Mentioned you") }
         assertTrue(ship.scried.count { it.startsWith("activity/") } > asked)
     }

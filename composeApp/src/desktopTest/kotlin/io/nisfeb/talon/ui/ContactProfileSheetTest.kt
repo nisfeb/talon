@@ -102,4 +102,27 @@ class ContactProfileSheetTest {
         // The sheet's own layer holds the clipboard, so the card's word for it is what is checked.
         waitUntil(timeoutMillis = 5_000) { shows("Copied") }
     }
+
+    // Tlon 12.3.0 bot-liveness: the card says whether a bot is up.
+    @Test
+    fun `a bot's card says whether it is up`() {
+        io.nisfeb.talon.urbit.BotLiveness.record(
+            ship,
+            kotlinx.serialization.json.buildJsonObject {
+                put("bot-info", kotlinx.serialization.json.buildJsonObject { put("type", kotlinx.serialization.json.JsonPrimitive("text")); put("value", kotlinx.serialization.json.JsonPrimitive("{}")) })
+                put("bot-liveness", kotlinx.serialization.json.buildJsonObject {
+                    put("type", kotlinx.serialization.json.JsonPrimitive("text"))
+                    put("value", kotlinx.serialization.json.JsonPrimitive("""{"v":1,"state":"offline"}"""))
+                })
+            },
+        )
+        try {
+            card { assertTrue(shows("Bot · Offline")) }
+        } finally {
+            io.nisfeb.talon.urbit.BotLiveness.record(ship, kotlinx.serialization.json.JsonObject(emptyMap()))
+        }
+    }
+
+    @Test
+    fun `a person's card says nothing of bots`() = card { assertTrue(!shows("Bot ·")) }
 }

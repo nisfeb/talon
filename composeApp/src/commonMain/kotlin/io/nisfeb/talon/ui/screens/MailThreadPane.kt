@@ -4,6 +4,7 @@ import io.nisfeb.talon.ui.UnreadDividerRow
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +43,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
@@ -230,7 +230,12 @@ fun MailThreadPane(
         prev = id,
         threadId = threadId,
         to = if (forwarding) emptyList() else io.nisfeb.talon.mail.replyAudience(thread?.messages.orEmpty(), id, ourShip),
-        subject = answerSubject(thread?.messages?.firstOrNull()?.subject.orEmpty(), forwarding),
+        // The subject of the message answered, as the ship's own page has
+        // it: after a reply changed it, the first message's came back.
+        subject = answerSubject(
+            thread?.messages?.lastOrNull { it.id == id }?.subject ?: io.nisfeb.talon.mail.threadSubject(thread?.messages.orEmpty()),
+            forwarding,
+        ),
         travels = if (id == answering) travelling.size else id?.let { pathTo(forest, it).size } ?: 0,
         forwarding = forwarding,
     )
@@ -247,7 +252,7 @@ fun MailThreadPane(
 
     Column(modifier.fillMaxSize()) {
         MailThreadHeader(
-            subject = thread?.messages?.firstOrNull()?.subject.orEmpty(),
+            subject = io.nisfeb.talon.mail.threadSubject(thread?.messages.orEmpty()),
             participants = thread?.participants.orEmpty().map(nameFor),
             unreadable = thread?.unreadable ?: 0,
             labels = thread?.labels.orEmpty(),
@@ -282,7 +287,7 @@ fun MailThreadPane(
             onFile = {
                 val t = thread ?: return@MailThreadHeader
                 file(
-                    title = t.messages.firstOrNull()?.subject.orEmpty().ifBlank { "Mail thread" },
+                    title = io.nisfeb.talon.mail.threadSubject(t.messages).ifBlank { "Mail thread" },
                     seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, null),
                     gemtext = io.nisfeb.talon.mail.MailGemtext.thread(t, nameFor, ::whenAt),
                 )
@@ -445,7 +450,7 @@ private fun ThreadActions(
     var confirming by remember { mutableStateOf(false) }
 
     Box {
-        IconButton(onClick = { open = true }) {
+        io.nisfeb.talon.ui.IconButton(tip = "Thread actions", onClick = { open = true }) {
             Icon(Icons.Filled.MoreVert, contentDescription = "Thread actions")
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -487,7 +492,7 @@ private fun ThreadActions(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { confirming = false; onDelete() }) { Text("Delete") }
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirming = false; onDelete() }) { Text("Delete") }
             },
             dismissButton = {
                 TextButton(onClick = { confirming = false }) { Text("Keep") }
@@ -530,7 +535,7 @@ private fun MailThreadHeader(
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (onBack != null) {
-                IconButton(onClick = onBack) {
+                io.nisfeb.talon.ui.IconButton(tip = "Back", onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
             }
@@ -562,11 +567,28 @@ private fun MailThreadHeader(
             }
         }
         if (participants.isNotEmpty()) {
+            // A long list folds to its first few and how many more; the
+            // count opens it, and the open list folds back.
+            var everyone by remember(participants) { mutableStateOf(false) }
+            val (shown, more) = io.nisfeb.talon.mail.foldNames(participants, everyone)
+            val foldable = io.nisfeb.talon.mail.foldNames(participants, false).second > 0
+            val accent = MaterialTheme.colorScheme.primary
             Text(
-                participants.joinToString(),
+                androidx.compose.ui.text.buildAnnotatedString {
+                    append(shown.joinToString())
+                    if (foldable) {
+                        withStyle(androidx.compose.ui.text.SpanStyle(color = accent)) {
+                            append(if (more > 0) " and $more more" else " · Show fewer")
+                        }
+                    }
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 8.dp),
+                modifier = Modifier.padding(start = 8.dp).then(
+                    if (foldable) {
+                        Modifier.clickable(onClickLabel = if (more > 0) "Show all ${participants.size} people" else "Show fewer") { everyone = !everyone }
+                    } else Modifier,
+                ),
             )
         }
         if (labels.isNotEmpty()) {
@@ -676,7 +698,7 @@ private fun MailMessageCard(
             // reply that swallows itself is not what a reader means by
             // folding a thread.
             if (foldable) {
-                IconButton(onClick = onFold, modifier = Modifier.size(22.dp)) {
+                io.nisfeb.talon.ui.IconButton(tip = if (folded) "Unfold replies" else "Fold replies", onClick = onFold, modifier = if (io.nisfeb.talon.ui.isTouchPrimary) Modifier else Modifier.size(22.dp)) {
                     Icon(
                         if (folded) Icons.AutoMirrored.Filled.KeyboardArrowRight
                         else Icons.Filled.KeyboardArrowDown,
@@ -716,10 +738,10 @@ private fun MailMessageCard(
             // On every message, so answering one never means selecting it
             // and then going back up to the top of the thread.
             if (onAnswer != null) {
-                IconButton(onClick = { onAnswer(false) }, modifier = Modifier.size(30.dp)) {
+                io.nisfeb.talon.ui.IconButton(tip = "Reply", onClick = { onAnswer(false) }, modifier = Modifier.size(30.dp)) {
                     Icon(TalonIcons.Reply, contentDescription = "Reply", modifier = Modifier.size(18.dp))
                 }
-                IconButton(onClick = { onAnswer(true) }, modifier = Modifier.size(30.dp)) {
+                io.nisfeb.talon.ui.IconButton(tip = "Forward", onClick = { onAnswer(true) }, modifier = Modifier.size(30.dp)) {
                     Icon(TalonIcons.Forward, contentDescription = "Forward", modifier = Modifier.size(18.dp))
                 }
             }

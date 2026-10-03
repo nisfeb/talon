@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import io.nisfeb.talon.data.latestPerConversation
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,7 +37,7 @@ fun PickConversationDialog(
     onDismiss: () -> Unit,
     onPick: (whom: String) -> Unit,
 ) {
-    val conversations by remember { db.messages().conversationLatest() }.collectAsState(initial = emptyList<MessageEntity>())
+    val conversations by remember { db.latestPerConversation() }.collectAsState(initial = emptyList<MessageEntity>())
     val contactMap by rememberContactMap(db)
     var query by remember { mutableStateOf("") }
     val rows = remember(conversations, contactMap, query, onlyGroups) {

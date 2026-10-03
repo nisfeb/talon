@@ -257,4 +257,85 @@ class CalendarEditTest {
         assertEquals(true, "list" in d.otherMeta, "meta the form does not edit is kept")
         assertNull(taskDraft(CalendarRow(id = "t2", cat = "todo", l = 0, r = 0), ny, day)!!.due, "no day, no due")
     }
+
+    // ─── reminders ───────────────────────────────────────────────
+
+    private val oct1 = LocalDate(2026, 10, 1)
+    private fun alarms(vararg raw: String) = raw.map { CalAlarm(kotlinx.serialization.json.Json.parseToJsonElement(it).jsonObject) }
+
+    @Test
+    fun `an event's reminders are read, and a calendar that does not say gives none`() {
+        val e = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"cat":"timed","kind":"once","start_ms":1790000000000,"meta":{"name":"x"},"alarms":[{"kind":"before","s":900,"desc":""},{"kind":"at","at_ms":1790000000000,"desc":""}]}""",
+        ).jsonObject
+        assertEquals(listOf("before", "at"), draftFromEvent(e, oct1)!!.alarms!!.map { it.kind })
+        val old = kotlinx.serialization.json.Json.parseToJsonElement("""{"cat":"timed","kind":"once","start_ms":1790000000000,"meta":{"name":"x"}}""").jsonObject
+        assertNull(draftFromEvent(old, oct1)!!.alarms)
+    }
+
+    // The wire, as the contract handed to the calendar reads it: a new
+    // event sends its list; an edit only when it changed; an older
+    // calendar never.
+    @Test
+    fun `reminders go on the wire only where the calendar takes them and the edit changed them`() {
+        val d = EventDraft(name = "Dentist", date = oct1, cal = "default", alarms = alarms("""{"kind":"before","s":900,"desc":""}"""))
+        assertEquals("""[{"kind":"before","s":900,"desc":""}]""", eventBody(d)["alarms"].toString(), "a new event")
+        assertNull(eventBody(d, "e1")["alarms"], "an edit that left them alone")
+        assertEquals("[]", eventBody(d.copy(alarms = emptyList(), alarmsChanged = true), "e1")["alarms"].toString(), "cleared")
+        assertNull(eventBody(d.copy(alarms = null))["alarms"], "a calendar older than reminders")
+        assertEquals("[]", eventBody(d.copy(alarms = emptyList()))["alarms"].toString(), "a new event with none")
+    }
+
+    @Test
+    fun `a kind this app does not edit goes back exactly as it came`() {
+        val kept = """{"kind":"offset","from":"end","after":true,"s":600,"desc":"wrap up","x-extra":1}"""
+        val d = EventDraft(name = "x", date = oct1, alarms = alarms(kept) + CalAlarm.before(300), alarmsChanged = true)
+        assertEquals("""[$kept,{"kind":"before","s":300,"desc":""}]""", eventBody(d, "e1")["alarms"].toString())
+    }
+
+    @Test
+    fun `a reminder says itself in words`() {
+        val z = TimeZone.UTC
+        fun say(raw: String) = alarmLabel(alarms(raw).single(), z, twentyFourHour = true)
+        assertEquals("At the start", say("""{"kind":"before","s":0}"""))
+        assertEquals("15 min before", say("""{"kind":"before","s":900}"""))
+        assertEquals("1 hour before", say("""{"kind":"before","s":3600}"""))
+        assertEquals("2 days before", say("""{"kind":"before","s":172800}"""))
+        assertEquals("90 seconds before", say("""{"kind":"before","s":90}"""))
+        assertEquals("10 min after the start", say("""{"kind":"offset","from":"start","after":true,"s":600}"""))
+        assertEquals("5 min before the end", say("""{"kind":"offset","from":"end","after":false,"s":300}"""))
+        assertEquals("At the end", say("""{"kind":"offset","from":"end","after":true,"s":0}"""))
+        assertEquals("At 09:00 on 2026-10-01", say("""{"kind":"at","at_ms":${oct1.atTime(9, 0).toInstant(z).toEpochMilliseconds()}}"""))
+        assertEquals("A reminder of a kind this app does not know", say("""{"kind":"geofence"}"""))
+    }
+
+    // ─── task priority ───────────────────────────────────────────
+
+    // As the calendar takes it (version 25): absent keeps, a number sets,
+    // 0 clears; on a todo only.
+    @Test
+    fun `a task's priority goes on the wire only where the calendar keeps one and it changed`() {
+        val t = EventDraft(name = "Pay rent", cat = EventCat.TODO, date = oct1, cal = "default", priority = 1)
+        assertEquals("1", eventBody(t)["priority"].toString(), "a new task")
+        assertNull(eventBody(t, "t1")["priority"], "an edit that left it alone")
+        assertEquals("0", eventBody(t.copy(priority = 0, priorityChanged = true), "t1")["priority"].toString(), "cleared")
+        assertNull(eventBody(t.copy(priority = null))["priority"], "a calendar older than priority")
+        assertNull(eventBody(t.copy(cat = EventCat.TIMED))["priority"], "an event has none")
+    }
+
+    @Test
+    fun `a task's priority is read, from the event and from its row`() {
+        val e = kotlinx.serialization.json.Json.parseToJsonElement("""{"cat":"todo","meta":{"name":"x"},"priority":3}""").jsonObject
+        assertEquals(3, draftFromEvent(e, oct1)!!.priority)
+        val old = kotlinx.serialization.json.Json.parseToJsonElement("""{"cat":"todo","meta":{"name":"x"}}""").jsonObject
+        assertNull(draftFromEvent(old, oct1)!!.priority)
+        val row = CalendarRow(id = "t1", cat = "todo", kind = "todo", all = true, l = 0, r = 0, priority = 9)
+        assertEquals(9, taskDraft(row, TimeZone.UTC, oct1)!!.priority)
+    }
+
+    @Test
+    fun `priorities read as the RFC's bands`() {
+        assertEquals(listOf("High", "High", "Medium", "Low", "Low", null, null),
+            listOf(1, 4, 5, 6, 9, 0, null).map { priorityBand(it) })
+    }
 }

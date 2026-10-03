@@ -29,7 +29,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -83,13 +82,13 @@ fun GroupHomeScreen(
     }.collectAsState(initial = emptyList())
 
     var joining by remember { mutableStateOf(false) }
-    var joinError by remember { mutableStateOf<String?>(null) }
+    var joinError by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     var joinRequested by remember { mutableStateOf(false) }
 
     var menuOpen by remember { mutableStateOf(false) }
     var confirmLeave by remember { mutableStateOf(false) }
     var leaving by remember { mutableStateOf(false) }
-    var leaveError by remember { mutableStateOf<String?>(null) }
+    var leaveError by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
 
     val title = group?.title ?: flag
     val isMember = group != null
@@ -146,7 +145,7 @@ fun GroupHomeScreen(
             // non-members the screen's whole purpose is the join CTA.
             if (isMember) {
                 Box {
-                    IconButton(onClick = { menuOpen = true }) {
+                    io.nisfeb.talon.ui.IconButton(tip = "More", onClick = { menuOpen = true }) {
                         Icon(Icons.Filled.MoreVert, contentDescription = "More")
                     }
                     DropdownMenu(
@@ -235,7 +234,7 @@ fun GroupHomeScreen(
                                 runCatching { repo.knockGroup(flag) }
                                     .onSuccess { joinRequested = true }
                                     .onFailure {
-                                        joinError = it.message ?: it::class.simpleName
+                                        joinError = io.nisfeb.talon.util.problemOf("Couldn't join the group", it)
                                     }
                                 joining = false
                             }
@@ -250,13 +249,7 @@ fun GroupHomeScreen(
                         }
                         Text("Join group")
                     }
-                    joinError?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
+                    joinError?.let { io.nisfeb.talon.ui.ProblemLine(it) }
                 }
             }
         }
@@ -273,17 +266,11 @@ fun GroupHomeScreen(
                             "You can rejoin later if it's public, or ask for a new invite.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    leaveError?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
+                    leaveError?.let { io.nisfeb.talon.ui.ProblemLine(it) }
                 }
             },
             confirmButton = {
-                TextButton(
+                io.nisfeb.talon.ui.DestructiveTextButton(
                     enabled = !leaving,
                     onClick = {
                         leaving = true
@@ -296,7 +283,7 @@ fun GroupHomeScreen(
                                     onBack()
                                 }
                                 .onFailure {
-                                    leaveError = it.message ?: it::class.simpleName
+                                    leaveError = io.nisfeb.talon.util.problemOf("Couldn't leave the group", it)
                                     leaving = false
                                 }
                         }

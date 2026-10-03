@@ -11,7 +11,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -34,7 +33,7 @@ fun UpdateBanner(
         is UpdateStatus.Available -> BannerSurface(
             primary = "Talon ${status.manifest.versionName} available",
             secondary = status.manifest.changelog.takeIf { it.isNotBlank() }
-                ?: "Tap to update.",
+                ?: "${io.nisfeb.talon.ui.tapWord} to update.",
             onTap = onTap,
             onDismiss = if (status.manifest.mandatory) null else onDismiss,
         )
@@ -46,7 +45,7 @@ fun UpdateBanner(
             progress = status.progress,
         )
         is UpdateStatus.Ready -> BannerSurface(
-            primary = "Tap to install ${status.manifest.versionName}",
+            primary = "${io.nisfeb.talon.ui.tapWord} to install ${status.manifest.versionName}",
             secondary = status.hint,
             onTap = onTap,
             onDismiss = null,
@@ -58,7 +57,7 @@ fun UpdateBanner(
             // describing success. Android's real failures ("Couldn't
             // …") still read as failures on their own.
             primary = status.message,
-            secondary = "Tap to retry.",
+            secondary = "${io.nisfeb.talon.ui.tapWord} to try again.",
             onTap = onTap,
             onDismiss = onDismiss,
         )
@@ -106,7 +105,7 @@ private fun BannerSurface(
             }
         }
         if (onDismiss != null) {
-            IconButton(onClick = onDismiss) {
+            io.nisfeb.talon.ui.IconButton(tip = "Dismiss", onClick = onDismiss) {
                 Icon(
                     Icons.Filled.Close,
                     contentDescription = "Dismiss",

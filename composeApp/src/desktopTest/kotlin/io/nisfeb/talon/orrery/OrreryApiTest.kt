@@ -123,6 +123,16 @@ class OrreryApiTest {
     }
 
     @Test
+    fun `the brief view is asked for with brief=1, the whole one without`() = runTest {
+        val api = api(body = """{"bodies":[]}""")
+        api.stateJson("k1.secret", brief = true)
+        assertEquals("https://ship/apps/orrery/api/state?brief=1", seen!!.url.toString())
+        assertEquals("Bearer k1.secret", seen!!.headers[HttpHeaders.Authorization])
+        api.stateJson("k1.secret")
+        assertEquals("https://ship/apps/orrery/api/state", seen!!.url.toString())
+    }
+
+    @Test
     fun `every call made with a key carries it, and no cookie`() = runTest {
         val sent = mutableListOf<HttpRequestData>()
         val bare = HttpClient(MockEngine { req -> sent += req; respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) })

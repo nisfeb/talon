@@ -88,7 +88,7 @@ class HomeListTest {
                             onOpenStatusFeed = { did += "Statuses" }, onOpenBookmarks = { did += "Bookmarks" },
                             onOpenActivity = { did += "Activity" }, onOpenSettings = { did += "Settings" },
                             onOpenMail = { did += "Mail" }, onOpenCalendar = { did += "Calendar" },
-                            onOpenContacts = { did += "Contacts" }, onOpenWatchwords = { did += "Watchwords" },
+                            onOpenContacts = { did += "Contacts" },
                             onOpenAdministration = { did += "Administration" }, onOpenInvites = { did += "Invites" },
                             onOpenHome = { did += "Home" },
                             activeShip = "~zod", allShips = listOf("~zod"),
@@ -296,7 +296,7 @@ class HomeListTest {
     @Test
     fun `every place in the More menu opens, and signing out is last`() = home(seed = {}) {
         val places = listOf("Home", "My profile", "Statuses", "Mail", "Bookmarks", "Activity", "Calendar", "Contacts",
-            "Watchwords", "Administration", "Invites", "Settings", "Sign out")
+            "Administration", "Invites", "Settings", "Sign out")
         for (place in places) {
             onNodeWithContentDescription("More").performClick()
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(place).fetchSemanticsNodes().isNotEmpty() }
@@ -314,7 +314,7 @@ class HomeListTest {
         onNode(hasSetTextAction() and hasText("Name")).performTextInput("Friends")
         onNodeWithText("Create").performClick()
         tap("Friends")
-        shows("This folder is empty. Long-press a chat or group to add it.")
+        shows("This folder is empty. Right-click a chat or group to add it.")
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("settings").any { "Friends" in it.json.toString() } }
     }
 

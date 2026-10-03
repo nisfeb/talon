@@ -76,6 +76,7 @@ fun MailWorkspace(
                     onOpenThread = { onOpenThread(it) },
                     onCompose = { onCompose(MailIntent()) },
                     onOpenDraft = { d -> onCompose(draftIntent(d)) },
+                    onReopen = { u -> onCompose(unsentIntent(u)) },
                 )
             }
             return@BoxWithConstraints
@@ -89,6 +90,7 @@ fun MailWorkspace(
                 onOpenThread = { onOpenThread(it) },
                 onCompose = { onCompose(MailIntent()) },
                 onOpenDraft = { d -> onCompose(draftIntent(d)) },
+                onReopen = { u -> onCompose(unsentIntent(u)) },
                 modifier = Modifier.width(430.dp).fillMaxHeight(),
             )
             VerticalDivider()
@@ -124,6 +126,11 @@ fun MailWorkspace(
             }
         }
     }
+}
+
+/** A message that did not go, back in a composer: its text, and the files it had. */
+internal fun unsentIntent(u: io.nisfeb.talon.mail.MailRepo.Unsent): MailIntent = draftIntent(u.draft).also { i ->
+    i.edits.files.addAll(u.files.map { io.nisfeb.talon.util.PickedImage(it.bytes, it.mime, it.name) })
 }
 
 internal fun draftIntent(d: io.nisfeb.talon.mail.Draft): MailIntent = MailIntent(

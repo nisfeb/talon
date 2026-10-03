@@ -28,10 +28,10 @@ import kotlinx.serialization.json.jsonPrimitive
  * MockEngine harness for CallController tests that push facts
  * mid-test and inspect what the controller PUT back up the channel.
  *
- * The SSE body is a ByteChannel that never closes, so the controller's
- * reconnect loop never fires: every emitted frame lands on the one
- * live channel, and a fact can't be replayed by a reconnect after the
- * test has moved on. Pokes are acked "ok" from the PUT handler so
+ * The SSE body is a ByteChannel that closes only on [endStream], so the
+ * controller's reconnect loop fires only when a test asks: every emitted
+ * frame lands on the one live channel, and a fact can't be replayed by a
+ * reconnect after the test has moved on. Pokes are acked "ok" from the PUT handler so
  * controller code sequenced after a poke doesn't sit out the 15s ack
  * timeout mid-test.
  */
@@ -44,7 +44,21 @@ internal class TrunkHarness(ship: String = "~nec") {
      *  Runs on the engine's thread — keep it tiny. */
     var onPut: ((String) -> Unit)? = null
 
-    private val sse = ByteChannel(autoFlush = true)
+    /** How long each scry takes to answer: a slow ship. */
+    @Volatile var scryDelayMs = 0L
+
+    /** Scries answered, and event streams opened, so far. */
+    val scries = java.util.concurrent.atomic.AtomicInteger()
+    val streams = java.util.concurrent.atomic.AtomicInteger()
+
+    @Volatile private var sse = ByteChannel(autoFlush = true)
+
+    /** End the live event stream, as a ship dropping it does; the next GET gets a new one. */
+    fun endStream() {
+        val old = sse
+        sse = ByteChannel(autoFlush = true)
+        old.cancel(null)
+    }
     private val emitLock = Mutex()
     // Well clear of the request ids echoed back in poke acks.
     private var eventId = 100L
@@ -75,10 +89,13 @@ internal class TrunkHarness(ship: String = "~nec") {
                 for (id in pokeIds) emit("""{"id":$id,"response":"poke","ok":true}""")
                 respond("", HttpStatusCode.NoContent)
             }
-            req.url.encodedPath.startsWith("/~/scry") ->
+            req.url.encodedPath.startsWith("/~/scry") -> {
+                scries.incrementAndGet()
+                if (scryDelayMs > 0) kotlinx.coroutines.delay(scryDelayMs)
                 respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+            }
             else -> respond(
-                sse, HttpStatusCode.OK,
+                sse.also { streams.incrementAndGet() }, HttpStatusCode.OK,
                 headersOf(HttpHeaders.ContentType, "text/event-stream"),
             )
         }

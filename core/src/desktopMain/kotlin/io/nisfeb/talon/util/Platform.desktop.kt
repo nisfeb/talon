@@ -26,3 +26,5 @@ actual val tempDirPath: String =
     System.getProperty("java.io.tmpdir")?.trimEnd('/') ?: "/tmp"
 
 actual val cacheDirPath: String get() = java.io.File(AppDirs.userData, "cache").absolutePath
+
+actual val dataDirPath: String get() = AppDirs.userData.absolutePath

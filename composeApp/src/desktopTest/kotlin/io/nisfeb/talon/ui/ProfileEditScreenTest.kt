@@ -11,6 +11,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
@@ -104,7 +105,7 @@ class ProfileEditScreenTest {
     fun `a save the ship refuses says so and stays`() = profile(prepare = { refuse = { if (it.app == "contacts") "not now" else null } }) {
         onNode(hasSetTextAction() and hasText("Nickname")).performTextReplacement("Zed")
         onNodeWithText("Save").performScrollTo().performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("save failed") }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Couldn't save your profile", substring = true).fetchSemanticsNodes().isNotEmpty() }
         assertTrue("back" !in did)
     }
 
@@ -126,4 +127,42 @@ class ProfileEditScreenTest {
             override suspend fun keys(ship: String) = Result.failure<AzimuthRpc.Keys?>(IllegalStateException("down"))
         }) { waitUntil(timeoutMillis = 5_000) { shows("Could not read your keys") } }
     }
+
+    // Back left with whatever was typed, unsaved and unsaid.
+    @Test
+    fun `leaving with an edit unsaved asks first, and without one does not`() = profile {
+        onNodeWithContentDescription("Back").performClick()
+        assertTrue("back" in did, "nothing changed: straight out")
+        did.clear()
+        onNode(hasSetTextAction() and hasText("Nickname")).performTextReplacement("Zed")
+        onNodeWithContentDescription("Back").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Discard your changes?") }
+        assertTrue("back" !in did)
+        onNodeWithText("Cancel").performClick()
+        onNodeWithContentDescription("Back").performClick()
+        onNodeWithText("Discard").performClick()
+        assertTrue("back" in did)
+    }
+
+    // The form sat empty while the ship was asked: seconds on a busy one.
+    private val slowSelf: FakeShip.() -> Unit = {
+        scries["contacts/v1/self"] = """{"nickname":{"type":"text","value":"Zeta"},"bio":{"type":"text","value":"from the ship"}}"""
+        holdScry = { if (it == "contacts/v1/self") 2_000 else 0 }
+    }
+
+    @Test
+    fun `the form shows what is kept at once, then what the ship says`() = profile(prepare = slowSelf) { _ ->
+        // The harness saw "Zod" before the ship's answer, two seconds off.
+        assertEquals("runs the place", fieldText("Bio"))
+        waitUntil(timeoutMillis = 5_000) { fieldText("Nickname") == "Zeta" }
+        assertEquals("from the ship", fieldText("Bio"))
+    }
+
+    @Test
+    fun `a field typed in before the ship answers keeps what was typed`() = profile(prepare = slowSelf) { _ ->
+        onNode(hasSetTextAction() and hasText("Bio")).performTextReplacement("mine")
+        waitUntil(timeoutMillis = 5_000) { fieldText("Nickname") == "Zeta" }
+        assertEquals("mine", fieldText("Bio"))
+    }
 }
+

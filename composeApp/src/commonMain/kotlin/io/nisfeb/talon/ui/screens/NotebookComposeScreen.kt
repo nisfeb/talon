@@ -23,7 +23,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -84,7 +83,7 @@ fun NotebookComposeScreen(
     var body by remember { mutableStateOf(initialBody) }
     var sending by remember { mutableStateOf(false) }
     var uploading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     var confirmDiscard by remember { mutableStateOf(false) }
     val dirty = title != initialTitle || imageUrl != initialImage || body != initialBody
     // System back must ask the same question the toolbar arrow does —
@@ -97,7 +96,7 @@ fun NotebookComposeScreen(
     val onPickCover: () -> Unit = {
         scope.launch {
             val picked = runCatching { pickImage() }
-                .onFailure { error = "couldn't read image: ${it.message ?: it::class.simpleName}" }
+                .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't read the image", it) }
                 .getOrNull() ?: return@launch
             uploading = true
             error = null
@@ -111,7 +110,7 @@ fun NotebookComposeScreen(
                 }
                 repo.uploadImage(picked.bytes, picked.mimeType, picked.displayName)
             }.onSuccess { imageUrl = it }
-                .onFailure { error = "upload failed: ${it.message ?: it::class.simpleName}" }
+                .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't upload the image", it) }
             uploading = false
         }
     }
@@ -123,7 +122,7 @@ fun NotebookComposeScreen(
         ) {
             // A long-form draft lives only in memory — confirm before an
             // accidental back-tap destroys it.
-            IconButton(onClick = { if (dirty) confirmDiscard = true else onBack() }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Back", onClick = { if (dirty) confirmDiscard = true else onBack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
@@ -159,7 +158,7 @@ fun NotebookComposeScreen(
                             sending = false
                             onPosted()
                         }.onFailure {
-                            error = it.message ?: it::class.simpleName
+                            error = io.nisfeb.talon.util.problemOf("Couldn't post", it)
                             sending = false
                         }
                     }
@@ -239,13 +238,7 @@ fun NotebookComposeScreen(
                     .fillMaxWidth()
                     .height(400.dp),
             )
-            error?.let {
-                Text(
-                    it,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
+            error?.let { io.nisfeb.talon.ui.ProblemLine(it) }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -256,7 +249,7 @@ fun NotebookComposeScreen(
             title = { Text("Discard this draft?") },
             text = { Text("Your changes will be lost.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     confirmDiscard = false
                     onBack()
                 }) { Text("Discard") }

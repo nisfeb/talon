@@ -18,7 +18,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -79,7 +78,7 @@ fun SidebarSettingsScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
+            io.nisfeb.talon.ui.IconButton(tip = "Back", onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
@@ -225,7 +224,6 @@ private fun sidebarRowState(item: RailItem): SidebarRowState = when (item) {
     // gated on it being enabled (App.kt / the kebab's onOpenAssistant).
     RailItem.Assistant -> SidebarRowState("Assistant", null, false, false)
     RailItem.Profile -> SidebarRowState("My profile", null, false, false)
-    RailItem.Watchwords -> SidebarRowState("Watchwords", null, false, false)
     RailItem.Administration -> SidebarRowState("Administration", null, false, false)
     RailItem.Invites -> SidebarRowState("Invites", null, false, false)
     RailItem.Actions -> SidebarRowState("Actions", null, false, false)

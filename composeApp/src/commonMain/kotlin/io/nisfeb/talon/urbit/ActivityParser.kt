@@ -3,6 +3,7 @@ package io.nisfeb.talon.urbit
 import io.nisfeb.talon.data.ThreadUnreadEntity
 import io.nisfeb.talon.data.UnreadEntity
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -36,6 +37,9 @@ import kotlinx.serialization.json.put
  * channel rollup.
  */
 internal fun sourceKeyToWhom(key: String): String? = when {
+    // A notebook (activity /v6, 12.1.0) is Talon's `notes/` conversation.
+    // Its notes (`note/~h/n/<id>`) are children, counted in it.
+    key.startsWith("notebook/") -> "notes/" + key.removePrefix("notebook/")
     key.startsWith("ship/") -> key.removePrefix("ship/")
     key.startsWith("club/") -> key.removePrefix("club/")
     key.startsWith("channel/") -> key.removePrefix("channel/")
@@ -210,6 +214,9 @@ internal fun sourceToWhom(source: JsonObject): String? {
     (source["channel"] as? JsonObject)?.let { ch ->
         ch["nest"].asStr()?.let { return it }
     }
+    (source["notebook"] as? JsonObject)?.let { nb ->
+        nb["flag"].asStr()?.let { return "notes/$it" }
+    }
     return null
 }
 
@@ -235,6 +242,19 @@ internal fun toUnread(
     val whom = overrideWhom
         ?: sourceKeyToWhom(sourceKey ?: return null)
         ?: return null
+    val recencyMs = summary["recency"].asLong() ?: 0L
+    // A notebook has no stream of its own: `unread` is always ~ for it
+    // (note events carry no message key), and its count is its notes'.
+    // Read off `unread`, every notebook said nothing new.
+    if (whom.startsWith("notes/")) {
+        return UnreadEntity(
+            whom = whom,
+            count = summary["count"].asInt() ?: 0,
+            notifyCount = summary["notify-count"].asInt() ?: 0,
+            recencyMs = recencyMs,
+            firstUnreadId = null,
+        )
+    }
     // `count` on the wire includes every child thread, which is why a
     // channel badge built from it could only clear with a deep read
     // that marked threads read behind the user's back. `unread` is the
@@ -367,6 +387,14 @@ internal fun activityReadSource(whom: String, groupFlag: String? = null): JsonOb
                 })
             }
         }
+        // activity-action-2 only (12.1.0). `group` must be there, null
+        // for a notebook in no group (activity-json's decoder asks for it).
+        whom.startsWith("notes/") -> buildJsonObject {
+            put("notebook", buildJsonObject {
+                put("flag", whom.removePrefix("notes/"))
+                put("group", groupFlag?.let(::JsonPrimitive) ?: kotlinx.serialization.json.JsonNull)
+            })
+        }
         else -> null
     }
 }
@@ -376,7 +404,7 @@ internal fun activityReadSource(whom: String, groupFlag: String? = null): JsonOb
  * conversation read. Caller supplies the source object (built with
  * [activityReadSource]).
  */
-internal fun activityReadAction(source: JsonObject, deep: Boolean = false): JsonObject =
+internal fun activityReadAction(source: JsonObject, deep: Boolean = false, upTo: Long? = null): JsonObject =
     buildJsonObject {
         put("read", buildJsonObject {
             put("source", source)
@@ -390,7 +418,11 @@ internal fun activityReadAction(source: JsonObject, deep: Boolean = false): Json
                     // unreads table, so without recursion the badge
                     // refuses to clear on diary / heap channels (and on
                     // any chat with reply traffic).
-                    put("time", kotlinx.serialization.json.JsonNull)
+                    // Up to now, or for a read that reaches the ship late, up
+                    // to when it was read ([upTo], ms): what came in since stays
+                    // unread. An @da as dotted @ud, as activity-json's
+                    // all-read decodes it: (un (mu (se %ud))).
+                    put("time", upTo?.let { kotlinx.serialization.json.JsonPrimitive(UrbitTime.daToUd(UrbitTime.unixMsToDa(it))) } ?: kotlinx.serialization.json.JsonNull)
                     // deep=true recurses into child sources: every
                     // thread under a channel, every reply thread under
                     // a DM. Reading a conversation must NOT do that —
@@ -404,3 +436,18 @@ internal fun activityReadAction(source: JsonObject, deep: Boolean = false): Json
             })
         })
     }
+
+/**
+ * %chat's chat-dm-status fact (12.3.0, on /v4): `{"ship":"~zod","net":…}`,
+ * net one of inviting, invited, archive, done, or null for a DM that is
+ * gone. Null for anything else: only these two keys make one.
+ */
+internal fun dmStatusOf(p: JsonObject): Pair<String, String?>? {
+    if (p.keys != setOf("ship", "net")) return null
+    val ship = (p["ship"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.startsWith("~") } ?: return null
+    val net = p["net"]
+    if (net is kotlinx.serialization.json.JsonNull) return ship to null
+    val s = (net as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+    return if (s in setOf("inviting", "invited", "archive", "done")) ship to s else null
+}
+

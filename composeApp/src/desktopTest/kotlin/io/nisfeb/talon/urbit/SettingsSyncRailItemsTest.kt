@@ -56,7 +56,7 @@ class SettingsSyncRailItemsTest {
     @Test
     fun `applyBucket replace semantics — old rows that are absent get cleared`() = runBlocking {
         // Pre-seed an explicit hide
-        db.railItemPrefs().upsert(RailItemPrefEntity("Watchwords", false))
+        db.railItemPrefs().upsert(RailItemPrefEntity("Invites", false))
         // New bucket with only Settings hidden
         val incoming: JsonObject = buildJsonObject {
             put("Settings", buildJsonObject { put("visible", false) })

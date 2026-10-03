@@ -39,7 +39,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.Surface
@@ -153,7 +152,7 @@ fun PartyLineFullScreen(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onMinimize, modifier = Modifier.size(48.dp)) {
+                io.nisfeb.talon.ui.IconButton(tip = "Minimize the call", onClick = onMinimize, modifier = Modifier.size(48.dp)) {
                     Icon(
                         TalonIcons.ExpandMore,
                         contentDescription = "Minimize the call",
@@ -595,7 +594,7 @@ private fun ParticipantRow(
         if (!isSelf && (onMessage != null || showOps)) {
             var menuOpen by remember(member.id) { mutableStateOf(false) }
             Box {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
+                io.nisfeb.talon.ui.IconButton(tip = "Options for ${nameFor(member.ship)}", onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
                     Icon(
                         Icons.Filled.MoreVert,
                         contentDescription = "Options for ${nameFor(member.ship)}",

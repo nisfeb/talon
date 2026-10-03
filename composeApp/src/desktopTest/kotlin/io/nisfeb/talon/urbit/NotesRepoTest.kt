@@ -109,7 +109,7 @@ class NotesRepoTest {
             if (method == "PUT" && path == "/notes/~/v1/notebooks/~bus/recipes/notes/11") """{"body":{"type":"ok"}}""" else null
         }
         assertTrue(notes.updateNote(book, 11, "Simmer all day.", expectedRevision = 3))
-        val sent = ship.api.single()
+        val sent = ship.api.single { !it.startsWith("GET ") }
         assertTrue("\"expectedRevision\":3" in sent && "Simmer all day." in sent, sent)
         assertEquals(false, db.notes().note(book.flagString, 11)?.pending, "no longer marked in flight")
 
@@ -165,7 +165,7 @@ class NotesRepoTest {
             } else null
         }
         assertEquals("notes/~bus/team-notes-3", notes.createGroupNotebook("~bus/garden", "Team notes"))
-        val asked = ship.api.single()
+        val asked = ship.api.single { !it.startsWith("GET ") }
         assertTrue("\"host\":\"~bus\"" in asked && "\"flagName\":\"garden\"" in asked, asked)
         assertNull(notes.createGroupNotebook("not a flag", "x"))
     }
@@ -184,4 +184,42 @@ class NotesRepoTest {
         notes.bootstrap()
         assertTrue(db.notes().allNotebooks().isEmpty())
     }
+
+    // The scries first: a read, where an HTTP request is an event on the
+    // ship, written to its log. %notes' HTTP reads (the same JSON, bare)
+    // only where a scry is not served.
+    @Test
+    fun `a ship that serves the scries is asked nothing over HTTP`() = live {
+        notes.bootstrap()
+        assertEquals(listOf("Pho"), titles())
+        assertTrue(ship.api.none { it.startsWith("GET ") }, "${ship.api}")
+    }
+
+    @Test
+    fun `notebooks are read over HTTP where the scries are not served`() = live {
+        val answers = mapOf(
+            "/notes/~/v1/notebooks" to ship.scries.remove("notes/v0/notebooks"),
+            "/notes/~/v1/notebooks/~bus/recipes/folders" to ship.scries.remove("notes/v0/folders/~bus/recipes"),
+            "/notes/~/v1/notebooks/~bus/recipes/notes" to ship.scries.remove("notes/v0/notes/~bus/recipes"),
+        )
+        ship.answerApi = { method, path, _ -> if (method == "GET") answers[path] else null }
+        notes.bootstrap()
+        assertEquals(listOf("Pho"), titles())
+    }
+
+    @Test
+    fun `a ship that does not answer is not asked again over HTTP`() = live {
+        ship.loseScry = { kotlinx.io.IOException("The network connection was lost.") }
+        notes.bootstrap()
+        assertTrue(ship.api.none { it.startsWith("GET ") }, "silence says nothing of the path: ${ship.api}")
+    }
+
+    @Test
+    fun `every notebook's stream is watched in one request`() = live {
+        ship.scries["notes/v0/notebooks"] = "[${summary()},${summary().replace("recipes", "drinks").replace("Recipes", "Drinks")}]"
+        notes.bootstrap()
+        assertTrue("notes/v0/notes/~bus/recipes/stream" in ship.subscribed && "notes/v0/notes/~bus/drinks/stream" in ship.subscribed)
+        assertTrue(2 in ship.subscribePuts, "${ship.subscribePuts}")
+    }
 }
+

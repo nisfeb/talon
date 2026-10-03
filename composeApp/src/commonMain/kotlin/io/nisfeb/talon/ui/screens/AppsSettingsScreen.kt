@@ -30,7 +30,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.calendar.CalendarRepo
@@ -41,7 +40,6 @@ import io.nisfeb.talon.ui.calendarRow
 import io.nisfeb.talon.ui.groupsRow
 import io.nisfeb.talon.ui.latticeRow
 import io.nisfeb.talon.ui.mailRow
-import io.nisfeb.talon.ui.permitsUrl
 import kotlinx.coroutines.launch
 import io.nisfeb.talon.util.runSuspendCatching
 
@@ -78,7 +76,6 @@ fun AppsSettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    val uriHandler = LocalUriHandler.current
     val installGrubbery = io.nisfeb.talon.mail.LocalGrubberyInstall.current
 
     // One remembered stand-in for a null repo's error flow, rather
@@ -269,8 +266,9 @@ fun AppsSettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (shipUrl != null) {
+                val openPermits = io.nisfeb.talon.ui.rememberPermitsPage(shipUrl)
                 Row(
-                    modifier = Modifier.fillMaxWidth().clickable { uriHandler.openUri(permitsUrl(shipUrl)) }.padding(vertical = 10.dp),
+                    modifier = Modifier.fillMaxWidth().clickable { openPermits() }.padding(vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text("Open permits on your ship", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))

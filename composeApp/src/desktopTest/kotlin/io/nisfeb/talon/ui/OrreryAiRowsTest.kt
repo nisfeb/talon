@@ -206,4 +206,19 @@ class OrreryAiRowsTest {
         waitForIdle()
         assertFalse(shows("Gate threshold"))
     }
+
+    // It was a bare box: one slip from an id that exists, and nothing said so.
+    @Test
+    fun `the jev model offers the provider's models as it is typed`() = rows(
+        both.copy(jev = true, providers = listOf(openRouter.copy(models = openRouter.models + ModelInfo("typesafe/jev-1.14", "TypeSafe: Jev 1.14", zdr = true), offersJev = true), anthropic)),
+    ) { _, _ ->
+        onNodeWithText("Advanced").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Nothing read with it yet today.") }
+        onNode(hasSetTextAction() and hasText("Jev model")).performTextReplacement("jv114")
+        waitUntil(timeoutMillis = 5_000) { shows("TypeSafe: Jev 1.14") }
+        onNodeWithText("TypeSafe: Jev 1.14").performClick()
+        waitForIdle()
+        assertEquals("typesafe/jev-1.14", decided.value.model)
+        assertFalse(shows("TypeSafe: Jev 1.14"), "picked: the list closes")
+    }
 }

@@ -1,5 +1,5 @@
 package io.nisfeb.talon.ui.screens
-import io.nisfeb.talon.util.formatMonthDayTime
+import io.nisfeb.talon.util.formatMonthDayClock
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -26,7 +26,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -225,7 +224,7 @@ internal fun BookmarkRow(
     val body = remember(fullBody) { fullBody.replace('\n', ' ') }
     val title = remember(b.whom, contactMap) { contactMap.conversationLabel(b.whom) }
     val authorLabel = remember(b.author, contactMap) { contactMap.displayName(b.author) }
-    val sentStamp = remember(b.sentMs) { formatMonthDayTime(b.sentMs) }
+    val sentStamp = remember(b.sentMs) { formatMonthDayClock(b.sentMs) }
     val avatar = remember(b.whom, contactMap) { contactMap.conversationAvatar(b.whom) }
     val clipboard = LocalClipboardManager.current
     var menuOpen by remember(b.id, b.whom) { mutableStateOf(false) }

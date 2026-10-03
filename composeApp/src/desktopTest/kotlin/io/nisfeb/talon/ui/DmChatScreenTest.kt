@@ -16,6 +16,10 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.onFirst
+import io.nisfeb.talon.data.ChannelGroupEntity
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
@@ -53,6 +57,7 @@ class DmChatScreenTest {
         seed: suspend AppDatabase.() -> Unit = {},
         whom: String = "~bus",
         prepare: FakeShip.() -> Unit = {},
+        jumpTo: String? = null,
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-dmchat-").toFile()
@@ -74,6 +79,7 @@ class DmChatScreenTest {
                             ourPatp = "~zod", whom = whom,
                             onBack = {}, onOpenThread = { threads += it }, onOpenConversation = {},
                             onOpenImage = {}, onOpenSelfProfile = {},
+                            initialScrollMessageId = jumpTo,
                         )
                     }
                 }
@@ -113,7 +119,7 @@ class DmChatScreenTest {
 
     @Test
     fun `an empty chat the ship sent invites the first message`() = chat(prepare = {
-        scries["chat/v4/dm/~bus/writs/newest/500/heavy"] = """{"writs":{}}"""
+        scries["chat/v4/dm/~bus/writs/newest/50/heavy"] = """{"writs":{}}"""
     }) { _, _ ->
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("No messages yet").fetchSemanticsNodes().isNotEmpty() }
         onAllNodesWithText("Messages could not be loaded").assertCountEquals(0)
@@ -157,7 +163,10 @@ class DmChatScreenTest {
             onNode(hasSetTextAction()).performTextInput("hi ..besp")
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("..bespoke...kazoo", substring = true).fetchSemanticsNodes().size > 1 }
             onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) } // takes the pick
-            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("hi $them", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            // The box shows it as it will read once sent, by its short word
+            // name, not its @p, and holds the @p.
+            waitUntil(timeoutMillis = 5_000) { draft().startsWith("hi ..bespoke...kazoo") }
+            assertTrue(held().startsWith("hi $them"), held())
             waitForIdle()
             onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) } // sends
             waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").isNotEmpty() }
@@ -173,6 +182,18 @@ class DmChatScreenTest {
             onAllNodesWithContentDescription("Send failed").fetchSemanticsNodes().isNotEmpty()
         }
         onNodeWithText("will not land").assertIsDisplayed()
+    }
+
+    // A long post took the whole screen; in the chat it folds to ten lines.
+    @Test
+    fun `a long post folds in the chat, and opens`() = chat(seed = {
+        // As the ship has it: a story, its lines broken, not raw newlines in a JSON string.
+        val story = io.nisfeb.talon.urbit.chatTextToStory((1..20).joinToString("\n") { "line $it" }).toString()
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, story, "/chat"))
+    }) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Show more").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("Show more").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Show less").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -210,8 +231,11 @@ class DmChatScreenTest {
             waitForIdle()
             val y = onNodeWithText(text).fetchSemanticsNode().boundsInRoot.center.y
             val buttons = onAllNodesWithContentDescription("Message actions")
-            buttons[buttons.fetchSemanticsNodes().indices.filter { buttons[it].fetchSemanticsNode().boundsInRoot.top <= y }
-                .maxBy { buttons[it].fetchSemanticsNode().boundsInRoot.top }].performClick()
+            // Under load the list can still be laying out; no button yet is
+            // another try, not a failure.
+            val nearest = buttons.fetchSemanticsNodes().indices.filter { buttons[it].fetchSemanticsNode().boundsInRoot.top <= y }
+                .maxByOrNull { buttons[it].fetchSemanticsNode().boundsInRoot.top } ?: continue
+            buttons[nearest].performClick()
             if (runCatching { waitUntil(timeoutMillis = 1_500) { opened() } }.isSuccess) return
         }
         waitUntil(timeoutMillis = 1_000) { opened() }
@@ -327,8 +351,13 @@ class DmChatScreenTest {
 
     // ─── emoji by name ─────────────────────────────────────────────
 
+    /** What the composer shows. A mention shows as the name it will read as once sent. */
     private fun ComposeUiTest.draft(): String =
         onNode(hasSetTextAction()).fetchSemanticsNode().config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.EditableText)?.text.orEmpty()
+
+    /** What the composer holds, and sends: a mention's @p. */
+    private fun ComposeUiTest.held(): String =
+        onNode(hasSetTextAction()).fetchSemanticsNode().config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.InputText)?.text.orEmpty()
 
     @Test
     fun `a colon and a name offer emoji, Enter takes the first, and the next Enter sends`() = chat { ship, _ ->
@@ -354,14 +383,16 @@ class DmChatScreenTest {
     // ─── people, commands, and the last thing said ─────────────────
 
     @Test
-    fun `an @ and a name offer people, and Enter puts in their @p`() = chat(seed = {
+    fun `an @ and a name offer people, and Enter puts them in, shown by name`() = chat(seed = {
         contacts().upsertAll(listOf(io.nisfeb.talon.data.ContactEntity("~sampel-palnet", "Sam", null, null)))
         messages().upsert(msg("~bus/170141184506", "~bus", "hello", 1_000))
     }) { ship, _ ->
         onNode(hasSetTextAction()).performTextInput("ask @Sa")
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Sam", substring = true).fetchSemanticsNodes().isNotEmpty() }
         onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
-        waitUntil(timeoutMillis = 5_000) { draft() == "ask ~sampel-palnet " }
+        // Shown as it will read once sent; held, and sent, as the @p.
+        waitUntil(timeoutMillis = 5_000) { draft() == "ask Sam " }
+        assertEquals("ask ~sampel-palnet ", held())
         assertTrue(ship.pokesTo("chat").isEmpty())
     }
 
@@ -388,4 +419,46 @@ class DmChatScreenTest {
         val edit = ship.pokesTo("channels").single().json.toString()
         assertTrue("\"edit\"" in edit && "170.141.184.507" in edit && "newest, fixed" in edit, edit)
     }
+
+    // ─── the window: a long chat is not read whole on every write ─────
+
+    private fun long(n: Int): suspend AppDatabase.() -> Unit = {
+        messages().upsertAll((0 until n).map { i -> msg("~bus/1701411845%03d".format(i), "~bus", "post %03d".format(i), 1_000L * (i + 1)) })
+    }
+
+    @Test
+    fun `a long chat shows its newest, and scrolling back shows the rest kept here, not asked of the ship`() = chat(seed = long(260)) { ship, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("post 259").fetchSemanticsNodes().isNotEmpty() }
+        // The first window: the newest 200 and the day's divider. At its top
+        // the rest kept here is taken in, and the ship is not asked.
+        onNode(hasScrollAction()).performScrollToIndex(200)
+        waitUntil(timeoutMillis = 5_000) { runCatching { onNode(hasScrollAction()).performScrollToIndex(260) }.isSuccess }
+        assertTrue(ship.scried.none { "/older/" in it && "/30/" in it }, "posts kept here were asked of the ship: ${ship.scried.filter { "/older/" in it }}")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("post 000").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun `a jump to a post older than the window lands on it`() = chat(seed = long(260), jumpTo = "~bus/1701411845005") { _, _ ->
+        waitUntil(timeoutMillis = 10_000) { onAllNodesWithText("post 005").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("post 005").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a pinned post older than the window is gone to from the banner`() = chat(
+        whom = "chat/~bus/general",
+        seed = {
+            messages().upsertAll((0 until 260).map { i ->
+                MessageEntity("chat/~bus/general", "1701411845%03d".format(i), "~bus", 1_000L * (i + 1), """[{"inline":["post %03d"]}]""".format(i), "/chat")
+            })
+            groups().upsertChannelGroups(listOf(ChannelGroupEntity("chat/~bus/general", "~bus/garden", pinnedPostId = "1701411845005")))
+        },
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("post 259").fetchSemanticsNodes().isNotEmpty() }
+        // The banner may show the post's words; the row itself is not drawn.
+        val before = onAllNodesWithText("post 005").fetchSemanticsNodes().size
+        onAllNodesWithContentDescription("Pinned").onFirst().performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("post 005").fetchSemanticsNodes().size > before }
+        onAllNodesWithText("Pinned message is older than what's loaded", substring = true).assertCountEquals(0)
+    }
 }
+

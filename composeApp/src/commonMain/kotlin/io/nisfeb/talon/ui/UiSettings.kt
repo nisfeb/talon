@@ -32,6 +32,18 @@ interface UiSettings {
     val themeSettings: StateFlow<io.nisfeb.talon.ui.theme.ThemeSettings>
     fun setThemeSettings(settings: io.nisfeb.talon.ui.theme.ThemeSettings)
 
+    /** Installed fonts and the one text is set in; synced with the other ui-prefs. */
+    val fontSettings: StateFlow<FontSettings>
+    fun setFontSettings(settings: FontSettings)
+
+    /**
+     * Keyboard shortcuts the owner set over the defaults, by action id
+     * ([BINDABLE]); a null unbinds a default. Per device: it is about
+     * this keyboard. Kept nowhere by a host without shortcuts.
+     */
+    val keybinds: StateFlow<Map<String, KeyCombo?>> get() = NoKeybinds
+    fun setKeybinds(binds: Map<String, KeyCombo?>) {}
+
     /** Microphone processing for calls. Per device: it depends on the mic, not the person. */
     val micProcessing: StateFlow<io.nisfeb.talon.call.MicProcessing>
     fun setMicProcessing(value: io.nisfeb.talon.call.MicProcessing)
@@ -312,6 +324,16 @@ class InMemoryUiSettings(
     }
     private val _themeSettings = MutableStateFlow(io.nisfeb.talon.ui.theme.ThemeSettings())
     override val themeSettings: StateFlow<io.nisfeb.talon.ui.theme.ThemeSettings> = _themeSettings.asStateFlow()
+    private val _fontSettings = MutableStateFlow(FontSettings())
+    override val fontSettings: StateFlow<FontSettings> = _fontSettings.asStateFlow()
+    override fun setFontSettings(settings: FontSettings) {
+        _fontSettings.value = settings
+    }
+    private val _keybinds = MutableStateFlow<Map<String, KeyCombo?>>(emptyMap())
+    override val keybinds: StateFlow<Map<String, KeyCombo?>> = _keybinds.asStateFlow()
+    override fun setKeybinds(binds: Map<String, KeyCombo?>) {
+        _keybinds.value = binds
+    }
     override fun setThemeSettings(settings: io.nisfeb.talon.ui.theme.ThemeSettings) {
         _themeSettings.value = settings
     }
@@ -438,3 +460,7 @@ class InMemoryUiSettings(
         _fontScale.value = normalizeFontScale(scale)
     }
 }
+
+/** [UiSettings.keybinds] where a host keeps none: the defaults alone. */
+private val NoKeybinds: StateFlow<Map<String, KeyCombo?>> = MutableStateFlow<Map<String, KeyCombo?>>(emptyMap()).asStateFlow()
+

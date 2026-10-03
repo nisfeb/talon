@@ -4,6 +4,7 @@ import androidx.room.ConstructedBy
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.RoomDatabaseConstructor
+import androidx.sqlite.execSQL
 
 /**
  * KMP-aware copy of the production AppDatabase. The `@Database`
@@ -43,9 +44,6 @@ import androidx.room.RoomDatabaseConstructor
         MessageEmbeddingEntity::class,
         BookmarkFolderEntity::class,
         BookmarkFolderMemberEntity::class,
-        WatchwordEntity::class,
-        WatchwordHitEntity::class,
-        WatchwordChatExcludeEntity::class,
         MessageMediaEntity::class,
         RailItemPrefEntity::class,
         DmInviteEntity::class,
@@ -64,7 +62,7 @@ import androidx.room.RoomDatabaseConstructor
         CometDomeEntity::class,
         UrbUnfurlEntity::class,
     ],
-    version = 50,
+    version = 53,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -83,7 +81,6 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun reactionUsage(): ReactionUsageDao
     abstract fun embeddings(): EmbeddingDao
     abstract fun bookmarkFolders(): BookmarkFolderDao
-    abstract fun watchwords(): WatchwordsDao
     abstract fun messageMedia(): MessageMediaDao
     abstract fun railItemPrefs(): RailItemPrefDao
     abstract fun dmInvites(): DmInviteDao
@@ -112,4 +109,35 @@ expect abstract class AppDatabase : RoomDatabase {
 @Suppress("NO_ACTUAL_FOR_EXPECT")
 expect object AppDatabaseConstructor : RoomDatabaseConstructor<AppDatabase> {
     override fun initialize(): AppDatabase
+}
+
+/**
+ * 51 to 52: watchwords were taken out of Talon, and their three tables
+ * with them. Named here so every platform drops the same ones; without a
+ * step the fallback would have dropped every table instead.
+ */
+internal val WATCHWORDS_DROP_SQL = listOf(
+    "DROP TABLE IF EXISTS `watchword_hits`",
+    "DROP TABLE IF EXISTS `watchword_chat_excludes`",
+    "DROP TABLE IF EXISTS `watchwords`",
+)
+
+/** See [WATCHWORDS_DROP_SQL]. Android runs the same statements its own way. */
+val WATCHWORDS_DROP_MIGRATION = object : androidx.room.migration.Migration(51, 52) {
+    override fun migrate(connection: androidx.sqlite.SQLiteConnection) {
+        WATCHWORDS_DROP_SQL.forEach { connection.execSQL(it) }
+    }
+}
+
+/**
+ * 52 to 53: a turn keeps what its run did ([AssistantHistoryEntity.log]).
+ * One column; the fallback would have dropped every table for it.
+ */
+internal const val ASSISTANT_LOG_SQL = "ALTER TABLE `assistant_history` ADD COLUMN `log` TEXT NOT NULL DEFAULT ''"
+
+/** See [ASSISTANT_LOG_SQL]. Android runs the same statement its own way. */
+val ASSISTANT_LOG_MIGRATION = object : androidx.room.migration.Migration(52, 53) {
+    override fun migrate(connection: androidx.sqlite.SQLiteConnection) {
+        connection.execSQL(ASSISTANT_LOG_SQL)
+    }
 }

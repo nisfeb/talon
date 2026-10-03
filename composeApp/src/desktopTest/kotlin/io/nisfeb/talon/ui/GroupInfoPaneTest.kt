@@ -134,14 +134,6 @@ class GroupInfoPaneTest {
     }
 
     @Test
-    fun `excluding the channel from watchwords sticks and syncs`() = pane { ship, _ ->
-        showing("Exclude from watchwords")
-        onNode(isToggleable()).performClick()
-        waitUntil(timeoutMillis = 5_000) { runCatching { onNode(isToggleable()).assertIsOn() }.isSuccess }
-        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("settings").any { "watchword" in it.json.toString() && nest in it.json.toString() } }
-    }
-
-    @Test
     fun `shared media is counted by kind and opens that kind`() = pane(media = listOf("Photo", "Photo", "Link")) { _, _ ->
         showing("📷")
         onNodeWithText("📷").performClick()

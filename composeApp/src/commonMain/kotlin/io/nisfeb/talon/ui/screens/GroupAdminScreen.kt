@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.submitOnEnter
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.foundation.ExperimentalFoundationApi
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
@@ -18,8 +19,6 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import io.nisfeb.talon.ui.isCallsSupported
 import androidx.compose.material3.Switch
 import androidx.compose.foundation.rememberScrollState
@@ -33,7 +32,6 @@ import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -82,7 +80,7 @@ fun GroupAdminScreen(
 
     var group by remember { mutableStateOf<AdminGroup?>(null) }
     var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     var memberActionTarget by remember {
         mutableStateOf<AdminMember?>(null)
     }
@@ -90,7 +88,7 @@ fun GroupAdminScreen(
     var pendingBan by remember { mutableStateOf<String?>(null) }
     var newChannelOpen by remember { mutableStateOf(false) }
     var creatingChannel by remember { mutableStateOf(false) }
-    var newChannelError by remember { mutableStateOf<String?>(null) }
+    var newChannelError by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     var savingMeta by remember { mutableStateOf(false) }
 
     // Contact map for nicknames on member rows. Updates live as
@@ -101,11 +99,11 @@ fun GroupAdminScreen(
      *  action's refusal stays until dismissed, or the refresh after it
      *  (its rollback, or another action's) cleared it before anyone
      *  could read it, and the row just came back, unexplained. */
-    var refreshSaid by remember { mutableStateOf<String?>(null) }
+    var refreshSaid by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     suspend fun refresh() {
         runCatching { repo.fetchGroupAdmin(flag) }
             .onSuccess { group = it; if (error == refreshSaid) error = null; refreshSaid = null }
-            .onFailure { e -> (e.message ?: e::class.simpleName).let { error = it; refreshSaid = it } }
+            .onFailure { e -> io.nisfeb.talon.util.problemOf("Couldn't load the group", e).let { error = it; refreshSaid = it } }
     }
 
     LaunchedEffect(flag) {
@@ -119,7 +117,7 @@ fun GroupAdminScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
+            io.nisfeb.talon.ui.IconButton(tip = "Back", onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
@@ -128,8 +126,7 @@ fun GroupAdminScreen(
                 modifier = Modifier.padding(start = 4.dp).weight(1f),
                 maxLines = 1,
             )
-            IconButton(
-                enabled = !creatingChannel,
+            io.nisfeb.talon.ui.IconButton(tip = "New channel", enabled = !creatingChannel,
                 onClick = { newChannelOpen = true },
             ) {
                 Icon(Icons.Filled.Add, contentDescription = "New channel")
@@ -146,12 +143,10 @@ fun GroupAdminScreen(
             // failed *action* on a loaded group renders as a dismissible
             // banner instead — replacing the body would throw away
             // unsaved metadata edits.
-            error != null && group == null -> Text(
-                "Couldn't load: $error",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(24.dp),
-            )
+            error != null && group == null -> Column(Modifier.padding(vertical = 16.dp)) {
+                io.nisfeb.talon.ui.ProblemLine(error!!)
+                TextButton(onClick = { scope.launch { loading = true; refresh(); loading = false } }, modifier = Modifier.padding(start = 8.dp)) { Text("Try again") }
+            }
 
             group != null -> Column {
                 error?.let { e ->
@@ -160,13 +155,7 @@ fun GroupAdminScreen(
                             .padding(horizontal = 16.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            e,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 2,
-                        )
+                        androidx.compose.foundation.layout.Box(Modifier.weight(1f)) { io.nisfeb.talon.ui.ProblemLine(e) }
                         TextButton(onClick = { error = null }) { Text("Dismiss") }
                     }
                 }
@@ -185,7 +174,7 @@ fun GroupAdminScreen(
                         runCatching {
                             repo.updateGroupMeta(flag, title, desc, img, cover)
                         }.onSuccess { refresh() }
-                            .onFailure { error = it.message ?: it::class.simpleName }
+                            .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't save the group's details", it) }
                         savingMeta = false
                     }
                 },
@@ -193,7 +182,7 @@ fun GroupAdminScreen(
                     scope.launch {
                         runCatching { repo.inviteToGroup(flag, ship) }
                             .onSuccess { scope.launch { kotlinx.coroutines.delay(500); refresh() } }
-                            .onFailure { error = it.message ?: it::class.simpleName }
+                            .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't invite $ship", it) }
                     }
                 },
                 onRevokeInvite = { ship ->
@@ -219,7 +208,7 @@ fun GroupAdminScreen(
                             kotlinx.coroutines.delay(500)
                             refresh()
                         }.onFailure {
-                            error = it.message ?: it::class.simpleName
+                            error = io.nisfeb.talon.util.problemOf("Couldn't take back the invite", it)
                             // Rollback by re-fetching.
                             refresh()
                         }
@@ -235,7 +224,7 @@ fun GroupAdminScreen(
                                 refresh()
                             }
                             .onFailure {
-                                error = it.message ?: it::class.simpleName
+                                error = io.nisfeb.talon.util.problemOf("Couldn't let $ship in", it)
                                 refresh()
                             }
                     }
@@ -250,7 +239,7 @@ fun GroupAdminScreen(
                                 refresh()
                             }
                             .onFailure {
-                                error = it.message ?: it::class.simpleName
+                                error = io.nisfeb.talon.util.problemOf("Couldn't turn $ship away", it)
                                 refresh()
                             }
                     }
@@ -265,7 +254,7 @@ fun GroupAdminScreen(
                                 refresh()
                             }
                             .onFailure {
-                                error = it.message ?: it::class.simpleName
+                                error = io.nisfeb.talon.util.problemOf("Couldn't unban $ship", it)
                                 refresh()
                             }
                     }
@@ -299,7 +288,7 @@ fun GroupAdminScreen(
                                 runCatching {
                                     repo.setMemberRole(flag, target.ship, "admin", add = !hasAdminRole)
                                 }.onSuccess { refresh() }
-                                    .onFailure { error = it.message ?: it::class.simpleName }
+                                    .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't change ${target.ship}'s role", it) }
                             }
                         }) {
                             Text(if (hasAdminRole) "Revoke admin" else "Make admin")
@@ -333,13 +322,13 @@ fun GroupAdminScreen(
             title = { Text("Kick $ship?") },
             text = { Text("They'll be removed from the group but can re-join.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     val s = ship
                     pendingKick = null
                     scope.launch {
                         runCatching { repo.kickFromGroup(flag, s) }
                             .onSuccess { refresh() }
-                            .onFailure { error = it.message ?: it::class.simpleName }
+                            .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't kick $s", it) }
                     }
                 }) { Text("Kick") }
             },
@@ -360,13 +349,13 @@ fun GroupAdminScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     val s = ship
                     pendingBan = null
                     scope.launch {
                         runCatching { repo.banFromGroup(flag, s) }
                             .onSuccess { refresh() }
-                            .onFailure { error = it.message ?: it::class.simpleName }
+                            .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't ban $s", it) }
                     }
                 }) { Text("Ban") }
             },
@@ -400,7 +389,7 @@ fun GroupAdminScreen(
                         // Into the dialog, not the screen: the screen-level
                         // error renders behind the dialog where it can't
                         // be seen.
-                        newChannelError = it.message ?: it::class.simpleName
+                        newChannelError = io.nisfeb.talon.util.problemOf("Couldn't make the channel", it)
                     }
                 }
             },
@@ -413,7 +402,7 @@ private fun NewChannelDialog(
     busy: Boolean,
     onDismiss: () -> Unit,
     onCreate: (kind: String, title: String, description: String) -> Unit,
-    error: String? = null,
+    error: io.nisfeb.talon.util.Problem? = null,
 ) {
     var kind by remember { mutableStateOf("chat") }
     var title by remember { mutableStateOf("") }
@@ -483,13 +472,7 @@ private fun NewChannelDialog(
                         )
                     }
                 }
-                error?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                error?.let { io.nisfeb.talon.ui.ProblemLine(it) }
             }
         },
         confirmButton = {
@@ -521,7 +504,7 @@ private fun AdminBody(
     onDenyRequest: (ship: String) -> Unit,
     onUnban: (ship: String) -> Unit,
     onMemberLongPress: (AdminMember) -> Unit,
-    onReportError: (String) -> Unit,
+    onReportError: (io.nisfeb.talon.util.Problem) -> Unit,
     /** A channel's settings changed: read the group again. */
     onChannelChanged: () -> Unit = {},
 ) {
@@ -540,7 +523,7 @@ private fun AdminBody(
     fun launchPicker(slot: String) {
         scope.launch {
             val picked = runCatching { pickImage() }
-                .onFailure { onReportError("couldn't read image: ${it.message ?: it::class.simpleName}") }
+                .onFailure { onReportError(io.nisfeb.talon.util.problemOf("Couldn't read the image", it)) }
                 .getOrNull() ?: return@launch
             uploading = true
             runCatching {
@@ -555,7 +538,7 @@ private fun AdminBody(
             }.onSuccess { url ->
                 if (slot == "image") image = url else cover = url
             }.onFailure { e ->
-                onReportError("upload failed: ${e.message ?: e::class.simpleName}")
+                onReportError(io.nisfeb.talon.util.problemOf("Couldn't upload the image", e))
             }
             uploading = false
         }
@@ -714,11 +697,17 @@ private fun AdminBody(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            val invite = {
+                invitePatp?.let { onInvite(it) }
+                inviteText = ""
+            }
             OutlinedTextField(
                 value = inviteText,
                 onValueChange = { inviteText = it },
                 label = { Text("~ship, or a word name") },
-                modifier = Modifier.weight(1f),
+                keyboardOptions = io.nisfeb.talon.ui.GoKeyboard,
+                keyboardActions = io.nisfeb.talon.ui.goActions { if (invitePatp != null) invite() },
+                modifier = Modifier.weight(1f).submitOnEnter(invitePatp != null, invite),
                 // A comet's @p is fifty-six characters and its full
                 // name twelve words; on one line you could not see what
                 // you had pasted, and in three the rest had to scroll
@@ -728,10 +717,7 @@ private fun AdminBody(
             )
             Button(
                 enabled = invitePatp != null,
-                onClick = {
-                    invitePatp?.let { onInvite(it) }
-                    inviteText = ""
-                },
+                onClick = invite,
             ) { Text("Invite") }
         }
         // Contacts, offered as you type. A short name keeps two words
@@ -1036,7 +1022,6 @@ private fun PartyLineSection(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val clipboard = LocalClipboardManager.current
             if (link == null) {
                 OutlinedButton(onClick = { scope.launch { controller.shareRoom(host, roomName) } }) {
                     Text("Create listen link")
@@ -1049,9 +1034,7 @@ private fun PartyLineSection(
                     maxLines = 1,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { clipboard.setText(AnnotatedString(link!!.url)) }) {
-                    Text("Copy")
-                }
+                link?.url?.let { url -> io.nisfeb.talon.ui.CopyButton({ url }) }
                 // Links expire, so there has to be a way to get
                 // another one — the button used to vanish for good
                 // after the first press.
@@ -1438,7 +1421,7 @@ private fun ChannelSettingsDialog(
 ) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
-    var note by remember { mutableStateOf<String?>(null) }
+    var note by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     var title by remember(c.nest, c.title) { mutableStateOf(c.title) }
     var description by remember(c.nest, c.description) { mutableStateOf(c.description) }
     var readers by remember(c.nest, c.readers) { mutableStateOf(c.readers) }
@@ -1454,7 +1437,7 @@ private fun ChannelSettingsDialog(
             note = null
             runCatching { block() }
                 .onSuccess { after(); onChanged() }
-                .onFailure { note = "Your ship did not take it: ${it.message ?: it::class.simpleName}" }
+                .onFailure { note = io.nisfeb.talon.util.problemOf("Your ship did not take it", it) }
             busy = false
         }
     }
@@ -1514,7 +1497,7 @@ private fun ChannelSettingsDialog(
                 TextButton(enabled = !busy, onClick = { confirmDelete = true }) {
                     Text("Delete channel", color = MaterialTheme.colorScheme.error)
                 }
-                note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                note?.let { io.nisfeb.talon.ui.ProblemLine(it) }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
@@ -1525,7 +1508,7 @@ private fun ChannelSettingsDialog(
             title = { Text("Delete ${c.title.ifBlank { "this channel" }}?") },
             text = { Text("It leaves the group for every member.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     confirmDelete = false
                     act({ repo.deleteChannel(flag, c.nest) }, after = onDismiss)
                 }) { Text("Delete") }
@@ -1651,7 +1634,7 @@ private fun MemberRow(
             }
         }
         if (onManage != null) {
-            androidx.compose.material3.IconButton(onClick = onManage, modifier = Modifier.size(32.dp)) {
+            io.nisfeb.talon.ui.IconButton(tip = "Manage ${contactMap.displayName(member.ship)}", onClick = onManage, modifier = Modifier.size(32.dp)) {
                 androidx.compose.material3.Icon(
                     androidx.compose.material.icons.Icons.Filled.MoreVert,
                     contentDescription = "Manage ${contactMap.displayName(member.ship)}",

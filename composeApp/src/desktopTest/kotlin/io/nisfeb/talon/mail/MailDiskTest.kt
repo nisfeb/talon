@@ -19,6 +19,7 @@ import io.nisfeb.talon.data.ORRERY_HANDOFF_MIGRATION
 import io.nisfeb.talon.data.ORRERY_SHIP_WORK_MIGRATION
 import io.nisfeb.talon.data.MESSAGE_SEARCH_TEXT_MIGRATION
 import io.nisfeb.talon.data.URB_UNFURLS_MIGRATION
+import io.nisfeb.talon.data.MESSAGE_STATUS_INDEX_MIGRATION
 import io.nisfeb.talon.data.MAIL_ROWS_MIGRATION
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -53,7 +54,7 @@ class MailDiskTest {
     // No destructive fallback: a migration that does not match the entity fails here.
     private fun db() = Room.databaseBuilder<AppDatabase>(name = dbPath)
         .setDriver(BundledSQLiteDriver())
-        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION, COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION)
+        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION, COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, io.nisfeb.talon.data.WATCHWORDS_DROP_MIGRATION, io.nisfeb.talon.data.ASSISTANT_LOG_MIGRATION)
         .build()
 
     @Test
@@ -66,6 +67,7 @@ class MailDiskTest {
             // Made at 44 in an older shape, which the later migrations read.
             c.execSQL("DROP TABLE orrery_accounts")
             c.execSQL("INSERT INTO rail_item_prefs (itemName, visible) VALUES ('Mail', 0)")
+            c.execSQL("ALTER TABLE assistant_history DROP COLUMN log") // added at 53
             c.execSQL("PRAGMA user_version = 41")
             c.close()
         }

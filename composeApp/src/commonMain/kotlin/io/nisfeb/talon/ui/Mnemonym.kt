@@ -64,6 +64,14 @@ object Mnemonym {
         if (added) AzimuthNames.generation.value = AzimuthNames.generation.value + 1
     }
 
+    /** [ship]'s Jael says no again ([CometDomes.recheck]): back to the two-dot form. */
+    fun unmarkGroundwire(ship: String) {
+        val removed = synchronized(nymLock) {
+            groundwire.remove(ship).also { if (it) { nymCache.remove(ship); abridgedCache.remove(ship) } }
+        }
+        if (removed) AzimuthNames.generation.value = AzimuthNames.generation.value + 1
+    }
+
     /** Display form: the scheme's own abridgement, `..first...last`,
      *  which is two words however long the nym is -- the same shape as
      *  the truncated comet @p people already read. Short nyms (a value

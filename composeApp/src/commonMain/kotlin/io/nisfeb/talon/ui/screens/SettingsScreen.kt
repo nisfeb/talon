@@ -32,7 +32,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.Surface
@@ -350,14 +349,23 @@ fun SettingsScreen(
                 }) { Text("New theme") }
                 themeSettings.active?.let { t ->
                     io.nisfeb.talon.ui.OutlinedButton(onClick = { themeDraft = t }) { Text("Edit") }
-                    TextButton(onClick = {
-                        uiSettings.setThemeSettings(
-                            themeSettings.copy(
-                                themes = themeSettings.themes.filter { it.id != t.id },
-                                activeId = null,
-                            ),
-                        )
-                    }) { Text("Delete") }
+                    var deletingTheme by remember { mutableStateOf(false) }
+                    TextButton(onClick = { deletingTheme = true }) { Text("Delete") }
+                    // A theme is a few minutes of picking colors, and gone here
+                    // and on every device it travelled to with one tap.
+                    if (deletingTheme) io.nisfeb.talon.ui.ConfirmDestructive(
+                        title = "Delete ${t.name}?",
+                        text = "It goes from this device and every device your settings reach.",
+                        onConfirm = {
+                            uiSettings.setThemeSettings(
+                                themeSettings.copy(
+                                    themes = themeSettings.themes.filter { it.id != t.id },
+                                    activeId = null,
+                                ),
+                            )
+                        },
+                        onDismiss = { deletingTheme = false },
+                    )
                 }
             }
             themeDraft?.let { d ->
@@ -390,6 +398,8 @@ fun SettingsScreen(
                     )
                 }
             }
+            Spacer(Modifier.height(8.dp))
+            FontSection(uiSettings)
             Spacer(Modifier.height(8.dp))
 
             // ── Ship naming ─────────────────────────────────────────
@@ -569,6 +579,33 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(8.dp))
 
+            // Every time shown, not only the dial's: it sat under Home's
+            // clock while the chats, search and calendar went their own way.
+            Text(
+                "Time",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = !homeTwentyFourHour,
+                    onClick = { uiSettings.setHomeTwentyFourHour(false) },
+                    label = { Text("12-hour") },
+                )
+                FilterChip(
+                    selected = homeTwentyFourHour,
+                    onClick = { uiSettings.setHomeTwentyFourHour(true) },
+                    label = { Text("24-hour") },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+
+            // Where there is a keyboard to press them on.
+            if (!io.nisfeb.talon.ui.isTouchPrimary) {
+                KeybindsSection(uiSettings)
+                Spacer(Modifier.height(8.dp))
+            }
+
             }
             if (safeTab == SettingsTab.Home) {
             Text(
@@ -586,7 +623,7 @@ fun SettingsScreen(
                 modifier = Modifier.padding(top = 4.dp),
             )
             Text(
-                "How the dial reads out temperature and the hour. Kept on this " +
+                "How the dial reads out temperature. Kept on this " +
                     "device rather than on the ship: which units somebody reads " +
                     "is a fact about them, not about their identity.",
                 style = MaterialTheme.typography.bodySmall,
@@ -604,20 +641,8 @@ fun SettingsScreen(
                     label = { Text("Celsius") },
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = !homeTwentyFourHour,
-                    onClick = { uiSettings.setHomeTwentyFourHour(false) },
-                    label = { Text("12-hour") },
-                )
-                FilterChip(
-                    selected = homeTwentyFourHour,
-                    onClick = { uiSettings.setHomeTwentyFourHour(true) },
-                    label = { Text("24-hour") },
-                )
-            }
             Text(
-                "The place the dial uses is set on the dial itself.",
+                "The hour reads as set under Appearance, Time. The place the dial uses is set on the dial itself.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
@@ -767,7 +792,7 @@ fun SettingsScreen(
                     visualTransformation = if (revealBrave) VisualTransformation.None
                     else PasswordVisualTransformation(),
                     trailingIcon = {
-                        IconButton(onClick = { revealBrave = !revealBrave }) {
+                        io.nisfeb.talon.ui.IconButton(tip = if (revealBrave) "Hide key" else "Show key", onClick = { revealBrave = !revealBrave }) {
                             Icon(
                                 imageVector = if (revealBrave) TalonIcons.VisibilityOff
                                 else TalonIcons.Visibility,
@@ -2048,7 +2073,7 @@ private fun SettingsTabRow(
 
 /** A hex field with a swatch; tapping the swatch opens a colour wheel under the row. */
 @Composable
-private fun ColorRow(label: String, value: String, onValue: (String) -> Unit) {
+internal fun ColorRow(label: String, value: String, onValue: (String) -> Unit) {
     val parsed = io.nisfeb.talon.ui.parseHexColor(value)
     var wheelOpen by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -2308,4 +2333,90 @@ private fun HomeWidgetRow(
             }
         }
     }
+}
+
+/**
+ * The font text is set in, and its size. The font travels to the
+ * owner's other devices (one they install is kept on their ship); the
+ * size stays with this device, whose screen it is for.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
+    val fonts by uiSettings.fontSettings.collectAsState()
+    val scale by uiSettings.fontScale.collectAsState()
+    val repo = io.nisfeb.talon.ui.LocalFontRepo.current
+    val status = repo?.status?.collectAsState()?.value
+    val pick = io.nisfeb.talon.util.rememberAnyFilePicker()
+    val scope = rememberCoroutineScope()
+    var removing by remember { mutableStateOf<String?>(null) }
+    val files = repo?.files ?: io.nisfeb.talon.ui.FontFiles.default
+    Text("Font", style = MaterialTheme.typography.bodyMedium)
+    Text(
+        "Set on all your devices. A font you add is kept on your ship, private to you, and your other devices fetch it. A .ttf or .otf put in talon/fonts on your ship's grubbery is offered too.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val choices = listOf<Pair<String?, String>>(
+            null to "System",
+            io.nisfeb.talon.ui.FontSettings.SERIF to "Serif",
+            io.nisfeb.talon.ui.FontSettings.MONOSPACE to "Monospace",
+        ) + fonts.families.map { it to it }
+        choices.forEach { (family, label) ->
+            // Each named in its own face, so the choice can be seen.
+            val face = remember(fonts, family) { io.nisfeb.talon.ui.appFontFamily(fonts.copy(family = family), files) }
+            FilterChip(
+                selected = fonts.family == family,
+                onClick = { uiSettings.setFontSettings(fonts.copy(family = family)) },
+                label = { Text(label, fontFamily = face) },
+            )
+        }
+    }
+    if (repo != null) {
+        TextButton(onClick = {
+            scope.launch {
+                val f = runCatching { pick() }.getOrNull() ?: return@launch
+                repo.install(f.bytes, f.displayName)
+            }
+        }) { Text("Add a font (.ttf or .otf)…") }
+        fonts.families.forEach { family ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val n = fonts.fonts.count { it.family == family }
+                Text(
+                    "$family · $n file${if (n == 1) "" else "s"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { removing = family }) { Text("Remove") }
+            }
+        }
+        status?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    removing?.let { family ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("Remove $family?") },
+            text = { Text("It goes from all your devices and from your ship. To use it again, add the file again.") },
+            confirmButton = { io.nisfeb.talon.ui.DestructiveTextButton(onClick = { repo?.remove(family); removing = null }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("Keep") } },
+        )
+    }
+    Spacer(Modifier.height(8.dp))
+    Text("Text size · ${(scale * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
+    Text(
+        "On this device only.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    androidx.compose.material3.Slider(
+        value = scale,
+        onValueChange = { uiSettings.setFontScale(it) },
+        valueRange = io.nisfeb.talon.ui.FONT_SCALE_MIN..io.nisfeb.talon.ui.FONT_SCALE_MAX,
+        // One stop per step of the keyboard's Ctrl +/-.
+        steps = kotlin.math.round((io.nisfeb.talon.ui.FONT_SCALE_MAX - io.nisfeb.talon.ui.FONT_SCALE_MIN) / io.nisfeb.talon.ui.FONT_SCALE_STEP).toInt() - 1,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }

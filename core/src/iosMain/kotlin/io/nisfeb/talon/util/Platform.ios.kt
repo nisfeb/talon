@@ -47,3 +47,10 @@ actual val cacheDirPath: String
             platform.Foundation.NSCachesDirectory, platform.Foundation.NSUserDomainMask, true,
         ).first() as String
     ).trimEnd('/')
+
+actual val dataDirPath: String
+    get() = (
+        platform.Foundation.NSSearchPathForDirectoriesInDomains(
+            platform.Foundation.NSApplicationSupportDirectory, platform.Foundation.NSUserDomainMask, true,
+        ).first() as String
+    ).trimEnd('/')

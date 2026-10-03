@@ -12,7 +12,7 @@ private val ZERO_STATUSES_SEEN: StateFlow<Long> = MutableStateFlow(0L).asStateFl
  * Narrow interface — the slice of the rich [SettingsSyncImpl] that
  * [TlonChatRepo]'s session loop pokes. Kept minimal so commonMain
  * doesn't depend on the full Android-flavored impl: UI callers reach
- * pushAiSettings / pushWatchwords / etc. on the concrete class
+ * pushAiSettings / etc. on the concrete class
  * directly.
  *
  * Android wires the real [SettingsSyncImpl] (which implements this).
@@ -40,6 +40,9 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
      */
     fun attachUiSettings(settings: io.nisfeb.talon.ui.UiSettings, scope: kotlinx.coroutines.CoroutineScope) {}
     suspend fun bootstrap()
+
+    /** A quick reconnect's: watch the desk again, without reading it whole. */
+    suspend fun resubscribe() = bootstrap()
     suspend fun applySettingsEvent(payload: JsonObject)
 
     /**
@@ -131,12 +134,6 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
     // Toggles whether a RailItem is visible on the desktop sidebar.
     // Default no-op for tests / hosts that don't sync.
     suspend fun setRailItemVisibility(item: io.nisfeb.talon.ui.RailItem, visible: Boolean) {}
-
-    // ───────── watchwords ─────────
-    // Mirror one watchword change to the ship. Watchwords calls it, and
-    // only while watchword sync is on (or for the switch itself).
-
-    suspend fun mirrorWatchword(change: io.nisfeb.talon.ai.WatchwordChange) {}
 
     // ───────── folder mutations ─────────
 

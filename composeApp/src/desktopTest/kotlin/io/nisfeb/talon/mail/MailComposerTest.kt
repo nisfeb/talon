@@ -128,7 +128,8 @@ class MailComposerTest {
         onNodeWithText("~zod").assertIsDisplayed()
         onNodeWithText("Message").performTextInput("answering")
         onNodeWithText("Send").performClick()
-        waitUntil(timeoutMillis = 5_000) { sent }
+        // Closed at Send; the message goes on behind it.
+        waitUntil(timeoutMillis = 5_000) { sent && seen.any { it.url.encodedPath.endsWith("/api/send") } }
 
         // One send path since auspex 14: the send route, then the draft
         // it was saved as dropped.
@@ -455,19 +456,22 @@ class MailComposerTest {
     @Test
     fun `a send the ship refuses says why, and the message stays`() = runComposeUiTest {
         var sent = false
+        val r = repo(sendAnswer = HttpStatusCode.InternalServerError to """{"error":"no route to ~bus"}""")
         setContent {
             TalonTheme(darkTheme = false) {
-                MailComposer(
-                    repo = repo(sendAnswer = HttpStatusCode.InternalServerError to """{"error":"no route to ~bus"}"""),
-                    intent = MailIntent(to = listOf("~bus")), onSent = { sent = true }, onCancel = {},
-                )
+                MailComposer(repo = r, intent = MailIntent(to = listOf("~bus")), onSent = { sent = true }, onCancel = {})
             }
         }
         onNodeWithText("Message").performTextInput("hello")
         onNodeWithText("Send").performClick()
-        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("route to ~bus", substring = true).fetchSemanticsNodes().isNotEmpty() }
-        assertTrue(!sent, "still here, to try again")
-        onNodeWithText("Send").assertIsDisplayed()
+        // The composer goes at Send, so other mail can be read meanwhile
+        // (MailSendBehindTest); why, and the message itself, wait on the
+        // list to be opened again.
+        assertTrue(sent)
+        waitUntil(timeoutMillis = 5_000) { r.unsent.value.isNotEmpty() }
+        val kept = r.unsent.value.single()
+        assertTrue("route to ~bus" in kept.line, kept.line)
+        assertEquals("hello", kept.draft.body)
     }
 
     // Who has seen what travels is whom it was sent to. The thread's

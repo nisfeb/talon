@@ -55,9 +55,12 @@ private fun midnightAfter(ms: Long, zone: TimeZone): Long {
 
 private const val HOUR_MS = 60 * 60 * 1000L
 
-/** The tasks list's order: open ones soonest due first, undated last, then by name. */
+/** The tasks list's order: open ones soonest due first, undated last, then by priority, then by name. */
 fun taskOrder(tasks: List<CalendarTask>): List<CalendarTask> =
-    tasks.sortedWith(compareBy({ it.dueMs ?: Long.MAX_VALUE }, { it.name.lowercase() }))
+    tasks.sortedWith(compareBy({ it.dueMs ?: Long.MAX_VALUE }, { it.priorityRank }, { it.name.lowercase() }))
+
+/** Where a task goes by priority: 1 first, 9 after, none last, as the calendar's page sorts. */
+val CalendarTask.priorityRank: Int get() = priority?.takeIf { it in 1..9 } ?: 10
 
 /** The task's due day, as the calendar's page reads it: the UTC date of due_ms. */
 fun CalendarTask.dueDate(): LocalDate? = dueMs?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date }

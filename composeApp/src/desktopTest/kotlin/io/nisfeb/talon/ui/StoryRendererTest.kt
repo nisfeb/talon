@@ -106,7 +106,7 @@ class StoryRendererTest {
         assertEquals(listOf<StoryPart>(StoryPart.PollWidget("Lunch?", listOf("pizza", "tacos"))), p)
         val votes = listOf(ReactionEntity("~bus", "1", "~nec", VOTE_EMOJIS[1]), ReactionEntity("~bus", "1", "~zod", VOTE_EMOJIS[1]))
         render(p, reactions = votes) {
-            assertTrue(shows("📊 Lunch?") && shows("2 votes · tap to change."))
+            assertTrue(shows("📊 Lunch?") && shows("2 votes · click to change."))
             assertTrue(!shows("[poll|"), "the tag is not shown")
             onNodeWithText("pizza").performClick()
             assertEquals(listOf("vote ${VOTE_EMOJIS[0]}"), did)
@@ -265,4 +265,21 @@ class StoryRendererTest {
             assertEquals(listOf("cite chat/~bus/general"), did)
         }
     }
+
+    // ─── long links and long posts ────────────────────────────────
+
+    @Test
+    fun `a link written as its address shows cut short and opens the whole of it`() {
+        val url = "https://example.com/articles/2026/10/a-very-long-slug"
+        val named = "https://example.com/another/long/path/to/somewhere"
+        val p = parts("""[{"inline":[{"link":{"href":"$url","content":"$url"}}," and ",{"link":{"href":"$named","content":"the report"}}]}]""", raw = true)
+        render(p) {
+            assertTrue(shows("example.com/articles…"), "cut short")
+            assertTrue(!shows("a-very-long-slug"), "not the whole address")
+            assertTrue(shows("the report"), "a named link reads as named")
+            clickWord("example.com/articles…")
+            assertEquals(listOf("link $url"), did)
+        }
+    }
 }
+

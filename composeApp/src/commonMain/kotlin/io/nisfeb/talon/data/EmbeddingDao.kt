@@ -22,11 +22,13 @@ interface EmbeddingDao {
     @Query("SELECT whom || ':' || id FROM message_embeddings")
     suspend fun allKeys(): List<String>
 
-    /** Pull every row in batches for the brute-force cosine search.
-     *  Limit + offset so we don't OOM on large archives — caller
-     *  iterates with page-size 1000. */
-    @Query("SELECT * FROM message_embeddings LIMIT :limit OFFSET :offset")
-    suspend fun page(limit: Int, offset: Int): List<MessageEmbeddingEntity>
+    /** Pull every row in batches for the brute-force cosine search, so
+     *  a large archive is not read at once: [limit] in key order after
+     *  ([whom], [id]), "" and "" first. By the primary key, where an
+     *  OFFSET re-read every row before the page (and, unordered, did
+     *  not promise the same order twice). */
+    @Query("SELECT * FROM message_embeddings WHERE (whom, id) > (:whom, :id) ORDER BY whom, id LIMIT :limit")
+    suspend fun pageAfter(whom: String, id: String, limit: Int): List<MessageEmbeddingEntity>
 
     /** Total embedding rows. UI status. */
     @Query("SELECT COUNT(*) FROM message_embeddings")

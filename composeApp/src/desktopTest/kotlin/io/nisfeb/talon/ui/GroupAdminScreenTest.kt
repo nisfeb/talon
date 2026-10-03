@@ -60,12 +60,13 @@ class GroupAdminScreenTest {
           "requests":{"~wicrys-bortel":{"requestedAt":0}}}}"""
 
     /** [rooms], when given, is %trunk's list of lines this ship hosts, and turns calling on. */
-    private fun admin(me: String = "~zod", rooms: String? = null, group: String = record, block: ComposeUiTest.(FakeShip) -> Unit) {
+    /** [group] null: the ship will not give the group, until a test sets it. */
+    private fun admin(me: String = "~zod", rooms: String? = null, group: String? = record, block: ComposeUiTest.(FakeShip) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-admin-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
         val ship = FakeShip("~zod").apply {
-            scries["groups/v2/groups/$flag"] = group
+            if (group != null) scries["groups/v2/groups/$flag"] = group
             scries["trunk/version"] = """{"wire":9}"""
             scries["trunk/policy"] = "{}"
             scries["trunk/sfu"] = """{"base":"https://sfu.zod.test","configured":"true"}"""
@@ -87,7 +88,7 @@ class GroupAdminScreenTest {
                         GroupAdminScreen(db = db, repo = repo, flag = flag, onBack = {}, me = me, callController = calls)
                     }
                 }
-                waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("The Garden", substring = true).fetchSemanticsNodes().isNotEmpty() }
+                if (group != null) waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("The Garden", substring = true).fetchSemanticsNodes().isNotEmpty() }
                 block(ship)
             }
         } finally {
@@ -124,7 +125,7 @@ class GroupAdminScreenTest {
 
     /** Open General's settings; [writers] is what this ship's %channels says of who may post, null for nothing. */
     private fun ComposeUiTest.openGeneral(ship: FakeShip, writers: String? = "[]") {
-        writers?.let { ship.scries["channels/v4/$nest/perm"] = """{"writers":$it,"group":"$flag"}""" }
+        writers?.let { ship.scries["channels/v5/$nest/perm"] = """{"writers":$it,"group":"$flag"}""" }
         onNodeWithText("Settings").performScrollTo().performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Who can post") }
         waitUntil(timeoutMillis = 5_000) { !shows("Asking your ship…") }
@@ -470,7 +471,7 @@ class GroupAdminScreenTest {
         }
         newChannel(kind = "Notebook", title = "Plans")
         waitUntil(timeoutMillis = 5_000) { ship.api.any { it.startsWith("POST /notes/~/v1/notebooks") } }
-        assertTrue(ship.api.single().contains("\"flagName\":\"garden\""), "made in this group")
+        assertTrue(ship.api.single { !it.startsWith("GET ") }.contains("\"flagName\":\"garden\""), "made in this group")
         assertTrue(ship.pokesTo("channels").isEmpty())
     }
 
@@ -570,4 +571,13 @@ class GroupAdminScreenTest {
         val unmute = trunkPoke(ship, "moderate-member")
         assertTrue("\"who\":\"~bus\"" in unmute && "\"mute\":false" in unmute, unmute)
     }
+
+    @Test
+    fun `a group the ship will not give says so, and Try again asks again`() = admin(group = null) { ship ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Couldn't load the group", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        ship.scries["groups/v2/groups/$flag"] = record
+        onNodeWithText("Try again").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("The Garden", substring = true).fetchSemanticsNodes().isNotEmpty() }
+    }
 }
+

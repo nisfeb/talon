@@ -44,6 +44,10 @@ internal class FakeShip(val us: String = "~zod") {
 
     /** Every subscription opened, as `app/path`. */
     val subscribed: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    /** How many subscriptions each PUT that carried any carried. */
+    val subscribePuts: MutableList<Int> = java.util.concurrent.CopyOnWriteArrayList()
+    /** The event ids each ack named, in order. */
+    val acked: MutableList<Long> = java.util.concurrent.CopyOnWriteArrayList()
 
     /** Every scry path asked for, answered or not, in order. */
     val scried: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
@@ -74,10 +78,18 @@ internal class FakeShip(val us: String = "~zod") {
     @Volatile var answerApi: (method: String, path: String, body: String) -> String? = { _, _, _ -> null }
     /** A scry the ship fails on (500), as a crashed or busy agent does; unlike one it has no answer for (404). */
     @Volatile var failScry: (path: String) -> Boolean = { false }
+    /** How long a scry waits before it is answered: a busy ship, by path. */
+    @Volatile var holdScry: (path: String) -> Long = { 0 }
+    /** A scry that never comes back: the connection dropped, or a busy ship timed out. */
+    @Volatile var loseScry: (path: String) -> Throwable? = { null }
+    /** How long a poke waits before the ship takes it: a slow ship, at work. */
+    @Volatile var holdPoke: Long = 0
     /** How long a channel's delete waits for an answer: a dead socket, as an iOS app finds coming back. */
     @Volatile var holdDelete: Long = 0
     /** While true the event stream is refused, as with no network yet. */
     @Volatile var refuseStream: Boolean = false
+    /** A subscription refused, by `app/path` (e.g. "activity/v6"): an older ship without it. */
+    @Volatile var refuseWatch: (String) -> String? = { null }
     /** Every request, "METHOD path", whatever it was for: what an app that must say nothing did say. */
     val requests: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
@@ -133,11 +145,14 @@ internal class FakeShip(val us: String = "~zod") {
         requests += "${req.method.value} $path"
         when {
             req.method == HttpMethod.Put && path.startsWith("/~/channel/") -> {
-                for (msg in Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonArray) {
+                val batch = Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonArray
+                batch.count { it.jsonObject["action"]?.jsonPrimitive?.content == "subscribe" }.takeIf { it > 0 }?.let { subscribePuts += it }
+                for (msg in batch) {
                     val o = msg.jsonObject
                     val id = o["id"]!!.jsonPrimitive.long
                     when (o["action"]?.jsonPrimitive?.content) {
                         "poke" -> {
+                            if (holdPoke > 0) kotlinx.coroutines.delay(holdPoke)
                             val p = Poke(
                                 o["app"]!!.jsonPrimitive.content,
                                 o["mark"]!!.jsonPrimitive.content,
@@ -155,9 +170,16 @@ internal class FakeShip(val us: String = "~zod") {
                             )
                             landThenFail(p)?.let { throw it }
                         }
+                        "ack" -> { o["event-id"]?.jsonPrimitive?.content?.toLongOrNull()?.let { acked += it } }
                         "subscribe" -> {
-                            subscribed += "${o["app"]?.jsonPrimitive?.content}${o["path"]?.jsonPrimitive?.content}"
-                            answer(path, """{"id":$id,"response":"subscribe","ok":"ok"}""")
+                            val watch = "${o["app"]?.jsonPrimitive?.content}${o["path"]?.jsonPrimitive?.content}"
+                            subscribed += watch
+                            val err = refuseWatch(watch)
+                            answer(
+                                path,
+                                if (err == null) """{"id":$id,"response":"subscribe","ok":"ok"}"""
+                                else """{"id":$id,"response":"subscribe","err":${JsonPrimitive(err)}}""",
+                            )
                         }
                         "delete" -> if (holdDelete > 0) kotlinx.coroutines.delay(holdDelete)
                     }
@@ -168,10 +190,16 @@ internal class FakeShip(val us: String = "~zod") {
                 respond("", HttpStatusCode.ServiceUnavailable)
             req.method == HttpMethod.Get && path.startsWith("/~/channel/") ->
                 respond(writing.withLock { pipeOf(path) }.stream, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+            path.startsWith("/~/scry/") && loseScry(path.removePrefix("/~/scry/").removeSuffix(".json")) != null -> {
+                val asked = path.removePrefix("/~/scry/").removeSuffix(".json")
+                scried += asked
+                throw loseScry(asked)!!
+            }
             path.startsWith("/~/scry/") && failScry(path.removePrefix("/~/scry/").removeSuffix(".json")) ->
                 respond("", HttpStatusCode.InternalServerError)
             path.startsWith("/~/scry/") ->
                 path.removePrefix("/~/scry/").removeSuffix(".json").also { scried += it }
+                    .also { p -> holdScry(p).takeIf { it > 0 }?.let { kotlinx.coroutines.delay(it) } }
                     .let { scries[it] }
                     ?.let { respond(it, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
                     ?: respond("", HttpStatusCode.NotFound)

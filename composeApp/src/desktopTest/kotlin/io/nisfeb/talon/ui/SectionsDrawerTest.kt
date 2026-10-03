@@ -26,8 +26,8 @@ class SectionsDrawerTest {
         setContent {
             TalonTheme(darkTheme = false) {
                 SectionsDrawer(
-                    order = listOf(RailItem.Mail, RailItem.Chats, RailItem.Watchwords, RailItem.Calendar, RailItem.Settings),
-                    visibility = mapOf(RailItem.Watchwords to false),
+                    order = listOf(RailItem.Mail, RailItem.Chats, RailItem.Invites, RailItem.Calendar, RailItem.Settings),
+                    visibility = mapOf(RailItem.Invites to false),
                     active = RailItem.Chats,
                     onSection = { went += railLabel(it) },
                     canOpen = { it != RailItem.Calendar },
@@ -38,7 +38,7 @@ class SectionsDrawerTest {
         val labels = listOf("Mail", "Chats", "Settings")
         val tops = labels.map { onNodeWithText(it).fetchSemanticsNode().boundsInRoot.top }
         assertEquals(tops.sorted(), tops, "in the saved order")
-        assertTrue(onAllNodesWithText("Watchwords").fetchSemanticsNodes().isEmpty(), "switched off")
+        assertTrue(onAllNodesWithText("Invites").fetchSemanticsNodes().isEmpty(), "switched off")
         assertTrue(onAllNodesWithText("Calendar").fetchSemanticsNodes().isEmpty(), "this host cannot open it")
         onNodeWithText("Chats").assertIsSelected()
         onNodeWithText("Mail").performClick()

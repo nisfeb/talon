@@ -1,6 +1,6 @@
 package io.nisfeb.talon.ui.screens
 import io.nisfeb.talon.util.formatMonthDay
-import io.nisfeb.talon.util.formatTime24
+import io.nisfeb.talon.util.formatClock
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
@@ -382,7 +382,7 @@ private fun AuthorAndTimestamp(author: String, sentMs: Long) {
 private fun formatPostedAt(ms: Long): String {
     val diff = nowMs() - ms
     return when {
-        diff < 24 * 3600_000L -> formatTime24(ms)
+        diff < 24 * 3600_000L -> formatClock(ms)
         else -> formatMonthDay(ms)
     }
 }

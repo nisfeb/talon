@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.submitOnEnter
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.LaunchedEffect
@@ -37,7 +38,6 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import io.nisfeb.talon.ui.icons.TalonIcons
 
 @Composable
@@ -148,7 +148,7 @@ fun NewDmScreen(
                 modifier = Modifier.padding(start = 4.dp).weight(1f),
             )
             if (scan != null) {
-                IconButton(onClick = { scanProblem = null; scan() }) {
+                io.nisfeb.talon.ui.IconButton(tip = "Scan a group or invite code", onClick = { scanProblem = null; scan() }) {
                     Icon(TalonIcons.QrCodeScanner, contentDescription = "Scan a group or invite code")
                 }
             }
@@ -174,7 +174,9 @@ fun NewDmScreen(
                 // drag belongs to the screen, and the text never moved.
                 singleLine = false,
                 maxLines = 6,
-                modifier = Modifier.weight(1f).focusRequester(fieldFocus),
+                keyboardOptions = io.nisfeb.talon.ui.GoKeyboard,
+                keyboardActions = io.nisfeb.talon.ui.goActions { if (isValidPatp) onPickPeer(asPatp) },
+                modifier = Modifier.weight(1f).focusRequester(fieldFocus).submitOnEnter(isValidPatp) { onPickPeer(asPatp) },
             )
             TextButton(
                 onClick = { onPickPeer(asPatp) },
@@ -198,21 +200,22 @@ fun NewDmScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                val addContact = {
+                    onAddContact(asPatp, newContactName.trim().takeIf { it.isNotBlank() })
+                    newContactName = ""
+                    // Keep `query`: the natural flow is add-then-Start,
+                    // and clearing it would disable the Start button.
+                }
                 OutlinedTextField(
                     value = newContactName,
                     onValueChange = { newContactName = it },
                     placeholder = { Text("nickname (optional)") },
                     singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    keyboardOptions = io.nisfeb.talon.ui.GoKeyboard,
+                    keyboardActions = io.nisfeb.talon.ui.goActions(addContact),
+                    modifier = Modifier.weight(1f).submitOnEnter(true, addContact),
                 )
-                TextButton(
-                    onClick = {
-                        onAddContact(asPatp, newContactName.trim().takeIf { it.isNotBlank() })
-                        newContactName = ""
-                        // Keep `query`: the natural flow is add-then-Start,
-                        // and clearing it would disable the Start button.
-                    },
-                ) { Text("Add contact") }
+                TextButton(onClick = addContact) { Text("Add contact") }
             }
         }
         HorizontalDivider()

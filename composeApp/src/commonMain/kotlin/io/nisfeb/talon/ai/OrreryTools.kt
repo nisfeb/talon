@@ -5,6 +5,7 @@ import io.nisfeb.talon.orrery.OrreryPreferences
 import io.nisfeb.talon.orrery.OrreryRepo
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -36,9 +37,14 @@ Before you write:
 
 - Ask the ship what it knows. orrery_find resolves a name to a body id;
   a hit IS the thing, so never create a second body for a name that
-  already resolves. orrery_read with no body gives the whole view,
-  including the schema: which kinds exist, which attributes each kind
-  takes, and what the ship says each one means.
+  already resolves. orrery_read with no body gives the brief view,
+  whole: every body, the open situations and actions, and the schema:
+  which kinds exist and which attributes each kind takes. Read it once,
+  then ask for the few bodies you need more of.
+- Write all the facts of a task in one orrery_observe (up to 50 bodies
+  and 200 observations), not one call per fact: each call costs the
+  ship seconds before any work. When the owner asked for the entries,
+  write them in this turn; one confirmation covers the turn.
 - A fact is one subject, one attribute, one value. `at` is when the
   thing happened or will happen, not when you are writing it.
 - A schedule is not a fact about the past. An activity's `next` and a
@@ -163,7 +169,9 @@ fun OrreryRepo.asTap(): OrreryTap = object : OrreryTap {
     override suspend fun find(q: String) =
         resolveBody(q).map { hits -> hits.map { it.id to "kind=${it.kind} name=${it.name} matched=${it.match}" } }
 
-    override suspend fun state() = readState().map { it.toString() }
+    // The brief view: whole JSON a tenth the size of the full one, so the
+    // model reads it whole instead of a view cut mid-string.
+    override suspend fun state() = readState(brief = true).map { it.toString() }
 
     override suspend fun body(id: String) = bodyTimeline(id).map { rows ->
         rows.map { "obs=${it.id} attr=${it.attr} at=${it.atMs} source=${it.sourceId} ${if (it.stands) "stands" else it.status}" }
@@ -246,7 +254,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
     add(Tool(
         spec = ToolSpec(
             "orrery_read",
-            "Read orrery. With no argument: every body the key may see, the attributes each kind takes and what the ship says they mean. With body: that body's timeline, what was said about it and whether each row still stands.",
+            "Read orrery. With no argument, the brief view: every body the key may see as id, kind, name, aliases, current values and the situations it is in; the open situations with what each needs and whose move it is; the open actions; and the attribute names each kind takes. Read it once at the start of a task, then orrery_find and orrery_read with body for the few things you need more of. With body: that body's timeline, what was said about it and whether each row still stands.",
             toolSchema("body" to ("string" to "A body id, e.g. person/alice. Omit for the whole view."), required = emptyList()),
         ),
         write = false,
@@ -254,7 +262,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
         val id = args.str("body")
         if (id == null) {
             orrery.state().fold(
-                onSuccess = { clip(it) },
+                onSuccess = { clipJson(it, STATE_CHARS) },
                 onFailure = { "Could not read orrery: ${it.message}" },
             )
         } else {
@@ -270,7 +278,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
     add(Tool(
         spec = ToolSpec(
             "orrery_observe",
-            "Write facts to orrery under this install's key. Give a JSON array of observations, each {\"subject\": body id, \"attr\": attribute, \"value\": the value, \"at\": ISO 8601 UTC when it happened}. Resolve names with orrery_find first; the ship answers per item and may refuse one.",
+            "Write facts to orrery under this install's key. Give a JSON array of observations, each {\"subject\": body id, \"attr\": attribute, \"value\": the value, \"at\": ISO 8601 UTC when it happened}. Put every fact of the task in ONE call: the ship takes up to 50 bodies and 200 observations at once, and each call costs it seconds before any work, so twenty calls is a minute of waiting. Resolve names with orrery_find first; the ship answers per item and may refuse one. When the owner's message asked for the entries, write them in this turn rather than describing what you would write; the owner confirms once for the turn.",
             toolSchema(
                 "observations" to ("string" to "A JSON array of observation objects."),
                 required = listOf("observations"),
@@ -496,6 +504,51 @@ private fun unknownDoc(name: String, names: Set<String> = OrreryApi.SETTINGS) =
 /** Enough of an answer to work from; the whole state view is long. */
 private fun clip(s: String, max: Int = 6000): String =
     if (s.length <= max) s else s.take(max) + "\n… cut here; ask for one body instead."
+
+/** The brief state view's room in a tool result: a few thousand tokens. */
+internal const val STATE_CHARS = 24_000
+
+/**
+ * [s] cut to [max] at a JSON boundary, saying what was cut. The view's
+ * lists lose elements from the end, largest list first, and the result
+ * carries a `_cut` key naming each list as kept-of-total — a view cut
+ * mid-string, which the model read as the whole, was what it got before.
+ * Text that is not a JSON object is cut at a line end with the same note.
+ */
+internal fun clipJson(s: String, max: Int): String {
+    if (s.length <= max) return s
+    val root = runCatching { Json.parseToJsonElement(s) as? JsonObject }.getOrNull()
+        ?: return s.take(max).substringBeforeLast('\n') + "\n… cut here, ${s.length - max} more characters; ask for one body instead."
+    // Sizes once, then arithmetic: no re-serialising a long view per step.
+    val kept = linkedMapOf<String, MutableList<JsonElement>>()
+    val sizes = linkedMapOf<String, MutableList<Int>>()
+    var total = 2
+    for ((k, v) in root) {
+        if (v is JsonArray) {
+            kept[k] = v.toMutableList()
+            sizes[k] = v.map { it.toString().length + 1 }.toMutableList()
+            total += k.length + 4 + 2 + sizes.getValue(k).sum()
+        } else {
+            total += k.length + 4 + v.toString().length
+        }
+    }
+    val totals = kept.mapValues { it.value.size }
+    while (total > max - NOTE_ROOM) {
+        val (k, list) = kept.entries.maxByOrNull { sizes.getValue(it.key).sum() }?.takeIf { it.value.isNotEmpty() } ?: break
+        list.removeAt(list.size - 1)
+        total -= sizes.getValue(k).removeAt(list.size)
+    }
+    val cuts = totals.filter { (k, n) -> kept.getValue(k).size < n }
+    if (cuts.isEmpty()) return s.take(max).substringBeforeLast('\n') + "\n… cut here; ask for one body instead."
+    val out = buildJsonObject {
+        for ((k, v) in root) put(k, if (v is JsonArray) JsonArray(kept.getValue(k)) else v)
+        put("_cut", cuts.entries.joinToString("; ", postfix = ". Ask orrery_read with a body id for one of the rest.") { (k, n) -> "$k: ${kept.getValue(k).size} of $n kept" })
+    }
+    return out.toString()
+}
+
+/** Room left for the `_cut` note. */
+private const val NOTE_ROOM = 300
 
 private fun JsonObject.str(key: String): String? =
     this[key]?.let { (it as? JsonPrimitive)?.contentOrNull }?.takeIf { it.isNotBlank() }

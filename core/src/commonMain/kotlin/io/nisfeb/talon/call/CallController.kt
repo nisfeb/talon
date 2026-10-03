@@ -3,6 +3,9 @@ package io.nisfeb.talon.call
 import io.nisfeb.talon.urbit.UrbitChannel
 import io.nisfeb.talon.urbit.PokeNacked
 import io.nisfeb.talon.urbit.UrbitSession
+import io.nisfeb.talon.urbit.jittered
+import io.nisfeb.talon.urbit.pauseAfterStream
+import io.nisfeb.talon.urbit.shouldBootstrap
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.backgroundExceptionHandler
 import io.nisfeb.talon.util.ioDispatcher
@@ -13,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -294,96 +298,131 @@ class CallController(
 
     private suspend fun runLoop() {
         var backoff = 2_000L
+        // When the six reads last ran, and when a stream last heard
+        // anything. ~ricsul dropped every stream at 45 s while it was
+        // busy, and each reconnect read all six again, about a second
+        // each, to the same answers.
+        var readsAtMs = 0L
+        var heardMs = 0L
         while (scope.isActive) {
+            var openedMs = 0L
             runCatching {
                 _connected.value = false
                 val ch = session.openChannel()
                 channel = ch
-                // The ship's advertised ICE servers (its sidecar / its
-                // sponsor's). Best-effort: no config means Tier 0 only.
-                val ice = runCatching { ch.scry(TrunkWire.AGENT, "/ice") }
-                    .onFailure { Log.w(TAG, "ice scry failed (Tier 0 only)", it) }
-                    .getOrNull()
-                if (ice != null) {
-                    _ice.value = TrunkWire.parseIce(ice)
-                    Log.i(TAG, "ice config: ${iceServers.size} servers")
+                lookedFor.value = emptySet()
+                val read = shouldBootstrap(readsAtMs == 0L, readsAtMs, nowMs(), heardMs)
+                // The six reads at once: one after another they held the
+                // subscription, and with it every call, six round trips back.
+                if (read) kotlinx.coroutines.coroutineScope {
+                    listOf(
+                        async {
+                            // The ship's advertised ICE servers (its sidecar / its
+                            // sponsor's). Best-effort: no config means Tier 0 only.
+                            val ice = runCatching { ch.scry(TrunkWire.AGENT, "/ice") }
+                                .onFailure { Log.w(TAG, "ice scry failed (Tier 0 only)", it) }
+                                .getOrNull()
+                            if (ice != null) {
+                                _ice.value = TrunkWire.parseIce(ice)
+                                Log.i(TAG, "ice config: ${iceServers.size} servers")
+                            }
+                            // Only a ship that answered it has none takes the default:
+                            // a failed read, or an answer in another shape, replaced
+                            // the servers someone had set, for every device on it.
+                            // Guarded like every other step here. It is internally
+                            // safe today, but a throw between opening the channel
+                            // and subscribing is the worst failure this loop has:
+                            // `channel` is already assigned, so pokes keep working
+                            // and the ship looks reachable while no fact ever
+                            // arrives again.
+                            // Off the connect path: the poke's ack comes down the event
+                            // stream, which is read only once this loop subscribes
+                            // below, so waiting for it here held calls up for the
+                            // poke's whole 15s timeout. It reads /ice again itself.
+                            if (ice is kotlinx.serialization.json.JsonArray && ice.isEmpty()) {
+                                scope.launch {
+                                    runCatching { adoptDefaultIce(ch) }
+                                        .onFailure { Log.w(TAG, "adopting default ice failed", it) }
+                                }
+                            }
+                        },
+                        async {
+                            // No %trunk (or a desk predating policy) leaves this
+                            // null, and the settings editor stays hidden.
+                            runCatching { _policy.value = TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy")) }
+                                .onFailure {
+                                    Log.w(TAG, "policy scry failed; hiding the editor", it)
+                                    // eyre answers 404 for an agent that isn't there.
+                                    // Anything else is a hiccup this loop retries on
+                                    // its own, and must not trigger an install.
+                                    if (it.message?.contains("HTTP 404") == true) autoInstallTrunk()
+                                }
+                        },
+                        async {
+                            // A ship running an older wire than we speak is the
+                            // failure that looks like nothing happening: pokes
+                            // gall cannot cast, switches that do not move. Say so
+                            // instead.
+                            runCatching {
+                                val shipWire = TrunkWire.parseWireVersion(
+                                    ch.scry(TrunkWire.AGENT, "/version"),
+                                )
+                                _wire.value = shipWire
+                                if (shipWire < TrunkWire.WIRE_VERSION &&
+                                    _install.value == TrunkInstall.Hidden
+                                ) {
+                                    Log.w(TAG, "ship speaks wire $shipWire; we speak ${TrunkWire.WIRE_VERSION}")
+                                    _install.value =
+                                        TrunkInstall.Outdated(shipWire, TrunkWire.WIRE_VERSION)
+                                }
+                            }.onFailure { Log.w(TAG, "version scry failed; assuming an old desk", it) }
+                        },
+                        async {
+                            // A ship with no sidecar of its own gets the one this
+                            // build ships with, so party lines work without any
+                            // setup. Group admins can point their group elsewhere;
+                            // a ship that already has an SFU is left alone.
+                            runCatching {
+                                val sfu = ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject
+                                // Only a ship that answered it has none takes the default,
+                                // and off the connect path, like the ICE above.
+                                if (sfu != null && sfu["configured"]?.jsonPrimitive?.content != "true" && defaults.sfuBase.isNotEmpty()) {
+                                    _shipSfuBase.value = defaults.sfuBase
+                                    scope.launch { adoptDefaultSfu(ch) }
+                                } else {
+                                    _shipSfuBase.value = sfu?.get("base")?.jsonPrimitive?.content.orEmpty()
+                                }
+                            }.onFailure { Log.w(TAG, "sfu scry failed", it) }
+                        },
+                        async {
+                            runCatching {
+                                val ours = session.shipName.orEmpty()
+                                _rooms.value = TrunkWire.parseRooms(ch.scry(TrunkWire.AGENT, "/rooms"))
+                                    .associateBy { "$ours/${it.name}" }
+                            }.onFailure { Log.w(TAG, "rooms scry failed", it) }
+                        },
+                        async {
+                            runCatching {
+                                _invites.value = TrunkWire.parseLines(ch.scry(TrunkWire.AGENT, "/lines"))
+                                    .associateBy { "${it.host}/${it.name}" }
+                            }.onFailure { Log.w(TAG, "lines scry failed", it) }
+                        },
+                    ).forEach { it.await() }
                 }
-                // Only a ship that answered it has none takes the default:
-                // a failed read, or an answer in another shape, replaced
-                // the servers someone had set, for every device on it.
-                // Guarded like every other step here. It is internally
-                // safe today, but a throw between opening the channel
-                // and subscribing is the worst failure this loop has:
-                // `channel` is already assigned, so pokes keep working
-                // and the ship looks reachable while no fact ever
-                // arrives again.
-                // Off the connect path: the poke's ack comes down the event
-                // stream, which is read only once this loop subscribes
-                // below, so waiting for it here held calls up for the
-                // poke's whole 15s timeout. It reads /ice again itself.
-                if (ice is kotlinx.serialization.json.JsonArray && ice.isEmpty()) {
-                    scope.launch {
-                        runCatching { adoptDefaultIce(ch) }
-                            .onFailure { Log.w(TAG, "adopting default ice failed", it) }
-                    }
-                }
-                // No %trunk (or a desk predating policy) leaves this
-                // null, and the settings editor stays hidden.
-                runCatching { _policy.value = TrunkWire.parsePolicy(ch.scry(TrunkWire.AGENT, "/policy")) }
-                    .onFailure {
-                        Log.w(TAG, "policy scry failed; hiding the editor", it)
-                        // eyre answers 404 for an agent that isn't there.
-                        // Anything else is a hiccup this loop retries on
-                        // its own, and must not trigger an install.
-                        if (it.message?.contains("HTTP 404") == true) autoInstallTrunk()
-                    }
-                // A ship with no sidecar of its own gets the one this
-                // build ships with, so party lines work without any
-                // setup. Group admins can point their group elsewhere;
-                // a ship that already has an SFU is left alone.
-                // A ship running an older wire than we speak is the
-                // failure that looks like nothing happening: pokes
-                // gall cannot cast, switches that do not move. Say so
-                // instead.
-                runCatching {
-                    val shipWire = TrunkWire.parseWireVersion(
-                        ch.scry(TrunkWire.AGENT, "/version"),
-                    )
-                    _wire.value = shipWire
-                    if (shipWire < TrunkWire.WIRE_VERSION &&
-                        _install.value == TrunkInstall.Hidden
-                    ) {
-                        Log.w(TAG, "ship speaks wire $shipWire; we speak ${TrunkWire.WIRE_VERSION}")
-                        _install.value =
-                            TrunkInstall.Outdated(shipWire, TrunkWire.WIRE_VERSION)
-                    }
-                }.onFailure { Log.w(TAG, "version scry failed; assuming an old desk", it) }
-                runCatching {
-                    val sfu = ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject
-                    // Only a ship that answered it has none takes the default,
-                    // and off the connect path, like the ICE above.
-                    if (sfu != null && sfu["configured"]?.jsonPrimitive?.content != "true" && defaults.sfuBase.isNotEmpty()) {
-                        _shipSfuBase.value = defaults.sfuBase
-                        scope.launch { adoptDefaultSfu(ch) }
-                    } else {
-                        _shipSfuBase.value = sfu?.get("base")?.jsonPrimitive?.content.orEmpty()
-                    }
-                }.onFailure { Log.w(TAG, "sfu scry failed", it) }
-                runCatching {
-                    val ours = session.shipName.orEmpty()
-                    _rooms.value = TrunkWire.parseRooms(ch.scry(TrunkWire.AGENT, "/rooms"))
-                        .associateBy { "$ours/${it.name}" }
-                }.onFailure { Log.w(TAG, "rooms scry failed", it) }
-                runCatching {
-                    _invites.value = TrunkWire.parseLines(ch.scry(TrunkWire.AGENT, "/lines"))
-                        .associateBy { "${it.host}/${it.name}" }
-                }.onFailure { Log.w(TAG, "lines scry failed", it) }
+                if (read) readsAtMs = nowMs()
                 ch.events().let { events ->
                     ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH)
-                    backoff = 2_000L
+                    openedMs = nowMs()
+                    heardMs = openedMs
                     _connected.value = true
+                    // Acked in batches, as the main channel is: a PUT per
+                    // event doubled what each fact cost the ship.
+                    val acks = kotlinx.coroutines.channels.Channel<Long>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+                    scope.launch { io.nisfeb.talon.urbit.ackInBatches(acks) { ch.ack(it) } }
+                    try {
                     events.collect { ev ->
-                        ev.id?.let { runCatching { ch.ack(it) } }
+                        heardMs = nowMs()
+                        ev.id?.let { acks.trySend(it) }
                         val body = ev.body as? JsonObject ?: return@collect
                         // Surface poke nacks — a silently-refused poke cost
                         // us a day of "the accept never arrives" debugging.
@@ -509,6 +548,11 @@ class CallController(
                                 // the host, so the set's size is the
                                 // count, not a guess at it.
                                 _presence.value = _presence.value + (key to up.who.size)
+                                // Long after any ask of ours: the host pushed it, so it
+                                // tells of every roster change and needs no polling.
+                                if (nowMs() - (askedAt[up.from] ?: 0L) > ANSWER_WINDOW_MS) {
+                                    _announces.value = _announces.value + up.from
+                                }
                             }
                             is TrunkUpdate.Recorders ->
                                 _recording.value = _recording.value +
@@ -588,6 +632,10 @@ class CallController(
                             null -> {}
                         }
                     }
+                    } finally {
+                        // What waits is acked as the stream ends.
+                        acks.close()
+                    }
                 }
             }.onFailure {
                 // Cancellation is the normal stop(); only a real failure
@@ -602,9 +650,10 @@ class CallController(
             }
             channel = null
             if (!scope.isActive) break
+            backoff = pauseAfterStream(backoff, if (openedMs != 0L) nowMs() - openedMs else null, 2_000L, CALLS_HEALTHY_MS)
             // Jittered: a ship restart drops every client at once, and a
             // fixed delay brings the whole fleet back on the same tick.
-            delay((backoff * kotlin.random.Random.nextDouble(0.5, 1.5)).toLong().coerceAtLeast(1L))
+            delay(jittered(backoff))
             backoff = (backoff * 2).coerceAtMost(60_000L)
         }
     }
@@ -814,6 +863,7 @@ class CallController(
      *  The answer lands in [presence]. Fire-and-forget; a wire-5 host
      *  just nacks and presence stays absent. */
     suspend fun occupancyOf(host: String, name: String) {
+        askedAt[host] = nowMs()
         val ch = channel ?: return
         runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.occupancyOfAction(host, name)) }
             .onFailure { Log.i(TAG, "occupancy-of declined (older host?): ${it.message}") }
@@ -822,6 +872,7 @@ class CallController(
     /** Ask [host] who is on its line [name]; the answer lands in
      *  [onLine]. Wire 8 on our ship; an older host simply never answers. */
     suspend fun whoIsOn(host: String, name: String) {
+        askedAt[host] = nowMs()
         if (_wire.value < TrunkWire.WIRE_VERSION_WHO) return
         val ch = channel ?: return
         runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.whoIsOnAction(host, name)) }
@@ -1264,6 +1315,32 @@ class CallController(
     private val _peekFailed = MutableStateFlow<Map<String, String>>(emptyMap())
     val peekFailed: StateFlow<Map<String, String>> = _peekFailed.asStateFlow()
 
+    /** Lines looked for since this connect; each opening of a group looked anew. */
+    private val lookedFor = MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * Ask [host] whether its line [name] exists, while we hold no room or
+     * invite for it: a few widening tries (an ames round trip to a sleeping
+     * host can miss one), once a connect rather than on every opening of
+     * the group. A member whose ship had no %trunk when the host announced
+     * never heard of the line; before this the only cure was an admin
+     * toggling it off and on.
+     */
+    suspend fun lookForLine(host: String, name: String) {
+        val key = "$host/$name"
+        if (key in lookedFor.value) return
+        var wait = 2_000L
+        repeat(PEEK_ATTEMPTS) { attempt ->
+            if (_rooms.value.containsKey(key) || _invites.value.containsKey(key)) return
+            peekRoom(host, name)
+            if (attempt < PEEK_ATTEMPTS - 1) {
+                delay(wait)
+                wait *= 3
+            }
+        }
+        lookedFor.update { it + key }
+    }
+
     suspend fun peekRoom(host: String, name: String) {
         val ch = channel ?: return
         val key = "$host/$name"
@@ -1324,6 +1401,13 @@ class CallController(
      *  answer (wire 8). Only lines we asked about via [whoIsOn]. */
     private val _onLine = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
     val onLine: StateFlow<Map<String, Set<String>>> = _onLine.asStateFlow()
+
+    /** When we last asked each host who is on: an %on-line long after is a push. */
+    private val askedAt = io.nisfeb.talon.util.ConcurrentMap<String, Long>()
+    private val _announces = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Hosts seen pushing a roster nobody asked for (wire 9): asked once, then heard. */
+    fun announces(host: String): Boolean = host in _announces.value
 
     /** Per line ("~host/name"), the ships recording it right now, for
      *  the recording badge every member on the line sees. Fed by
@@ -1798,6 +1882,12 @@ class CallController(
     }
 
     companion object {
+        /** Peeks for a line per connect, 2 s then 6 s apart: enough for a host
+         *  briefly asleep, few enough not to hammer one that is gone. */
+        const val PEEK_ATTEMPTS = 3
+
+        /** An %on-line this long after our ask was not its answer. */
+        const val ANSWER_WINDOW_MS = 10_000L
         private const val TAG = "Trunk"
 
         /** Default life of a listen link. Short on purpose: the link
@@ -1839,6 +1929,11 @@ class CallController(
         internal const val JOIN_ASK_TIMEOUT_MS = 20_000L
         /** How long after an ask a grant is still welcome. */
         private const val LATE_GRANT_MS = 120_000L
+        /** A /calls stream that lived this long was let in and kept, so the
+         *  next connect waits the first pause. Under vere's 45 s cut of a
+         *  stream the ship has gone quiet on: a busy ship's streams end
+         *  there, and rings must not wait out a backoff for it. */
+        private const val CALLS_HEALTHY_MS = 30_000L
 
         /** How long the "call ended" notice lingers before the surface
          *  goes quiet. Cleared here, not in the UI, so a backgrounded

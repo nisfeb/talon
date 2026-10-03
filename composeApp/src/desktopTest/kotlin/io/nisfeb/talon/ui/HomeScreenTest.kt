@@ -18,6 +18,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.rightClick
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
@@ -190,7 +192,7 @@ class HomeScreenTest {
     private val todayUtc = java.time.LocalDate.now(java.time.ZoneOffset.UTC).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
 
     /** A calendar app on the ship, or none where [present] is false. */
-    private fun calendar(present: Boolean = true, offers: String = "{}", writeTakesMs: Long = 0): io.nisfeb.talon.calendar.CalendarRepo {
+    private fun calendar(present: Boolean = true, offers: String = "{}", writeTakesMs: Long = 0, taskPriority: Int? = null): io.nisfeb.talon.calendar.CalendarRepo {
         val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
             val path = req.url.encodedPath
             val json = { body: String -> respond(body, io.ktor.http.HttpStatusCode.OK, io.ktor.http.headersOf("Content-Type", "application/json")) }
@@ -204,7 +206,7 @@ class HomeScreenTest {
                     json("""{"rows":[{"id":"e1","cal":"default","meta":{"name":"Dentist"},"l":${now - 600_000},"r":${now + 600_000}}]}""")
                 // Done once written: the ship's own word after the tick.
                 path.endsWith("/events.json") ->
-                    json("""[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"},"due_ms":$todayUtc${if (calendarWrites.any { "t1" in it }) ""","done":true""" else ""}}]""")
+                    json("""[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"},"due_ms":$todayUtc${if (calendarWrites.any { "t1" in it }) ""","done":true""" else ""}${taskPriority?.let { ",\"priority\":$it" } ?: ""}}]""")
                 path.endsWith("/calendars.json") -> json("""[{"id":"default","name":"Personal","kind":"local"}]""")
                 path.endsWith("/config.json") -> json("""{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
                 path.endsWith("/share/shares.json") -> json("""{"shares":{},"offers":$offers,"accepted":{}}""")
@@ -222,6 +224,13 @@ class HomeScreenTest {
         waitUntil(timeoutMillis = 5_000) { calendarWrites.any { "t1" in it } }
         onNodeWithText("Dentist").performClick()
         assertEquals(1, calendarOpened)
+    }
+
+    // The calendar's tasks carry a priority (version 25); the home page's
+    // today says it as the Tasks view does.
+    @Test
+    fun `a task's priority shows on the home page too`() = home(calendar = calendar(taskPriority = 1)) {
+        waitUntil(timeoutMillis = 5_000) { shows("Buy milk") && shows("High") }
     }
 
     // Ticked, then off to the chats and back while the ship was still at
@@ -286,4 +295,13 @@ class HomeScreenTest {
         onNodeWithText("Install the calendar").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("The ship would not install it.") }
     }
+
+    // A widget's menu came only from a held press; a mouse right-clicks.
+    @Test
+    fun `a right-click arranges the page, as a long press does`() = home {
+        onAllNodesWithText("Mail")[0].performMouseInput { rightClick() }
+        waitForIdle()
+        assertTrue(onAllNodesWithText("Done").fetchSemanticsNodes().isNotEmpty(), "arranging")
+    }
 }
+

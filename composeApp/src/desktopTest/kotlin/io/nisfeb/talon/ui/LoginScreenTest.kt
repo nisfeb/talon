@@ -18,6 +18,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -221,4 +223,15 @@ class LoginScreenTest {
         assertEquals(1, ranLocal)
         assertTrue(opened.single().startsWith("https://urbit.org/"), opened.toString())
     }
+
+    // The code was typed, then the mouse fetched to click Connect.
+    @Test
+    fun `Enter in the code signs in`() = login { loggedIn ->
+        onNodeWithText("Ship URL").performTextInput("zod.example.com")
+        onNodeWithText("+code").performTextInput("lidlut-tabwed")
+        onNodeWithText("+code").performKeyInput { pressKey(androidx.compose.ui.input.key.Key.Enter) }
+        waitUntil(timeoutMillis = 5_000) { loggedIn.isNotEmpty() }
+        assertEquals(listOf("~zod"), loggedIn)
+    }
 }
+

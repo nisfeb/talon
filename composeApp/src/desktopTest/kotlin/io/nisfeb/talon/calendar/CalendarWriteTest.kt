@@ -13,6 +13,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.LocalDate
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.buildJsonObject
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.test.Test
@@ -70,7 +72,7 @@ class CalendarWriteTest {
                         path.endsWith("/events.json") -> tasks(ship)
                         path.endsWith("/window.json") -> window(ship)
                         path.endsWith("/calendars.json") -> calendars
-                        path.endsWith("/config.json") -> """{"title":"Calendar","zone":"UTC","ball":"abc"}"""
+                        path.endsWith("/config.json") -> """{"title":"Calendar","zone":"UTC","ball":"abc","lead_min":30}"""
                         path.endsWith("/google.json") -> """{"connected":true,"linked":{}}"""
                         else -> "[]"
                     }
@@ -92,6 +94,20 @@ class CalendarWriteTest {
     }
 
     private fun Ship.asked(path: String) = reads.any { it.substringBefore('?').endsWith(path) }
+
+    // The heads-up before every timed event: set, it is what the page
+    // shows; refused, the page keeps showing what the ship still has.
+    @Test
+    fun `a refused heads-up change leaves the ship's own on show`() = calendar { repo, ship ->
+        assertEquals(30, repo.leadMin.value)
+        assertTrue(repo.remindersKnown.value, "the config says so, with no rows to say it")
+        ship.refuse = true
+        assertTrue(!repo.setLeadMin(0))
+        assertEquals(30, repo.leadMin.value)
+        ship.refuse = false
+        assertTrue(repo.setLeadMin(10))
+        assertEquals(10, repo.leadMin.value)
+    }
 
     @Test
     fun `the task list asks for tasks, not every event there is`() = calendar { repo, ship ->
@@ -291,4 +307,35 @@ class CalendarWriteTest {
             assertTrue(ship.asked("/google.json") && ship.asked("/conflicts.json"), ship.reads.toString())
         }
     }
+
+    // The beat the nexus takes to apply a poke is the reading's to wait:
+    // waited inside the write, every save stayed on screen that much longer.
+    @Test
+    fun `a save is answered as soon as the ship takes it, the beat left to the reading`() = calendar { repo, _ ->
+        repo.refreshTasks()
+        val started = System.nanoTime()
+        val w = repo.writeEvent(buildJsonObject { put("action", "edit-event"); put("id", "t1"); put("cat", "todo"); put("cal", "default"); put("meta", buildJsonObject { put("name", "Buy oat milk") }) })
+        val tookMs = (System.nanoTime() - started) / 1_000_000
+        assertTrue(w.ok)
+        assertTrue(tookMs < CalendarRepo.APPLY_BEAT_MS, "answered in $tookMs ms")
+        assertEquals("Buy oat milk", repo.tasks.value?.first { it.id == "t1" }?.name, "in the list already")
+    }
+
+    // A full read is up to nine requests of the ship's one thread, about a
+    // second each, and it ran on every focus: every alt-tab on desktop.
+    @Test
+    fun `coming back minutes after a read asks the ship nothing`() = calendar { repo, ship ->
+        repo.setForeground(false)
+        repo.setForeground(true)
+        kotlinx.coroutines.delay(300)
+        assertTrue(ship.reads.isEmpty(), "${ship.reads}")
+    }
+
+    @Test
+    fun `a stale read asks for the events and tasks, not the rest`() = calendar { repo, ship ->
+        repo.refreshIfStale(0)
+        assertTrue(ship.asked("/window.json") && ship.asked("/events.json"), "${ship.reads}")
+        assertTrue(ship.reads.none { r -> listOf("/calendars.json", "/config.json", "/shares.json", "/tags.json", "/google.json").any { r.substringBefore('?').endsWith(it) } }, "${ship.reads}")
+    }
 }
+
