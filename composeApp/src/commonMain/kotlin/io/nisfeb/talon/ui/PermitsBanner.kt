@@ -76,12 +76,16 @@ internal suspend fun fetchPendingPermits(http: HttpClient, shipUrl: String, cook
  * front (as it does after approving in the browser), and every half hour.
  */
 @Composable
-fun PermitsBanner(http: HttpClient?, shipUrl: String?) {
+fun PermitsBanner(http: HttpClient?, shipUrl: String?, inApp: Boolean = isUrbWebViewSupported) {
     if (http == null || shipUrl == null) return
     var pending by remember(shipUrl) { mutableStateOf(0) }
     var checkedAt by remember(shipUrl) { mutableLongStateOf(0L) }
+    // Bumped when the in-app page closes: the window never left the
+    // front, so nothing else would read the approvals again.
+    var reviewed by remember(shipUrl) { mutableStateOf(0) }
     val focused = LocalWindowInfo.current
-    LaunchedEffect(http, shipUrl) {
+    val review = rememberPermitsPage(shipUrl, inApp) { checkedAt = 0L; reviewed++ }
+    LaunchedEffect(http, shipUrl, reviewed) {
         suspend fun check() {
             checkedAt = nowMs()
             fetchPendingPermits(http, shipUrl)?.let { pending = it.size }
@@ -98,7 +102,6 @@ fun PermitsBanner(http: HttpClient?, shipUrl: String?) {
         }
     }
     if (pending == 0) return
-    val uriHandler = LocalUriHandler.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -106,7 +109,7 @@ fun PermitsBanner(http: HttpClient?, shipUrl: String?) {
             .clickable {
                 // Read again on the way back, whenever that is.
                 checkedAt = 0L
-                runCatching { uriHandler.openUri(permitsUrl(shipUrl)) }
+                review()
             }
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -129,3 +132,32 @@ fun PermitsBanner(http: HttpClient?, shipUrl: String?) {
 private const val RECHECK_MS = 30L * 60 * 1000
 // Two grubbery reads; a minute had them on most alt-tabs.
 private const val FOCUS_RECHECK_MS = 10L * 60 * 1000
+
+/**
+ * The ship's permits page, signed in. The phone's browser is not signed
+ * in to the ship, and grubbery answered it "forbidden": where there is
+ * an in-app browser the page opens there with this session's cookie.
+ * Desktop has none, and goes through eyre's login, which asks for the
+ * access key only where the browser is signed out and then goes on to
+ * the page. [after] runs when the in-app page closes.
+ */
+@Composable
+internal fun rememberPermitsPage(shipUrl: String, inApp: Boolean = isUrbWebViewSupported, after: () -> Unit = {}): () -> Unit {
+    val cookie = LocalShipCookie.current
+    val uriHandler = LocalUriHandler.current
+    var open by remember(shipUrl) { mutableStateOf(false) }
+    if (open && cookie != null) {
+        ShipPageSheet(title = "Permissions", pageUrl = permitsUrl(shipUrl), shipUrl = shipUrl, cookie = cookie) {
+            open = false
+            after()
+        }
+    }
+    return {
+        if (inApp && cookie != null) open = true
+        else runCatching { uriHandler.openUri(permitsLoginUrl(shipUrl)) }
+    }
+}
+
+/** Eyre's login, going on to the permits page once signed in. */
+fun permitsLoginUrl(shipUrl: String): String = shipUrl.trimEnd('/') + "/~/login?redirect=/apps/grubbery/permits"
+
