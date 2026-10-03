@@ -316,6 +316,36 @@ class TlonChatRepoStartupTest {
         assertEquals(lists, ship.scried.count { it == "notes/v0/notebooks" }, "the list not read again")
     }
 
+    // ~ricsul broke its streams every few minutes, and each break re-ran the
+    // whole pass (forty requests, the unread scry among them) until the
+    // ship could do nothing else. A short outage re-subscribes only.
+    @Test
+    fun `a stream broken minutes after the last pass reconnects without the whole pass`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        until("the progress bar clears") { !repo.bootstrapping.value }
+        until("the unread scry") { ship.scried.any { "activity/full" in it } }
+        val unreadReads = ship.scried.count { "activity/full" in it }
+        val subs = ship.subscribed.size
+        repo.ageForTest(byMs = 5 * 60_000L)
+        ship.endStreams()
+        until("subscribed again on the new channel") { ship.subscribed.size > subs }
+        kotlinx.coroutines.delay(500)
+        assertEquals(unreadReads, ship.scried.count { "activity/full" in it }, "the unread scry not run again")
+    }
+
+    @Test
+    fun `a long outage still reconciles`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        until("the progress bar clears") { !repo.bootstrapping.value }
+        until("the unread scry") { ship.scried.any { "activity/full" in it } }
+        val unreadReads = ship.scried.count { "activity/full" in it }
+        repo.ageForTest(byMs = 5 * 60_000L, heardMs = 10 * 60_000L)
+        ship.endStreams()
+        until("the unread scry again") { ship.scried.count { "activity/full" in it } > unreadReads }
+    }
+
     // Each invite heard read the whole foreigns list again. The fact is
     // the one group that moved, in the shape the scry gives.
     @Test

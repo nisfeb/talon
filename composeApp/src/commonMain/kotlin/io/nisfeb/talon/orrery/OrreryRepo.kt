@@ -507,15 +507,16 @@ class OrreryRepo(
     private fun watchBeacon(shipUrl: String) {
         beacon?.cancel()
         beacon = scope.launch {
-            var pause = 3_000L
+            var pause = BEACON_FIRST_PAUSE_MS
             var last: String? = null
             while (isActive) {
+                var openedMs = 0L
                 runCatching {
                     http.prepareGet(shipUrl.trimEnd('/') + BEACON_PATH) {
                         header(io.ktor.http.HttpHeaders.Accept, "text/event-stream")
                     }.execute { resp ->
                         if (!resp.status.isSuccess()) error("the beacon answered ${resp.status.value}")
-                        pause = 3_000L
+                        openedMs = now()
                         val body = resp.bodyAsChannel()
                         val reader = BeaconReader()
                         while (isActive) {
@@ -530,6 +531,10 @@ class OrreryRepo(
                         }
                     }
                 }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; Log.i(TAG, "beacon: ${it.message}") }
+                // Short again only after a stream that lived. Reset on being
+                // let in, a stream ~ricsul accepted and then broke at once
+                // came back every three seconds, all afternoon.
+                pause = beaconPauseAfter(pause, if (openedMs != 0L) now() - openedMs else null)
                 delay(pause + kotlin.random.Random.nextLong(0, 2_000))
                 pause = (pause * 2).coerceAtMost(5 * 60_000L)
             }
@@ -2131,3 +2136,14 @@ suspend fun settleOrreryGate(
         gate == false && holdsKey -> repo.forget(shipUrl, ship)
     }
 }
+
+/** The beacon's first pause after a stream ends, and the floor it goes back to. */
+internal const val BEACON_FIRST_PAUSE_MS = 3_000L
+
+/** A beacon stream that lived this long was healthy; its end is no sign of trouble. */
+internal const val BEACON_HEALTHY_MS = 60_000L
+
+/** The pause before opening the beacon again; see [io.nisfeb.talon.urbit.pauseAfterStream]. */
+internal fun beaconPauseAfter(pause: Long, livedMs: Long?): Long =
+    io.nisfeb.talon.urbit.pauseAfterStream(pause, livedMs, BEACON_FIRST_PAUSE_MS, BEACON_HEALTHY_MS)
+

@@ -3,6 +3,9 @@ package io.nisfeb.talon.call
 import io.nisfeb.talon.urbit.UrbitChannel
 import io.nisfeb.talon.urbit.PokeNacked
 import io.nisfeb.talon.urbit.UrbitSession
+import io.nisfeb.talon.urbit.jittered
+import io.nisfeb.talon.urbit.pauseAfterStream
+import io.nisfeb.talon.urbit.shouldBootstrap
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.backgroundExceptionHandler
 import io.nisfeb.talon.util.ioDispatcher
@@ -295,15 +298,23 @@ class CallController(
 
     private suspend fun runLoop() {
         var backoff = 2_000L
+        // When the six reads last ran, and when a stream last heard
+        // anything. ~ricsul dropped every stream at 45 s while it was
+        // busy, and each reconnect read all six again, about a second
+        // each, to the same answers.
+        var readsAtMs = 0L
+        var heardMs = 0L
         while (scope.isActive) {
+            var openedMs = 0L
             runCatching {
                 _connected.value = false
                 val ch = session.openChannel()
                 channel = ch
                 lookedFor.value = emptySet()
+                val read = shouldBootstrap(readsAtMs == 0L, readsAtMs, nowMs(), heardMs)
                 // The six reads at once: one after another they held the
                 // subscription, and with it every call, six round trips back.
-                kotlinx.coroutines.coroutineScope {
+                if (read) kotlinx.coroutines.coroutineScope {
                     listOf(
                         async {
                             // The ship's advertised ICE servers (its sidecar / its
@@ -398,9 +409,11 @@ class CallController(
                         },
                     ).forEach { it.await() }
                 }
+                if (read) readsAtMs = nowMs()
                 ch.events().let { events ->
                     ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH)
-                    backoff = 2_000L
+                    openedMs = nowMs()
+                    heardMs = openedMs
                     _connected.value = true
                     // Acked in batches, as the main channel is: a PUT per
                     // event doubled what each fact cost the ship.
@@ -408,6 +421,7 @@ class CallController(
                     scope.launch { io.nisfeb.talon.urbit.ackInBatches(acks) { ch.ack(it) } }
                     try {
                     events.collect { ev ->
+                        heardMs = nowMs()
                         ev.id?.let { acks.trySend(it) }
                         val body = ev.body as? JsonObject ?: return@collect
                         // Surface poke nacks — a silently-refused poke cost
@@ -636,9 +650,10 @@ class CallController(
             }
             channel = null
             if (!scope.isActive) break
+            backoff = pauseAfterStream(backoff, if (openedMs != 0L) nowMs() - openedMs else null, 2_000L, CALLS_HEALTHY_MS)
             // Jittered: a ship restart drops every client at once, and a
             // fixed delay brings the whole fleet back on the same tick.
-            delay((backoff * kotlin.random.Random.nextDouble(0.5, 1.5)).toLong().coerceAtLeast(1L))
+            delay(jittered(backoff))
             backoff = (backoff * 2).coerceAtMost(60_000L)
         }
     }
@@ -1914,6 +1929,11 @@ class CallController(
         internal const val JOIN_ASK_TIMEOUT_MS = 20_000L
         /** How long after an ask a grant is still welcome. */
         private const val LATE_GRANT_MS = 120_000L
+        /** A /calls stream that lived this long was let in and kept, so the
+         *  next connect waits the first pause. Under vere's 45 s cut of a
+         *  stream the ship has gone quiet on: a busy ship's streams end
+         *  there, and rings must not wait out a backoff for it. */
+        private const val CALLS_HEALTHY_MS = 30_000L
 
         /** How long the "call ended" notice lingers before the surface
          *  goes quiet. Cleared here, not in the UI, so a backgrounded
