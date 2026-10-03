@@ -4,6 +4,7 @@ import io.nisfeb.talon.ui.UnreadDividerRow
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -229,7 +230,12 @@ fun MailThreadPane(
         prev = id,
         threadId = threadId,
         to = if (forwarding) emptyList() else io.nisfeb.talon.mail.replyAudience(thread?.messages.orEmpty(), id, ourShip),
-        subject = answerSubject(thread?.messages?.firstOrNull()?.subject.orEmpty(), forwarding),
+        // The subject of the message answered, as the ship's own page has
+        // it: after a reply changed it, the first message's came back.
+        subject = answerSubject(
+            thread?.messages?.lastOrNull { it.id == id }?.subject ?: io.nisfeb.talon.mail.threadSubject(thread?.messages.orEmpty()),
+            forwarding,
+        ),
         travels = if (id == answering) travelling.size else id?.let { pathTo(forest, it).size } ?: 0,
         forwarding = forwarding,
     )
@@ -246,7 +252,7 @@ fun MailThreadPane(
 
     Column(modifier.fillMaxSize()) {
         MailThreadHeader(
-            subject = thread?.messages?.firstOrNull()?.subject.orEmpty(),
+            subject = io.nisfeb.talon.mail.threadSubject(thread?.messages.orEmpty()),
             participants = thread?.participants.orEmpty().map(nameFor),
             unreadable = thread?.unreadable ?: 0,
             labels = thread?.labels.orEmpty(),
@@ -281,7 +287,7 @@ fun MailThreadPane(
             onFile = {
                 val t = thread ?: return@MailThreadHeader
                 file(
-                    title = t.messages.firstOrNull()?.subject.orEmpty().ifBlank { "Mail thread" },
+                    title = io.nisfeb.talon.mail.threadSubject(t.messages).ifBlank { "Mail thread" },
                     seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, null),
                     gemtext = io.nisfeb.talon.mail.MailGemtext.thread(t, nameFor, ::whenAt),
                 )
@@ -561,11 +567,28 @@ private fun MailThreadHeader(
             }
         }
         if (participants.isNotEmpty()) {
+            // A long list folds to its first few and how many more; the
+            // count opens it, and the open list folds back.
+            var everyone by remember(participants) { mutableStateOf(false) }
+            val (shown, more) = io.nisfeb.talon.mail.foldNames(participants, everyone)
+            val foldable = io.nisfeb.talon.mail.foldNames(participants, false).second > 0
+            val accent = MaterialTheme.colorScheme.primary
             Text(
-                participants.joinToString(),
+                androidx.compose.ui.text.buildAnnotatedString {
+                    append(shown.joinToString())
+                    if (foldable) {
+                        withStyle(androidx.compose.ui.text.SpanStyle(color = accent)) {
+                            append(if (more > 0) " and $more more" else " · Show fewer")
+                        }
+                    }
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 8.dp),
+                modifier = Modifier.padding(start = 8.dp).then(
+                    if (foldable) {
+                        Modifier.clickable(onClickLabel = if (more > 0) "Show all ${participants.size} people" else "Show fewer") { everyone = !everyone }
+                    } else Modifier,
+                ),
             )
         }
         if (labels.isNotEmpty()) {
