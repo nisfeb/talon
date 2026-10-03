@@ -365,6 +365,12 @@ class TlonChatRepo(
     /** The ship's word on what is unread, read as a connect reads it. */
     internal suspend fun bootstrapActivityForTest() = bootstrapActivity(channel!!)
 
+    /** As if the last full pass ran [byMs] ago and the stream last heard anything [heardMs] ago (null: as it is). */
+    internal fun ageForTest(byMs: Long, heardMs: Long? = null) {
+        lastBootstrapMs -= byMs
+        heardMs?.let { lastEventMs = nowMs() - it }
+    }
+
     fun start(session: UrbitSession) {
         if (started) return
         started = true
@@ -487,6 +493,8 @@ class TlonChatRepo(
 
     private suspend fun runSessionOnce(session: UrbitSession, firstRun: Boolean) = coroutineScope {
         Log.i(TAG, "opening channel (firstRun=$firstRun)")
+        // When the old stream last heard anything: how long this outage was.
+        val heardBeforeMs = lastEventMs
         val ch = session.openChannel()
         channel = ch
         lastEventMs = nowMs()
@@ -585,7 +593,7 @@ class TlonChatRepo(
         // its subscriptions and nothing else. See the client-conduct
         // rules: a reconnect must be cheap.
         val sinceBootstrapMs = nowMs() - lastBootstrapMs
-        val skipBootstrap = !shouldBootstrap(firstRun, lastBootstrapMs, nowMs())
+        val skipBootstrap = !shouldBootstrap(firstRun, lastBootstrapMs, nowMs(), heardBeforeMs)
         // A connect somebody asked for (back to the app, the network back)
         // still reads the recent messages and the unread counts inside the
         // window: the stream was down while they were away, and what landed

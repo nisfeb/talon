@@ -36,6 +36,25 @@ class ReconnectPolicyTest {
         assertTrue(shouldBootstrap(false, now - 300_000L, now), "5 min later")
     }
 
+    // ~ricsul broke its streams every few minutes and every break re-ran
+    // the whole pass, unread scry and all, until the ship did nothing else.
+    @Test
+    fun `a reconnect after a short outage re-subscribes, a long one reconciles`() {
+        val now = 10_000_000L
+        val lastPass = now - 5 * 60_000L
+        assertFalse(shouldBootstrap(false, lastPass, now, lastHeardMs = now - 20_000L), "stream broke 20 s ago")
+        assertTrue(shouldBootstrap(false, lastPass, now, lastHeardMs = now - 10 * 60_000L), "ten minutes without a word")
+        assertTrue(shouldBootstrap(false, lastPass, now), "not known when it last heard: reconcile")
+    }
+
+    @Test
+    fun `short outages still reconcile every fifteen minutes`() {
+        val now = 10_000_000L
+        assertFalse(shouldBootstrap(false, now - (RECONCILE_EVERY_MS - 1), now, lastHeardMs = now - 5_000L))
+        assertTrue(shouldBootstrap(false, now - RECONCILE_EVERY_MS, now, lastHeardMs = now - 5_000L))
+        assertFalse(shouldBootstrap(false, now - 30_000L, now, lastHeardMs = now - 10 * 60_000L), "never twice within a minute")
+    }
+
     @Test
     fun `a session that never reconciled always does`() {
         assertTrue(shouldBootstrap(firstRun = false, lastBootstrapMs = 0L, nowMs = 1_000L))

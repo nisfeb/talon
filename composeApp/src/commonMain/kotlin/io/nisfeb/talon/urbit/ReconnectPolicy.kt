@@ -18,6 +18,12 @@ fun jittered(ms: Long): Long =
 /** A reconnect inside this window re-registers subscriptions only. */
 const val BOOTSTRAP_MIN_GAP_MS = 60_000L
 
+/** A stream that heard something this recently missed little: a reconnect after it re-subscribes only. */
+const val SHORT_OUTAGE_MS = 2 * 60_000L
+
+/** But the counts are reconciled at least this often, so what short gaps missed does not drift for long. */
+const val RECONCILE_EVERY_MS = 15 * 60_000L
+
 /**
  * Whether a session that has just (re)connected should run the
  * reconciliation scries, or only re-subscribe.
@@ -25,11 +31,20 @@ const val BOOTSTRAP_MIN_GAP_MS = 60_000L
  * A reconnect must be cheap. The first connect of a session always
  * reconciles; a reconnect that lands right after the previous pass
  * does not, because that pass already covered the window and the
- * subscriptions carry everything live. This bounds the cost to the
- * ship if anything ever reconnects in a loop again.
+ * subscriptions carry everything live. Nor does one after a short
+ * outage ([lastHeardMs], when the old stream last heard anything, is
+ * recent): ~ricsul broke its streams every few minutes, and each break
+ * re-ran the whole pass (forty requests, the unread scry among them)
+ * until the ship could do nothing else. A long outage, or none for
+ * [RECONCILE_EVERY_MS], still reconciles.
  */
-fun shouldBootstrap(firstRun: Boolean, lastBootstrapMs: Long, nowMs: Long): Boolean =
-    firstRun || lastBootstrapMs == 0L || nowMs - lastBootstrapMs >= BOOTSTRAP_MIN_GAP_MS
+fun shouldBootstrap(firstRun: Boolean, lastBootstrapMs: Long, nowMs: Long, lastHeardMs: Long = 0L): Boolean {
+    if (firstRun || lastBootstrapMs == 0L) return true
+    val since = nowMs - lastBootstrapMs
+    if (since < BOOTSTRAP_MIN_GAP_MS) return false
+    val shortOutage = lastHeardMs != 0L && nowMs - lastHeardMs < SHORT_OUTAGE_MS
+    return !shortOutage || since >= RECONCILE_EVERY_MS
+}
 
 /** The deep history pass: nothing kept here, or the newest is over a day old. */
 fun needsDeepHistory(newestSentMs: Long?, nowMs: Long): Boolean =
