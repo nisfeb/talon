@@ -146,4 +146,15 @@ class AgentLoopTest {
         assertEquals(50, fin.result.length)
         assertTrue(fin.ms >= 0)
     }
+
+    // The kept log says how long each tool took; a tool that takes time says so.
+    @Test
+    fun `a slow tool's time is what it took`() = runBlocking {
+        val slow = Tool(spec("read"), write = false) { kotlinx.coroutines.delay(40); "done" }
+        val loop = AgentLoop(scripted(AgentTurn.Calls(null, listOf(call("read"))), AgentTurn.Final("ok")).completer, listOf(slow))
+        val events = mutableListOf<AgentLoop.Event>()
+        loop.run("q", confirm = { _, _ -> true }, onEvent = { events += it })
+        val fin = events.filterIsInstance<AgentLoop.Event.ToolFinished>().single()
+        assertTrue(fin.ms >= 40, "took ${fin.ms}ms")
+    }
 }

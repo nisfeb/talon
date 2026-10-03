@@ -316,5 +316,21 @@ class OrreryToolsTest {
         val out = clipJson(lines, 6000)
         assertTrue(out.length <= 6000 + 120 && out.lines().dropLast(1).all { it.startsWith("line ") }, "whole lines only")
         assertTrue("cut here" in out && "ask for one body" in out)
+        assertTrue("cut here, ${lines.length - 6000} more characters" in out, "says how much was left out")
+    }
+
+    @Test
+    fun `a view exactly the room there is is handed over whole`() {
+        val view = "{\"bodies\":[" + (1..200).joinToString(",") { "\"b$it\"" } + "]}"
+        assertEquals(view, clipJson(view, view.length))
+    }
+
+    // A long view with no list to shorten: cut at a line, and said so.
+    @Test
+    fun `a long view with nothing to drop is cut at a line, with the note`() {
+        val view = buildJsonObject { (1..40).forEach { put("k$it", "v".repeat(200)) } }.toString()
+        val out = clipJson(view, 2000)
+        assertTrue(out.length <= 2000 + 60, "${out.length}")
+        assertTrue(out.endsWith("… cut here; ask for one body instead."), out.takeLast(80))
     }
 }
