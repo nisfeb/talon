@@ -12,6 +12,7 @@ import io.ktor.http.Url
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.nisfeb.talon.urbit.asText
+import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.createAppHttpClient
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -126,6 +127,7 @@ class AgentClient(
         headers: HttpRequestBuilder.() -> Unit,
         parse: (JsonObject) -> AgentTurn,
     ): AgentTurn = withContext(ioDispatcher) {
+        val started = kotlin.time.TimeSource.Monotonic.markNow()
         val resp = http.post(url) {
             contentType(ContentType.Application.Json)
             headers()
@@ -137,17 +139,32 @@ class AgentClient(
             }
         }
         val body = resp.bodyAsText()
+        val ms = started.elapsedNow().inWholeMilliseconds
         val host = Url(url).host
         if (!resp.status.isSuccess()) {
+            Log.w(TAG, "$model: ${resp.status.value} after ${ms}ms, ${payload.length} chars sent")
             error(extractApiError(host, resp.status.value, body))
         }
         val obj = runCatching { JSON.parseToJsonElement(body).jsonObject }
             .getOrElse { error("$host bad JSON: ${body.take(300)}") }
         feature?.let { AiSpend.add(it.name, usageCost(cfg.provider, model, obj)) }
-        parse(obj)
+        val turn = parse(obj)
+        // One line per call, so a turn that went wrong can be read back from
+        // the log instead of reconstructed: what it cost, how it ended, and
+        // whether anything came back. The raw body is kept only when nothing
+        // did — that is the case the fields above cannot explain.
+        val empty = turn is AgentTurn.Final && turn.text.isBlank()
+        Log.i(TAG, "${usageLine(cfg.provider, model, obj) ?: "model $model"}, ${ms}ms, ${payload.length} chars sent, finish=${finishReason(obj) ?: "?"}" +
+            when (turn) {
+                is AgentTurn.Calls -> ", ${turn.calls.size} tool call(s)"
+                is AgentTurn.Final -> if (empty) ", EMPTY" else ", ${turn.text.length} chars"
+            })
+        if (empty) Log.w(TAG, "$model returned nothing; raw body: ${body.take(4000)}")
+        turn
     }
 
     companion object {
+        private const val TAG = "AgentClient"
         internal val JSON = Json { ignoreUnknownKeys = true }
     }
 }
@@ -295,6 +312,12 @@ internal fun buildOpenAiRequest(
         }
     }
 }
+
+/** Why the model stopped, in either dialect: OpenAI's `finish_reason`
+ *  on the first choice, Anthropic's `stop_reason`. */
+internal fun finishReason(body: JsonObject): String? =
+    (body["choices"] as? JsonArray)?.firstOrNull()?.let { (it as? JsonObject)?.get("finish_reason").asText() }
+        ?: body["stop_reason"].asText()
 
 internal fun parseOpenAiTurn(body: JsonObject): AgentTurn {
     val msg = (body["choices"] as? JsonArray)?.firstOrNull()

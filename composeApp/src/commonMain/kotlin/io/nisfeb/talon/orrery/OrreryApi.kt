@@ -92,9 +92,16 @@ class OrreryApi(
         request(owner, HttpMethod.Delete, "/api/clients/$id")
     }
 
-    /** The state view as the key sees it, whole, for readers that need attribute values. */
-    suspend fun stateJson(token: String): JsonObject {
-        val text = request(bare, HttpMethod.Get, "/api/state") { header(HttpHeaders.Authorization, "Bearer $token") }
+    /**
+     * The state view as the key sees it: whole, for readers that need
+     * attribute values, or [brief] (orrery 67+): each body's id, kind,
+     * name, aliases, current values and situations, the open situations
+     * and actions, and each kind's attribute names — about a tenth of the
+     * whole. An older ship ignores the flag and answers whole.
+     */
+    suspend fun stateJson(token: String, brief: Boolean = false): JsonObject {
+        val path = if (brief) "/api/state?brief=1" else "/api/state"
+        val text = request(bare, HttpMethod.Get, path) { header(HttpHeaders.Authorization, "Bearer $token") }
         return reading { Json.parseToJsonElement(text).jsonObject }
     }
 

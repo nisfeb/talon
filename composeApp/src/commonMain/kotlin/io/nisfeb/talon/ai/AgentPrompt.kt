@@ -89,6 +89,11 @@ object AgentPrompt {
           confirmation before it runs, so call them directly when the task
           needs them; do not ask for permission in prose. If the user
           declines, the tool result says so; adapt and move on.
+        - Many items in one request (a list of facts, several entries) go
+          in as few calls as the tool takes: every call to the ship costs
+          seconds before any work. When the user's message asked for the
+          writes, make them in this turn; do not describe what you would
+          write instead. Always end with an answer that says what you did.
 
         DOING THINGS FOR THE USER
         - People: a name in the request ("sunbum", "my brother Tom") is a

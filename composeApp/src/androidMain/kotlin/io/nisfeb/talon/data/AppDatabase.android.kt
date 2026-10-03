@@ -67,7 +67,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39,
             MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44, MIGRATION_44_45,
             MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50,
-            MIGRATION_50_51, MIGRATION_51_52,
+            MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -460,6 +460,12 @@ private val MIGRATION_50_51 = object : Migration(50, 51) {
 private val MIGRATION_51_52 = object : Migration(51, 52) {
     override fun migrate(db: SupportSQLiteDatabase) {
         WATCHWORDS_DROP_SQL.forEach(db::execSQL)
+    }
+}
+
+private val MIGRATION_52_53 = object : Migration(52, 53) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(ASSISTANT_LOG_SQL)
     }
 }
 

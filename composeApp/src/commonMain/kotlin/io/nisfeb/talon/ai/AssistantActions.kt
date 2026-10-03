@@ -815,8 +815,10 @@ private suspend fun eventFrom(args: JsonObject, a: AssistantActions, zone: TimeZ
 
 /**
  * The writes "Allow all" lets through for the rest of an answer: adding
- * and changing calendar entries, the batches the owner asks for. A
+ * and changing calendar entries, and orrery entries, the batches the
+ * owner asks for (an information dump is many facts in one turn: the
+ * owner confirms the first write and Allow all covers the rest). A
  * delete, a message, mail, a call or a share still asks each time.
  */
-internal val ALLOW_ALL_TOOLS = setOf("create_event", "update_event", "create_task", "complete_task")
+internal val ALLOW_ALL_TOOLS = setOf("create_event", "update_event", "create_task", "complete_task", "orrery_observe")
 

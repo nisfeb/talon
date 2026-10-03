@@ -25,12 +25,13 @@ class MessageStatusIndexTest {
         // No destructive fallback: a migration that does not match the entity fails here.
         fun db() = Room.databaseBuilder<AppDatabase>(name = path)
             .setDriver(BundledSQLiteDriver())
-            .addMigrations(MESSAGE_STATUS_INDEX_MIGRATION, io.nisfeb.talon.data.WATCHWORDS_DROP_MIGRATION)
+            .addMigrations(MESSAGE_STATUS_INDEX_MIGRATION, io.nisfeb.talon.data.WATCHWORDS_DROP_MIGRATION, io.nisfeb.talon.data.ASSISTANT_LOG_MIGRATION)
             .build()
         try {
             db().also { it.messages().upsert(MessageEntity("~bus", "~bus/1", "~bus", 1_000, "[]", "/chat", status = "queued")); it.close() }
             BundledSQLiteDriver().open(path).also { c ->
                 c.execSQL("DROP INDEX index_messages_status")
+                c.execSQL("ALTER TABLE assistant_history DROP COLUMN log") // added at 53
                 c.execSQL("PRAGMA user_version = 50")
                 c.close()
             }
