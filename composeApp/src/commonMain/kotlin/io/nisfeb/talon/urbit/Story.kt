@@ -331,7 +331,7 @@ object Story {
             val url = text.substring(r.first, r.last + 1)
             out.pushStringAnnotation(URL_TAG, url)
             out.withSpan(SpanStyle(color = LINK_COLOR, textDecoration = TextDecoration.Underline)) {
-                append(url)
+                append(shortLinkLabel(url))
             }
             out.pop()
             cursor = r.last + 1
@@ -440,7 +440,9 @@ object Story {
         (obj["link"] as? JsonObject)?.let { link ->
             val href = link["href"].asStr()
             val content = link["content"].asStr()
-            val label = content ?: href ?: "[link]"
+            // A link written as its own address is cut short; one the
+            // author named reads as they named it.
+            val label = content?.takeUnless { it == href } ?: href?.let(::shortLinkLabel) ?: content ?: "[link]"
             if (href != null) out.pushStringAnnotation(URL_TAG, href)
             out.withSpan(SpanStyle(color = LINK_COLOR, textDecoration = TextDecoration.Underline)) {
                 append(label)
@@ -803,3 +805,15 @@ private inline fun androidx.compose.ui.text.AnnotatedString.Builder.withSpan(
         pop(idx)
     }
 }
+
+/**
+ * A long address as a link shows it: without its http(s):// and cut to
+ * [keep] characters and an ellipsis. Long addresses ran across the
+ * message; the link still goes to the whole of it. One that fits is left
+ * as written.
+ */
+fun shortLinkLabel(url: String, keep: Int = 20): String {
+    val shown = url.removePrefix("https://").removePrefix("http://")
+    return if (shown.length <= keep + 1) url else shown.take(keep) + "…"
+}
+

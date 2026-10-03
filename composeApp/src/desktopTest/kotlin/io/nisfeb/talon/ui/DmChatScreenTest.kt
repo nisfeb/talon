@@ -184,6 +184,18 @@ class DmChatScreenTest {
         onNodeWithText("will not land").assertIsDisplayed()
     }
 
+    // A long post took the whole screen; in the chat it folds to ten lines.
+    @Test
+    fun `a long post folds in the chat, and opens`() = chat(seed = {
+        // As the ship has it: a story, its lines broken, not raw newlines in a JSON string.
+        val story = io.nisfeb.talon.urbit.chatTextToStory((1..20).joinToString("\n") { "line $it" }).toString()
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, story, "/chat"))
+    }) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Show more").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("Show more").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Show less").fetchSemanticsNodes().isNotEmpty() }
+    }
+
     @Test
     fun `a reply count opens the thread`() = chat(seed = {
         messages().upsert(msg("~bus/170141184506", "~bus", "a question", 1_000))
@@ -219,8 +231,11 @@ class DmChatScreenTest {
             waitForIdle()
             val y = onNodeWithText(text).fetchSemanticsNode().boundsInRoot.center.y
             val buttons = onAllNodesWithContentDescription("Message actions")
-            buttons[buttons.fetchSemanticsNodes().indices.filter { buttons[it].fetchSemanticsNode().boundsInRoot.top <= y }
-                .maxBy { buttons[it].fetchSemanticsNode().boundsInRoot.top }].performClick()
+            // Under load the list can still be laying out; no button yet is
+            // another try, not a failure.
+            val nearest = buttons.fetchSemanticsNodes().indices.filter { buttons[it].fetchSemanticsNode().boundsInRoot.top <= y }
+                .maxByOrNull { buttons[it].fetchSemanticsNode().boundsInRoot.top } ?: continue
+            buttons[nearest].performClick()
             if (runCatching { waitUntil(timeoutMillis = 1_500) { opened() } }.isSuccess) return
         }
         waitUntil(timeoutMillis = 1_000) { opened() }
