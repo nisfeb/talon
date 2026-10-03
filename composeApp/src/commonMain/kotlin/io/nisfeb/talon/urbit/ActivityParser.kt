@@ -404,7 +404,7 @@ internal fun activityReadSource(whom: String, groupFlag: String? = null): JsonOb
  * conversation read. Caller supplies the source object (built with
  * [activityReadSource]).
  */
-internal fun activityReadAction(source: JsonObject, deep: Boolean = false): JsonObject =
+internal fun activityReadAction(source: JsonObject, deep: Boolean = false, upTo: Long? = null): JsonObject =
     buildJsonObject {
         put("read", buildJsonObject {
             put("source", source)
@@ -418,7 +418,11 @@ internal fun activityReadAction(source: JsonObject, deep: Boolean = false): Json
                     // unreads table, so without recursion the badge
                     // refuses to clear on diary / heap channels (and on
                     // any chat with reply traffic).
-                    put("time", kotlinx.serialization.json.JsonNull)
+                    // Up to now, or for a read that reaches the ship late, up
+                    // to when it was read ([upTo], ms): what came in since stays
+                    // unread. An @da as dotted @ud, as activity-json's
+                    // all-read decodes it: (un (mu (se %ud))).
+                    put("time", upTo?.let { kotlinx.serialization.json.JsonPrimitive(UrbitTime.daToUd(UrbitTime.unixMsToDa(it))) } ?: kotlinx.serialization.json.JsonNull)
                     // deep=true recurses into child sources: every
                     // thread under a channel, every reply thread under
                     // a DM. Reading a conversation must NOT do that —

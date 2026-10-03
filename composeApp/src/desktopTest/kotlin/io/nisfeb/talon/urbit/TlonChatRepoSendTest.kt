@@ -372,6 +372,9 @@ class TlonChatRepoSendTest {
 
     @Test
     fun `opening a chat with nothing unread tells the ship nothing`() = live {
+        // Once the ship's word on what is unread has been read this connect.
+        ship.scries["activity/v6/activity/full"] = "{}"
+        repo.bootstrapActivityForTest()
         repo.setOpenChat("~bus")
         delay(300)
         repo.setOpenChat(null)
@@ -381,6 +384,8 @@ class TlonChatRepoSendTest {
 
     @Test
     fun `messages arriving in the chat in view are read once, not once each`() = live {
+        ship.scries["activity/v6/activity/full"] = "{}"
+        repo.bootstrapActivityForTest()
         repo.setForeground(true)
         repo.setOpenChat("~bus")
         repeat(5) { n ->
@@ -397,6 +402,8 @@ class TlonChatRepoSendTest {
 
     @Test
     fun `leaving sends the read that was waiting, at once`() = live {
+        ship.scries["activity/v6/activity/full"] = "{}"
+        repo.bootstrapActivityForTest()
         repo.setForeground(true)
         repo.setOpenChat("~bus")
         repo.applyActivityUpdate(kotlinx.serialization.json.Json.parseToJsonElement(
@@ -464,6 +471,61 @@ class TlonChatRepoSendTest {
         ))
         assertEquals(5_000L, repo.groupLastActive("~bus/garden").filterNotNull().first())
         assertEquals(7_000L, repo.groupLastActive("~nec/shed").filterNotNull().first())
+    }
+
+    // ─── a read the ship did not hear ─────────────────────────────
+    // The same messages came back unread, again and again: a read that
+    // timed out was lost (the badge here was cleared first, so the next
+    // open sent nothing) and the ship's next word brought them back.
+
+    private suspend fun shipSays(whom: String, recency: Long, count: Int) = repo.applyActivityUpdate(
+        kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"activity":{"ship/$whom":{"recency":$recency,"count":$count,"notify-count":0,"notify":false,"unread":{"id":"$whom/170.141.184.506","time":"1","count":$count,"notify":false}}}}""",
+        ) as kotlinx.serialization.json.JsonObject,
+    )
+
+    @Test
+    fun `a read the ship did not hear is owed, kept read here, and sent up to when it was read`() = live {
+        db.unreads().upsert(UnreadEntity("~bus", count = 2, notifyCount = 0, recencyMs = 1))
+        ship.lose = { if (it.app == "activity") kotlinx.io.IOException("The network connection was lost.") else null }
+        val before = io.nisfeb.talon.util.nowMs()
+        repo.markRead("~bus")
+        val after = io.nisfeb.talon.util.nowMs()
+        assertTrue(ship.pokesTo("activity").isEmpty(), "never reached the ship")
+        // The ship, not having heard, says the same messages are unread.
+        shipSays("~bus", recency = before - 1_000, count = 2)
+        assertEquals(0, db.unreads().getOne("~bus")!!.count, "read here, and kept read")
+        // The ship back: the owed read goes, up to when it was read.
+        ship.lose = { null }
+        repo.drainQueue()
+        val read = ship.pokesTo("activity").single().json
+        val time = read.at("read", "action", "all", "time").jsonPrimitive.content
+        assertTrue(Regex("\\d{1,3}(\\.\\d{3})+").matches(time), "a dotted @ud, as all-read decodes it: $time")
+        val ms = UrbitTime.daToUnixMs(com.ionspin.kotlin.bignum.integer.BigInteger.parseString(time.replace(".", "")))!!
+        assertTrue(ms in before..after, "up to the read, not to now: $ms not in $before..$after")
+        // Paid: a message after the read is unread again, as it should be.
+        shipSays("~bus", recency = after + 60_000, count = 1)
+        assertEquals(1, db.unreads().getOne("~bus")!!.count)
+        repo.drainQueue()
+        assertEquals(1, ship.pokesTo("activity").size, "nothing owed any more")
+    }
+
+    @Test
+    fun `a message newer than an owed read still shows unread`() = live {
+        db.unreads().upsert(UnreadEntity("~bus", count = 1, notifyCount = 0, recencyMs = 1))
+        ship.lose = { if (it.app == "activity") kotlinx.io.IOException("The network connection was lost.") else null }
+        repo.markRead("~bus")
+        shipSays("~bus", recency = io.nisfeb.talon.util.nowMs() + 60_000, count = 3)
+        assertEquals(3, db.unreads().getOne("~bus")!!.count)
+    }
+
+    // The ship's counts had not been read yet (that read took minutes on a
+    // busy ship): a chat with none here was opened and nothing was sent, and
+    // when the counts landed its messages came back unread.
+    @Test
+    fun `before the ship's counts are read, opening a chat reads it there anyway`() = live {
+        repo.markRead("~bus")
+        assertEquals(1, ship.pokesTo("activity").size)
     }
 }
 
