@@ -187,7 +187,9 @@ class DmChatScreenTest {
     // A long post took the whole screen; in the chat it folds to ten lines.
     @Test
     fun `a long post folds in the chat, and opens`() = chat(seed = {
-        messages().upsert(msg("~bus/170141184506", "~bus", (1..20).joinToString("\n") { "line $it" }, 1_000))
+        // As the ship has it: a story, its lines broken, not raw newlines in a JSON string.
+        val story = io.nisfeb.talon.urbit.chatTextToStory((1..20).joinToString("\n") { "line $it" }).toString()
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, story, "/chat"))
     }) { _, _ ->
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Show more").fetchSemanticsNodes().isNotEmpty() }
         onNodeWithText("Show more").performClick()
