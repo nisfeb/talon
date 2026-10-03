@@ -94,7 +94,7 @@ class OrreryApi(
 
     /**
      * The state view as the key sees it: whole, for readers that need
-     * attribute values, or [brief] (orrery 66+): each body's id, kind,
+     * attribute values, or [brief] (orrery 67+): each body's id, kind,
      * name, aliases, current values and situations, the open situations
      * and actions, and each kind's attribute names — about a tenth of the
      * whole. An older ship ignores the flag and answers whole.
