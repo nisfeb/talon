@@ -265,4 +265,21 @@ class StoryRendererTest {
             assertEquals(listOf("cite chat/~bus/general"), did)
         }
     }
+
+    // ─── long links and long posts ────────────────────────────────
+
+    @Test
+    fun `a link written as its address shows cut short and opens the whole of it`() {
+        val url = "https://example.com/articles/2026/10/a-very-long-slug"
+        val named = "https://example.com/another/long/path/to/somewhere"
+        val p = parts("""[{"inline":[{"link":{"href":"$url","content":"$url"}}," and ",{"link":{"href":"$named","content":"the report"}}]}]""", raw = true)
+        render(p) {
+            assertTrue(shows("example.com/articles…"), "cut short")
+            assertTrue(!shows("a-very-long-slug"), "not the whole address")
+            assertTrue(shows("the report"), "a named link reads as named")
+            clickWord("example.com/articles…")
+            assertEquals(listOf("link $url"), did)
+        }
+    }
 }
+

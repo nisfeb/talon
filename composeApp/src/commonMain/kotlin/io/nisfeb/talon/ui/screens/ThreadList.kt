@@ -741,6 +741,8 @@ private fun ThreadMessage(
                     if (m.status == "pending") SendingIcon()
                 }
             }
+            // Only a post that could run long is measured for a fold.
+            val body: @Composable () -> Unit = {
             StoryRenderer(
                 parts,
                 onMentionTap = onMentionTap,
@@ -753,6 +755,10 @@ private fun ThreadMessage(
                 // text rather than opening the menu (hover "⋯" opens it).
                 onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
+            }
+            if (remember(parts) { io.nisfeb.talon.ui.mightFold(parts) }) {
+                io.nisfeb.talon.ui.FoldLongPost(m.id, hasMedia = remember(parts) { io.nisfeb.talon.ui.hasMedia(parts) }, content = body)
+            } else body()
             SendStateNote(m.status)
             if (grouped.isNotEmpty()) {
                 FlowRow(
