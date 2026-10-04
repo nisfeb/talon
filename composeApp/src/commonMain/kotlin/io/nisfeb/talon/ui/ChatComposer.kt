@@ -527,6 +527,17 @@ fun ChatComposer(
         stage(file.bytes, file.mimeType, file.name, file.isImage)
     }
 
+    // The clipboard's image staged, or said to be too large. True when
+    // there was one either way, so the field does not paste the
+    // clipboard's text in its place.
+    val pasteClipboardImage: () -> Boolean = {
+        when (val found = clipboardPaste()) {
+            is ClipboardPaste.Image -> { stageDropped(found.file); true }
+            is ClipboardPaste.Problem -> { state.sendError = found.message; true }
+            ClipboardPaste.None -> false
+        }
+    }
+
     // A mention reads in the box as it will once sent, by this device's
     // naming settings; a draft with no @p keeps the plain look (on iOS a
     // transformation can cost the field its paste menu).
@@ -1026,7 +1037,7 @@ fun ChatComposer(
                 }
                 if (hasImage) {
                     io.nisfeb.talon.ui.IconButton(tip = "Paste image", onClick = {
-                            readClipboardImageOrNull()?.let(stageDropped)
+                            pasteClipboardImage()
                         },
                         modifier = Modifier.size(36.dp),
                     ) {
@@ -1176,12 +1187,8 @@ fun ChatComposer(
                         // paste falls through normally.
                         val pasteCombo = e.key == Key.V &&
                             (e.isCtrlPressed || e.isMetaPressed)
-                        if (pasteCombo && canSend && !state.uploading) {
-                            val img = readClipboardImageOrNull()
-                            if (img != null) {
-                                stageDropped(img)
-                                return@onPreviewKeyEvent true
-                            }
+                        if (pasteCombo && canSend && !state.uploading && pasteClipboardImage()) {
+                            return@onPreviewKeyEvent true
                         }
                         if (e.key != Key.Enter) return@onPreviewKeyEvent false
                         if (e.isShiftPressed) {

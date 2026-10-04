@@ -140,12 +140,7 @@ private class DesktopAppGraph {
         installer = DesktopUpdateInstaller(
             http = ktorHttp,
             updatesDir = File(AppDirs.userData, "updates"),
-            quit = {
-                Thread {
-                    runCatching { shutdown() }
-                    kotlin.system.exitProcess(0)
-                }.apply { isDaemon = true; name = "Talon-update-restart" }.start()
-            },
+            quit = { ExitPolicy.exitAfterShutdown { shutdown() } },
         ),
     )
 
@@ -261,6 +256,11 @@ fun main() {
     // SSE channel, etc. See SingleInstance.kt for the full post-mortem
     // of what 10 simultaneous Talons did to one user's machine.
     SingleInstance.acquireOrExit()
+    // Out of memory anywhere ends the process at once, rather than leave
+    // it holding the lock above with no window: see ExitPolicy.
+    Thread.setDefaultUncaughtExceptionHandler(
+        ExitPolicy.fatalHandler(Thread.getDefaultUncaughtExceptionHandler(), { m, e -> io.nisfeb.talon.util.Log.e("Talon", m, e) }),
+    )
 
     // Decide once, in a child JVM, whether this host's libstdc++ can run
     // the DJL tokenizer without a SIGSEGV. Fire-and-forget; the verdict
@@ -359,10 +359,9 @@ fun main() {
         // background thread runs shutdown + exitProcess so the user
         // sees the window vanish immediately.
         val quitToOs: () -> Unit = {
-            Thread {
-                runCatching { graph.shutdown() }
-                kotlin.system.exitProcess(0)
-            }.apply { isDaemon = true; name = "Talon-shutdown" }.start()
+            // With a deadline: a shutdown that hangs used to leave the
+            // process behind holding the single-instance lock.
+            ExitPolicy.exitAfterShutdown { graph.shutdown() }
             exitApplication()
         }
         // A comet set up earlier boots before the app connects; the
