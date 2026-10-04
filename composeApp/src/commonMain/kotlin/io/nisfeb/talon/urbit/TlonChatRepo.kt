@@ -28,6 +28,7 @@ import com.ionspin.kotlin.bignum.integer.BigInteger
 import io.nisfeb.talon.util.ConcurrentMap
 import io.nisfeb.talon.util.ConcurrentSet
 import io.nisfeb.talon.util.isTransientNetworkError
+import io.nisfeb.talon.util.isShipSlow
 import io.nisfeb.talon.util.backgroundExceptionHandler
 import io.nisfeb.talon.util.ioDispatcher
 import io.nisfeb.talon.util.nowMs
@@ -38,6 +39,7 @@ import io.nisfeb.talon.data.ChannelGroupEntity
 import io.nisfeb.talon.data.ClubEntity
 import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.data.DmInviteEntity
+import io.nisfeb.talon.data.FollowedThreadEntity
 import io.nisfeb.talon.data.GroupEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.ReactionEntity
@@ -373,6 +375,9 @@ class TlonChatRepo(
     /** The ship's word on what is unread, read as a connect reads it. */
     internal suspend fun bootstrapActivityForTest() = bootstrapActivity(channel!!)
 
+    /** The ship's follows, read as a connect reads them. */
+    internal suspend fun bootstrapFollowedThreadsForTest() = bootstrapFollowedThreads(channel!!)
+
     /** As if the last full pass ran [byMs] ago and the stream last heard anything [heardMs] ago (null: as it is). */
     internal fun ageForTest(byMs: Long, heardMs: Long? = null) {
         lastBootstrapMs -= byMs
@@ -681,6 +686,10 @@ class TlonChatRepo(
                             .onSuccess { notificationHealth.markReconcileSuccess() }
                             .onFailure { Log.e(TAG, "activity scry failed", it) }
                     }
+                    val followsJob = async {
+                        runCatching { bootstrapFollowedThreads(ch) }
+                            .onFailure { Log.w(TAG, "followed threads scry failed", it) }
+                    }
                     val contactsJob = async {
                         runCatching { bootstrapContacts(ch) }
                             .onFailure { Log.e(TAG, "contacts scry failed", it) }
@@ -714,7 +723,7 @@ class TlonChatRepo(
                         )
                     } else emptyList()
                     (
-                        listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob, groupInvitesJob) +
+                        listOf(initJob, activityJob, followsJob, contactsJob, ordersJob, dmInvitesJob, groupInvitesJob) +
                             firstRunJobs
                         ).awaitAll()
                     lastBootstrapMs = nowMs()
@@ -1419,6 +1428,23 @@ class TlonChatRepo(
             } catch (t: Throwable) {
                 if (t is PokeNacked) {
                     owedReads.update { m -> if (m[r.key] == r) m - r.key else m }
+                    continue
+                }
+                drainJob = null
+                stillSlow(t)
+                return@withLock
+            }
+        }
+        // Follows made while the ship was slow.
+        for (f in db.followedThreads().unsent()) {
+            try {
+                sendFollow(ch, f.whom, f.parentPostId, f.follow)
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                if (!isShipSlow(t)) {
+                    // Refused, or the thread is not known here: the ship's word stands.
+                    db.followedThreads().delete(f.whom, f.parentPostId)
                     continue
                 }
                 drainJob = null
@@ -2985,6 +3011,7 @@ class TlonChatRepo(
             throw t
         }
         runCatching { db.reactionUsage().bump(canonical) }
+        joinedThread(whom, parentId ?: postId)
     }
 
     /** A reaction's poke, or its taking off's ([QueuedReact.glyph] null). */
@@ -3191,6 +3218,7 @@ class TlonChatRepo(
                 .let { if (isChannelNest(whom)) it.copy(status = "pending") else it },
         )
         sendOrQueue(whom, replyId, out)
+        joinedThread(whom, parentId)
         return replyId
     }
 
@@ -3507,7 +3535,10 @@ class TlonChatRepo(
         when {
             path == "/dm/invited" -> bootstrapDmInvites(ch, notify = true)
             app == "chat" || app == "channels" -> catchUpPosts(ch)
-            app == "activity" -> bootstrapActivity(ch).also { notificationHealth.markReconcileSuccess() }
+            app == "activity" -> {
+                bootstrapActivity(ch).also { notificationHealth.markReconcileSuccess() }
+                bootstrapFollowedThreads(ch)
+            }
             app == "contacts" -> bootstrapContacts(ch)
             app == "groups" -> {
                 bootstrapGroups(ch)
@@ -3686,7 +3717,7 @@ class TlonChatRepo(
         }
 
         // %activity update — variants keyed by "activity"/"read"/"del"/etc.
-        if (payload.containsKey("activity") || payload.containsKey("read") || payload.containsKey("del")) {
+        if (payload.containsKey("activity") || payload.containsKey("read") || payload.containsKey("del") || payload.containsKey("adjust")) {
             applyActivityUpdate(payload)
             return
         }
@@ -3862,7 +3893,7 @@ class TlonChatRepo(
             val replyEssay = add["reply-essay"] as? JsonObject ?: return@let
             val entity = toReplyEntity(whom, parentId, replyId, replyEssay)
             db.messages().upsertWithMedia(db.messageMedia(), entity)
-            if (entity.author != ourPatp) {
+            if (entity.author != ourPatp && replyCounts(entity)) {
                 val parent = db.messages().getOne(whom, parentId)
                 val replyToUs = parent?.author == ourPatp
                 heard(entity, replyToUs)
@@ -4001,7 +4032,7 @@ class TlonChatRepo(
                 db.messages().upsertWithMedia(db.messageMedia(), entity)
                 if (entity.author == ourPatp) {
                     reapOwnEchoTwin(whom, entity.sentMs)
-                } else {
+                } else if (replyCounts(entity)) {
                     val parent = db.messages().getOne(whom, parentId)
                     val replyToUs = parent?.author == ourPatp
                     heard(entity, replyToUs)
@@ -4164,6 +4195,9 @@ class TlonChatRepo(
                 }
             return
         }
+        // A thread followed or unfollowed, here or on another client, or by
+        // the ship itself when a reply lands in a thread the owner is in.
+        (obj["adjust"] as? JsonObject)?.let { applyAdjust(it); return }
         (obj["del"] as? JsonObject)?.let { source ->
             sourceToThreadSource(source)?.let { src ->
                 db.threadUnreads().deleteOne(src.whom, src.parentPostId)
@@ -4368,18 +4402,139 @@ class TlonChatRepo(
         val owed = owedReads.value.containsKey("$whom#$parentPostId")
         if (!force && activityKnown && !owed && (had == null || (had.count == 0 && had.notifyCount == 0))) return
         val ch = channel ?: return
+        val source = threadSource(whom, parentPostId) ?: return
+        pokeActivityRead(ch, "$whom#$parentPostId", source)
+    }
+
+    /**
+     * %activity's source for the thread under [parentPostId]: a channel's
+     * needs its group and the parent's author, so null while either is
+     * unknown here.
+     */
+    private suspend fun threadSource(whom: String, parentPostId: String): JsonObject? {
         val isChannel = whom.startsWith("chat/") || whom.startsWith("diary/") || whom.startsWith("heap/")
         val groupFlag = if (isChannel) {
             db.groups().channelGroupFor(whom)?.groupFlag ?: run {
-                Log.w(TAG, "markThreadRead: no group flag for $whom; skipping poke")
-                return
+                Log.w(TAG, "no group flag for $whom; no thread source")
+                return null
             }
         } else null
         val author = if (isChannel) {
-            db.messages().streamOne(whom, parentPostId).first()?.author ?: return
+            db.messages().streamOne(whom, parentPostId).first()?.author ?: return null
         } else null
-        val source = activityThreadReadSource(whom, parentPostId, author, groupFlag) ?: return
-        pokeActivityRead(ch, "$whom#$parentPostId", source)
+        return activityThreadReadSource(whom, parentPostId, author, groupFlag)
+    }
+
+    // ───────── followed threads ─────────
+
+    /**
+     * The threads the ship follows and unfollows, from %activity's volume
+     * settings: Tlon's own record, made when a reply lands in a thread the
+     * owner wrote, replied in or was named in, and by Talon when they
+     * react or reply. A row the ship no longer names goes, bar a change
+     * made here that has not reached it.
+     */
+    private suspend fun bootstrapFollowedThreads(ch: UrbitChannel) {
+        val start = nowMs()
+        val body = scryNewest(ch, "activity", "/v6/volume-settings", "/v5/volume-settings", "/v4/volume-settings") as? JsonObject ?: return
+        val named = followedThreadsOf(body)
+        val dao = db.followedThreads()
+        val have = dao.all().associateBy { ThreadSource(it.whom, it.parentPostId) }
+        named.forEach { (src, follow) ->
+            if (have[src]?.sent == false) return@forEach
+            dao.upsert(FollowedThreadEntity(src.whom, src.parentPostId, follow, sent = true, atMs = start))
+        }
+        have.values.filter { it.sent && it.atMs < start && ThreadSource(it.whom, it.parentPostId) !in named }
+            .forEach { dao.delete(it.whom, it.parentPostId) }
+    }
+
+    /** An adjust fact: one thread's follow changed, here or on another client. */
+    private suspend fun applyAdjust(adjust: JsonObject) {
+        val src = (adjust["source"] as? JsonObject)?.let(::sourceToThreadSource) ?: return
+        val dao = db.followedThreads()
+        val follow = (adjust["volume"] as? JsonObject)?.let(::followOf)
+        if (follow == null) {
+            // Back to the defaults, unless a change made here is on its way.
+            if (dao.get(src.whom, src.parentPostId)?.sent != false) dao.delete(src.whom, src.parentPostId)
+            return
+        }
+        dao.upsert(FollowedThreadEntity(src.whom, src.parentPostId, follow, sent = true, atMs = nowMs()))
+    }
+
+    /**
+     * Follow a thread, or stop: its replies unread and notifying, or
+     * neither, here at once and on the ship for the owner's other
+     * clients and Tlon's apps. Carried on the repo's scope, so leaving the
+     * screen does not stop it; a slow ship gets it with the queued
+     * writes; a refusal puts back what was there and is thrown. Stopping
+     * reads it too, or its count stays in Tlon's apps.
+     */
+    suspend fun setFollow(whom: String, parentPostId: String, follow: Boolean) = carry {
+        val id = parentPostId.replace(".", "")
+        val dao = db.followedThreads()
+        val before = dao.get(whom, id)
+        dao.upsert(FollowedThreadEntity(whom, id, follow, sent = false, atMs = nowMs()))
+        try {
+            val ch = channel ?: throw IllegalStateException("not connected to the ship")
+            sendFollow(ch, whom, id, follow)
+            shipAnswered()
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            if (isShipSlow(t)) {
+                stillSlow(t)
+                return@carry
+            }
+            if (before != null) dao.upsert(before) else dao.delete(whom, id)
+            throw t
+        }
+        if (!follow) runCatching { markThreadRead(whom, id, force = true) }
+    }
+
+    /** One follow's adjust poke, marked sent once the ship takes it. */
+    private suspend fun sendFollow(ch: UrbitChannel, whom: String, parentPostId: String, follow: Boolean) {
+        val source = threadSource(whom, parentPostId)
+            ?: throw IllegalStateException("that thread's channel or post is not known here")
+        val action = buildJsonObject {
+            put("adjust", buildJsonObject {
+                put("source", source)
+                put("volume", followVolume(whom, follow))
+            })
+        }
+        try {
+            ch.poke(app = "activity", mark = activityReadMark, payload = action)
+        } catch (n: PokeNacked) {
+            // An older ship has only the original mark, as with reads.
+            if (activityReadMark == "activity-action") throw n
+            ch.poke(app = "activity", mark = "activity-action", payload = action)
+        }
+        db.followedThreads().get(whom, parentPostId)?.takeIf { it.follow == follow }
+            ?.let { db.followedThreads().upsert(it.copy(sent = true)) }
+    }
+
+    /**
+     * The owner is in a channel's thread now, by a reply or a reaction:
+     * followed, unless they already chose. A DM's thread counts already.
+     */
+    private fun joinedThread(whom: String, parentPostId: String) {
+        if (!(whom.startsWith("chat/") || whom.startsWith("diary/") || whom.startsWith("heap/"))) return
+        val id = parentPostId.replace(".", "")
+        pushScope.launch {
+            if (db.followedThreads().get(whom, id) != null) return@launch
+            runCatching { setFollow(whom, id, true) }.onFailure { Log.w(TAG, "not followed: $whom $id", it) }
+        }
+    }
+
+    /** Whether a reply that just came counts for the owner (see [threadCounts]). */
+    private suspend fun replyCounts(reply: MessageEntity): Boolean {
+        val parentId = reply.parentId ?: return true
+        val isDm = reply.whom.startsWith("~") || reply.whom.startsWith("0v")
+        val follow = db.followedThreads().get(reply.whom, parentId)?.follow
+        if (follow != null || isDm) return threadCounts(follow, isDm, ours = false)
+        val ours = db.messages().getOne(reply.whom, parentId)?.author == ourPatp ||
+            io.nisfeb.talon.notify.isMentioned(reply.contentJson, ourPatp) ||
+            db.messages().hasReplyBy(reply.whom, parentId, ourPatp)
+        return threadCounts(null, isDm, ours)
     }
 
     /**
