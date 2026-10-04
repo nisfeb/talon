@@ -192,6 +192,17 @@ class FollowedThreadsTest {
         assertEquals(false, row()?.follow, "the owner's unfollow stands")
     }
 
+    // A DM's thread counts by default, but drops out of the Threads list
+    // once read unless it is followed; Tlon's agents never follow one.
+    @Test
+    fun `replying in a DM's thread follows it too, so it stays in the Threads list`() = live {
+        val p = "~bus/170141184506"
+        db.messages().upsert(MessageEntity("~bus", p, "~bus", 1_000, """[{"inline":["q"]}]""", "/chat"))
+        repo.reply("~bus", p, "an answer")
+        withTimeout(5_000) { while (db.followedThreads().get("~bus", p)?.sent != true) delay(20) }
+        assertTrue(ship.pokesTo("activity").any { "dm-thread" in it.json.toString() && "\"notify\":true" in it.json.toString() })
+    }
+
     // ─── what counts ─────────────────────────────────────────────
 
     @Test

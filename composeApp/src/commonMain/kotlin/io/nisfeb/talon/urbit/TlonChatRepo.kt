@@ -4525,11 +4525,12 @@ class TlonChatRepo(
     }
 
     /**
-     * The owner is in a channel's thread now, by a reply or a reaction:
-     * followed, unless they already chose. A DM's thread counts already.
+     * The owner is in a thread now, by a reply or a reaction: followed,
+     * unless they already chose. A DM's thread counts already, but only a
+     * row keeps it in the Threads lists once read, and Tlon's agents never
+     * write one for a DM.
      */
     private fun joinedThread(whom: String, parentPostId: String) {
-        if (!(whom.startsWith("chat/") || whom.startsWith("diary/") || whom.startsWith("heap/"))) return
         val id = parentPostId.replace(".", "")
         pushScope.launch {
             if (db.followedThreads().get(whom, id) != null) return@launch
