@@ -100,13 +100,13 @@ private fun topViewController(): UIViewController? {
  * queue, a picker that opened a moment later took the photo picked in
  * it nowhere: "selecting an image doesn't attach it".
  */
-private fun present(picker: UIViewController, onDropped: () -> Unit, attempt: Int = 0) {
+private fun present(picker: UIViewController, attempt: Int = 0, onDropped: () -> Unit) {
     if (attempt == 0) activeWindow()?.endEditing(true)
     dispatch_async(dispatch_get_main_queue()) {
         val root = topViewController()
         val busy = root == null || root.isBeingDismissed() || root.isBeingPresented()
         when (presentStep(busy, attempt)) {
-            PresentStep.RETRY -> after(PRESENT_RETRY_MS) { present(picker, onDropped, attempt + 1) }
+            PresentStep.RETRY -> after(PRESENT_RETRY_MS) { present(picker, attempt + 1, onDropped) }
             PresentStep.GIVE_UP -> onDropped()
             PresentStep.PRESENT -> {
                 var shown = false
