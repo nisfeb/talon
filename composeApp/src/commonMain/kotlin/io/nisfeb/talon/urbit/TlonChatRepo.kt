@@ -315,6 +315,14 @@ class TlonChatRepo(
      */
     @Volatile var messageListener: ((MessageEntity, Boolean) -> Unit)? = null
 
+    /**
+     * A chat the ship says is read to the end, here or on any other client:
+     * its notifications can go, as Tlon's %notify dismisses them. Only on
+     * a read, not on any count of zero: a chat whose unreads the ship does
+     * not count still notifies here.
+     */
+    @Volatile var readListener: ((whom: String) -> Unit)? = null
+
     /** A live message from someone else, to the listener. */
     private fun heard(entity: MessageEntity, replyToUs: Boolean) {
         messageListener?.invoke(entity, replyToUs)
@@ -470,10 +478,12 @@ class TlonChatRepo(
                 .onFailure { Log.w(TAG, "session iteration ended", it) }
             // A channel the ship reaped is no trouble: the next pass opens a
             // new one at once. Its replay went with it, so that pass reads
-            // everything, however short the outage looks.
-            val gone = ended.exceptionOrNull() is ChannelGone
-            if (gone) lastBootstrapMs = 0L
-            val ok = ended.isSuccess || gone
+            // everything, however short the outage looks. One refused to
+            // this login waits out the backoff first: if the login lapsed,
+            // the new channel is refused too.
+            val gone = ended.exceptionOrNull() as? ChannelGone
+            if (gone != null) lastBootstrapMs = 0L
+            val ok = endedWell(ended.exceptionOrNull())
             if (!scope.isActive || !started) break
             firstRun = false
             // Back off exponentially after failures; reset on a normal
@@ -547,6 +557,7 @@ class TlonChatRepo(
             // event, not just reactions. So ask for /v5 and let the nack
             // walk us back to /v4.
             subFallbacks.clear()
+            subPaths.clear()
             // What streamed while away is not in an opened chat yet: read again.
             readOnOpen.clear()
             listOf(
@@ -586,6 +597,7 @@ class TlonChatRepo(
                     .onSuccess { ids ->
                         ids.zip(plans).forEach { (id, plan) ->
                             val (spec, all, from) = plan
+                            subPaths[id] = spec.app to all[from]
                             val rest = all.drop(from + 1)
                             if (rest.isNotEmpty()) subFallbacks[id] = spec.app to rest
                         }
@@ -661,7 +673,7 @@ class TlonChatRepo(
                     // scry on every connect. Seen on a fresh comet, whose join
                     // landed while the ship was busy and the channel cycled.
                     val initJob = async {
-                        runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
+                        runCatching { catchUpPosts(ch) }
                             .onFailure { Log.e(TAG, "initPosts scry failed", it) }
                     }
                     val activityJob = async {
@@ -709,7 +721,7 @@ class TlonChatRepo(
                 } else if (forced) {
                     listOf(
                         async {
-                            runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
+                            runCatching { catchUpPosts(ch) }
                                 .onFailure { Log.e(TAG, "initPosts scry failed", it) }
                         },
                         async {
@@ -914,7 +926,7 @@ class TlonChatRepo(
             // already covered by the deep-history scry on the original
             // bootstrap. Smaller page = lower bandwidth on every wake
             // / network-change tick.
-            runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
+            runCatching { catchUpPosts(ch) }
                 .onFailure { Log.w(TAG, "catchUp bootstrap failed", it) }
             runCatching { bootstrapActivity(ch) }
                 .onSuccess { notificationHealth.markReconcileSuccess() }
@@ -1249,17 +1261,24 @@ class TlonChatRepo(
     /** What the last write that could not reach the ship said, for "Copy error details"; null once the queue is empty. */
     private val slowDetails = MutableStateFlow<String?>(null)
 
-    /** The ship is slow: [queued] writes wait for it, and [details] is what the last try said. */
-    data class ShipSlow(val queued: Int, val details: String)
+    /** What vere's healthz said when the last write could not reach the ship; null until asked. */
+    private val slowHealth = MutableStateFlow<ShipHealth?>(null)
+
+    /**
+     * The ship is slow: [queued] writes wait for it, [details] is what the
+     * last try said, and [health] whether it is busy, down or out of reach.
+     */
+    data class ShipSlow(val queued: Int, val details: String, val health: ShipHealth? = null)
 
     /**
      * Whether writes are waiting for the ship, for the calm line in a
      * chat: messages queued there and reactions queued here. Null while
      * the ship is keeping up.
      */
-    val shipSlow: Flow<ShipSlow?> = combine(db.messages().queuedCount(), queuedReacts, slowDetails) { messages, reacts, details ->
+    val shipSlow: Flow<ShipSlow?> = combine(db.messages().queuedCount(), queuedReacts, slowDetails, slowHealth) { messages, reacts, details, health ->
         val queued = messages + reacts.size
-        if (queued == 0) null else ShipSlow(queued, details ?: "Waiting for the ship.")
+        if (queued == 0) null
+        else ShipSlow(queued, (details ?: "Waiting for the ship.") + (health?.let { "\nhealthz: $it" } ?: ""), health)
     }
 
     private val drainLock = Mutex()
@@ -1269,6 +1288,7 @@ class TlonChatRepo(
     /** The ship took a write: whatever waited can go now. */
     private fun shipAnswered() {
         drainPauseMs = FIRST_DRAIN_PAUSE_MS
+        slowHealth.value = null
         // The ship is back: a drain sleeping out its backoff goes now. Left
         // to sleep, a message queued behind one that waited sat out the
         // rest of a backoff of up to a minute with the ship answering.
@@ -1278,6 +1298,9 @@ class TlonChatRepo(
     /** A write did not reach the ship: say why, and try again later, a little later each time. */
     private fun stillSlow(why: Throwable) {
         slowDetails.value = errorDetails(why)
+        // Busy, down or out of reach, asked of vere itself: no event on a
+        // ship that is already behind.
+        channel?.let { ch -> pushScope.launch { slowHealth.value = ch.health() } }
         val pause = drainPauseMs
         drainPauseMs = (pause * 2).coerceAtMost(MAX_DRAIN_PAUSE_MS)
         scheduleDrain(pause)
@@ -3422,6 +3445,79 @@ class TlonChatRepo(
             "/v6/init-posts/$count/$count",
             BOOTSTRAP_TIMEOUT_SECS,
         )
+        ingestPosts(body, "init-posts (count=$count)")
+    }
+
+    /**
+     * When the last read of every chat's posts began, init-posts or
+     * /changes; 0 before the first. In memory only: a launch reads
+     * init-posts, as it always has.
+     */
+    @Volatile private var postsReadMs = 0L
+
+    /** This ship answered no /changes path: init-posts, as before. */
+    @Volatile private var changesUnserved = false
+
+    /**
+     * What every chat gained since the last such read: one /changes read
+     * while that read is under three days old, as Tlon's client catches
+     * up; init-posts' newest ten of each otherwise. /changes has all of
+     * them, where ten a chat left a gap in a busy one.
+     */
+    private suspend fun catchUpPosts(ch: UrbitChannel) {
+        val start = nowMs()
+        val since = postsReadMs
+        if (useChanges(since, start, changesUnserved)) {
+            try {
+                readChanges(ch, since - CHANGES_OVERLAP_MS)
+                postsReadMs = start
+                return
+            } catch (t: Throwable) {
+                // A slow ship is not asked for init-posts on top.
+                if (t is kotlinx.coroutines.CancellationException || !notServed(t)) throw t
+                Log.w(TAG, "no /changes on this ship; init-posts instead")
+                changesUnserved = true
+            }
+        }
+        bootstrap(ch, count = INITIAL_PAGE_COUNT)
+        postsReadMs = start
+    }
+
+    /**
+     * groups-ui's /changes since [sinceMs]. From /v8 its chat and channels
+     * parts are init-posts' own (chat /v4, channels /v6), so they go in
+     * the same way; its activity part leaves out reads made elsewhere, so
+     * the activity read stays.
+     */
+    private suspend fun readChanges(ch: UrbitChannel, sinceMs: Long) {
+        val da = UrbitTime.unixMsToDaText(sinceMs)
+        val body = scryNewest(
+            ch, "groups-ui",
+            "/v11/changes/$da", "/v10/changes/$da", "/v9/changes/$da", "/v8/changes/$da",
+            timeoutSecs = BOOTSTRAP_TIMEOUT_SECS,
+        )
+        ingestPosts(body, "changes since $da")
+    }
+
+    /**
+     * What a watch the ship dropped would have carried while it was down,
+     * read back once it is watched again. Presence has nothing to read.
+     */
+    private suspend fun catchUpAfterQuit(ch: UrbitChannel, app: String, path: String) {
+        when {
+            path == "/dm/invited" -> bootstrapDmInvites(ch, notify = true)
+            app == "chat" || app == "channels" -> catchUpPosts(ch)
+            app == "activity" -> bootstrapActivity(ch).also { notificationHealth.markReconcileSuccess() }
+            app == "contacts" -> bootstrapContacts(ch)
+            app == "groups" -> {
+                bootstrapGroups(ch)
+                refreshInvites(notify = false)
+            }
+        }
+    }
+
+    /** A chat-and-channels post map, init-posts' or /changes', into the tables. */
+    private suspend fun ingestPosts(body: JsonElement, what: String) {
         val obj = body as? JsonObject
         if (obj == null) {
             // Used to silently `return` here. Real ships have returned
@@ -3431,7 +3527,7 @@ class TlonChatRepo(
             // Surface it.
             Log.w(
                 TAG,
-                "init-posts scry returned non-object: ${body::class.simpleName} " +
+                "$what returned non-object: ${body::class.simpleName} " +
                     "preview=${body.toString().take(200)}",
             )
             return
@@ -3440,7 +3536,7 @@ class TlonChatRepo(
         val channelNests = (obj["channels"] as? JsonObject)?.size ?: 0
         Log.i(
             TAG,
-            "init-posts scry (count=$count): chat-peers=$chatPeers " +
+            "$what: chat-peers=$chatPeers " +
                 "channel-nests=$channelNests top-keys=${obj.keys}",
         )
 
@@ -3459,7 +3555,7 @@ class TlonChatRepo(
         }
         Log.i(
             TAG,
-            "init-posts ingested: messages=${messages.size} reactions=${reactions.size}",
+            "$what ingested: messages=${messages.size} reactions=${reactions.size}",
         )
 
         if (messages.isNotEmpty()) db.messages().upsertAllWithMedia(db.messageMedia(), messages)
@@ -3501,6 +3597,7 @@ class TlonChatRepo(
                 // than the wire version we asked for. Retry the path we
                 // registered as this request's fallback, once.
                 if (response == "subscribe" && pokeIdLong != null) {
+                    subPaths.remove(pokeIdLong)
                     subFallbacks.remove(pokeIdLong)?.let { (app, paths) ->
                         val path = paths.first()
                         // Remembered by the family's newest path, for the next connect.
@@ -3508,7 +3605,10 @@ class TlonChatRepo(
                         Log.w(TAG, "$app subscribe rejected; falling back to $path")
                         scope.launch {
                             runCatching { channel?.subscribe(app, path) }
-                                .onSuccess { id -> if (id != null && paths.size > 1) subFallbacks[id] = app to paths.drop(1) }
+                                .onSuccess { id ->
+                                    if (id != null) subPaths[id] = app to path
+                                    if (id != null && paths.size > 1) subFallbacks[id] = app to paths.drop(1)
+                                }
                                 .onFailure { Log.e(TAG, "$app fallback subscribe failed", it) }
                         }
                     }
@@ -3518,10 +3618,27 @@ class TlonChatRepo(
         }
         if (response == "quit") {
             // The ship dropped a subscription: a clog while the stream was
-            // down, or an agent's upgrade. A resumed channel would carry on
-            // without it for good, and what it would have carried is
-            // missing, so the next pass is a new channel, every watch and
-            // the whole read.
+            // down, or an agent's upgrade. One of ours is watched again on
+            // this channel, as Tlon's client and the calls loop do, and what
+            // it would have carried meanwhile is read: an upgrade of one
+            // agent cost a new channel, every watch and the whole read.
+            val now = nowMs()
+            val sub = outer["id"].asLong()?.let { subPaths.remove(it) }
+            val live = channel?.takeIf { !it.gone }
+            val before = sub?.let { lastQuitMs["${it.first}${it.second}"] }
+            sub?.let { lastQuitMs["${it.first}${it.second}"] = now }
+            if (sub != null && live != null && resubscribeAfterQuit(before, now)) {
+                Log.w(TAG, "${sub.first}${sub.second} dropped by the ship; watching it again")
+                scope.launch {
+                    runCatching {
+                        subPaths[live.subscribe(sub.first, sub.second)] = sub
+                        catchUpAfterQuit(live, sub.first, sub.second)
+                    }.onFailure { Log.w(TAG, "${sub.first}${sub.second} not watched again", it) }
+                }
+                return
+            }
+            // Not one of ours (a settings watch), or dropped again at once:
+            // the next pass is a new channel, every watch and the whole read.
             channel?.let { old ->
                 Log.w(TAG, "subscription ${outer["id"]} dropped by the ship; opening a new channel")
                 old.retire()
@@ -4041,6 +4158,9 @@ class TlonChatRepo(
                         row.copy(count = 0, notifyCount = 0)
                     } else row
                     db.unreads().upsert(adjusted)
+                    // The whole of it, threads too: a channel caught up on its
+                    // own stream may still have a reply notified here.
+                    if (summary["count"].asInt() == 0 && summary["notify-count"].asInt() == 0) readListener?.invoke(row.whom)
                 }
             return
         }
@@ -4340,6 +4460,12 @@ class TlonChatRepo(
 
     /** subscribe request id → (app, the fallback paths left), pending a nack. */
     private val subFallbacks = ConcurrentMap<Long, Pair<String, List<String>>>()
+
+    /** What each of the session's watches is, app to path, by request id: a dropped one is watched again. */
+    private val subPaths = ConcurrentMap<Long, Pair<String, String>>()
+
+    /** When the ship last dropped each app+path, so one dropped again at once opens a new channel instead. */
+    private val lastQuitMs = ConcurrentMap<String, Long>()
 
     /** The subscriptions with fallbacks, so a nack's path can be placed in its family. */
     private val subSpecs = listOf(

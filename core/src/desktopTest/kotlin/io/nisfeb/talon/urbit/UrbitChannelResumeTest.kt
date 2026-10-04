@@ -7,7 +7,9 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.Test
@@ -65,5 +67,55 @@ class UrbitChannelResumeTest {
         assertTrue(ch.gone)
         assertFailsWith<ChannelGone> { ch.events().toList() }
         assertEquals(0, gets)
+    }
+
+    // Eyre ties a channel to the login that made it: anyone else gets 403,
+    // on the stream and on a PUT, for good.
+    @Test
+    fun `a stream refused to this login says so, and is not asked for again`() = runBlocking<Unit> {
+        var gets = 0
+        val http = HttpClient(MockEngine { gets++; respond("", HttpStatusCode.Forbidden) })
+        val ch = UrbitChannel(http, "https://ship.test", "~zod")
+        val e = assertFailsWith<ChannelGone> { ch.events().toList() }
+        assertTrue(e.forbidden && ch.gone)
+        assertFailsWith<ChannelGone> { ch.events().toList() }
+        assertEquals(1, gets)
+    }
+
+    @Test
+    fun `a PUT refused to this login ends the open stream`() = runBlocking<Unit> {
+        val held = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val http = HttpClient(MockEngine { req ->
+            if (req.method.value == "PUT") return@MockEngine respond("", HttpStatusCode.Forbidden)
+            // The stream stays open, quiet, until the test is over.
+            val body = io.ktor.utils.io.ByteChannel(autoFlush = true)
+            launch { held.await(); body.close() }
+            respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+        })
+        val ch = UrbitChannel(http, "https://ship.test", "~zod")
+        val stream = async { runCatching { ch.events().toList() }.exceptionOrNull() }
+        kotlinx.coroutines.delay(200)
+        val put = assertFailsWith<ChannelGone> { ch.subscribe("chat", "/v4") }
+        assertTrue(put.forbidden && ch.gone)
+        val ended = kotlinx.coroutines.withTimeout(5_000) { stream.await() }
+        held.complete(Unit)
+        assertTrue(ended is ChannelGone && ended.forbidden, "the stream ended with it: $ended")
+    }
+
+    // Vere answers /~_~/healthz itself, no login and no event on the ship.
+    @Test
+    fun `health asks vere at its own path and reads the answer`() = runBlocking<Unit> {
+        val asked = CopyOnWriteArrayList<String>()
+        var status = HttpStatusCode.TooManyRequests
+        val http = HttpClient(MockEngine { req -> asked += "${req.method.value} ${req.url}"; respond("", status) }) {
+            install(io.ktor.client.plugins.HttpTimeout)
+        }
+        val ch = UrbitChannel(http, "https://ship.test/", "~zod")
+        assertEquals(ShipHealth.BUSY, ch.health())
+        assertEquals(listOf("GET https://ship.test/~_~/healthz"), asked.toList())
+        status = HttpStatusCode.NoContent
+        assertEquals(ShipHealth.IDLE, ch.health())
+        val down = UrbitChannel(HttpClient(MockEngine { throw java.net.ConnectException("refused") }) { install(io.ktor.client.plugins.HttpTimeout) }, "https://ship.test", "~zod")
+        assertEquals(ShipHealth.UNREACHABLE, down.health())
     }
 }

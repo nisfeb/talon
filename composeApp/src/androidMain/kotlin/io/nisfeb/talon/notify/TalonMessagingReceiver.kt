@@ -132,6 +132,14 @@ class TalonMessagingReceiver : MessagingReceiver() {
         }
 
         if (whom.isNullOrBlank()) return
+        // Read to the end on some client: its notifications go, as Tlon's
+        // %notify dismisses them. Only that ship's: the same whom on
+        // another is another conversation. A forged one clears a
+        // notification and nothing else.
+        if (event == "read") {
+            io.nisfeb.talon.Notifications.cancelAllForChat(context, whom, forShip = patp)
+            return
+        }
         // On screen right now: the app already shows it, and a
         // notification would only need clearing. Only when the push is
         // for the ship actually signed in, though — the same whom open

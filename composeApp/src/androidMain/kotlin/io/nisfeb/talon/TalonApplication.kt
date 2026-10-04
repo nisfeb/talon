@@ -355,7 +355,11 @@ class TalonApplication : Application() {
             db = db,
             settingsSync = settingsSync,
             notificationHealth = notificationHealth,
-        )
+        ).also { r ->
+            // Here, for the app's lifetime: the screens come and go, and a
+            // chat read elsewhere should leave no notification behind.
+            r.readListener = { whom -> Notifications.cancelAllForChat(this, whom, forShip = ship) }
+        }
         drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
         menuSeen = io.nisfeb.talon.ui.AndroidMenuSeenStore(this, ship)
         shortcuts = ShortcutsPublisher(this, db)

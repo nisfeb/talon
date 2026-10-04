@@ -700,7 +700,7 @@ fun ChatComposer(
         val slow = repo.shipSlow.collectAsState(initial = null).value
         if (slow != null) {
             NoteLine(
-                "Your ship is slow. ${slow.queued} queued for when it's back.",
+                io.nisfeb.talon.util.shipSlowLine(slow.queued, slow.health),
                 calm = true,
                 details = slow.details,
                 onCopy = { clipboard.setText(AnnotatedString(it)) },

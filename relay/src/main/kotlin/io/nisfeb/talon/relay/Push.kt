@@ -168,6 +168,16 @@ class Push(
     }
 
     /**
+     * [whom] was read to the end on some client: the device takes back
+     * its notifications for it. Android only: an iOS alert stays until
+     * the app can be woken to clear it, which needs a handler it lacks.
+     */
+    fun sendRead(endpoint: String, patp: String, whom: String, platform: String = "") {
+        if (platform == IOS || platform == IOS_VOIP) return
+        post(endpoint, readBody(patp, whom))
+    }
+
+    /**
      * @param urgency RFC 8030 urgency. A push server may batch or defer
      *   anything below "high" to save the device's battery, which is
      *   right for a message and fatal for a ring: the notification
@@ -208,6 +218,9 @@ class Push(
             log.warn("push failed → ${endpoint.take(64)}…: ${e.message}")
         }
     }
+
+    internal fun readBody(patp: String, whom: String): String =
+        """{"event":"read","patp":"${escape(patp)}","whom":"${escape(whom)}"}"""
 
     private fun escape(s: String): String = s
         .replace("\\", "\\\\")

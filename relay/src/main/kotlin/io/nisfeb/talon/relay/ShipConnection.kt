@@ -266,6 +266,16 @@ class ShipConnection(
             return
         }
 
+        // Read to the end, on this ship's own client or any other: the
+        // phone's notifications for it go, as Tlon's %notify dismisses
+        // them. Off the message cursor, like a ring.
+        readWhom(json)?.let { whom ->
+            val dev = db.deviceFor(deviceId) ?: return
+            log.info("read whom=$whom")
+            push.sendRead(endpoint = dev.pushEndpoint, patp = patp, whom = whom, platform = dev.platform)
+            return
+        }
+
         // %activity /v4 envelope shape:
         //   { add: { source: { dm | club | channel: {...} },
         //            event: { notified: bool, dm-post|chan-post: {...} } } }
@@ -500,6 +510,24 @@ internal sealed interface CallFact {
  *  hangup  {"recv":{"from":"~zod","sig":{"hangup":{"id":i}}}}
  *  handled {"handled":"<id>"} — our own ship saying another of the
  *          user's clients answered. */
+/**
+ * The chat an %activity /v4 read update says is read to the end:
+ * `{read: {source, activity: {count, notify-count, …}}}` with both counts
+ * zero. Null for a thread's read (its chat may still be unread), a read
+ * that leaves some unread, and anything else.
+ */
+internal fun readWhom(json: JsonObject): String? {
+    val read = json["read"] as? JsonObject ?: return null
+    val summary = read["activity"] as? JsonObject ?: return null
+    val counts = listOf("count", "notify-count").map { (summary[it] as? JsonPrimitive)?.content?.toIntOrNull() }
+    if (counts.any { it != 0 }) return null
+    val source = read["source"] as? JsonObject ?: return null
+    return ((source["dm"] as? JsonObject)?.get("ship")
+        ?: (source["club"] as? JsonObject)?.get("id")
+        ?: (source["channel"] as? JsonObject)?.get("nest"))
+        ?.let { (it as? JsonPrimitive)?.content }
+}
+
 internal fun parseCallFact(json: JsonObject): CallFact? {
     fun JsonElement?.str(): String? =
         runCatching { (this as? JsonPrimitive)?.content }.getOrNull()

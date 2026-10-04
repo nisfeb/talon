@@ -74,6 +74,29 @@ class TlonChatRepoQueueTest {
         assertNull(repo.shipSlow.first(), "nothing waits")
     }
 
+    // "Slow" covered a ship mid-event, one down behind its proxy and one
+    // out of reach. Vere's healthz tells them apart for nothing: the
+    // runtime answers it, so the ship works no event.
+    @Test
+    fun `a write that waits says whether the ship is busy, down or out of reach`() = live {
+        ship.lose = { lost }
+        ship.health = 429
+        repo.send("~bus", "are you there")
+        val busy = kotlinx.coroutines.withTimeout(5_000) { repo.shipSlow.first { it?.health != null }!! }
+        assertEquals(ShipHealth.BUSY, busy.health)
+        assertEquals("Your ship is busy. 1 queued for when it catches up.", io.nisfeb.talon.util.shipSlowLine(busy.queued, busy.health))
+        assertTrue("healthz: BUSY" in busy.details, busy.details)
+        assertTrue(ship.requests.any { it == "GET /~_~/healthz" }, "${ship.requests}")
+
+        ship.health = 502
+        repo.drainQueue()
+        assertEquals(ShipHealth.DOWN, kotlinx.coroutines.withTimeout(5_000) { repo.shipSlow.first { it?.health == ShipHealth.DOWN } }!!.health)
+
+        ship.lose = { null }
+        repo.drainQueue()
+        assertNull(repo.shipSlow.first(), "nothing waits")
+    }
+
     @Test
     fun `a reply, a club message and a channel post go again exactly as first sent`() = live {
         ship.lose = { lost }

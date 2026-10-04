@@ -53,6 +53,9 @@ class TlonChatRepoStartupTest {
     private fun post(id: String, author: String, text: String, sent: Long) =
         """"$id":{"seal":{"id":"$id","reacts":{},"replies":{},"meta":{"replyCount":0,"lastReply":null,"lastRepliers":[]}},"essay":${essay(author, text, sent)}}"""
 
+    private val changes = """{"activity":{},"groups":{},"contacts":{},"chat":{},
+        "channels":{"chat/~bus/general":{${post("170141184511", "~nec", "while away", 3_000)}}}}"""
+
     private val initPosts = """{
         "chat":{"~bus":{${post("~bus/170141184506", "~bus", "a DM", 1_000)}}},
         "channels":{"chat/~bus/general":{${post("170141184507", "~nec", "a channel post", 2_000)}}}}"""
@@ -92,6 +95,13 @@ class TlonChatRepoStartupTest {
 
     private val init = "groups-ui/v6/init-posts/10/10"
     private fun streams() = ship.requests.count { it.startsWith("GET /~/channel/") }
+
+    /** Signed in: the first read done and the stream open. The progress bar is clear before the session starts, too. */
+    private suspend fun connected(repo: TlonChatRepo) {
+        until("the first read") { ship.scried.any { "init-posts/10" in it } }
+        until("the progress bar clears") { !repo.bootstrapping.value }
+        until("the stream") { streams() >= 1 }
+    }
     private fun channelsStreamed() = ship.streamsOpened.map { it.first }.distinct()
 
     private fun dmFact(id: String, text: String, sent: Long) =
@@ -383,20 +393,134 @@ class TlonChatRepoStartupTest {
     }
 
     // A clog while the stream was down, or an agent's upgrade, drops a
-    // subscription. Resumed, the channel would go on without it for good.
+    // subscription. Resumed, the channel would go on without it for good;
+    // a new channel for it watched everything again and read everything.
+    // Tlon's client watches that one path again, on the same channel.
     @Test
-    fun `a subscription the ship drops brings a new channel and the whole read`() = started(prepare = {
+    fun `a subscription the ship drops is watched again on the same channel, and what it carried is read`() = started(prepare = {
+        scries[init] = initPosts
+        answerScry = { p -> if (p.startsWith("groups-ui/v11/changes/")) changes else null }
+    }) { repo ->
+        until("the progress bar clears") { !repo.bootstrapping.value }
+        until("the stream") { streams() >= 1 }
+        val subs = ship.subscribed.size
+        ship.quit("channels/v4")
+        until("watched again") { ship.subscribed.count { it == "channels/v4" } == 2 }
+        until("what it carried read") { ship.scried.any { it.startsWith("groups-ui/v11/changes/") } }
+        until("its post") { db.messages().getOne("chat/~bus/general", "170141184511") != null }
+        kotlinx.coroutines.delay(500)
+        assertEquals(subs + 1, ship.subscribed.size, "that watch alone")
+        assertEquals(1, channelsStreamed().size, "the same channel")
+        assertEquals(1, ship.scried.count { "init-posts/10" in it }, "not the whole read")
+    }
+
+    // Dropped again the moment it is watched again: a loop, not an upgrade.
+    @Test
+    fun `a subscription dropped again at once brings a new channel and the whole read`() = started(prepare = {
         scries[init] = initPosts
     }) { repo ->
         until("the progress bar clears") { !repo.bootstrapping.value }
         until("the unread scry") { ship.scried.any { "activity/full" in it } }
         until("the stream") { streams() >= 1 }
         val unreadReads = ship.scried.count { "activity/full" in it }
-        val subs = ship.subscribed.size
-        ship.emit("""{"id":2,"response":"quit"}""")
-        until("the unread scry again") { ship.scried.count { "activity/full" in it } > unreadReads }
-        until("watched again") { ship.subscribed.size >= 2 * subs }
+        val first = ship.subIds.getValue("activity/v6")
+        ship.quit("activity/v6")
+        until("watched again") { ship.subIds.getValue("activity/v6") != first }
+        until("its unreads read") { ship.scried.count { "activity/full" in it } > unreadReads }
+        ship.quit("activity/v6")
         until("a new channel") { channelsStreamed().size == 2 }
+    }
+
+    // A watch that is not the session's own (settings) still brings a new channel.
+    @Test
+    fun `a dropped watch the session did not make brings a new channel`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        until("the progress bar clears") { !repo.bootstrapping.value }
+        until("the stream") { streams() >= 1 }
+        ship.emit("""{"id":9999,"response":"quit"}""")
+        until("a new channel") { channelsStreamed().size == 2 }
+    }
+
+    // A reconnect read the newest ten of every chat again, all of them,
+    // and a busy chat with more than ten while away kept a gap. /changes
+    // has everything since the last read, and nothing else.
+    @Test
+    fun `a reconnect reads what changed since the last read, not ten of every chat`() = started(prepare = {
+        scries[init] = initPosts
+        answerScry = { p -> if (p.startsWith("groups-ui/v11/changes/")) changes else null }
+    }) { repo ->
+        val began = System.currentTimeMillis()
+        connected(repo)
+        repo.ageForTest(byMs = 5 * 60_000L, heardMs = 10 * 60_000L)
+        ship.reap()
+        until("changes read") { ship.scried.any { it.startsWith("groups-ui/v11/changes/") } }
+        until("its post") { db.messages().getOne("chat/~bus/general", "170141184511") != null }
+        assertEquals(1, ship.scried.count { "init-posts/10" in it }, "init-posts once, at sign-in")
+        // Since the first read began, less the overlap for clocks that differ.
+        val asked = ship.scried.first { it.startsWith("groups-ui/v11/changes/") }.removePrefix("groups-ui/v11/changes/")
+        val m = Regex("""~(\d{4})\.(\d{1,2})\.(\d{1,2})\.\.(\d{2})\.(\d{2})\.(\d{2})""").matchEntire(asked)
+        assertNotNull(m, asked)
+        val (y, mo, d, h, mi, se) = m.destructured
+        val sinceMs = java.time.ZonedDateTime.of(y.toInt(), mo.toInt(), d.toInt(), h.toInt(), mi.toInt(), se.toInt(), 0, java.time.ZoneOffset.UTC)
+            .toInstant().toEpochMilli()
+        assertTrue(sinceMs in (began - 5 * 60_000L - 2_000L)..(began - 5 * 60_000L + 30_000L), "since $asked against $began")
+    }
+
+    // An older ship has no /changes: init-posts, as before, and the newer
+    // paths are not asked again on every reconnect.
+    @Test
+    fun `a ship without changes reads ten a chat, and is asked for changes once`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        connected(repo)
+        repeat(2) { n ->
+            repo.ageForTest(byMs = 5 * 60_000L, heardMs = 10 * 60_000L)
+            ship.reap()
+            until("init-posts again") { ship.scried.count { "init-posts/10" in it } == n + 2 }
+        }
+        assertEquals(1, ship.scried.count { it.startsWith("groups-ui/v11/changes/") }, "${ship.scried}")
+        assertEquals(1, ship.scried.count { it.startsWith("groups-ui/v8/changes/") })
+    }
+
+    // A /changes read that does not come back is a busy ship: init-posts
+    // on top of it would only add to the load.
+    @Test
+    fun `a changes read that times out is not followed by init-posts`() = started(prepare = {
+        scries[init] = initPosts
+        loseScry = { p -> if (p.startsWith("groups-ui/v11/changes/")) java.io.IOException("timed out") else null }
+    }) { repo ->
+        connected(repo)
+        repo.ageForTest(byMs = 5 * 60_000L, heardMs = 10 * 60_000L)
+        ship.reap()
+        until("changes asked") { ship.scried.any { it.startsWith("groups-ui/v11/changes/") } }
+        until("the unread scry again") { ship.scried.count { "activity/full" in it } >= 2 }
+        kotlinx.coroutines.delay(500)
+        assertEquals(1, ship.scried.count { "init-posts/10" in it }, "${ship.scried}")
+        assertTrue(ship.scried.none { it.startsWith("groups-ui/v10/changes/") }, "nor an older path")
+    }
+
+    // Eyre ties a channel to the login that made it, and refuses it (403)
+    // to any other: retried, it is refused for good. A new one, after the
+    // backoff a lapsed login needs.
+    @Test
+    fun `a channel refused to this login is replaced`() = runBlocking<Unit> {
+        ship.scries[init] = initPosts
+        val repo = TlonChatRepo(db)
+        repo.start(UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") })
+        try {
+            withTimeout(25_000) {
+                connected(repo)
+                ship.forbid()
+                runCatching { withTimeout(20_000) { while (channelsStreamed().size < 2) delay(50) } }
+                    .onFailure { error("never saw a new channel: ${ship.streamsOpened}") }
+                val refused = ship.streamsOpened.count { it.first == channelsStreamed().first() }
+                kotlinx.coroutines.delay(1_000)
+                assertEquals(refused, ship.streamsOpened.count { it.first == channelsStreamed().first() }, "not asked again")
+            }
+        } finally {
+            repo.stop()
+        }
     }
 
     // Each invite heard read the whole foreigns list again. The fact is

@@ -77,5 +77,43 @@ class ReconnectPolicyTest {
         assertFalse(needsDeepHistory(newestSentMs = 10 * day - 60_000, nowMs = 10 * day))
         assertFalse(needsDeepHistory(newestSentMs = 9 * day, nowMs = 10 * day), "exactly a day: not yet")
     }
-}
 
+    // Tlon's client reads only what changed while its last read is under
+    // three days old, and everything again past that.
+    @Test
+    fun `a catch-up reads changes while the last read is under three days old`() {
+        val now = 10 * CHANGES_MAX_AGE_MS
+        assertFalse(useChanges(0L, now, unserved = false), "no read yet: init-posts")
+        assertTrue(useChanges(now - 60_000L, now, unserved = false))
+        assertTrue(useChanges(now - CHANGES_MAX_AGE_MS + 1, now, unserved = false))
+        assertFalse(useChanges(now - CHANGES_MAX_AGE_MS, now, unserved = false), "three days: read it all")
+        assertFalse(useChanges(now - 60_000L, now, unserved = true), "a ship without /changes")
+    }
+
+    @Test
+    fun `a dropped watch is watched again, unless it was dropped a moment ago`() {
+        val now = 1_000_000L
+        assertTrue(resubscribeAfterQuit(null, now))
+        assertTrue(resubscribeAfterQuit(now - QUIT_AGAIN_MS, now))
+        assertFalse(resubscribeAfterQuit(now - QUIT_AGAIN_MS + 1, now))
+        assertFalse(resubscribeAfterQuit(now, now))
+    }
+
+    @Test
+    fun `vere's healthz answer reads as busy, down or out of reach`() {
+        assertEquals(ShipHealth.IDLE, shipHealthOf(204))
+        assertEquals(ShipHealth.BUSY, shipHealthOf(429))
+        listOf(502, 503, 504).forEach { assertEquals(ShipHealth.DOWN, shipHealthOf(it), "$it") }
+        assertEquals(ShipHealth.UNREACHABLE, shipHealthOf(null))
+        // A redirect to a login page, an old vere's 404: not a word about the ship.
+        listOf(200, 302, 404).forEach { assertEquals(ShipHealth.UNKNOWN, shipHealthOf(it), "$it") }
+    }
+
+    @Test
+    fun `a reaped channel comes back at once, a refused one after the backoff`() {
+        assertTrue(endedWell(null))
+        assertTrue(endedWell(ChannelGone()))
+        assertFalse(endedWell(ChannelGone(forbidden = true)), "a lapsed login is refused again: no hot loop")
+        assertFalse(endedWell(IllegalStateException("channel SSE: HTTP 503")))
+    }
+}

@@ -74,6 +74,18 @@ fun problemOf(what: String, err: Throwable): Problem {
     return Problem("$what: $why", errorDetailsOf(err), calm = slow)
 }
 
+/**
+ * The calm line over a chat while [queued] writes wait for the ship, in
+ * the words vere's healthz gives: busy, down, or out of reach; slow when
+ * it has not said, or says it is idle.
+ */
+fun shipSlowLine(queued: Int, health: io.nisfeb.talon.urbit.ShipHealth?): String = when (health) {
+    io.nisfeb.talon.urbit.ShipHealth.BUSY -> "Your ship is busy. $queued queued for when it catches up."
+    io.nisfeb.talon.urbit.ShipHealth.DOWN -> "Your ship is down. $queued queued for when it's back."
+    io.nisfeb.talon.urbit.ShipHealth.UNREACHABLE -> "Can't reach your ship. $queued queued for when it's back."
+    else -> "Your ship is slow. $queued queued for when it's back."
+}
+
 /** [message]'s first line when it reads as words, else null. */
 internal fun readableReason(message: String?): String? {
     val first = message?.lineSequence()?.firstOrNull()?.trim().orEmpty()
