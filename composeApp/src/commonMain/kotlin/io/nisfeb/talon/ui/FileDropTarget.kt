@@ -63,8 +63,32 @@ data class DroppedFile(
  *  clipboard currently holds an image; null otherwise (text-only,
  *  empty, or unreadable). Used by the chat composer's Ctrl+V
  *  intercept on desktop. Android returns null until we wire
- *  ContentReceiver. */
+ *  ContentReceiver. Throws [ImageTooLargeToPaste] for an image too
+ *  large to read at all, which the composer says rather than pasting
+ *  the clipboard's text in its place. */
 expect fun readClipboardImageOrNull(): DroppedFile?
+
+/** What a paste found on the clipboard. */
+sealed interface ClipboardPaste {
+    /** An image, to stage for review. */
+    data class Image(val file: DroppedFile) : ClipboardPaste
+    /** An image that could not be taken, and why, said in place of pasting the clipboard's text. */
+    data class Problem(val message: String) : ClipboardPaste
+    /** No image: the field pastes whatever text there is. */
+    data object None : ClipboardPaste
+}
+
+/** The clipboard's image, or what kept it from being taken ([read] stands in for the OS clipboard in tests). */
+fun clipboardPaste(read: () -> DroppedFile? = ::readClipboardImageOrNull): ClipboardPaste = try {
+    read()?.let { ClipboardPaste.Image(it) } ?: ClipboardPaste.None
+} catch (e: ImageTooLargeToPaste) {
+    ClipboardPaste.Problem(e.message.orEmpty())
+}
+
+/** The clipboard's image is too large to read: reading it ran out of memory. */
+class ImageTooLargeToPaste : RuntimeException(
+    "That image is too large to paste. Save it as a file and attach it instead.",
+)
 
 /**
  * True when the OS clipboard holds an image, checked cheaply enough to

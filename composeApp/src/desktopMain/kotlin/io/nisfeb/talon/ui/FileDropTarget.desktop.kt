@@ -109,29 +109,66 @@ actual fun readClipboardImageOrNull(): DroppedFile? {
         .getOrNull() ?: return null
     val contents = runCatching { clipboard.getContents(null) }.getOrNull() ?: return null
     if (!contents.isDataFlavorSupported(DataFlavor.imageFlavor)) return null
-    val img = runCatching {
+    // AWT hands back the image already decoded, at full size. One too
+    // large for that runs out of memory here, and is said so: a crash in
+    // the key handler took the window and left the process holding the
+    // single-instance lock, so Talon would not start again.
+    val img = try {
         contents.getTransferData(DataFlavor.imageFlavor) as? java.awt.Image
-    }.getOrNull() ?: return null
+    } catch (e: OutOfMemoryError) {
+        throw ImageTooLargeToPaste()
+    } catch (t: Throwable) {
+        null
+    } ?: return null
+    return try {
+        pngOf(img)
+    } catch (e: OutOfMemoryError) {
+        throw ImageTooLargeToPaste()
+    }
+}
 
-    // Convert to BufferedImage so ImageIO can encode. Drawing onto a
-    // fresh BufferedImage is the standard route — most clipboard
-    // image transfers hand back a generic Image, not a
-    // BufferedImage, and ImageIO refuses to write the former.
-    val width = img.getWidth(null).coerceAtLeast(1)
-    val height = img.getHeight(null).coerceAtLeast(1)
-    val buffered = java.awt.image.BufferedImage(
-        width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB,
-    )
+/**
+ * The longest side a pasted image keeps. Plenty for a chat, and a
+ * full-size copy of a very large one was what ran the app out of
+ * memory: a 20000 px square is 1.6 GB as pixels.
+ */
+internal const val MAX_PASTE_SIDE = 4096
+
+/** [width] by [height] scaled to fit within [maxSide] on its longest side, aspect kept; as is when it fits. */
+internal fun fitWithin(width: Int, height: Int, maxSide: Int = MAX_PASTE_SIDE): Pair<Int, Int> {
+    val longest = maxOf(width, height)
+    if (longest <= maxSide) return width to height
+    val scale = maxSide.toDouble() / longest
+    return (width * scale).toInt().coerceAtLeast(1) to (height * scale).toInt().coerceAtLeast(1)
+}
+
+/**
+ * [img] as a PNG, drawn straight to its scaled size (see [fitWithin]):
+ * never a second full-size copy. ImageIO writes only a BufferedImage,
+ * which is why it is drawn at all. Null when it cannot be encoded.
+ */
+internal fun pngOf(img: java.awt.Image, maxSide: Int = MAX_PASTE_SIDE): DroppedFile? {
+    val width = img.getWidth(null)
+    val height = img.getHeight(null)
+    if (width <= 0 || height <= 0) return null
+    val (w, h) = fitWithin(width, height, maxSide)
+    val buffered = java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB)
     val g = buffered.createGraphics()
-    g.drawImage(img, 0, 0, null)
-    g.dispose()
-
+    try {
+        if (w != width) {
+            g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+        }
+        g.drawImage(img, 0, 0, w, h, null)
+    } finally {
+        g.dispose()
+    }
     val out = java.io.ByteArrayOutputStream()
     val ok = runCatching { ImageIO.write(buffered, "png", out) }.getOrElse { false }
     if (ok != true) {
         Log.w(TAG, "ImageIO.write failed for clipboard image (${width}x$height)")
         return null
     }
+    if (w != width) Log.i(TAG, "pasted image scaled from ${width}x$height to ${w}x$h")
     return DroppedFile(
         name = "pasted-${System.currentTimeMillis()}.png",
         mimeType = "image/png",
