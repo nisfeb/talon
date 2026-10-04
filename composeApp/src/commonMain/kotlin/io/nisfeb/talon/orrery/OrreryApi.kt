@@ -500,6 +500,17 @@ class OrreryApi(
     }
 
     /** One observe batch under the key. Per-item answers, in order. */
+    /**
+     * Where the owner is, to the metre, for the ship's leave alerts
+     * (orrery 69): one record the ship overwrites, never an observation.
+     * See [positionBody] for the wire.
+     */
+    suspend fun postPosition(token: String, fix: LocationFix) {
+        request(bare, HttpMethod.Post, "/api/position", positionBody(fix)) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+    }
+
     suspend fun observe(batch: JsonObject, token: String): ObserveAnswer {
         val text = request(bare, HttpMethod.Post, "/api/observe", batch.toString()) {
             header(HttpHeaders.Authorization, "Bearer $token")
