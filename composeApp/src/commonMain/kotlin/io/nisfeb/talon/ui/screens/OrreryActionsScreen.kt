@@ -185,11 +185,12 @@ private fun Body(
                     )
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { onDecide(a, "approved", "") }) { Text("Approve") }
-                        // Dismiss asks why, in a tap: a reason teaches the
-                        // generator, and none is ever made up.
+                        // Reject asks why, in a tap: a reason teaches the
+                        // generator, and none is ever made up. The same word
+                        // as the action's own window.
                         var asking by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
                         androidx.compose.foundation.layout.Box {
-                            OutlinedButton(onClick = { asking = true }) { Text("Dismiss") }
+                            OutlinedButton(onClick = { asking = true }) { Text("Reject") }
                             androidx.compose.material3.DropdownMenu(expanded = asking, onDismissRequest = { asking = false }) {
                                 androidx.compose.material3.DropdownMenuItem(text = { Text("No reason") }, onClick = { asking = false; onDecide(a, "dismissed", "") })
                                 io.nisfeb.talon.ui.DISMISS_REASONS.forEach { r ->
