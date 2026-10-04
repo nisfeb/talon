@@ -61,8 +61,9 @@ import androidx.sqlite.execSQL
         OrrerySentEntity::class,
         CometDomeEntity::class,
         UrbUnfurlEntity::class,
+        FollowedThreadEntity::class,
     ],
-    version = 53,
+    version = 54,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -96,6 +97,7 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun orrerySent(): OrrerySentDao
     abstract fun cometDomes(): CometDomeDao
     abstract fun urbUnfurls(): UrbUnfurlDao
+    abstract fun followedThreads(): FollowedThreadDao
 }
 
 /**

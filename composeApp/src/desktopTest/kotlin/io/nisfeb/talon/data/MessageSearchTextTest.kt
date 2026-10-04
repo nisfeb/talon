@@ -24,7 +24,7 @@ class MessageSearchTextTest {
     // No destructive fallback: a migration that does not match the entity fails here.
     private fun db() = Room.databaseBuilder<AppDatabase>(name = path)
         .setDriver(BundledSQLiteDriver())
-        .addMigrations(MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, io.nisfeb.talon.data.WATCHWORDS_DROP_MIGRATION, io.nisfeb.talon.data.ASSISTANT_LOG_MIGRATION)
+        .addMigrations(MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, io.nisfeb.talon.data.WATCHWORDS_DROP_MIGRATION, io.nisfeb.talon.data.ASSISTANT_LOG_MIGRATION, io.nisfeb.talon.data.FOLLOWED_THREADS_MIGRATION)
         .build()
 
     @AfterTest

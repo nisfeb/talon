@@ -102,7 +102,7 @@ class UrbUnfurlKeptTest {
     fun `the kept cards' table comes in by migration, with the rest of the database kept`() = runBlocking<Unit> {
         val path = File(dir, "talon.db").absolutePath
         fun open() = Room.databaseBuilder<AppDatabase>(name = path).setDriver(BundledSQLiteDriver())
-            .addMigrations(URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, io.nisfeb.talon.data.WATCHWORDS_DROP_MIGRATION, io.nisfeb.talon.data.ASSISTANT_LOG_MIGRATION).build()
+            .addMigrations(URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, io.nisfeb.talon.data.WATCHWORDS_DROP_MIGRATION, io.nisfeb.talon.data.ASSISTANT_LOG_MIGRATION, io.nisfeb.talon.data.FOLLOWED_THREADS_MIGRATION).build()
         open().also { it.cometDomes().put(io.nisfeb.talon.data.CometDomeEntity("~sampel", "gw-btc")); it.close() }
         // Wind the file back to 49: no table.
         BundledSQLiteDriver().open(path).also { c ->
