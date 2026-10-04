@@ -12,7 +12,10 @@ import platform.UIKit.UIApplication
 import platform.UIKit.UIDocumentPickerDelegateProtocol
 import platform.UIKit.UIDocumentPickerViewController
 import platform.UIKit.UIImage
-import platform.UIKit.UIImagePNGRepresentation
+import platform.UIKit.UIGraphicsBeginImageContextWithOptions
+import platform.UIKit.UIGraphicsEndImageContext
+import platform.UIKit.UIGraphicsGetImageFromCurrentImageContext
+import platform.UIKit.UIImageJPEGRepresentation
 import platform.UIKit.UIImagePickerController
 import platform.UIKit.UIImagePickerControllerDelegateProtocol
 import platform.UIKit.UIImagePickerControllerOriginalImage
@@ -25,8 +28,14 @@ import platform.UIKit.UIWindowScene
 import platform.UIKit.endEditing
 import platform.UniformTypeIdentifiers.UTTypeItem
 import platform.darwin.NSObject
+import platform.CoreGraphics.CGRectMake
+import platform.CoreGraphics.CGSizeMake
+import platform.darwin.DISPATCH_TIME_NOW
+import platform.darwin.dispatch_after
 import platform.darwin.dispatch_async
+import platform.darwin.dispatch_get_global_queue
 import platform.darwin.dispatch_get_main_queue
+import platform.darwin.dispatch_time
 import kotlin.coroutines.resume
 
 // Delegates are retained here for the lifetime of the presentation —
@@ -81,33 +90,45 @@ private fun topViewController(): UIViewController? {
 /**
  * Show a picker, or say it never opened.
  *
- * Three things, each a tap somebody lost. The keyboard is a first
+ * Each of these was a tap somebody lost. The keyboard is a first
  * responder and presenting while it dismisses is a race, so editing
- * ends first. The presentation goes on the main queue, after that
- * dismissal has begun. And a presentation UIKit declines is checked
- * for rather than assumed, because the delegate would never fire and
- * the caller would wait for ever.
+ * ends first. UIKit drops a presentation asked for mid transition, so
+ * a busy screen is tried again a little later ([presentStep]) rather
+ * than given up on at once: the gallery "didn't consistently open".
+ * And a presentation is counted as dropped only once it has had time
+ * to show ([PRESENT_CONFIRM_MS]); counted after one turn of the main
+ * queue, a picker that opened a moment later took the photo picked in
+ * it nowhere: "selecting an image doesn't attach it".
  */
-private fun present(picker: UIViewController, onDropped: () -> Unit) {
-    activeWindow()?.endEditing(true)
+private fun present(picker: UIViewController, onDropped: () -> Unit, attempt: Int = 0) {
+    if (attempt == 0) activeWindow()?.endEditing(true)
     dispatch_async(dispatch_get_main_queue()) {
         val root = topViewController()
-        if (root == null || root.isBeingDismissed() || root.isBeingPresented()) {
-            onDropped()
-            return@dispatch_async
-        }
-        root.presentViewController(picker, animated = true, completion = null)
-        dispatch_async(dispatch_get_main_queue()) {
-            if (picker.presentingViewController == null) onDropped()
+        val busy = root == null || root.isBeingDismissed() || root.isBeingPresented()
+        when (presentStep(busy, attempt)) {
+            PresentStep.RETRY -> after(PRESENT_RETRY_MS) { present(picker, onDropped, attempt + 1) }
+            PresentStep.GIVE_UP -> onDropped()
+            PresentStep.PRESENT -> {
+                var shown = false
+                root!!.presentViewController(picker, animated = true, completion = { shown = true })
+                after(PRESENT_CONFIRM_MS) {
+                    if (!shown && picker.presentingViewController == null) onDropped()
+                }
+            }
         }
     }
+}
+
+/** [block] on the main queue after [ms]. */
+private fun after(ms: Long, block: () -> Unit) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, ms * 1_000_000L), dispatch_get_main_queue(), block)
 }
 
 private suspend fun pickPhoto(): PickedImage? = suspendCancellableCoroutine { cont ->
     val picker = UIImagePickerController()
     var done = false
     val delegate = PhotoPickerDelegate { result ->
-        if (!done) { done = true; cont.resume(result) }
+        if (!done) { done = true; cont.resumeWith(result) }
     }
     activeDelegates.add(delegate)
     picker.sourceType =
@@ -134,7 +155,8 @@ private suspend fun pickDocument(): PickedImage? = suspendCancellableCoroutine {
 }
 
 private class PhotoPickerDelegate(
-    private val onResult: (PickedImage?) -> Unit,
+    /** The photo, null when cancelled, or why it could not be read: said in the composer, not dropped. */
+    private val onResult: (Result<PickedImage?>) -> Unit,
 ) : NSObject(), UIImagePickerControllerDelegateProtocol, UINavigationControllerDelegateProtocol {
 
     override fun imagePickerController(
@@ -142,20 +164,50 @@ private class PhotoPickerDelegate(
         didFinishPickingMediaWithInfo: Map<Any?, *>,
     ) {
         val image = didFinishPickingMediaWithInfo[UIImagePickerControllerOriginalImage] as? UIImage
-        val png = image?.let { UIImagePNGRepresentation(it) }
-        val result = png?.let {
-            PickedImage(bytes = it.toByteArray(), mimeType = "image/png", displayName = "photo.png")
-        }
         picker.dismissViewControllerAnimated(true, completion = null)
         activeDelegates.remove(this)
-        onResult(result)
+        if (image == null) {
+            onResult(Result.failure(IllegalStateException("That photo could not be read.")))
+            return
+        }
+        // Off the main queue: a full photo was turned into a PNG here,
+        // seconds of work and hundreds of MB for a 48 MP one, and nothing
+        // was attached when it failed. A JPEG of it, no larger than
+        // MAX_IMAGE_SIDE, as the paste path makes.
+        dispatch_async(dispatch_get_global_queue(0, 0u)) {
+            val result = runCatching { jpegOf(image) ?: error("That photo could not be read.") }
+            dispatch_async(dispatch_get_main_queue()) { onResult(result) }
+        }
     }
 
     override fun imagePickerControllerDidCancel(picker: UIImagePickerController) {
         picker.dismissViewControllerAnimated(true, completion = null)
         activeDelegates.remove(this)
-        onResult(null)
+        onResult(Result.success(null))
     }
+}
+
+/**
+ * [image] as a JPEG, scaled to fit [io.nisfeb.talon.ui.MAX_IMAGE_SIDE]
+ * pixels on its longest side. Drawn through UIImage, not its CGImage,
+ * so a photo keeps its orientation.
+ */
+@OptIn(ExperimentalForeignApi::class)
+private fun jpegOf(image: UIImage): PickedImage? {
+    val (pw, ph) = image.size.useContents { (width * image.scale).toInt() to (height * image.scale).toInt() }
+    if (pw <= 0 || ph <= 0) return null
+    val (w, h) = io.nisfeb.talon.ui.fitWithin(pw, ph)
+    val drawn = if (w == pw && h == ph) image else {
+        UIGraphicsBeginImageContextWithOptions(CGSizeMake(w.toDouble(), h.toDouble()), false, 1.0)
+        try {
+            image.drawInRect(CGRectMake(0.0, 0.0, w.toDouble(), h.toDouble()))
+            UIGraphicsGetImageFromCurrentImageContext()
+        } finally {
+            UIGraphicsEndImageContext()
+        }
+    } ?: return null
+    val jpeg = UIImageJPEGRepresentation(drawn, 0.9) ?: return null
+    return PickedImage(bytes = jpeg.toByteArray(), mimeType = "image/jpeg", displayName = "photo.jpg")
 }
 
 private class DocumentPickerDelegate(

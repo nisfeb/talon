@@ -128,26 +128,11 @@ actual fun readClipboardImageOrNull(): DroppedFile? {
 }
 
 /**
- * The longest side a pasted image keeps. Plenty for a chat, and a
- * full-size copy of a very large one was what ran the app out of
- * memory: a 20000 px square is 1.6 GB as pixels.
- */
-internal const val MAX_PASTE_SIDE = 4096
-
-/** [width] by [height] scaled to fit within [maxSide] on its longest side, aspect kept; as is when it fits. */
-internal fun fitWithin(width: Int, height: Int, maxSide: Int = MAX_PASTE_SIDE): Pair<Int, Int> {
-    val longest = maxOf(width, height)
-    if (longest <= maxSide) return width to height
-    val scale = maxSide.toDouble() / longest
-    return (width * scale).toInt().coerceAtLeast(1) to (height * scale).toInt().coerceAtLeast(1)
-}
-
-/**
  * [img] as a PNG, drawn straight to its scaled size (see [fitWithin]):
  * never a second full-size copy. ImageIO writes only a BufferedImage,
  * which is why it is drawn at all. Null when it cannot be encoded.
  */
-internal fun pngOf(img: java.awt.Image, maxSide: Int = MAX_PASTE_SIDE): DroppedFile? {
+internal fun pngOf(img: java.awt.Image, maxSide: Int = MAX_IMAGE_SIDE): DroppedFile? {
     val width = img.getWidth(null)
     val height = img.getHeight(null)
     if (width <= 0 || height <= 0) return null
