@@ -77,5 +77,25 @@ class ReconnectPolicyTest {
         assertFalse(needsDeepHistory(newestSentMs = 10 * day - 60_000, nowMs = 10 * day))
         assertFalse(needsDeepHistory(newestSentMs = 9 * day, nowMs = 10 * day), "exactly a day: not yet")
     }
-}
 
+    // Tlon's client reads only what changed while its last read is under
+    // three days old, and everything again past that.
+    @Test
+    fun `a catch-up reads changes while the last read is under three days old`() {
+        val now = 10 * CHANGES_MAX_AGE_MS
+        assertFalse(useChanges(0L, now, unserved = false), "no read yet: init-posts")
+        assertTrue(useChanges(now - 60_000L, now, unserved = false))
+        assertTrue(useChanges(now - CHANGES_MAX_AGE_MS + 1, now, unserved = false))
+        assertFalse(useChanges(now - CHANGES_MAX_AGE_MS, now, unserved = false), "three days: read it all")
+        assertFalse(useChanges(now - 60_000L, now, unserved = true), "a ship without /changes")
+    }
+
+    @Test
+    fun `a dropped watch is watched again, unless it was dropped a moment ago`() {
+        val now = 1_000_000L
+        assertTrue(resubscribeAfterQuit(null, now))
+        assertTrue(resubscribeAfterQuit(now - QUIT_AGAIN_MS, now))
+        assertFalse(resubscribeAfterQuit(now - QUIT_AGAIN_MS + 1, now))
+        assertFalse(resubscribeAfterQuit(now, now))
+    }
+}

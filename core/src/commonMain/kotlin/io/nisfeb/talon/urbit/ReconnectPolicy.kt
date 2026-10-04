@@ -56,6 +56,33 @@ fun shouldBootstrap(firstRun: Boolean, lastBootstrapMs: Long, nowMs: Long, lastH
 fun pauseAfterStream(pause: Long, livedMs: Long?, first: Long, healthyMs: Long): Long =
     if (livedMs != null && livedMs >= healthyMs) first else pause
 
+/**
+ * How old the last full read of posts may be for a catch-up to read only
+ * what changed since: Tlon's client reads everything again past three days.
+ */
+const val CHANGES_MAX_AGE_MS = 3 * 24 * 60 * 60_000L
+
+/** How far before the last read a /changes read starts: the device's clock and the ship's need not agree. */
+const val CHANGES_OVERLAP_MS = 5 * 60_000L
+
+/**
+ * Whether a catch-up reads groups-ui's /changes since [readMs], when the
+ * last full read of posts began (0: none yet), instead of init-posts'
+ * newest ten of every chat again. Not on a ship that serves no /changes.
+ */
+fun useChanges(readMs: Long, nowMs: Long, unserved: Boolean): Boolean =
+    !unserved && readMs > 0L && nowMs - readMs < CHANGES_MAX_AGE_MS
+
+/** A path the ship drops again this soon after it was watched again is in a loop: open a new channel instead. */
+const val QUIT_AGAIN_MS = 60_000L
+
+/**
+ * Whether a subscription the ship dropped ([lastQuitMs]: when it last
+ * dropped that path, null if never) is watched again on the same channel.
+ */
+fun resubscribeAfterQuit(lastQuitMs: Long?, nowMs: Long): Boolean =
+    lastQuitMs == null || nowMs - lastQuitMs >= QUIT_AGAIN_MS
+
 /** The deep history pass: nothing kept here, or the newest is over a day old. */
 fun needsDeepHistory(newestSentMs: Long?, nowMs: Long): Boolean =
     newestSentMs == null || nowMs - newestSentMs > 24 * 60 * 60 * 1000L

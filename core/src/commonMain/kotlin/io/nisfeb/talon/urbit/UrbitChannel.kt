@@ -116,6 +116,23 @@ class UrbitChannel internal constructor(
         gone = true
     }
 
+    /** The open stream's inbox, so a refused PUT can end the stream too. */
+    @Volatile
+    private var streamInbox: Channel<UrbitEvent>? = null
+
+    /**
+     * Eyre ties a channel to the identity that made it and answers 403 to
+     * anyone else, a lapsed login included. Nothing on this channel will
+     * work again, so the open stream ends with it and the next pass opens
+     * another.
+     */
+    private fun forbidden(): Nothing {
+        gone = true
+        val e = ChannelGone(forbidden = true)
+        streamInbox?.close(e)
+        throw e
+    }
+
     /**
      * Opens the SSE stream. Hot flow — every collector shares the same
      * connection for the life of this UrbitChannel instance. Called again
@@ -131,6 +148,7 @@ class UrbitChannel internal constructor(
     fun events(): Flow<UrbitEvent> = channelFlow {
         if (gone) throw ChannelGone()
         val inbox = Channel<UrbitEvent>(Channel.UNLIMITED)
+        streamInbox = inbox
         // Drive the SSE session on its own coroutine. The sse{} block
         // stays suspended for the life of the connection; when this
         // job is cancelled (awaitClose below) the session closes.
@@ -159,6 +177,7 @@ class UrbitChannel internal constructor(
                         gone = true
                         throw ChannelGone()
                     }
+                    if (resp.status.value == 403) forbidden()
                     if (!resp.status.isSuccess()) error("channel SSE: HTTP ${resp.status.value}")
                     lastStreamMs = nowMs()
                     val body = resp.bodyAsChannel()
@@ -460,6 +479,7 @@ class UrbitChannel internal constructor(
             setBody(messages.toString())
             timeout { requestTimeoutMillis = RPC_TIMEOUT_SECS * 1000 }
         }
+        if (resp.status.value == 403) forbidden()
         if (!resp.status.isSuccess()) error("channel PUT: HTTP ${resp.status.value}")
     }
 
@@ -481,8 +501,13 @@ class UrbitChannel internal constructor(
 /** Raw SSE event: optional sequence id from the server, plus JSON payload. */
 data class UrbitEvent(val id: Long?, val body: JsonElement)
 
-/** The ship reaped the channel (twelve hours without a stream) or never had it: open a new one. */
-class ChannelGone : RuntimeException("the ship no longer has this channel")
+/**
+ * The ship reaped the channel (twelve hours without a stream) or never had
+ * it: open a new one. [forbidden]: eyre refused it to this login (403), so
+ * the new one waits out a backoff, in case the login itself has lapsed.
+ */
+class ChannelGone(val forbidden: Boolean = false) :
+    RuntimeException(if (forbidden) "the ship refused this channel to this login" else "the ship no longer has this channel")
 
 /**
  * The ship refused a poke.

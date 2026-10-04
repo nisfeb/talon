@@ -99,6 +99,14 @@ internal class FakeShip(val us: String = "~zod") {
     // a 404 until a PUT makes it again, as with eyre.
     private val known: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val reaped: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    // Channels refused to this login since [forbid]: a 403 on stream and PUT.
+    private val forbidden: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** The request id each watch (app + path) was last made with, for [quit]. */
+    val subIds = ConcurrentHashMap<String, Long>()
+
+    /** A scry with no entry in [scries] is answered by this, for paths that carry a time. */
+    @Volatile var answerScry: (path: String) -> String? = { null }
 
     // One event stream per channel, as eyre keeps one per channel: the app
     // runs several (the repo's, the call controller's), and two channels
@@ -167,6 +175,16 @@ internal class FakeShip(val us: String = "~zod") {
         pipes.clear()
     }
 
+    /** Refuse every channel made so far, as eyre does one made by another login: 403 on stream and PUT. */
+    suspend fun forbid() = writing.withLock {
+        forbidden += known
+        pipes.values.forEach { it.queue.close(); it.stream.close() }
+        pipes.clear()
+    }
+
+    /** Drop the watch [watch] (app + path), as gall's kick reaches a channel: eyre's quit, on its id. */
+    suspend fun quit(watch: String) = emit("""{"id":${subIds.getValue(watch)},"response":"quit"}""")
+
     /** Put a fact on every channel's event stream, framed as eyre frames it. */
     suspend fun emit(json: String) = writing.withLock {
         val f = frame(json)
@@ -181,6 +199,11 @@ internal class FakeShip(val us: String = "~zod") {
         val path = req.url.encodedPath
         requests += "${req.method.value} $path"
         when {
+            (req.method == HttpMethod.Put || req.method == HttpMethod.Get) && path.startsWith("/~/channel/") &&
+                path.removePrefix("/~/channel/") in forbidden -> {
+                if (req.method == HttpMethod.Get) streamsOpened += path.removePrefix("/~/channel/") to req.headers["Last-Event-ID"]
+                respond("", HttpStatusCode.Forbidden)
+            }
             req.method == HttpMethod.Put && path.startsWith("/~/channel/") -> {
                 path.removePrefix("/~/channel/").let { known += it; reaped -= it }
                 val batch = Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonArray
@@ -212,6 +235,7 @@ internal class FakeShip(val us: String = "~zod") {
                         "subscribe" -> {
                             val watch = "${o["app"]?.jsonPrimitive?.content}${o["path"]?.jsonPrimitive?.content}"
                             subscribed += watch
+                            subIds[watch] = id
                             val err = refuseWatch(watch)
                             answer(
                                 path,
@@ -229,8 +253,16 @@ internal class FakeShip(val us: String = "~zod") {
                 respond("", HttpStatusCode.NotFound)
             req.method == HttpMethod.Get && path.startsWith("/~/channel/") && refuseStream ->
                 respond("", HttpStatusCode.ServiceUnavailable)
-            req.method == HttpMethod.Get && path.startsWith("/~/channel/") ->
-                respond(writing.withLock { streamOf(path) }, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+            // Checked again under the lock: a reap or a forbid between the
+            // checks above and here would otherwise leave a stream open on
+            // a channel that is gone.
+            req.method == HttpMethod.Get && path.startsWith("/~/channel/") -> {
+                val id = path.removePrefix("/~/channel/")
+                when (val stream = writing.withLock { if (id in reaped || id in forbidden) null else streamOf(path) }) {
+                    null -> respond("", if (id in forbidden) HttpStatusCode.Forbidden else HttpStatusCode.NotFound)
+                    else -> respond(stream, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+                }
+            }
             path.startsWith("/~/scry/") && loseScry(path.removePrefix("/~/scry/").removeSuffix(".json")) != null -> {
                 val asked = path.removePrefix("/~/scry/").removeSuffix(".json")
                 scried += asked
@@ -241,7 +273,7 @@ internal class FakeShip(val us: String = "~zod") {
             path.startsWith("/~/scry/") ->
                 path.removePrefix("/~/scry/").removeSuffix(".json").also { scried += it }
                     .also { p -> holdScry(p).takeIf { it > 0 }?.let { kotlinx.coroutines.delay(it) } }
-                    .let { scries[it] }
+                    .let { scries[it] ?: answerScry(it) }
                     ?.let { respond(it, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
                     ?: respond("", HttpStatusCode.NotFound)
             // An app's own HTTP API (%notes' v1, …): recorded, and answered by [answerApi].
