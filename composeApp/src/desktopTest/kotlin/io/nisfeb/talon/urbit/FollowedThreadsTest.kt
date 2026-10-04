@@ -42,9 +42,10 @@ class FollowedThreadsTest {
     private val nest = "chat/~bus/general"
     private val parent = "170141184506"
     private val heard = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private val forOwner = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
 
     init {
-        repo.messageListener = { m, _ -> heard += m.id }
+        repo.messageListener = { m, toUs -> heard += m.id; forOwner += toUs }
     }
 
     @AfterTest
@@ -215,6 +216,8 @@ class FollowedThreadsTest {
         db.followedThreads().upsert(FollowedThreadEntity(nest, parent, follow = true, sent = true, atMs = 1))
         reply("170.141.184.510", "~nec", "followed")
         assertEquals("170141184510", heard.last())
+        // Addressed to the owner, so "mentions only" lets it through.
+        assertTrue(forOwner.all { it }, "$forOwner")
     }
 
     @Test
