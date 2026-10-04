@@ -92,11 +92,16 @@ class TlonChatRepoStartupTest {
 
     private val init = "groups-ui/v6/init-posts/10/10"
     private fun streams() = ship.requests.count { it.startsWith("GET /~/channel/") }
+    private fun channelsStreamed() = ship.streamsOpened.map { it.first }.distinct()
+
+    private fun dmFact(id: String, text: String, sent: Long) =
+        """{"id":1,"response":"diff","json":{"whom":"~bus","id":"$id","response":{"add":{"essay":${essay("~bus", text, sent)},"time":null}}}}"""
 
     // "the time to load new messages when they open the app is very long.
-    // over 5 seconds" (iOS). Coming back, the old channel's delete hangs on
-    // a dead socket; the reconnect waited out its 5s, then a 1-3s jitter,
-    // and a return inside a minute of the last load read nothing at all.
+    // over 5 seconds" (iOS). Coming back, the old channel's delete hung on
+    // a dead socket and the reconnect waited out its 5s. The channel is
+    // resumed now: nothing to delete, and what came while away is the
+    // ship's replay on it.
     @Test
     fun `back in the app, what came while away loads at once`() = started(prepare = {
         scries[init] = initPosts
@@ -104,13 +109,15 @@ class TlonChatRepoStartupTest {
         until("history") { db.messages().getOne("~bus", "~bus/170141184506") != null }
         until("the stream") { streams() >= 1 }
         ship.holdDelete = 10_000
-        ship.scries[init] = """{"chat":{"~bus":{${post("~bus/170141184506", "~bus", "a DM", 1_000)},
-            ${post("~bus/170141184508", "~bus", "while you were away", 3_000)}}}}"""
+        val before = streams()
         val t0 = System.currentTimeMillis()
         repo.forceReconnect()
+        until("the stream again") { streams() > before }
+        ship.emit(dmFact("~bus/170141184508", "while you were away", 3_000))
         until("the message that came while away") { db.messages().getOne("~bus", "~bus/170141184508") != null }
         val took = System.currentTimeMillis() - t0
         assertTrue(took < 2_000, "took ${took}ms")
+        assertEquals(1, channelsStreamed().size, "the same channel, resumed")
     }
 
     // The stream often died while the app was suspended, and the loop sat
@@ -299,10 +306,11 @@ class TlonChatRepoStartupTest {
         until("the deep pass") { ship.scried.any { "init-posts/50" in it } }
     }
 
-    // A dropped stream inside a minute of the last full pass read the
-    // notebook list again, and each loop of a reconnect storm with it.
+    // A dropped stream read the notebook list again, and each loop of a
+    // reconnect storm with it; then every reconnect was a new channel that
+    // watched each notebook again. Eyre keeps the channel and its watches.
     @Test
-    fun `a quick reconnect nobody asked for watches the notebooks without reading them`() = started(prepare = {
+    fun `a dropped stream resumes its channel, watching and reading nothing again`() = started(prepare = {
         scries[init] = initPosts
         scries["notes/v0/notebooks"] = """[{"flagName":"recipes","host":"~bus","notebook":{"title":"Recipes","id":7,"rootFolderId":8,
             "createdBy":"~bus","createdAt":1784592399,"updatedAt":1784592399,"updatedBy":"~bus"},"visibility":"private"}]"""
@@ -310,40 +318,85 @@ class TlonChatRepoStartupTest {
         until("the notebook watched") { "notes/v0/notes/~bus/recipes/stream" in ship.subscribed }
         until("the progress bar clears") { !repo.bootstrapping.value }
         val lists = ship.scried.count { it == "notes/v0/notebooks" }
-        val watches = ship.subscribed.count { it == "notes/v0/notes/~bus/recipes/stream" }
+        val subs = ship.subscribed.size
+        val before = streams()
         ship.endStreams()
-        until("watched again on the new channel") { ship.subscribed.count { it == "notes/v0/notes/~bus/recipes/stream" } > watches }
+        until("the stream again") { streams() > before }
+        kotlinx.coroutines.delay(500)
+        assertEquals(subs, ship.subscribed.size, "nothing watched again")
         assertEquals(lists, ship.scried.count { it == "notes/v0/notebooks" }, "the list not read again")
+        assertEquals(1, channelsStreamed().size, "the same channel")
     }
 
-    // ~ricsul broke its streams every few minutes, and each break re-ran the
-    // whole pass (forty requests, the unread scry among them) until the
-    // ship could do nothing else. A short outage re-subscribes only.
+    // ~ricsul, too busy to send its keepalives, cut every stream at 45 s.
+    // Each reconnect was a new channel, and on a ship that slow the outage
+    // always looked long, so the whole pass ran too: forty requests, the
+    // unread scry among them, until the ship could do nothing else.
     @Test
-    fun `a stream broken minutes after the last pass reconnects without the whole pass`() = started(prepare = {
+    fun `a stream broken minutes after the last pass resumes without the whole pass`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        until("the progress bar clears") { !repo.bootstrapping.value }
+        until("the unread scry") { ship.scried.any { "activity/full" in it } }
+        val unreadReads = ship.scried.count { "activity/full" in it }
+        val before = streams()
+        repo.ageForTest(byMs = 5 * 60_000L, heardMs = 10 * 60_000L)
+        ship.endStreams()
+        until("the stream again") { streams() > before }
+        kotlinx.coroutines.delay(500)
+        assertEquals(unreadReads, ship.scried.count { "activity/full" in it }, "the unread scry not run again")
+        assertEquals(1, channelsStreamed().size, "the same channel")
+    }
+
+    // The resumed stream asks eyre to start after the last event applied:
+    // eyre acks everything up to it and replays the rest.
+    @Test
+    fun `a resumed stream starts after the last event applied`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        until("the progress bar clears") { !repo.bootstrapping.value }
+        until("the stream") { streams() >= 1 }
+        ship.emit(dmFact("~bus/170141184509", "the last one heard", 4_000))
+        until("it applied") { db.messages().getOne("~bus", "~bus/170141184509") != null }
+        val last = ship.lastEventId
+        val before = streams()
+        ship.endStreams()
+        until("the stream again") { streams() > before }
+        assertEquals(last.toString(), ship.streamsOpened.last().second)
+    }
+
+    // Eyre reaps a channel twelve hours after its stream: a stream asked
+    // for on it is a 404. That is a long outage, read whole.
+    @Test
+    fun `a channel the ship reaped is replaced, every watch and the whole read`() = started(prepare = {
         scries[init] = initPosts
     }) { repo ->
         until("the progress bar clears") { !repo.bootstrapping.value }
         until("the unread scry") { ship.scried.any { "activity/full" in it } }
         val unreadReads = ship.scried.count { "activity/full" in it }
         val subs = ship.subscribed.size
-        repo.ageForTest(byMs = 5 * 60_000L)
-        ship.endStreams()
-        until("subscribed again on the new channel") { ship.subscribed.size > subs }
-        kotlinx.coroutines.delay(500)
-        assertEquals(unreadReads, ship.scried.count { "activity/full" in it }, "the unread scry not run again")
+        repo.ageForTest(byMs = 5 * 60_000L, heardMs = 10 * 60_000L)
+        ship.reap()
+        until("the unread scry again") { ship.scried.count { "activity/full" in it } > unreadReads }
+        until("watched again") { ship.subscribed.size >= 2 * subs }
+        until("a new channel") { channelsStreamed().size == 2 }
     }
 
+    // A clog while the stream was down, or an agent's upgrade, drops a
+    // subscription. Resumed, the channel would go on without it for good.
     @Test
-    fun `a long outage still reconciles`() = started(prepare = {
+    fun `a subscription the ship drops brings a new channel and the whole read`() = started(prepare = {
         scries[init] = initPosts
     }) { repo ->
         until("the progress bar clears") { !repo.bootstrapping.value }
         until("the unread scry") { ship.scried.any { "activity/full" in it } }
+        until("the stream") { streams() >= 1 }
         val unreadReads = ship.scried.count { "activity/full" in it }
-        repo.ageForTest(byMs = 5 * 60_000L, heardMs = 10 * 60_000L)
-        ship.endStreams()
+        val subs = ship.subscribed.size
+        ship.emit("""{"id":2,"response":"quit"}""")
         until("the unread scry again") { ship.scried.count { "activity/full" in it } > unreadReads }
+        until("watched again") { ship.subscribed.size >= 2 * subs }
+        until("a new channel") { channelsStreamed().size == 2 }
     }
 
     // Each invite heard read the whole foreigns list again. The fact is

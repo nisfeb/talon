@@ -455,9 +455,10 @@ class TlonChatRepo(
     }
 
     /**
-     * Forever-loop the SSE session. Each iteration opens a fresh
-     * UrbitChannel, subscribes, re-scries recent state, then drains
-     * events until the stream errors or ends. On failure we wait with
+     * Forever-loop the SSE session. Each iteration resumes the last
+     * channel while the ship keeps it, or opens a fresh one, subscribes
+     * and re-scries recent state; then it drains events until the stream
+     * errors or ends. On failure we wait with
      * exponential backoff (capped) and reconnect — handles doze-wake,
      * network blips, and server-side channel timeouts transparently.
      */
@@ -465,9 +466,14 @@ class TlonChatRepo(
         var backoffMs = 2_000L
         var firstRun = true
         while (scope.isActive && started) {
-            val ok = runCatching { runSessionOnce(session, firstRun) }
+            val ended = runCatching { runSessionOnce(session, firstRun) }
                 .onFailure { Log.w(TAG, "session iteration ended", it) }
-                .isSuccess
+            // A channel the ship reaped is no trouble: the next pass opens a
+            // new one at once. Its replay went with it, so that pass reads
+            // everything, however short the outage looks.
+            val gone = ended.exceptionOrNull() is ChannelGone
+            if (gone) lastBootstrapMs = 0L
+            val ok = ended.isSuccess || gone
             if (!scope.isActive || !started) break
             firstRun = false
             // Back off exponentially after failures; reset on a normal
@@ -492,269 +498,284 @@ class TlonChatRepo(
     @Volatile private var forcedReconnect = false
 
     private suspend fun runSessionOnce(session: UrbitSession, firstRun: Boolean) = coroutineScope {
-        Log.i(TAG, "opening channel (firstRun=$firstRun)")
         // When the old stream last heard anything: how long this outage was.
         val heardBeforeMs = lastEventMs
-        val ch = session.openChannel()
+        // The last channel, while the ship keeps it. Eyre holds a channel,
+        // its subscriptions and every event since the last ack for twelve
+        // hours after its stream drops, and a stream opened on it again
+        // starts after the last event applied here. ~ricsul, too busy to
+        // send its keepalives, cut every stream at 45 s, and each reconnect
+        // made a new channel: every watch again, and on a ship that slow
+        // the outage always looked long, so the whole pass ran as well.
+        val kept = channel?.takeIf { !it.gone }
+        val ch = kept ?: session.openChannel()
         channel = ch
         lastEventMs = nowMs()
         notificationHealth.markSseConnected(true)
         notificationHealth.markSseEvent(lastEventMs)
-        // Pagination markers are per-(channel, ship). A new channel
-        // means the ship may surface old history we previously couldn't
-        // reach (e.g. backfill arrived during the disconnect). Drop the
-        // markers so loadOlder retries them on demand.
-        paginationExhausted.clear()
+        if (kept != null) {
+            Log.i(TAG, "resuming the channel")
+            // What came while it was down is replayed: nothing to read again.
+            forcedReconnect = false
+            pushScope.launch { runCatching { drainQueue() }.onFailure { Log.w(TAG, "queue not sent", it) } }
+        } else {
+            Log.i(TAG, "opening channel (firstRun=$firstRun)")
+            // Pagination markers are per-(channel, ship). A new channel
+            // means the ship may surface old history we previously couldn't
+            // reach (e.g. backfill arrived during the disconnect). Drop the
+            // markers so loadOlder retries them on demand.
+            paginationExhausted.clear()
 
-        // Subscribe to all streams we care about. Failures here don't
-        // skip the event-loop — a partial subscribe set still delivers
-        // whatever the server accepted. Run in parallel: each is one
-        // round-trip and they're independent, so the serial form was
-        // 5× the wall time for no reason.
-        // Groups subscribe catches new channels added to existing
-        // groups + meta edits — without it, channel-add is only picked
-        // up on reconnect (bootstrap re-scry).
-        // %presence shipped with Tlon v11.4.0. On an older ship the
-        // agent isn't installed and this subscribe nacks — harmless,
-        // the nack is logged by applyEvent and typing simply never
-        // shows. Same for the pokes in setTyping/clearTyping.
-        //
-        // %activity /v5 is where %react and %dm-react events live:
-        // /v4's down-conversion returns ~ for them, so the agent emits
-        // no v4 fact at all and reaction notifications never arrive.
-        // But /v5 only exists on v11.4.0+, and an older ship's watch
-        // arm crashes on it — which would cost us *every* activity
-        // event, not just reactions. So ask for /v5 and let the nack
-        // walk us back to /v4.
-        subFallbacks.clear()
-        // What streamed while away is not in an opened chat yet: read again.
-        readOnOpen.clear()
-        listOf(
-            SubSpec("chat", "/v4"),
-            SubSpec("channels", "/v4"),
-            // /v6 (12.1.0) carries notebook and note sources, which v5
-            // and v4 leave out: notebooks had no unreads here.
-            subSpecs[0],
-            SubSpec("contacts", "/v1/news"),
-            // /v3 (12.2.0) is what Tlon's own client watches: same
-            // envelope, plus `blob` and `active-channel`, which go to
-            // Unknown. /v1 is no longer called by Tlon's clients, which
-            // makes it removable under its N-1 policy.
-            subSpecs[1],
-            SubSpec("presence", "/v1"),
-            // Invites live here, not on the content subscriptions above:
-            // %chat pushes the pending-DM list on /dm/invited (never on
-            // /v4), and %groups pushes gang/invite updates on
-            // /gangs/updates. Without these two, a new invite only
-            // surfaced on the next reconnect's bootstrap scry — or, for
-            // groups, never, since refreshInvites ran only when the
-            // Invites screen was opened.
-            SubSpec("chat", "/dm/invited"),
-            // /v1/foreigns is where Tlon's client hears of group invites;
-            // the desk marks /gangs/updates deprecated (12.3.0). The same
-            // change goes out on both, a flag-keyed map either way.
-            subSpecs[2],
-        ).let { specs ->
-            // Where this ship stopped refusing last time, if it did: a
-            // reconnect walked the refusals again, every time.
-            val plans = specs.map { spec ->
-                val all = listOf(spec.path) + spec.fallbacks
-                Triple(spec, all, subServed["${spec.app}${spec.path}"] ?: 0)
-            }
-            // All in one PUT: one each was an event on the ship apiece.
-            runCatching { ch.subscribeAll(plans.map { (spec, all, from) -> spec.app to all[from] }) }
-                .onSuccess { ids ->
-                    ids.zip(plans).forEach { (id, plan) ->
-                        val (spec, all, from) = plan
-                        val rest = all.drop(from + 1)
-                        if (rest.isNotEmpty()) subFallbacks[id] = spec.app to rest
+            // Subscribe to all streams we care about. Failures here don't
+            // skip the event-loop — a partial subscribe set still delivers
+            // whatever the server accepted. Run in parallel: each is one
+            // round-trip and they're independent, so the serial form was
+            // 5× the wall time for no reason.
+            // Groups subscribe catches new channels added to existing
+            // groups + meta edits — without it, channel-add is only picked
+            // up on reconnect (bootstrap re-scry).
+            // %presence shipped with Tlon v11.4.0. On an older ship the
+            // agent isn't installed and this subscribe nacks — harmless,
+            // the nack is logged by applyEvent and typing simply never
+            // shows. Same for the pokes in setTyping/clearTyping.
+            //
+            // %activity /v5 is where %react and %dm-react events live:
+            // /v4's down-conversion returns ~ for them, so the agent emits
+            // no v4 fact at all and reaction notifications never arrive.
+            // But /v5 only exists on v11.4.0+, and an older ship's watch
+            // arm crashes on it — which would cost us *every* activity
+            // event, not just reactions. So ask for /v5 and let the nack
+            // walk us back to /v4.
+            subFallbacks.clear()
+            // What streamed while away is not in an opened chat yet: read again.
+            readOnOpen.clear()
+            listOf(
+                SubSpec("chat", "/v4"),
+                SubSpec("channels", "/v4"),
+                // /v6 (12.1.0) carries notebook and note sources, which v5
+                // and v4 leave out: notebooks had no unreads here.
+                subSpecs[0],
+                SubSpec("contacts", "/v1/news"),
+                // /v3 (12.2.0) is what Tlon's own client watches: same
+                // envelope, plus `blob` and `active-channel`, which go to
+                // Unknown. /v1 is no longer called by Tlon's clients, which
+                // makes it removable under its N-1 policy.
+                subSpecs[1],
+                SubSpec("presence", "/v1"),
+                // Invites live here, not on the content subscriptions above:
+                // %chat pushes the pending-DM list on /dm/invited (never on
+                // /v4), and %groups pushes gang/invite updates on
+                // /gangs/updates. Without these two, a new invite only
+                // surfaced on the next reconnect's bootstrap scry — or, for
+                // groups, never, since refreshInvites ran only when the
+                // Invites screen was opened.
+                SubSpec("chat", "/dm/invited"),
+                // /v1/foreigns is where Tlon's client hears of group invites;
+                // the desk marks /gangs/updates deprecated (12.3.0). The same
+                // change goes out on both, a flag-keyed map either way.
+                subSpecs[2],
+            ).let { specs ->
+                // Where this ship stopped refusing last time, if it did: a
+                // reconnect walked the refusals again, every time.
+                val plans = specs.map { spec ->
+                    val all = listOf(spec.path) + spec.fallbacks
+                    Triple(spec, all, subServed["${spec.app}${spec.path}"] ?: 0)
+                }
+                // All in one PUT: one each was an event on the ship apiece.
+                runCatching { ch.subscribeAll(plans.map { (spec, all, from) -> spec.app to all[from] }) }
+                    .onSuccess { ids ->
+                        ids.zip(plans).forEach { (id, plan) ->
+                            val (spec, all, from) = plan
+                            val rest = all.drop(from + 1)
+                            if (rest.isNotEmpty()) subFallbacks[id] = spec.app to rest
+                        }
                     }
-                }
-                .onFailure { Log.e(TAG, "subscribe failed", it) }
-        }
-
-        // Re-scry init-posts + activity every reconnect so we catch up on
-        // anything that landed while the stream was down. The
-        // `_bootstrapping` flag drives a top-of-screen progress bar so
-        // the silent fetch on first launch doesn't read as
-        // "the app has hung."
-        //
-        // Two-stage history load: a small 10-per-source scry runs
-        // synchronously (fast first paint, ~1-2s on a busy ship) and
-        // counts as "bootstrapping done" the moment it lands. The
-        // larger 50-per-source scry runs in the background after,
-        // reactively upserting older history into the same tables —
-        // the UI is interactive throughout. Without this, a heavy
-        // ship's full init-posts payload took 30+ seconds and either
-        // timed out the scry or left the user staring at a progress
-        // bar with no idea if anything was happening. See `bootstrap`
-        // for the count semantics.
-        // A reconnect this soon after the last full pass re-registers
-        // its subscriptions and nothing else. See the client-conduct
-        // rules: a reconnect must be cheap.
-        val sinceBootstrapMs = nowMs() - lastBootstrapMs
-        val skipBootstrap = !shouldBootstrap(firstRun, lastBootstrapMs, nowMs(), heardBeforeMs)
-        // A connect somebody asked for (back to the app, the network back)
-        // still reads the recent messages and the unread counts inside the
-        // window: the stream was down while they were away, and what landed
-        // then comes no other way. Without it, a quick trip out of an iOS
-        // app lost that minute's messages until some later reconnect.
-        val forced = forcedReconnect
-        forcedReconnect = false
-        val reconnectAskedMs = lastReconnectMs
-        if (skipBootstrap) {
-            Log.i(TAG, "reconnected ${sinceBootstrapMs}ms after the last bootstrap; re-subscribed only")
-        }
-        if (firstRun) _bootstrapping.value = true
-        try {
-            // The group list is reconciled on EVERY connect, throttle or
-            // not. A group joined while the stream was down does not
-            // arrive as a fact when we re-subscribe, so without this a
-            // join can stay invisible until the app restarts — the exact
-            // bug a fresh comet hit. One scry is not the expensive
-            // bootstrap the throttle exists to prevent.
-            val groupsJob = async {
-                runCatching { bootstrapGroups(ch) }
-                    .onFailure { Log.e(TAG, "groups scry failed", it) }
+                    .onFailure { Log.e(TAG, "subscribe failed", it) }
             }
-            // Skipped when a reconnect lands right after the last
-            // pass; the subscriptions above are re-registered either way.
-            if (!skipBootstrap) {
-                // Parallel-fan-out the bootstrap scries — each is a network
-                // round-trip and they write to disjoint tables, so running
-                // them serially burned 4× wall time for no reason. Failures
-                // are caught per-job so a slow one doesn't poison the rest.
-                //
-                // - initPosts: chat/channel history + reactions
-                // - activity: unread + notify counts → also marks reconcile
-                //   success on notificationHealth
-                // - contacts: status / nickname / color updates that the
-                //   live %contacts /v1/news subscribe doesn't replay on
-                //   reconnect
-                // - channel orders: pin/unpin state, same reconnect-replay
-                //   gap as contacts
-                //
-                // Clubs stay in a firstRun-only branch (the %chat /v4
-                // subscription covers edits adequately on reconnect).
-                // Groups do not: a group joined while the channel was down
-                // never arrives as a fact, so the list is reconciled from a
-                // scry on every connect. Seen on a fresh comet, whose join
-                // landed while the ship was busy and the channel cycled.
-                val initJob = async {
-                    runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
-                        .onFailure { Log.e(TAG, "initPosts scry failed", it) }
+
+            // Re-scry init-posts + activity every reconnect so we catch up on
+            // anything that landed while the stream was down. The
+            // `_bootstrapping` flag drives a top-of-screen progress bar so
+            // the silent fetch on first launch doesn't read as
+            // "the app has hung."
+            //
+            // Two-stage history load: a small 10-per-source scry runs
+            // synchronously (fast first paint, ~1-2s on a busy ship) and
+            // counts as "bootstrapping done" the moment it lands. The
+            // larger 50-per-source scry runs in the background after,
+            // reactively upserting older history into the same tables —
+            // the UI is interactive throughout. Without this, a heavy
+            // ship's full init-posts payload took 30+ seconds and either
+            // timed out the scry or left the user staring at a progress
+            // bar with no idea if anything was happening. See `bootstrap`
+            // for the count semantics.
+            // A reconnect this soon after the last full pass re-registers
+            // its subscriptions and nothing else. See the client-conduct
+            // rules: a reconnect must be cheap.
+            val sinceBootstrapMs = nowMs() - lastBootstrapMs
+            val skipBootstrap = !shouldBootstrap(firstRun, lastBootstrapMs, nowMs(), heardBeforeMs)
+            // A connect somebody asked for (back to the app, the network back)
+            // still reads the recent messages and the unread counts inside the
+            // window: the stream was down while they were away, and what landed
+            // then comes no other way. Without it, a quick trip out of an iOS
+            // app lost that minute's messages until some later reconnect.
+            val forced = forcedReconnect
+            forcedReconnect = false
+            val reconnectAskedMs = lastReconnectMs
+            if (skipBootstrap) {
+                Log.i(TAG, "reconnected ${sinceBootstrapMs}ms after the last bootstrap; re-subscribed only")
+            }
+            if (firstRun) _bootstrapping.value = true
+            try {
+                // The group list is reconciled on EVERY connect, throttle or
+                // not. A group joined while the stream was down does not
+                // arrive as a fact when we re-subscribe, so without this a
+                // join can stay invisible until the app restarts — the exact
+                // bug a fresh comet hit. One scry is not the expensive
+                // bootstrap the throttle exists to prevent.
+                val groupsJob = async {
+                    runCatching { bootstrapGroups(ch) }
+                        .onFailure { Log.e(TAG, "groups scry failed", it) }
                 }
-                val activityJob = async {
-                    runCatching { bootstrapActivity(ch) }
-                        .onSuccess { notificationHealth.markReconcileSuccess() }
-                        .onFailure { Log.e(TAG, "activity scry failed", it) }
-                }
-                val contactsJob = async {
-                    runCatching { bootstrapContacts(ch) }
-                        .onFailure { Log.e(TAG, "contacts scry failed", it) }
-                }
-                val ordersJob = async {
-                    runCatching { bootstrapChannelOrders(ch) }
-                        .onFailure { Log.e(TAG, "channel orders scry failed", it) }
-                }
-                // A request that arrived while this session was down is
-                // news on a reconnect, so it notifies; only the first
-                // pass of a session stays quiet.
-                val dmInvitesJob = async {
-                    runCatching { bootstrapDmInvites(ch, notify = !firstRun) }
-                        .onFailure { Log.e(TAG, "dm-invites scry failed", it) }
-                }
-                // Group invites had no bootstrap at all — refreshInvites ran
-                // only when the Invites screen was opened, so an invite that
-                // arrived while you weren't looking never lit the badge.
-                // notify=false: populate the badge, don't fire a toast for
-                // invites that were already pending before this launch.
-                val groupInvitesJob = async {
-                    runCatching { refreshInvites(notify = false) }
-                        .onFailure { Log.e(TAG, "group-invites scry failed", it) }
-                }
-                val firstRunJobs = if (firstRun) {
-                    listOf(
-                        async {
-                            runCatching { bootstrapClubs(ch) }
-                                .onFailure { Log.e(TAG, "clubs scry failed", it) }
-                        },
-                    )
-                } else emptyList()
-                (
-                    listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob, groupInvitesJob) +
-                        firstRunJobs
-                    ).awaitAll()
-                lastBootstrapMs = nowMs()
-            } else if (forced) {
-                listOf(
-                    async {
+                // Skipped when a reconnect lands right after the last
+                // pass; the subscriptions above are re-registered either way.
+                if (!skipBootstrap) {
+                    // Parallel-fan-out the bootstrap scries — each is a network
+                    // round-trip and they write to disjoint tables, so running
+                    // them serially burned 4× wall time for no reason. Failures
+                    // are caught per-job so a slow one doesn't poison the rest.
+                    //
+                    // - initPosts: chat/channel history + reactions
+                    // - activity: unread + notify counts → also marks reconcile
+                    //   success on notificationHealth
+                    // - contacts: status / nickname / color updates that the
+                    //   live %contacts /v1/news subscribe doesn't replay on
+                    //   reconnect
+                    // - channel orders: pin/unpin state, same reconnect-replay
+                    //   gap as contacts
+                    //
+                    // Clubs stay in a firstRun-only branch (the %chat /v4
+                    // subscription covers edits adequately on reconnect).
+                    // Groups do not: a group joined while the channel was down
+                    // never arrives as a fact, so the list is reconciled from a
+                    // scry on every connect. Seen on a fresh comet, whose join
+                    // landed while the ship was busy and the channel cycled.
+                    val initJob = async {
                         runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
                             .onFailure { Log.e(TAG, "initPosts scry failed", it) }
-                    },
-                    async {
+                    }
+                    val activityJob = async {
                         runCatching { bootstrapActivity(ch) }
                             .onSuccess { notificationHealth.markReconcileSuccess() }
                             .onFailure { Log.e(TAG, "activity scry failed", it) }
-                    },
-                ).awaitAll()
+                    }
+                    val contactsJob = async {
+                        runCatching { bootstrapContacts(ch) }
+                            .onFailure { Log.e(TAG, "contacts scry failed", it) }
+                    }
+                    val ordersJob = async {
+                        runCatching { bootstrapChannelOrders(ch) }
+                            .onFailure { Log.e(TAG, "channel orders scry failed", it) }
+                    }
+                    // A request that arrived while this session was down is
+                    // news on a reconnect, so it notifies; only the first
+                    // pass of a session stays quiet.
+                    val dmInvitesJob = async {
+                        runCatching { bootstrapDmInvites(ch, notify = !firstRun) }
+                            .onFailure { Log.e(TAG, "dm-invites scry failed", it) }
+                    }
+                    // Group invites had no bootstrap at all — refreshInvites ran
+                    // only when the Invites screen was opened, so an invite that
+                    // arrived while you weren't looking never lit the badge.
+                    // notify=false: populate the badge, don't fire a toast for
+                    // invites that were already pending before this launch.
+                    val groupInvitesJob = async {
+                        runCatching { refreshInvites(notify = false) }
+                            .onFailure { Log.e(TAG, "group-invites scry failed", it) }
+                    }
+                    val firstRunJobs = if (firstRun) {
+                        listOf(
+                            async {
+                                runCatching { bootstrapClubs(ch) }
+                                    .onFailure { Log.e(TAG, "clubs scry failed", it) }
+                            },
+                        )
+                    } else emptyList()
+                    (
+                        listOf(initJob, activityJob, contactsJob, ordersJob, dmInvitesJob, groupInvitesJob) +
+                            firstRunJobs
+                        ).awaitAll()
+                    lastBootstrapMs = nowMs()
+                } else if (forced) {
+                    listOf(
+                        async {
+                            runCatching { bootstrap(ch, count = INITIAL_PAGE_COUNT) }
+                                .onFailure { Log.e(TAG, "initPosts scry failed", it) }
+                        },
+                        async {
+                            runCatching { bootstrapActivity(ch) }
+                                .onSuccess { notificationHealth.markReconcileSuccess() }
+                                .onFailure { Log.e(TAG, "activity scry failed", it) }
+                        },
+                    ).awaitAll()
+                }
+                if (forced) Log.i(TAG, "reconnect asked for: messages read ${nowMs() - reconnectAskedMs}ms later")
+                groupsJob.await()
+            } finally {
+                if (firstRun) _bootstrapping.value = false
             }
-            if (forced) Log.i(TAG, "reconnect asked for: messages read ${nowMs() - reconnectAskedMs}ms later")
-            groupsJob.await()
-        } finally {
-            if (firstRun) _bootstrapping.value = false
-        }
-        // The ship is back: what waited for it goes, now that the reading
-        // above has reaped any queued channel post that landed after all.
-        pushScope.launch { runCatching { drainQueue() }.onFailure { Log.w(TAG, "queue not sent", it) } }
+            // The ship is back: what waited for it goes, now that the reading
+            // above has reaped any queued channel post that landed after all.
+            pushScope.launch { runCatching { drainQueue() }.onFailure { Log.w(TAG, "queue not sent", it) } }
 
-        // Stage two: deep history fill-out. Fires on firstRun only —
-        // reconnects already pulled the same window via the small
-        // scry above, and the bigger one would just re-download the
-        // same data. Run on the session scope so a stop()/teardown
-        // cancels it cleanly, and so the SSE collect job below
-        // (the next thing this function does) starts immediately
-        // rather than waiting on a network call we don't need to
-        // complete before showing the UI.
-        // Only with nothing kept, or nothing newer than a day: otherwise
-        // the ten above and the read on opening a chat cover it, and this
-        // is 50 posts from every channel on every launch. The admin
-        // groups (a scry per group) are read when a group message's menu
-        // opens, not here.
-        if (firstRun && needsDeepHistory(db.messages().newestSentMs(), nowMs())) {
-            launch {
-                Log.i(TAG, "deep-history scry starting (count=$DEEP_PAGE_COUNT)")
-                runCatching { bootstrap(ch, count = DEEP_PAGE_COUNT) }
-                    .onSuccess { Log.i(TAG, "deep-history scry complete") }
-                    .onFailure { Log.w(TAG, "deep-history scry failed", it) }
+            // Stage two: deep history fill-out. Fires on firstRun only —
+            // reconnects already pulled the same window via the small
+            // scry above, and the bigger one would just re-download the
+            // same data. Run on the session scope so a stop()/teardown
+            // cancels it cleanly, and so the SSE collect job below
+            // (the next thing this function does) starts immediately
+            // rather than waiting on a network call we don't need to
+            // complete before showing the UI.
+            // Only with nothing kept, or nothing newer than a day: otherwise
+            // the ten above and the read on opening a chat cover it, and this
+            // is 50 posts from every channel on every launch. The admin
+            // groups (a scry per group) are read when a group message's menu
+            // opens, not here.
+            if (firstRun && needsDeepHistory(db.messages().newestSentMs(), nowMs())) {
+                launch {
+                    Log.i(TAG, "deep-history scry starting (count=$DEEP_PAGE_COUNT)")
+                    runCatching { bootstrap(ch, count = DEEP_PAGE_COUNT) }
+                        .onSuccess { Log.i(TAG, "deep-history scry complete") }
+                        .onFailure { Log.w(TAG, "deep-history scry failed", it) }
+                }
             }
-        }
 
-        // Settings sync — scries our desk and subscribes so changes
-        // from other devices stream in. Run on every connect, not just
-        // firstRun: an Urbit subscribe doesn't replay missed events, so
-        // any %settings change made on another device while this SSE
-        // was zombie (doze, screen off, network blip) would be silently
-        // lost forever — the watchdog at the bottom of this function
-        // restores the connection but not the missed payload, and the
-        // user only catches up on a full app kill+relaunch.
-        // A reconnect nobody asked for, inside a minute of the last full
-        // pass, only watches again: the gap is that minute, and a whole
-        // desk and the notebook list per reconnect is what a loop costs.
-        val watchOnly = skipBootstrap && !forced
-        settingsSync?.attach(ch)
-        if (settingsSync != null) {
-            runCatching { if (watchOnly) settingsSync.resubscribe() else settingsSync.bootstrap() }
-                .onFailure { Log.e(TAG, "settings bootstrap failed", it) }
-        }
+            // Settings sync — scries our desk and subscribes so changes
+            // from other devices stream in. Run on every connect, not just
+            // firstRun: an Urbit subscribe doesn't replay missed events, so
+            // any %settings change made on another device while this SSE
+            // was zombie (doze, screen off, network blip) would be silently
+            // lost forever — the watchdog at the bottom of this function
+            // restores the connection but not the missed payload, and the
+            // user only catches up on a full app kill+relaunch.
+            // A reconnect nobody asked for, inside a minute of the last full
+            // pass, only watches again: the gap is that minute, and a whole
+            // desk and the notebook list per reconnect is what a loop costs.
+            val watchOnly = skipBootstrap && !forced
+            settingsSync?.attach(ch)
+            if (settingsSync != null) {
+                runCatching { if (watchOnly) settingsSync.resubscribe() else settingsSync.bootstrap() }
+                    .onFailure { Log.e(TAG, "settings bootstrap failed", it) }
+            }
 
-        // %notes (v12 Markdown notebooks). Scries the notebook list and
-        // subscribes to each notebook's stream. A pre-v12 ship has no
-        // such agent — bootstrap logs and returns, leaving the tables
-        // empty, so this is safe to run unconditionally.
-        notes.attach(ch)
-        runCatching { if (watchOnly) notes.resubscribe() else notes.bootstrap() }
-            .onFailure { Log.w(TAG, "notes bootstrap failed", it) }
+            // %notes (v12 Markdown notebooks). Scries the notebook list and
+            // subscribes to each notebook's stream. A pre-v12 ship has no
+            // such agent — bootstrap logs and returns, leaving the tables
+            // empty, so this is safe to run unconditionally.
+            notes.attach(ch)
+            runCatching { if (watchOnly) notes.resubscribe() else notes.bootstrap() }
+                .onFailure { Log.w(TAG, "notes bootstrap failed", it) }
+        }
 
         // Watchdog: if nothing at all arrives on the stream for 90s the
         // SSE is a zombie (doze-frozen or server-side dropped) — cancel
@@ -792,23 +813,18 @@ class TlonChatRepo(
                             if (it is kotlinx.coroutines.CancellationException) throw it
                             Log.w(TAG, "apply event failed", it)
                         }
-                    event.id?.let { ackQueue.trySend(it) }
+                    event.id?.let {
+                        ch.applied(it)
+                        ackQueue.trySend(it)
+                    }
                 }
             } finally {
                 // Close on normal completion AND cancellation so the ack
                 // consumer drains what's queued and exits with us.
                 ackQueue.close()
-                // End the channel on the ship. Left alone it keeps every
-                // subscription for hours and the ship queues each fact for
-                // a reader that is gone: dozens of "eyre: clogged" lines
-                // and a pegged core, which made it slow, which made this
-                // watchdog reconnect, which opened yet another channel.
-                // Off the reconnect's path: back in an iOS app the old
-                // socket is dead, and the next channel waited out this
-                // delete's whole timeout before it was even asked for.
-                kotlinx.coroutines.CoroutineScope(io.nisfeb.talon.util.ioDispatcher).launch {
-                    runCatching { kotlinx.coroutines.withTimeoutOrNull(5_000) { ch.delete() } }
-                }
+                // The channel stays: the next stream resumes it. It is
+                // deleted where it is given up, in stop() and when the ship
+                // dropped one of its subscriptions (see applyEvent).
             }
             Log.w(TAG, "event stream completed; will reconnect")
         }
@@ -836,8 +852,9 @@ class TlonChatRepo(
 
     /**
      * Immediately tear down the current SSE stream. The session loop
-     * will observe the collect job completing and reconnect with fresh
-     * subscribes + bootstrap scries. Safe to call from any thread.
+     * will observe the collect job completing and open the stream again,
+     * on the same channel while the ship keeps it. Safe to call from any
+     * thread.
      *
      * Debounced — Android's `ON_START` lifecycle event sometimes fires
      * twice in rapid succession (briefly-backgrounded activities, dialog
@@ -3496,6 +3513,23 @@ class TlonChatRepo(
                         }
                     }
                 }
+            }
+            return
+        }
+        if (response == "quit") {
+            // The ship dropped a subscription: a clog while the stream was
+            // down, or an agent's upgrade. A resumed channel would carry on
+            // without it for good, and what it would have carried is
+            // missing, so the next pass is a new channel, every watch and
+            // the whole read.
+            channel?.let { old ->
+                Log.w(TAG, "subscription ${outer["id"]} dropped by the ship; opening a new channel")
+                old.retire()
+                lastBootstrapMs = 0L
+                kotlinx.coroutines.CoroutineScope(io.nisfeb.talon.util.ioDispatcher).launch {
+                    runCatching { kotlinx.coroutines.withTimeoutOrNull(5_000) { old.delete() } }
+                }
+                sessionJob?.cancel()
             }
             return
         }
