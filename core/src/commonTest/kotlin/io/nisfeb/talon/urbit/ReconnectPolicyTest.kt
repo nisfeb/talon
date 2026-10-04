@@ -108,4 +108,12 @@ class ReconnectPolicyTest {
         // A redirect to a login page, an old vere's 404: not a word about the ship.
         listOf(200, 302, 404).forEach { assertEquals(ShipHealth.UNKNOWN, shipHealthOf(it), "$it") }
     }
+
+    @Test
+    fun `a reaped channel comes back at once, a refused one after the backoff`() {
+        assertTrue(endedWell(null))
+        assertTrue(endedWell(ChannelGone()))
+        assertFalse(endedWell(ChannelGone(forbidden = true)), "a lapsed login is refused again: no hot loop")
+        assertFalse(endedWell(IllegalStateException("channel SSE: HTTP 503")))
+    }
 }

@@ -102,6 +102,13 @@ fun shipHealthOf(status: Int?): ShipHealth = when (status) {
     else -> ShipHealth.UNKNOWN
 }
 
+/**
+ * Whether a session pass that ended with [error] (null: cleanly) comes
+ * back at once. A channel the ship reaped does; one refused to this
+ * login waits out the backoff, since a lapsed login is refused again.
+ */
+fun endedWell(error: Throwable?): Boolean = error == null || (error is ChannelGone && !error.forbidden)
+
 /** The deep history pass: nothing kept here, or the newest is over a day old. */
 fun needsDeepHistory(newestSentMs: Long?, nowMs: Long): Boolean =
     newestSentMs == null || nowMs - newestSentMs > 24 * 60 * 60 * 1000L

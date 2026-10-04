@@ -483,7 +483,7 @@ class TlonChatRepo(
             // the new channel is refused too.
             val gone = ended.exceptionOrNull() as? ChannelGone
             if (gone != null) lastBootstrapMs = 0L
-            val ok = ended.isSuccess || (gone != null && !gone.forbidden)
+            val ok = endedWell(ended.exceptionOrNull())
             if (!scope.isActive || !started) break
             firstRun = false
             // Back off exponentially after failures; reset on a normal
