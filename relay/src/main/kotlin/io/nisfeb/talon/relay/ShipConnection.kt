@@ -269,8 +269,9 @@ class ShipConnection(
         // Read to the end, on this ship's own client or any other: the
         // phone's notifications for it go, as Tlon's %notify dismisses
         // them. Off the message cursor, like a ring.
-        readWhom(json)?.let { whom ->
+        if (json.containsKey("read")) {
             val dev = db.deviceFor(deviceId) ?: return
+            val whom = readPushWhom(json, dev.caps) ?: return
             log.info("read whom=$whom")
             push.sendRead(endpoint = dev.pushEndpoint, patp = patp, whom = whom, platform = dev.platform)
             return
@@ -527,6 +528,17 @@ internal fun readWhom(json: JsonObject): String? {
         ?: (source["channel"] as? JsonObject)?.get("nest"))
         ?.let { (it as? JsonPrimitive)?.content }
 }
+
+/** Whether a device whose app declared [caps] is sent read pushes. */
+internal fun wantsRead(caps: Set<String>): Boolean = "read" in caps
+
+/**
+ * The chat to send a read push about, for a device whose app declared
+ * [caps]: only one that said it understands one, since an older app
+ * shows any push it does not know as a new message.
+ */
+internal fun readPushWhom(json: JsonObject, caps: Set<String>): String? =
+    if (wantsRead(caps)) readWhom(json) else null
 
 internal fun parseCallFact(json: JsonObject): CallFact? {
     fun JsonElement?.str(): String? =

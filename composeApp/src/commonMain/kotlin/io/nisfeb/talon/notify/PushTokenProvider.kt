@@ -18,6 +18,14 @@ interface PushTokenProvider {
      *  (e.g. desktop webhook). */
     val platform: String
 
+    /**
+     * What this platform's push receiver understands beyond messages and
+     * rings, told to the relay so it sends nothing else ("read": take a
+     * chat's notifications back). An older receiver shows any push it
+     * does not know as a new message, so the relay sends only these.
+     */
+    val caps: List<String> get() = emptyList()
+
     /** Current push endpoint. Suspending because Android impls may
      *  block briefly on the distributor's bind/registration call.
      *  Returns null when no transport is available (e.g. no

@@ -86,6 +86,22 @@ class SettingsRelayTest {
         assertEquals("dev-12345678-abc", relaySettings.deviceIdFor("~zod"))
     }
 
+    // A push the receiver does not know shows as a new message on an
+    // older app, so the relay sends "read" only to a device that said it
+    // understands one, on its own route: a relay from before refuses a
+    // registration carrying a field it does not know.
+    @Test
+    fun `a phone whose receiver understands reads says so after registering, not inside it`() = panel(tokens = object : PushTokenProvider {
+        override val platform = "unifiedpush"
+        override val caps = listOf("read")
+        override suspend fun token() = "https://push.test/abc"
+    }) {
+        register("lidlut-tabwed")
+        waitUntil(timeoutMillis = 5_000) { asked.size == 2 }
+        assertTrue(asked[0].startsWith("POST https://relay.test/register") && "caps" !in asked[0], asked[0])
+        assertEquals("""POST https://relay.test/devices/dev-12345678-abc/caps {"caps":["read"]}""", asked[1])
+    }
+
     @Test
     fun `a refused registration says what to check, and keeps nothing`() = panel(client = relay(ok = false)) {
         register("wrong")
