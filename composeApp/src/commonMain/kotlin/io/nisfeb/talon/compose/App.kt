@@ -1417,7 +1417,28 @@ fun App(
                         }
                     }
             }
+            // Replies, which the diff above never sees. Only those in a
+            // thread that counts reach the listener: the repo decides.
+            val replyScope = rememberCoroutineScope()
+            DisposableEffect(repo, notifier, loggedInShip) {
+                repo.messageListener = { m, _ ->
+                    if (m.parentId != null) replyScope.launch {
+                        val level = db.notifyPrefs().levelFor(m.whom)
+                        io.nisfeb.talon.notify.replyNotification(
+                            reply = m,
+                            level = level,
+                            openChat = openChat.takeIf { windowInfo.isWindowFocused },
+                            nowMs = nowMs(),
+                            freshnessMaxAgeMs = 5L * 60_000L,
+                            storyText = { id, json -> io.nisfeb.talon.urbit.StoryCache.textFor(id, json) },
+                            nameFor = { callContacts.displayName(it) },
+                        )?.let { n -> runCatching { notifier.notify(n.title, n.body, n.whom) } }
+                    }
+                }
+                onDispose { repo.messageListener = null }
+            }
         }
+
 
         val themeMode by themePreference.mode.collectAsState()
         val systemDark = isSystemInDarkTheme()

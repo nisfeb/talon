@@ -310,10 +310,10 @@ class TlonChatRepo(
     /**
      * Called once per incoming message delta from another author, after
      * the row has been written to Room. UI layers wire this to their
-     * notification / in-app banner logic. `replyToUs` is true when the
-     * delivered entity is a reply whose parent was authored by us — the
-     * mentions-only filter uses that flag to still surface direct
-     * replies even if the body doesn't contain our patp.
+     * notification / in-app banner logic. A reply comes only from a
+     * thread that counts for the owner (followed, a DM's, their own: see
+     * [threadCounts]), and always with `replyToUs` true: following is
+     * asking for it, so a chat at "mentions only" still lets it through.
      */
     @Volatile var messageListener: ((MessageEntity, Boolean) -> Unit)? = null
 
@@ -3893,11 +3893,8 @@ class TlonChatRepo(
             val replyEssay = add["reply-essay"] as? JsonObject ?: return@let
             val entity = toReplyEntity(whom, parentId, replyId, replyEssay)
             db.messages().upsertWithMedia(db.messageMedia(), entity)
-            if (entity.author != ourPatp && replyCounts(entity)) {
-                val parent = db.messages().getOne(whom, parentId)
-                val replyToUs = parent?.author == ourPatp
-                heard(entity, replyToUs)
-            }
+            // For the owner, whatever the chat's level: following is asking.
+            if (entity.author != ourPatp && replyCounts(entity)) heard(entity, true)
             return
         }
         delta["del"]?.let {
@@ -4033,9 +4030,7 @@ class TlonChatRepo(
                 if (entity.author == ourPatp) {
                     reapOwnEchoTwin(whom, entity.sentMs)
                 } else if (replyCounts(entity)) {
-                    val parent = db.messages().getOne(whom, parentId)
-                    val replyToUs = parent?.author == ourPatp
-                    heard(entity, replyToUs)
+                    heard(entity, true)
                 }
             }
             is ReplyIntent.Tombstone, is ReplyIntent.Deleted -> {
