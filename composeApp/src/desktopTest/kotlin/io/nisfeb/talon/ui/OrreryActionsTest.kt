@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.room.Room
@@ -37,9 +38,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * What Orrery proposes, answered: the list's quick Approve and Dismiss,
- * and one action opened to approve, dismiss with a reason, refine in
- * words, or mark done, each checked by what reaches the ship.
+ * What Orrery proposes, answered: the list's quick Approve and Reject,
+ * and one action opened to approve, reject with a reason, leave for
+ * later, change in words, or mark done, each checked by what reaches
+ * the ship.
  */
 @OptIn(ExperimentalTestApi::class)
 class OrreryActionsTest {
@@ -101,7 +103,7 @@ class OrreryActionsTest {
         waitUntil(timeoutMillis = 5_000) { shows("Tell Bus about lunch") }
         assertTrue(shows("Old thing"), "settled ones are listed too")
         onNodeWithText("Approve").performClick()
-        onNodeWithText("Dismiss").performClick()
+        onNodeWithText("Reject").performClick()
         onNodeWithText("No reason").performClick()
         onNodeWithText("Tell Bus about lunch").performClick()
         assertEquals(listOf("a1 approved", "a1 dismissed", "open a1"), did.filter { it != "shown" })
@@ -177,7 +179,7 @@ class OrreryActionsTest {
         ),
     ) {
         assertTrue(shows("Not true: person/andrea's location is place/barcelona") && shows("Why: she stayed home"))
-        assertTrue(shows("Approved, the ship makes the change itself."))
+        assertTrue(shows("Approve lets the ship make this change."))
         onNodeWithText("Approve").performClick()
         assertEquals("""{"status":"approved"}""", answered("c1"))
     }
@@ -192,9 +194,9 @@ class OrreryActionsTest {
         instruct = { HttpStatusCode.OK to """{"ok":true,"reply":"Bus is on holiday until Friday.","actions":[{"id":"t9","kind":"task","title":"Ask Bus on Friday","payload":{},"about":[],"status":"proposed","by":"owner"}],"note":""}""" },
     ) {
         holdInstruct = 2_000
-        onNodeWithText("Tell Orrery").performClick()
+        onNodeWithText("Note for Orrery").performClick()
         onNode(hasSetTextAction()).performTextInput("he is away this week")
-        onNodeWithText("Send").performClick()
+        onNodeWithText("Send note").performClick()
         waitForIdle()
         assertEquals(listOf("closed"), did.toList(), "closed before the ship answered")
         assertEquals("Orrery is reading what you told it.", repo.told.value)
@@ -210,9 +212,9 @@ class OrreryActionsTest {
         action("a1"),
         instruct = { HttpStatusCode.ServiceUnavailable to """{"error":"the generator has no key"}""" },
     ) {
-        onNodeWithText("Tell Orrery").performClick()
+        onNodeWithText("Note for Orrery").performClick()
         onNode(hasSetTextAction()).performTextInput("she moved to Lisbon")
-        onNodeWithText("Send").performClick()
+        onNodeWithText("Send note").performClick()
         waitForIdle()
         assertEquals(listOf("closed"), did.toList())
         // Said where Actions shows problems, with the words to say again.
@@ -225,7 +227,7 @@ class OrreryActionsTest {
     @Test
     fun `one that failed says why, and offers nothing to do`() = opened(action("f1", status = "failed").copy(note = "no DM with ~bus")) {
         assertTrue(shows("It did not go through. no DM with ~bus"))
-        assertTrue(!shows("Mark done") && !shows("Approve") && !shows("Not this"))
+        assertTrue(!shows("Mark done") && !shows("Approve") && !shows("Reject"))
     }
 
     private fun ComposeUiTest.answered(id: String): String {
@@ -236,17 +238,17 @@ class OrreryActionsTest {
     @Test
     fun `a message proposal shows who it goes to and what it says, and approving sends it`() = opened(action("a1")) {
         assertTrue(shows("To ~bus, by DM:") && shows("Lunch at noon?"))
-        assertTrue(shows("Approved, the ship sends it as a DM."))
+        assertTrue(shows("Approve sends this message as a DM."))
         onNodeWithText("Approve and send").performClick()
         assertEquals("""{"status":"approved"}""", answered("a1"))
         assertTrue("closed" in did)
     }
 
     @Test
-    fun `not this, with a reason, dismisses it and says why`() = opened(action("a1")) {
-        onNodeWithText("Not this").performClick()
+    fun `rejecting it, with a reason, sends the reason`() = opened(action("a1")) {
+        onNodeWithText("Reject").performClick()
         onNode(hasSetTextAction()).performTextInput("wrong person")
-        onAllNodesWithText("Dismiss").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
+        onNodeWithText("Reject").performClick()
         val sent = Json.parseToJsonElement(answered("a1")) as JsonObject
         assertEquals("dismissed", sent["status"].toString().trim('"'))
         assertEquals("wrong person", sent["note"].toString().trim('"'))
@@ -256,9 +258,9 @@ class OrreryActionsTest {
     fun `words sent to refine it come back as the proposal revised`() = opened(action("a1"), refine = {
         """{"ok":true,"action":{"id":"a1","kind":"message","title":"Tell Bus and Nec about lunch","payload":{"via":"chat","to":"~bus","text":"Lunch at one?"},"status":"proposed"},"note":""}"""
     }) {
-        onNodeWithText("Say what it should be").performClick()
+        onNodeWithText("Change it").performClick()
         onNode(hasSetTextAction()).performTextInput("make it one o'clock")
-        onNodeWithText("Refine").performClick()
+        onNodeWithText("Ask for the change").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Lunch at one?") }
         assertTrue(posts.single { it.first.endsWith("/refine") }.second.contains("make it one o'clock"))
     }
@@ -267,9 +269,9 @@ class OrreryActionsTest {
     fun `a refinement the ship will not take says why and leaves the proposal`() = opened(action("a1"), refine = {
         """{"ok":false,"note":"That action has moved on."}"""
     }) {
-        onNodeWithText("Say what it should be").performClick()
+        onNodeWithText("Change it").performClick()
         onNode(hasSetTextAction()).performTextInput("make it one o'clock")
-        onNodeWithText("Refine").performClick()
+        onNodeWithText("Ask for the change").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("That action has moved on.") }
         assertTrue(shows("Lunch at noon?"))
     }
@@ -281,25 +283,56 @@ class OrreryActionsTest {
         assertEquals("""{"status":"done"}""", answered("t1"))
     }
 
-    // Three of them did not fit across a phone's dialog, and the last was
-    // squeezed to a column one letter wide.
+    // "Close" beside a "Dismiss" read as the same thing: a proposal's way
+    // out is Later, and it leaves the proposal waiting.
+    @Test
+    fun `later closes and leaves it waiting`() = opened(action("a1")) {
+        onNodeWithText("Later").performClick()
+        waitForIdle()
+        assertEquals(listOf("closed"), did.toList())
+        Thread.sleep(300)
+        assertTrue(posts.none { "/api/actions/a1" in it.first }, "nothing sent")
+    }
+
+    @Test
+    fun `back from rejecting sends nothing and offers approve again`() = opened(action("a1")) {
+        onNodeWithText("Reject").performClick()
+        assertTrue(shows("Reason (optional)") && !shows("Approve and send"))
+        onNodeWithText("Back").performClick()
+        assertTrue(shows("Approve and send") && !shows("Reason (optional)"))
+        Thread.sleep(300)
+        assertTrue(posts.none { "/api/actions/a1" in it.first } && did.isEmpty())
+    }
+
+    // A long message pushed Approve and Reject off a phone's screen, and
+    // the text could not be scrolled. The other choices wrap rather than
+    // squeeze to a column one letter wide.
     @OptIn(ExperimentalTestApi::class)
     @Test
-    fun `on a phone, the dialog's choices wrap rather than squeeze`() {
+    fun `on a phone, a long proposal scrolls and its buttons stay on screen`() {
         val tmp = createTempDirectory(prefix = "talon-orract-phone-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
         val http = HttpClient(MockEngine { respond("[]", HttpStatusCode.OK, headersOf("Content-Type", "application/json")) })
         val scope = CoroutineScope(SupervisorJob())
         val orrery = OrreryRepo(http, scope, db, "test", bareClient = http)
+        val long = action("a1").copy(
+            payload = Json.parseToJsonElement("""{"via":"chat","to":"~bus","text":"${"Lunch at noon on the terrace? ".repeat(120)}END OF MESSAGE"}""").jsonObject,
+        )
         try {
             androidx.compose.ui.test.runDesktopComposeUiTest(width = 412, height = 915) {
-                setContent { TalonTheme(darkTheme = false) { io.nisfeb.talon.ui.OrreryActionDialog(action("a1"), orrery, onClose = {}) } }
-                waitUntil(timeoutMillis = 5_000) { shows("Not this") }
-                val line = onNodeWithText("Say what it should be").fetchSemanticsNode().boundsInRoot.height
-                val not = onNodeWithText("Not this").fetchSemanticsNode().boundsInRoot
-                assertTrue(not.height <= line * 1.5f, "one line, not a column: ${not.height} against ${line}")
-                assertTrue(not.width > not.height, "wider than tall: $not")
+                setContent { TalonTheme(darkTheme = false) { io.nisfeb.talon.ui.OrreryActionDialog(long, orrery, onClose = {}) } }
+                waitUntil(timeoutMillis = 5_000) { shows("Approve and send") }
+                for (b in listOf("Approve and send", "Reject", "Later")) {
+                    val r = onNodeWithText(b).fetchSemanticsNode().boundsInRoot
+                    assertTrue(r.top >= 0f && r.bottom <= 915f, "$b on screen: $r")
+                }
+                onNodeWithText("END OF MESSAGE", substring = true).performScrollTo()
+                onNodeWithText("Change it").performScrollTo()
+                val line = onNodeWithText("Change it").fetchSemanticsNode().boundsInRoot.height
+                val note = onNodeWithText("Note for Orrery").fetchSemanticsNode().boundsInRoot
+                assertTrue(note.height <= line * 1.5f, "one line, not a column: ${note.height} against $line")
+                assertTrue(note.width > note.height, "wider than tall: $note")
             }
         } finally {
             runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.cancelAndJoin() }
