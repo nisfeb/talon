@@ -139,6 +139,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.ui.icons.TalonIcons
@@ -250,6 +251,15 @@ fun DmChatScreen(
     // on) the exact content the user just dismissed.
     var caughtUp by remember(whom) { mutableStateOf(false) }
     var topicsSheetOpen by remember(whom) { mutableStateOf(false) }
+    // The threads the owner follows here: the way back to one that
+    // scrolled away, from the chip over the chat or the header.
+    var threadsSheetOpen by remember(whom) { mutableStateOf(false) }
+    val followedHere by remember(whom) {
+        db.followedThreads().streamThreads().map { rows -> io.nisfeb.talon.data.threadsInOrder(rows.filter { it.whom == whom }) }
+    }.collectAsState(initial = emptyList())
+    val followOfPost by remember(whom) {
+        db.followedThreads().streamForWhom(whom).map { rows -> rows.associate { it.parentPostId to it.follow } }
+    }.collectAsState(initial = emptyMap())
     val composerState = io.nisfeb.talon.ui.rememberComposerState(whom, drafts)
     // The chat's window: its posts sent from this time on, the newest
     // CHAT_WINDOW at first. New posts fall inside it; scrolling back and
@@ -273,7 +283,18 @@ fun DmChatScreen(
                 .onStart { emit(emptyList()) },
             db.threadUnreads().streamForWhom(whom).distinctUntilChanged()
                 .onStart { emit(emptyList()) },
-        ) { messages, reactions, replyCounts, threadUnreads ->
+            db.followedThreads().streamForWhom(whom).distinctUntilChanged()
+                .onStart { emit(emptyList()) },
+        ) { messages, reactions, replyCounts, allThreadUnreads, follows ->
+            // Only a thread that counts tints: one the owner follows, a
+            // DM's, or under their own post. A channel's thread they never
+            // joined has replies, not unread ones.
+            val followOf = follows.associate { it.parentPostId to it.follow }
+            val authorOf = messages.associate { it.id to it.author }
+            val dm = whom.startsWith("~") || whom.startsWith("0v")
+            val threadUnreads = allThreadUnreads.filter {
+                io.nisfeb.talon.urbit.threadCounts(followOf[it.parentPostId], dm, ours = authorOf[it.parentPostId] == ourPatp)
+            }
             if (messages.isEmpty()) {
                 prevByMsgId = emptyMap()
                 emptyList()
@@ -806,6 +827,11 @@ fun DmChatScreen(
                     }
                 }
             }
+            if (followedHere.isNotEmpty()) {
+                io.nisfeb.talon.ui.IconButton(tip = "Threads you follow", onClick = { threadsSheetOpen = true }) {
+                    Icon(TalonIcons.Reply, contentDescription = "Threads you follow")
+                }
+            }
             val hasInfoPane = onOpenGroupInfo != null && whom.startsWith("chat/")
             if (hasInfoPane) {
                 io.nisfeb.talon.ui.IconButton(tip = "Info", onClick = onOpenGroupInfo) {
@@ -883,6 +909,10 @@ fun DmChatScreen(
                     }
                 },
             )
+        }
+        // Followed threads with new replies, which may be far up the chat.
+        followedHere.count { it.unread > 0 }.takeIf { it > 0 }?.let { n ->
+            io.nisfeb.talon.ui.FollowedThreadsChip(n) { threadsSheetOpen = true }
         }
         // Pinned-post banner — chat channels only, surfaces just
         // above the message list when an admin has pinned a post.
@@ -1061,6 +1091,22 @@ fun DmChatScreen(
                 },
                 onMakeTask = calendar?.takeIf { calendarHere }?.let {
                     { actionTarget = null; calendarTarget = FromMessage.Task to target }
+                },
+                followLabel = if (target.parentId != null) null else {
+                    val following = io.nisfeb.talon.urbit.threadCounts(
+                        followOfPost[target.id], whom.startsWith("~") || whom.startsWith("0v"), target.author == ourPatp,
+                    )
+                    if (following) "Unfollow thread" else "Follow thread"
+                },
+                onToggleFollow = {
+                    val following = io.nisfeb.talon.urbit.threadCounts(
+                        followOfPost[target.id], whom.startsWith("~") || whom.startsWith("0v"), target.author == ourPatp,
+                    )
+                    actionTarget = null
+                    scope.launch {
+                        runCatching { repo.setFollow(whom, target.id, !following) }
+                            .onFailure { composerState.failed("follow", it) }
+                    }
                 },
                 onTogglePin = {
                     val wasPinned = pinnedPostId == target.id
@@ -1472,6 +1518,18 @@ fun DmChatScreen(
                     Text(if (resultUrb != null) "Done" else "Cancel")
                 }
             },
+        )
+    }
+
+    if (threadsSheetOpen) {
+        io.nisfeb.talon.ui.FollowedThreadsSheet(
+            rows = followedHere,
+            contactMap = contactMap,
+            onOpen = { row ->
+                threadsSheetOpen = false
+                row.lastReplyId?.let { onOpenThreadAt(row.parentPostId, it) } ?: onOpenThread(row.parentPostId)
+            },
+            onDismiss = { threadsSheetOpen = false },
         )
     }
 
@@ -2234,6 +2292,9 @@ private fun MessageActionMenu(
     onReport: () -> Unit,
     onPublish: () -> Unit,
     onTogglePin: () -> Unit,
+    /** "Follow thread" or "Unfollow thread" for a top-level post; null for none. */
+    followLabel: String? = null,
+    onToggleFollow: () -> Unit = {},
     /** Make an event or a task of what was said. Null where the ship has no calendar. */
     onMakeEvent: (() -> Unit)? = null,
     onMakeTask: (() -> Unit)? = null,
@@ -2406,6 +2467,7 @@ private fun MessageActionMenu(
             if (isMine && isChannel && message.parentId == null) {
                 ActionRow(onClick = onEdit, label = "Edit")
             }
+            followLabel?.let { ActionRow(onClick = onToggleFollow, label = it) }
             // Pin / Unpin — chat channels only, top-level posts only.
             if (canPin) {
                 ActionRow(

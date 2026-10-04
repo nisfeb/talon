@@ -2497,6 +2497,8 @@ class TlonChatRepo(
             ActivityTab.ALL -> all
             ActivityTab.MENTIONS -> mentions
             ActivityTab.REPLIES -> replies
+            // Read from the database, not the feed: see ActivityList.
+            ActivityTab.THREADS -> emptyList()
         }
     }
 
@@ -2504,6 +2506,7 @@ class TlonChatRepo(
         ALL("All"),
         MENTIONS("Mentions"),
         REPLIES("Replies"),
+        THREADS("Threads"),
     }
 
     /**
@@ -4484,6 +4487,20 @@ class TlonChatRepo(
             throw t
         }
         if (!follow) runCatching { markThreadRead(whom, id, force = true) }
+    }
+
+    /**
+     * Read every one of [threads] (whom to parent post), as "mark all
+     * read" asks: one read each, on the repo's scope, so leaving the
+     * screen does not stop them.
+     */
+    fun markThreadsRead(threads: List<Pair<String, String>>) {
+        pushScope.launch {
+            threads.forEach { (whom, parent) ->
+                runCatching { markThreadRead(whom, parent, force = true) }
+                    .onFailure { Log.w(TAG, "thread not read: $whom $parent", it) }
+            }
+        }
     }
 
     /** One follow's adjust poke, marked sent once the ship takes it. */

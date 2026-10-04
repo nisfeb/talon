@@ -3013,12 +3013,16 @@ fun App(
                         val calendarShares by calendarRepo.shares.collectAsState()
                         val mailUnread by mailRepo.inboxUnread.collectAsState()
                         val assistantNews by assistantSession.news.collectAsState()
+                        val threadsUnread by remember(db) {
+                            db.followedThreads().streamThreads().map { rows -> rows.any { it.unread > 0 } }
+                        }.collectAsState(initial = false)
                         val menuBadges = remember(
                             railStatusFeed, railPendingInvites,
                             railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship, calendarShares,
-                            orreryActions, mailUnread, assistantNews,
+                            orreryActions, mailUnread, assistantNews, threadsUnread,
                         ) {
                             MenuBadges(
+                                threadsUnread = threadsUnread,
                                 mailUnread = mailUnread,
                                 assistantNews = assistantNews,
                                 // A proposal is a question, and a question
