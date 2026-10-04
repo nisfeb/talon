@@ -59,6 +59,7 @@ import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -561,6 +562,30 @@ fun DmListScreen(
     // Reuse a singleton LazyListState so the user's scroll position in
     // the home list survives navigating into a chat and back out.
     val listState = snap.listState
+    // At the top, what moves up stays in view. A conversation that moved
+    // above the first row with new messages landed half out of sight: five
+    // unread in one group, and only the jump chip said so. Off the top while
+    // the row that was first is still on screen, and nobody scrolled: the
+    // list goes back to the top. Any scroll of the user's own ends it.
+    LaunchedEffect(listState) {
+        var topKey: Any? = null
+        snapshotFlow {
+            // The position from firstVisibleItemIndex: the visible items
+            // include one sitting in the top padding, above the real first.
+            Triple(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset, listState.isScrollInProgress) to
+                listState.layoutInfo.visibleItemsInfo
+        }.collect { (at, visible) ->
+            val (index, offset, scrolling) = at
+            when {
+                scrolling -> topKey = null
+                index == 0 && offset == 0 -> topKey = visible.firstOrNull { it.index == 0 }?.key
+                // Requested, not scrolled: this can run inside a layout pass.
+                topKey != null && visible.any { it.key == topKey } -> listState.requestScrollToItem(0)
+                else -> topKey = null
+            }
+        }
+    }
+
     // Leaving a tab remembers where it was; arriving restores it.
     val switchHomeTab: (HomeTab) -> Unit = { tab ->
         if (tab != selectedHomeTab) {
@@ -1143,7 +1168,8 @@ fun DmListScreen(
         else
         LazyColumn(
             state = listState,
-            contentPadding = PaddingValues(vertical = 8.dp),
+            // Room under the last row for the new-message button.
+            contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             // Claims the triage noticed, above everything: each is one tap

@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CalendarToday
@@ -65,6 +66,7 @@ object TalonIconSources {
         "Air" to Icons.Filled.Air,
         "Archive" to Icons.Filled.Archive,
         "AttachFile" to Icons.Filled.AttachFile,
+        "AutoAwesome" to Icons.Filled.AutoAwesome,
         "BrokenImage" to Icons.Filled.BrokenImage,
         "CalendarMonth" to Icons.Filled.CalendarMonth,
         "CalendarToday" to Icons.Filled.CalendarToday,

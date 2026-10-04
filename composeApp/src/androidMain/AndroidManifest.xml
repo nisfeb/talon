@@ -99,10 +99,15 @@
              rotation, split-screen resize, dark-mode flip, or density
              change hangs up a live call. Handle them in-process —
              Compose relayouts on its own; nothing here needs the
-             recreate. -->
+             recreate.
+             singleTask: one instance, whatever opens it. As standard, a
+             shortcut, the call screen or a plain start put another copy
+             on top, each with its own calls loop, beacon and pollers:
+             eight at once on one phone, and the ship paid for each. -->
         <activity
             android:name="io.nisfeb.talon.MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Talon">

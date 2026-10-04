@@ -1363,6 +1363,8 @@ private fun CalendarPanel(
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (late) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                                // A long title ran into it: "Pi…tomorrow".
+                                modifier = Modifier.padding(start = 8.dp),
                             )
                         }
                     }

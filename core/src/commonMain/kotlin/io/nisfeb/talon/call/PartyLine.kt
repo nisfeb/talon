@@ -1430,12 +1430,14 @@ class PartyLine(
         // Bounded: a socket that has stalled takes the close frame no
         // more than any other, and the links below are what stop the
         // sound.
-        runCatching {
-            withTimeoutOrNull(GOODBYE_MS) {
-                session?.close(
-                    CloseReason(CloseReason.Codes.NORMAL, "left"),
-                )
-            } ?: Log.w(TAG, "the socket did not close in time; dropping it")
+        // Only a socket there is: with none, the null close read as a
+        // timeout, and every screen that let go of an idle line said so.
+        session?.let { open ->
+            runCatching {
+                withTimeoutOrNull(GOODBYE_MS) {
+                    open.close(CloseReason(CloseReason.Codes.NORMAL, "left"))
+                } ?: Log.w(TAG, "the socket did not close in time; dropping it")
+            }
         }
         session = null
         Log.i(TAG, "closing the line: ${downLinks.size} down links${if (upLink != null) " and the up link" else ""}")

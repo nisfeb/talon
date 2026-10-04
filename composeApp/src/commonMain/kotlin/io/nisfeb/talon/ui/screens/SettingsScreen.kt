@@ -262,6 +262,13 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // It opens a page, as Menu below does: without the arrow
+                // it read as a heading.
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             val drawerNav = io.nisfeb.talon.ui.isDrawerNavigation
             Row(

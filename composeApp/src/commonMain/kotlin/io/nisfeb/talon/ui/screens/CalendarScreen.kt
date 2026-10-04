@@ -717,7 +717,9 @@ fun CalendarScreen(
                 } else if (dayRows.isEmpty()) {
                     Text("Nothing on this day.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
                 } else {
-                    LazyColumn(Modifier.fillMaxSize()) {
+                    // Room under the last row for the button below: it sat on
+                    // the bottom rows' times and their "Done".
+                    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 88.dp)) {
                         items(dayRows, key = { "${it.id}/${it.idx}" }) { r ->
                             val ghost = r.id.startsWith("pending-") || r.id in editsNow
                             Row(

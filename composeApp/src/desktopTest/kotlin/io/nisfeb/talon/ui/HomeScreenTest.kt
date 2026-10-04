@@ -8,6 +8,7 @@ import androidx.compose.ui.test.ComposeUiTest
 import io.ktor.client.engine.mock.toByteArray
 import io.ktor.client.engine.mock.respond
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.geometry.Offset
@@ -192,7 +193,7 @@ class HomeScreenTest {
     private val todayUtc = java.time.LocalDate.now(java.time.ZoneOffset.UTC).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
 
     /** A calendar app on the ship, or none where [present] is false. */
-    private fun calendar(present: Boolean = true, offers: String = "{}", writeTakesMs: Long = 0, taskPriority: Int? = null): io.nisfeb.talon.calendar.CalendarRepo {
+    private fun calendar(present: Boolean = true, offers: String = "{}", writeTakesMs: Long = 0, taskPriority: Int? = null, taskName: String = "Buy milk"): io.nisfeb.talon.calendar.CalendarRepo {
         val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
             val path = req.url.encodedPath
             val json = { body: String -> respond(body, io.ktor.http.HttpStatusCode.OK, io.ktor.http.headersOf("Content-Type", "application/json")) }
@@ -206,7 +207,7 @@ class HomeScreenTest {
                     json("""{"rows":[{"id":"e1","cal":"default","meta":{"name":"Dentist"},"l":${now - 600_000},"r":${now + 600_000}}]}""")
                 // Done once written: the ship's own word after the tick.
                 path.endsWith("/events.json") ->
-                    json("""[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"},"due_ms":$todayUtc${if (calendarWrites.any { "t1" in it }) ""","done":true""" else ""}${taskPriority?.let { ",\"priority\":$it" } ?: ""}}]""")
+                    json("""[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"$taskName"},"due_ms":$todayUtc${if (calendarWrites.any { "t1" in it }) ""","done":true""" else ""}${taskPriority?.let { ",\"priority\":$it" } ?: ""}}]""")
                 path.endsWith("/calendars.json") -> json("""[{"id":"default","name":"Personal","kind":"local"}]""")
                 path.endsWith("/config.json") -> json("""{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
                 path.endsWith("/share/shares.json") -> json("""{"shares":{},"offers":$offers,"accepted":{}}""")
@@ -228,6 +229,19 @@ class HomeScreenTest {
 
     // The calendar's tasks carry a priority (version 25); the home page's
     // today says it as the Tasks view does.
+    // A long title ran into its day: "Get Linus ready for Pi…tomorrow".
+    @Test
+    fun `a long task title stops short of its day`() = home(
+        calendar = calendar(taskName = "Get Linus ready for Pirates picture day and the bake sale after it"),
+    ) {
+        waitUntil(timeoutMillis = 5_000) { shows("today") }
+        // Unmerged: the row is clickable, and merged its texts into one node.
+        val title = onNodeWithText("Get Linus", substring = true, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val day = onNodeWithText("today", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val gap = day.left - title.right
+        assertTrue(gap >= with(density) { 8.dp.toPx() } - 0.5f, "title ends ${gap}px before its day")
+    }
+
     @Test
     fun `a task's priority shows on the home page too`() = home(calendar = calendar(taskPriority = 1)) {
         waitUntil(timeoutMillis = 5_000) { shows("Buy milk") && shows("High") }

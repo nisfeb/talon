@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -92,6 +93,12 @@ class MainActivity : ComponentActivity() {
         }
 
         val app = applicationContext as TalonApplication
+        // Back at the root sends Talon behind, as Android does for a
+        // launcher's root activity, instead of finishing it: a finished
+        // activity took its calls loop, beacon and repos with it, and each
+        // reopen read the ship from the start again. Added before
+        // setContent, so every screen's BackHandler comes first.
+        onBackPressedDispatcher.addCallback(this) { moveTaskToBack(true) }
         setContent {
             val forShip by deepLinkForShip
             val whom by deepLinkWhom
