@@ -324,6 +324,15 @@ class TalonApplication : Application() {
      * fired on every ship-switch.
      */
     private fun buildShipScoped(ship: String, afterPriorClose: (() -> Unit)? = null) {
+        // A device registered with the relay before it asked what the app
+        // understands has said nothing, and gets no read pushes: say it,
+        // once a launch. Registering needs the +code; this does not.
+        relaySettings.deviceIdFor(ship).takeIf { it.isNotBlank() }?.let { deviceId ->
+            appScope.launch {
+                io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value })
+                    .declareCaps(deviceId, io.nisfeb.talon.notify.UnifiedPushTokenProvider(this@TalonApplication).caps)
+            }
+        }
         val priorDb = if (::db.isInitialized) db else null
         val priorIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
         val priorRepo = if (::repo.isInitialized) repo else null

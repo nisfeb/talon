@@ -60,6 +60,15 @@ class Db(private val path: String) {
                     s.executeUpdate("DROP TABLE last_event")
                 }
                 s.executeUpdate(SCHEMA)
+                // What a device's app understands beyond messages and
+                // rings, added after devices were first kept: an older
+                // table gets the column, and its devices none of them.
+                val hasCaps = s.executeQuery("PRAGMA table_info(devices)").use { rs ->
+                    var found = false
+                    while (rs.next()) if (rs.getString("name") == "caps") found = true
+                    found
+                }
+                if (!hasCaps) s.executeUpdate("ALTER TABLE devices ADD COLUMN caps TEXT NOT NULL DEFAULT ''")
             }
         }
     }
@@ -73,22 +82,36 @@ class Db(private val path: String) {
      * rotate (the device may re-register after a distributor reset)
      * — re-calling upsertDevice with the same id replaces in place.
      */
-    fun upsertDevice(deviceId: String, pushEndpoint: String, platform: String) {
+    fun upsertDevice(deviceId: String, pushEndpoint: String, platform: String, caps: Collection<String> = emptyList()) {
         connect().use { c ->
             c.prepareStatement(
                 """
-                INSERT INTO devices (id, push_endpoint, platform, created_at)
-                VALUES (?, ?, ?, strftime('%s', 'now') * 1000)
+                INSERT INTO devices (id, push_endpoint, platform, created_at, caps)
+                VALUES (?, ?, ?, strftime('%s', 'now') * 1000, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   push_endpoint = excluded.push_endpoint,
-                  platform = excluded.platform
+                  platform = excluded.platform,
+                  caps = excluded.caps
                 """,
             ).use { ps ->
                 ps.setString(1, deviceId)
                 ps.setString(2, pushEndpoint)
                 ps.setString(3, platform)
+                ps.setString(4, capsText(caps))
                 ps.executeUpdate()
             }
+        }
+    }
+
+    /**
+     * Replace what [deviceId]'s app says it understands. False for a
+     * device the relay does not know.
+     */
+    fun setCaps(deviceId: String, caps: Collection<String>): Boolean = connect().use { c ->
+        c.prepareStatement("UPDATE devices SET caps = ? WHERE id = ?").use { ps ->
+            ps.setString(1, capsText(caps))
+            ps.setString(2, deviceId)
+            ps.executeUpdate() > 0
         }
     }
 
@@ -119,14 +142,19 @@ class Db(private val path: String) {
      *  [Push] delivers: "ios-voip" → an APNs VoIP push whose
      *  `push_endpoint` is the PushKit token; anything else → a
      *  UnifiedPush POST to `push_endpoint` as an opaque URL. */
-    data class DeviceRow(val pushEndpoint: String, val platform: String)
+    data class DeviceRow(
+        val pushEndpoint: String,
+        val platform: String,
+        /** What the device's app understands beyond messages and rings: "read". */
+        val caps: Set<String> = emptySet(),
+    )
 
     fun deviceFor(deviceId: String): DeviceRow? = connect().use { c ->
-        c.prepareStatement("SELECT push_endpoint, platform FROM devices WHERE id = ?").use { ps ->
+        c.prepareStatement("SELECT push_endpoint, platform, caps FROM devices WHERE id = ?").use { ps ->
             ps.setString(1, deviceId)
             ps.executeQuery().use { rs ->
                 if (rs.next()) {
-                    DeviceRow(rs.getString("push_endpoint"), rs.getString("platform"))
+                    DeviceRow(rs.getString("push_endpoint"), rs.getString("platform"), capsOf(rs.getString("caps")))
                 } else {
                     null
                 }
@@ -254,7 +282,8 @@ class Db(private val path: String) {
                 id TEXT PRIMARY KEY,
                 push_endpoint TEXT NOT NULL,
                 platform TEXT NOT NULL,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                caps TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS ships (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -283,3 +312,10 @@ class Db(private val path: String) {
 }
 
 internal fun newDeviceId(): String = UUID.randomUUID().toString()
+
+/** Capabilities as stored: comma-separated, sorted, no blanks. */
+internal fun capsText(caps: Collection<String>): String =
+    caps.map { it.trim() }.filter { it.isNotEmpty() && ',' !in it }.toSortedSet().joinToString(",")
+
+internal fun capsOf(text: String?): Set<String> =
+    text.orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()

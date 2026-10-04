@@ -43,7 +43,22 @@ data class RegisterRequest(
      *  cookie, then encrypts the cookie for storage. The +code
      *  itself is NOT persisted past the login call. */
     val code: String,
+    /** What the app understands beyond messages and rings ("read").
+     *  An app that names nothing gets nothing else: an older one
+     *  shows any push it does not know as a new message. */
+    val caps: List<String> = emptyList(),
 )
+
+/** POST /devices/{id}/caps: an app saying, after registering, what it understands. */
+@Serializable
+data class CapsRequest(val caps: List<String> = emptyList())
+
+/**
+ * The relay's JSON: Ktor's own settings, but a field it does not know
+ * is ignored rather than refused, so an app newer than the relay can
+ * still register.
+ */
+val RelayJson = kotlinx.serialization.json.Json(io.ktor.serialization.kotlinx.json.DefaultJson) { ignoreUnknownKeys = true }
 
 @Serializable
 data class RegisterResponse(
@@ -66,7 +81,7 @@ fun Application.installRoutes(
     httpClient: OkHttpClient,
 ) {
     val log = LoggerFactory.getLogger("Routes")
-    install(ContentNegotiation) { json() }
+    install(ContentNegotiation) { json(RelayJson) }
     install(StatusPages) {
         exception<Throwable> { call, cause ->
             log.error("unhandled error: ${cause.message}", cause)
@@ -101,7 +116,7 @@ fun Application.installRoutes(
             }
             // 2. Mint or reuse the device id.
             val deviceId = req.deviceId.ifBlank { newDeviceId() }
-            db.upsertDevice(deviceId, req.pushEndpoint, req.platform)
+            db.upsertDevice(deviceId, req.pushEndpoint, req.platform, req.caps)
             // 3. Encrypt + persist the cookie.
             val sealed = Crypto.seal(cookie, masterSecret)
             db.upsertShip(deviceId, req.patp, req.shipUrl, sealed)
@@ -117,6 +132,15 @@ fun Application.installRoutes(
             for (row in db.shipsForDevice(id)) pool.stopRow(row.rowId)
             db.deleteDevice(id)
             call.respond(HttpStatusCode.NoContent)
+        }
+
+        // The device id is the app's own secret here, as for its deletion
+        // and its health: it may say what it understands without its +code.
+        post("/devices/{deviceId}/caps") {
+            val id = call.parameters["deviceId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val req = call.receive<CapsRequest>()
+            if (db.setCaps(id, req.caps)) call.respond(HttpStatusCode.NoContent)
+            else call.respond(HttpStatusCode.NotFound)
         }
 
         get("/health/{deviceId}") {

@@ -95,6 +95,26 @@ class RelayClient(
     }
 
     /**
+     * Tell the relay what this device's app understands ([caps]), so it
+     * may send those pushes. Its own route, not a field on /register: a
+     * relay from before refuses a registration with a field it does not
+     * know, and answers this 404, which is harmless. False on any failure.
+     */
+    suspend fun declareCaps(deviceId: String, caps: List<String>): Boolean = withContext(ioDispatcher) {
+        if (deviceId.isBlank()) return@withContext false
+        runCatching {
+            val resp = http.post("${endpoint().trimEnd('/')}/devices/$deviceId/caps") {
+                contentType(ContentType.Application.Json)
+                setBody(JSON.encodeToString(CapsRequest(caps)))
+            }
+            resp.status.isSuccess()
+        }.getOrDefault(false)
+    }
+
+    @Serializable
+    private data class CapsRequest(val caps: List<String>)
+
+    /**
      * Tell the relay to forget this device entirely. Idempotent —
      * a 404 is fine because "already gone" is the goal.
      */

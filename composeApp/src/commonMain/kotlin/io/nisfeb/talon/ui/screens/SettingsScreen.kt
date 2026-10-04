@@ -1899,6 +1899,10 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
                             )
                             if (newId != null) {
                                 config.settings.setDeviceIdFor(ship, newId)
+                                // What this phone understands, so the relay may
+                                // send it; an older relay says 404, harmless.
+                                config.pushTokens.caps.takeIf { it.isNotEmpty() }
+                                    ?.let { config.client.declareCaps(newId, it) }
                                 status = "Registered (deviceId=${newId.take(8)}…)"
                             } else {
                                 status = "Registration failed. Check the endpoint, " +
