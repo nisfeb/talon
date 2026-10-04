@@ -315,6 +315,14 @@ class TlonChatRepo(
      */
     @Volatile var messageListener: ((MessageEntity, Boolean) -> Unit)? = null
 
+    /**
+     * A chat the ship says is read to the end, here or on any other client:
+     * its notifications can go, as Tlon's %notify dismisses them. Only on
+     * a read, not on any count of zero: a chat whose unreads the ship does
+     * not count still notifies here.
+     */
+    @Volatile var readListener: ((whom: String) -> Unit)? = null
+
     /** A live message from someone else, to the listener. */
     private fun heard(entity: MessageEntity, replyToUs: Boolean) {
         messageListener?.invoke(entity, replyToUs)
@@ -4139,6 +4147,9 @@ class TlonChatRepo(
                         row.copy(count = 0, notifyCount = 0)
                     } else row
                     db.unreads().upsert(adjusted)
+                    // The whole of it, threads too: a channel caught up on its
+                    // own stream may still have a reply notified here.
+                    if (summary["count"].asInt() == 0 && summary["notify-count"].asInt() == 0) readListener?.invoke(row.whom)
                 }
             return
         }

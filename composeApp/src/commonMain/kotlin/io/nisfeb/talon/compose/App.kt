@@ -699,7 +699,7 @@ fun App(
                 db = db,
                 settingsSync = settingsSync,
                 notificationHealth = notificationHealth,
-            )
+            ).also { r -> r.readListener = { whom -> notifier.clear(whom) } }
         }
         // Let user-shaped preferences ride %settings to this user's
         // other devices. Screen-shaped ones stay local by design.
