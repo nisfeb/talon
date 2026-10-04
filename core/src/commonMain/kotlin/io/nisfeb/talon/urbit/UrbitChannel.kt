@@ -472,6 +472,23 @@ class UrbitChannel internal constructor(
         if (text.isBlank()) JsonNull else json.parseToJsonElement(text)
     }
 
+    /**
+     * Whether the ship is busy, down or out of reach, from vere's own
+     * /~_~/healthz: no event on the ship, so it can be asked of one too
+     * slow to answer anything else. Three seconds, then out of reach.
+     */
+    suspend fun health(): ShipHealth = shipHealthOf(
+        try {
+            withContext(ioDispatcher) {
+                http.get("${baseUrl.trimEnd('/')}/~_~/healthz") { timeout { requestTimeoutMillis = 3_000 } }.status.value
+            }
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            null
+        },
+    )
+
     /** PUT a batch of channel actions. Runs on the IO dispatcher. */
     private suspend fun put(messages: JsonArray) = withContext(ioDispatcher) {
         val resp = http.put(channelUrl) {

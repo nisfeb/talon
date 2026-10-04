@@ -101,4 +101,21 @@ class UrbitChannelResumeTest {
         held.complete(Unit)
         assertTrue(ended is ChannelGone && ended.forbidden, "the stream ended with it: $ended")
     }
+
+    // Vere answers /~_~/healthz itself, no login and no event on the ship.
+    @Test
+    fun `health asks vere at its own path and reads the answer`() = runBlocking<Unit> {
+        val asked = CopyOnWriteArrayList<String>()
+        var status = HttpStatusCode.TooManyRequests
+        val http = HttpClient(MockEngine { req -> asked += "${req.method.value} ${req.url}"; respond("", status) }) {
+            install(io.ktor.client.plugins.HttpTimeout)
+        }
+        val ch = UrbitChannel(http, "https://ship.test/", "~zod")
+        assertEquals(ShipHealth.BUSY, ch.health())
+        assertEquals(listOf("GET https://ship.test/~_~/healthz"), asked.toList())
+        status = HttpStatusCode.NoContent
+        assertEquals(ShipHealth.IDLE, ch.health())
+        val down = UrbitChannel(HttpClient(MockEngine { throw java.net.ConnectException("refused") }) { install(io.ktor.client.plugins.HttpTimeout) }, "https://ship.test", "~zod")
+        assertEquals(ShipHealth.UNREACHABLE, down.health())
+    }
 }

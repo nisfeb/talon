@@ -105,6 +105,9 @@ internal class FakeShip(val us: String = "~zod") {
     /** The request id each watch (app + path) was last made with, for [quit]. */
     val subIds = ConcurrentHashMap<String, Long>()
 
+    /** Vere's own /~_~/healthz: 204 idle, 429 busy, a proxy's 502 down. */
+    @Volatile var health: Int = 204
+
     /** A scry with no entry in [scries] is answered by this, for paths that carry a time. */
     @Volatile var answerScry: (path: String) -> String? = { null }
 
@@ -263,6 +266,7 @@ internal class FakeShip(val us: String = "~zod") {
                     else -> respond(stream, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
                 }
             }
+            req.method == HttpMethod.Get && path == "/~_~/healthz" -> respond("", HttpStatusCode.fromValue(health))
             path.startsWith("/~/scry/") && loseScry(path.removePrefix("/~/scry/").removeSuffix(".json")) != null -> {
                 val asked = path.removePrefix("/~/scry/").removeSuffix(".json")
                 scried += asked

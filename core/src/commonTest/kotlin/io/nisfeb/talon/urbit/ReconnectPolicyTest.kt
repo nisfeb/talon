@@ -98,4 +98,14 @@ class ReconnectPolicyTest {
         assertFalse(resubscribeAfterQuit(now - QUIT_AGAIN_MS + 1, now))
         assertFalse(resubscribeAfterQuit(now, now))
     }
+
+    @Test
+    fun `vere's healthz answer reads as busy, down or out of reach`() {
+        assertEquals(ShipHealth.IDLE, shipHealthOf(204))
+        assertEquals(ShipHealth.BUSY, shipHealthOf(429))
+        listOf(502, 503, 504).forEach { assertEquals(ShipHealth.DOWN, shipHealthOf(it), "$it") }
+        assertEquals(ShipHealth.UNREACHABLE, shipHealthOf(null))
+        // A redirect to a login page, an old vere's 404: not a word about the ship.
+        listOf(200, 302, 404).forEach { assertEquals(ShipHealth.UNKNOWN, shipHealthOf(it), "$it") }
+    }
 }

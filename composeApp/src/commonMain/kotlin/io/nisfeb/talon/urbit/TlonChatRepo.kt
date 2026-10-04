@@ -1261,17 +1261,24 @@ class TlonChatRepo(
     /** What the last write that could not reach the ship said, for "Copy error details"; null once the queue is empty. */
     private val slowDetails = MutableStateFlow<String?>(null)
 
-    /** The ship is slow: [queued] writes wait for it, and [details] is what the last try said. */
-    data class ShipSlow(val queued: Int, val details: String)
+    /** What vere's healthz said when the last write could not reach the ship; null until asked. */
+    private val slowHealth = MutableStateFlow<ShipHealth?>(null)
+
+    /**
+     * The ship is slow: [queued] writes wait for it, [details] is what the
+     * last try said, and [health] whether it is busy, down or out of reach.
+     */
+    data class ShipSlow(val queued: Int, val details: String, val health: ShipHealth? = null)
 
     /**
      * Whether writes are waiting for the ship, for the calm line in a
      * chat: messages queued there and reactions queued here. Null while
      * the ship is keeping up.
      */
-    val shipSlow: Flow<ShipSlow?> = combine(db.messages().queuedCount(), queuedReacts, slowDetails) { messages, reacts, details ->
+    val shipSlow: Flow<ShipSlow?> = combine(db.messages().queuedCount(), queuedReacts, slowDetails, slowHealth) { messages, reacts, details, health ->
         val queued = messages + reacts.size
-        if (queued == 0) null else ShipSlow(queued, details ?: "Waiting for the ship.")
+        if (queued == 0) null
+        else ShipSlow(queued, (details ?: "Waiting for the ship.") + (health?.let { "\nhealthz: $it" } ?: ""), health)
     }
 
     private val drainLock = Mutex()
@@ -1281,6 +1288,7 @@ class TlonChatRepo(
     /** The ship took a write: whatever waited can go now. */
     private fun shipAnswered() {
         drainPauseMs = FIRST_DRAIN_PAUSE_MS
+        slowHealth.value = null
         // The ship is back: a drain sleeping out its backoff goes now. Left
         // to sleep, a message queued behind one that waited sat out the
         // rest of a backoff of up to a minute with the ship answering.
@@ -1290,6 +1298,9 @@ class TlonChatRepo(
     /** A write did not reach the ship: say why, and try again later, a little later each time. */
     private fun stillSlow(why: Throwable) {
         slowDetails.value = errorDetails(why)
+        // Busy, down or out of reach, asked of vere itself: no event on a
+        // ship that is already behind.
+        channel?.let { ch -> pushScope.launch { slowHealth.value = ch.health() } }
         val pause = drainPauseMs
         drainPauseMs = (pause * 2).coerceAtMost(MAX_DRAIN_PAUSE_MS)
         scheduleDrain(pause)
