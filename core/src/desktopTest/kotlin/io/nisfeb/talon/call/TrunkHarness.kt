@@ -51,6 +51,12 @@ internal class TrunkHarness(ship: String = "~nec") {
     val scries = java.util.concurrent.atomic.AtomicInteger()
     val streams = java.util.concurrent.atomic.AtomicInteger()
 
+    /** Each event stream asked for: its channel path, and the Last-Event-ID it carried. */
+    val opened: MutableList<Pair<String, String?>> = java.util.concurrent.CopyOnWriteArrayList()
+
+    /** Channels the ship has reaped: a stream asked for on one is a 404. */
+    val reaped: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
     @Volatile private var sse = ByteChannel(autoFlush = true)
 
     /** End the live event stream, as a ship dropping it does; the next GET gets a new one. */
@@ -94,6 +100,8 @@ internal class TrunkHarness(ship: String = "~nec") {
                 if (scryDelayMs > 0) kotlinx.coroutines.delay(scryDelayMs)
                 respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
             }
+            req.url.encodedPath.also { opened += it to req.headers["Last-Event-ID"] } in reaped ->
+                respond("", HttpStatusCode.NotFound)
             else -> respond(
                 sse.also { streams.incrementAndGet() }, HttpStatusCode.OK,
                 headersOf(HttpHeaders.ContentType, "text/event-stream"),

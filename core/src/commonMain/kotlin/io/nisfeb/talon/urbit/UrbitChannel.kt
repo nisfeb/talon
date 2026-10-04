@@ -86,8 +86,41 @@ class UrbitChannel internal constructor(
     }
 
     /**
+     * The newest event the caller has finished with, or -1: a stream
+     * opened on this channel again asks eyre to start after it, and a
+     * replay of anything up to it is skipped. See [applied].
+     */
+    @Volatile
+    private var appliedId: Long = -1L
+
+    /**
+     * Event [id] is handled. Eyre keeps a channel, its subscriptions and
+     * every event since the last one acked for twelve hours after its
+     * stream drops, so a stream opened again resumes where this one
+     * stopped instead of a new channel watching everything again.
+     */
+    fun applied(id: Long) {
+        if (id > appliedId) appliedId = id
+    }
+
+    /**
+     * The ship no longer has this channel (eyre answered 404), or it was
+     * retired or deleted here: a stream cannot be opened on it again.
+     */
+    @Volatile
+    var gone: Boolean = false
+        private set
+
+    /** Never resume this channel: a subscription on it was dropped, or it is being given up. */
+    fun retire() {
+        gone = true
+    }
+
+    /**
      * Opens the SSE stream. Hot flow — every collector shares the same
-     * connection for the life of this UrbitChannel instance.
+     * connection for the life of this UrbitChannel instance. Called again
+     * after a stream ends, it resumes the channel; on a channel the ship
+     * has reaped it fails with [ChannelGone].
      *
      * Events are buffered through an UNLIMITED intermediate Channel so
      * that bursts (e.g. 10 messages delivered back-to-back after a
@@ -96,6 +129,7 @@ class UrbitChannel internal constructor(
      * rendezvous/buffered channel would shed events under load.
      */
     fun events(): Flow<UrbitEvent> = channelFlow {
+        if (gone) throw ChannelGone()
         val inbox = Channel<UrbitEvent>(Channel.UNLIMITED)
         // Drive the SSE session on its own coroutine. The sse{} block
         // stays suspended for the life of the connection; when this
@@ -113,11 +147,18 @@ class UrbitChannel internal constructor(
                 // makes eyre emit each frame uncompressed the instant it's
                 // ready; parsing frames ourselves keeps this in commonMain
                 // for every platform.
+                val resumeAfter = appliedId
                 http.prepareGet(channelUrl) {
                     header(HttpHeaders.Accept, "text/event-stream")
                     header(HttpHeaders.CacheControl, "no-cache")
                     header(HttpHeaders.AcceptEncoding, "identity")
+                    // Eyre acks every event up to this one and replays the rest.
+                    if (resumeAfter >= 0) header(HttpHeaders.LastEventID, resumeAfter.toString())
                 }.execute { resp ->
+                    if (resp.status.value == 404) {
+                        gone = true
+                        throw ChannelGone()
+                    }
                     if (!resp.status.isSuccess()) error("channel SSE: HTTP ${resp.status.value}")
                     lastStreamMs = nowMs()
                     val body = resp.bodyAsChannel()
@@ -138,7 +179,10 @@ class UrbitChannel internal constructor(
                                     val element = runCatching { json.parseToJsonElement(data.toString()) }.getOrNull()
                                     // inbox is UNLIMITED so trySend only fails
                                     // after close, when the flow is shutting down.
-                                    if (element != null) inbox.trySend(UrbitEvent(id, element))
+                                    // Eyre may replay events already handled here;
+                                    // its own note says the client must skip them.
+                                    val replayed = id != null && id <= appliedId
+                                    if (element != null && !replayed) inbox.trySend(UrbitEvent(id, element))
                                 }
                                 id = null
                                 data.setLength(0)
@@ -322,6 +366,7 @@ class UrbitChannel internal constructor(
      * replacement and on the way out.
      */
     suspend fun delete() {
+        retire()
         val msg = buildJsonObject {
             put("id", nextRequestId())
             put("action", "delete")
@@ -435,6 +480,9 @@ class UrbitChannel internal constructor(
 
 /** Raw SSE event: optional sequence id from the server, plus JSON payload. */
 data class UrbitEvent(val id: Long?, val body: JsonElement)
+
+/** The ship reaped the channel (twelve hours without a stream) or never had it: open a new one. */
+class ChannelGone : RuntimeException("the ship no longer has this channel")
 
 /**
  * The ship refused a poke.

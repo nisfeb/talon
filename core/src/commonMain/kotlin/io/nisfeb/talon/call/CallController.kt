@@ -296,6 +296,13 @@ class CallController(
         endLocal("stopped")
     }
 
+    /** Give [ch] up: never resumed, and ended on the ship so its watch does not clog. */
+    private fun drop(ch: UrbitChannel) {
+        ch.retire()
+        if (channel === ch) channel = null
+        scope.launch { runCatching { withTimeoutOrNull(5_000) { ch.delete() } } }
+    }
+
     private suspend fun runLoop() {
         var backoff = 2_000L
         // When the six reads last ran, and when a stream last heard
@@ -308,10 +315,14 @@ class CallController(
             var openedMs = 0L
             runCatching {
                 _connected.value = false
-                val ch = session.openChannel()
+                // The last channel while the ship keeps it: eyre holds its
+                // /calls watch and what came while the stream was down, and
+                // replays that to a stream opened on it again.
+                val kept = channel?.takeIf { !it.gone }
+                val ch = kept ?: session.openChannel()
                 channel = ch
-                lookedFor.value = emptySet()
-                val read = shouldBootstrap(readsAtMs == 0L, readsAtMs, nowMs(), heardMs)
+                if (kept == null) lookedFor.value = emptySet()
+                val read = kept == null && shouldBootstrap(readsAtMs == 0L, readsAtMs, nowMs(), heardMs)
                 // The six reads at once: one after another they held the
                 // subscription, and with it every call, six round trips back.
                 if (read) kotlinx.coroutines.coroutineScope {
@@ -411,7 +422,9 @@ class CallController(
                 }
                 if (read) readsAtMs = nowMs()
                 ch.events().let { events ->
-                    ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH)
+                    // A channel whose watch never went out is no use resumed.
+                    if (kept == null) runCatching { ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH) }
+                        .onFailure { drop(ch); throw it }
                     openedMs = nowMs()
                     heardMs = openedMs
                     _connected.value = true
@@ -422,7 +435,10 @@ class CallController(
                     try {
                     events.collect { ev ->
                         heardMs = nowMs()
-                        ev.id?.let { acks.trySend(it) }
+                        ev.id?.let {
+                            ch.applied(it)
+                            acks.trySend(it)
+                        }
                         val body = ev.body as? JsonObject ?: return@collect
                         // Surface poke nacks — a silently-refused poke cost
                         // us a day of "the accept never arrives" debugging.
@@ -455,6 +471,7 @@ class CallController(
                                     // tight loop would spin, so let the
                                     // outer reconnect back off instead.
                                     Log.e(TAG, "calls subscription refused: $err")
+                                    drop(ch)
                                     throw IllegalStateException("calls watch refused: $err")
                                 }
                                 return@collect
@@ -643,12 +660,8 @@ class CallController(
                 if (it is kotlin.coroutines.cancellation.CancellationException) throw it
                 Log.w(TAG, "signal loop ended", it)
             }
-            // The channel this iteration opened is done; end it on the
-            // ship rather than leaving its /calls subscription to clog.
-            channel?.let { ch ->
-                runCatching { withTimeoutOrNull(5_000) { ch.delete() } }
-            }
-            channel = null
+            // The channel stays for the next stream to resume; stop() and
+            // drop() end it on the ship.
             if (!scope.isActive) break
             backoff = pauseAfterStream(backoff, if (openedMs != 0L) nowMs() - openedMs else null, 2_000L, CALLS_HEALTHY_MS)
             // Jittered: a ship restart drops every client at once, and a

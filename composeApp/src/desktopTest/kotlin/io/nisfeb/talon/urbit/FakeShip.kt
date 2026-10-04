@@ -92,6 +92,13 @@ internal class FakeShip(val us: String = "~zod") {
     @Volatile var refuseWatch: (String) -> String? = { null }
     /** Every request, "METHOD path", whatever it was for: what an app that must say nothing did say. */
     val requests: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    /** Each event stream asked for: its channel, and the Last-Event-ID it carried. */
+    val streamsOpened: MutableList<Pair<String, String?>> = java.util.concurrent.CopyOnWriteArrayList()
+
+    // Channels a PUT made, and those reaped since: a stream on a reaped one is
+    // a 404 until a PUT makes it again, as with eyre.
+    private val known: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val reaped: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     // One event stream per channel, as eyre keeps one per channel: the app
     // runs several (the repo's, the call controller's), and two channels
@@ -124,8 +131,38 @@ internal class FakeShip(val us: String = "~zod") {
             }
         }
 
+    /**
+     * The stream for a GET on the channel at [path]. One whose last reader
+     * went away is closed; a stream opened on that channel again gets a new
+     * one fed from the same queue, as eyre resumes a channel. Called under [writing].
+     */
+    private fun streamOf(path: String): ByteChannel {
+        val id = path.removePrefix("/~/channel/")
+        val old = pipes[id] ?: return pipeOf(path).stream
+        if (!old.stream.isClosedForWrite) return old.stream
+        // A new queue, with what the old one had not written: the old pump
+        // still waits on its queue and would take the next frame to a
+        // stream nobody reads.
+        val fresh = Pipe(ByteChannel(autoFlush = true), Channel(Channel.UNLIMITED))
+        while (true) fresh.queue.trySend(old.queue.tryReceive().getOrNull() ?: break)
+        old.queue.close()
+        pipes[id] = fresh
+        pumps.launch { runCatching { for (f in fresh.queue) fresh.stream.writeStringUtf8(f) } }
+        return fresh.stream
+    }
+
+    /** The id of the last event framed so far. */
+    val lastEventId: Long get() = nextEventId - 1
+
     /** End every open event stream, as a dropped connection does. */
     suspend fun endStreams() = writing.withLock {
+        pipes.values.forEach { it.queue.close(); it.stream.close() }
+        pipes.clear()
+    }
+
+    /** Forget every channel, as eyre reaps one twelve hours after its stream: streams end, and a channel asked for again is a 404. */
+    suspend fun reap() = writing.withLock {
+        reaped += known
         pipes.values.forEach { it.queue.close(); it.stream.close() }
         pipes.clear()
     }
@@ -145,6 +182,7 @@ internal class FakeShip(val us: String = "~zod") {
         requests += "${req.method.value} $path"
         when {
             req.method == HttpMethod.Put && path.startsWith("/~/channel/") -> {
+                path.removePrefix("/~/channel/").let { known += it; reaped -= it }
                 val batch = Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonArray
                 batch.count { it.jsonObject["action"]?.jsonPrimitive?.content == "subscribe" }.takeIf { it > 0 }?.let { subscribePuts += it }
                 for (msg in batch) {
@@ -186,10 +224,13 @@ internal class FakeShip(val us: String = "~zod") {
                 }
                 respond("", HttpStatusCode.NoContent)
             }
+            req.method == HttpMethod.Get && path.startsWith("/~/channel/") &&
+                path.removePrefix("/~/channel/").also { streamsOpened += it to req.headers["Last-Event-ID"] } in reaped ->
+                respond("", HttpStatusCode.NotFound)
             req.method == HttpMethod.Get && path.startsWith("/~/channel/") && refuseStream ->
                 respond("", HttpStatusCode.ServiceUnavailable)
             req.method == HttpMethod.Get && path.startsWith("/~/channel/") ->
-                respond(writing.withLock { pipeOf(path) }.stream, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+                respond(writing.withLock { streamOf(path) }, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
             path.startsWith("/~/scry/") && loseScry(path.removePrefix("/~/scry/").removeSuffix(".json")) != null -> {
                 val asked = path.removePrefix("/~/scry/").removeSuffix(".json")
                 scried += asked

@@ -3,6 +3,7 @@ package io.nisfeb.talon.call
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
@@ -64,6 +65,65 @@ class ConnectReadsTest {
             }
             val gap = at[3] - at[2]
             assertTrue(gap > 3_200, "the fourth stream came ${gap}ms after the third; backing off, it waits 4 to 12 s")
+        } finally {
+            c.stop()
+        }
+    }
+
+    private fun subscribes(h: TrunkHarness) = h.putsSnapshot().count { "\"action\":\"subscribe\"" in it }
+
+    // ~ricsul cut every stream at 45 s, and each reconnect opened a new
+    // channel and watched /calls again. Eyre keeps the channel and replays
+    // what came while the stream was down.
+    @Test
+    fun `a dropped stream resumes its channel, watched once`() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val c = CallController(h.session, CallEngineProvider { error("no media needed") })
+        try {
+            c.start()
+            h.await { h.streams.get() == 1 }
+            h.emitFact("""{"nothing":1}""")
+            kotlinx.coroutines.delay(300)
+            h.endStream()
+            h.await(8_000) { h.streams.get() == 2 }
+            assertEquals(1, subscribes(h), "watched once")
+            assertEquals(1, h.opened.map { it.first }.distinct().size, "the same channel")
+            assertEquals("100", h.opened.last().second, "resumed after the last event")
+        } finally {
+            c.stop()
+        }
+    }
+
+    @Test
+    fun `a channel the ship reaped is replaced and watched again`() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val c = CallController(h.session, CallEngineProvider { error("no media needed") })
+        try {
+            c.start()
+            h.await { h.streams.get() == 1 }
+            val first = h.opened.last().first
+            h.reaped += first
+            h.endStream()
+            h.await(10_000) { h.streams.get() == 2 }
+            assertEquals(2, subscribes(h))
+            assertNotEquals(first, h.opened.last().first)
+        } finally {
+            c.stop()
+        }
+    }
+
+    // Resumed, a channel whose watch was refused would never hear a ring.
+    @Test
+    fun `a refused watch gives its channel up`() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val c = CallController(h.session, CallEngineProvider { error("no media needed") })
+        try {
+            c.start()
+            h.await { h.streams.get() == 1 }
+            val first = h.opened.last().first
+            h.emit("""{"id":1,"response":"subscribe","err":"no"}""")
+            h.await(10_000) { subscribes(h) == 2 }
+            h.await { h.opened.last().first != first }
         } finally {
             c.stop()
         }
