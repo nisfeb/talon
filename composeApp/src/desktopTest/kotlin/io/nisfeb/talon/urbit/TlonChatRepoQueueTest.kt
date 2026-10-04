@@ -103,12 +103,18 @@ class TlonChatRepoQueueTest {
         repo.send("0v4.abcde", "all of you")
         repo.reply("~bus", "~bus/170141184507933044937549665940933705728", "in the thread")
         repo.send(nest, "in the channel")
-        val first = ship.attempted.map { it.json }
+        // The messages alone: replying in the thread also follows it, a
+        // poke of its own to %activity, which FollowedThreadsTest covers.
+        val first = ship.attempted.filter { it.app != "activity" }.map { it.json }
         ship.lose = { null }
         // The channel's newest posts, asked for before its post goes again: not there.
         ship.scries["channels/v4/$nest/posts/newest/30/post"] = """{"posts":{}}"""
         repo.drainQueue()
-        assertEquals(first.map { it.toString() }.joinToString("\n"), ship.pokes.map { it.json.toString() }.joinToString("\n"), "oldest first, and as they were")
+        assertEquals(
+            first.map { it.toString() }.joinToString("\n"),
+            ship.pokes.filter { it.app != "activity" }.map { it.json.toString() }.joinToString("\n"),
+            "oldest first, and as they were",
+        )
     }
 
     @Test

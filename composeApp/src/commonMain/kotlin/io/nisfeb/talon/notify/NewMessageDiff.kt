@@ -112,6 +112,27 @@ fun diffNewMessageNotifications(
     )
 }
 
+/**
+ * The balloon for a reply in a thread that counts (the repo has decided:
+ * followed, a DM's, the owner's own). Following is asking for it, so only
+ * a muted chat, that chat open in front, or a stale reply holds it back.
+ * The top-level diff above never sees replies.
+ */
+fun replyNotification(
+    reply: MessageEntity,
+    level: String?,
+    openChat: String?,
+    nowMs: Long,
+    freshnessMaxAgeMs: Long,
+    storyText: (id: String, contentJson: String) -> String,
+    nameFor: (String) -> String = { it },
+): NotificationCandidate? {
+    if (reply.parentId == null || reply.whom == openChat || level == NotifyLevel.NONE) return null
+    if (nowMs - reply.sentMs > freshnessMaxAgeMs) return null
+    val text = storyText(reply.id, reply.contentJson).replace('\n', ' ').take(200).ifBlank { "(attachment)" }
+    return NotificationCandidate(whom = reply.whom, title = nameFor(reply.author), body = "In a thread: $text")
+}
+
 /** Does the story name our ship? Same test the Android filter and
  *  the relay use: a mention inline is `{"ship":"~us"}` in the JSON. */
 fun isMentioned(contentJson: String, ourPatp: String?): Boolean {

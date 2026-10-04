@@ -64,6 +64,49 @@ internal fun sourceKeyToWhom(key: String): String? = when {
  */
 internal data class ThreadSource(val whom: String, val parentPostId: String)
 
+/**
+ * A thread's follow in the ship's volume settings, from its volume map:
+ * followed when its replies notify, unfollowed when they neither notify
+ * nor count, null (the defaults) otherwise. A channel's thread replies
+ * are `reply`, a DM's `dm-reply`.
+ */
+internal fun followOf(volumeMap: JsonObject): Boolean? {
+    val v = (volumeMap["reply"] ?: volumeMap["dm-reply"]) as? JsonObject ?: return null
+    val unreads = v["unreads"].asBool()
+    val notify = v["notify"].asBool()
+    return when {
+        notify == true -> true
+        notify == false && unreads == false -> false
+        else -> null
+    }
+}
+
+/** Every thread the ship's volume settings (%activity /v6/volume-settings) name, followed or not. */
+internal fun followedThreadsOf(settings: JsonObject): Map<ThreadSource, Boolean> =
+    settings.entries.mapNotNull { (key, map) ->
+        val src = sourceKeyToThreadSource(key) ?: return@mapNotNull null
+        val follow = followOf(map as? JsonObject ?: return@mapNotNull null) ?: return@mapNotNull null
+        src to follow
+    }.toMap()
+
+/** The volume map that follows a thread or stops: its replies unread and notifying, or neither. */
+internal fun followVolume(whom: String, follow: Boolean): JsonObject = buildJsonObject {
+    put(if (whom.startsWith("~") || whom.startsWith("0v")) "dm-reply" else "reply", buildJsonObject {
+        put("unreads", follow)
+        put("notify", follow)
+    })
+}
+
+/**
+ * Whether a thread counts for the owner: its unread replies tint, its
+ * replies notify, it is in the Threads lists. The follow when there is
+ * one; otherwise a DM's thread counts, as the ship's defaults have it,
+ * and a channel's once the owner is in it ([ours]: their post, a reply
+ * of theirs, a mention of them). The ship follows those itself, but its
+ * word can arrive after the reply it was for.
+ */
+fun threadCounts(follow: Boolean?, isDm: Boolean, ours: Boolean): Boolean = follow ?: (isDm || ours)
+
 internal fun sourceKeyToThreadSource(key: String): ThreadSource? = when {
     key.startsWith("thread/") -> {
         // Tlon shape (via desk/lib/activity-json.hoon string-source):

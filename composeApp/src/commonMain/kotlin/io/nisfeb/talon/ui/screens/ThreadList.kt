@@ -60,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.flow.map
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -409,7 +410,33 @@ fun ThreadList(
         }
     }
 
+    // Follow it or stop, from inside: the same switch as on the post, so
+    // its replies count (tint, notify, the Threads lists) or do not.
+    val followHere by remember(whom, parentId) {
+        db.followedThreads().streamForWhom(whom).map { rows -> rows.firstOrNull { it.parentPostId == parentId }?.follow }
+    }.collectAsState(initial = null)
+    val following = io.nisfeb.talon.urbit.threadCounts(
+        followHere, whom.startsWith("~") || whom.startsWith("0v"), parent?.author == ourPatp,
+    )
+
     Column(modifier = modifier) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        ) {
+            Text(
+                if (following) "You follow this thread" else "You don't follow this thread",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            io.nisfeb.talon.ui.TextButton(onClick = {
+                scope.launch {
+                    runCatching { repo.setFollow(whom, parentId, !following) }
+                        .onFailure { composerState.failed("follow", it) }
+                }
+            }) { Text(if (following) "Unfollow" else "Follow") }
+        }
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxSize(),

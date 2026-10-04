@@ -172,6 +172,10 @@ abstract class MessageDao {
     abstract suspend fun latestAnyFor(whom: String, count: Int): List<MessageEntity>
 
     /** When the newest message kept here was sent; null when none is. */
+    /** Whether [author] has replied in the thread under [parentId]. */
+    @Query("SELECT EXISTS(SELECT 1 FROM messages WHERE whom = :whom AND parentId = :parentId AND author = :author AND isDeleted = 0)")
+    abstract suspend fun hasReplyBy(whom: String, parentId: String, author: String): Boolean
+
     @Query("SELECT MAX(sentMs) FROM messages")
     abstract suspend fun newestSentMs(): Long?
 

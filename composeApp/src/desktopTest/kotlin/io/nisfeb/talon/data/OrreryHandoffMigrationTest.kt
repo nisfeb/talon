@@ -24,7 +24,7 @@ class OrreryHandoffMigrationTest {
         // No destructive fallback: a migration that does not match the entity fails here.
         fun db() = Room.databaseBuilder<AppDatabase>(name = path)
             .setDriver(BundledSQLiteDriver())
-            .addMigrations(ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, io.nisfeb.talon.data.WATCHWORDS_DROP_MIGRATION, io.nisfeb.talon.data.ASSISTANT_LOG_MIGRATION)
+            .addMigrations(ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, io.nisfeb.talon.data.WATCHWORDS_DROP_MIGRATION, io.nisfeb.talon.data.ASSISTANT_LOG_MIGRATION, io.nisfeb.talon.data.FOLLOWED_THREADS_MIGRATION)
             .build()
         try {
             db().also { it.orreryAccounts().get("~zod"); it.close() }
