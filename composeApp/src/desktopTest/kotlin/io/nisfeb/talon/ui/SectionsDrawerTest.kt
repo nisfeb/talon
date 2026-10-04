@@ -45,4 +45,25 @@ class SectionsDrawerTest {
         onNodeWithText("Edit menu").performClick()
         assertEquals(listOf("Mail", "edit"), went.toList())
     }
+
+    // The assistant was the letter "A": narrower than an icon, it pulled
+    // its label out of line with every other one in the menu.
+    @Test
+    fun `every section's label lines up, the assistant's too`() = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                SectionsDrawer(
+                    order = listOf(RailItem.Chats, RailItem.Assistant, RailItem.Settings),
+                    visibility = emptyMap(),
+                    active = RailItem.Chats,
+                    onSection = {},
+                    canOpen = { true },
+                    onEditMenu = null,
+                )
+            }
+        }
+        val lefts = listOf("Chats", "Assistant", "Settings").map { onNodeWithText(it).fetchSemanticsNode().boundsInRoot.left }
+        assertEquals(1, lefts.distinct().size, "label lefts: $lefts")
+        assertTrue(onAllNodesWithText("A").fetchSemanticsNodes().isEmpty(), "no letter standing in for an icon")
+    }
 }

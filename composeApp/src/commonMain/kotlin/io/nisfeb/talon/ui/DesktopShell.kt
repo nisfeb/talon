@@ -232,20 +232,7 @@ private fun RailIconButton(
         ) {
             Box {
                 IconButton(onClick = onClick) {
-                    val icon = railIcon(item)
-                    if (icon != null) {
-                        Icon(imageVector = icon, contentDescription = label, tint = tint)
-                    } else {
-                        // The Assistant has no material glyph — render the
-                        // letter "A" so it sits in the panel like every other
-                        // feature (matching the icon's 24dp visual weight).
-                        Text(
-                            "A",
-                            color = tint,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
-                        )
-                    }
+                    Icon(imageVector = railIcon(item), contentDescription = label, tint = tint)
                 }
                 if (showBadge) {
                     // 8dp dot on the icon's top-right corner. The
@@ -268,7 +255,7 @@ private fun RailIconButton(
     }
 }
 
-internal fun railIcon(item: RailItem): ImageVector? = when (item) {
+internal fun railIcon(item: RailItem): ImageVector = when (item) {
     // Core icons, or ones the app owns in TalonIcons: the extended
     // set is not shipped.
     RailItem.Home -> Icons.Filled.Home
@@ -280,8 +267,9 @@ internal fun railIcon(item: RailItem): ImageVector? = when (item) {
     RailItem.Statuses -> Icons.Filled.Person
     RailItem.Bookmarks -> Icons.Filled.Star
     RailItem.Activity -> Icons.Filled.Notifications
-    // Null → rendered as the letter "A" in RailIconButton.
-    RailItem.Assistant -> null
+    // Was the letter "A": narrower than an icon, it pulled its label
+    // out of line with every other one in the menu.
+    RailItem.Assistant -> TalonIcons.AutoAwesome
     RailItem.Profile -> Icons.Filled.AccountCircle
     RailItem.Administration -> Icons.Filled.Build
     // Not an envelope: that reads as mail. An invite is to a group.
