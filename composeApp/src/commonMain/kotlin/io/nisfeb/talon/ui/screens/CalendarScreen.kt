@@ -113,8 +113,9 @@ import io.nisfeb.talon.calendar.EventDraft
 import io.nisfeb.talon.calendar.EditScope
 import io.nisfeb.talon.calendar.ORDINALS
 import io.nisfeb.talon.calendar.Repeat
-import io.nisfeb.talon.calendar.followingBody
+import io.nisfeb.talon.calendar.atOccurrence
 import io.nisfeb.talon.calendar.onlyBody
+import io.nisfeb.talon.calendar.seriesEdit
 import io.nisfeb.talon.calendar.daysOf
 import io.nisfeb.talon.calendar.draftFromEvent
 import io.nisfeb.talon.calendar.eventBody
@@ -216,9 +217,10 @@ fun CalendarScreen(
     /** The row being looked at; editing starts from here. */
     var viewing by remember { mutableStateOf<CalendarRow?>(null) }
     var editingIdx by remember { mutableStateOf<Int?>(null) }
-    var editingStartMs by remember { mutableStateOf<Long?>(null) }
-    /** Whether the row being edited is all-day: its start is date-space, read as UTC. */
-    var editingAllDay by remember { mutableStateOf(false) }
+    /** Opened on one occurrence of a series: the series as read, and the
+     *  draft as it opened on that occurrence. Every occurrence moves as
+     *  far as that one was moved. */
+    var editingSeries by remember { mutableStateOf<Pair<EventDraft, EventDraft>?>(null) }
     var zones by remember { mutableStateOf<List<String>>(emptyList()) }
     LaunchedEffect(availability) { if (availability == CalendarAvailability.PRESENT) zones = repo.zones() }
     var managing by remember { mutableStateOf(false) }
@@ -314,8 +316,7 @@ fun CalendarScreen(
             priority = if (priorityKnown) 0 else null,
         )
         editingIdx = null
-        editingStartMs = null
-        editingAllDay = false
+        editingSeries = null
     }
     /** What the wait says, where there is one long enough to say it. */
     val OPENING = "Opening the editor..."
@@ -332,10 +333,13 @@ fun CalendarScreen(
             val d = json?.let { draftFromEvent(it, selected) }
             if (d == null) { status = "That event could not be read for editing."; return@launch }
             if (status == OPENING) status = null
-            editing = id to d
+            // On one occurrence of a series the editor shows that one, in
+            // the event's own zone: its day and time are what is edited.
+            val opened = startMs?.takeIf { idx != null && d.repeats }
+                ?.let { d.atOccurrence(occurrenceAt(it, allDay, d.zone?.let(::zoneFor) ?: zone)) }
+            editing = id to (opened ?: d)
             editingIdx = idx
-            editingStartMs = startMs
-            editingAllDay = allDay
+            editingSeries = opened?.let { d to it }
         }
     }
     /** A task opens at once from its row; an event reads its rule first. */
@@ -344,8 +348,7 @@ fun CalendarScreen(
             taskDraft(r, zone, selected)?.let { d ->
                 editing = r.id to d
                 editingIdx = null
-                editingStartMs = null
-                editingAllDay = r.all
+                editingSeries = null
                 return
             }
         }
@@ -614,8 +617,7 @@ fun CalendarScreen(
                         priority = if (priorityKnown) 0 else null,
                     )
                     editingIdx = null
-                    editingStartMs = null
-                    editingAllDay = false
+                    editingSeries = null
                 },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
@@ -1020,7 +1022,9 @@ fun CalendarScreen(
                     return@onSave
                 }
                 val idx = editingIdx
-                val occurrence = editingStartMs?.let { occurrenceAt(it, editingAllDay, zone) }
+                val series = editingSeries
+                // The one-off went in but the ship would not skip the old.
+                var halfDone = false
                 val ghost = if (id == null) placeholderFor(d) else null
                 if (ghost != null) pendingRows = pendingRows + ghost
                 if (id != null) pendingEdits = pendingEdits + (id to d)
@@ -1035,20 +1039,27 @@ fun CalendarScreen(
                             d.copy(doneMs = repo.eventDetail(id)?.get("done_ms")?.jsonPrimitive?.longOrNull)
                         } else d
                         when {
-                            id == null || editScope == EditScope.ALL || idx == null || occurrence == null ->
+                            id == null || idx == null || series == null ->
                                 repo.writeEvent(eventBody(d, id))
-                            // The page's own two steps: end or skip the old, then add.
+                            editScope == EditScope.ALL ->
+                                repo.writeEvent(eventBody(seriesEdit(d, opened = series.second, series = series.first), id))
+                            // The page's own two steps: end the old, then add.
                             editScope == EditScope.FOLLOWING ->
                                 if (repo.pokeEvent(buildJsonObject { put("action", "cap-event"); put("id", id); put("dom", idx) }, readBack = false)) {
-                                    repo.writeEvent(followingBody(d, occurrence))
+                                    repo.writeEvent(eventBody(d))
                                 } else null
+                            // Add, then skip the old: skipping first lost the
+                            // occurrence whenever the add was refused.
                             else ->
-                                if (repo.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) }, readBack = false)) {
-                                    repo.writeEvent(onlyBody(d, occurrence))
+                                if (repo.pokeEvent(onlyBody(d), readBack = false)) {
+                                    repo.writeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
+                                        .also { halfDone = !it.ok }
                                 } else null
                         }
                     }
-                    val ok = written?.ok == true
+                    val ok = written?.ok == true || halfDone
+                    // Not reopened: saving again would add it twice.
+                    if (halfDone) status = "\"${d.name.trim()}\" is on its new day and time, but the ship kept the old one too: open it and choose Skip this one."
                     if (ghost != null) pendingRows = pendingRows - ghost
                     if (id != null) pendingEdits = pendingEdits - id
                     // Not saved: the editor back with what was typed, and why.
@@ -1173,7 +1184,7 @@ private fun spanLabel(r: CalendarRow, day: LocalDate, zone: TimeZone, twentyFour
     }
 }
 
-/** The event form. Saves the whole series; a single occurrence can be skipped. */
+/** The event form: the whole series, this one only, or this and following. */
 /** The colours an entry can be given here: a spread that reads on light and dark. */
 private val ENTRY_COLOURS = listOf(
     "#c0392b", "#d35400", "#f39c12", "#27ae60", "#16a085", "#2980b9", "#1e3a5f", "#8e44ad", "#7f8c8d",

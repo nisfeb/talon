@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -52,6 +53,8 @@ class CalendarScreenTest {
     @Volatile private var down = false
     /** The ship says no to every write. */
     @Volatile private var refuse = false
+    /** The ship says no to a skip, and takes everything else. */
+    @Volatile private var refuseSkip = false
     /** Writes wait for this: a busy ship, until it completes. */
     @Volatile private var shipTakes: kotlinx.coroutines.CompletableDeferred<Unit>? = null
     /** The ship's one-event read never answers: a busy ship, at its worst. */
@@ -63,6 +66,12 @@ class CalendarScreenTest {
     private fun alarms(json: String) = if (reminders) ",\"alarms\":$json" else ""
     @Volatile private var tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"}}]"""
     private val soon = java.time.LocalDate.now().atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+    /** A weekly lesson at 16:00 in New York, from a CalDAV calendar, read in a UTC calendar: today's is on today's UTC date. */
+    private val newYork = java.time.ZoneId.of("America/New_York")
+    private val lessonDay = java.time.LocalDate.now(java.time.ZoneOffset.UTC)
+    private val lessonAt = lessonDay.atTime(16, 0).atZone(newYork).toInstant().toEpochMilli()
+    /** The series began on Monday 31 August at 16:00, its start written as that wall clock read as UTC. */
+    private val lessonJson = """{"id":"f1","cal":"family","cat":"timed","kind":"rrule","start_ms":1788192000000,"zone":"America/New_York","dur_min":60,"fin":"dur","count":0,"args":{"rrule":"FREQ=WEEKLY;UNTIL=20261020T025959Z"},"meta":{"name":"Fencing lesson"}}"""
 
     private val http = HttpClient(MockEngine { req ->
         val path = req.url.encodedPath
@@ -74,26 +83,31 @@ class CalendarScreenTest {
             path.startsWith("/grubbery/api/poke/") && refuse -> { shipTakes?.await(); respond("", HttpStatusCode.BadRequest) }
             path.startsWith("/grubbery/api/poke/") -> {
                 shipTakes?.await()
-                writes += path to req.body.toByteArray().decodeToString()
+                val body = req.body.toByteArray().decodeToString()
+                if (refuseSkip && "skip-event" in body) return@MockEngine respond("", HttpStatusCode.BadRequest)
+                writes += path to body
                 json("")
             }
             path.endsWith("/window.json") -> json(
                 """{"rows":[
                 {"id":"e1","cal":"default","meta":{"name":"Dentist","location":"12 High Street","note":"Ring 020 7946 0958 first, or book at https://dent.example/book"},"l":$soon,"r":${soon + 30 * 60_000L}${alarms("""[{"kind":"before","s":900,"desc":""}]""")}},
                 {"id":"s1","cal":"default","idx":3,"kind":"daily","meta":{"name":"Standup"},"l":${soon + HOUR},"r":${soon + HOUR + 15 * 60_000L}${alarms("[]")}},
-                {"id":"b1","cal":"~nec/work","meta":{"name":"Board meeting"},"l":${soon + 2 * HOUR},"r":${soon + 3 * HOUR}${alarms("[]")}}
+                {"id":"b1","cal":"~nec/work","meta":{"name":"Board meeting"},"l":${soon + 2 * HOUR},"r":${soon + 3 * HOUR}${alarms("[]")}},
+                {"id":"f1","cal":"family","idx":5,"kind":"rrule","meta":{"name":"Fencing lesson"},"l":$lessonAt,"r":${lessonAt + HOUR}${alarms("[]")}}
                 ]}""",
             )
+            path.endsWith("/event.json") && req.url.parameters["id"] == "f1" -> json(lessonJson)
             path.endsWith("/event.json") -> json(
                 """{"id":"s1","cal":"default","cat":"timed","kind":"daily","start_ms":${soon + HOUR},"dur_min":15,"args":{"at":600},"zone":"none","meta":{"name":"Standup"}${alarms("""[{"kind":"offset","from":"end","after":true,"s":0,"desc":"wrap up"}]""")}}""",
             )
             path.endsWith("/events.json") -> json(tasksJson)
             path.endsWith("/calendars.json") ->
-                json("""[{"id":"default","name":"Personal","kind":"local"},{"id":"~nec/work","name":"Work","kind":"local"}]""")
+                json("""[{"id":"default","name":"Personal","kind":"local"},{"id":"~nec/work","name":"Work","kind":"local"},{"id":"family","name":"Family","kind":"caldav"}]""")
             path.endsWith("/config.json") -> json(if (reminders) """{"title":"Calendar","zone":"UTC","ball":"abc123","lead_min":$leadMin}""" else """{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
             path.endsWith("/share/shares.json") ->
                 json("""{"shares":{},"offers":{},"accepted":{"~nec/work":{"key":"~nec/work","mode":"read"}}}""")
             path.endsWith("/google.json") -> json("""{"connected":false,"linked":{}}""")
+            path.endsWith("/zones.json") -> json("""["UTC","America/New_York"]""")
             else -> json("[]")
         }
     })
@@ -350,7 +364,7 @@ class CalendarScreenTest {
     }
 
     @Test
-    fun `this one only, edited, skips the occurrence and adds it back as it now is`() = calendar {
+    fun `this one only, edited, adds it back as it now is and then skips the occurrence`() = calendar {
         open("Standup")
         onNodeWithText("Edit").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("This change applies to") }
@@ -362,7 +376,60 @@ class CalendarScreenTest {
         val added = wrote("Standup, moved")
         // A new single event, the series left as it was.
         assertTrue("add-event" in added && Regex("kind.{0,6}once").containsMatchIn(added), added)
-        assertTrue(writes.indexOfFirst { "skip-event" in it.second } < writes.indexOfFirst { "Standup, moved" in it.second })
+        // Added first: skipping first lost the occurrence when the add was refused.
+        assertTrue(writes.indexOfFirst { "Standup, moved" in it.second } < writes.indexOfFirst { "skip-event" in it.second })
+    }
+
+    /** Opens the lesson's editor on today's occurrence and sets its hour. */
+    private fun ComposeUiTest.moveLesson(scope: String?, hour: String) {
+        open("Fencing lesson")
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("This change applies to") }
+        // It opens on the occurrence, at 16:00 where the lesson is, not on the
+        // day the series began.
+        assertTrue(shows(io.nisfeb.talon.util.formatDate(kotlinx.datetime.LocalDate(lessonDay.year, lessonDay.monthValue, lessonDay.dayOfMonth))), "opens on today's lesson")
+        if (scope != null) onNodeWithText(scope).performScrollTo().performClick()
+        onNode(hasSetTextAction() and hasText("16")).performTextReplacement(hour)
+        onAllNodesWithText("Save")[0].performClick()
+    }
+    private fun wallMs(d: java.time.LocalDate, h: Int) = d.atTime(h, 0).toInstant(java.time.ZoneOffset.UTC).toEpochMilli()
+
+    // "I've moved Magnus fencing to 5pm on the calendar twice and it still doesn't save."
+    @Test
+    fun `a series moved to five, every occurrence, moves on the ship`() = calendar {
+        moveLesson(scope = null, hour = "17")
+        val edit = wrote("edit-event")
+        assertTrue("\"start_ms\":${wallMs(java.time.LocalDate.of(2026, 8, 31), 17)}" in edit, "from its own first day, an hour later: $edit")
+        assertTrue("FREQ=WEEKLY;UNTIL=20261020T025959Z" in edit && "\"cal\":\"family\"" in edit && "America/New_York" in edit, edit)
+        assertTrue(writes.none { "skip-event" in it.second || "add-event" in it.second }, "the series itself, nothing added")
+    }
+
+    @Test
+    fun `one lesson moved to five, this one only, is a one-off at five and the old one skipped`() = calendar {
+        moveLesson(scope = "This one only", hour = "17")
+        val skip = wrote("skip-event")
+        assertTrue("\"id\":\"f1\"" in skip && "\"idx\":5" in skip, skip)
+        val added = writes.first { "add-event" in it.second }.second
+        assertTrue("\"start_ms\":${wallMs(lessonDay, 17)}" in added && Regex("kind.{0,6}once").containsMatchIn(added) && "America/New_York" in added, added)
+        assertTrue(writes.none { "edit-event" in it.second }, "the series left as it was")
+    }
+
+    @Test
+    fun `this and following restarts the series at five on that day, not at midnight`() = calendar {
+        moveLesson(scope = "This and following", hour = "17")
+        val cap = wrote("cap-event")
+        assertTrue("\"dom\":5" in cap, cap)
+        val added = wrote("add-event")
+        assertTrue("\"start_ms\":${wallMs(lessonDay, 17)}" in added && "FREQ=WEEKLY" in added, added)
+    }
+
+    @Test
+    fun `a move whose skip the ship refuses says the old one is still there, and does not offer to add it twice`() = calendar {
+        refuseSkip = true
+        moveLesson(scope = "This one only", hour = "17")
+        waitUntil(timeoutMillis = 5_000) { shows("kept the old one too") }
+        assertEquals(1, writes.count { "add-event" in it.second })
+        assertFalse(shows("This change applies to"), "the editor stays closed")
     }
 
     @Test

@@ -84,13 +84,14 @@ data class EventDraft(
     /** every: the period, in minutes. */
     val periodMin: Int = 60,
     /**
-     * A rule the editor does not model (an imported rrule or cron): the
-     * kind, its arguments and its anchor are kept verbatim, so the rest
-     * of the event can still be edited without rewriting the rule.
+     * A rule the editor does not model (an rrule, which is every series
+     * the calendar holds since it turned its presets into rrules): the
+     * kind and its arguments are kept verbatim, so the rest of the event
+     * can still be edited without rewriting the rule. When it starts is
+     * [date] and [minuteOfDay], like any other event's.
      */
     val rawKind: String? = null,
     val rawArgs: JsonObject? = null,
-    val rawStartMs: Long? = null,
     /** A task: when it is due, if ever, and whether it is done. The
      *  done moment is kept across an edit rather than reset to now. */
     val due: LocalDate? = null,
@@ -174,9 +175,11 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
         return@buildJsonObject
     }
     if (d.rawKind != null) {
-        // An imported rule, sent back as it came.
+        // The rule's text as it came. Its start is the form's: it sent the
+        // start it was read with, so a moved series stayed where it was.
         put("kind", d.rawKind)
-        put("start_ms", d.rawStartMs ?: d.date.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds())
+        val at = if (d.cat == EventCat.TIMED) LocalTime(d.minuteOfDay / 60, d.minuteOfDay % 60) else LocalTime(0, 0)
+        put("start_ms", d.date.atTime(at).toInstant(TimeZone.UTC).toEpochMilliseconds())
         put("args", d.rawArgs ?: JsonObject(emptyMap()))
     } else {
         put("kind", d.repeat.kind)
@@ -213,23 +216,28 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
     }
 }
 
-/**
- * The event this occurrence becomes on its own: a one-off at the
- * occurrence's own day and time, the rest as edited. Sent after a
- * skip-event for the occurrence, the way the calendar's page does it.
- */
-fun onlyBody(d: EventDraft, occurrence: LocalDateTime): JsonObject = eventBody(
-    d.copy(
-        repeat = Repeat.ONCE, rawKind = null, rawArgs = null, rawStartMs = null, count = 0, until = null,
-        date = occurrence.date,
-        minuteOfDay = if (d.cat == EventCat.TIMED) occurrence.hour * 60 + occurrence.minute else d.minuteOfDay,
-    ),
-)
+/** The draft opened on one occurrence of a series: its day and time are that occurrence's. */
+fun EventDraft.atOccurrence(at: LocalDateTime): EventDraft =
+    copy(date = at.date, minuteOfDay = if (cat == EventCat.TIMED) at.hour * 60 + at.minute else minuteOfDay)
 
-/** The series as edited, restarted from the occurrence's day. Sent
- *  after a cap-event that ends the old series before it. */
-fun followingBody(d: EventDraft, occurrence: LocalDateTime): JsonObject =
-    eventBody(d.copy(date = occurrence.date, rawStartMs = d.rawStartMs?.let { occurrence.date.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds() }))
+/**
+ * The event this occurrence becomes on its own: a one-off at the day and
+ * time in the editor, which opened on the occurrence. Added before a
+ * skip-event for the occurrence, so a refused add loses nothing.
+ */
+fun onlyBody(d: EventDraft): JsonObject =
+    eventBody(d.copy(repeat = Repeat.ONCE, rawKind = null, rawArgs = null, count = 0, until = null))
+
+/**
+ * Every occurrence, edited from [opened] (the draft as it opened on one
+ * of them): the series moves as far as that occurrence was moved, from
+ * its own start in [series], and takes everything else as [edited].
+ */
+fun seriesEdit(edited: EventDraft, opened: EventDraft, series: EventDraft): EventDraft {
+    fun EventDraft.wall() = date.atTime(minuteOfDay / 60, minuteOfDay % 60).toInstant(TimeZone.UTC)
+    val moved = (series.wall() + (edited.wall() - opened.wall())).toLocalDateTime(TimeZone.UTC)
+    return edited.copy(date = moved.date, minuteOfDay = moved.hour * 60 + moved.minute)
+}
 
 /** The editor's draft for an event.json answer, or null for a shape it cannot edit. */
 /** The meta fields the editor shows and writes itself. Everything else rides through. */
@@ -306,7 +314,7 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
     val repeat = Repeat.entries.firstOrNull { it.kind == kind }
         // A rule the form does not model is kept whole: the rest of the
         // event stays editable.
-        ?: return common.copy(rawKind = kind, rawArgs = args, rawStartMs = startMs, minuteOfDay = wall.hour * 60 + wall.minute)
+        ?: return common.copy(rawKind = kind, rawArgs = args, minuteOfDay = wall.hour * 60 + wall.minute)
     val at = args?.get("at")?.jsonPrimitive?.intOrNull
     val days = (args?.get("days") as? JsonArray)?.mapNotNull { j ->
         WIRE_DAYS.indexOf(j.jsonPrimitive.contentOrNull).takeIf { it >= 0 }?.let { DayOfWeek(it + 1) }
