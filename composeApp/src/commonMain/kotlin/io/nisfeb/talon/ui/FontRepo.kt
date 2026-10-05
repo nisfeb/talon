@@ -46,12 +46,18 @@ class FontShip(
         return resp.status.value to resp.readRawBytes()
     }
 
+    /** Set once the ship has the fonts' place: two requests, not two with every font. */
+    @kotlin.concurrent.Volatile private var placeMade = false
+
     /** Put a font's file on the ship as [name]; already there is as good. */
     suspend fun put(name: String, bytes: ByteArray) {
-        for (dir in listOf("talon", "talon/fonts")) {
-            val (status, _) = send(HttpMethod.Put, "dir/$dir")
-            if (status == 404) throw NoGrubbery()
-            check(status in 200..299 || status == 409) { "The ship would not make a place for fonts." }
+        if (!placeMade) {
+            for (dir in listOf("talon", "talon/fonts")) {
+                val (status, _) = send(HttpMethod.Put, "dir/$dir")
+                if (status == 404) throw NoGrubbery()
+                check(status in 200..299 || status == 409) { "The ship would not make a place for fonts." }
+            }
+            placeMade = true
         }
         val (status, _) = send(HttpMethod.Put, "file/talon/fonts/$name", bytes)
         if (status == 404) throw NoGrubbery()
@@ -65,7 +71,7 @@ class FontShip(
      */
     suspend fun names(): Set<String> {
         val (status, bytes) = send(HttpMethod.Get, "kids/talon/fonts")
-        if (status == 404) return emptySet()
+        if (status == 404) throw NoGrubbery()
         check(status in 200..299) { "The ship would not list its fonts." }
         val files = kotlinx.serialization.json.Json.parseToJsonElement(bytes.decodeToString())
             .let { it as? kotlinx.serialization.json.JsonObject }?.get("files") as? kotlinx.serialization.json.JsonArray
@@ -157,7 +163,8 @@ class FontRepo(
         val s = settings.fontSettings.value
         for (id in s.removed) if (files.has(id)) files.delete(id)
         // Asked once; a ship that will not say is treated as having none.
-        val onShip = runCatching { ship.names() }.getOrDefault(emptySet())
+        val listing = io.nisfeb.talon.util.runSuspendCatching { ship.names() }
+        val onShip = listing.getOrDefault(emptySet())
         var missing = 0
         for (f in s.fonts) {
             if (files.has(f.id)) {
@@ -173,7 +180,9 @@ class FontRepo(
         _status.value = if (missing == 0) null
         else "$missing font file${if (missing == 1) "" else "s"} could not be fetched from your ship yet; text uses the system font until ${if (missing == 1) "it arrives" else "they arrive"}."
         io.nisfeb.talon.util.Log.i("FontRepo", "fonts: ${s.fonts.size} listed, ${s.fonts.size - missing} here, $missing missing")
-        missing
+        // A ship without grubbery will never have them: nothing to wait for,
+        // where keepInLine asked it every ten minutes for as long as Talon ran.
+        if (listing.exceptionOrNull() is NoGrubbery) 0 else missing
     }
 
     /**
@@ -190,6 +199,17 @@ class FontRepo(
         }
     }
 
+    /** [bytes] kept here as [id] when the platform can load them; false, and nothing kept, when not. */
+    private fun keep(id: String, bytes: ByteArray): Boolean {
+        files.write(id, bytes)
+        if (fontLoads(files.path(id).toString())) return true
+        files.delete(id)
+        return false
+    }
+
+    /** Names on the ship already fetched and passed over: not fetched again this session. */
+    private val passedOver = mutableSetOf<String>()
+
     /**
      * Fonts in the ship's talon/fonts the list does not name: put there
      * through grubbery's own page, or by a device whose list never got
@@ -199,28 +219,23 @@ class FontRepo(
      * and style (two such files would take turns removing each other),
      * and nothing on the ship is deleted here.
      */
-    /** [bytes] kept here as [id] when the platform can load them; false, and nothing kept, when not. */
-    private fun keep(id: String, bytes: ByteArray): Boolean {
-        files.write(id, bytes)
-        if (fontLoads(files.path(id).toString())) return true
-        files.delete(id)
-        return false
-    }
-
     private suspend fun takeUp(names: Set<String>, s: FontSettings) {
         val found = mutableListOf<InstalledFont>()
         for (name in names) {
             if (!FONT_FILE.matches(name)) continue
             if (name.endsWith(".font") && name.removeSuffix(".font") in s.removed) continue
-            // ponytail: a file named by hand is fetched to learn its id on
-            // every start while it is not taken up (removed, or a duplicate);
-            // remember name to id if those pile up.
+            if (name in passedOver) continue
             val bytes = runCatching { ship.get(name) }.getOrNull() ?: continue
             val id = fontId(bytes)
-            if (id in s.removed || (s.fonts + found).any { it.id == id }) continue
-            val info = readFontInfo(bytes).getOrNull() ?: continue
-            if ((s.fonts + found).any { it.family == info.family && it.weight == info.weight && it.italic == info.italic }) continue
-            if (!keep(id, bytes)) continue
+            // A file named by hand is fetched to learn its id: once a session
+            // when it is not taken up (removed, a duplicate, or not a font).
+            val info = readFontInfo(bytes).getOrNull()
+            if (id in s.removed || (s.fonts + found).any { it.id == id } || info == null ||
+                (s.fonts + found).any { it.face == info } || !keep(id, bytes)
+            ) {
+                passedOver += name
+                continue
+            }
             found += InstalledFont(id, info.family, info.weight, info.italic, fileName = name, shipName = name.takeIf { it != "$id.font" })
         }
         if (found.isEmpty()) return

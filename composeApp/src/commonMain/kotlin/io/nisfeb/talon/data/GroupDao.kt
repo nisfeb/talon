@@ -53,6 +53,10 @@ interface GroupDao {
     @Query("SELECT * FROM groups")
     fun streamGroups(): Flow<List<GroupEntity>>
 
+    /** Which of [flags] are groups kept here: an invite fact names one or two. */
+    @Query("SELECT flag FROM groups WHERE flag IN (:flags)")
+    suspend fun joinedOf(flags: Collection<String>): List<String>
+
     /**
      * Name search over groups for the search screen. Matches the
      * group's title (case-insensitive substring). Prefix matches sort

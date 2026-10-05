@@ -271,7 +271,7 @@ fun OrreryActionDialog(
                                                 " And filed beside it: " + answer.extras.joinToString { it.title }
                                         }
                                     },
-                                    onFailure = { refined = it.message ?: "The ship did not answer." },
+                                    onFailure = { refined = io.nisfeb.talon.util.problemOf("Couldn't ask for the change", it).line },
                                 )
                                 refining = false
                             }

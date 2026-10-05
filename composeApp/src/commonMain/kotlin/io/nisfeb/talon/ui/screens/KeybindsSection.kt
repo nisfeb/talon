@@ -120,7 +120,7 @@ internal fun KeybindsSection(uiSettings: UiSettings, isMacHost: Boolean = isMacO
                     }
                     val (next, from) = rebind(stored, id, combo, isMacHost)
                     uiSettings.setKeybinds(next)
-                    note = from?.let { "${combo.label(isMacHost)} was for $it, and is for ${BINDABLE.first { b -> b.first == id }.second} now." }
+                    note = from?.let { "${combo.label(isMacHost)} was for $it, and is for ${BINDABLE.first { b -> b.id == id }.label} now." }
                     recording = null
                     true
                 },

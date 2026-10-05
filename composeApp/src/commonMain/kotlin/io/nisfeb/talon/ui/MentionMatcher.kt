@@ -30,15 +30,15 @@ object MentionMatcher {
 
     fun containsMention(haystack: String, patp: String, notInPaths: Boolean = false): Boolean {
         if (patp.isEmpty() || haystack.isEmpty()) return false
-        val needle = "~" + patp.lowercase()
-        val h = haystack.lowercase()
+        val needle = "~$patp"
         var i = 0
         while (true) {
-            val found = h.indexOf(needle, startIndex = i)
+            // Case aside without a lowercased copy of every message scanned.
+            val found = haystack.indexOf(needle, startIndex = i, ignoreCase = true)
             if (found < 0) return false
-            val before = if (found == 0) ' ' else h[found - 1]
+            val before = if (found == 0) ' ' else haystack[found - 1]
             val end = found + needle.length
-            val after = if (end >= h.length) ' ' else h[end]
+            val after = if (end >= haystack.length) ' ' else haystack[end]
             val inPath = notInPaths && (before == '/' || after == '/')
             if (!before.isLetter() && before != '-' && !after.isLetter() && after != '-' && !inPath) return true
             i = found + 1

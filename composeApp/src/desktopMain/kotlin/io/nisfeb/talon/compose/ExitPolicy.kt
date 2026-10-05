@@ -56,9 +56,6 @@ internal object ExitPolicy {
     }
 
     private fun daemon(name: String, body: () -> Unit) {
-        Thread { runCatching(body) }.apply {
-            isDaemon = true
-            this.name = name
-        }.start()
+        kotlin.concurrent.thread(isDaemon = true, name = name) { runCatching(body) }
     }
 }

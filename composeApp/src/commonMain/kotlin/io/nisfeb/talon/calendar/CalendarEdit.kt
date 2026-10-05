@@ -432,7 +432,7 @@ fun alarmLabel(a: CalAlarm, zone: TimeZone, twentyFourHour: Boolean): String = w
     "before" -> if (a.s == 0L) "At the start" else "${alarmSpan(a.s)} before"
     "at" -> a.raw["at_ms"]?.jsonPrimitive?.longOrNull?.let {
         val t = Instant.fromEpochMilliseconds(it).toLocalDateTime(zone)
-        "At ${io.nisfeb.talon.ui.SkyClock.clockLabel(t.hour * 60 + t.minute, twentyFourHour)} on ${t.date}"
+        "At ${io.nisfeb.talon.ui.SkyClock.clockLabel(t.hour * 60 + t.minute, twentyFourHour)} on ${io.nisfeb.talon.util.formatDate(t.date)}"
     } ?: "At a set time"
     "offset" -> {
         val end = a.raw["from"]?.jsonPrimitive?.contentOrNull == "end"

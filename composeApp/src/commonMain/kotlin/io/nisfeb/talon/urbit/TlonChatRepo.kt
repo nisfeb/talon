@@ -2103,7 +2103,7 @@ class TlonChatRepo(
             refreshInvites(notify = true)
             return
         }
-        val joined = db.groups().allGroups().mapTo(mutableSetOf()) { it.flag }
+        val joined = db.groups().joinedOf(payload.keys).toSet()
         val out = shown.filter { it.flag !in payload }.toMutableList()
         val joining = _joining.value.filter { it.flag !in payload }.toMutableList()
         val fresh = mutableListOf<InviteSummary>()
@@ -4422,16 +4422,17 @@ class TlonChatRepo(
         val named = followedThreadsOf(body)
         val dao = db.followedThreads()
         val have = dao.all().associateBy { ThreadSource(it.whom, it.parentPostId) }
-        named.forEach { (src, follow) ->
-            // A change made here and not yet sent stands; one already
-            // stored as the ship has it is not written again, since every
-            // write re-reads the followed-threads list on each screen.
-            val held = have[src]
-            if (held != null && (!held.sent || held.follow == follow)) return@forEach
-            dao.upsert(FollowedThreadEntity(src.whom, src.parentPostId, follow, sent = true, atMs = start))
-        }
-        have.values.filter { it.sent && it.atMs < start && ThreadSource(it.whom, it.parentPostId) !in named }
-            .forEach { dao.delete(it.whom, it.parentPostId) }
+        // A change made here and not yet sent stands; one already stored as
+        // the ship has it is not written again. One write each way: every
+        // write re-reads the followed-threads list on each screen.
+        dao.upsertAll(
+            named.mapNotNull { (src, follow) ->
+                val held = have[src]
+                if (held != null && (!held.sent || held.follow == follow)) null
+                else FollowedThreadEntity(src.whom, src.parentPostId, follow, sent = true, atMs = start)
+            },
+        )
+        dao.deleteAll(have.values.filter { it.sent && it.atMs < start && ThreadSource(it.whom, it.parentPostId) !in named })
     }
 
     /** An adjust fact: one thread's follow changed, here or on another client. */
