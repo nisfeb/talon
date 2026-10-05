@@ -856,6 +856,21 @@ class CallController(
         }
     }
 
+    /** What the live call could share; empty between calls. */
+    suspend fun screenSources(): List<ScreenSource> = engine?.screenSources().orEmpty()
+
+    /**
+     * Share [source] on the live call, or stop with null. Like
+     * [setCamera], no signalling. Runs on the controller's scope, so a
+     * screen that closes midway doesn't cancel it; false when it failed.
+     */
+    suspend fun setScreenShare(source: ScreenSource?): Boolean {
+        val eng = engine ?: return false
+        val ok = scope.async { eng.setScreenShare(source) }.await()
+        if (!ok && source != null) Log.w(TAG, "the screen share would not start")
+        return ok
+    }
+
     fun setMuted(muted: Boolean) {
         engine?.setMuted(muted)
         val cur = _state.value

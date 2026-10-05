@@ -46,7 +46,8 @@ actual fun VideoSurface(
     VideoTrackCanvas(
         track = if (local) desktop.localVideoTrack else desktop.remoteVideoTrack,
         on = if (local) video.localOn else video.remoteOn,
-        mirror = local,
+        // A mirror suits a camera; a shared screen's text must read right.
+        mirror = local && !video.sharing,
         modifier = modifier,
         onFrameAspect = onFrameAspect,
     )
@@ -64,7 +65,7 @@ actual fun VideoSurface(
     VideoTrackCanvas(
         track = if (local) d.localVideoTrack else d.remoteVideoTrack,
         on = if (local) video.localOn else video.remoteOn,
-        mirror = local,
+        mirror = local && !video.sharing,
         modifier = modifier,
         onFrameAspect = onFrameAspect,
     )

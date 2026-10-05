@@ -5,6 +5,8 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.automirrored.filled.Reply
+import androidx.compose.material.icons.automirrored.filled.ScreenShare
+import androidx.compose.material.icons.automirrored.filled.StopScreenShare
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Archive
@@ -112,5 +114,7 @@ object TalonIconSources {
         "Logout" to Icons.AutoMirrored.Filled.Logout,
         "Reply" to Icons.AutoMirrored.Filled.Reply,
         "Forward" to Icons.AutoMirrored.Filled.Forward,
+        "ScreenShare" to Icons.AutoMirrored.Filled.ScreenShare,
+        "StopScreenShare" to Icons.AutoMirrored.Filled.StopScreenShare,
     )
 }

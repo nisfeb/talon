@@ -42,7 +42,10 @@ import kotlinx.coroutines.withTimeout
  * Remote audio renders automatically through the default device via
  * libwebrtc's audio device module; mic capture likewise.
  */
-class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngine {
+class DesktopCallEngine(
+    configuredIce: List<IceServer> = emptyList(),
+    screenCapture: ScreenCapture = DesktopScreenCapture,
+) : CallEngine {
 
     private val _state = MutableStateFlow(MediaState.Idle)
     override val state: StateFlow<MediaState> = _state
@@ -71,7 +74,8 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
 
     /** Tracks the renderer attaches a sink to. Desktop-only members:
      *  webrtc-java's types cannot cross into commonMain. */
-    val localVideoTrack: VideoTrack? get() = localVideo
+    val localVideoTrack: VideoTrack? get() = share.track ?: localVideo
+    private val share = ScreenShareSlot(factory, screenCapture)
     @Volatile var remoteVideoTrack: VideoTrack? = null
         private set
 
@@ -174,8 +178,13 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         if (!enabled) {
             runCatching { track.isEnabled = false }
             runCatching { source.stop() }
-            _video.value = _video.value.copy(localOn = false)
+            _video.value = _video.value.copy(localOn = share.active)
             return true
+        }
+        // The camera takes the sender back from a share.
+        if (share.active) {
+            share.stop(cameraSender, localVideo)
+            _video.value = _video.value.copy(localOn = false, sharing = false)
         }
         return runCatching {
             val device = DesktopVideoDevices.pick()
@@ -207,6 +216,31 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         }.getOrElse {
             Log.w("Trunk", "could not start the camera", it)
             runCatching { source.stop() }
+            false
+        }
+    }
+
+    override suspend fun screenSources(): List<ScreenSource> = desktopScreenSources()
+
+    /** See [CallEngine.setScreenShare]: the share takes the camera's sender. */
+    override suspend fun setScreenShare(source: ScreenSource?): Boolean {
+        if (closed.value) return false
+        val sender = cameraSender ?: return false
+        if (source == null) {
+            share.stop(sender, localVideo)
+            _video.value = _video.value.copy(localOn = false, sharing = false)
+            return true
+        }
+        return runCatching {
+            runCatching { localVideo?.isEnabled = false }
+            runCatching { cameraSource?.stop() }
+            share.start(sender, source)
+            _video.value = _video.value.copy(localOn = true, sharing = true)
+            true
+        }.getOrElse {
+            Log.w("Trunk", "could not share ${source.title}", it)
+            share.stop(sender, localVideo)
+            _video.value = _video.value.copy(localOn = false, sharing = false)
             false
         }
     }
@@ -330,6 +364,7 @@ class DesktopCallEngine(configuredIce: List<IceServer> = emptyList()) : CallEngi
         // closed source is a native callback into freed memory.
         runCatching { localVideo?.isEnabled = false }
         runCatching { cameraSource?.stop() }
+        share.release()
         runCatching { localVideo?.dispose() }
         runCatching { cameraSource?.dispose() }
         cameraSource = null
