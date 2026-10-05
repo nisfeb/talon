@@ -253,6 +253,8 @@ class PartyLine(
     // kept to share it again on a republished up link.
     private val _shared = MutableStateFlow<ScreenSource?>(null)
     val shared: StateFlow<ScreenSource?> = _shared.asStateFlow()
+    // The up link that took the share: only it can end it by itself.
+    private var sharedOn: PeerLink? = null
     // The pinned speaker who gets the focused tile. Local only today:
     // see [setFocusedVideo] — no up link is labelled and none publishes
     // simulcast, so "video-low" bounds nothing yet.
@@ -610,6 +612,7 @@ class PartyLine(
         val ok = up.setScreenShare(source)
         if (ok) {
             _shared.value = source
+            sharedOn = up.takeIf { source != null }
             if (source != null) _cameraOn.value = false
             refreshVideoOn()
             broadcastVideo()
@@ -622,6 +625,7 @@ class PartyLine(
 
     private fun stopSharingState() {
         _shared.value = null
+        sharedOn = null
     }
 
     /** Broadcast our camera on/off so peers' tiles show video vs avatar.
@@ -1108,6 +1112,7 @@ class PartyLine(
         when {
             had && !speak -> {
                 upWatch?.cancel()
+                upShareWatch?.cancel()
                 upWatch = null
                 upLink?.close()
                 upLink = null
@@ -1155,6 +1160,7 @@ class PartyLine(
      *  the new link was live, the exact lie the retry was built to
      *  kill. It also leaked one collector per republish. */
     private var upWatch: Job? = null
+    private var upShareWatch: kotlinx.coroutines.Job? = null
     /** Whether we have offered an up stream yet this join, so the first
      *  publish doesn't claim to replace an id the server never saw. */
     private var upOffered = false
@@ -1202,6 +1208,18 @@ class PartyLine(
             old?.close()
             upLink = up
             _upLink.value = up
+            // A share the link ended itself (its dialog cancelled, nothing
+            // sent) ends here too, so the room and the button follow it.
+            upShareWatch?.cancel()
+            upShareWatch = scope.launch {
+                up.video.collect { v ->
+                    if (!v.sharing && sharedOn === up && upLink === up) {
+                        stopSharingState()
+                        refreshVideoOn()
+                        broadcastVideo()
+                    }
+                }
+            }
             startLevelPolling()
             up.setMuted(muted)
             // Carry an in-flight recording across the republish. The old
@@ -1226,7 +1244,8 @@ class PartyLine(
             // when its screen or window is gone.
             val shared = _shared.value
             if (shared != null) scope.launch {
-                if (!up.setScreenShare(shared)) {
+                if (up.setScreenShare(shared)) sharedOn = up
+                else {
                     stopSharingState()
                     refreshVideoOn()
                     broadcastVideo()
@@ -1460,6 +1479,7 @@ class PartyLine(
         levelPoll?.cancel()
         levelPoll = null
         upWatch?.cancel()
+        upShareWatch?.cancel()
         upWatch = null
         streamOwner.clear()
         speaking = emptySet()

@@ -21,6 +21,8 @@ import kotlin.test.assertTrue
 class PartyLineScreenShareTest {
     private class ScriptedLink(private val shareOk: Boolean = true) : PeerLink {
         override val state: StateFlow<MediaState> = MutableStateFlow(MediaState.Idle)
+        val videoFlow = MutableStateFlow(VideoState())
+        override val video: StateFlow<VideoState> get() = videoFlow
         val shares = mutableListOf<ScreenSource?>()
         val cameras = mutableListOf<Boolean>()
         override fun onLocalCandidate(callback: (IceCandidate) -> Unit) = Unit
@@ -32,7 +34,10 @@ class PartyLineScreenShareTest {
         override fun close() = Unit
         override suspend fun setCameraEnabled(enabled: Boolean): Boolean = true.also { cameras += enabled }
         override suspend fun screenSources(): List<ScreenSource> = listOf(SCREEN)
-        override suspend fun setScreenShare(source: ScreenSource?): Boolean = (shareOk || source == null).also { shares += source }
+        override suspend fun setScreenShare(source: ScreenSource?): Boolean = (shareOk || source == null).also { ok ->
+            shares += source
+            if (ok) videoFlow.value = VideoState(localOn = source != null, sharing = source != null)
+        }
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -115,6 +120,19 @@ class PartyLineScreenShareTest {
         l.handle(abort(l.upId))
         withTimeout(5_000) { while ((l.shared.value != null)) delay(10) }
         assertTrue(l.videoOn.value.isEmpty(), "peers are not left with a frameless tile")
+    }
+
+    @Test
+    fun `a share the link ends itself ends on the line too`() = runBlocking {
+        // A cancelled system dialog, or a capture that stopped sending:
+        // the link ends the share, and the room and the button must follow.
+        val ups = mutableListOf<ScriptedLink>()
+        val l = line(ups)
+        l.handle(joined())
+        assertTrue(l.setScreenShare(SCREEN))
+        ups.single().videoFlow.value = VideoState()
+        withTimeout(5_000) { while (l.shared.value != null) delay(10) }
+        assertTrue(l.videoOn.value.isEmpty(), "the room is told our video went off")
     }
 
     private companion object {

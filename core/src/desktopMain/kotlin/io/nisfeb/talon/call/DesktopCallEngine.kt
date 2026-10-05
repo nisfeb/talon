@@ -75,7 +75,8 @@ class DesktopCallEngine(
     /** Tracks the renderer attaches a sink to. Desktop-only members:
      *  webrtc-java's types cannot cross into commonMain. */
     val localVideoTrack: VideoTrack? get() = share.track ?: localVideo
-    private val share = ScreenShareSlot(factory, screenCapture)
+    // A share that ended itself (its dialog cancelled, nothing sent) is off here too.
+    private val share = ScreenShareSlot(factory, screenCapture, onEnded = { _video.value = _video.value.copy(localOn = false, sharing = false) })
     @Volatile var remoteVideoTrack: VideoTrack? = null
         private set
 
