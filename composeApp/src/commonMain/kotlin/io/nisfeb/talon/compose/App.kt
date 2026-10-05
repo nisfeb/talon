@@ -2386,20 +2386,13 @@ fun App(
                         onOpenContact = { patp -> profileSheetShip = patp },
                         onBack = { showContacts = false },
                     )
-                    showActions -> io.nisfeb.talon.ui.screens.OrreryActionsScreen(
+                    showActions -> io.nisfeb.talon.ui.screens.OrreryRepoScreen(
+                        orreryRepo = orreryRepo,
                         actions = orreryActions,
-                        onBack = { showActions = false },
-                        onShown = { orreryRepo.opened() },
-                        told = orreryRepo.told.collectAsState().value,
-                        onLeave = { orreryRepo.toldSeen() },
-                        failed = orreryRepo.failed.collectAsState().value,
-                        onDecide = { a, status, why -> orreryRepo.answer(a.id, status, why) },
-                        problem = orreryRepo.answerProblem.collectAsState().value ?: orreryRepo.error.collectAsState().value,
-                        generator = orreryRepo.generator.collectAsState().value?.let {
-                            io.nisfeb.talon.orrery.generatorLine(it, io.nisfeb.talon.util.nowMs(), kotlinx.datetime.TimeZone.currentSystemDefault())
-                        },
                         twentyFourHour = uiSettings.homeTwentyFourHour.collectAsState().value,
-                    ) { a -> openAction = a }
+                        onBack = { showActions = false },
+                        onOpenAction = { a -> openAction = a },
+                    )
                     openGroupAdminFlag != null -> GroupAdminScreen(
                         db = db,
                         repo = repo,

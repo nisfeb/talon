@@ -290,7 +290,7 @@ internal fun railLabel(item: RailItem): String = when (item) {
     RailItem.Profile -> "My profile"
     RailItem.Administration -> "Administration"
     RailItem.Invites -> "Invites"
-    RailItem.Actions -> "Actions"
+    RailItem.Actions -> "Orrery"
     RailItem.Settings -> "Settings"
 }
 

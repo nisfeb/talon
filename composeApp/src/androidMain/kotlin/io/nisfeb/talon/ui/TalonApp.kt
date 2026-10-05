@@ -144,6 +144,8 @@ fun TalonApp(
     /** A tapped mail notification: open Mail on arrival. */
     initialOpenMail: Boolean = false,
     initialOpenActions: Boolean = false,
+    /** A tapped leave alert: open Orrery on the thing it is about ("activity/slug"). */
+    initialOpenOrreryItem: String? = null,
     pendingShare: ShareIntent? = null,
     /** When non-null, the user already picked the share target in
      *  the system share sheet (Sharing Shortcut). Skip the in-app
@@ -698,6 +700,8 @@ fun TalonApp(
     var adminGroupFlag by remember { mutableStateOf<String?>(null) }
     var invitesOpen by remember { sections.flag() }
     var actionsOpen by remember { sections.flag() }
+    /** The thing Orrery opens on, from a leave alert; taken when shown. */
+    var orreryItem by remember { mutableStateOf<String?>(null) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
     /** Login-handoff QR generator. Reachable from the LoginScreen
      *  "Make a login QR" link (pre-login) and from settings
@@ -758,6 +762,15 @@ fun TalonApp(
     LaunchedEffect(initialOpenActions) {
         if (initialOpenActions) {
             closeSections()
+            actionsOpen = true
+            onDeepLinkConsumed()
+        }
+    }
+    // A tapped leave alert: Orrery, on the thing to leave for.
+    LaunchedEffect(initialOpenOrreryItem) {
+        if (initialOpenOrreryItem != null) {
+            closeSections()
+            orreryItem = initialOpenOrreryItem
             actionsOpen = true
             onDeepLinkConsumed()
         }
@@ -1588,7 +1601,7 @@ fun TalonApp(
             adminGroupFlag != null -> "GroupAdmin($adminGroupFlag)"
             adminListOpen -> "AdminList"
             invitesOpen -> "Invites"
-            actionsOpen -> "Actions"
+            actionsOpen -> "Orrery"
             openGroupFlag != null -> "GroupHome($openGroupFlag)"
             sidebarSettingsOpen -> "SidebarSettings"
             appsOpen -> "Apps"
@@ -2078,21 +2091,16 @@ fun TalonApp(
                 modifier = mod,
             )
 
-            actionsOpen -> io.nisfeb.talon.ui.screens.OrreryActionsScreen(
+            actionsOpen -> io.nisfeb.talon.ui.screens.OrreryRepoScreen(
+                orreryRepo = orreryRepo,
                 actions = orreryActions,
-                onBack = { actionsOpen = false },
-                modifier = mod,
-                onShown = { orreryRepo.opened() },
-                told = orreryRepo.told.collectAsState().value,
-                onLeave = { orreryRepo.toldSeen() },
-                failed = orreryRepo.failed.collectAsState().value,
-                onDecide = { a, status, why -> orreryRepo.answer(a.id, status, why) },
-                problem = orreryRepo.answerProblem.collectAsState().value ?: orreryRepo.error.collectAsState().value,
-                        generator = orreryRepo.generator.collectAsState().value?.let {
-                            io.nisfeb.talon.orrery.generatorLine(it, io.nisfeb.talon.util.nowMs(), kotlinx.datetime.TimeZone.currentSystemDefault())
-                        },
                 twentyFourHour = app.uiSettings.homeTwentyFourHour.collectAsState().value,
-            ) { a -> openAction = a }
+                onBack = { actionsOpen = false },
+                onOpenAction = { a -> openAction = a },
+                modifier = mod,
+                openItem = orreryItem,
+                onOpenedItem = { orreryItem = null },
+            )
 
             openGroupFlag != null -> GroupHomeScreen(
                 db = app.db,
