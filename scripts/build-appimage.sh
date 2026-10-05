@@ -68,14 +68,16 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
         done
     fi
     : "${JAVA_HOME:?JAVA_HOME must point to a JDK 25}"
-    # `slimReleaseDistributable` depends on `createReleaseDistributable`
-    # and runs after — so a single Gradle call gives us a slim host-
-    # native-only distributable. The Gradle slim is host-OS-aware
+    # `trainReleaseAotCache` runs after `slimReleaseDistributable`, which
+    # runs after `createReleaseDistributable` — so a single Gradle call
+    # gives us a slim host-native-only distributable with its startup
+    # cache trained in (or without one, if training failed; it needs a
+    # display, so CI runs this under xvfb-run). The Gradle slim is host-OS-aware
     # (linux-x64 here) and shared by every package* task; the
     # post-cp slim block below stays as a belt-and-suspenders
     # idempotent fallback for `--skip-build` runs against an
     # unslimmed dist.
-    PATH="$JAVA_HOME/bin:$PATH" "$ROOT/gradlew" :composeApp:slimReleaseDistributable
+    PATH="$JAVA_HOME/bin:$PATH" "$ROOT/gradlew" :composeApp:trainReleaseAotCache
 fi
 
 if [[ ! -d "$DIST_SRC" ]]; then
@@ -101,7 +103,8 @@ mkdir -p "$APPDIR"
 # native launcher at `bin/Talon` already knows how to find its
 # bundled JRE under `lib/runtime/` via relative path, so we don't
 # have to rewrite anything.
-cp -r "$DIST_SRC/." "$APPDIR/"
+# -a keeps mtimes: the JVM rejects the AOT cache if a jar's mtime changed.
+cp -a "$DIST_SRC/." "$APPDIR/"
 
 # Slim cross-platform native libs out of bundled JARs. The Linux
 # AppImage doesn't need Windows DLLs, macOS dylibs (especially their

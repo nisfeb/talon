@@ -248,6 +248,15 @@ private fun showStartupError(title: String, body: String) {
     )
 }
 
+/** Milliseconds from process start to now, and the heap still in use after a collection. */
+internal fun startupProbeLine(): String {
+    val ms = ProcessHandle.current().info().startInstant()
+        .map { java.time.Duration.between(it, java.time.Instant.now()).toMillis() }.orElse(-1L)
+    System.gc()
+    val rt = Runtime.getRuntime()
+    return "talon-first-frame-ms=$ms heap-used-mb=${(rt.totalMemory() - rt.freeMemory()) / (1024 * 1024)}"
+}
+
 fun main() {
     io.nisfeb.talon.util.DesktopNetworkWatcher.start()
     io.nisfeb.talon.util.UiWatchdog.start()
@@ -461,6 +470,16 @@ fun main() {
                 }
             },
         ) {
+            // Startup probe: the AOT cache's training run and launch
+            // timing set this to quit once the first frame has drawn.
+            System.getenv("TALON_EXIT_AFTER_FIRST_FRAME_MS")?.toLongOrNull()?.let { linger ->
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    println(startupProbeLine())
+                    kotlinx.coroutines.delay(linger)
+                    kotlin.system.exitProcess(0)
+                }
+            }
             // Override Compose's default desktop UriHandler. The
             // default delegates to java.awt.Desktop.browse, which
             // throws on Wayland-only Linux setups (Hyprland, Sway,
