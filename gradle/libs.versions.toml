@@ -15,6 +15,7 @@ bignum = "0.3.10"
 okio = "3.17.0"
 atomicfu = "0.33.0"
 coil = "3.4.0"
+filekit = "0.13.0"
 media3 = "1.10.1"
 lifecycle = "2.11.0"
 reorderable = "3.1.0"
@@ -77,6 +78,7 @@ kotlinx-coroutines-swing = { group = "org.jetbrains.kotlinx", name = "kotlinx-co
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
 coil-network-ktor = { group = "io.coil-kt.coil3", name = "coil-network-ktor3", version.ref = "coil" }
+filekit-dialogs = { group = "io.github.vinceglb", name = "filekit-dialogs", version.ref = "filekit" }
 webrtc-java = { group = "dev.onvoid.webrtc", name = "webrtc-java", version.ref = "webrtcJava" }
 webrtc-android = { group = "io.getstream", name = "stream-webrtc-android", version.ref = "webrtcAndroid" }
 

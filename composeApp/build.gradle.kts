@@ -242,6 +242,10 @@ kotlin {
             }
             runtimeOnly("dev.onvoid.webrtc:webrtc-java:" + libs.versions.webrtcJava.get() + ":" + webrtcNatives)
             implementation(libs.kotlinx.coroutines.swing)
+            // The system's own file picker (util/DesktopFilePicker.kt): the
+            // xdg-desktop-portal on Linux, NSOpenPanel on macOS, the Windows
+            // dialog. Brings JNA and dbus-java.
+            implementation(libs.filekit.dialogs)
             // Ktor OkHttp engine — backs the shared HttpClient on desktop.
             implementation(libs.ktor.client.okhttp)
             // Coil network fetcher (JVM only).
@@ -457,7 +461,11 @@ compose.desktop {
             // java.naming = JNDI for OkHttp DNS, java.sql = JDBC stubs
             // pulled in by androidx.sqlite-bundled. Without these the
             // jpackage runtime image can't open a connection at all.
-            modules("java.naming", "java.sql")
+            // jdk.security.auth and jdk.net = dbus-java (FileKit's portal
+            // file picker on Linux): the UID for the session bus's
+            // EXTERNAL auth, and its unix-socket transport. Without them
+            // the packaged app cannot reach the portal.
+            modules("java.naming", "java.sql", "jdk.security.auth", "jdk.net")
 
             linux {
                 iconFile.set(project.file("src/desktopMain/resources/icon.png"))
