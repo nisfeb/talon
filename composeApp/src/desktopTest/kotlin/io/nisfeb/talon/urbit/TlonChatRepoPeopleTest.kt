@@ -63,6 +63,18 @@ class TlonChatRepoPeopleTest {
     }
 
     @Test
+    fun `a directory slower than a chat read still arrives, so strangers get their avatars`() = live {
+        // ~ricsul, 2026-10-05: ~3,400 peers took longer than 6 s on every
+        // read for two days, so no one outside the book had an avatar.
+        val ship = FakeShip("~zod", timeouts = true)
+        val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod") }
+        ship.scries["contacts/v1/directory"] = """{"~bus":{"avatar":{"type":"look","value":"https://bus.example/a.png"}}}"""
+        ship.holdScry = { if (it == "contacts/v1/directory") 7_000 else 0 }
+        repo.bootstrapContacts(ship.channel)
+        assertEquals("https://bus.example/a.png", db.contacts().get("~bus")?.avatarUrl)
+    }
+
+    @Test
     fun `adding a contact meets them, pages them, and keeps what we knew`() = live {
         db.contacts().upsert(ContactEntity("~bus", null, "a bus", null, status = "on the road", statusUpdatedMs = 1))
         repo.addContact("~bus", nickname = "  Bus  ")

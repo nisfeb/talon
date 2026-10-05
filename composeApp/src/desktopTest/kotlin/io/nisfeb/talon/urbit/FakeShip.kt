@@ -36,7 +36,11 @@ import java.util.concurrent.ConcurrentHashMap
  * `channel.events()`, as in the app; without that every poke waits out
  * its ack timeout.
  */
-internal class FakeShip(val us: String = "~zod") {
+/**
+ * [timeouts] gives the client the app's own request timeouts (HttpTimeout):
+ * without it a held answer waits forever, so no read here ever times out.
+ */
+internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
     data class Poke(val app: String, val mark: String, val json: JsonElement, val ship: String)
 
     val pokes: MutableList<Poke> = java.util.concurrent.CopyOnWriteArrayList()
@@ -290,7 +294,7 @@ internal class FakeShip(val us: String = "~zod") {
             }
             else -> respond("", HttpStatusCode.NotFound)
         }
-    })
+    }) { if (timeouts) install(io.ktor.client.plugins.HttpTimeout) }
 
     /** Signed in to this ship at https://ship.test, and nothing else. */
     val session = object : SessionStore {
