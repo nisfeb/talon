@@ -323,7 +323,7 @@ tasks.withType<Test>().configureEach {
     environment("XDG_CONFIG_HOME", "$home/.config")
     // RuntimeClassVersionTest reads the release's JDK from here: a change
     // to it runs the tests again rather than reusing a cached pass.
-    inputs.file(rootProject.file(".github/workflows/release.yml"))
+    inputs.file(rootDir.resolve(".github/workflows/release.yml"))
 }
 
 // Single source of truth for the app version. `derivePackageVersion`
