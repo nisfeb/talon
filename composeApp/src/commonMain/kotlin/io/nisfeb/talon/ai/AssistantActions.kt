@@ -439,7 +439,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 // add-first can only leave a visible duplicate, and the
                 // partial state is reported honestly below.
                 val one = d.copy(
-                    repeat = Repeat.ONCE, rawKind = null, rawArgs = null, rawStartMs = null, count = 0, until = null,
+                    repeat = Repeat.ONCE, rawKind = null, rawArgs = null, count = 0, until = null,
                     date = newDate ?: at.date,
                     minuteOfDay = newMinute ?: (at.hour * 60 + at.minute),
                 )
