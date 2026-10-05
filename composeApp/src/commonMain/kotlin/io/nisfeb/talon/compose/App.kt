@@ -1665,10 +1665,10 @@ fun App(
             // state moves whenever anyone starts or stops speaking, and
             // each move recomposed the whole window.
             val partyPhase by remember(partyLine) {
-                (partyLine?.state ?: kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.PartyState.Idle))
-                    .map { (it is io.nisfeb.talon.call.PartyState.Live) to (it is io.nisfeb.talon.call.PartyState.Idle) }
-                    .distinctUntilChanged()
-            }.collectAsState(initial = false to true)
+                io.nisfeb.talon.util.mapState(partyLine?.state ?: kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.PartyState.Idle)) {
+                    (it is io.nisfeb.talon.call.PartyState.Live) to (it is io.nisfeb.talon.call.PartyState.Idle)
+                }
+            }.collectAsState()
             val (partyLive, partyIdle) = partyPhase
             // Desktop meeting view: the call view over the whole window.
             var meetingOpen by remember { mutableStateOf(false) }

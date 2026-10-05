@@ -83,6 +83,30 @@ internal class ScreenShareSlot(
         previous?.close()
     }
 
+    /**
+     * Share [src] on [sender], or stop with null, with the camera
+     * stopped first ([stopCamera]): the two take turns on the sender.
+     * False when the capture would not start; the camera's track is
+     * then back on the sender.
+     */
+    fun set(sender: RTCRtpSender, src: ScreenSource?, camera: VideoTrack?, stopCamera: () -> Unit): Boolean {
+        if (src == null) {
+            stop(sender, camera)
+            return true
+        }
+        return runCatching {
+            runCatching { camera?.isEnabled = false }
+            runCatching(stopCamera)
+            start(sender, src)
+            Log.i(TAG, "sharing ${if (src.isWindow) "window" else "screen"} ${src.title}")
+            true
+        }.getOrElse {
+            Log.w(TAG, "could not share ${src.title}", it)
+            stop(sender, camera)
+            false
+        }
+    }
+
     /** Put [camera] (or nothing) back on [sender] and end the capture. */
     fun stop(sender: RTCRtpSender?, camera: VideoTrack?) {
         val current = opened ?: return

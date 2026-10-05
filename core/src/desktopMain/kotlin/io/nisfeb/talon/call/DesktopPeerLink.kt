@@ -240,24 +240,9 @@ class DesktopPeerLink(
     override suspend fun setScreenShare(source: ScreenSource?): Boolean {
         if (closed.value) return false
         val sender = cameraSender ?: return false
-        if (source == null) {
-            share.stop(sender, localVideo)
-            _video.value = _video.value.copy(localOn = false, sharing = false)
-            return true
-        }
-        return runCatching {
-            runCatching { localVideo?.isEnabled = false }
-            runCatching { cameraSource?.stop() }
-            share.start(sender, source)
-            Log.i("PartyLine", "sharing ${if (source.isWindow) "window" else "screen"} ${source.title}")
-            _video.value = _video.value.copy(localOn = true, sharing = true)
-            true
-        }.getOrElse {
-            Log.w("PartyLine", "could not share ${source.title}", it)
-            share.stop(sender, localVideo)
-            _video.value = _video.value.copy(localOn = false, sharing = false)
-            false
-        }
+        val ok = share.set(sender, source, localVideo) { cameraSource?.stop() }
+        _video.value = _video.value.copy(localOn = share.active, sharing = share.active)
+        return ok
     }
 
     override fun onLocalCandidate(callback: (IceCandidate) -> Unit) {

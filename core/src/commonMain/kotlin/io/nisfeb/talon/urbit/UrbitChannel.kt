@@ -256,18 +256,7 @@ class UrbitChannel internal constructor(
     @Volatile
     private var lastStreamMs: Long = 0L
 
-    suspend fun subscribe(app: String, path: String, onShip: String = ship): Long {
-        val id = nextRequestId()
-        val msg = buildJsonObject {
-            put("id", id)
-            put("action", "subscribe")
-            put("ship", onShip)
-            put("app", app)
-            put("path", path)
-        }
-        put(buildJsonArray { add(msg) })
-        return id
-    }
+    suspend fun subscribe(app: String, path: String): Long = subscribeAll(listOf(app to path)).single()
 
     /**
      * Several subscriptions in one PUT, answering their request ids in the
@@ -384,6 +373,16 @@ class UrbitChannel internal constructor(
      * nobody reads ("eyre: clogged"). Call it before opening a
      * replacement and on the way out.
      */
+    /**
+     * Give this channel up now and end it on the ship in [scope], waiting
+     * at most [timeoutMs]: a ship that does not answer keeps it until
+     * eyre reaps it, and nothing here waits on that.
+     */
+    fun deleteSoon(scope: kotlinx.coroutines.CoroutineScope, timeoutMs: Long = 5_000) {
+        retire()
+        scope.launch { io.nisfeb.talon.util.runSuspendCatching { withTimeoutOrNull(timeoutMs) { delete() } } }
+    }
+
     suspend fun delete() {
         retire()
         val msg = buildJsonObject {
@@ -478,15 +477,11 @@ class UrbitChannel internal constructor(
      * slow to answer anything else. Three seconds, then out of reach.
      */
     suspend fun health(): ShipHealth = shipHealthOf(
-        try {
+        io.nisfeb.talon.util.runSuspendCatching {
             withContext(ioDispatcher) {
                 http.get("${baseUrl.trimEnd('/')}/~_~/healthz") { timeout { requestTimeoutMillis = 3_000 } }.status.value
             }
-        } catch (c: kotlinx.coroutines.CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            null
-        },
+        }.getOrNull(),
     )
 
     /** PUT a batch of channel actions. Runs on the IO dispatcher. */

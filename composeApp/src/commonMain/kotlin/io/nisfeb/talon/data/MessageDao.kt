@@ -59,12 +59,15 @@ abstract class MessageDao {
      * woke every screen watching the table, for nothing new.
      */
     open suspend fun changedOf(messages: List<MessageEntity>): List<MessageEntity> {
-        val incoming = messages.map { it.normalized().searchable() }
+        val incoming = messages.map { it.normalized() }
         val stored = HashMap<Pair<String, String>, MessageEntity>(incoming.size)
         for ((whom, rows) in incoming.groupBy { it.whom }) {
             for (ids in rows.map { it.id }.chunked(500)) getMany(whom, ids).forEach { stored[it.whom to it.id] = it }
         }
-        return incoming.filter { stored[it.whom to it.id] != it }
+        // Compared without the search text, which is a parse of the whole
+        // story: only a row that changed pays for one. A row stored before
+        // search text existed gets it from fillSearchText instead.
+        return incoming.filter { stored[it.whom to it.id]?.copy(searchText = null) != it }.map { it.searchable() }
     }
 
     /**

@@ -54,10 +54,10 @@ class PartyLineScreenShareTest {
         assertEquals(listOf(SCREEN), l.screenSources())
         assertTrue(l.setScreenShare(SCREEN))
         assertEquals(listOf<ScreenSource?>(SCREEN), ups.single().shares)
-        assertTrue(l.sharing.value)
+        assertTrue((l.shared.value != null))
         assertTrue(l.videoOn.value.isNotEmpty(), "the room is told our video is on")
         assertTrue(l.setScreenShare(null))
-        assertFalse(l.sharing.value)
+        assertFalse((l.shared.value != null))
         assertTrue(l.videoOn.value.isEmpty(), "and that it went off")
     }
 
@@ -69,10 +69,10 @@ class PartyLineScreenShareTest {
         assertTrue(l.setCameraEnabled(true))
         assertTrue(l.setScreenShare(SCREEN))
         assertFalse(l.cameraOn.value, "a share turns the camera off")
-        assertTrue(l.sharing.value)
+        assertTrue((l.shared.value != null))
         assertTrue(l.setCameraEnabled(true))
         assertTrue(l.cameraOn.value)
-        assertFalse(l.sharing.value, "the camera takes the sender back")
+        assertFalse((l.shared.value != null), "the camera takes the sender back")
     }
 
     @Test
@@ -81,7 +81,7 @@ class PartyLineScreenShareTest {
         val l = line(ups) { false }
         l.handle(joined())
         assertFalse(l.setScreenShare(SCREEN))
-        assertFalse(l.sharing.value)
+        assertFalse((l.shared.value != null))
         assertTrue(l.videoOn.value.isEmpty())
     }
 
@@ -102,7 +102,7 @@ class PartyLineScreenShareTest {
         assertEquals(2, ups.size, "the aborted up link was republished")
         withTimeout(5_000) { while (ups[1].shares.isEmpty()) delay(10) }
         assertEquals(listOf<ScreenSource?>(SCREEN), ups[1].shares)
-        assertTrue(l.sharing.value)
+        assertTrue((l.shared.value != null))
     }
 
     @Test
@@ -113,7 +113,7 @@ class PartyLineScreenShareTest {
         l.handle(joined())
         assertTrue(l.setScreenShare(SCREEN))
         l.handle(abort(l.upId))
-        withTimeout(5_000) { while (l.sharing.value) delay(10) }
+        withTimeout(5_000) { while ((l.shared.value != null)) delay(10) }
         assertTrue(l.videoOn.value.isEmpty(), "peers are not left with a frameless tile")
     }
 

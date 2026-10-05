@@ -64,12 +64,7 @@ import java.util.concurrent.TimeUnit
 private class DesktopAppGraph {
     // OkHttp client for the desktop-only leaf consumers (image
     // downloader). The session/repo/UI path uses [ktorHttp] instead.
-    val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        // long-lived SSE — no read timeout
-        .readTimeout(0, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
-        .build()
+    val http: OkHttpClient = io.nisfeb.talon.util.sharedOkHttp
     // Shared multiplatform HTTP client threaded into common (UrbitSession,
     // TlonChatRepo, link previews). Ktor over an OkHttp engine on desktop.
     val ktorHttp: HttpClient = createAppHttpClient()

@@ -297,16 +297,11 @@ fun DmListScreen(
         mentionUnreads = kotlinx.coroutines.withContext(Dispatchers.Default) {
             val filtered = mutableListOf<UnreadEntity>()
             for (u in notifyUnreads) {
-                // Not runCatching: it caught the cancellation of a scan the
-                // next emission replaced, every row after it read as having
-                // nothing cached and so passed, and the stale list was shown.
-                val recent = try {
+                // A scan the next emission replaced must stop, not read as
+                // nothing cached: plain runCatching showed the stale list.
+                val recent = io.nisfeb.talon.util.runSuspendCatching {
                     db.messages().latestAnyFor(u.whom, MENTION_SCAN_LIMIT)
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    emptyList()
-                }
+                }.getOrDefault(emptyList())
                 val include = if (recent.isEmpty()) {
                     true
                 } else {

@@ -830,7 +830,7 @@ class PartyWiring(
 @Composable
 fun rememberPartyWiring(party: PartyLine, videoDevices: io.nisfeb.talon.call.VideoDevices): PartyWiring {
     val cameraOn by party.cameraOn.collectAsState()
-    val sharing by party.sharing.collectAsState()
+    val sharing = party.shared.collectAsState().value != null
     val screenShare = remember(party) {
         if (isScreenShareSupported) ScreenShareControl({ party.screenSources() }, { party.setScreenShare(it) }) else null
     }
