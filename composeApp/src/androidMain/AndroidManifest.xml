@@ -100,7 +100,8 @@
         android:enableOnBackInvokedCallback="true"
         android:allowBackup="false"
         android:theme="@style/Theme.Talon"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config">
 
         <!-- configChanges: CallController / PartyLine live in this
              activity's composition, so recreating the activity on a

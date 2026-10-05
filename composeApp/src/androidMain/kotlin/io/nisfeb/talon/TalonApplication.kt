@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.util.createAppHttpClient
 import kotlinx.coroutines.launch
+import coil3.memoryCacheMaxSizePercentWhileInBackground
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -120,6 +121,20 @@ class TalonApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Images off screen leave the memory cache while Talon is in the
+        // background (those still drawn stay, held weakly), so a hidden
+        // Talon holds less. ponytail: half is a guess; Coil names none.
+        // Images get ECH where Android does it, like ship traffic.
+        coil3.SingletonImageLoader.setSafe { ctx ->
+            coil3.ImageLoader.Builder(ctx)
+                .memoryCacheMaxSizePercentWhileInBackground(0.5)
+                .apply {
+                    io.nisfeb.talon.util.echDnsOrNull()?.let { dns ->
+                        components { add(coil3.network.okhttp.OkHttpNetworkFetcherFactory(callFactory = { OkHttpClient.Builder().dns(dns).build() })) }
+                    }
+                }
+                .build()
+        }
         // Module-visible app context for the few leaf helpers that have
         // no Context of their own (e.g. saveWavFile's MediaStore write).
         talonAppContext = applicationContext
@@ -153,6 +168,7 @@ class TalonApplication : Application() {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.SECONDS) // long-lived SSE
             .writeTimeout(15, TimeUnit.SECONDS)
+            .apply { io.nisfeb.talon.util.echDnsOrNull()?.let(::dns) }
             .build()
         ktorHttp = createAppHttpClient()
         shipDataEraser = io.nisfeb.talon.data.AndroidShipDataEraser(this)
