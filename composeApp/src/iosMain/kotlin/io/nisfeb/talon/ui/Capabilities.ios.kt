@@ -46,6 +46,8 @@ actual val isBackgroundCallRingSupported: Boolean = true
 // Supplied by MainViewController's edge strip -> IosBackDispatcher.
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = true
+// iOS: port pending (a ReplayKit broadcast extension).
+actual val isScreenShareSupported: Boolean = false
 actual val isCameraSwitchSupported: Boolean = true
 
 actual val isEdgeSwipeBackSupported: Boolean = true

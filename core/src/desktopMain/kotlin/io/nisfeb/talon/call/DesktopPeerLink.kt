@@ -46,6 +46,8 @@ class DesktopPeerLink(
     private val micPcm: dev.onvoid.webrtc.media.audio.CustomAudioSource? = null,
     /** Where the incoming audio goes, instead of a speaker. */
     private val remotePcm: dev.onvoid.webrtc.media.audio.AudioTrackSink? = null,
+    /** How a shared screen is opened; a fake in tests. */
+    screenCapture: ScreenCapture = DesktopScreenCapture,
 ) : PeerLink {
 
     private val _state = MutableStateFlow(MediaState.Idle)
@@ -89,7 +91,8 @@ class DesktopPeerLink(
     /** The camera / remote camera track for [io.nisfeb.talon.ui.VideoSurface]
      *  to render. Platform members: a libwebrtc track can't cross into
      *  commonMain. */
-    val localVideoTrack: VideoTrack? get() = localVideo
+    val localVideoTrack: VideoTrack? get() = share.track ?: localVideo
+    private val share = ScreenShareSlot(factory, screenCapture)
     val remoteVideoTrack: VideoTrack? get() = remoteVideo
 
     private val config = RTCConfiguration().apply {
@@ -185,11 +188,16 @@ class DesktopPeerLink(
         if (!enabled) {
             runCatching { track.isEnabled = false }
             runCatching { source.stop() }
-            _video.value = _video.value.copy(localOn = false)
+            _video.value = _video.value.copy(localOn = share.active)
             return true
         }
         // Already on (e.g. a double-tap): don't re-open the source.
         if (localVideo?.isEnabled == true) return true
+        // The camera takes the sender back from a share.
+        if (share.active) {
+            share.stop(cameraSender, localVideo)
+            _video.value = _video.value.copy(localOn = false, sharing = false)
+        }
         return runCatching {
             val device = DesktopVideoDevices.pick()
                 ?: error("no camera on this machine")
@@ -221,6 +229,33 @@ class DesktopPeerLink(
         }.getOrElse {
             Log.w("PartyLine", "could not start the camera", it)
             runCatching { cameraSource?.stop() }
+            false
+        }
+    }
+
+    override suspend fun screenSources(): List<ScreenSource> =
+        if (sendAudio) desktopScreenSources() else emptyList()
+
+    /** See [PeerLink.setScreenShare]: the share takes the camera's sender. */
+    override suspend fun setScreenShare(source: ScreenSource?): Boolean {
+        if (closed.value) return false
+        val sender = cameraSender ?: return false
+        if (source == null) {
+            share.stop(sender, localVideo)
+            _video.value = _video.value.copy(localOn = false, sharing = false)
+            return true
+        }
+        return runCatching {
+            runCatching { localVideo?.isEnabled = false }
+            runCatching { cameraSource?.stop() }
+            share.start(sender, source)
+            Log.i("PartyLine", "sharing ${if (source.isWindow) "window" else "screen"} ${source.title}")
+            _video.value = _video.value.copy(localOn = true, sharing = true)
+            true
+        }.getOrElse {
+            Log.w("PartyLine", "could not share ${source.title}", it)
+            share.stop(sender, localVideo)
+            _video.value = _video.value.copy(localOn = false, sharing = false)
             false
         }
     }
@@ -526,6 +561,7 @@ class DesktopPeerLink(
         detachRec()
         runCatching { localVideo?.isEnabled = false }
         runCatching { cameraSource?.stop() }
+        share.release()
         // stop() releases the device; dispose() releases the object.
         // Without it a link leaked its camera source and track — once
         // per down link and once per republish, not once per call.

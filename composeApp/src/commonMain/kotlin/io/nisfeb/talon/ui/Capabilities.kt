@@ -23,6 +23,7 @@ package io.nisfeb.talon.ui
  *  - isVideoCallsSupported — A, D, i: camera capture + render end-to-end on all three.
  *  - isPartyVideoSupported — A, D, i: PeerLink publishes and renders cameras on all three.
  *  - isCameraSwitchSupported — A, i; D: a webcam has one lens and no switch.
+ *  - isScreenShareSupported — D (webrtc-java captures a screen or window). A: port pending (MediaProjection behind a foreground service). i: port pending (a ReplayKit broadcast extension).
  *  - isEdgeSwipeBackSupported — i (Compose gets none of UIKit's gesture); A: the system back owns the edge; D: no touch edge.
  *  - isDrawerNavigation — A, i (no room for a rail); D: the permanent rail is already one click from anywhere.
  *  - isTouchPrimary — A, i (thumb-sized rows); D: mouse + close screen favour density.
@@ -245,6 +246,14 @@ expect val isVideoCallsSupported: Boolean
  * works everywhere regardless.
  */
 expect val isPartyVideoSupported: Boolean
+
+/**
+ * Sharing a screen or a window on a call or a party line, sent in place
+ * of the camera. Desktop only: webrtc-java captures screens and windows
+ * on X11, Wayland (through the system portal), macOS and Windows. Gates
+ * the share control (CLAUDE.md #3); everyone can still see a share.
+ */
+expect val isScreenShareSupported: Boolean
 
 /**
  * Whether the camera can be flipped front/back. Android: true

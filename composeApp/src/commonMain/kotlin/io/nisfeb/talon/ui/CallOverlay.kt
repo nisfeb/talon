@@ -157,6 +157,9 @@ fun CallStrip(
     val video by (engine?.video ?: remember { MutableStateFlow(VideoState()) })
         .collectAsState()
     val camera = rememberCameraPermission()
+    val shareControl = remember(controller) {
+        ScreenShareControl({ controller.screenSources() }, { controller.setScreenShare(it) })
+    }
     when (val s = state) {
         is CallUiState.Active -> Column(modifier) {
             // Pictures above the strip, so the controls stay in the
@@ -198,6 +201,8 @@ fun CallStrip(
                     else controller.setCamera(!video.localOn)
                 }
             } else null,
+            screenShare = if (isScreenShareSupported && engine != null) shareControl else null,
+            sharing = video.sharing,
             videoPane = if (isVideoCallsSupported && engine != null && video.anyOn) {
                 { CallVideoPane(engine, video, Modifier.fillMaxWidth()) }
             } else null,

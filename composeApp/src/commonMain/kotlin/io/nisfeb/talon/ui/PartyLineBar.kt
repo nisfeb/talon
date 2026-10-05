@@ -109,6 +109,8 @@ fun PartyLineBar(
         cameraOn = w.cameraOn,
         cameraError = w.cameraError,
         onToggleCamera = w.onToggleCamera,
+        screenShare = w.screenShare,
+        sharing = w.sharing,
         localVideoLink = w.localLink,
         videoLinkFor = { party.videoLinkFor(it) },
         videoOnShips = w.videoOnShips,
@@ -208,6 +210,9 @@ fun PartyLineBarContent(
      *  own: the toggle looks identical whether the camera opened or the
      *  machine has no webcam at all. */
     cameraError: Boolean = false,
+    /** Screen sharing, shown only when non-null (isScreenShareSupported). */
+    screenShare: ScreenShareControl? = null,
+    sharing: Boolean = false,
     /** Video conference: render tiles in the full-screen view. */
     partyVideoSupported: Boolean = false,
     localVideoLink: io.nisfeb.talon.call.PeerLink? = null,
@@ -414,6 +419,26 @@ fun PartyLineBarContent(
                                 )
                             }
                         }
+                        // A share goes out on the camera's sender, so a
+                        // listener (no up link) has nothing to share on.
+                        if (screenShare != null && s.canSpeak) {
+                            ScreenShareMenu(screenShare, sharing) { press ->
+                                val tip = if (sharing) "Stop sharing" else "Share your screen"
+                                io.nisfeb.talon.ui.IconButton(tip = tip, onClick = {
+                                    // Show the self tile, as the camera does.
+                                    if (!sharing) {
+                                        if (immersive) fullScreen = true
+                                        else if (partyVideoSupported && headline == null) expanded = true
+                                    }
+                                    press()
+                                }) {
+                                    Icon(
+                                        if (sharing) TalonIcons.StopScreenShare else TalonIcons.ScreenShare,
+                                        contentDescription = tip,
+                                    )
+                                }
+                            }
+                        }
                         if (expandable) {
                             io.nisfeb.talon.ui.IconButton(tip = if (immersive) "Open the full-screen call"
                                         else if (expanded) "Hide who's on the line"
@@ -445,6 +470,16 @@ fun PartyLineBarContent(
                 PartyState.Idle -> {}
             }
         }
+    }
+    if (screenShare?.failed == true) {
+        Text(
+            "Couldn't share: nothing to share, or the system refused the capture.",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.error,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+        )
     }
     if (cameraError) {
         Text(
@@ -781,6 +816,9 @@ class PartyWiring(
     val cameraOn: Boolean,
     val cameraError: Boolean,
     val onToggleCamera: (() -> Unit)?,
+    val sharing: Boolean,
+    /** Null where the platform can't share a screen (isScreenShareSupported). */
+    val screenShare: ScreenShareControl?,
     val localLink: io.nisfeb.talon.call.PeerLink?,
     val videoOnShips: Set<String>,
     val focused: String?,
@@ -792,6 +830,10 @@ class PartyWiring(
 @Composable
 fun rememberPartyWiring(party: PartyLine, videoDevices: io.nisfeb.talon.call.VideoDevices): PartyWiring {
     val cameraOn by party.cameraOn.collectAsState()
+    val sharing by party.sharing.collectAsState()
+    val screenShare = remember(party) {
+        if (isScreenShareSupported) ScreenShareControl({ party.screenSources() }, { party.setScreenShare(it) }) else null
+    }
     val localLink by party.localVideoLink.collectAsState()
     val videoOnShips by party.videoOn.collectAsState()
     val focused by party.focusedVideo.collectAsState()
@@ -801,6 +843,8 @@ fun rememberPartyWiring(party: PartyLine, videoDevices: io.nisfeb.talon.call.Vid
     return PartyWiring(
         cameraOn = cameraOn,
         cameraError = cameraError,
+        sharing = sharing,
+        screenShare = screenShare,
         onToggleCamera = if (isPartyVideoSupported) {
             {
                 if (!camera.granted) camera.request()
@@ -884,6 +928,8 @@ fun PartyLineMeeting(
             partyVideoSupported = isPartyVideoSupported,
             cameraOn = w.cameraOn,
             onToggleCamera = w.onToggleCamera,
+            screenShare = w.screenShare,
+            sharing = w.sharing,
             localVideoLink = w.localLink,
             videoLinkFor = { party.videoLinkFor(it) },
             videoOnShips = w.videoOnShips,

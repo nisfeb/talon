@@ -313,6 +313,65 @@ class PartyLineScreensTest {
         }
     }
 
+    // ─── sharing a screen ───
+
+    private val screen = io.nisfeb.talon.call.ScreenSource(1, "Built-in display", isWindow = false)
+    private val window = io.nisfeb.talon.call.ScreenSource(7, "Notes", isWindow = true)
+
+    private fun shareControl(vararg sources: io.nisfeb.talon.call.ScreenSource, accept: Boolean = true) =
+        ScreenShareControl({ sources.toList() }, { s -> did += "share:${s?.title}"; accept })
+
+    private fun shareBar(state: PartyState.Live, control: ScreenShareControl?, sharing: Boolean = false, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                PartyLineBarContent(
+                    state = state, nameFor = { names[it] ?: it }, selfShip = "~zod",
+                    screenShare = control, sharing = sharing, partyVideoSupported = true,
+                    onOpenMeeting = { did += "meeting" },
+                )
+            }
+        }
+        waitForIdle()
+        block()
+    }
+
+    @Test
+    fun `a share is picked from the screens and windows, and the bar opens out to show it`() = shareBar(live(), shareControl(screen, window)) {
+        onNodeWithContentDescription("Share your screen").performClick()
+        waitForIdle()
+        onNodeWithText("Built-in display").assertExists()
+        onNodeWithText("Notes").performClick()
+        waitForIdle()
+        assertEquals(listOf("share:Notes"), did)
+        onNodeWithContentDescription("Hide who's on the line").assertExists()
+    }
+
+    @Test
+    fun `sharing offers a stop, and a share that would not start says so`() {
+        shareBar(live(), shareControl(screen), sharing = true) {
+            onNodeWithContentDescription("Stop sharing").performClick()
+            waitForIdle()
+            assertEquals(listOf("share:null"), did)
+        }
+        did.clear()
+        shareBar(live(), shareControl(screen, accept = false)) {
+            onNodeWithContentDescription("Share your screen").performClick()
+            waitForIdle()
+            assertEquals(listOf("share:Built-in display"), did, "one screen is shared without a menu")
+            assertTrue(shows("Couldn't share: nothing to share, or the system refused the capture."))
+        }
+    }
+
+    @Test
+    fun `there is no share button where sharing isn't built, or for a listener`() {
+        shareBar(live(), control = null) {
+            assertTrue(onAllNodesWithContentDescription("Share your screen").fetchSemanticsNodes().isEmpty())
+        }
+        shareBar(live(canSpeak = false), shareControl(screen)) {
+            assertTrue(onAllNodesWithContentDescription("Share your screen").fetchSemanticsNodes().isEmpty())
+        }
+    }
+
     // ─── the bar's camera, the meeting view, and the asking row ───
 
     private fun cameraBar(state: PartyState.Live, cameraError: Boolean = false, block: ComposeUiTest.() -> Unit) = runComposeUiTest {

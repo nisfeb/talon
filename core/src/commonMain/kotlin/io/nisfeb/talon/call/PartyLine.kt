@@ -249,6 +249,11 @@ class PartyLine(
     // videoLinkFor) and collects their PeerLink.video.
     private val _cameraOn = MutableStateFlow(false)
     val cameraOn: StateFlow<Boolean> = _cameraOn.asStateFlow()
+    // A shared screen or window, sent on the same sender as the camera.
+    // The source is kept to share it again on a republished up link.
+    private val _sharing = MutableStateFlow(false)
+    val sharing: StateFlow<Boolean> = _sharing.asStateFlow()
+    private var sharedSource: ScreenSource? = null
     // The pinned speaker who gets the focused tile. Local only today:
     // see [setFocusedVideo] — no up link is labelled and none publishes
     // simulcast, so "video-low" bounds nothing yet.
@@ -276,7 +281,7 @@ class PartyLine(
         // Connections -> the ships they belong to. A person is
         // camera-on if ANY of their connections is.
         val ships = videoOnBy.mapNotNull { roster[it]?.ship }.toSet()
-        _videoOn.value = ships + (if (_cameraOn.value) setOf(ourId) else emptySet())
+        _videoOn.value = ships + (if (_cameraOn.value || _sharing.value) setOf(ourId) else emptySet())
     }
     private var room = ""
     private var ourId = ""
@@ -585,12 +590,41 @@ class PartyLine(
         val ok = up.setCameraEnabled(enabled)
         if (ok) {
             _cameraOn.value = enabled
+            // The camera took the sender back from a share.
+            if (enabled) stopSharingState()
             refreshVideoOn()
             // Tell the room: a disabled track still sends (frozen) frames,
             // so peers can't tell camera-off from a still scene without this.
             broadcastVideo()
         }
         return ok
+    }
+
+    /**
+     * Share a screen or window on the line, or stop with null. It goes
+     * out on the camera's sender, so the room sees our video tile, and a
+     * share turns the camera off. False when the capture could not start
+     * or we have no up link.
+     */
+    suspend fun setScreenShare(source: ScreenSource?): Boolean {
+        val up = upLink ?: return false
+        val ok = up.setScreenShare(source)
+        if (ok) {
+            sharedSource = source
+            _sharing.value = source != null
+            if (source != null) _cameraOn.value = false
+            refreshVideoOn()
+            broadcastVideo()
+        }
+        return ok
+    }
+
+    /** What our up link could share; empty without one. */
+    suspend fun screenSources(): List<ScreenSource> = upLink?.screenSources().orEmpty()
+
+    private fun stopSharingState() {
+        sharedSource = null
+        _sharing.value = false
     }
 
     /** Broadcast our camera on/off so peers' tiles show video vs avatar.
@@ -604,7 +638,8 @@ class PartyLine(
                     put("dest", "")
                     put("username", ourId)
                     put("kind", VIDEO_KIND)
-                    put("value", _cameraOn.value)
+                    // A shared screen is video too: the tile shows it.
+                    put("value", _cameraOn.value || _sharing.value)
                 },
             )
         }
@@ -1088,8 +1123,9 @@ class PartyLine(
                 // sent, and a later restore had publishUp reopen the
                 // camera with no user tap — exactly the auto-open the
                 // teardown path documents as forbidden.
-                if (_cameraOn.value) {
+                if (_cameraOn.value || _sharing.value) {
                     _cameraOn.value = false
+                    stopSharingState()
                     refreshVideoOn()
                     broadcastVideo()
                 }
@@ -1185,6 +1221,16 @@ class PartyLine(
                 // out of phase.
                 if (!up.setCameraEnabled(true)) {
                     _cameraOn.value = false
+                    refreshVideoOn()
+                    broadcastVideo()
+                }
+            }
+            // A share is restored the same way, and dropped the same way
+            // when its screen or window is gone.
+            val shared = sharedSource
+            if (_sharing.value && shared != null) scope.launch {
+                if (!up.setScreenShare(shared)) {
+                    stopSharingState()
                     refreshVideoOn()
                     broadcastVideo()
                 }
@@ -1466,6 +1512,7 @@ class PartyLine(
         recStartMs = 0L
         upOffered = false
         _cameraOn.value = false
+        stopSharingState()
         _focusedVideo.value = null
         videoOnBy.clear()
         _videoOn.value = emptySet()

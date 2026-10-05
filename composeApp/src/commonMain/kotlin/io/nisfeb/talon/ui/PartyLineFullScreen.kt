@@ -114,6 +114,9 @@ fun PartyLineFullScreen(
     cameraOn: Boolean = false,
     /** Toggle our camera, or null to hide the control. */
     onToggleCamera: (() -> Unit)? = null,
+    /** Screen sharing, shown only when non-null (isScreenShareSupported). */
+    screenShare: ScreenShareControl? = null,
+    sharing: Boolean = false,
     /** Our up link, for the self-preview tile. */
     localVideoLink: io.nisfeb.talon.call.PeerLink? = null,
     /** The down link carrying a given speaker's camera. */
@@ -365,6 +368,30 @@ fun PartyLineFullScreen(
                             contentDescription = null,
                             modifier = Modifier.size(26.dp),
                         )
+                    }
+                }
+                if (screenShare != null) {
+                    ScreenShareMenu(screenShare, sharing) { press ->
+                        ControlButton(
+                            label = if (sharing) "Stop sharing" else "Share",
+                            onClick = press,
+                            containerColor = if (sharing) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            contentColor = if (sharing) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        ) {
+                            Icon(
+                                if (sharing) TalonIcons.StopScreenShare else TalonIcons.ScreenShare,
+                                contentDescription = null,
+                                modifier = Modifier.size(26.dp),
+                            )
+                        }
                     }
                 }
                 if (onToggleCamera != null && videoDevices.supported && onSelectCamera != null) {
