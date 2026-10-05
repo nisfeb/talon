@@ -324,6 +324,9 @@ tasks.withType<Test>().configureEach {
     val home = layout.buildDirectory.dir("test-home").get().asFile.absolutePath
     systemProperty("user.home", home)
     environment("XDG_CONFIG_HOME", "$home/.config")
+    // RuntimeClassVersionTest reads the release's JDK from here: a change
+    // to it runs the tests again rather than reusing a cached pass.
+    inputs.file(rootProject.file(".github/workflows/release.yml"))
 }
 
 // Single source of truth for the app version. `derivePackageVersion`
@@ -441,6 +444,11 @@ compose.desktop {
         buildTypes.release.proguard {
             isEnabled.set(false)
         }
+
+        // Since JDK 24 the JVM warns whenever a library loads native code
+        // without leave, and a later JDK refuses: Skia, SQLite, ONNX,
+        // llama.cpp, WebRTC and JNA (VLC, FileKit) all do here.
+        jvmArgs += listOf("--enable-native-access=ALL-UNNAMED")
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)

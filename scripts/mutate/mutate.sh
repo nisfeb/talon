@@ -22,7 +22,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-: "${JAVA_HOME:=/home/sneagan/jdk-install/jdk-17.0.12+7}"
+: "${JAVA_HOME:=$HOME/jdk-install/jdk-25.0.4.1+1}"
 export JAVA_HOME
 export PATH="$JAVA_HOME/bin:$PATH"
 
