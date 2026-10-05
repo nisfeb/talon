@@ -29,6 +29,10 @@ object Notifications {
     const val CHANNEL_ORRERY = "orrery"
     const val CHANNEL_SYNC = "sync"
     const val CHANNEL_LOOPS = "loops"
+    /** The ship's own pushes (grubbery web push): calendar reminders and the like. */
+    const val CHANNEL_SHIP = "ship"
+    /** Time to leave: the ship's leave push, and the alarm kept in case it does not come. */
+    const val CHANNEL_LEAVE = "leave"
     // v2: the Ringer owns sound and vibration now, so the channel must
     // do neither. A channel's alerting cannot be changed after it is
     // created, so changing it means a new id.
@@ -168,6 +172,55 @@ object Notifications {
                 }
             )
         }
+        if (mgr.getNotificationChannel(CHANNEL_SHIP) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(CHANNEL_SHIP, "From your ship", NotificationManager.IMPORTANCE_DEFAULT)
+                    .apply { description = "Reminders and other pushes your ship sends" },
+            )
+        }
+        if (mgr.getNotificationChannel(CHANNEL_LEAVE) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(CHANNEL_LEAVE, "Time to leave", NotificationManager.IMPORTANCE_HIGH)
+                    .apply { description = "When to leave for an appointment, with traffic" },
+            )
+        }
+    }
+
+    /**
+     * A push from the owner's ship. Tagged with its own tag, so a second
+     * push with the same tag replaces the first, and a leave push and the
+     * alarm kept for it share one slot.
+     */
+    fun showShipPush(context: Context, push: io.nisfeb.talon.notify.ShipPushMessage) {
+        val leave = io.nisfeb.talon.orrery.leaveKeyOfTag(push.tag) != null
+        post(context, push.tag ?: "ship:${push.title.hashCode()}", if (leave) CHANNEL_LEAVE else CHANNEL_SHIP, push.title, push.body, leave)
+    }
+
+    /** The alarm: the ship's leave push did not come. */
+    fun showLeave(context: Context, plan: io.nisfeb.talon.orrery.LeavePlan, title: String, body: String) {
+        post(context, io.nisfeb.talon.orrery.LEAVE_TAG_PREFIX + plan.key, CHANNEL_LEAVE, title, body, alarm = true)
+    }
+
+    private fun post(context: Context, tag: String, channel: String, title: String, body: String, alarm: Boolean) {
+        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java) ?: return
+        val tap = PendingIntent.getActivity(
+            context, tag.hashCode(),
+            Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(context, channel)
+            .setSmallIcon(R.drawable.ic_stat_talon)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .setPriority(if (alarm) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(if (alarm) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
+            .setWhen(System.currentTimeMillis())
+            .setShowWhen(true)
+            .build()
+        mgr.notify(tag, NOTIFICATION_ID, n)
     }
 
     /**

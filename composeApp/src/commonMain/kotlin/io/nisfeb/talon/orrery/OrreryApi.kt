@@ -500,6 +500,18 @@ class OrreryApi(
     }
 
     /** One observe batch under the key. Per-item answers, in order. */
+    /** The time-to-leave settings as a key sees them (orrery 69): `enabled` and `lead_min`, never the token. */
+    suspend fun travel(token: String): JsonObject {
+        val text = request(bare, HttpMethod.Get, "/api/travel") { header(HttpHeaders.Authorization, "Bearer $token") }
+        return reading { Json.parseToJsonElement(text).jsonObject }
+    }
+
+    /** What the leave pass did last, with its plan for the next appointment: the owner's only. */
+    suspend fun travelLast(): JsonObject {
+        val text = request(owner, HttpMethod.Get, "/api/travel/last")
+        return reading { Json.parseToJsonElement(text).jsonObject }
+    }
+
     /**
      * Where the owner is, to the metre, for the ship's leave alerts
      * (orrery 69): one record the ship overwrites, never an observation.

@@ -264,6 +264,11 @@ class TalonApplication : Application() {
         // update ended is made again here. A no-op while the switch is off.
         // And only with Orrery on: off, where the owner is goes nowhere.
         if (aiSettings.state.value.orreryOn()) runCatching { io.nisfeb.talon.orrery.LocationWatch.resume(this) }
+        // The ship's own pushes here, and the time-to-leave alarm that
+        // stands behind its leave push. A no-op with no ship, no UnifiedPush
+        // distributor, or no grubbery push on the ship.
+        runCatching { io.nisfeb.talon.notify.ShipPushes.ensure(this) }
+        if (aiSettings.state.value.orreryOn()) runCatching { io.nisfeb.talon.orrery.LeaveAlarm.schedule(this) }
 
 
         // User loops — headless scheduled agent runs. Ship-scoped deps
@@ -453,6 +458,7 @@ class TalonApplication : Application() {
      * show the login screen.
      */
     fun signOutActive() {
+        _activeShip.value?.let { runCatching { io.nisfeb.talon.notify.ShipPushes.forget(this, it) } }
         runCatching { repo.stop() }
         runCatching { shortcuts.stop() }
         session.logout()
@@ -486,6 +492,7 @@ class TalonApplication : Application() {
      */
     fun forgetShip(ship: String, alsoData: Boolean) {
         val wasActive = ship == _activeShip.value
+        runCatching { io.nisfeb.talon.notify.ShipPushes.forget(this, ship) }
         // The relay keeps pushing a ship's activity until told to stop,
         // and a notification for a ship no longer signed in has nowhere
         // right to land. Best effort; the device id is dropped either

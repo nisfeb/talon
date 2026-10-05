@@ -27,6 +27,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+      The time-to-leave alarm rings at a set minute, through Doze
+      (orrery/LeaveAlarm.kt). USE_EXACT_ALARM is granted at install from
+      13 on; 12 asks for SCHEDULE_EXACT_ALARM. Without either the alarm
+      falls back to an inexact one.
+    -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Incoming calls take over a locked screen. Auto-granted for
          apps that post CATEGORY_CALL notifications; without it the
@@ -190,6 +198,10 @@
 
         <receiver
             android:name="io.nisfeb.talon.orrery.LocationReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name="io.nisfeb.talon.orrery.LeaveAlarmReceiver"
             android:exported="false" />
 
         <receiver
