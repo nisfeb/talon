@@ -1,5 +1,6 @@
 package io.nisfeb.talon.orrery
 
+import io.nisfeb.talon.util.formatDecimals
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.OrrerySentDao
@@ -144,18 +145,7 @@ private const val POSITION_MISSING = "position:missing"
  * be `1.0E-4`. Six places is a tenth of a metre; the accuracy is metres.
  */
 internal fun positionBody(fix: LocationFix): String =
-    """{"lat":${fixed(fix.lat, 6)},"lon":${fixed(fix.lon, 6)},"acc":${fixed(fix.accuracyM, 0)},"at":"${isoUtc(fix.atMs)}"}"""
-
-/** [v] with [places] decimals and no exponent; "-0" never. */
-internal fun fixed(v: Double, places: Int): String {
-    var scale = 1L
-    repeat(places) { scale *= 10 }
-    val n = kotlin.math.round(kotlin.math.abs(v) * scale).toLong()
-    val sign = if (v < 0 && n != 0L) "-" else ""
-    if (places == 0) return sign + n
-    val digits = n.toString().padStart(places + 1, '0')
-    return sign + digits.dropLast(places) + "." + digits.takeLast(places)
-}
+    """{"lat":${fix.lat.formatDecimals(6)},"lon":${fix.lon.formatDecimals(6)},"acc":${fix.accuracyM.formatDecimals(0)},"at":"${isoUtc(fix.atMs)}"}"""
 
 /**
  * The key's client, made once. It used to be made per fix and never

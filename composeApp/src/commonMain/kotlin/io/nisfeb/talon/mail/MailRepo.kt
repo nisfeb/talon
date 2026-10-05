@@ -646,17 +646,6 @@ class MailRepo(
     /** [message] put away, opened again or dismissed. */
     fun dismiss(message: Unsent) {
         _unsent.update { it - message }
-        _sendProblem.value = _unsent.value.lastOrNull()?.line
-    }
-
-    private val _sendProblem = MutableStateFlow<String?>(null)
-
-    /** A send that failed, said on the mail list until dismissed, since its composer may be gone. */
-    val sendProblem: StateFlow<String?> = _sendProblem.asStateFlow()
-
-    fun clearSendProblem() {
-        _sendProblem.value = null
-        _unsent.value = emptyList()
     }
 
     private val _problem = MutableStateFlow<String?>(null)
@@ -681,7 +670,7 @@ class MailRepo(
      * in Drafts, and it is dropped once the ship takes the message.
      * [progress] is told where it is, for whoever is still watching. The
      * answer is null when it went, else why not, which is also left in
-     * [sendProblem] for a composer no longer there to show it.
+     * [unsent] for a composer no longer there to show it.
      */
     fun sendMessage(draft: Draft, files: List<Outgoing>, progress: (String?) -> Unit = {}): Deferred<String?> =
         scope.async {
@@ -707,7 +696,10 @@ class MailRepo(
             for ((i, f) in files.withIndex()) {
                 progress("Uploading ${i + 1} of ${files.size}")
                 val hash = runSuspendCatching { uploadBlob(f.bytes) }
-                    .getOrElse { return@run "${f.name}: ${it.message ?: "the upload gave no reason"}." }
+                    .getOrElse { e ->
+                        val why = (e as? AuspexError)?.said() ?: io.nisfeb.talon.util.readableReason(e.message)?.let { "$it." }
+                        return@run "${f.name}: ${why ?: "the upload gave no reason."}"
+                    }
                 refs += AttachRef(name = f.name, mime = f.mime, hash = hash)
             }
             progress("Sending")
@@ -719,7 +711,6 @@ class MailRepo(
             val what = draft.subject.ifBlank { "A message" }.let { s -> if (s == "A message") s else "\"$s\"" }
             val line = "$what was not sent: $it" + if (kept) " It is in Drafts." else ""
             _unsent.update { list -> list + Unsent(line, draft, files) }
-            _sendProblem.value = line
         }
     }
 

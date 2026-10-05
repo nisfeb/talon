@@ -23,15 +23,14 @@ import kotlinx.serialization.json.put
  * time-to-leave come this way, not through the Talon relay.
  */
 
-/** One push as grubbery sends it (lib/web-push.hoon): title, body, and optional url and tag. */
-data class ShipPushMessage(val title: String, val body: String, val url: String?, val tag: String?)
+/** One push as grubbery sends it (lib/web-push.hoon): title, body, and an optional tag. Its url is not used. */
+data class ShipPushMessage(val title: String, val body: String, val tag: String?)
 
 fun parseShipPush(text: String): ShipPushMessage? {
     val o = runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return null
     return ShipPushMessage(
         title = o["title"].asText()?.takeIf { it.isNotBlank() } ?: return null,
         body = o["body"].asText().orEmpty(),
-        url = o["url"].asText()?.takeIf { it.isNotBlank() },
         tag = o["tag"].asText()?.takeIf { it.isNotBlank() },
     )
 }

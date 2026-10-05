@@ -1,18 +1,12 @@
 package io.nisfeb.talon.ui
 
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import io.nisfeb.talon.urbit.mentionRanges
-
-/** As a sent mention is drawn (Story's span), so the box shows what will be sent. */
-private val MENTION_STYLE = SpanStyle(color = Color(0xFF4F63D2), fontWeight = FontWeight.Medium)
 
 /**
  * The composer's text as it will read once sent: a `~ship` that goes as
@@ -42,7 +36,7 @@ fun mentionTransformation(name: (String) -> String): VisualTransformation = Visu
         append(text, at, text.length)
     }
     val styled = AnnotatedString.Builder(if (needsEmojiFontSpans) shown.applyEmojiSpans() else AnnotatedString(shown)).apply {
-        spans.forEach { (_, d) -> addStyle(MENTION_STYLE, d.first, d.last + 1) }
+        spans.forEach { (_, d) -> addStyle(io.nisfeb.talon.urbit.MENTION_SPAN, d.first, d.last + 1) }
     }.toAnnotatedString()
     TransformedText(styled, MentionOffsets(spans))
 }

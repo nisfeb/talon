@@ -82,12 +82,12 @@ class Db(private val path: String) {
      * rotate (the device may re-register after a distributor reset)
      * — re-calling upsertDevice with the same id replaces in place.
      */
-    fun upsertDevice(deviceId: String, pushEndpoint: String, platform: String, caps: Collection<String> = emptyList()) {
+    fun upsertDevice(deviceId: String, pushEndpoint: String, platform: String) {
         connect().use { c ->
             c.prepareStatement(
                 """
                 INSERT INTO devices (id, push_endpoint, platform, created_at, caps)
-                VALUES (?, ?, ?, strftime('%s', 'now') * 1000, ?)
+                VALUES (?, ?, ?, strftime('%s', 'now') * 1000, '')
                 ON CONFLICT(id) DO UPDATE SET
                   push_endpoint = excluded.push_endpoint,
                   platform = excluded.platform,
@@ -97,7 +97,6 @@ class Db(private val path: String) {
                 ps.setString(1, deviceId)
                 ps.setString(2, pushEndpoint)
                 ps.setString(3, platform)
-                ps.setString(4, capsText(caps))
                 ps.executeUpdate()
             }
         }

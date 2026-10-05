@@ -158,7 +158,7 @@ class MailSendBehindTest {
         assertEquals(listOf("1", "2"), repo.unsent.value.map { it.draft.body })
         repo.dismiss(repo.unsent.value.last())
         assertEquals(listOf("1"), repo.unsent.value.map { it.draft.body })
-        assertTrue(repo.sendProblem.value!!.startsWith("\"One\" was not sent"))
+        assertTrue(repo.unsent.value.last().line.startsWith("\"One\" was not sent"))
         assertTrue(repo.outbox.value.isEmpty(), "nothing left on its way")
         scope.cancel()
     }

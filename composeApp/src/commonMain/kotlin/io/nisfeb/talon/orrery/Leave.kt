@@ -1,9 +1,8 @@
 package io.nisfeb.talon.orrery
 
+import io.nisfeb.talon.ui.parseIsoUtc
 import io.nisfeb.talon.urbit.asText
-import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
@@ -41,7 +40,7 @@ fun leaveKeyOfTag(tag: String?): String? =
 fun leavePlanOf(travel: JsonObject, last: JsonObject): LeavePlan? {
     if (travel["enabled"]?.jsonPrimitive?.booleanOrNull != true) return null
     val next = last["next"] as? JsonObject ?: return null
-    fun ms(k: String) = next[k].asText()?.let { runCatching { Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+    fun ms(k: String) = next[k].asText()?.let(::parseIsoUtc)
     return LeavePlan(
         key = next["key"].asText()?.takeIf { it.isNotBlank() } ?: return null,
         name = next["name"].asText().orEmpty(),
@@ -61,10 +60,8 @@ fun leaveTitle(plan: LeavePlan, nowMs: Long): String {
 }
 
 /** "25 min with traffic; leave by 14:35", in [zone]. */
-fun leaveBody(plan: LeavePlan, zone: TimeZone): String {
-    val t = Instant.fromEpochMilliseconds(plan.leaveByMs).toLocalDateTime(zone)
-    return "${plan.minutes} min with traffic; leave by ${t.hour.toString().padStart(2, '0')}:${t.minute.toString().padStart(2, '0')}"
-}
+fun leaveBody(plan: LeavePlan, zone: TimeZone): String =
+    "${plan.minutes} min with traffic; leave by ${OrreryText.clock(plan.leaveByMs, zone)}"
 
 /**
  * The plan from the ship, or null when time to leave is off or there is

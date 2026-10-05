@@ -321,7 +321,7 @@ class CallController(
                 val kept = channel?.takeIf { !it.gone }
                 val ch = kept ?: session.openChannel()
                 channel = ch
-                if (kept == null) lookedFor.value = emptySet()
+                if (kept == null) lookedFor.clear()
                 val read = kept == null && shouldBootstrap(readsAtMs == 0L, readsAtMs, nowMs(), heardMs)
                 // The six reads at once: one after another they held the
                 // subscription, and with it every call, six round trips back.
@@ -568,7 +568,7 @@ class CallController(
                                 // Long after any ask of ours: the host pushed it, so it
                                 // tells of every roster change and needs no polling.
                                 if (nowMs() - (askedAt[up.from] ?: 0L) > ANSWER_WINDOW_MS) {
-                                    _announces.value = _announces.value + up.from
+                                    announcers.add(up.from)
                                 }
                             }
                             is TrunkUpdate.Recorders ->
@@ -1329,7 +1329,7 @@ class CallController(
     val peekFailed: StateFlow<Map<String, String>> = _peekFailed.asStateFlow()
 
     /** Lines looked for since this connect; each opening of a group looked anew. */
-    private val lookedFor = MutableStateFlow<Set<String>>(emptySet())
+    private val lookedFor = io.nisfeb.talon.util.ConcurrentSet<String>()
 
     /**
      * Ask [host] whether its line [name] exists, while we hold no room or
@@ -1341,7 +1341,7 @@ class CallController(
      */
     suspend fun lookForLine(host: String, name: String) {
         val key = "$host/$name"
-        if (key in lookedFor.value) return
+        if (lookedFor.contains(key)) return
         var wait = 2_000L
         repeat(PEEK_ATTEMPTS) { attempt ->
             if (_rooms.value.containsKey(key) || _invites.value.containsKey(key)) return
@@ -1351,7 +1351,7 @@ class CallController(
                 wait *= 3
             }
         }
-        lookedFor.update { it + key }
+        lookedFor.add(key)
     }
 
     suspend fun peekRoom(host: String, name: String) {
@@ -1417,10 +1417,10 @@ class CallController(
 
     /** When we last asked each host who is on: an %on-line long after is a push. */
     private val askedAt = io.nisfeb.talon.util.ConcurrentMap<String, Long>()
-    private val _announces = MutableStateFlow<Set<String>>(emptySet())
+    private val announcers = io.nisfeb.talon.util.ConcurrentSet<String>()
 
     /** Hosts seen pushing a roster nobody asked for (wire 9): asked once, then heard. */
-    fun announces(host: String): Boolean = host in _announces.value
+    fun announces(host: String): Boolean = announcers.contains(host)
 
     /** Per line ("~host/name"), the ships recording it right now, for
      *  the recording badge every member on the line sees. Fed by

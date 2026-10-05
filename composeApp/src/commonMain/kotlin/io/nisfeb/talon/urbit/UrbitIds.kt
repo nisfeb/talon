@@ -28,5 +28,8 @@ internal fun dotAtom(decimal: String): String {
     return out.toString()
 }
 
+/** A conversation of one or a few, a DM or a club, rather than a group's channel. */
+fun isDirect(whom: String): Boolean = whom.startsWith("~") || whom.startsWith("0v")
+
 /** Strip dot grouping from an @ud. Safe on undotted inputs. */
 internal fun undotAtom(decimal: String): String = decimal.replace(".", "")

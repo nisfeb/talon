@@ -1631,9 +1631,7 @@ fun TalonApp(
         val mailUnread by mailRepo.inboxUnread.collectAsState()
         val assistantNews by assistantSession.news.collectAsState()
         // The desktop rail's dots, as far as this host has them.
-        val threadsUnread by remember(app.db) {
-            app.db.followedThreads().streamThreads().map { rows -> rows.any { it.unread > 0 } }
-        }.collectAsState(initial = false)
+        val threadsUnread by remember(app.db) { app.db.followedThreads().streamAnyUnread() }.collectAsState(initial = false)
         val drawerBadges = remember(orreryActions, mailUnread, assistantNews, threadsUnread) {
             io.nisfeb.talon.ui.MenuBadges(
                 threadsUnread = threadsUnread,

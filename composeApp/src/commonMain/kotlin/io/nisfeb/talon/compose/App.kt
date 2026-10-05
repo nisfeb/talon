@@ -3013,9 +3013,7 @@ fun App(
                         val calendarShares by calendarRepo.shares.collectAsState()
                         val mailUnread by mailRepo.inboxUnread.collectAsState()
                         val assistantNews by assistantSession.news.collectAsState()
-                        val threadsUnread by remember(db) {
-                            db.followedThreads().streamThreads().map { rows -> rows.any { it.unread > 0 } }
-                        }.collectAsState(initial = false)
+                        val threadsUnread by remember(db) { db.followedThreads().streamAnyUnread() }.collectAsState(initial = false)
                         val menuBadges = remember(
                             railStatusFeed, railPendingInvites,
                             railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship, calendarShares,
