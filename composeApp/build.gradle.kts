@@ -3,6 +3,7 @@ import java.io.FileInputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.Properties
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -323,7 +324,7 @@ tasks.withType<Test>().configureEach {
     environment("XDG_CONFIG_HOME", "$home/.config")
     // RuntimeClassVersionTest reads the release's JDK from here: a change
     // to it runs the tests again rather than reusing a cached pass.
-    inputs.file(rootProject.file(".github/workflows/release.yml"))
+    inputs.file(rootDir.resolve(".github/workflows/release.yml"))
 }
 
 // Single source of truth for the app version. `derivePackageVersion`
@@ -446,6 +447,11 @@ compose.desktop {
         // without leave, and a later JDK refuses: Skia, SQLite, ONNX,
         // llama.cpp, WebRTC and JNA (VLC, FileKit) all do here.
         jvmArgs += listOf("--enable-native-access=ALL-UNNAMED")
+        // Compact object headers (JEP 519, JDK 25): 8 bytes off every
+        // object's header. Live heap after start fell 13 to 12 MB on the
+        // login screen; object-heavy heaps save more. The AOT cache below
+        // is trained with it, and a cache only maps under the same flag.
+        jvmArgs += listOf("-XX:+UseCompactObjectHeaders")
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
@@ -751,6 +757,78 @@ val slimReleaseDistributable = tasks.register("slimReleaseDistributable") {
                     entry.startsWith("native/lib/$tokKeep/")
                 }
             }
+    }
+}
+
+// The JDK's AOT cache (JEPs 483, 514, 515), for the AppImage: a training
+// launch records the classes startup loads and links, and later launches
+// map them in instead of doing that work again. First frame went from
+// 2.9-3.6 s to 1.7-1.9 s. Trained through the app's own launcher, so the
+// runtime, classpath and flags are exactly what users run. The JVM refuses
+// a cache whose jars changed size or mtime (and then starts as before), so
+// only a copy that keeps mtimes can carry one: build-appimage.sh does
+// (cp -a); jpackage's deb, DMG and MSI rebuild or copy the app without
+// them, so they get no cache. The task proves the trained app starts and
+// maps the cache, and on any failure puts the untrained config back:
+// training never fails a release. It needs a display (CI: xvfb-run).
+val trainReleaseAotCache = tasks.register("trainReleaseAotCache") {
+    description = "Train a JDK AOT cache into the Linux release app image, or leave it without one."
+    dependsOn(slimReleaseDistributable)
+    val appRoot = layout.buildDirectory.dir("compose/binaries/main-release/app/Talon")
+    val scratch = layout.buildDirectory.dir("tmp/aot")
+    onlyIf("the cache only reaches users through the Linux AppImage") { "linux" in System.getProperty("os.name").lowercase() }
+    doLast {
+        val tmp = scratch.get().asFile.apply { deleteRecursively(); mkdirs() }
+        val bundle = appRoot.get().asFile
+        val launcher = File(bundle, "bin/Talon")
+        val appDir = File(bundle, "lib/app")
+        val cfg = File(appDir, "Talon.cfg")
+        val cache = File(appDir, "talon.aot")
+        val conf = File(appDir, "talon.aotconf")
+        // Without any cache option, so a rerun on a trained image starts clean.
+        val original = cfg.readText().lines().filterNot { it.startsWith("java-options=-XX:AOT") }.joinToString("\n")
+
+        fun withOptions(vararg opts: String) = cfg.writeText(
+            original.replaceFirst("[JavaOptions]\n", "[JavaOptions]\n" + opts.joinToString("") { "java-options=$it\n" }),
+        )
+        fun launch(name: String, seconds: Long, vararg env: Pair<String, String>): String {
+            val out = File(tmp, "$name.log")
+            val pb = ProcessBuilder(launcher.absolutePath).redirectErrorStream(true).redirectOutput(out)
+            // A throwaway profile: its own data dir and lock, the login screen.
+            pb.environment().putAll(mapOf("TALON_PROFILE" to "aot-training", "XDG_CONFIG_HOME" to File(tmp, "profile").absolutePath) + env)
+            val p = pb.start()
+            if (!p.waitFor(seconds, TimeUnit.SECONDS)) {
+                p.destroyForcibly()
+                error("$name did not finish in $seconds s")
+            }
+            val text = out.readText()
+            check(p.exitValue() == 0) { "$name exited ${p.exitValue()}: ${text.takeLast(2000)}" }
+            return text
+        }
+        cfg.writeText(original)
+        if (System.getenv("DISPLAY").isNullOrEmpty() && System.getenv("WAYLAND_DISPLAY").isNullOrEmpty()) {
+            // Without one the app waits for a window, it does not fail.
+            logger.warn("AOT cache not trained, no display: the AppImage goes without it")
+            return@doLast
+        }
+        try {
+            withOptions("-XX:AOTMode=record", "-XX:AOTConfiguration=\$APPDIR/talon.aotconf")
+            launch("record", 180, "TALON_EXIT_AFTER_FIRST_FRAME_MS" to "3000")
+            withOptions("-XX:AOTMode=create", "-XX:AOTConfiguration=\$APPDIR/talon.aotconf", "-XX:AOTCache=\$APPDIR/talon.aot")
+            launch("create", 300)
+            conf.delete()
+            withOptions("-XX:AOTCache=\$APPDIR/talon.aot")
+            val proof = launch("verify", 120, "TALON_EXIT_AFTER_FIRST_FRAME_MS" to "0", "JAVA_TOOL_OPTIONS" to "-Xlog:aot=info,class+path=info")
+            check("talon-first-frame-ms" in proof && "Archived app classpath validation: passed" in proof && "[error][aot" !in proof.replace(" ", "")) {
+                "the trained app did not map its cache: ${proof.lines().filter { "aot" in it || "class,path" in it }.takeLast(10)}"
+            }
+            logger.lifecycle("AOT cache trained: ${cache.length() / (1024 * 1024)} MB, ${proof.lines().firstOrNull { "talon-first-frame-ms" in it }}")
+        } catch (e: Exception) {
+            logger.warn("AOT cache not trained, the AppImage goes without it: ${e.message}")
+            cfg.writeText(original)
+            cache.delete()
+            conf.delete()
+        }
     }
 }
 

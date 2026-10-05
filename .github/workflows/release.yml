@@ -272,7 +272,12 @@ jobs:
           TALON_DEFAULT_SFU_BASE: ${{ secrets.TALON_DEFAULT_SFU_BASE }}
           TALON_DEFAULT_SFU_GROUP: ${{ secrets.TALON_DEFAULT_SFU_GROUP }}
           TALON_DEFAULT_SFU_KEY: ${{ secrets.TALON_DEFAULT_SFU_KEY }}
-        run: ./scripts/build-appimage.sh
+        # The AppImage's startup cache is trained by launching the app,
+        # which needs a display: xvfb-run gives it one. Training failing
+        # only means an AppImage without the cache.
+        run: |
+          command -v xvfb-run >/dev/null || sudo apt-get install -y xvfb
+          xvfb-run -a ./scripts/build-appimage.sh
       - name: Upload AppImage (Linux only)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  With a network security config present, Android ignores the manifest's
+  usesCleartextTraffic, so cleartext is allowed here too: ships and relays
+  on http:// must keep working. res/xml-v37 adds Encrypted Client Hello.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
