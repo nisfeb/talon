@@ -78,6 +78,8 @@ object Notifications {
     const val EXTRA_OPEN_MAIL = "open_mail"
     /** Set by a tapped orrery notification: the app opens Actions. */
     const val EXTRA_OPEN_ACTIONS = "open_actions"
+    /** A leave alert's thing ("activity/slug"): the tap opens Orrery on it. */
+    const val EXTRA_OPEN_ORRERY = "open_orrery"
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -193,22 +195,28 @@ object Notifications {
      */
     fun showShipPush(context: Context, push: io.nisfeb.talon.notify.ShipPushMessage) {
         val leave = io.nisfeb.talon.orrery.leaveKeyOfTag(push.tag) != null
-        post(context, push.tag ?: "ship:${push.title.hashCode()}", if (leave) CHANNEL_LEAVE else CHANNEL_SHIP, push.title, push.body, leave)
+        post(context, push.tag ?: "ship:${push.title.hashCode()}", if (leave) CHANNEL_LEAVE else CHANNEL_SHIP, push.title, push.body, leave,
+            openItem = io.nisfeb.talon.orrery.leaveItemOf(push.tag))
     }
 
     /** The alarm: the ship's leave push did not come. */
     fun showLeave(context: Context, plan: io.nisfeb.talon.orrery.LeavePlan, title: String, body: String) {
-        post(context, io.nisfeb.talon.orrery.LEAVE_TAG_PREFIX + plan.key, CHANNEL_LEAVE, title, body, alarm = true)
+        val tag = io.nisfeb.talon.orrery.LEAVE_TAG_PREFIX + plan.key
+        post(context, tag, CHANNEL_LEAVE, title, body, alarm = true, openItem = io.nisfeb.talon.orrery.leaveItemOf(tag))
     }
 
     private fun post(
         context: Context, tag: String, channel: String, title: String, body: String, alarm: Boolean,
         whenMs: Long = System.currentTimeMillis(),
+        openItem: String? = null,
     ) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java) ?: return
         val tap = PendingIntent.getActivity(
             context, tag.hashCode(),
-            Intent(context, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP },
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                if (openItem != null) putExtra(EXTRA_OPEN_ORRERY, openItem)
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val n = NotificationCompat.Builder(context, channel)

@@ -68,6 +68,8 @@ fun OrreryActionsScreen(
     told: String? = null,
     /** The page is left: [told] has been seen. */
     onLeave: () -> Unit = {},
+    /** Off under the Orrery section's tabs, which carry back and refresh. */
+    header: Boolean = true,
     onOpen: (OrreryAction) -> Unit,
 ) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -79,8 +81,8 @@ fun OrreryActionsScreen(
     }
     androidx.compose.runtime.LaunchedEffect(Unit) { refresh() }
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { onLeave() } }
-    Column(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-        Row(
+    Column(modifier.fillMaxSize().then(if (header) Modifier.windowInsetsPadding(WindowInsets.safeDrawing) else Modifier)) {
+        if (header) Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

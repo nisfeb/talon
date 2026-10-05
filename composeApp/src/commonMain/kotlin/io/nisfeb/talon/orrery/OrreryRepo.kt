@@ -654,6 +654,9 @@ class OrreryRepo(
     /** The state view; [brief] is the assistant's, see [OrreryApi.stateJson]. */
     suspend fun readState(brief: Boolean = false): Result<JsonObject> = runCatching { attached().stateJson(key(), brief) }
 
+    /** The ship's last time-to-leave pass (GET /api/travel/last), or null where it has none. */
+    suspend fun travelLast(): JsonObject? = io.nisfeb.talon.util.runSuspendCatching { attached().travelLast() }.getOrNull()
+
     /** Ask the ship which body a name means, before writing about it. */
     suspend fun resolveBody(q: String): Result<List<ResolvedBody>> = runCatching { attached().resolve(q, key()) }
 
