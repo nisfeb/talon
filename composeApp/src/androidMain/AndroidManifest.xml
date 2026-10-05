@@ -69,6 +69,8 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- Where the owner is, for orrery, when they move with the app closed (orrery/LocationWatch.kt). -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- Trip mode (orrery/TripService.kt): a fix each minute on the way to an appointment. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!--
       Sideload distribution only — required by UpdateInstaller to
@@ -204,6 +206,15 @@
         <receiver
             android:name="io.nisfeb.talon.orrery.LeaveAlarmReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name="io.nisfeb.talon.orrery.TripAlarmReceiver"
+            android:exported="false" />
+
+        <service
+            android:name="io.nisfeb.talon.orrery.TripService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
 
         <receiver
             android:name="io.nisfeb.talon.CallActionReceiver"

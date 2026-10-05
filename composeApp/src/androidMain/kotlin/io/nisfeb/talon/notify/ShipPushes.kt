@@ -96,8 +96,13 @@ object ShipPushes {
             ?: return Log.w(TAG, "a ship push with no title was dropped")
         Log.i(TAG, "ship push tag=${push.tag}")
         Notifications.showShipPush(ctx, push)
-        // The push came: the alarm kept in case it did not stands down.
-        leaveKeyOfTag(push.tag)?.let { LeaveAlarm.done(ctx, it) }
+        // The push came: the alarm kept in case it did not stands down, and
+        // the trip begins where Android lets a push start it (Talon in
+        // front); otherwise its own alarm, at the same moment, does.
+        leaveKeyOfTag(push.tag)?.let {
+            LeaveAlarm.done(ctx, it)
+            io.nisfeb.talon.orrery.Trips.start(ctx)
+        }
     }
 
     /**

@@ -24,6 +24,8 @@ data class LeavePlan(
     val alertAtMs: Long,
     /** The drive, with traffic. */
     val minutes: Int,
+    /** The time to be there (for a pick-up, the appointment's end); null from a ship before orrery 73. */
+    val startsMs: Long? = null,
 )
 
 const val LEAVE_TAG_PREFIX = "orrery-leave-"
@@ -47,6 +49,7 @@ fun leavePlanOf(travel: JsonObject, last: JsonObject): LeavePlan? {
         leaveByMs = ms("leave_by") ?: return null,
         alertAtMs = ms("alert_at") ?: return null,
         minutes = next["minutes"]?.jsonPrimitive?.intOrNull ?: 0,
+        startsMs = ms("starts"),
     )
 }
 

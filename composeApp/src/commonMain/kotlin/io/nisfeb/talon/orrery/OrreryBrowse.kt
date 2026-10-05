@@ -94,8 +94,16 @@ fun browse(items: List<OrreryItem>, query: String): List<Pair<String, List<Orrer
     }
 }
 
-/** The thing a leave alert is about: its tag's key without the occurrence ("activity/x@123" is "activity/x"). */
-fun leaveItemOf(tag: String?): String? = leaveKeyOfTag(tag)?.substringBefore('@')?.takeIf { it.isNotBlank() }
+/** The ship's "running late" push (orrery 73): [LATE_TAG_PREFIX] + the same key a leave push has. */
+const val LATE_TAG_PREFIX = "orrery-late-"
+
+/**
+ * The thing a leave or running-late alert is about: its tag's key without
+ * the occurrence ("activity/x@123" and "activity/x@123/pick" are "activity/x").
+ */
+fun alertItemOf(tag: String?): String? =
+    (leaveKeyOfTag(tag) ?: tag?.takeIf { it.startsWith(LATE_TAG_PREFIX) }?.removePrefix(LATE_TAG_PREFIX))
+        ?.substringBefore('@')?.takeIf { it.isNotBlank() }
 
 /** The ship's next time to leave (GET /api/travel/last's `next`): for which thing, when, and how long the drive. */
 data class LeaveBy(val itemId: String, val leaveByMs: Long, val minutes: Int)

@@ -769,6 +769,8 @@ fun TalonApp(
     // A tapped leave alert: Orrery, on the thing to leave for.
     LaunchedEffect(initialOpenOrreryItem) {
         if (initialOpenOrreryItem != null) {
+            // The owner has the alert in hand: the trip, armed for it, begins if it has not.
+            io.nisfeb.talon.orrery.Trips.start(app)
             closeSections()
             orreryItem = initialOpenOrreryItem
             actionsOpen = true

@@ -137,7 +137,15 @@ class LeaveWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
     override suspend fun doWork(): Result {
         val app = applicationContext as? TalonApplication ?: return Result.success()
         LeaveAlarm.fetch(app).fold(
-            onSuccess = { plan -> if (plan == null) LeaveAlarm.clear(app) else LeaveAlarm.set(app, plan) },
+            onSuccess = { plan ->
+                if (plan == null) {
+                    LeaveAlarm.clear(app)
+                    Trips.disarm(app)
+                } else {
+                    Trips.arm(app, plan)
+                    LeaveAlarm.set(app, plan)
+                }
+            },
             // Unreachable: the alarm already set stays; the next read tries again.
             onFailure = { Log.i(LeaveAlarm.TAG, "plan not read: ${it.message}") },
         )
