@@ -1107,6 +1107,11 @@ fun ChatComposer(
                         if (e.type != KeyEventType.KeyDown) {
                             return@onPreviewKeyEvent false
                         }
+                        // While an input method composes (pinyin, kana,
+                        // hangul), the keys are its own: Enter confirms a
+                        // candidate, arrows and Tab move through them.
+                        // Taken here, Enter sent the half-typed message.
+                        if (state.draft.composition != null) return@onPreviewKeyEvent false
                         // Escape drops a staged attachment, as its cross does.
                         if (e.key == Key.Escape && state.pendingAttachment != null && !state.uploading) {
                             state.pendingAttachment = null
