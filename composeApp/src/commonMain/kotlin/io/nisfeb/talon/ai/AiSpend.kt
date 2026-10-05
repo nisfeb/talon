@@ -54,6 +54,6 @@ object AiSpend {
     private suspend fun read(d: OrrerySentDao, key: String): Map<String, Double> =
         d.get("", key)?.value?.let { runCatching { Json.decodeFromString(serializer, it) }.getOrNull() }.orEmpty()
 
-    private fun key(ms: Long) = "spend:" + kotlinx.datetime.Instant.fromEpochMilliseconds(ms)
+    private fun key(ms: Long) = "spend:" + kotlin.time.Instant.fromEpochMilliseconds(ms)
         .toLocalDateTime(TimeZone.currentSystemDefault()).date.toString().take(7)
 }

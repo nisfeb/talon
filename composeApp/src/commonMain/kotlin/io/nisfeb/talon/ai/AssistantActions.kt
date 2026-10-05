@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ai
 
+import kotlinx.datetime.number
 import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.daysOf
@@ -25,7 +26,7 @@ import io.nisfeb.talon.ui.shipHandleLong
 import io.nisfeb.talon.urbit.isValidPatp
 import io.nisfeb.talon.util.nowMs
 import kotlinx.datetime.DayOfWeek
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atTime
@@ -58,7 +59,7 @@ class AssistantActions(
  * as its UTC day, which is how the calendar keeps one.
  */
 internal fun eventWhenLine(startMs: Long, endMs: Long, allDay: Boolean, zone: TimeZone): String {
-    fun day(d: LocalDate) = "${d.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }} ${d.dayOfMonth} ${MONTHS[d.monthNumber - 1]} ${d.year}"
+    fun day(d: LocalDate) = "${d.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }} ${d.day} ${MONTHS[d.month.number - 1]} ${d.year}"
     if (allDay) {
         val first = Instant.fromEpochMilliseconds(startMs).toLocalDateTime(TimeZone.UTC).date
         val days = ((endMs - startMs) / 86_400_000L).toInt()

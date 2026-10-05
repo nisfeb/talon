@@ -1,7 +1,8 @@
 package io.nisfeb.talon.calendar
 
+import kotlinx.datetime.number
 import io.nisfeb.talon.util.nowMs
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
@@ -23,12 +24,12 @@ fun eventIcs(id: String, name: String, location: String, note: String, startMs: 
     fun stamp(ms: Long): String {
         val t = Instant.fromEpochMilliseconds(ms).toLocalDateTime(TimeZone.UTC)
         fun p(n: Int) = n.toString().padStart(2, '0')
-        return "${t.year}${p(t.monthNumber)}${p(t.dayOfMonth)}T${p(t.hour)}${p(t.minute)}${p(t.second)}Z"
+        return "${t.year}${p(t.month.number)}${p(t.day)}T${p(t.hour)}${p(t.minute)}${p(t.second)}Z"
     }
     fun day(ms: Long): String {
         val d = Instant.fromEpochMilliseconds(ms).toLocalDateTime(TimeZone.UTC).date
         fun p(n: Int) = n.toString().padStart(2, '0')
-        return "${d.year}${p(d.monthNumber)}${p(d.dayOfMonth)}"
+        return "${d.year}${p(d.month.number)}${p(d.day)}"
     }
     // The id goes into the file raw, so nothing that could end its line
     // early -- or smuggle a new one in -- may survive into the UID.

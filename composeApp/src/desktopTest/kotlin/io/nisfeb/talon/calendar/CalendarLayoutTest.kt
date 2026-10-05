@@ -1,5 +1,6 @@
 package io.nisfeb.talon.calendar
 
+import kotlinx.datetime.number
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.requiredSize
@@ -85,8 +86,8 @@ class CalendarLayoutTest {
     }
 
     private fun monthLabel(): String {
-        val today = kotlinx.datetime.Instant.fromEpochMilliseconds(io.nisfeb.talon.util.nowMs())
+        val today = kotlin.time.Instant.fromEpochMilliseconds(io.nisfeb.talon.util.nowMs())
             .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).date
-        return "${kotlinx.datetime.format.MonthNames.ENGLISH_ABBREVIATED.names[today.monthNumber - 1]} ${today.year}"
+        return "${kotlinx.datetime.format.MonthNames.ENGLISH_ABBREVIATED.names[today.month.number - 1]} ${today.year}"
     }
 }

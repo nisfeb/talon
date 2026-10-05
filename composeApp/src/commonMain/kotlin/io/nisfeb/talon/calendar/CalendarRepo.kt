@@ -1,5 +1,6 @@
 package io.nisfeb.talon.calendar
 
+import kotlinx.datetime.number
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.mail.AuspexApi
 import io.nisfeb.talon.mail.AuspexError
@@ -394,7 +395,7 @@ class CalendarRepo(
                 if (d.tags.isNotEmpty()) put("tags", kotlinx.serialization.json.JsonArray(d.tags.map { kotlinx.serialization.json.JsonPrimitive(it) }))
             },
             // The calendar's own due for a day: midnight UTC.
-            dueMs = d.due?.let { kotlinx.datetime.LocalDateTime(it.year, it.monthNumber, it.dayOfMonth, 0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds() },
+            dueMs = d.due?.let { kotlinx.datetime.LocalDateTime(it.year, it.month.number, it.day, 0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds() },
         )
         _pendingTasks.value = _pendingTasks.value + ghost
         scope.launch {

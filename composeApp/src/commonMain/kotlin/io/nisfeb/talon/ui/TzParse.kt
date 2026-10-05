@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import kotlinx.datetime.number
 import io.nisfeb.talon.util.formatClock
 import io.nisfeb.talon.util.formatWeekdayShort
 import io.nisfeb.talon.util.nowMs
@@ -140,7 +141,7 @@ fun formatIsoUtc(ms: Long): String {
     val dt = Instant.fromEpochMilliseconds(ms).toLocalDateTime(TimeZone.UTC)
     fun p(n: Int, w: Int) = n.toString().padStart(w, '0')
     val millis = dt.nanosecond / 1_000_000
-    return "${p(dt.year, 4)}-${p(dt.monthNumber, 2)}-${p(dt.dayOfMonth, 2)}T" +
+    return "${p(dt.year, 4)}-${p(dt.month.number, 2)}-${p(dt.day, 2)}T" +
         "${p(dt.hour, 2)}:${p(dt.minute, 2)}:${p(dt.second, 2)}.${p(millis, 3)}Z"
 }
 

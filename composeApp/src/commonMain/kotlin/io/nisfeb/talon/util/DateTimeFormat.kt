@@ -30,32 +30,32 @@ private fun localIn(ms: Long, zone: TimeZone): LocalDateTime =
 
 private val MONTH_DAY_TIME = LocalDateTime.Format {
     monthName(MonthNames.ENGLISH_ABBREVIATED); char(' ')
-    dayOfMonth(Padding.NONE); char(' ')
+    day(Padding.NONE); char(' ')
     hour(); char(':'); minute()
 }
 private val MONTH_DAY_YEAR = LocalDateTime.Format {
     monthName(MonthNames.ENGLISH_ABBREVIATED); char(' ')
-    dayOfMonth(Padding.NONE); chars(", "); year()
+    day(Padding.NONE); chars(", "); year()
 }
 private val MONTH_DAY = LocalDateTime.Format {
-    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); dayOfMonth(Padding.NONE)
+    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); day(Padding.NONE)
 }
 private val TIME_24 = LocalDateTime.Format {
     hour(); char(':'); minute()
 }
 private val WEEKDAY_MONTH_DAY = LocalDateTime.Format {
     dayOfWeek(DayOfWeekNames.ENGLISH_ABBREVIATED); chars(", ")
-    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); dayOfMonth(Padding.NONE)
+    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); day(Padding.NONE)
 }
 private val TIME_12 = LocalDateTime.Format {
     amPmHour(Padding.NONE); char(':'); minute(); char(' '); amPmMarker("AM", "PM")
 }
 private val DATE_LONG = kotlinx.datetime.LocalDate.Format {
     dayOfWeek(DayOfWeekNames.ENGLISH_ABBREVIATED); chars(", ")
-    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); dayOfMonth(Padding.NONE); chars(", "); year()
+    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); day(Padding.NONE); chars(", "); year()
 }
 private val DATE_NO_YEAR = kotlinx.datetime.LocalDate.Format {
-    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); dayOfMonth(Padding.NONE)
+    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); day(Padding.NONE)
 }
 
 /** "Fri, Jul 10, 2026": a calendar date in words, where "2026-07-10" was shown. */
@@ -69,7 +69,7 @@ private val WEEKDAY_SHORT = LocalDateTime.Format {
 }
 private val FULL_LOCAL = LocalDateTime.Format {
     dayOfWeek(DayOfWeekNames.ENGLISH_FULL); chars(", ")
-    monthName(MonthNames.ENGLISH_FULL); char(' '); dayOfMonth(Padding.NONE); char(' '); year()
+    monthName(MonthNames.ENGLISH_FULL); char(' '); day(Padding.NONE); char(' '); year()
     chars(" at "); hour(); char(':'); minute()
 }
 

@@ -327,7 +327,7 @@ val DISMISS_REASONS = listOf("just the event", "I always do this")
 /** The event as the owner reads it: local times, and the place where there is one. */
 private fun whenLine(e: io.nisfeb.talon.orrery.EventToAdd): String {
     val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
-    fun at(ms: Long) = kotlinx.datetime.Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone)
+    fun at(ms: Long) = kotlin.time.Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone)
     val start = at(e.startMs)
     val end = e.endMs?.let(::at)
     val span = "${start.date} ${start.time}" + (end?.let { if (it.date == start.date) " to ${it.time}" else " to ${it.date} ${it.time}" } ?: "")

@@ -104,7 +104,7 @@ class OrreryApiTest {
         val steps = """[{"at":"2026-09-27T09:00:00Z","status":"approved","by":"owner"},{"at":"2026-09-28T09:00:00Z","status":"failed","by":"executor"}]"""
         val failed = api(body = "[" + row(steps) + "]").actions(null, "failed").single()
         assertEquals("no DM with ~bus", failed.note)
-        assertEquals(kotlinx.datetime.Instant.parse("2026-09-28T09:00:00Z").toEpochMilliseconds(), failed.movedMs, "the last step, not the first")
+        assertEquals(kotlin.time.Instant.parse("2026-09-28T09:00:00Z").toEpochMilliseconds(), failed.movedMs, "the last step, not the first")
         assertEquals(null, api(body = "[" + row("[]") + "]").actions(null, "failed").single().movedMs)
         val garbled = """[{"at":"soon","status":"failed","by":"executor"}]"""
         assertEquals(null, api(body = "[" + row(garbled) + "]").actions(null, "failed").single().movedMs)

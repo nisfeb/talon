@@ -357,7 +357,7 @@ class OrreryApi(
                 id = o["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
                 attr = o["attr"]?.jsonPrimitive?.content ?: "",
                 atMs = o["at"]?.jsonPrimitive?.content
-                    ?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+                    ?.let { runCatching { kotlin.time.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
                     ?: return@mapNotNull null,
                 sourceId = o["source"]?.jsonObject?.get("id")?.jsonPrimitive?.content ?: "",
                 status = o["status"]?.jsonPrimitive?.content ?: "",
@@ -381,7 +381,7 @@ class OrreryApi(
             ClientKey(
                 id = c["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
                 by = c["by"]?.jsonPrimitive?.content ?: "",
-                usedMs = c["used"]?.jsonPrimitive?.content?.takeIf { it != "null" }?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
+                usedMs = c["used"]?.jsonPrimitive?.content?.takeIf { it != "null" }?.let { runCatching { kotlin.time.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
             )
         }
     }
@@ -415,7 +415,7 @@ class OrreryApi(
         note = a["note"]?.jsonPrimitive?.contentOrNull.orEmpty(),
         movedMs = ((a["history"] as? kotlinx.serialization.json.JsonArray)?.lastOrNull() as? JsonObject)
             ?.get("at")?.jsonPrimitive?.contentOrNull
-            ?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
+            ?.let { runCatching { kotlin.time.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
     )
 
     /**
@@ -756,7 +756,7 @@ fun chatOptionsOf(o: JsonObject): List<ChatOption> = (o["items"] as? kotlinx.ser
 data class ChatReaderRun(val atMs: Long?, val read: Int, val filed: Int, val notes: List<String>, val modelDown: Boolean)
 
 fun chatReaderRunOf(o: JsonObject) = ChatReaderRun(
-    atMs = o["at"]?.jsonPrimitive?.contentOrNull?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
+    atMs = o["at"]?.jsonPrimitive?.contentOrNull?.let { runCatching { kotlin.time.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
     read = o["read"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0,
     filed = o["filed"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0,
     notes = names(o["notes"]),
@@ -807,7 +807,7 @@ fun checkPayload(payload: JsonObject, shape: JsonObject, known: Set<String>): Pa
             out[k] = kotlinx.serialization.json.JsonPrimitive(said.lowercase())
         }
         if ("ISO 8601" in line) {
-            val utc = runCatching { kotlinx.datetime.Instant.parse(said).toString() }.getOrNull()
+            val utc = runCatching { kotlin.time.Instant.parse(said).toString() }.getOrNull()
                 ?: said.takeIf { runCatching { kotlinx.datetime.LocalDate.parse(it) }.isSuccess }
                 ?: return null to "$k is not a time"
             out[k] = kotlinx.serialization.json.JsonPrimitive(utc)
@@ -950,7 +950,7 @@ data class GeneratorRun(
 fun generatorRunOf(o: JsonObject): GeneratorRun {
     fun str(k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() && it != "null" }
     fun int(k: String) = str(k)?.toDoubleOrNull()?.toInt()
-    val at = (str("at") ?: str("called"))?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+    val at = (str("at") ?: str("called"))?.let { runCatching { kotlin.time.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
     val usage = o["usage"] as? JsonObject
     return GeneratorRun(
         atMs = at,
@@ -968,17 +968,17 @@ fun generatorRunOf(o: JsonObject): GeneratorRun {
 fun generatorLine(r: GeneratorRun, nowMs: Long, zone: kotlinx.datetime.TimeZone): String {
     val parts = mutableListOf<String>()
     r.atMs?.let { at ->
-        val day = kotlinx.datetime.Instant.fromEpochMilliseconds(at).toLocalDateTime(zone).date
-        val today = kotlinx.datetime.Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
+        val day = kotlin.time.Instant.fromEpochMilliseconds(at).toLocalDateTime(zone).date
+        val today = kotlin.time.Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
         val clock = OrreryText.clock(at, zone)
-        parts += if (day == today) "ran $clock" else "ran ${day.dayOfMonth} ${day.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)} $clock"
+        parts += if (day == today) "ran $clock" else "ran ${day.day} ${day.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)} $clock"
     }
     when {
         r.error != null -> parts += "failed: ${r.error.take(80)}"
         r.skipped -> {
             val held = r.notes.firstOrNull { "held by the limits" in it }
             val until = held?.substringAfter(" until ", "")?.trim()
-                ?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+                ?.let { runCatching { kotlin.time.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
             parts += when {
                 until != null -> "held by the limits until ${OrreryText.clock(until, zone)}"
                 held != null -> "held by the limits"

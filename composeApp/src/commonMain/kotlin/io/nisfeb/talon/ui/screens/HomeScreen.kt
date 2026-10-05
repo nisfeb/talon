@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import kotlinx.datetime.number
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.nisfeb.talon.ui.onSecondaryClick
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
@@ -101,7 +102,7 @@ import io.nisfeb.talon.ui.resizedSpan
 import io.nisfeb.talon.ui.SkyClock
 import io.nisfeb.talon.ui.Solar
 import kotlinx.coroutines.delay
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
@@ -1202,7 +1203,7 @@ internal fun zoneFor(id: String?): TimeZone =
     id?.let { runCatching { TimeZone.of(it) }.getOrNull() } ?: TimeZone.currentSystemDefault()
 
 internal fun dayLabel(t: LocalDateTime): String {
-    val d = t.dayOfMonth
+    val d = t.day
     val suffix = when {
         d % 100 in 11..13 -> "th"
         d % 10 == 1 -> "st"
@@ -1210,7 +1211,7 @@ internal fun dayLabel(t: LocalDateTime): String {
         d % 10 == 3 -> "rd"
         else -> "th"
     }
-    return "${MonthNames.ENGLISH_ABBREVIATED.names[t.monthNumber - 1]} $d$suffix"
+    return "${MonthNames.ENGLISH_ABBREVIATED.names[t.month.number - 1]} $d$suffix"
 }
 
 /**
