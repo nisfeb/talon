@@ -174,11 +174,11 @@ abstract class MessageDao {
     """)
     abstract suspend fun latestAnyFor(whom: String, count: Int): List<MessageEntity>
 
-    /** When the newest message kept here was sent; null when none is. */
     /** Whether [author] has replied in the thread under [parentId]. */
     @Query("SELECT EXISTS(SELECT 1 FROM messages WHERE whom = :whom AND parentId = :parentId AND author = :author AND isDeleted = 0)")
     abstract suspend fun hasReplyBy(whom: String, parentId: String, author: String): Boolean
 
+    /** When the newest message kept here was sent; null when none is. */
     @Query("SELECT MAX(sentMs) FROM messages")
     abstract suspend fun newestSentMs(): Long?
 
@@ -264,13 +264,11 @@ abstract class MessageDao {
     @Query("DELETE FROM messages WHERE whom = :whom AND id = :id")
     abstract suspend fun hardDelete(whom: String, id: String)
 
-    /** Stable pagination across the entire messages table — used by
-     *  the embedding indexer's backfill pass. Includes soft-deleted
-     *  rows so the indexer can mark them seen and skip on re-runs. */
     /**
      * Every row, [limit] at a time in key order, after ([whom], [id]) (""
-     * and "" for the first page). Found by the primary key: an OFFSET
-     * read every row before the page again, so a pass was quadratic.
+     * and "" for the first page), soft-deleted ones included so the
+     * embedding indexer can mark them seen. Found by the primary key: an
+     * OFFSET read every row before the page again, so a pass was quadratic.
      */
     @Query("SELECT * FROM messages WHERE (whom, id) > (:whom, :id) ORDER BY whom, id LIMIT :limit")
     abstract suspend fun pageAfter(whom: String, id: String, limit: Int): List<MessageEntity>

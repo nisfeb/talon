@@ -32,7 +32,7 @@ class DesktopShipDataEraser : ShipDataEraser {
             error("could not delete ${survivors.joinToString { it.name }}; is the database still open?")
         }
         // Asked of the store that writes it, not guessed at.
-        io.nisfeb.talon.ui.DesktopMenuSeenStore.defaultFile(ship).delete()
+        java.io.File(io.nisfeb.talon.util.AppDirs.userData, io.nisfeb.talon.ui.menuSeenFileName(ship)).delete()
         io.nisfeb.talon.mail.MailThreadFiles.erase(ship)
         if (pendingFile.run { exists() && readText().trim() == ship }) pendingFile.delete()
         Log.i(TAG, "erased $ship ($gone files)")

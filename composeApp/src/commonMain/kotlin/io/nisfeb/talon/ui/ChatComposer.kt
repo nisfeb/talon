@@ -147,13 +147,6 @@ class ComposerState(initialDraftText: String) {
     var sendErrorCalm by mutableStateOf(false)
         private set
 
-    /**
-     * [what] did not go through. A ship that was only slow or out of reach
-     * is said calmly, as something to try again when it is back; a refusal
-     * is said as one. Either way the error whole is behind Copy error
-     * details, not in the line: "Request timeout has expired [url=…]" was
-     * the line.
-     */
     /** [problem] over the composer, its error whole behind Copy error details. */
     fun show(problem: io.nisfeb.talon.util.Problem) {
         shownError = problem.line

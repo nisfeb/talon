@@ -2337,7 +2337,7 @@ class TlonChatRepo(
     }
 
     /**
-     * Send a `group-action-4` poke wrapping the given `a-group` diff
+     * Send a group action (see [pokeGroupAction]) wrapping the given `a-group` diff
      * for the target group. All admin actions (meta, seat, entry,
      * role) go through this helper.
      */

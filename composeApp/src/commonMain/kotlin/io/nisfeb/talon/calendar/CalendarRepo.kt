@@ -600,7 +600,7 @@ class CalendarRepo(
         }
     }
 
-    /** A write and nothing read back: the caller knows what it changed. False when refused. */
+    /** Why the last write failed, for [failedLine]. */
     // ponytail: the last write's only; two saves failing at once for different reasons share one
     @kotlin.concurrent.Volatile private var lastWriteError: io.nisfeb.talon.mail.AuspexError? = null
 
@@ -613,6 +613,7 @@ class CalendarRepo(
     fun failedLine(refused: String): String =
         (lastWriteError as? io.nisfeb.talon.mail.AuspexError.Unreachable)?.let { it.said() + " Nothing was changed." } ?: refused
 
+    /** A write and nothing read back: the caller knows what it changed. False when refused. */
     private suspend fun write(body: JsonObject): Boolean {
         val a = api ?: return false
         if (ball.isEmpty()) ball = runSuspendCatching { a.config().ball }.getOrDefault("")

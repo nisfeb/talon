@@ -62,7 +62,7 @@ class MenuSeenStoreTest {
         assertFalse(before == after)
     }
 
-    // ── DesktopMenuSeenStore: round-trip + persistence ───────────────
+    // ── StoredMenuSeenStore on a JVM file: round-trip + persistence ───────────────
 
 
 
@@ -70,11 +70,11 @@ class MenuSeenStoreTest {
     fun `the three markers are independent and accumulate in one file`() {
         // All three writes hit the same per-ship JSON; one mark must
         // not stomp the others. Reload reads them all back.
-        val store = DesktopMenuSeenStore(ship = "~test", file = file)
+        val store = StoredMenuSeenStore(JvmUiSettingsStore(file))
         store.markStatusesSeenAt(1_700_000_000_000L)
         store.markInvitesSeen("~zod")
 
-        val reloaded = DesktopMenuSeenStore(ship = "~test", file = file)
+        val reloaded = StoredMenuSeenStore(JvmUiSettingsStore(file))
         val s = reloaded.state.value
         assertEquals(1_700_000_000_000L, s.lastSeenStatusesMs)
         assertEquals("~zod", s.lastSeenInvitesSnapshot)
@@ -86,7 +86,7 @@ class MenuSeenStoreTest {
         // surface as the empty default rather than crashing the
         // composition that constructs the store.
         file.writeText("{ malformed")
-        val store = DesktopMenuSeenStore(ship = "~test", file = file)
+        val store = StoredMenuSeenStore(JvmUiSettingsStore(file))
         val s = store.state.value
         assertEquals(0L, s.lastSeenStatusesMs)
         assertEquals("", s.lastSeenInvitesSnapshot)
@@ -99,7 +99,7 @@ class MenuSeenStoreTest {
         file.writeText(
             """{"lastSeenStatusesMs":7,"somethingNew":"x"}""",
         )
-        val store = DesktopMenuSeenStore(ship = "~test", file = file)
+        val store = StoredMenuSeenStore(JvmUiSettingsStore(file))
         assertEquals(7L, store.state.value.lastSeenStatusesMs)
     }
 

@@ -1,5 +1,6 @@
 package io.nisfeb.talon.data
 
+
 import androidx.room.ConstructedBy
 import androidx.room.Database
 import androidx.room.RoomDatabase
@@ -143,3 +144,15 @@ val ASSISTANT_LOG_MIGRATION = object : androidx.room.migration.Migration(52, 53)
         connection.execSQL(ASSISTANT_LOG_SQL)
     }
 }
+
+/**
+ * Every migration the desktop and iOS databases take, so neither can miss
+ * one the other has: this PR added four, to both by hand. Android runs
+ * the same changes through its own Migration objects.
+ */
+val SHARED_MIGRATIONS = arrayOf(
+    MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION,
+    COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION,
+    URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, WATCHWORDS_DROP_MIGRATION, ASSISTANT_LOG_MIGRATION,
+    FOLLOWED_THREADS_MIGRATION,
+)
