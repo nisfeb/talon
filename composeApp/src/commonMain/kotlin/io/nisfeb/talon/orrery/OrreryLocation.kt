@@ -2,6 +2,7 @@ package io.nisfeb.talon.orrery
 
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.OrrerySentDao
 import io.nisfeb.talon.data.OrrerySentEntity
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.createAppHttpClient
@@ -96,8 +97,12 @@ suspend fun sendLocation(
 ): Result<Unit> = runCatching {
     val token = db.orreryAccounts().get(ship)?.token ?: return Result.success(Unit)
     val api = OrreryApi(http, bare, url)
-    val state = api.stateJson(token)
     val sent = db.orrerySent()
+    // First and on every fix, before the state read below, which is the
+    // whole view and the slow part on a busy ship: the leave alert needs
+    // where the owner is now, not only when the place changed.
+    sendPosition(api, sent, ship, token, fix)
+    val state = api.stateJson(token)
     val last = sent.get(ship, LAST_KEY)?.value?.let { runCatching { kotlinx.serialization.json.Json.parseToJsonElement(it) }.getOrNull() }
     val value = locationValue(fix, geoPlaces(state), name, last) ?: return Result.success(Unit)
     if (value == last) return Result.success(Unit)
@@ -110,6 +115,47 @@ suspend fun sendLocation(
 }
 
 private const val LAST_KEY = "location:last"
+
+/**
+ * The fix to the metre, for the ship's leave alerts. An orrery without
+ * the route (before 69) answers 404: remembered a day per ship, so an
+ * older ship is not asked on every move, and asked again once it may
+ * have been updated. Any other refusal fails the send, so the worker
+ * tries again.
+ */
+private suspend fun sendPosition(api: OrreryApi, sent: OrrerySentDao, ship: String, token: String, fix: LocationFix) {
+    val missing = sent.get(ship, POSITION_MISSING)
+    if (missing != null && fix.atMs - missing.atMs < DAY_MS) return
+    try {
+        api.postPosition(token, fix)
+    } catch (e: OrreryError.Refused) {
+        if (e.status != 404) throw e
+        sent.put(OrrerySentEntity(ship, POSITION_MISSING, "", fix.atMs))
+        Log.i("OrreryLocation", "this orrery takes no position (before 69); asking again in a day")
+    }
+}
+
+private const val POSITION_MISSING = "position:missing"
+
+/**
+ * `{"lat":30.201200,"lon":-81.603400,"acc":12,"at":"…Z"}`: decimal
+ * degrees as JSON numbers in fixed decimals, because the ship reads each
+ * as `-?\d+(\.\d+)?` (orrery's +coordinate) and a Double's own text can
+ * be `1.0E-4`. Six places is a tenth of a metre; the accuracy is metres.
+ */
+internal fun positionBody(fix: LocationFix): String =
+    """{"lat":${fixed(fix.lat, 6)},"lon":${fixed(fix.lon, 6)},"acc":${fixed(fix.accuracyM, 0)},"at":"${isoUtc(fix.atMs)}"}"""
+
+/** [v] with [places] decimals and no exponent; "-0" never. */
+internal fun fixed(v: Double, places: Int): String {
+    var scale = 1L
+    repeat(places) { scale *= 10 }
+    val n = kotlin.math.round(kotlin.math.abs(v) * scale).toLong()
+    val sign = if (v < 0 && n != 0L) "-" else ""
+    if (places == 0) return sign + n
+    val digits = n.toString().padStart(places + 1, '0')
+    return sign + digits.dropLast(places) + "." + digits.takeLast(places)
+}
 
 /**
  * The key's client, made once. It used to be made per fix and never

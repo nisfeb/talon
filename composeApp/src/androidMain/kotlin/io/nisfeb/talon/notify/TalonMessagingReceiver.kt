@@ -44,11 +44,14 @@ class TalonMessagingReceiver : MessagingReceiver() {
 
     override fun onNewEndpoint(context: Context, endpoint: PushEndpoint, instance: String) {
         Log.i(TAG, "new endpoint for instance=$instance: ${endpoint.url.take(48)}…")
+        // The ship's own pushes are another registration, with its own endpoint.
+        if (instance == ShipPushes.INSTANCE) return ShipPushes.onEndpoint(context, endpoint)
         cacheEndpoint(context, endpoint.url)
     }
 
     override fun onUnregistered(context: Context, instance: String) {
         Log.i(TAG, "unregistered instance=$instance")
+        if (instance == ShipPushes.INSTANCE) return ShipPushes.onUnregistered(context)
         clearEndpoint(context)
     }
 
@@ -61,6 +64,7 @@ class TalonMessagingReceiver : MessagingReceiver() {
     }
 
     override fun onMessage(context: Context, message: PushMessage, instance: String) {
+        if (instance == ShipPushes.INSTANCE) return ShipPushes.onMessage(context, message)
         // Hint-only payload from the Talon relay:
         //   { "event": "new-message", "patp": "...", "whom": "...",
         //     "id": "..." }

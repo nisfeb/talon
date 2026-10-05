@@ -158,7 +158,11 @@ class LocationWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val d = inputData
         val fix = LocationFix(d.getDouble("lat", 0.0), d.getDouble("lon", 0.0), d.getDouble("acc", MAX_MATCH_M), d.getLong("at", System.currentTimeMillis()))
         return sendLocation(app.session.http, app.db, session.shipUrl, session.ship, fix, placeName(fix)).fold(
-            onSuccess = { Result.success() },
+            onSuccess = {
+                // Where the owner is now moves when to leave: the ship looks again, and so does the alarm.
+                LeaveAlarm.refresh(applicationContext)
+                Result.success()
+            },
             onFailure = {
                 Log.w("LocationWorker", "location not sent: ${it.message}")
                 if (runAttemptCount < 3) Result.retry() else Result.success()

@@ -133,6 +133,24 @@ class OrreryApiTest {
     }
 
     @Test
+    fun `travel is read with the key, its last pass with the owner's session`() = runTest {
+        val keyed = mutableListOf<HttpRequestData>()
+        val owned = mutableListOf<HttpRequestData>()
+        val api = OrreryApi(
+            owner = HttpClient(MockEngine { req -> owned += req; respond("""{"next":null}""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }),
+            bare = HttpClient(MockEngine { req -> keyed += req; respond("""{"enabled":false,"lead_min":10}""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }),
+            baseUrl = "https://ship/",
+        )
+        assertEquals(null, io.nisfeb.talon.orrery.readLeavePlan(api, "k1.secret"))
+        assertEquals("https://ship/apps/orrery/api/travel", keyed.single().url.toString())
+        assertEquals("Bearer k1.secret", keyed.single().headers[HttpHeaders.Authorization])
+        assertEquals(emptyList(), owned, "off: the pass's record is not asked for")
+        api.travelLast()
+        assertEquals("https://ship/apps/orrery/api/travel/last", owned.single().url.toString())
+        assertEquals(null, owned.single().headers[HttpHeaders.Authorization], "the owner's, by cookie, not the key")
+    }
+
+    @Test
     fun `every call made with a key carries it, and no cookie`() = runTest {
         val sent = mutableListOf<HttpRequestData>()
         val bare = HttpClient(MockEngine { req -> sent += req; respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) })
