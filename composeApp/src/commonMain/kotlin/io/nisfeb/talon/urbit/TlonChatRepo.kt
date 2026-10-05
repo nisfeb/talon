@@ -4838,6 +4838,8 @@ class TlonChatRepo(
                 "contacts",
                 listOf("/v1/directory", "/v1/all"),
                 "contacts directory",
+                perCallSecs = DIRECTORY_SCRY_SECS,
+                budgetMs = DIRECTORY_BUDGET_MS,
             )
         }
         // /v1/book is our curated contact book (kip -> [con, mod] page),
@@ -5349,8 +5351,10 @@ class TlonChatRepo(
         paths: List<String>,
         label: String,
         memo: String? = null,
+        perCallSecs: Long = SCRY_PROBE_PER_CALL_SECS,
+        budgetMs: Long = SCRY_PROBE_BUDGET_MS,
     ): JsonElement? {
-        val deadline = nowMs() + SCRY_PROBE_BUDGET_MS
+        val deadline = nowMs() + budgetMs
         var lastErr: Throwable? = null
         // The version and mark that answered last time first: a ship that
         // stopped serving the first ones was walked through them per read.
@@ -5360,10 +5364,10 @@ class TlonChatRepo(
         }
         for (path in order) {
             if (nowMs() >= deadline) {
-                Log.w(TAG, "$label: ${SCRY_PROBE_BUDGET_MS}ms budget exhausted, giving up; last err: ${lastErr?.message}")
+                Log.w(TAG, "$label: ${budgetMs}ms budget exhausted, giving up; last err: ${lastErr?.message}")
                 return null
             }
-            val attempt = io.nisfeb.talon.util.runSuspendCatching { ch.scry(app, path, SCRY_PROBE_PER_CALL_SECS) }
+            val attempt = io.nisfeb.talon.util.runSuspendCatching { ch.scry(app, path, perCallSecs) }
             if (attempt.isSuccess) {
                 memo?.let { walkServed[it] = path.split('/')[1] to path.substringAfterLast('/') }
                 return attempt.getOrNull()
@@ -5577,6 +5581,13 @@ class TlonChatRepo(
         // scry/poke paths (bootstrap, sends) where slower responses
         // are tolerable.
         private const val SCRY_PROBE_PER_CALL_SECS = 6L
+        // The contacts directory is every peer the ship knows, a few
+        // thousand on a busy ship. The ship builds it in half a second,
+        // but its JSON took longer than 6 s to arrive on every read for
+        // two days (~ricsul, ~3,400 peers, 2026-10-05), so no one outside
+        // the contact book ever got an avatar. Tlon's client waits 60 s.
+        private const val DIRECTORY_SCRY_SECS = 60L
+        private const val DIRECTORY_BUDGET_MS = 90_000L
     }
 
     // dmAction / clubAction / channelAction / replyDelta extracted to WireShapes.kt.
