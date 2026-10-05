@@ -581,7 +581,9 @@ suspend fun ackInBatches(
         runCatching { ack(newest) }
     }
     while (true) {
-        val next = kotlinx.coroutines.withTimeoutOrNull(quietMs) { ids.receiveCatching() }
+        // Nothing owed: wait for the next event without waking every [quietMs].
+        val next = if (waiting == 0) ids.receiveCatching()
+        else kotlinx.coroutines.withTimeoutOrNull(quietMs) { ids.receiveCatching() }
         when {
             next == null -> flush()
             next.isClosed -> { flush(); return }

@@ -203,5 +203,3 @@ fun batches(facts: Facts): List<JsonObject> {
     return out
 }
 
-/** A conversation of one or a few, a DM or a club, rather than a group's channel. */
-fun isDirect(whom: String): Boolean = whom.startsWith("~") || whom.startsWith("0v")

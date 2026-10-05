@@ -43,9 +43,6 @@ interface FollowedThreadDao {
     @Query("SELECT * FROM followed_threads")
     suspend fun all(): List<FollowedThreadEntity>
 
-    @Query("SELECT * FROM followed_threads")
-    fun streamAll(): Flow<List<FollowedThreadEntity>>
-
     @Query("SELECT * FROM followed_threads WHERE sent = 0")
     suspend fun unsent(): List<FollowedThreadEntity>
 
@@ -56,7 +53,8 @@ interface FollowedThreadDao {
      * The threads the owner follows, as the Threads lists show them, with
      * their parent post and newest reply as kept here and the ship's
      * unread count. A DM's thread with unread replies is in too unless
-     * unfollowed: a DM's thread counts by default.
+     * unfollowed: a DM's thread counts by default. [whom] keeps one
+     * conversation's, so a chat does not read every thread's replies.
      */
     @Query("""
         SELECT t.whom AS whom, t.parentPostId AS parentPostId,
@@ -76,8 +74,23 @@ interface FollowedThreadDao {
         ) t
         LEFT JOIN messages p ON p.whom = t.whom AND p.id = t.parentPostId
         LEFT JOIN thread_unreads u ON u.whom = t.whom AND u.parentPostId = t.parentPostId
+        WHERE :whom IS NULL OR t.whom = :whom
     """)
-    fun streamThreads(): Flow<List<FollowedThreadRow>>
+    fun streamThreads(whom: String? = null): Flow<List<FollowedThreadRow>>
+
+    /**
+     * Whether any thread in [streamThreads] has unread replies, for the
+     * menu's dot: from the unread counts alone, so a message written
+     * anywhere does not ask it again.
+     */
+    @Query("""
+        SELECT EXISTS(SELECT 1 FROM thread_unreads u WHERE u.count > 0 AND (
+            EXISTS(SELECT 1 FROM followed_threads f WHERE f.whom = u.whom AND f.parentPostId = u.parentPostId AND f.follow = 1)
+            OR ((u.whom LIKE '~%' OR u.whom LIKE '0v%')
+                AND NOT EXISTS(SELECT 1 FROM followed_threads f WHERE f.whom = u.whom AND f.parentPostId = u.parentPostId))
+        ))
+    """)
+    fun streamAnyUnread(): Flow<Boolean>
 }
 
 /** A followed thread as the Threads lists show it (see [FollowedThreadDao.streamThreads]). */

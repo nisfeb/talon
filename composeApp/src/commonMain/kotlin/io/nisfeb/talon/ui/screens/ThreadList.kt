@@ -291,7 +291,7 @@ fun ThreadList(
         }
     }
     val canSend = remember(whom) {
-        whom.startsWith("~") || whom.startsWith("0v") || isChannelNest(whom)
+        io.nisfeb.talon.urbit.isDirect(whom) || isChannelNest(whom)
     }
     var pendingDelete by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
     var pendingReport by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
@@ -416,7 +416,7 @@ fun ThreadList(
         db.followedThreads().streamForWhom(whom).map { rows -> rows.firstOrNull { it.parentPostId == parentId }?.follow }
     }.collectAsState(initial = null)
     val following = io.nisfeb.talon.urbit.threadCounts(
-        followHere, whom.startsWith("~") || whom.startsWith("0v"), parent?.author == ourPatp,
+        followHere, io.nisfeb.talon.urbit.isDirect(whom), parent?.author == ourPatp,
     )
 
     Column(modifier = modifier) {

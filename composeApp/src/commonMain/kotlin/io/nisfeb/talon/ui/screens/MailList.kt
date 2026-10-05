@@ -109,16 +109,12 @@ fun MailList(
     // picked only itself.
     val toggle: (String) -> Unit = { id -> picked = picked.let { if (id in it) it - id else it + id } }
     if (confirmingDelete) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { confirmingDelete = false },
-            title = { Text("Delete ${chosen.size} thread${if (chosen.size == 1) "" else "s"}?") },
-            text = { Text("They are deleted from your ship. This cannot be undone.") },
-            confirmButton = {
-                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
-                    repo.deleteMany(chosen); picked = emptySet(); confirmingDelete = false
-                }) { Text("Delete") }
-            },
-            dismissButton = { io.nisfeb.talon.ui.TextButton(onClick = { confirmingDelete = false }) { Text("Keep") } },
+        io.nisfeb.talon.ui.ConfirmDestructive(
+            title = "Delete ${chosen.size} thread${if (chosen.size == 1) "" else "s"}?",
+            text = "They are deleted from your ship. This cannot be undone.",
+            dismiss = "Keep",
+            onConfirm = { repo.deleteMany(chosen); picked = emptySet() },
+            onDismiss = { confirmingDelete = false },
         )
     }
 
@@ -684,7 +680,7 @@ private fun MailSelectionBar(
             io.nisfeb.talon.ui.TextButton(onClick = { onArchive(archiving) }) { Text(if (archiving) "Archive" else "Unarchive") }
             io.nisfeb.talon.ui.TextButton(onClick = { onRead(true) }) { Text("Mark read") }
             io.nisfeb.talon.ui.TextButton(onClick = { onRead(false) }) { Text("Mark unread") }
-            io.nisfeb.talon.ui.TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            io.nisfeb.talon.ui.DestructiveTextButton(onClick = onDelete) { Text("Delete") }
         }
     }
 }

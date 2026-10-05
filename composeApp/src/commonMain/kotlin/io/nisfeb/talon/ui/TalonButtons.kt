@@ -84,13 +84,15 @@ fun TextButton(
 
 /**
  * Asked before something that cannot be taken back: [title] ("Delete
- * this theme?"), [text] saying what goes, [confirm] in the error colour.
+ * this theme?"), [text] saying what goes, [confirm] in the error colour,
+ * [dismiss] beside it.
  */
 @Composable
 fun ConfirmDestructive(
     title: String,
     text: String,
     confirm: String = "Delete",
+    dismiss: String = "Cancel",
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) = androidx.compose.material3.AlertDialog(
@@ -98,7 +100,7 @@ fun ConfirmDestructive(
     title = { androidx.compose.material3.Text(title) },
     text = { androidx.compose.material3.Text(text) },
     confirmButton = { DestructiveTextButton(onClick = { onDismiss(); onConfirm() }) { androidx.compose.material3.Text(confirm) } },
-    dismissButton = { TextButton(onClick = onDismiss) { androidx.compose.material3.Text("Cancel") } },
+    dismissButton = { TextButton(onClick = onDismiss) { androidx.compose.material3.Text(dismiss) } },
 )
 
 /**
@@ -106,14 +108,19 @@ fun ConfirmDestructive(
  * nothing, and people pasted somewhere to see whether they had worked.
  */
 @Composable
-fun CopyButton(text: () -> String, label: String = "Copy", modifier: Modifier = Modifier) {
+fun CopyButton(
+    text: () -> String,
+    label: String = "Copy",
+    modifier: Modifier = Modifier,
+    style: androidx.compose.ui.text.TextStyle = androidx.compose.material3.LocalTextStyle.current,
+) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var copied by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(copied) {
         if (copied) { kotlinx.coroutines.delay(COPIED_FOR_MS); copied = false }
     }
     TextButton(onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(text())); copied = true }, modifier = modifier) {
-        androidx.compose.material3.Text(if (copied) "Copied" else label)
+        androidx.compose.material3.Text(if (copied) "Copied" else label, style = style)
     }
 }
 

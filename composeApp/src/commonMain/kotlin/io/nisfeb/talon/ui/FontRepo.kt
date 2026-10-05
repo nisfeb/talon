@@ -110,9 +110,7 @@ class FontRepo(
     fun install(bytes: ByteArray, fileName: String) {
         val info = readFontInfo(bytes).getOrElse { _status.value = it.message; return }
         val id = fontId(bytes)
-        files.write(id, bytes)
-        if (!fontLoads(files.path(id).toString())) {
-            files.delete(id)
+        if (!keep(id, bytes)) {
             _status.value = "That font would not load here, so it was not installed."
             return
         }
@@ -128,7 +126,9 @@ class FontRepo(
                 onSuccess = { "${info.family} is installed on all your devices." },
                 onFailure = {
                     if (it is NoGrubbery) "${info.family} is installed on this device only: ${it.message}"
-                    else "${info.family} is installed here; it was not shared yet: ${it.message} It is tried again next time Talon starts."
+                    else "${info.family} is installed here; it was not shared yet" +
+                        (io.nisfeb.talon.util.readableReason(it.message)?.let { r -> " ($r)" } ?: "") +
+                        ". It is tried again next time Talon starts."
                 },
             )
         }
@@ -167,8 +167,7 @@ class FontRepo(
             }
             val got = if (f.shipFile in onShip) runCatching { ship.get(f.shipFile) }.getOrNull() else null
             if (got == null || fontId(got) != f.id) { missing++; continue }
-            files.write(f.id, got)
-            if (!fontLoads(files.path(f.id).toString())) { files.delete(f.id); missing++ }
+            if (!keep(f.id, got)) missing++
         }
         takeUp(onShip - s.fonts.map { it.shipFile }.toSet(), s)
         _status.value = if (missing == 0) null
@@ -200,6 +199,14 @@ class FontRepo(
      * and style (two such files would take turns removing each other),
      * and nothing on the ship is deleted here.
      */
+    /** [bytes] kept here as [id] when the platform can load them; false, and nothing kept, when not. */
+    private fun keep(id: String, bytes: ByteArray): Boolean {
+        files.write(id, bytes)
+        if (fontLoads(files.path(id).toString())) return true
+        files.delete(id)
+        return false
+    }
+
     private suspend fun takeUp(names: Set<String>, s: FontSettings) {
         val found = mutableListOf<InstalledFont>()
         for (name in names) {
@@ -213,8 +220,7 @@ class FontRepo(
             if (id in s.removed || (s.fonts + found).any { it.id == id }) continue
             val info = readFontInfo(bytes).getOrNull() ?: continue
             if ((s.fonts + found).any { it.family == info.family && it.weight == info.weight && it.italic == info.italic }) continue
-            files.write(id, bytes)
-            if (!fontLoads(files.path(id).toString())) { files.delete(id); continue }
+            if (!keep(id, bytes)) continue
             found += InstalledFont(id, info.family, info.weight, info.italic, fileName = name, shipName = name.takeIf { it != "$id.font" })
         }
         if (found.isEmpty()) return

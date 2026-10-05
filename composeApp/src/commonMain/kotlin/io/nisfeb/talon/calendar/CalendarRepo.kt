@@ -790,23 +790,7 @@ class CalendarRepo(
     }
 
     /** The events and tasks: two requests, where a full read is up to nine. */
-    suspend fun refreshLight() = gate.withLock {
-        val a = api ?: return@withLock
-        try {
-            val now = nowMs()
-            val w = a.window(now - BEHIND_MS, now + AHEAD_MS)
-            _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
-            details.clear()
-            _tasks.value = runSuspendCatching { a.tasks() }.getOrNull() ?: _tasks.value
-            keep()
-            noteReminders(w.rows)
-            _availability.value = CalendarAvailability.PRESENT
-            _error.value = null
-            lastReadMs = now
-        } catch (e: AuspexError) {
-            readFailed(e)
-        }
-    }
+    suspend fun refreshLight() = refresh(full = false)
 
     /**
      * The tasks, and nothing else.
@@ -830,7 +814,11 @@ class CalendarRepo(
         }
     }
 
-    suspend fun refresh() = gate.withLock {
+    /**
+     * Everything, or with [full] false only the events and tasks: the
+     * calendars, shares, sync, tags and config change rarely.
+     */
+    suspend fun refresh(full: Boolean = true) = gate.withLock {
         val a = api ?: return@withLock
         try {
             val now = nowMs()
@@ -839,36 +827,43 @@ class CalendarRepo(
             // The ship has just said what is current, so nothing read of
             // one event before now is: the assistant reads through here too.
             details.clear()
-            _calendars.value = runSuspendCatching { a.calendars() }.getOrNull() ?: _calendars.value
+            if (full) _calendars.value = runSuspendCatching { a.calendars() }.getOrNull() ?: _calendars.value
             _tasks.value = runSuspendCatching { a.tasks() }.getOrNull() ?: _tasks.value
-            // Null only when the calendar has no sharing (404); a hiccup
-            // keeps the last answer, and with it the read-only guard.
-            _shares.value = runSuspendCatching { a.shares() }.getOrElse { e ->
-                if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) null else _shares.value
-            }
-            // Sync state and conflicts only where a calendar syncs: three
-            // reads of the ship's one queue that say nothing of local ones.
-            val syncing = _calendars.value.any { it.kind != "local" }
-            _conflicts.value = if (syncing) runSuspendCatching { a.conflicts() }.getOrElse { _conflicts.value } else emptyList()
-            _sync.value = buildMap {
-                if (syncing) {
-                    runSuspendCatching { a.google() }.getOrNull()?.linked?.forEach { (id, row) -> put(id, row) }
-                    runSuspendCatching { a.caldavSubscriptions() }.getOrNull()?.forEach { put(it.id, SyncRow(it.lastMs, it.error)) }
-                }
-                _shares.value?.accepted?.forEach { (id, acc) -> put(id, SyncRow(acc.lastMs, acc.error)) }
-            }.ifEmpty { if (_calendars.value.any { it.kind != "local" }) _sync.value else emptyMap() }
-            _tags.value = runSuspendCatching { a.tags() }.getOrNull()?.map { it.tag } ?: _tags.value
+            if (full) readRarely(a)
             keep()
-            runSuspendCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball; _leadMin.value = it.leadMin }
+            if (full) runSuspendCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball; _leadMin.value = it.leadMin }
             noteReminders(w.rows)
             _availability.value = CalendarAvailability.PRESENT
             _error.value = null
             lastReadMs = now
-            lastFullMs = now
-            adoptZoneIfNone()
+            if (full) {
+                lastFullMs = now
+                adoptZoneIfNone()
+            }
         } catch (e: AuspexError) {
             readFailed(e)
         }
+    }
+
+    /** What a full read adds between the tasks and the config: shares, sync state and tags. */
+    private suspend fun readRarely(a: CalendarApi) {
+        // Null only when the calendar has no sharing (404); a hiccup
+        // keeps the last answer, and with it the read-only guard.
+        _shares.value = runSuspendCatching { a.shares() }.getOrElse { e ->
+            if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) null else _shares.value
+        }
+        // Sync state and conflicts only where a calendar syncs: three
+        // reads of the ship's one queue that say nothing of local ones.
+        val syncing = _calendars.value.any { it.kind != "local" }
+        _conflicts.value = if (syncing) runSuspendCatching { a.conflicts() }.getOrElse { _conflicts.value } else emptyList()
+        _sync.value = buildMap {
+            if (syncing) {
+                runSuspendCatching { a.google() }.getOrNull()?.linked?.forEach { (id, row) -> put(id, row) }
+                runSuspendCatching { a.caldavSubscriptions() }.getOrNull()?.forEach { put(it.id, SyncRow(it.lastMs, it.error)) }
+            }
+            _shares.value?.accepted?.forEach { (id, acc) -> put(id, SyncRow(acc.lastMs, acc.error)) }
+        }.ifEmpty { if (_calendars.value.any { it.kind != "local" }) _sync.value else emptyMap() }
+        _tags.value = runSuspendCatching { a.tags() }.getOrNull()?.map { it.tag } ?: _tags.value
     }
 
     private fun readFailed(e: AuspexError) {

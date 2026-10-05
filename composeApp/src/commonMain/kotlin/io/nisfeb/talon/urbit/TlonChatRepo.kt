@@ -189,6 +189,7 @@ class TlonChatRepo(
     private val _adminGroups = MutableStateFlow<List<AdminGroup>?>(null)
     val adminGroupsFlow: StateFlow<List<AdminGroup>?> = _adminGroups.asStateFlow()
     @Volatile private var adminGroupsFetchedMs: Long = 0L
+    @Volatile private var adminGroupsFailedMs: Long = 0L
     private val adminGroupsMutex = Mutex()
 
     /**
@@ -1202,7 +1203,7 @@ class TlonChatRepo(
         // queued", and in a channel, where the ship numbers posts as they
         // arrive, could land ahead of the one written before it.
         if (db.messages().queuedIn(whom) > 0) {
-            neverSent["$whom|$id"] = true
+            neverSent.add("$whom|$id")
             db.messages().setStatus(whom, id, "queued")
             scheduleDrain(0)
             return@async
@@ -1346,7 +1347,7 @@ class TlonChatRepo(
      * Forgotten at the first send of it, so an interrupted one is asked
      * about after all; kept in memory only, so after a restart all are.
      */
-    private val neverSent = ConcurrentMap<String, Boolean>()
+    private val neverSent = ConcurrentSet<String>()
 
     /**
      * Send what waited for the ship, oldest first: queued messages, then
@@ -1378,7 +1379,7 @@ class TlonChatRepo(
                     continue
                 }
                 try {
-                    val untried = neverSent.remove("${now.whom}|${now.id}") != null
+                    val untried = neverSent.remove("${now.whom}|${now.id}")
                     if (isChannelNest(now.whom) && !untried && landedAlready(now)) continue
                     // Queued until the ship takes it, label and count with it:
                     // marked sent before the send, it lost its label and stood
@@ -1387,15 +1388,8 @@ class TlonChatRepo(
                     db.messages().setStatus(now.whom, now.id, if (isChannelNest(now.whom)) "pending" else null)
                     // The ship took one: the next wait, if there is one, starts short.
                     drainPauseMs = FIRST_DRAIN_PAUSE_MS
-                } catch (c: kotlinx.coroutines.CancellationException) {
-                    throw c
                 } catch (t: Throwable) {
-                    if (t is PokeNacked) {
-                        db.messages().setStatus(now.whom, now.id, "failed")
-                        continue
-                    }
-                    drainJob = null
-                    stillSlow(t)
+                    if (goesOn(t, t is PokeNacked) { db.messages().setStatus(now.whom, now.id, "failed") }) continue
                     return@withLock
                 }
             }
@@ -1404,16 +1398,9 @@ class TlonChatRepo(
             try {
                 sendReact(ch, r)
                 queuedReacts.update { m -> if (m[r.key] == r) m - r.key else m }
-            } catch (c: kotlinx.coroutines.CancellationException) {
-                throw c
             } catch (t: Throwable) {
                 // Refused now: dropped, and the post's next reading shows the ship's word.
-                if (t is PokeNacked) {
-                    queuedReacts.update { m -> if (m[r.key] == r) m - r.key else m }
-                    continue
-                }
-                drainJob = null
-                stillSlow(t)
+                if (goesOn(t, t is PokeNacked) { queuedReacts.update { m -> if (m[r.key] == r) m - r.key else m } }) continue
                 return@withLock
             }
         }
@@ -1423,15 +1410,8 @@ class TlonChatRepo(
             try {
                 sendActivityRead(ch, r.source, upTo = r.readAtMs)
                 owedReads.update { m -> if (m[r.key] == r) m - r.key else m }
-            } catch (c: kotlinx.coroutines.CancellationException) {
-                throw c
             } catch (t: Throwable) {
-                if (t is PokeNacked) {
-                    owedReads.update { m -> if (m[r.key] == r) m - r.key else m }
-                    continue
-                }
-                drainJob = null
-                stillSlow(t)
+                if (goesOn(t, t is PokeNacked) { owedReads.update { m -> if (m[r.key] == r) m - r.key else m } }) continue
                 return@withLock
             }
         }
@@ -1439,21 +1419,30 @@ class TlonChatRepo(
         for (f in db.followedThreads().unsent()) {
             try {
                 sendFollow(ch, f.whom, f.parentPostId, f.follow)
-            } catch (c: kotlinx.coroutines.CancellationException) {
-                throw c
             } catch (t: Throwable) {
-                if (!isShipSlow(t)) {
-                    // Refused, or the thread is not known here: the ship's word stands.
-                    db.followedThreads().delete(f.whom, f.parentPostId)
-                    continue
-                }
-                drainJob = null
-                stillSlow(t)
+                // Refused, or the thread is not known here: the ship's word stands.
+                if (goesOn(t, !isShipSlow(t)) { db.followedThreads().delete(f.whom, f.parentPostId) }) continue
                 return@withLock
             }
         }
         slowDetails.value = null
         drainPauseMs = FIRST_DRAIN_PAUSE_MS
+    }
+
+    /**
+     * After a queued write failed with [t]: one the ship refused ([drops])
+     * goes ([drop]) and the drain moves on (true); otherwise the ship is
+     * still slow, and the drain stops (false) to try again later.
+     */
+    private inline fun goesOn(t: Throwable, drops: Boolean, drop: () -> Unit): Boolean {
+        if (t is kotlinx.coroutines.CancellationException) throw t
+        if (drops) {
+            drop()
+            return true
+        }
+        drainJob = null
+        stillSlow(t)
+        return false
     }
 
     /**
@@ -1659,6 +1648,19 @@ class TlonChatRepo(
                     // already failed, its error line unreachable.
                     throw it
                 }
+        }
+    }
+
+    /**
+     * [refreshAdminGroups] for a message menu: on the repo's scope, so
+     * closing the menu does not throw the read away, and not again for a
+     * minute after one failed, where every tap on a slow ship asked anew.
+     */
+    fun prefetchAdminGroups() {
+        if (nowMs() - adminGroupsFailedMs < ADMIN_RETRY_MS) return
+        scope.launch {
+            runCatching { refreshAdminGroups() }
+                .onFailure { if (it !is kotlinx.coroutines.CancellationException) adminGroupsFailedMs = nowMs() }
         }
     }
 
@@ -2641,7 +2643,7 @@ class TlonChatRepo(
     }
 
     /** Conversations read on opening since this connect; the stream keeps them current after. */
-    private val readOnOpen = ConcurrentMap<String, Boolean>()
+    private val readOnOpen = ConcurrentSet<String>()
 
     /**
      * A conversation read as it opens: its newest [OPEN_READ_COUNT], once a
@@ -2650,9 +2652,9 @@ class TlonChatRepo(
      * rest page by page, and a reconnect's catch-up covers a gap.
      */
     suspend fun refreshOnOpen(whom: String) {
-        if (readOnOpen[whom] == true) return
+        if (readOnOpen.contains(whom)) return
         refreshConversation(whom, count = OPEN_READ_COUNT)
-        readOnOpen[whom] = true
+        readOnOpen.add(whom)
     }
 
     /**
@@ -4439,7 +4441,11 @@ class TlonChatRepo(
         val dao = db.followedThreads()
         val have = dao.all().associateBy { ThreadSource(it.whom, it.parentPostId) }
         named.forEach { (src, follow) ->
-            if (have[src]?.sent == false) return@forEach
+            // A change made here and not yet sent stands; one already
+            // stored as the ship has it is not written again, since every
+            // write re-reads the followed-threads list on each screen.
+            val held = have[src]
+            if (held != null && (!held.sent || held.follow == follow)) return@forEach
             dao.upsert(FollowedThreadEntity(src.whom, src.parentPostId, follow, sent = true, atMs = start))
         }
         have.values.filter { it.sent && it.atMs < start && ThreadSource(it.whom, it.parentPostId) !in named }
@@ -4541,7 +4547,7 @@ class TlonChatRepo(
     /** Whether a reply that just came counts for the owner (see [threadCounts]). */
     private suspend fun replyCounts(reply: MessageEntity): Boolean {
         val parentId = reply.parentId ?: return true
-        val isDm = reply.whom.startsWith("~") || reply.whom.startsWith("0v")
+        val isDm = isDirect(reply.whom)
         val follow = db.followedThreads().get(reply.whom, parentId)?.follow
         if (follow != null || isDm) return threadCounts(follow, isDm, ours = false)
         val ours = db.messages().getOne(reply.whom, parentId)?.author == ourPatp ||
@@ -4887,8 +4893,13 @@ class TlonChatRepo(
         }
 
         if (fields.isNotEmpty()) {
-            val merged = fields.map { (ship, f) -> mergeContact(parseContact(ship, f, modAt[ship]), full = ship !in unknown) }
-            db.contacts().upsertAll(merged)
+            // Read once and write only what changed: a ship that knows a
+            // few thousand peers asked a row of the database for each, and
+            // rewrote every one, on every reconcile.
+            val stored = db.contacts().all().associateBy { it.ship }
+            val changed = fields.map { (ship, f) -> mergeContact(parseContact(ship, f, modAt[ship]), stored[ship], full = ship !in unknown) }
+                .filter { it != stored[it.ship] }
+            if (changed.isNotEmpty()) db.contacts().upsertAll(changed)
         }
         // No answer is not an empty book: read as one, every contact
         // left the Contacts screen until the next connect.
@@ -5010,9 +5021,12 @@ class TlonChatRepo(
      *     nothing on the wire to anchor it → stamp now so the feed
      *     can sort recent updates above silent old entries.
      */
-    internal suspend fun mergeContact(incoming: ContactEntity, full: Boolean = false): ContactEntity {
-        val existing = db.contacts().get(incoming.ship)
-        return incoming.copy(
+    internal suspend fun mergeContact(incoming: ContactEntity, full: Boolean = false): ContactEntity =
+        mergeContact(incoming, db.contacts().get(incoming.ship), full)
+
+    /** [mergeContact] over a row already read. */
+    private fun mergeContact(incoming: ContactEntity, existing: ContactEntity?, full: Boolean): ContactEntity =
+        incoming.copy(
             nickname = if (full) incoming.nickname else incoming.nickname ?: existing?.nickname,
             bio = if (full) incoming.bio else incoming.bio ?: existing?.bio,
             avatarUrl = if (full) incoming.avatarUrl else incoming.avatarUrl ?: existing?.avatarUrl,
@@ -5023,7 +5037,6 @@ class TlonChatRepo(
                 else -> nowMs()
             },
         )
-    }
 
     /**
      * Visible to tests so the regression guard around the
@@ -5398,6 +5411,9 @@ class TlonChatRepo(
         private const val MAX_DRAIN_PAUSE_MS = 60_000L
         /** How many of a channel's newest posts are read to see whether a queued one landed. */
         private const val LANDED_CHECK_COUNT = 30
+
+        /** How long a message menu waits to ask for the admin groups again after a read failed. */
+        private const val ADMIN_RETRY_MS = 60_000L
 
         /**
          * `#FF5050` → `ff.5050` for a profile tint.

@@ -9,14 +9,14 @@ class ShipPushTest {
     @Test
     fun `a leave push reads whole`() {
         assertEquals(
-            ShipPushMessage("Leave in 10 min for Dentist", "23 min with traffic; leave by 15:02", "/apps/orrery", "orrery-leave-situation/dentist@1791127800000"),
+            ShipPushMessage("Leave in 10 min for Dentist", "23 min with traffic; leave by 15:02", "orrery-leave-situation/dentist@1791127800000"),
             parseShipPush("""{"title":"Leave in 10 min for Dentist","body":"23 min with traffic; leave by 15:02","url":"/apps/orrery","tag":"orrery-leave-situation/dentist@1791127800000"}"""),
         )
     }
 
     @Test
     fun `the optional keys may be absent`() {
-        assertEquals(ShipPushMessage("Standup", "in 30 min", null, null), parseShipPush("""{"title":"Standup","body":"in 30 min"}"""))
+        assertEquals(ShipPushMessage("Standup", "in 30 min", null), parseShipPush("""{"title":"Standup","body":"in 30 min"}"""))
     }
 
     @Test

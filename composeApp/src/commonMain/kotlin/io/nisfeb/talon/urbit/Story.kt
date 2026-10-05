@@ -159,6 +159,9 @@ const val MENTION_TAG = "mention"
 /** Inline URL annotation tag — value is the absolute href. */
 const val URL_TAG = "url"
 
+/** How a mention is drawn, sent or in the composer, so the box shows what will be sent. */
+internal val MENTION_SPAN = SpanStyle(color = Color(0xFF4F63D2), fontWeight = FontWeight.Medium)
+
 object Story {
 
     /**
@@ -431,7 +434,7 @@ object Story {
             // person's view. The annotation stays the @p so taps still
             // resolve the right ship.
             out.pushStringAnnotation(MENTION_TAG, patp)
-            out.withSpan(SpanStyle(color = MENTION_COLOR, fontWeight = FontWeight.Medium)) {
+            out.withSpan(MENTION_SPAN) {
                 append(io.nisfeb.talon.ui.ShipNames.resolve(patp))
             }
             out.pop()
@@ -788,7 +791,6 @@ object Story {
 
     // ───────── style constants ─────────
 
-    private val MENTION_COLOR = Color(0xFF4F63D2)
     private val LINK_COLOR = io.nisfeb.talon.ui.theme.LINK_BLUE
     private val MONO_SPAN = SpanStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
 }

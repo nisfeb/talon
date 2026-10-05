@@ -91,7 +91,7 @@ internal fun followedThreadsOf(settings: JsonObject): Map<ThreadSource, Boolean>
 
 /** The volume map that follows a thread or stops: its replies unread and notifying, or neither. */
 internal fun followVolume(whom: String, follow: Boolean): JsonObject = buildJsonObject {
-    put(if (whom.startsWith("~") || whom.startsWith("0v")) "dm-reply" else "reply", buildJsonObject {
+    put(if (isDirect(whom)) "dm-reply" else "reply", buildJsonObject {
         put("unreads", follow)
         put("notify", follow)
     })

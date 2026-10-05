@@ -255,7 +255,7 @@ fun DmChatScreen(
     // scrolled away, from the chip over the chat or the header.
     var threadsSheetOpen by remember(whom) { mutableStateOf(false) }
     val followedHere by remember(whom) {
-        db.followedThreads().streamThreads().map { rows -> io.nisfeb.talon.data.threadsInOrder(rows.filter { it.whom == whom }) }
+        db.followedThreads().streamThreads(whom).map { io.nisfeb.talon.data.threadsInOrder(it) }
     }.collectAsState(initial = emptyList())
     val followOfPost by remember(whom) {
         db.followedThreads().streamForWhom(whom).map { rows -> rows.associate { it.parentPostId to it.follow } }
@@ -291,7 +291,7 @@ fun DmChatScreen(
             // joined has replies, not unread ones.
             val followOf = follows.associate { it.parentPostId to it.follow }
             val authorOf = messages.associate { it.id to it.author }
-            val dm = whom.startsWith("~") || whom.startsWith("0v")
+            val dm = io.nisfeb.talon.urbit.isDirect(whom)
             val threadUnreads = allThreadUnreads.filter {
                 io.nisfeb.talon.urbit.threadCounts(followOf[it.parentPostId], dm, ours = authorOf[it.parentPostId] == ourPatp)
             }
@@ -668,7 +668,7 @@ fun DmChatScreen(
     }
 
     val canSend = remember(whom) {
-        whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
+        io.nisfeb.talon.urbit.isDirect(whom) || whom.startsWith("chat/")
     }
 
     val contactList by remember {
@@ -978,8 +978,11 @@ fun DmChatScreen(
         // bookmark/pinned lookups don't run for every list row.
         val clipboardManager = LocalClipboardManager.current
         val messageActionMenuFor: @Composable (MessageEntity) -> Unit = { target ->
+            val followingTarget = target.parentId == null && io.nisfeb.talon.urbit.threadCounts(
+                followOfPost[target.id], io.nisfeb.talon.urbit.isDirect(whom), target.author == ourPatp,
+            )
             // Read here, not at launch: a scry per group, cached 5 minutes.
-            if (whom.startsWith("chat/")) LaunchedEffect(Unit) { runCatching { repo.refreshAdminGroups() } }
+            if (whom.startsWith("chat/")) LaunchedEffect(Unit) { repo.prefetchAdminGroups() }
             val isBookmarked by remember(target.whom, target.id) {
                 db.bookmarks().isBookmarked(target.whom, target.id)
             }.collectAsState(initial = false)
@@ -1092,19 +1095,11 @@ fun DmChatScreen(
                 onMakeTask = calendar?.takeIf { calendarHere }?.let {
                     { actionTarget = null; calendarTarget = FromMessage.Task to target }
                 },
-                followLabel = if (target.parentId != null) null else {
-                    val following = io.nisfeb.talon.urbit.threadCounts(
-                        followOfPost[target.id], whom.startsWith("~") || whom.startsWith("0v"), target.author == ourPatp,
-                    )
-                    if (following) "Unfollow thread" else "Follow thread"
-                },
+                followLabel = if (target.parentId != null) null else if (followingTarget) "Unfollow thread" else "Follow thread",
                 onToggleFollow = {
-                    val following = io.nisfeb.talon.urbit.threadCounts(
-                        followOfPost[target.id], whom.startsWith("~") || whom.startsWith("0v"), target.author == ourPatp,
-                    )
                     actionTarget = null
                     scope.launch {
-                        runCatching { repo.setFollow(whom, target.id, !following) }
+                        runCatching { repo.setFollow(whom, target.id, !followingTarget) }
                             .onFailure { composerState.failed("follow", it) }
                     }
                 },
@@ -2897,14 +2892,10 @@ internal fun SendFailedNote() {
  * Another's message is deleted as an admin, and says so.
  */
 @Composable
-internal fun DeleteMessageDialog(mine: Boolean, onDelete: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Delete message?") },
-        text = { Text("It goes for everyone in the chat. This cannot be undone.") },
-        confirmButton = {
-            io.nisfeb.talon.ui.DestructiveTextButton(onClick = onDelete) { Text(if (mine) "Delete" else "Delete (admin)") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
+internal fun DeleteMessageDialog(mine: Boolean, onDelete: () -> Unit, onDismiss: () -> Unit) = io.nisfeb.talon.ui.ConfirmDestructive(
+    title = "Delete message?",
+    text = "It goes for everyone in the chat. This cannot be undone.",
+    confirm = if (mine) "Delete" else "Delete (admin)",
+    onConfirm = onDelete,
+    onDismiss = onDismiss,
+)

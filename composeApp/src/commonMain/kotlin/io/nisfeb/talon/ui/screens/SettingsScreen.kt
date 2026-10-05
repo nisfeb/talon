@@ -2407,12 +2407,13 @@ private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
         }
     }
     removing?.let { family ->
-        AlertDialog(
-            onDismissRequest = { removing = null },
-            title = { Text("Remove $family?") },
-            text = { Text("It goes from all your devices and from your ship. To use it again, add the file again.") },
-            confirmButton = { io.nisfeb.talon.ui.DestructiveTextButton(onClick = { repo?.remove(family); removing = null }) { Text("Remove") } },
-            dismissButton = { TextButton(onClick = { removing = null }) { Text("Keep") } },
+        io.nisfeb.talon.ui.ConfirmDestructive(
+            title = "Remove $family?",
+            text = "It goes from all your devices and from your ship. To use it again, add the file again.",
+            confirm = "Remove",
+            dismiss = "Keep",
+            onConfirm = { repo?.remove(family) },
+            onDismiss = { removing = null },
         )
     }
     Spacer(Modifier.height(8.dp))

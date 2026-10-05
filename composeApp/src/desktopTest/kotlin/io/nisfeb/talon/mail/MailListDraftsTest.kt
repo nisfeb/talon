@@ -18,7 +18,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -76,6 +75,6 @@ class MailListDraftsTest {
         onAllNodesWithText("\"Lunch\" was not sent", substring = true)[0].performClick()
         waitForIdle()
         assertTrue(onAllNodesWithText("was not sent", substring = true).fetchSemanticsNodes().isEmpty())
-        assertNull(mail.sendProblem.value)
+        assertTrue(mail.unsent.value.isEmpty())
     }
 }

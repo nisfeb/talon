@@ -282,13 +282,13 @@ fun OrreryActionDialog(
                         // that lands mid-refinement is refused by the ship and
                         // files nothing, so the tap would be a tap that did nothing.
                         proposed -> {
-                            TextButton(onClick = { saying = Saying.REJECT }) { Text(noWord, color = MaterialTheme.colorScheme.error) }
+                            io.nisfeb.talon.ui.DestructiveTextButton(onClick = { saying = Saying.REJECT }) { Text(noWord) }
                             io.nisfeb.talon.ui.Button(enabled = !refining, onClick = { move("approved") }) {
                                 Text(if (message != null) "Approve and send" else "Approve")
                             }
                         }
                         action.status == "approved" -> {
-                            TextButton(onClick = { saying = Saying.REJECT }) { Text(noWord, color = MaterialTheme.colorScheme.error) }
+                            io.nisfeb.talon.ui.DestructiveTextButton(onClick = { saying = Saying.REJECT }) { Text(noWord) }
                             // What the ship carries out reports itself; marking
                             // it done here would skip the doing.
                             if (event == null && message == null && change == null) {

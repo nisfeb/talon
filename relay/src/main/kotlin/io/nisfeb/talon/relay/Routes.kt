@@ -43,10 +43,6 @@ data class RegisterRequest(
      *  cookie, then encrypts the cookie for storage. The +code
      *  itself is NOT persisted past the login call. */
     val code: String,
-    /** What the app understands beyond messages and rings ("read").
-     *  An app that names nothing gets nothing else: an older one
-     *  shows any push it does not know as a new message. */
-    val caps: List<String> = emptyList(),
 )
 
 /** POST /devices/{id}/caps: an app saying, after registering, what it understands. */
@@ -116,7 +112,7 @@ fun Application.installRoutes(
             }
             // 2. Mint or reuse the device id.
             val deviceId = req.deviceId.ifBlank { newDeviceId() }
-            db.upsertDevice(deviceId, req.pushEndpoint, req.platform, req.caps)
+            db.upsertDevice(deviceId, req.pushEndpoint, req.platform)
             // 3. Encrypt + persist the cookie.
             val sealed = Crypto.seal(cookie, masterSecret)
             db.upsertShip(deviceId, req.patp, req.shipUrl, sealed)

@@ -201,7 +201,10 @@ object Notifications {
         post(context, io.nisfeb.talon.orrery.LEAVE_TAG_PREFIX + plan.key, CHANNEL_LEAVE, title, body, alarm = true)
     }
 
-    private fun post(context: Context, tag: String, channel: String, title: String, body: String, alarm: Boolean) {
+    private fun post(
+        context: Context, tag: String, channel: String, title: String, body: String, alarm: Boolean,
+        whenMs: Long = System.currentTimeMillis(),
+    ) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java) ?: return
         val tap = PendingIntent.getActivity(
             context, tag.hashCode(),
@@ -217,7 +220,7 @@ object Notifications {
             .setAutoCancel(true)
             .setPriority(if (alarm) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(if (alarm) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
-            .setWhen(System.currentTimeMillis())
+            .setWhen(whenMs)
             .setShowWhen(true)
             .build()
         mgr.notify(tag, NOTIFICATION_ID, n)
@@ -580,36 +583,8 @@ object Notifications {
      * separate rows even if they share a name (Android dedupes per
      * (tag, id)). Tap just opens the app — there's no per-loop deep link yet.
      */
-    fun showLoop(context: Context, loopId: Long, title: String, body: String, whenMs: Long) {
-        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
-            ?: return
-
-        val tag = "loop:$loopId"
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val pending = PendingIntent.getActivity(
-            context,
-            tag.hashCode(),
-            tapIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_LOOPS)
-            .setSmallIcon(R.drawable.ic_stat_talon)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setContentIntent(pending)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .setWhen(whenMs)
-            .setShowWhen(true)
-            .build()
-
-        mgr.notify(tag, NOTIFICATION_ID, notification)
-    }
+    fun showLoop(context: Context, loopId: Long, title: String, body: String, whenMs: Long) =
+        post(context, "loop:$loopId", CHANNEL_LOOPS, title, body, alarm = false, whenMs = whenMs)
 
     fun clear(context: Context, whom: String) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)

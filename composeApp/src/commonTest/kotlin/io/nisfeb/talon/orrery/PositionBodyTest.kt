@@ -1,5 +1,6 @@
 package io.nisfeb.talon.orrery
 
+import io.nisfeb.talon.util.formatDecimals
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -27,8 +28,8 @@ class PositionBodyTest {
         // A Double near Greenwich prints as 4.0E-5 on its own.
         val body = positionBody(LocationFix(51.4779, 0.00004, 3.0, 1_791_115_200_000L))
         assertEquals("0.000040", numbers(body)["lon"])
-        assertEquals("0.000000", fixed(-0.0000001, 6), "rounds to zero without a sign")
-        assertEquals("-0.000100", fixed(-0.0001, 6))
+        assertEquals("0.000000", (-0.0000001).formatDecimals(6), "rounds to zero without a sign")
+        assertEquals("-0.000100", (-0.0001).formatDecimals(6))
         for ((k, v) in numbers(body)) assertTrue(shipNumber.matches(v), "$k=$v is not a number the ship reads")
     }
 

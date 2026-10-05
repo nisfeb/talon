@@ -43,8 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -705,7 +703,6 @@ fun ChatComposer(
                 }
             },
     ) {
-        val clipboard = LocalClipboardManager.current
         // Writes waiting for a slow ship: said once, quietly, with what
         // the last try said behind the button.
         val slow = repo.shipSlow.collectAsState(initial = null).value
@@ -714,11 +711,10 @@ fun ChatComposer(
                 io.nisfeb.talon.util.shipSlowLine(slow.queued, slow.health),
                 calm = true,
                 details = slow.details,
-                onCopy = { clipboard.setText(AnnotatedString(it)) },
             )
         }
         state.sendError?.let { err ->
-            NoteLine(err, calm = state.sendErrorCalm, details = state.sendErrorDetails, onCopy = { clipboard.setText(AnnotatedString(it)) })
+            NoteLine(err, calm = state.sendErrorCalm, details = state.sendErrorDetails)
         }
         if (slashSuggestions.isNotEmpty() && slashTrigger != null) {
             SlashPicker(
