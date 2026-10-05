@@ -380,7 +380,7 @@ class SettingsScreenTest {
                 assertTrue(shows(io.nisfeb.talon.TalonBuild.versionName))
                 tap("Copy version info")
                 val copied = did.single()
-                assertTrue(io.nisfeb.talon.TalonBuild.versionName in copied && "%trunk wire 8 (app speaks 9)" in copied, copied)
+                assertTrue(io.nisfeb.talon.TalonBuild.versionName in copied && "%trunk wire 8 (app speaks ${io.nisfeb.talon.call.TrunkWire.WIRE_VERSION})" in copied, copied)
             }
         } finally {
             controller.stop()
