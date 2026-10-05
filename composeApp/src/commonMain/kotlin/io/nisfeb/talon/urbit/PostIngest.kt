@@ -3,6 +3,8 @@ package io.nisfeb.talon.urbit
 import io.nisfeb.talon.data.MessageDao
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.MessageMediaDao
+import io.nisfeb.talon.data.normalized
+import io.nisfeb.talon.data.searchable
 import io.nisfeb.talon.data.ReactionEntity
 import io.nisfeb.talon.ui.ReactionPalette
 import kotlinx.serialization.json.Json
@@ -204,12 +206,8 @@ internal suspend fun MessageDao.upsertWithMedia(
     media: MessageMediaDao,
     message: MessageEntity,
 ) {
-    upsert(message)
-    media.replaceForMessage(
-        whom = message.whom,
-        messageId = message.id,
-        rows = MediaClassifier.extractMedia(message),
-    )
+    // One transaction for the row and its media, as a page's are.
+    upsertPage(media, listOf(message.normalized().searchable()))
 }
 
 /**

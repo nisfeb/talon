@@ -47,11 +47,14 @@ class FontRepoTest {
     private val dirs = ConcurrentHashMap.newKeySet<String>()
     private val asked = CopyOnWriteArrayList<String>()
     @Volatile private var grubbery = true
+    /** False: a proxy's 502 for a ship that is down, which is not a ship without grubbery. */
+    @Volatile private var answering = true
     @Volatile private var holdPutMs = 0L
 
     private val http = HttpClient(MockEngine { req ->
         val path = req.url.encodedPath.removePrefix("/grubbery/api/")
         asked += "${req.method.value} $path"
+        if (!answering) return@MockEngine respond("", HttpStatusCode.BadGateway)
         if (!grubbery) return@MockEngine respond("", HttpStatusCode.NotFound)
         when {
             req.method == HttpMethod.Put && path.startsWith("dir/") ->
@@ -182,16 +185,28 @@ class FontRepoTest {
         val id = fontId(bytes)
         dirs += "talon"; dirs += "talon/fonts"
         ball["talon/fonts/$id.font"] = bytes
-        grubbery = false // the ship does not answer at first
+        answering = false // the ship does not answer at first
         val listed = InMemoryUiSettings().apply { setFontSettings(FontSettings(listOf(InstalledFont(id, "X")), family = "X")) }
         val there = device("desktop", listed)
         val keeping = scope.launch { there.keepInLine(waits = listOf(50L)) }
         settled { asked.size >= 2 }
         assertTrue(!there.files.has(id))
-        grubbery = true
+        answering = true
         settled { there.files.has(id) }
         settled { keeping.isCompleted }
         assertNull(there.status.value)
+    }
+
+    // It asked the ship every ten minutes for as long as Talon ran: a 404
+    // to "kids" looked like an empty folder, so the font seemed due soon.
+    @Test
+    fun `a ship without grubbery is not asked for fonts again and again`() = runBlocking<Unit> {
+        grubbery = false
+        val listed = InMemoryUiSettings().apply { setFontSettings(FontSettings(listOf(InstalledFont("f".repeat(64), "X")), family = "X")) }
+        val there = device("desktop", listed)
+        val keeping = scope.launch { there.keepInLine(waits = listOf(50L)) }
+        settled { keeping.isCompleted }
+        assertEquals(1, asked.count { it.startsWith("GET kids") }, "one listing, then nothing to wait for")
     }
 
     @Test

@@ -1,6 +1,6 @@
 package io.nisfeb.talon.orrery
 
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject

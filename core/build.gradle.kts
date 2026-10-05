@@ -57,6 +57,8 @@ kotlin {
             // libwebrtc via JNI. The base jar is pure API; natives ship
             // per-platform, and only the host's are bundled.
             implementation(libs.webrtc.java)
+            // GLib's main loop for the Wayland screen share (GLibLoop).
+            implementation(libs.jna)
             val webrtcNatives = run {
                 val os = System.getProperty("os.name").lowercase()
                 val arch = System.getProperty("os.arch").lowercase()

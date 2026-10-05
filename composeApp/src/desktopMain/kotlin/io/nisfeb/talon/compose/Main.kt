@@ -64,12 +64,7 @@ import java.util.concurrent.TimeUnit
 private class DesktopAppGraph {
     // OkHttp client for the desktop-only leaf consumers (image
     // downloader). The session/repo/UI path uses [ktorHttp] instead.
-    val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        // long-lived SSE — no read timeout
-        .readTimeout(0, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
-        .build()
+    val http: OkHttpClient = io.nisfeb.talon.util.sharedOkHttp
     // Shared multiplatform HTTP client threaded into common (UrbitSession,
     // TlonChatRepo, link previews). Ktor over an OkHttp engine on desktop.
     val ktorHttp: HttpClient = createAppHttpClient()
@@ -79,7 +74,7 @@ private class DesktopAppGraph {
     val aiSettings: AiSettingsRepository = createAiSettings()
     val themePreference: ThemePreference = DesktopThemePreference()
     val relaySettings: io.nisfeb.talon.notify.RelaySettings =
-        io.nisfeb.talon.notify.DesktopRelaySettings()
+        io.nisfeb.talon.ui.StoredRelaySettings(io.nisfeb.talon.ui.JvmUiSettingsStore(File(io.nisfeb.talon.util.AppDirs.userData, "relay.json")))
     val lastOpenChatStore: io.nisfeb.talon.notify.LastOpenChatStore =
         io.nisfeb.talon.notify.DesktopLastOpenChatStore()
     val drafts: DraftStore = InMemoryDraftStore()
@@ -531,7 +526,9 @@ fun main() {
                     // this on each switch so the JSON file for the
                     // active ship is loaded fresh.
                     createMenuSeen = { ship ->
-                        io.nisfeb.talon.ui.DesktopMenuSeenStore(ship = ship)
+                        io.nisfeb.talon.ui.StoredMenuSeenStore(
+                            io.nisfeb.talon.ui.JvmUiSettingsStore(File(io.nisfeb.talon.util.AppDirs.userData, io.nisfeb.talon.ui.menuSeenFileName(ship))),
+                        )
                     },
                     lastOpenChatStore = graph.lastOpenChatStore,
                     urbLinkLauncher = io.nisfeb.talon.urbit.DesktopUrbLinkLauncher,

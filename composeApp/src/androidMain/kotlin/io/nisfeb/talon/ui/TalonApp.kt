@@ -327,10 +327,10 @@ fun TalonApp(
         // Only (live, muted): the line's state moves whenever anyone
         // starts or stops speaking, and each move recomposed the shell.
         val partyOnAir by remember(partyLine) {
-            (partyLine?.state ?: idleParty)
-                .map { (it as? io.nisfeb.talon.call.PartyState.Live)?.let { live -> true to live.muted } ?: (false to false) }
-                .distinctUntilChanged()
-        }.collectAsState(initial = false to false)
+            io.nisfeb.talon.util.mapState(partyLine?.state ?: idleParty) {
+                (it as? io.nisfeb.talon.call.PartyState.Live)?.let { live -> true to live.muted } ?: (false to false)
+            }
+        }.collectAsState()
         val onAir = callState is io.nisfeb.talon.call.CallUiState.Active ||
             callState is io.nisfeb.talon.call.CallUiState.Outgoing ||
             partyOnAir.first
@@ -587,10 +587,10 @@ fun TalonApp(
     // Mirrors App.kt.
     // Idle or not, and nothing else: see partyOnAir above.
     val partyIdle by remember(partyLine) {
-        (partyLine?.state ?: kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.PartyState.Idle))
-            .map { it is io.nisfeb.talon.call.PartyState.Idle }
-            .distinctUntilChanged()
-    }.collectAsState(initial = true)
+        io.nisfeb.talon.util.mapState(partyLine?.state ?: kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.PartyState.Idle)) {
+            it is io.nisfeb.talon.call.PartyState.Idle
+        }
+    }.collectAsState()
     val partyFloats = partyLine != null && !partyIdle && !inlineCallUiShown.value
 
     /** A ship whose invite-me code was scanned or tapped: message it, or invite it to a group. */

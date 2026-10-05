@@ -289,18 +289,15 @@ class CallController(
     fun stop() {
         loop?.cancel()
         loop = null
-        channel?.let { ch ->
-            scope.launch { runCatching { withTimeoutOrNull(3_000) { ch.delete() } } }
-        }
+        channel?.deleteSoon(scope, timeoutMs = 3_000)
         channel = null
         endLocal("stopped")
     }
 
     /** Give [ch] up: never resumed, and ended on the ship so its watch does not clog. */
     private fun drop(ch: UrbitChannel) {
-        ch.retire()
+        ch.deleteSoon(scope)
         if (channel === ch) channel = null
-        scope.launch { runCatching { withTimeoutOrNull(5_000) { ch.delete() } } }
     }
 
     private suspend fun runLoop() {

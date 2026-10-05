@@ -257,9 +257,9 @@ fun DmChatScreen(
     val followedHere by remember(whom) {
         db.followedThreads().streamThreads(whom).map { io.nisfeb.talon.data.threadsInOrder(it) }
     }.collectAsState(initial = emptyList())
-    val followOfPost by remember(whom) {
-        db.followedThreads().streamForWhom(whom).map { rows -> rows.associate { it.parentPostId to it.follow } }
-    }.collectAsState(initial = emptyMap())
+    // Read once: the rows below take it from here, not from a second query.
+    val follows by remember(whom) { db.followedThreads().streamForWhom(whom) }.collectAsState(initial = emptyList())
+    val followOfPost = remember(follows) { follows.associate { it.parentPostId to it.follow } }
     val composerState = io.nisfeb.talon.ui.rememberComposerState(whom, drafts)
     // The chat's window: its posts sent from this time on, the newest
     // CHAT_WINDOW at first. New posts fall inside it; scrolling back and
@@ -283,8 +283,7 @@ fun DmChatScreen(
                 .onStart { emit(emptyList()) },
             db.threadUnreads().streamForWhom(whom).distinctUntilChanged()
                 .onStart { emit(emptyList()) },
-            db.followedThreads().streamForWhom(whom).distinctUntilChanged()
-                .onStart { emit(emptyList()) },
+            snapshotFlow { follows },
         ) { messages, reactions, replyCounts, allThreadUnreads, follows ->
             // Only a thread that counts tints: one the owner follows, a
             // DM's, or under their own post. A channel's thread they never
@@ -601,9 +600,11 @@ fun DmChatScreen(
                 paginating = true
                 // Older posts kept here first; the ship only past them.
                 val shown = rows.count { it is ChatListItem.Message }
-                if (db.messages().sentMsAfterNewest(whom, shown) != null) {
-                    // Up to another window of them, or all that are left.
-                    widenTo(db.messages().sentMsAfterNewest(whom, shown + CHAT_WINDOW - 1) ?: Long.MIN_VALUE)
+                // Another window's start, or, with less than a window left,
+                // whether anything older is kept here at all.
+                val nextWindow = db.messages().sentMsAfterNewest(whom, shown + CHAT_WINDOW - 1)
+                if (nextWindow != null || db.messages().sentMsAfterNewest(whom, shown) != null) {
+                    widenTo(nextWindow ?: Long.MIN_VALUE)
                 } else {
                     widenTo(Long.MIN_VALUE)
                     // A failed page is not the bottom: the next scroll asks again.

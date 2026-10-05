@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
  * `preconfigured` so desktop/android networking matches master exactly:
  * readTimeout=0, 15s connect/write, one shared connection pool.
  */
-private val sharedOkHttp: OkHttpClient = OkHttpClient.Builder()
+val sharedOkHttp: OkHttpClient = OkHttpClient.Builder()
     .connectTimeout(15, TimeUnit.SECONDS)
     .readTimeout(0, TimeUnit.SECONDS)
     .writeTimeout(15, TimeUnit.SECONDS)

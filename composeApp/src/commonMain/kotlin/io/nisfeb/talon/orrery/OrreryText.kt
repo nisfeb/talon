@@ -2,7 +2,7 @@ package io.nisfeb.talon.orrery
 
 import io.nisfeb.talon.ui.parseIsoUtc
 import io.nisfeb.talon.urbit.asText
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -41,7 +41,7 @@ object OrreryText {
         return dayText(t.date) + " " + io.nisfeb.talon.ui.SkyClock.clockLabel(t.hour * 60 + t.minute, twentyFourHour)
     }
 
-    private fun dayText(d: LocalDate) = titled(d.dayOfWeek.name).take(3) + " " + d.dayOfMonth + " " + titled(d.month.name).take(3)
+    private fun dayText(d: LocalDate) = titled(d.dayOfWeek.name).take(3) + " " + d.day + " " + titled(d.month.name).take(3)
 
     /**
      * An action's due as [whenText] says it, or "Thu 24 Sep" for a day

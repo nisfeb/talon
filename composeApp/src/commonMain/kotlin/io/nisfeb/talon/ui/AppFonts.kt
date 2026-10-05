@@ -43,6 +43,9 @@ data class InstalledFont(
 ) {
     /** The file's name in the ship's talon/fonts. */
     val shipFile: String get() = shipName ?: "$id.font"
+
+    /** Its family, weight and style: two fonts with one face take turns replacing each other. */
+    val face: FontInfo get() = FontInfo(family, weight, italic)
 }
 
 /**
@@ -81,7 +84,7 @@ data class FontSettings(
      * said removed, or another device's copy would bring it back).
      */
     fun adding(f: InstalledFont): FontSettings {
-        val replaced = fonts.filter { it.id != f.id && it.family == f.family && it.weight == f.weight && it.italic == f.italic }
+        val replaced = fonts.filter { it.id != f.id && it.face == f.face }
         return copy(
             fonts = fonts.filter { it.id != f.id && it !in replaced } + f,
             removed = (removed - f.id + replaced.map { it.id }).distinct().sorted(),

@@ -40,7 +40,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import io.nisfeb.talon.util.nowMs
 import kotlinx.datetime.toLocalDateTime
 import io.nisfeb.talon.ui.parseIsoUtc
@@ -397,7 +397,7 @@ class OrreryRepo(
     }
 
     /** The owner's calendar day at [ms], which is what a day's tally is kept under. */
-    private fun localDay(ms: Long): String = kotlinx.datetime.Instant.fromEpochMilliseconds(ms)
+    private fun localDay(ms: Long): String = kotlin.time.Instant.fromEpochMilliseconds(ms)
         .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).date.toString()
 
     /** The tally kept for [day], or an empty one. */

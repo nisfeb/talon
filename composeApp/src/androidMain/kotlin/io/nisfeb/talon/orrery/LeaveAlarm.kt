@@ -97,7 +97,7 @@ object LeaveAlarm {
             // Not allowed exact: Doze may hold it some minutes.
             am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
         }
-        Log.i(TAG, "alarm at ${kotlinx.datetime.Instant.fromEpochMilliseconds(at)} for ${plan.key}")
+        Log.i(TAG, "alarm at ${kotlin.time.Instant.fromEpochMilliseconds(at)} for ${plan.key}")
     }
 
     fun clear(ctx: Context) {

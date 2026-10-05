@@ -69,15 +69,11 @@ class CometDomes(
      *  none, or null when it is not a comet or the ship can't tell. */
     suspend fun registry(comet: String): String? {
         if (!isComet(comet)) return null
-        return try {
+        return io.nisfeb.talon.util.runSuspendCatching {
             db.cometDomes().get(comet)?.let { return it.registry.also { r -> if (r.isNotEmpty()) Mnemonym.markGroundwire(comet) } }
             if (noDome) return null
             ask(comet)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            null
-        }
+        }.getOrNull()
     }
 
     /** Whether this ship's Jael can say: false once it has shown it has no `%dome`. */
@@ -93,13 +89,7 @@ class CometDomes(
     suspend fun recheck(comet: String): String? {
         if (!isComet(comet)) return null
         return scope.async {
-            try {
-                oneAtATime.withLock { ask(comet) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                null
-            }
+            io.nisfeb.talon.util.runSuspendCatching { oneAtATime.withLock { ask(comet) } }.getOrNull()
         }.await()
     }
 

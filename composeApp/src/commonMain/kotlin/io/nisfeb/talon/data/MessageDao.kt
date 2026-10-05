@@ -59,12 +59,15 @@ abstract class MessageDao {
      * woke every screen watching the table, for nothing new.
      */
     open suspend fun changedOf(messages: List<MessageEntity>): List<MessageEntity> {
-        val incoming = messages.map { it.normalized().searchable() }
+        val incoming = messages.map { it.normalized() }
         val stored = HashMap<Pair<String, String>, MessageEntity>(incoming.size)
         for ((whom, rows) in incoming.groupBy { it.whom }) {
             for (ids in rows.map { it.id }.chunked(500)) getMany(whom, ids).forEach { stored[it.whom to it.id] = it }
         }
-        return incoming.filter { stored[it.whom to it.id] != it }
+        // Compared without the search text, which is a parse of the whole
+        // story: only a row that changed pays for one. A row stored before
+        // search text existed gets it from fillSearchText instead.
+        return incoming.filter { stored[it.whom to it.id]?.copy(searchText = null) != it }.map { it.searchable() }
     }
 
     /**
@@ -171,11 +174,11 @@ abstract class MessageDao {
     """)
     abstract suspend fun latestAnyFor(whom: String, count: Int): List<MessageEntity>
 
-    /** When the newest message kept here was sent; null when none is. */
     /** Whether [author] has replied in the thread under [parentId]. */
     @Query("SELECT EXISTS(SELECT 1 FROM messages WHERE whom = :whom AND parentId = :parentId AND author = :author AND isDeleted = 0)")
     abstract suspend fun hasReplyBy(whom: String, parentId: String, author: String): Boolean
 
+    /** When the newest message kept here was sent; null when none is. */
     @Query("SELECT MAX(sentMs) FROM messages")
     abstract suspend fun newestSentMs(): Long?
 
@@ -261,13 +264,11 @@ abstract class MessageDao {
     @Query("DELETE FROM messages WHERE whom = :whom AND id = :id")
     abstract suspend fun hardDelete(whom: String, id: String)
 
-    /** Stable pagination across the entire messages table — used by
-     *  the embedding indexer's backfill pass. Includes soft-deleted
-     *  rows so the indexer can mark them seen and skip on re-runs. */
     /**
      * Every row, [limit] at a time in key order, after ([whom], [id]) (""
-     * and "" for the first page). Found by the primary key: an OFFSET
-     * read every row before the page again, so a pass was quadratic.
+     * and "" for the first page), soft-deleted ones included so the
+     * embedding indexer can mark them seen. Found by the primary key: an
+     * OFFSET read every row before the page again, so a pass was quadratic.
      */
     @Query("SELECT * FROM messages WHERE (whom, id) > (:whom, :id) ORDER BY whom, id LIMIT :limit")
     abstract suspend fun pageAfter(whom: String, id: String, limit: Int): List<MessageEntity>

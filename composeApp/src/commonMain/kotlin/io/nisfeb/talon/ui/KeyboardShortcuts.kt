@@ -99,12 +99,15 @@ fun isModifierKey(key: Key): Boolean = key in setOf(
 )
 
 /** What may be bound: search, a new message, and each of the app's areas. Ids are kept in settings. */
-val BINDABLE: List<Triple<String, String, ShortcutAction>> = listOf(
-    Triple("search", "Search", ShortcutAction.FocusSearch),
-    Triple("new-message", "New message", ShortcutAction.NewDm),
+val BINDABLE: List<Bindable> = listOf(
+    Bindable("search", "Search", ShortcutAction.FocusSearch),
+    Bindable("new-message", "New message", ShortcutAction.NewDm),
 ) + RailItem.entries.map { item ->
-    Triple("open:${item.name}", if (item == RailItem.Chats) "Messages" else item.name, ShortcutAction.Open(item))
+    Bindable("open:${item.name}", if (item == RailItem.Chats) "Messages" else item.name, ShortcutAction.Open(item))
 }
+
+/** One bindable action: its settings [id], what the settings call it, and what it does. */
+data class Bindable(val id: String, val label: String, val action: ShortcutAction)
 
 private fun primary(key: String, isMacHost: Boolean) =
     if (isMacHost) KeyCombo(key, meta = true) else KeyCombo(key, ctrl = true)
@@ -131,7 +134,7 @@ fun refusalFor(combo: KeyCombo, isMacHost: Boolean): String? {
     val held = combo.ctrl || combo.meta || combo.alt
     if (!held && !combo.key.matches(Regex("F\\d+"))) return "Hold Ctrl, ⌘ or Alt with it: a key on its own is typing."
     val primaryOnly = (if (isMacHost) combo.meta && !combo.ctrl else combo.ctrl && !combo.meta) && !combo.alt
-    if (primaryOnly && !combo.shift && combo.key in setOf("1", "2", "3", "4", "5", "6", "7", "8", "9")) return "${combo.label(isMacHost)} switches ships."
+    if (primaryOnly && !combo.shift && combo.key.toIntOrNull() in 1..9) return "${combo.label(isMacHost)} switches ships."
     if (primaryOnly && combo.key in setOf("Equals", "Minus", "0")) return "${combo.label(isMacHost)} sizes text."
     return null
 }
@@ -169,18 +172,7 @@ fun keyEventToShortcut(
     val bare = !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed && !event.isShiftPressed
     if (event.key == Key.Escape && bare) return ShortcutAction.Back
     if (modifierActive && !event.isShiftPressed && !event.isAltPressed) {
-        when (event.key) {
-            Key.One -> return ShortcutAction.SwitchShip(0)
-            Key.Two -> return ShortcutAction.SwitchShip(1)
-            Key.Three -> return ShortcutAction.SwitchShip(2)
-            Key.Four -> return ShortcutAction.SwitchShip(3)
-            Key.Five -> return ShortcutAction.SwitchShip(4)
-            Key.Six -> return ShortcutAction.SwitchShip(5)
-            Key.Seven -> return ShortcutAction.SwitchShip(6)
-            Key.Eight -> return ShortcutAction.SwitchShip(7)
-            Key.Nine -> return ShortcutAction.SwitchShip(8)
-            else -> Unit
-        }
+        KEY_NAMES[event.key]?.toIntOrNull()?.takeIf { it in 1..9 }?.let { return ShortcutAction.SwitchShip(it - 1) }
     }
     val combo = comboOf(event) ?: return null
     return actionFor(combo, binds)
@@ -189,7 +181,7 @@ fun keyEventToShortcut(
 /** The action [combo] is bound to in [binds], or null. */
 fun actionFor(combo: KeyCombo, binds: Map<String, KeyCombo>): ShortcutAction? {
     val id = binds.entries.firstOrNull { it.value == combo }?.key ?: return null
-    return BINDABLE.firstOrNull { it.first == id }?.third
+    return BINDABLE.firstOrNull { it.id == id }?.action
 }
 
 /**
@@ -201,7 +193,7 @@ fun rebind(stored: Map<String, KeyCombo?>, id: String, combo: KeyCombo, isMacHos
     val next = stored.toMutableMap()
     next[id] = combo
     if (holder != null) next[holder] = null
-    return next to holder?.let { h -> BINDABLE.firstOrNull { it.first == h }?.second }
+    return next to holder?.let { h -> BINDABLE.firstOrNull { it.id == h }?.label }
 }
 
 /** The fixed shortcuts, as Settings lists them under the ones that can be set. */

@@ -1,9 +1,10 @@
 package io.nisfeb.talon.calendar
 
+import kotlinx.datetime.number
 import io.nisfeb.talon.util.nowMs
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.DayOfWeek
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.LocalTime
@@ -168,8 +169,8 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
         return@buildJsonObject
     }
     if (d.cat == EventCat.DATE) {
-        put("month", d.date.monthNumber)
-        put("day", d.date.dayOfMonth)
+        put("month", d.date.month.number)
+        put("day", d.date.day)
         return@buildJsonObject
     }
     if (d.rawKind != null) {
@@ -188,12 +189,12 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
             if (d.cat == EventCat.TIMED && d.repeat != Repeat.ONCE && d.repeat != Repeat.EVERY) put("at", d.minuteOfDay)
             when (d.repeat) {
                 Repeat.WEEKLY -> put("days", JsonArray(d.weekdays.sortedBy { it.isoDayNumber }.map { JsonPrimitive(WIRE_DAYS[it.isoDayNumber - 1]) }))
-                Repeat.MONTHLY -> put("day", d.date.dayOfMonth)
+                Repeat.MONTHLY -> put("day", d.date.day)
                 Repeat.MONTHLY_NTH -> {
                     put("ord", d.ordinal.takeIf { it in ORDINALS } ?: "first")
                     put("day", WIRE_DAYS[(d.nthDay ?: d.date.dayOfWeek).isoDayNumber - 1])
                 }
-                Repeat.YEARLY -> { put("month", d.date.monthNumber); put("day", d.date.dayOfMonth) }
+                Repeat.YEARLY -> { put("month", d.date.month.number); put("day", d.date.day) }
                 Repeat.EVERY -> put("period", d.periodMin.coerceAtLeast(1))
                 else -> Unit
             }
@@ -432,7 +433,7 @@ fun alarmLabel(a: CalAlarm, zone: TimeZone, twentyFourHour: Boolean): String = w
     "before" -> if (a.s == 0L) "At the start" else "${alarmSpan(a.s)} before"
     "at" -> a.raw["at_ms"]?.jsonPrimitive?.longOrNull?.let {
         val t = Instant.fromEpochMilliseconds(it).toLocalDateTime(zone)
-        "At ${io.nisfeb.talon.ui.SkyClock.clockLabel(t.hour * 60 + t.minute, twentyFourHour)} on ${t.date}"
+        "At ${io.nisfeb.talon.ui.SkyClock.clockLabel(t.hour * 60 + t.minute, twentyFourHour)} on ${io.nisfeb.talon.util.formatDate(t.date)}"
     } ?: "At a set time"
     "offset" -> {
         val end = a.raw["from"]?.jsonPrimitive?.contentOrNull == "end"

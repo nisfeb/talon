@@ -287,13 +287,7 @@ class AuspexApi(
      * headers cannot come back without the request having got there.
      */
     private suspend fun send(path: String, build: HttpRequestBuilder.() -> Unit) =
-        try {
-            http.request(root + path, build)
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Unreachable(t)
-        }.also(::throwIfShipDown)
+        reachShip { http.request(root + path, build) }
 
     /** Reading an answer that did arrive. A failure here is the body,
      *  not the ship, so it is [AuspexError.Garbled]. */
@@ -643,3 +637,13 @@ class Blob(val bytes: ByteArray, val name: String)
 internal fun dispositionName(header: String?): String? =
     header?.let { runCatching { io.ktor.http.ContentDisposition.parse(it).parameter("filename") }.getOrNull() }
         ?.ifBlank { null }
+
+/**
+ * A request to a ship's app: not reaching the ship is
+ * [AuspexError.Unreachable], and a proxy's page for a ship that is down
+ * says so too ([AuspexApi.throwIfShipDown]).
+ */
+internal suspend fun reachShip(request: suspend () -> io.ktor.client.statement.HttpResponse): io.ktor.client.statement.HttpResponse =
+    io.nisfeb.talon.util.runSuspendCatching { request() }
+        .getOrElse { throw AuspexError.Unreachable(it) }
+        .also(AuspexApi::throwIfShipDown)

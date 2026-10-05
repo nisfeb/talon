@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import kotlinx.datetime.number
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -124,7 +125,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.DayOfWeek
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atTime
@@ -207,7 +208,7 @@ fun CalendarScreen(
         }
     }
     var year by remember { mutableStateOf(today.year) }
-    var month by remember { mutableStateOf(today.monthNumber) }
+    var month by remember { mutableStateOf(today.month.number) }
     var selected by remember { mutableStateOf(today) }
     var editing by remember { mutableStateOf<Pair<String?, EventDraft>?>(null) }
     /** Why the last save did not go, shown in the editor it reopened. */
@@ -398,7 +399,7 @@ fun CalendarScreen(
     fun labelOf(whom: String) = contactMap?.conversationLabel(whom) ?: whom
     fun whenLineOf(r: CalendarRow): String {
         val day = daysOf(r, zone).first()
-        val d = "${d3(day.dayOfWeek)} ${day.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[day.monthNumber - 1]} ${day.year}"
+        val d = "${d3(day.dayOfWeek)} ${day.day} ${MonthNames.ENGLISH_ABBREVIATED.names[day.month.number - 1]} ${day.year}"
         return if (r.isTask) (r.dueLabel(zone)?.let { "$it" } ?: "No due date") else "$d · ${spanLabel(r, day, zone, twentyFourHour)}"
     }
     fun textOf(r: CalendarRow): String {
@@ -458,7 +459,7 @@ fun CalendarScreen(
     val narrow = maxWidth < 600.dp
     fun step(days: Int) {
         selected = selected.plus(days, DateTimeUnit.DAY)
-        year = selected.year; month = selected.monthNumber
+        year = selected.year; month = selected.month.number
     }
     val title = if (showTasks) "Tasks" else "${MonthNames.ENGLISH_ABBREVIATED.names[month - 1]} $year"
     val monthSteps: @Composable () -> Unit = {
@@ -466,7 +467,7 @@ fun CalendarScreen(
             io.nisfeb.talon.ui.IconButton(tip = if (weekView) "Previous week" else "Previous month", onClick = { if (weekView) step(-7) else if (month == 1) { month = 12; year -= 1 } else month -= 1 }) {
                 Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = if (weekView) "Previous week" else "Previous month")
             }
-            TextButton(onClick = { year = today.year; month = today.monthNumber; selected = today }) { Text("Today") }
+            TextButton(onClick = { year = today.year; month = today.month.number; selected = today }) { Text("Today") }
             io.nisfeb.talon.ui.IconButton(tip = if (weekView) "Next week" else "Next month", onClick = { if (weekView) step(7) else if (month == 12) { month = 1; year += 1 } else month += 1 }) {
                 Icon(Icons.Filled.KeyboardArrowRight, contentDescription = if (weekView) "Next week" else "Next month")
             }
@@ -633,7 +634,7 @@ fun CalendarScreen(
             grid.chunked(7).forEach { week ->
                 Row(Modifier.fillMaxWidth().then(if (fill) Modifier.weight(1f) else Modifier).padding(horizontal = 8.dp)) {
                     week.forEach { d ->
-                        val inMonth = d.monthNumber == month
+                        val inMonth = d.month.number == month
                         val isSel = d == selected
                         val dayRows = byDay[d].orEmpty()
                         Column(
@@ -654,7 +655,7 @@ fun CalendarScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Text(
-                                "${d.dayOfMonth}",
+                                "${d.day}",
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = if (d == today) FontWeight.SemiBold else FontWeight.Normal,
                                 ),
@@ -683,7 +684,7 @@ fun CalendarScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "${d3(selected.dayOfWeek)} ${selected.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[selected.monthNumber - 1]}",
+                    "${d3(selected.dayOfWeek)} ${selected.day} ${MonthNames.ENGLISH_ABBREVIATED.names[selected.month.number - 1]}",
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f),
                 )
@@ -805,7 +806,7 @@ fun CalendarScreen(
                         else -> {
                             // The row's own day, not whatever day is selected now.
                             val day = daysOf(r, zone).first()
-                            "${d3(day.dayOfWeek)} ${day.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[day.monthNumber - 1]} · ${spanLabel(r, day, zone, twentyFourHour)}" +
+                            "${d3(day.dayOfWeek)} ${day.day} ${MonthNames.ENGLISH_ABBREVIATED.names[day.month.number - 1]} · ${spanLabel(r, day, zone, twentyFourHour)}" +
                                 if (r.repeats) " · repeats ${r.kind}" else ""
                         }
                     }
@@ -1154,7 +1155,7 @@ private fun d3(d: DayOfWeek) = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", 
 private fun CalendarRow.dueLabel(zone: TimeZone): String? {
     if (l == 0L) return null
     val d = Instant.fromEpochMilliseconds(l).toLocalDateTime(zone).date
-    return "Due ${d.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[d.monthNumber - 1]}"
+    return "Due ${d.day} ${MonthNames.ENGLISH_ABBREVIATED.names[d.month.number - 1]}"
 }
 
 /** When a row is, on the day being looked at. */
@@ -1863,7 +1864,7 @@ private fun TasksView(
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
                     keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { add() }),
                 )
-                TextButton(onClick = { picking = true }) { Text(due?.let { "${it.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[it.monthNumber - 1]}" } ?: "Due") }
+                TextButton(onClick = { picking = true }) { Text(due?.let { "${it.day} ${MonthNames.ENGLISH_ABBREVIATED.names[it.month.number - 1]}" } ?: "Due") }
                 io.nisfeb.talon.ui.IconButton(tip = "Add task", onClick = ::add, enabled = name.isNotBlank()) { Icon(Icons.Filled.Add, contentDescription = "Add task") }
             }
             // A description as soon as there is something to describe; the
@@ -1980,7 +1981,7 @@ private fun TaskLine(
             Text("Saving", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else if (dueDay != null) {
             Text(
-                "${dueDay.dayOfMonth} ${MonthNames.ENGLISH_ABBREVIATED.names[dueDay.monthNumber - 1]}" + if (late) " · overdue" else "",
+                "${dueDay.day} ${MonthNames.ENGLISH_ABBREVIATED.names[dueDay.month.number - 1]}" + if (late) " · overdue" else "",
                 style = MaterialTheme.typography.labelSmall,
                 color = if (late) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -2034,7 +2035,7 @@ private fun WeekGrid(
                     ) {
                         Text(d3(d.dayOfWeek), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
-                            "${d.dayOfMonth}",
+                            "${d.day}",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = if (d == today) FontWeight.SemiBold else FontWeight.Normal),
                             color = if (d == today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                         )

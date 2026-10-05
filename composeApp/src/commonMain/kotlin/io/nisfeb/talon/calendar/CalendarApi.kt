@@ -1,6 +1,7 @@
 package io.nisfeb.talon.calendar
 
 import io.ktor.client.HttpClient
+import io.nisfeb.talon.mail.reachShip
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -193,16 +194,12 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
 
     /** Every event in an .ics onto calendar [calId]; true when the calendar took it. */
     suspend fun importIcs(calId: String, ics: String): Boolean {
-        val resp = try {
+        val resp = reachShip {
             http.post("$root/import?cal=" + calId.encodeURLParameter()) {
                 contentType(ContentType.parse("text/calendar"))
                 setBody(ics)
             }
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Unreachable(t)
-        }.also(AuspexApi::throwIfShipDown)
+        }
         return resp.status.isSuccess()
     }
     /** Every refusal and conflict logged by the Google and CalDAV syncs. */
@@ -243,43 +240,23 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
     suspend fun poke(ball: String, body: JsonObject): Boolean =
         postJson("$base/grubbery/api/poke/${ball.asPath()}/calendar.calendar?blot=/json", body)
 
+    private suspend fun post(url: String, body: JsonObject) = reachShip {
+        http.post(url) {
+            contentType(ContentType.Application.Json)
+            setBody(body.toString())
+        }
+    }
+
     private suspend fun postForJson(url: String, body: JsonObject): JsonObject? {
-        val resp = try {
-            http.post(url) {
-                contentType(ContentType.Application.Json)
-                setBody(body.toString())
-            }
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Unreachable(t)
-        }.also(AuspexApi::throwIfShipDown)
+        val resp = post(url, body)
         if (!resp.status.isSuccess()) return null
         return runCatching { AuspexApi.json.parseToJsonElement(resp.bodyAsText()) as? JsonObject }.getOrNull()
     }
 
-    private suspend fun postJson(url: String, body: JsonObject): Boolean {
-        val resp = try {
-            http.post(url) {
-                contentType(ContentType.Application.Json)
-                setBody(body.toString())
-            }
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Unreachable(t)
-        }.also(AuspexApi::throwIfShipDown)
-        return resp.status.isSuccess()
-    }
+    private suspend fun postJson(url: String, body: JsonObject): Boolean = post(url, body).status.isSuccess()
 
     private suspend fun get(path: String): String {
-        val resp = try {
-            http.get(root + path)
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Unreachable(t)
-        }.also(AuspexApi::throwIfShipDown)
+        val resp = reachShip { http.get(root + path) }
         val text = try { resp.bodyAsText() } catch (c: CancellationException) { throw c } catch (t: Throwable) { throw AuspexError.Garbled(t) }
         if (!resp.status.isSuccess()) throw AuspexError.Refused(resp.status.value, AuspexApi.reasonOf(text))
         return text

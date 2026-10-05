@@ -1,6 +1,6 @@
 package io.nisfeb.talon.orrery
 
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive

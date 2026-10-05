@@ -75,7 +75,8 @@ class DesktopCallEngine(
     /** Tracks the renderer attaches a sink to. Desktop-only members:
      *  webrtc-java's types cannot cross into commonMain. */
     val localVideoTrack: VideoTrack? get() = share.track ?: localVideo
-    private val share = ScreenShareSlot(factory, screenCapture)
+    // A share that ended itself (its dialog cancelled, nothing sent) is off here too.
+    private val share = ScreenShareSlot(factory, screenCapture, onEnded = { _video.value = _video.value.copy(localOn = false, sharing = false) })
     @Volatile var remoteVideoTrack: VideoTrack? = null
         private set
 
@@ -226,23 +227,9 @@ class DesktopCallEngine(
     override suspend fun setScreenShare(source: ScreenSource?): Boolean {
         if (closed.value) return false
         val sender = cameraSender ?: return false
-        if (source == null) {
-            share.stop(sender, localVideo)
-            _video.value = _video.value.copy(localOn = false, sharing = false)
-            return true
-        }
-        return runCatching {
-            runCatching { localVideo?.isEnabled = false }
-            runCatching { cameraSource?.stop() }
-            share.start(sender, source)
-            _video.value = _video.value.copy(localOn = true, sharing = true)
-            true
-        }.getOrElse {
-            Log.w("Trunk", "could not share ${source.title}", it)
-            share.stop(sender, localVideo)
-            _video.value = _video.value.copy(localOn = false, sharing = false)
-            false
-        }
+        val ok = share.set(sender, source, localVideo) { cameraSource?.stop() }
+        _video.value = _video.value.copy(localOn = share.active, sharing = share.active)
+        return ok
     }
 
     override suspend fun restartIce(): SessionDesc? {

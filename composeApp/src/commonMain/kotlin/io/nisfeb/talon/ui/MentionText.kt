@@ -78,8 +78,7 @@ fun keepMentionsWhole(prev: TextFieldValue, next: TextFieldValue): TextFieldValu
     val now = next.text
     if (now.length < was.length) {
         // One run taken out: where the two differ, and how much went.
-        var a = 0
-        while (a < now.length && was[a] == now[a]) a++
+        val a = was.commonPrefixWith(now).length
         val cut = was.length - now.length
         if (was.substring(a + cut) != now.substring(a)) return next
         var start = a

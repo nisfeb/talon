@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.nisfeb.talon.urbit.LatticeInstall
 import io.nisfeb.talon.urbit.jittered
 import io.nisfeb.talon.util.Log
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -839,7 +840,7 @@ class MailRepo(
      */
     private fun many(ids: Collection<String>, done: String, each: suspend (String) -> Job?): Job = scope.launch {
         val before = _rollbacks.value
-        ids.toList().map { each(it) }.forEach { it?.join() }
+        ids.toList().mapNotNull { each(it) }.joinAll()
         val refused = _rollbacks.value - before
         if (refused > 0) _problem.value = "$refused of ${ids.size} were not $done; they are back as they were."
         relistSoon()

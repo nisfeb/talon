@@ -34,6 +34,12 @@ interface FollowedThreadDao {
     @Upsert
     suspend fun upsert(row: FollowedThreadEntity)
 
+    @Upsert
+    suspend fun upsertAll(rows: List<FollowedThreadEntity>)
+
+    @androidx.room.Delete
+    suspend fun deleteAll(rows: List<FollowedThreadEntity>)
+
     @Query("SELECT * FROM followed_threads WHERE whom = :whom AND parentPostId = :parentPostId")
     suspend fun get(whom: String, parentPostId: String): FollowedThreadEntity?
 
@@ -59,10 +65,8 @@ interface FollowedThreadDao {
     @Query("""
         SELECT t.whom AS whom, t.parentPostId AS parentPostId,
                p.author AS parentAuthor, p.contentJson AS parentContent,
-               (SELECT COUNT(*) FROM messages r WHERE r.whom = t.whom AND r.parentId = t.parentPostId AND r.isDeleted = 0) AS replyCount,
-               (SELECT r.sentMs FROM messages r WHERE r.whom = t.whom AND r.parentId = t.parentPostId AND r.isDeleted = 0 ORDER BY r.sentMs DESC LIMIT 1) AS lastReplyMs,
-               (SELECT r.author FROM messages r WHERE r.whom = t.whom AND r.parentId = t.parentPostId AND r.isDeleted = 0 ORDER BY r.sentMs DESC LIMIT 1) AS lastReplier,
-               (SELECT r.id FROM messages r WHERE r.whom = t.whom AND r.parentId = t.parentPostId AND r.isDeleted = 0 ORDER BY r.sentMs DESC LIMIT 1) AS lastReplyId,
+               (SELECT COUNT(*) FROM messages c WHERE c.whom = t.whom AND c.parentId = t.parentPostId AND c.isDeleted = 0) AS replyCount,
+               r.sentMs AS lastReplyMs, r.author AS lastReplier, r.id AS lastReplyId,
                COALESCE(u.count, 0) AS unread,
                COALESCE(u.recencyMs, 0) AS recencyMs
         FROM (
@@ -73,6 +77,10 @@ interface FollowedThreadDao {
               AND NOT EXISTS (SELECT 1 FROM followed_threads f WHERE f.whom = u2.whom AND f.parentPostId = u2.parentPostId)
         ) t
         LEFT JOIN messages p ON p.whom = t.whom AND p.id = t.parentPostId
+        LEFT JOIN messages r ON r.rowid = (
+            SELECT rowid FROM messages WHERE whom = t.whom AND parentId = t.parentPostId AND isDeleted = 0
+            ORDER BY sentMs DESC LIMIT 1
+        )
         LEFT JOIN thread_unreads u ON u.whom = t.whom AND u.parentPostId = t.parentPostId
         WHERE :whom IS NULL OR t.whom = :whom
     """)

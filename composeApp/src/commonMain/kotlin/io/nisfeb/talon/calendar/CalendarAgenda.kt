@@ -1,7 +1,7 @@
 package io.nisfeb.talon.calendar
 
 import io.nisfeb.talon.ui.CalendarRange
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone

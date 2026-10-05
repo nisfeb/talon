@@ -87,7 +87,7 @@ object ShipPushes {
 
     fun onUnregistered(ctx: Context) {
         val p = prefs(ctx)
-        p.edit().apply { p.all.keys.forEach { remove(it) } }.apply()
+        p.edit().clear().apply()
     }
 
     fun onMessage(ctx: Context, message: PushMessage) {

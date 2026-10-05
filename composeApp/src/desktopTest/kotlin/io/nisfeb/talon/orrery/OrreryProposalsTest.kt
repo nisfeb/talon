@@ -37,8 +37,8 @@ import kotlin.test.assertTrue
  */
 class OrreryProposalsTest {
     private val acts = CopyOnWriteArrayList<JsonObject>()
-    private val starts = kotlinx.datetime.Instant.fromEpochMilliseconds(nowMs() + 3 * 86_400_000L).let {
-        kotlinx.datetime.Instant.fromEpochSeconds(it.epochSeconds)
+    private val starts = kotlin.time.Instant.fromEpochMilliseconds(nowMs() + 3 * 86_400_000L).let {
+        kotlin.time.Instant.fromEpochSeconds(it.epochSeconds)
     }
 
     private fun state(actions: String, calendar: String = """{"title":"required","starts":"required; ISO 8601","location":"optional"}""") =

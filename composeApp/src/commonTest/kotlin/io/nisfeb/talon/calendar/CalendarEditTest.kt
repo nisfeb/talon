@@ -305,7 +305,7 @@ class CalendarEditTest {
         assertEquals("10 min after the start", say("""{"kind":"offset","from":"start","after":true,"s":600}"""))
         assertEquals("5 min before the end", say("""{"kind":"offset","from":"end","after":false,"s":300}"""))
         assertEquals("At the end", say("""{"kind":"offset","from":"end","after":true,"s":0}"""))
-        assertEquals("At 09:00 on 2026-10-01", say("""{"kind":"at","at_ms":${oct1.atTime(9, 0).toInstant(z).toEpochMilliseconds()}}"""))
+        assertEquals("At 09:00 on Thu, Oct 1, 2026", say("""{"kind":"at","at_ms":${oct1.atTime(9, 0).toInstant(z).toEpochMilliseconds()}}"""))
         assertEquals("A reminder of a kind this app does not know", say("""{"kind":"geofence"}"""))
     }
 

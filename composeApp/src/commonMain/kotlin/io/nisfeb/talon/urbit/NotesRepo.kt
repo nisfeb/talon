@@ -159,11 +159,7 @@ class NotesRepo(
      * so Tlon's N-1 policy is unlikely to take them soon.
      */
     private suspend fun readNotes(ch: UrbitChannel, get: String, scry: String): kotlinx.serialization.json.JsonElement =
-        try {
-            ch.scry(NotesPaths.APP, scry)
-        } catch (c: kotlinx.coroutines.CancellationException) {
-            throw c
-        } catch (t: Throwable) {
+        io.nisfeb.talon.util.runSuspendCatching { ch.scry(NotesPaths.APP, scry) }.getOrElse { t ->
             if (!notServed(t)) throw t
             ch.apiJson(method = "GET", path = get).takeIf { it is kotlinx.serialization.json.JsonArray } ?: throw t
         }
@@ -230,18 +226,7 @@ class NotesRepo(
             }
     }
 
-    private suspend fun ensureSubscribed(flag: NotesFlag) {
-        val ch = channel ?: return
-        val key = flag.flagString
-        subLock.withLock {
-            if (!subscribed.add(key)) return
-        }
-        runCatching { ch.subscribe(NotesPaths.APP, NotesPaths.stream(flag)) }
-            .onFailure {
-                subLock.withLock { subscribed.remove(key) }
-                Log.w(TAG, "notes subscribe failed for $key", it)
-            }
-    }
+    private suspend fun ensureSubscribed(flag: NotesFlag) = ensureSubscribedAll(listOf(flag))
 
     // ---- events --------------------------------------------------------
 

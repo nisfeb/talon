@@ -164,12 +164,7 @@ class TalonApplication : Application() {
         // required. If anyone ever adds a Coil callsite for a
         // resource behind the ship's cookie wall, that callsite will
         // need its own ImageLoader configured with this client.
-        http = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.SECONDS) // long-lived SSE
-            .writeTimeout(15, TimeUnit.SECONDS)
-            .apply { io.nisfeb.talon.util.echDnsOrNull()?.let(::dns) }
-            .build()
+        http = io.nisfeb.talon.util.sharedOkHttp
         ktorHttp = createAppHttpClient()
         shipDataEraser = io.nisfeb.talon.data.AndroidShipDataEraser(this)
         sessionStore = io.nisfeb.talon.urbit.AndroidSessionStore(this)
