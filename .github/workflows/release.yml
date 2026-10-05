@@ -64,12 +64,12 @@ jobs:
             echo "have_keystore=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set up JDK 17
+      - name: Set up JDK 25
         if: steps.chk.outputs.have_keystore == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '25'
 
       # core-ktx 1.19.0 / lifecycle 2.11.0 need compileSdk 37, which the
       # runner image may not preinstall. Try the plain id first, fall back
@@ -233,7 +233,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '25'
       # macOS-only: generate icon.icns from icon.png so the .app
       # bundle / .dmg / Dock-after-install all get the Talon logo
       # instead of jpackage's default. The .icns isn't committed; the

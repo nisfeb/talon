@@ -174,7 +174,7 @@ You only need this section if you're contributing or building Talon yourself.
 
 ### Requirements
 
-- JDK 17 (Temurin or any full JDK with the standard jmods)
+- JDK 25 (Temurin, or any JDK 25 whose jlink can build a runtime)
 - Android SDK 34, build-tools 34 (Android target only)
 - Gradle wrapper handles its own version
 

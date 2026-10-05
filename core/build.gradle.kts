@@ -49,8 +49,7 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
         }
-        val desktopMain by getting
-        desktopMain.dependencies {
+        getByName("desktopMain").dependencies {
             implementation(libs.ktor.client.okhttp)
             // Pseudo-terminal for the local comet: vere refuses to run
             // without a tty, and the dojo is the only source of +code.
@@ -70,8 +69,7 @@ kotlin {
             }
             runtimeOnly("dev.onvoid.webrtc:webrtc-java:" + libs.versions.webrtcJava.get() + ":" + webrtcNatives)
         }
-        val desktopTest by getting
-        desktopTest.dependencies {
+        getByName("desktopTest").dependencies {
             implementation(kotlin("test"))
             implementation(libs.ktor.client.mock)
         }

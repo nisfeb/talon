@@ -20,11 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '25'
 
       # All unit tests now live under :composeApp — desktopTest covers
       # the parser / wire-format Tlon protocol regressions plus the
@@ -72,11 +72,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '25'
 
       # Archive via xcodebuild (unsigned), NOT a plain `gradlew linkRelease`.
       # This runs the exact path the TestFlight build uses — xcodebuild ->

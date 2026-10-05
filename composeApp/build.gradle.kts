@@ -73,7 +73,7 @@ kotlin {
     }
     // Force the default source-set hierarchy now (it's applied at the end
     // of the kotlin{} block otherwise) so `iosMain` exists for the
-    // `by getting` accessor below.
+    // `getByName` below.
     applyDefaultHierarchyTemplate()
 
     sourceSets {
@@ -213,8 +213,7 @@ kotlin {
                 exclude(group = "com.google.crypto.tink")
             }
         }
-        val desktopMain by getting
-        desktopMain.dependencies {
+        getByName("desktopMain").dependencies {
             implementation(compose.desktop.currentOs)
             // Video in a chat row. Binds to the system's libvlc: the jar
             // is small and carries no natives, and where VLC is not
@@ -269,7 +268,7 @@ kotlin {
         // Coil network fetcher (coil-network-okhttp is JVM-only). The
         // iosMain intermediate source set is created by the default
         // hierarchy template once apple targets are declared.
-        val iosMain by getting {
+        getByName("iosMain") {
             dependencies {
                 implementation(libs.ktor.client.darwin)
                 implementation(libs.coil.network.ktor)
@@ -290,8 +289,7 @@ kotlin {
         // backends. Other target test source sets stay unconfigured
         // for now — Android composeApp tests land when that target
         // gets exercised end-to-end.
-        val desktopTest by getting
-        desktopTest.dependencies {
+        getByName("desktopTest").dependencies {
             implementation(libs.junit)
             // Only the generator and its fidelity test see the extended
             // icon set now; the app owns the fifty it uses (TalonIcons).
@@ -299,7 +297,6 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(kotlin("test"))
             implementation(libs.ktor.client.mock)
-            implementation("com.squareup.okhttp3:mockwebserver:4.12.0")
             // Compose Multiplatform UI test runner — `runComposeUiTest`,
             // `onNodeWithText`, `onNodeWithTag`, `performMouseInput`,
             // etc. Used by the pointer-input regression guards
@@ -324,6 +321,9 @@ tasks.withType<Test>().configureEach {
     val home = layout.buildDirectory.dir("test-home").get().asFile.absolutePath
     systemProperty("user.home", home)
     environment("XDG_CONFIG_HOME", "$home/.config")
+    // RuntimeClassVersionTest reads the release's JDK from here: a change
+    // to it runs the tests again rather than reusing a cached pass.
+    inputs.file(rootProject.file(".github/workflows/release.yml"))
 }
 
 // Single source of truth for the app version. `derivePackageVersion`
@@ -441,6 +441,11 @@ compose.desktop {
         buildTypes.release.proguard {
             isEnabled.set(false)
         }
+
+        // Since JDK 24 the JVM warns whenever a library loads native code
+        // without leave, and a later JDK refuses: Skia, SQLite, ONNX,
+        // llama.cpp, WebRTC and JNA (VLC, FileKit) all do here.
+        jvmArgs += listOf("--enable-native-access=ALL-UNNAMED")
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
