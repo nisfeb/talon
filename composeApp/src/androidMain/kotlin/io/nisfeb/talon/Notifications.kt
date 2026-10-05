@@ -33,6 +33,8 @@ object Notifications {
     const val CHANNEL_SHIP = "ship"
     /** Time to leave: the ship's leave push, and the alarm kept in case it does not come. */
     const val CHANNEL_LEAVE = "leave"
+    /** A trip under way: silent, ongoing, while the phone tells the ship where it is each minute. */
+    const val CHANNEL_TRIP = "trip"
     // v2: the Ringer owns sound and vibration now, so the channel must
     // do neither. A channel's alerting cannot be changed after it is
     // created, so changing it means a new id.
@@ -183,7 +185,13 @@ object Notifications {
         if (mgr.getNotificationChannel(CHANNEL_LEAVE) == null) {
             mgr.createNotificationChannel(
                 NotificationChannel(CHANNEL_LEAVE, "Time to leave", NotificationManager.IMPORTANCE_HIGH)
-                    .apply { description = "When to leave for an appointment, with traffic" },
+                    .apply { description = "When to leave for an appointment, with traffic, and when you are running late" },
+            )
+        }
+        if (mgr.getNotificationChannel(CHANNEL_TRIP) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(CHANNEL_TRIP, "On the way", NotificationManager.IMPORTANCE_LOW)
+                    .apply { description = "Shown while your ship hears where you are each minute on the way to an appointment" },
             )
         }
     }
@@ -194,15 +202,16 @@ object Notifications {
      * alarm kept for it share one slot.
      */
     fun showShipPush(context: Context, push: io.nisfeb.talon.notify.ShipPushMessage) {
-        val leave = io.nisfeb.talon.orrery.leaveKeyOfTag(push.tag) != null
-        post(context, push.tag ?: "ship:${push.title.hashCode()}", if (leave) CHANNEL_LEAVE else CHANNEL_SHIP, push.title, push.body, leave,
-            openItem = io.nisfeb.talon.orrery.leaveItemOf(push.tag))
+        // A leave push or a running-late one: the alert channel, and the tap opens its appointment.
+        val item = io.nisfeb.talon.orrery.alertItemOf(push.tag)
+        post(context, push.tag ?: "ship:${push.title.hashCode()}", if (item != null) CHANNEL_LEAVE else CHANNEL_SHIP, push.title, push.body, item != null,
+            openItem = item)
     }
 
     /** The alarm: the ship's leave push did not come. */
     fun showLeave(context: Context, plan: io.nisfeb.talon.orrery.LeavePlan, title: String, body: String) {
         val tag = io.nisfeb.talon.orrery.LEAVE_TAG_PREFIX + plan.key
-        post(context, tag, CHANNEL_LEAVE, title, body, alarm = true, openItem = io.nisfeb.talon.orrery.leaveItemOf(tag))
+        post(context, tag, CHANNEL_LEAVE, title, body, alarm = true, openItem = io.nisfeb.talon.orrery.alertItemOf(tag))
     }
 
     private fun post(

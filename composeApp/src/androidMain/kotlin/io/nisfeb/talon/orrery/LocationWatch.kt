@@ -33,7 +33,8 @@ import kotlinx.coroutines.flow.StateFlow
  * there. Desktop has no analog: a computer does not move with you.
  *
  * LocationManager is asked for a fix on a move of [MIN_MOVE_M], at most
- * every [MIN_GAP_MS], delivered by PendingIntent to [LocationReceiver],
+ * every [MIN_GAP_MS] (on a trip, [TRIP_MOVE_M] and [TRIP_GAP_MS]: see
+ * [Trips]), delivered by PendingIntent to [LocationReceiver],
  * which the platform wakes with the app closed; no timer runs. The
  * platform's own LocationManager, not Play services, which GrapheneOS
  * does not have unless the owner installed them. A registration does
@@ -87,26 +88,35 @@ object LocationWatch {
 
     fun granted(ctx: Context, permission: String) = ContextCompat.checkSelfPermission(ctx, permission) == PackageManager.PERMISSION_GRANTED
 
-    /** Turn it on or off, and listen or stop listening to match. */
+    /** Turn it on or off, and listen or stop listening to match. Off ends a trip under way. */
     fun set(ctx: Context, on: Boolean) {
         app = ctx.applicationContext
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ON, on).apply()
         (on(ctx) as MutableStateFlow).value = on
-        if (on) resume(ctx) else stopListening(ctx)
+        if (on) resume(ctx) else {
+            stopListening(ctx)
+            ctx.stopService(Intent(ctx, TripService::class.java))
+        }
     }
 
-    /** Listen, where the switch is on and the permission holds. */
+    /** Sharing where the owner is: switched on, allowed, and not held. */
+    fun sharing(ctx: Context): Boolean = isOn(ctx) && allowed(ctx) &&
+        !ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_PAUSED, false)
+
+    /** Listen, where the switch is on and the permission holds: each minute on a trip, else on a move. */
     fun resume(ctx: Context) {
         app = ctx.applicationContext
-        if (!isOn(ctx) || !allowed(ctx)) return
-        if (ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_PAUSED, false)) return
+        if (!sharing(ctx)) return
         val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
         val providers = lm.getProviders(true)
-        val provider = listOf(LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
-            .firstOrNull { it in providers } ?: return Log.i(TAG, "no location provider is on")
+        val trip = Trips.active(ctx) != null
+        // On a trip GPS first: a fix a minute wants the street, not the cell.
+        val order = if (trip) listOf(LocationManager.GPS_PROVIDER, LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER)
+        else listOf(LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
+        val provider = order.firstOrNull { it in providers } ?: return Log.i(TAG, "no location provider is on")
         try {
             @Suppress("MissingPermission")
-            lm.requestLocationUpdates(provider, MIN_GAP_MS, MIN_MOVE_M, intent(ctx))
+            lm.requestLocationUpdates(provider, if (trip) TRIP_GAP_MS else MIN_GAP_MS, if (trip) TRIP_MOVE_M else MIN_MOVE_M, intent(ctx))
         } catch (e: SecurityException) {
             Log.w(TAG, "location refused: ${e.message}")
         }
@@ -160,7 +170,8 @@ class LocationWorker(context: Context, params: WorkerParameters) : CoroutineWork
         return sendLocation(app.session.http, app.db, session.shipUrl, session.ship, fix, placeName(fix)).fold(
             onSuccess = {
                 // Where the owner is now moves when to leave: the ship looks again, and so does the alarm.
-                LeaveAlarm.refresh(applicationContext)
+                // Not on a trip: the alert has gone, and a read a minute would only cost the ship.
+                if (Trips.active(applicationContext) == null) LeaveAlarm.refresh(applicationContext)
                 Result.success()
             },
             onFailure = {

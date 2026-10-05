@@ -18,7 +18,7 @@ class LeaveTest {
                      "starts": "2026-10-04T15:30:00Z", "leave_by": "2026-10-04T15:02:00Z", "alert_at": "2026-10-04T14:52:00Z",
                      "minutes": 23, "from": "position", "verdict": "yes"}}""",
     )
-    private val plan = LeavePlan("situation/dentist@1791127800000", "Dentist", 1_791_126_120_000, 1_791_125_520_000, 23)
+    private val plan = LeavePlan("situation/dentist@1791127800000", "Dentist", 1_791_126_120_000, 1_791_125_520_000, 23, startsMs = 1_791_127_800_000)
 
     @Test
     fun `the plan is the pass's next, when time to leave is on`() {

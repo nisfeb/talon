@@ -70,10 +70,13 @@ class OrreryBrowseTest {
 
     @Test
     fun `a leave alert names its thing, and the ship's plan says when to leave for which`() {
-        assertEquals("activity/fencing-lesson", leaveItemOf("orrery-leave-activity/fencing-lesson@1791230400000"))
-        assertEquals("situation/visit", leaveItemOf("orrery-leave-situation/visit"))
-        assertNull(leaveItemOf("orrery-other"))
-        assertNull(leaveItemOf(null))
+        assertEquals("activity/fencing-lesson", alertItemOf("orrery-leave-activity/fencing-lesson@1791230400000"))
+        assertEquals("situation/visit", alertItemOf("orrery-leave-situation/visit"))
+        // Running late (orrery 73) names its thing the same way, a leg's key included.
+        assertEquals("activity/fencing-lesson", alertItemOf("orrery-late-activity/fencing-lesson@1791230400000/pick"))
+        assertNull(leaveKeyOfTag("orrery-late-activity/fencing-lesson@1791230400000"), "a late push does not stand the leave alarm down")
+        assertNull(alertItemOf("orrery-other"))
+        assertNull(alertItemOf(null))
         val last = Json.parseToJsonElement(
             """{"next":{"key":"activity/fencing-lesson@1791230400000","name":"Fencing lesson","leave_by":"2026-10-05T19:32:37Z","alert_at":"2026-10-05T19:22:37Z","minutes":23}}""",
         ).jsonObject
