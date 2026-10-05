@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.first
 
 /**
  * Synchronous directory built from snapshots of the contacts, clubs,
@@ -313,6 +314,10 @@ private val sharedContactMaps = io.nisfeb.talon.util.OneSlot<AppDatabase, StateF
  * holding one ran its four queries and built its maps on every write.
  */
 fun AppDatabase.contactMap(): StateFlow<ContactMap> = sharedContactMaps.of(this)
+
+/** The contact map as the database has it now, for code no screen is running (a push woke the app). */
+suspend fun AppDatabase.contactMapNow(): ContactMap =
+    contactMapFlow(contacts().stream(), clubs().stream(), groups().streamGroups(), groups().streamChannelGroups()).first()
 
 /** [contactMap], as a screen holds it: not collected while the app is out of sight. */
 @Composable
