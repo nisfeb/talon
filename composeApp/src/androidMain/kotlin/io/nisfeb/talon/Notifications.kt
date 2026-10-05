@@ -241,7 +241,7 @@ object Notifications {
      * showed the in-app ring and the user had to press Answer twice.
      * Declining works from here alone, being one poke and no media.
      */
-    fun showIncomingCall(context: Context, from: String, callId: String) {
+    fun showIncomingCall(context: Context, from: String, callId: String, name: String = from) {
         ensureChannel(context)
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
@@ -291,7 +291,7 @@ object Notifications {
 
         val builder = NotificationCompat.Builder(context, CHANNEL_CALLS)
             .setSmallIcon(android.R.drawable.sym_call_incoming)
-            .setContentTitle(from)
+            .setContentTitle(name)
             .setContentText("Incoming call")
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
@@ -316,7 +316,7 @@ object Notifications {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             builder.setStyle(
                 NotificationCompat.CallStyle.forIncomingCall(
-                    Person.Builder().setName(from).setImportant(true).build(),
+                    Person.Builder().setName(name).setImportant(true).build(),
                     decline,
                     answer,
                 ),
@@ -329,6 +329,7 @@ object Notifications {
         mgr.notify(CALL_NOTIFICATION_ID, builder.build())
         shownCallId = callId
         shownCallFrom = from
+        shownCallName = name
         when {
             inAppRingExpected -> Unit // the in-app ring is already sounding
             // Notifications denied means notify() above was dropped on
@@ -358,6 +359,8 @@ object Notifications {
     /** Who rang, for the missed-call notice a cancel may become. */
     @Volatile
     private var shownCallFrom: String? = null
+    @Volatile
+    private var shownCallName: String? = null
 
     /** True while TalonApp has a live CallController composed — the
      *  thing that actually plays the in-app ring. Set by TalonApp; the
@@ -439,9 +442,10 @@ object Notifications {
     fun ringCancelled(context: Context, callId: String, reason: String?) {
         if (shownCallId != callId) return
         val from = shownCallFrom
+        val name = shownCallName ?: from
         cancelIncomingCall(context)
-        if (reason == "answered" || callControllerLive || from == null) return
-        showMissedCall(context, from, from)
+        if (reason == "answered" || callControllerLive || from == null || name == null) return
+        showMissedCall(context, from, name)
     }
 
     fun showMessage(

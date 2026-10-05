@@ -2,6 +2,8 @@ package io.nisfeb.talon.notify
 
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.NotifyLevel
+import io.nisfeb.talon.ui.ContactMap
+import io.nisfeb.talon.ui.shipHandle
 
 /**
  * What [diffNewMessageNotifications] decides should be fired as an
@@ -132,6 +134,26 @@ fun replyNotification(
     val text = storyText(reply.id, reply.contentJson).replace('\n', ' ').take(200).ifBlank { "(attachment)" }
     return NotificationCandidate(whom = reply.whom, title = nameFor(reply.author), body = "In a thread: $text")
 }
+
+/**
+ * The names a relay push is shown with. [names] is the signed-in ship's
+ * map; a push for another of our ships gets none of its nicknames, which
+ * are not that ship's, only the word names anyone would see.
+ */
+fun pushNames(forShip: String?, activeShip: String?, names: ContactMap): ContactMap =
+    if (forShip == null || forShip == activeShip) names else ContactMap(alwaysPatp = names.alwaysPatp)
+
+/**
+ * A relay push for a message says where, not what: the conversation by
+ * the name the app gives it, and which of our ships when it is not the
+ * one signed in. It used to show our own @p over the raw conversation id.
+ */
+fun pushHintNotification(whom: String, forShip: String?, activeShip: String?, names: ContactMap): NotificationCandidate =
+    NotificationCandidate(
+        whom = whom,
+        title = pushNames(forShip, activeShip, names).conversationLabel(whom),
+        body = if (forShip == null || forShip == activeShip) "New activity" else "New activity on ${shipHandle(forShip)}",
+    )
 
 /** Does the story name our ship? Same test the Android filter and
  *  the relay use: a mention inline is `{"ship":"~us"}` in the JSON. */
