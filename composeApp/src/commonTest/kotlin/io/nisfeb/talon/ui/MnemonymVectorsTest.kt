@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import io.nisfeb.talon.comet.MNEMONYM_WORDS
 import kotlin.test.Test
 import kotlin.test.assertEquals
 

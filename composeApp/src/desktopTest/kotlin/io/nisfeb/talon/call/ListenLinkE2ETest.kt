@@ -82,7 +82,7 @@ class ListenLinkE2ETest {
             // Galène's conference UI — that UI hides audio-only
             // publishers and can't autoplay, so a plain group URL is
             // unusable to whoever you send it to.
-            assertTrue("/listen/?group=" in link.url, "not a listen page: ${link.url}")
+            assertTrue("/listen/?host=" in link.url, "not a listen page: ${link.url}")
             assertTrue(
                 link.expiresSecs > 0,
                 "link has no expiry — the ttl is the only thing that can revoke it",
@@ -150,12 +150,15 @@ class ListenLinkE2ETest {
             // The subgroup must be the HOST's — a listener has to land
             // in the same Galène room the members are in, and the
             // subgroup is host-qualified. Get this wrong and the link
-            // opens an empty room with no error anywhere.
+            // opens an empty room with no error anywhere. Since wire 10
+            // the page reads it from the token's aud, not the link.
+            val claims = java.util.Base64.getUrlDecoder()
+                .decode(link.url.substringAfter("&token=").split('.')[1]).decodeToString()
             assertTrue(
-                "${hostShip.removePrefix("~")}-$room" in link.url,
-                "link points at the wrong host's subgroup: ${link.url.substringBefore("&token=")}",
+                "${hostShip.removePrefix("~")}-$room" in claims,
+                "link points at the wrong host's subgroup: $claims",
             )
-            assertTrue("/listen/?group=" in link.url, "not a listen page: ${link.url}")
+            assertTrue("/listen/?host=" in link.url, "not a listen page: ${link.url}")
             println("remote admin got a link: ${link.url.substringBefore("&token=")}")
 
             hostCtl.configureRoom(hostShip, room, open = false, listen = false)

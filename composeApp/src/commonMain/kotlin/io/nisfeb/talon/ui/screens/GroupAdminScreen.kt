@@ -1029,7 +1029,7 @@ private fun PartyLineSection(
             } else {
                 Text(
                     // The token is the credential; don't put it on screen.
-                    link!!.url.substringBefore("?token="),
+                    link!!.url.substringBefore("&token="),
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     modifier = Modifier.weight(1f),
