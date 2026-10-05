@@ -214,7 +214,9 @@ object TrunkWire {
     // /party roll call and the party-lines list.
     // 9: the host announces %on-line when a line's roster changes, so
     // knowing who is on a line costs a join, not a poll interval.
-    const val WIRE_VERSION = 9
+    // 10: a comet's Galène username is its full mnemonym, not its @p,
+    // and a listen link carries host= and room= instead of group=.
+    const val WIRE_VERSION = 10
 
     /** The wire that added the call-recording announcement. A ship
      *  below this relays no %recording-on, so nobody on the line would

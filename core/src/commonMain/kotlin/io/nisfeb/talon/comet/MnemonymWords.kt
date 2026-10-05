@@ -1,9 +1,9 @@
-package io.nisfeb.talon.ui
+package io.nisfeb.talon.comet
 
 // GENERATED from the mnemonyms repo (wordlists/english.txt) and the @p
 // syllable tables (verified against urbit-ob). Do not hand-edit.
 
-internal val MNEMONYM_WORDS: List<String> = (
+val MNEMONYM_WORDS: List<String> = (
     "aback abate abduct abducts abet abhor abide ablate ablaze aboard abode " +
     "abort abound about above abreast abridge abroad abrupt abscond absolve " +
     "absolved absolves absorb absorbs abstain abstract abstruse absurd abut " +
@@ -239,7 +239,7 @@ internal val MNEMONYM_WORDS: List<String> = (
     ""
     ).trim().split(' ')
 
-internal val PATP_PREFIXES: List<String> = (
+val PATP_PREFIXES: List<String> = (
     "doz mar bin wan sam lit sig hid fid lis sog dir wac sab wis sib rig sol dop " +
     "mod fog lid hop dar dor lor hod fol rin tog sil mir hol pas lac rov liv dal " +
     "sat lib tab han tic pid tor bol fos dot los dil for pil ram tir win tad bic " +
@@ -257,7 +257,7 @@ internal val PATP_PREFIXES: List<String> = (
     ""
     ).trim().split(' ')
 
-internal val PATP_SUFFIXES: List<String> = (
+val PATP_SUFFIXES: List<String> = (
     "zod nec bud wes sev per sut let ful pen syt dur wep ser wyl sun ryp syx dyr " +
     "nup heb peg lup dep dys put lug hec ryt tyv syd nex lun mep lut sep pes del " +
     "sul ped tem led tul met wen byn hex feb pyl dul het mev rut tyl wyd tep bes " +

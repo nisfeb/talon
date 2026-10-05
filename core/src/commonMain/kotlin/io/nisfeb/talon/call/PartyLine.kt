@@ -9,6 +9,7 @@ import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
+import io.nisfeb.talon.comet.shipOfGaleneName
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.backgroundExceptionHandler
 import io.nisfeb.talon.util.ioDispatcher
@@ -896,7 +897,8 @@ class PartyLine(
 
             "user" -> {
                 val id = msg["id"]?.jsonPrimitive?.content ?: return
-                val name = msg["username"]?.jsonPrimitive?.content ?: id
+                // A comet's username is its mnemonym (trunk wire 10).
+                val name = msg["username"]?.jsonPrimitive?.content?.let(::shipOfGaleneName) ?: id
                 when (msg["kind"]?.jsonPrimitive?.content) {
                     "add" -> {
                         // Not for our own arrival, and not for anyone
@@ -1295,7 +1297,7 @@ class PartyLine(
         // Galène names the publisher on the offer, which is the only
         // place a stream is tied to a person — the roster is keyed by
         // client, and audio levels arrive per stream.
-        msg["username"]?.jsonPrimitive?.content?.let { streamOwner[id] = it }
+        msg["username"]?.jsonPrimitive?.content?.let { streamOwner[id] = shipOfGaleneName(it) }
         // The same servers the up link got. A down link needs them just
         // as much: it is the side that has to traverse to the SFU.
         val fresh = id !in downLinks
