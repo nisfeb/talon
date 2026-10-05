@@ -1,6 +1,7 @@
 package io.nisfeb.talon.util
 
 import io.github.vinceglb.filekit.FileKit
+import io.github.vinceglb.filekit.dialogs.FileKitDialogParent
 import io.github.vinceglb.filekit.dialogs.FileKitDialogSettings
 import io.github.vinceglb.filekit.dialogs.FileKitType
 import io.github.vinceglb.filekit.dialogs.openFilePicker
@@ -44,7 +45,7 @@ class DesktopFilePicker : FilePicker {
     private suspend fun pick(type: FileKitType, title: String): File? = mutex.withLock {
         FileKit.openFilePicker(
             type = type,
-            dialogSettings = FileKitDialogSettings(title = title, parentWindow = appFrame()),
+            dialogSettings = FileKitDialogSettings(title = title, parent = appFrame()?.let(FileKitDialogParent::awt)),
         )?.file
     }
 
