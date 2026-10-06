@@ -275,6 +275,7 @@ class TalonApplication : Application() {
         // update ended is made again here. A no-op while the switch is off.
         // And only with Orrery on: off, where the owner is goes nowhere.
         if (aiSettings.state.value.orreryOn()) runCatching { io.nisfeb.talon.orrery.LocationWatch.resume(this) }
+        if (aiSettings.state.value.orreryOn()) runCatching { io.nisfeb.talon.orrery.HealthWatch.resume(this) }
         // The ship's own pushes here, and the time-to-leave alarm that
         // stands behind its leave push. A no-op with no ship, no UnifiedPush
         // distributor, or no grubbery push on the ship.
