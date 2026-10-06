@@ -343,6 +343,7 @@ class ShipConnection(
             author = postId.substringBefore('/').takeIf { it.startsWith("~") },
             preview = ActivityPreview.of(event),
             parent = activityParentId(event),
+            badge = if (dev.platform == Push.IOS) db.nextBadge(Db.DEVICES, deviceId) else null,
         )
         db.setLastEventId(shipRowId, deviceId, postId)
     }

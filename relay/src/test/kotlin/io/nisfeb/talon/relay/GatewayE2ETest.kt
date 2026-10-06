@@ -36,7 +36,7 @@ class GatewayE2ETest {
         val sent = LinkedBlockingQueue<Pair<String, String>>()
         val gateway = Gateway(
             db,
-            alert = { t, p -> sent += t to alertPayload(p.title, p.body, p.patp, p.whom, p.postId, p.parent, p.nonce); ApnsResult(200, "") },
+            alert = { t, p, badge -> sent += t to alertPayload(p.title, p.body, p.patp, p.whom, p.postId, p.parent, p.nonce, badge); ApnsResult(200, "") },
             voip = { t, p -> sent += t to p; ApnsResult(200, "") },
         )
         val port = 8194

@@ -40,7 +40,9 @@ fun main() {
     val gateway = apns?.let { a ->
         Gateway(
             db,
-            alert = { token, p -> a.sendAlert(token, p.title, p.body, p.patp, p.whom, p.postId, parent = p.parent, nonce = p.nonce) },
+            alert = { token, p, badge ->
+                a.sendAlert(token, p.title, p.body, p.patp, p.whom, p.postId, parent = p.parent, nonce = p.nonce, badge = badge)
+            },
             voip = { token, payload -> a.sendVoip(token, payload) },
         )
     }

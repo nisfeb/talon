@@ -21,11 +21,12 @@ class GatewayTest {
     private val path = Files.createTempFile("relay-gateway-", ".db").toFile().also { it.delete() }.absolutePath
     private val db = Db(path).also { it.migrate() }
     private val alerts = mutableListOf<Pair<String, GatewayPush>>()
+    private val badges = mutableListOf<Int?>()
     private val rings = mutableListOf<Pair<String, String>>()
     private var apns = ApnsResult(200, "")
     private val gateway = Gateway(
         db,
-        alert = { t, p -> alerts += t to p; apns },
+        alert = { t, p, badge -> alerts += t to p; badges += badge; apns },
         voip = { t, p -> rings += t to p; apns },
     )
 
@@ -132,5 +133,44 @@ class GatewayTest {
         assertEquals(nasty, Json.parseToJsonElement("\"${jsonEscape(nasty)}\"").jsonPrimitive.content)
         val p = Json.parseToJsonElement(alertPayload(nasty, nasty, "~zod", "~bus", "~bus/1")).jsonObject
         assertEquals(nasty, p["aps"]!!.jsonObject["alert"]!!.jsonObject["body"]!!.jsonPrimitive.content)
+    }
+
+    // sneagan: "add the ability for iOS users to enable badges on the app
+    // icon". The app sets the true count while open; each alert adds one.
+    @Test
+    fun `with badges on, each alert counts one more than the app last set`() {
+        val d = enrolled()
+        gateway.push(alert(d))
+        assertEquals(204, gateway.badge(GatewayBadge(d.handle, d.secret, 3)))
+        gateway.push(alert(d))
+        gateway.push(alert(d))
+        gateway.push(alert(d, nonce = "n"))
+        assertEquals(listOf(null, 4, 5, null), badges, "off until set; a test alert is nothing to count")
+        assertEquals(204, gateway.badge(GatewayBadge(d.handle, d.secret, null)))
+        gateway.push(alert(d))
+        assertEquals(null, badges.last(), "off again")
+        assertEquals(401, gateway.badge(GatewayBadge(d.handle, "guess", 1)))
+        assertEquals(404, gateway.badge(GatewayBadge("nope", d.secret, 1)))
+        assertEquals(400, gateway.badge(GatewayBadge(d.handle, d.secret, -1)))
+    }
+
+    @Test
+    fun `the badge rides in the alert's aps`() {
+        val p = Json.parseToJsonElement(alertPayload("~bus", "hi", "~zod", "~bus", "~bus/1", badge = 7)).jsonObject
+        assertEquals("7", p["aps"]!!.jsonObject["badge"]!!.jsonPrimitive.content)
+        assertEquals("~bus", p["aps"]!!.jsonObject["thread-id"]!!.jsonPrimitive.content)
+        assertNull(Json.parseToJsonElement(alertPayload("~bus", "hi", "~zod", "~bus", "~bus/1")).jsonObject["aps"]!!.jsonObject["badge"])
+    }
+
+    @Test
+    fun `a relay iPhone's count works the same, by device id`() {
+        db.upsertDevice("dev-1", "aa|bb", Push.IOS)
+        assertEquals(null, db.nextBadge(Db.DEVICES, "dev-1"))
+        assertTrue(db.setBadge(Db.DEVICES, "dev-1", 0))
+        assertEquals(1, db.nextBadge(Db.DEVICES, "dev-1"))
+        assertEquals(2, db.nextBadge(Db.DEVICES, "dev-1"))
+        assertTrue(db.setBadge(Db.DEVICES, "dev-1", null))
+        assertEquals(null, db.nextBadge(Db.DEVICES, "dev-1"))
+        assertEquals(false, db.setBadge(Db.DEVICES, "never-was", 1))
     }
 }

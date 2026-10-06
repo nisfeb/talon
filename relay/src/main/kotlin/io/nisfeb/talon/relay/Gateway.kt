@@ -14,6 +14,9 @@ data class GatewayEnroll(val token: String, val handle: String? = null, val secr
 data class GatewayDevice(val handle: String, val secret: String)
 
 @Serializable
+data class GatewayBadge(val handle: String, val secret: String, val count: Int? = null)
+
+@Serializable
 data class GatewayPush(
     val handle: String,
     val secret: String,
@@ -46,7 +49,7 @@ data class GatewayPush(
  */
 class Gateway(
     private val db: Db,
-    private val alert: (token: String, push: GatewayPush) -> ApnsResult,
+    private val alert: (token: String, push: GatewayPush, badge: Int?) -> ApnsResult,
     private val voip: (token: String, payload: String) -> ApnsResult,
 ) {
     private val log = LoggerFactory.getLogger("Gateway")
@@ -76,7 +79,8 @@ class Gateway(
                 if (fields.any { it.length > MAX_FIELD }) return 400
                 val token = Push.iosAlertToken(row.endpoint)
                     ?: return 409.also { log.warn("gateway ${req.handle.take(6)}…: an alert, and the phone gave no alert token") }
-                alert(token, req)
+                // A test alert proves the path; it is nothing to count.
+                alert(token, req, if (req.nonce == null) db.nextBadge(Db.GATEWAY, req.handle) else null)
             }
             "voip" -> {
                 val payload = req.payload?.toString() ?: return 400
@@ -94,6 +98,16 @@ class Gateway(
         }
     }
 
+    /** The phone's own count, from the app while it is open; null for
+     *  badges off. 204 when set. */
+    fun badge(req: GatewayBadge): Int {
+        val row = db.gatewayDevice(req.handle) ?: return 404
+        if (!matches(row, req.secret)) return 401
+        if (req.count != null && req.count !in 0..MAX_BADGE) return 400
+        db.setBadge(Db.GATEWAY, req.handle, req.count)
+        return 204
+    }
+
     private fun matches(row: Db.GatewayRow, secret: String) =
         MessageDigest.isEqual(sha256(secret).toByteArray(), row.secretSha256.toByteArray())
 
@@ -104,6 +118,7 @@ class Gateway(
         val DEAD = setOf("BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic")
         const val MAX_FIELD = 1000
         const val MAX_VOIP = 3000
+        const val MAX_BADGE = 99_999
         val rng = SecureRandom()
 
         fun random(bytes: Int): String =

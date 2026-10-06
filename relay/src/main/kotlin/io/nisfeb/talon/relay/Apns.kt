@@ -110,8 +110,10 @@ class Apns(
         parent: String? = null,
         /** A ship's test push ([Gateway]): the app takes it as proof. */
         nonce: String? = null,
+        /** The app-icon count, when its owner has badges on. */
+        badge: Int? = null,
     ): ApnsResult {
-        val payload = alertPayload(title, body, patp, whom, postId, parent, nonce)
+        val payload = alertPayload(title, body, patp, whom, postId, parent, nonce, badge)
         val req = Request.Builder()
             .url("$host/3/device/$token")
             .header("authorization", "bearer ${jwt()}")
@@ -219,11 +221,13 @@ internal fun alertPayload(
     postId: String,
     parent: String? = null,
     nonce: String? = null,
+    badge: Int? = null,
 ): String = buildString {
     append("{\"aps\":{\"alert\":{\"title\":\"").append(jsonEscape(title))
     append("\",\"body\":\"").append(jsonEscape(body))
-    append("\"},\"sound\":\"default\",\"thread-id\":\"").append(jsonEscape(whom))
-    append("\"},\"event\":\"").append(if (nonce != null) "push-test" else "new-message")
+    append("\"},\"sound\":\"default\",\"thread-id\":\"").append(jsonEscape(whom)).append('"')
+    if (badge != null) append(",\"badge\":").append(badge)
+    append("},\"event\":\"").append(if (nonce != null) "push-test" else "new-message")
     append("\",\"patp\":\"").append(jsonEscape(patp))
     append("\",\"whom\":\"").append(jsonEscape(whom))
     append("\",\"id\":\"").append(jsonEscape(postId)).append('"')

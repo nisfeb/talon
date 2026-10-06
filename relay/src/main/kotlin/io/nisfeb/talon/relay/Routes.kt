@@ -67,6 +67,9 @@ data class RegisterResponse(
 )
 
 @Serializable
+data class BadgeRequest(val count: Int? = null)
+
+@Serializable
 data class HealthResponse(
     val ok: Boolean,
     val ships: Int,
@@ -142,6 +145,23 @@ fun Application.installRoutes(
             val req = runCatching { call.receive<GatewayPush>() }.getOrNull()
                 ?: return@post call.respond(HttpStatusCode.BadRequest)
             call.respond(HttpStatusCode.fromValue(g.push(req)))
+        }
+
+        post("/gateway/badge") {
+            val g = gateway ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
+            val req = runCatching { call.receive<GatewayBadge>() }.getOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            call.respond(HttpStatusCode.fromValue(g.badge(req)))
+        }
+
+        // An iPhone's app-icon count from the app while it is open, null
+        // for badges off; each alert adds one until the next ([Db.nextBadge]).
+        post("/devices/{deviceId}/badge") {
+            val id = call.parameters["deviceId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val req = runCatching { call.receive<BadgeRequest>() }.getOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            if (req.count != null && req.count !in 0..99_999) return@post call.respond(HttpStatusCode.BadRequest)
+            call.respond(if (db.setBadge(Db.DEVICES, id, req.count)) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
         }
 
         delete("/devices/{deviceId}") {
