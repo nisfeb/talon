@@ -370,8 +370,12 @@ fun CalendarScreen(
     // A tapped reminder: its day, and the occurrence open on it. A
     // reminder is due soon, so the month on show holds it; until rows
     // that hold it are in, it waits.
+    var openedPushTag by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(openPushTag, rows) {
+        // Once per reminder: the rows come again as the calendar reads.
+        if (openPushTag == null || openPushTag == openedPushTag) return@LaunchedEffect
         val r = calendarRowOfPushTag(openPushTag, rows.orEmpty()) ?: return@LaunchedEffect
+        openedPushTag = openPushTag
         val day = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(TimeZone.currentSystemDefault()).date
         year = day.year
         month = day.month.number

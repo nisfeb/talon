@@ -105,7 +105,7 @@ class SettingsRelayTest {
     @Test
     fun `a refused registration says what to check, and keeps nothing`() = panel(client = relay(ok = false)) {
         register("wrong")
-        waitUntil(timeoutMillis = 5_000) { shows("Registration failed.") }
+        waitUntil(timeoutMillis = 5_000) { shows("The relay could not sign in to your ship.") }
         assertEquals("", relaySettings.deviceIdFor("~zod"))
     }
 
