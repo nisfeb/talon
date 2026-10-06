@@ -82,6 +82,7 @@ fun OrreryRepoScreen(
     val answerProblem by orreryRepo.answerProblem.collectAsState()
     val error by orreryRepo.error.collectAsState()
     val generator by orreryRepo.generator.collectAsState()
+    val on by orreryRepo.enabled.collectAsState()
     val store = orreryRepo.view
     OrreryScreen(
         onBack = onBack,
@@ -93,6 +94,7 @@ fun OrreryRepoScreen(
         modifier = modifier,
         openItem = openItem,
         onOpenedItem = onOpenedItem,
+        turnOn = if (on) null else orreryRepo::enable,
     ) {
         OrreryActionsScreen(
             actions = actions,
@@ -134,6 +136,10 @@ fun OrreryScreen(
     modifier: Modifier = Modifier,
     openItem: String? = null,
     onOpenedItem: () -> Unit = {},
+    /** Non-null where Orrery is not on for this install (no key of its own):
+     *  the screen offers to turn it on, as Settings does, rather than
+     *  failing to read with "This install has no orrery key yet." */
+    turnOn: (suspend () -> Result<Unit>)? = null,
     actionsTab: @Composable () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -198,6 +204,7 @@ fun OrreryScreen(
         when {
             open != null -> ItemPage(open, byId[open], loaded = state != null, byId, me, plan) { stack = stack + it }
             tab == OrreryTab.ACTIONS -> actionsTab()
+            state == null && turnOn != null -> NotOnHere(turnOn) { onOpen(true) }
             state == null -> Text(
                 problem?.let { "Orrery could not be read: $it" } ?: "Looking…",
                 style = MaterialTheme.typography.bodySmall,
@@ -349,3 +356,33 @@ private fun timeSpan(startMs: Long, endMs: Long?): String =
 
 private fun leaveLine(p: LeaveBy): String =
     "Leave by ${formatClock(p.leaveByMs)}" + (if (p.minutes > 0) " · ${p.minutes} min with traffic" else "")
+
+/**
+ * Orrery is on the ship but not on for this install: reading it needs a
+ * key of this install's own, which is what turning it on makes. Said as
+ * that, with the switch's own words, not as a failure to read.
+ */
+@Composable
+private fun NotOnHere(turnOn: suspend () -> Result<Unit>, onOn: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var why by remember { mutableStateOf<String?>(null) }
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Orrery isn't turned on for this device.", style = MaterialTheme.typography.bodyMedium)
+        Text(
+            "Turning it on gives this device a key of its own: it reads Orrery here, and sends Orrery the facts from your calls and contacts' status lines. Your ship reads your chats, calendar and mail itself. The same switch is in Settings, under AI.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Button(enabled = !busy, onClick = {
+            why = null
+            busy = true
+            scope.launch {
+                turnOn().onSuccess { onOn() }.onFailure { why = it.message ?: "Orrery did not answer." }
+                busy = false
+            }
+        }) { Text(if (busy) "Turning on…" else "Turn on") }
+        why?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
