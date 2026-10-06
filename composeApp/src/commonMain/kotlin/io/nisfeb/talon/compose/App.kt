@@ -1637,6 +1637,7 @@ fun App(
               io.nisfeb.talon.calendar.LocalCalendarRepo provides calendarRepo,
               io.nisfeb.talon.mail.LocalMailTo provides mailTarget,
               io.nisfeb.talon.ui.LocalCallTo provides callTarget,
+              io.nisfeb.talon.ui.LocalFetchProfile provides remember(repo) { { ship: String -> repo.meetIfUnknown(ship); Unit } },
               io.nisfeb.talon.ui.LocalOpenProfile provides { ship: String -> profileSheetShip = ship },
               io.nisfeb.talon.ui.LocalCometDomes provides remember(session, db) {
                   session.baseUrl?.takeIf { it.isNotBlank() }?.let { io.nisfeb.talon.ui.CometDomes(session.http, it, db) }

@@ -23,6 +23,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class ContactProfileSheetTest {
     private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    private val fetched: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val ship = "~mitlyn-ditrel"
     private fun card(self: Boolean = false, inBook: Boolean = true, bio: String = "bakes on weekends", trunk: Boolean = true, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
         val person = ContactEntity(ship, "Mittens", bio, null, status = "at the market")
@@ -34,6 +35,7 @@ class ContactProfileSheetTest {
                 },
                 io.nisfeb.talon.mail.LocalMailTo provides { to: String -> did += "mail $to" },
                 LocalCallTo provides if (trunk) { to: String -> did += "call $to" } else null,
+                LocalFetchProfile provides { who: String -> fetched += who },
             ) {
                 TalonTheme(darkTheme = false) {
                     ContactProfileSheet(
@@ -147,5 +149,17 @@ class ContactProfileSheetTest {
     @Test
     fun `our own card has no Call`() = card(self = true) {
         onAllNodesWithText("Call").assertCountEquals(0)
+    }
+
+    @Test
+    fun `opening someone's card asks the ship for their profile`() = card {
+        waitForIdle()
+        assertEquals(listOf(ship), fetched)
+    }
+
+    @Test
+    fun `our own card asks for nothing`() = card(self = true) {
+        waitForIdle()
+        assertTrue(fetched.isEmpty(), fetched.toString())
     }
 }

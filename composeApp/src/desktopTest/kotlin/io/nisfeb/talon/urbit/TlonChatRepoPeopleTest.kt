@@ -86,6 +86,34 @@ class TlonChatRepoPeopleTest {
         assertEquals(Triple("Bus", "a bus", "on the road"), Triple(row.nickname, row.bio, row.status))
     }
 
+    // A comet in ~ricsul's book with no profile, while another ship had
+    // his name and picture (2026-10-06): opening him asks the ship.
+    @Test
+    fun `opening someone we hold nothing of asks the ship for them`() = live {
+        db.contacts().upsert(ContactEntity("~bus", null, null, null))
+        repo.meetIfUnknown("~bus")!!.join()
+        val meet = ship.pokesTo("contacts").single()
+        assertEquals("contact-action-1", meet.mark)
+        assertEquals("""{"meet":["~bus"]}""", meet.json.toString())
+        repo.meetIfUnknown("~nec")!!.join()
+        assertEquals("~nec", ship.pokesTo("contacts").last().json.at("meet").jsonArray.single().jsonPrimitive.content, "no row at all is nothing held")
+    }
+
+    @Test
+    fun `someone whose profile we hold is not asked for again`() = live {
+        db.contacts().upsert(ContactEntity("~bus", null, null, "https://bus.example/a.png"))
+        repo.meetIfUnknown("~bus")!!.join()
+        repo.meetIfUnknown("~zod")
+        assertTrue(ship.pokesTo("contacts").isEmpty(), "a picture is enough, and we never ask for ourselves")
+    }
+
+    @Test
+    fun `a ship that refuses the ask leaves nothing behind`() = live {
+        ship.refuse = { "contacts is not running" }
+        repo.meetIfUnknown("~bus")!!.join()
+        assertNull(db.contacts().get("~bus"))
+    }
+
     @Test
     fun `adding without a name keeps the name we had`() = live {
         db.contacts().upsert(ContactEntity("~bus", "Old Bus", null, null))

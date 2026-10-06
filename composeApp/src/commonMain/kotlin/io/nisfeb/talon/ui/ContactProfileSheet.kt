@@ -28,6 +28,7 @@ import io.nisfeb.talon.ui.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,6 +74,9 @@ fun ContactProfileSheet(
     val mailTo = io.nisfeb.talon.mail.LocalMailTo.current
     // The same for calls: null where our ship has no %trunk.
     val callTo = LocalCallTo.current
+    // Opening someone's profile asks the ship for it, where it has none.
+    val fetchProfile = LocalFetchProfile.current
+    LaunchedEffect(ship, self) { if (!self) fetchProfile?.invoke(ship) }
     // Open all the way: half open left Message, Mail and Close below
     // the fold on a short window, behind a drag nobody knows to make.
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -278,3 +282,6 @@ val LocalOpenProfile = androidx.compose.runtime.staticCompositionLocalOf<((Strin
  * has %trunk nobody can ask; a ship without it is a call nobody answers.
  */
 val LocalCallTo = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
+
+/** Asks our ship for a ship's profile when it holds none ([io.nisfeb.talon.urbit.TlonChatRepo.meetIfUnknown]). */
+val LocalFetchProfile = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
