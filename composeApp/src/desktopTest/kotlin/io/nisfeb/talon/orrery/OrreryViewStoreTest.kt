@@ -129,4 +129,75 @@ class OrreryViewStoreTest {
         assertNull(s.problem.value)
         scope.cancel()
     }
+
+    // ---- the change beacon (orrery's /beacon/rev, read by scry) ----
+
+    /** A store whose state reads are counted, over a beacon the test moves. */
+    private class Beaconed(val kept: Kept = Kept(), var beacon: Long? = 7) {
+        val stateReads = AtomicInteger()
+        val planReads = AtomicInteger()
+    }
+
+    private fun CoroutineScope.store(b: Beaconed, state: JsonObject, now: () -> Long) = OrreryViewStore(
+        b.kept, this,
+        readState = { b.stateReads.incrementAndGet(); state },
+        readPlan = { b.planReads.incrementAndGet(); plan },
+        readBeacon = { b.beacon },
+        now = now,
+    )
+
+    @Test
+    fun `a beacon that has not moved skips the state read and reads only the plan`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob())
+        val b = Beaconed()
+        val s = scope.store(b, fresh) { clock }
+        s.open()
+        until { b.stateReads.get() == 1 && !s.refreshing.value }
+        clock += OrreryViewStore.FRESH_MS
+        s.open()
+        until { b.planReads.get() == 2 && !s.refreshing.value }
+        assertEquals(1, b.stateReads.get(), "orrery wrote nothing: no 3.5 s state read")
+        assertEquals(clock, s.view.value!!.atMs, "the kept state is current as of now")
+        b.beacon = 8
+        clock += OrreryViewStore.FRESH_MS
+        s.open()
+        until { b.stateReads.get() == 2 && !s.refreshing.value }
+        assertEquals(8L, s.view.value!!.beacon)
+        scope.cancel()
+    }
+
+    @Test
+    fun `no beacon, a Refresh, or a state read whole too long ago reads the state`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob())
+        val none = Beaconed(beacon = null)
+        val s1 = scope.store(none, fresh) { clock }
+        s1.open(); until { none.stateReads.get() == 1 && !s1.refreshing.value }
+        clock += OrreryViewStore.FRESH_MS
+        s1.open(); until { none.stateReads.get() == 2 && !s1.refreshing.value }
+
+        val still = Beaconed()
+        val s2 = scope.store(still, fresh) { clock }
+        s2.open(); until { still.stateReads.get() == 1 && !s2.refreshing.value }
+        s2.open(force = true); until { still.stateReads.get() == 2 && !s2.refreshing.value }
+        clock += OrreryViewStore.FULL_EVERY_MS
+        s2.open(); until { still.stateReads.get() == 3 && !s2.refreshing.value }
+        scope.cancel()
+    }
+
+    @Test
+    fun `the beacon is kept with the state, so a restart still skips an unchanged read`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob())
+        val first = Beaconed()
+        val s1 = scope.store(first, fresh) { clock }
+        s1.open(); until { first.stateReads.get() == 1 && !s1.refreshing.value }
+        until { first.kept.rows["beacon"] != null }
+        // A cold start over the same database.
+        val again = Beaconed(kept = first.kept)
+        clock += OrreryViewStore.FRESH_MS
+        val s2 = scope.store(again, fresh) { clock }
+        s2.open(); until { again.planReads.get() == 1 && !s2.refreshing.value }
+        assertEquals(0, again.stateReads.get())
+        assertEquals(fresh, s2.view.value!!.state)
+        scope.cancel()
+    }
 }

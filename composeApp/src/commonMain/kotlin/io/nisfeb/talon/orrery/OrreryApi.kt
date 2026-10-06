@@ -3,6 +3,7 @@ package io.nisfeb.talon.orrery
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.plugins.timeout
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
@@ -43,7 +44,12 @@ class OrreryApi(
     private val bare: HttpClient,
     baseUrl: String,
 ) {
-    private val root = baseUrl.trimEnd('/') + APP_PATH
+    private val base = baseUrl.trimEnd('/')
+    private val root = base + APP_PATH
+
+    /** Off after a scry answered 404 or 500: this ship cannot scry orrery's files, so this login stops asking. */
+    @kotlin.concurrent.Volatile
+    private var scryable = true
 
     /** Whether orrery answers on this ship, by the cheapest owner read. */
     suspend fun probe(): OrreryAvailability {
@@ -512,6 +518,40 @@ class OrreryApi(
         return reading { Json.parseToJsonElement(text).jsonObject }
     }
 
+    /** [travelLast] read by scry: the same document, or null where it cannot be scried. */
+    suspend fun travelLastByScry(): JsonObject? =
+        scryFile("/leave-last.json.json")?.let { text -> reading { Json.parseToJsonElement(text).jsonObject } }
+
+    /** Orrery's change beacon (the time of its last write), or null where it cannot be scried. */
+    suspend fun beacon(): Long? = scryFile("/beacon/rev.json")?.let { text -> reading { text.trim().toLong() } }
+
+    /**
+     * One of orrery's own files, read by eyre scry on the owner's cookie.
+     * Nothing runs on the ship for it: no event, no request grub, no
+     * history left behind. On ricsul 0.15 s, against 2.6 s for the same
+     * read through orrery, which also adds to every later request's cost.
+     * The path is where grubbery's shell installs a desk app; an install
+     * elsewhere, or a ship that cannot scry it, answers 404 or 500, and
+     * then this login stops asking and callers read through orrery.
+     */
+    private suspend fun scryFile(path: String): String? {
+        if (!scryable) return null
+        val resp = try {
+            owner.get(base + SCRY_ROOT + path)
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            throw OrreryError.Unreachable(t)
+        }
+        if (resp.status.value == NOT_FOUND || resp.status.value == SCRY_FAILED) {
+            scryable = false
+            return null
+        }
+        val text = reading { resp.bodyAsText() }
+        if (!resp.status.isSuccess()) throw OrreryError.Refused(resp.status.value, reasonOf(text))
+        return text
+    }
+
     /**
      * Where the owner is, to the metre, for the ship's leave alerts
      * (orrery 69): one record the ship overwrites, never an observation.
@@ -631,6 +671,9 @@ class OrreryApi(
         val REGISTRATIONS = mapOf("telegram" to "/api/telegram/webhook")
 
         const val APP_PATH = "/apps/orrery"
+        /** Orrery's data directory as grubbery's shell installs it, under eyre's scry of grubbery's files. */
+        const val SCRY_ROOT = "/~/scry/grubbery/peek/file/apps/shell.shell/desks/orrery.desk/desk/data/orrery.orrery_app"
+        private const val SCRY_FAILED = 500
         private const val NOT_FOUND = 404
         private const val FORBIDDEN = 403
         // activity is in this list because a recurring event is one:

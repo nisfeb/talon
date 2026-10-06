@@ -654,15 +654,24 @@ class OrreryRepo(
     /** The state view; [brief] is the assistant's, see [OrreryApi.stateJson]. */
     suspend fun readState(brief: Boolean = false): Result<JsonObject> = runCatching { attached().stateJson(key(), brief) }
 
-    /** The ship's last time-to-leave pass (GET /api/travel/last), or null where it has none. */
-    suspend fun travelLast(): JsonObject? = io.nisfeb.talon.util.runSuspendCatching { attached().travelLast() }.getOrNull()
+    /** The ship's last time-to-leave pass, by scry where it can be, else GET /api/travel/last; null where it has none. */
+    suspend fun travelLast(): JsonObject? =
+        io.nisfeb.talon.util.runSuspendCatching { attached().let { it.travelLastByScry() ?: it.travelLast() } }.getOrNull()
+
+    /** Orrery's change beacon by scry, or null where it cannot be read. */
+    suspend fun beacon(): Long? = io.nisfeb.talon.util.runSuspendCatching { attached().beacon() }.getOrNull()
 
     /**
      * The Orrery section's state and leave plan, kept and asked for again
      * behind it. The brief state: values without each fact's provenance,
      * a third the size to send, keep and read, and all the section shows.
      */
-    val view = OrreryViewStore(db.orreryCache(), scope, readState = { attached().stateJson(key(), brief = true) }, readPlan = { travelLast() })
+    val view = OrreryViewStore(
+        db.orreryCache(), scope,
+        readState = { attached().stateJson(key(), brief = true) },
+        readPlan = { travelLast() },
+        readBeacon = { beacon() },
+    )
 
     /** Ask the ship which body a name means, before writing about it. */
     suspend fun resolveBody(q: String): Result<List<ResolvedBody>> = runCatching { attached().resolve(q, key()) }
