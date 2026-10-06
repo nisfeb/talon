@@ -815,13 +815,24 @@ val trainReleaseAotCache = tasks.register("trainReleaseAotCache") {
         try {
             withOptions("-XX:AOTMode=record", "-XX:AOTConfiguration=\$APPDIR/talon.aotconf")
             launch("record", 180, "TALON_EXIT_AFTER_FIRST_FRAME_MS" to "3000")
-            withOptions("-XX:AOTMode=create", "-XX:AOTConfiguration=\$APPDIR/talon.aotconf", "-XX:AOTCache=\$APPDIR/talon.aot")
+            // Class data only, no machine code: the cache is trained on the
+            // build machine, and JDK 25 keeps its adapters and stubs as that
+            // CPU's code. A runner's AVX-512 adapter crashed the AppImage on
+            // a Ryzen 3950X with SIGILL (2026-10-06). Class data is the same
+            // on every x86-64.
+            withOptions(
+                "-XX:AOTMode=create", "-XX:AOTConfiguration=\$APPDIR/talon.aotconf", "-XX:AOTCache=\$APPDIR/talon.aot",
+                "-XX:+UnlockDiagnosticVMOptions", "-XX:-AOTAdapterCaching", "-XX:-AOTStubCaching",
+            )
             launch("create", 300)
             conf.delete()
             withOptions("-XX:AOTCache=\$APPDIR/talon.aot")
-            val proof = launch("verify", 120, "TALON_EXIT_AFTER_FIRST_FRAME_MS" to "0", "JAVA_TOOL_OPTIONS" to "-Xlog:aot=info,class+path=info")
+            val proof = launch("verify", 120, "TALON_EXIT_AFTER_FIRST_FRAME_MS" to "0", "JAVA_TOOL_OPTIONS" to "-Xlog:aot=info,class+path=info,aot+codecache+init=info")
             check("talon-first-frame-ms" in proof && "Archived app classpath validation: passed" in proof && "[error][aot" !in proof.replace(" ", "")) {
                 "the trained app did not map its cache: ${proof.lines().filter { "aot" in it || "class,path" in it }.takeLast(10)}"
+            }
+            check("AOT Code Cache is empty" in proof) {
+                "the cache carries machine code for the build machine's CPU: ${proof.lines().filter { "codecache" in it }.take(5)}"
             }
             logger.lifecycle("AOT cache trained: ${cache.length() / (1024 * 1024)} MB, ${proof.lines().firstOrNull { "talon-first-frame-ms" in it }}")
         } catch (e: Exception) {
