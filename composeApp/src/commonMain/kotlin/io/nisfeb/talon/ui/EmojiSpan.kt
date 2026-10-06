@@ -65,6 +65,56 @@ internal fun CharSequence.codePointAtCommon(index: Int): Int {
     return high.code
 }
 
+/**
+ * How many emoji [text] is when it is nothing but emoji (spaces aside),
+ * else 0. What draws as one counts once: a sequence joined by ZWJ, one
+ * with a skin tone or a variation selector, a keycap, a flag's pair of
+ * regional indicators, a subdivision flag's tags.
+ */
+fun emojiOnlyCount(text: String): Int {
+    val t = text.trim()
+    var count = 0
+    var joined = false
+    var halfFlag = false
+    var i = 0
+    while (i < t.length) {
+        val cp = t.codePointAtCommon(i)
+        val len = if (cp >= 0x10000) 2 else 1
+        when {
+            cp < 0x10000 && cp.toChar().isWhitespace() -> { joined = false; halfFlag = false }
+            cp == 0x200D -> joined = true
+            // Modifiers of the emoji before: variation selectors, skin tones, the keycap mark, tags.
+            cp in 0xFE00..0xFE0F || cp in 0x1F3FB..0x1F3FF || cp == 0x20E3 || cp in 0xE0020..0xE007F -> Unit
+            cp in 0x1F1E6..0x1F1FF -> {
+                if (!halfFlag && !joined) count++
+                halfFlag = !halfFlag
+                joined = false
+            }
+            isEmojiCodepoint(cp) || isKeycapBase(t, i, cp) -> {
+                if (!joined) count++
+                joined = false
+                halfFlag = false
+            }
+            else -> return 0
+        }
+        i += len
+    }
+    return count
+}
+
+/** A digit, # or * is an emoji only as a keycap: followed by U+20E3, with or without U+FE0F between. */
+private fun isKeycapBase(t: String, i: Int, cp: Int): Boolean {
+    if (cp !in '0'.code..'9'.code && cp != '#'.code && cp != '*'.code) return false
+    val next = t.getOrNull(i + 1)?.code
+    return next == 0x20E3 || (next == 0xFE0F && t.getOrNull(i + 2)?.code == 0x20E3)
+}
+
+/** At most this many emoji, alone in a message, draw large, as other chat apps do. */
+const val JUMBO_EMOJI_MAX = 3
+
+/** Whether a message's text is one to [JUMBO_EMOJI_MAX] emoji and nothing else. */
+fun isJumboEmoji(text: String): Boolean = emojiOnlyCount(text) in 1..JUMBO_EMOJI_MAX
+
 fun String.applyEmojiSpans(): AnnotatedString {
     val text = this
     // Android and iOS draw colour emoji in the default family: nothing to
