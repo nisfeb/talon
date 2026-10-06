@@ -523,6 +523,14 @@ class OrreryApi(
         }
     }
 
+    /**
+     * One local day of health from the phone (orrery 74), under the key;
+     * a later post of the same day replaces it. See [healthBody].
+     */
+    suspend fun postHealth(token: String, body: String) {
+        request(bare, HttpMethod.Post, "/api/health", body) { header(HttpHeaders.Authorization, "Bearer $token") }
+    }
+
     suspend fun observe(batch: JsonObject, token: String): ObserveAnswer {
         val text = request(bare, HttpMethod.Post, "/api/observe", batch.toString()) {
             header(HttpHeaders.Authorization, "Bearer $token")

@@ -33,6 +33,7 @@ package io.nisfeb.talon.ui
  *  - isUrbWebViewSupported — A, i (in-app webview popover); D: hands off to the system browser.
  *  - isLocalTriageSupported — D (llama.cpp on the JVM, or a local Ollama), A (MediaPipe LLM Inference), i (Apple's system model on iOS 26, else llama.cpp).
  *  - isLocationSharingSupported — A (LocationManager wakes a receiver on a significant move). D: a computer does not move with you. i: port pending (CLLocationManager significant-change monitoring, Always authorization, Info.plist strings).
+ *  - isHealthSharingSupported — A (Health Connect: steps, exercise, sleep). D: a computer holds no health data. i: port pending (HealthKit statistics and sample queries, the HealthKit entitlement, Info.plist strings).
  *  - isArmillaryPurchaseSupported — A, D; i on the US App Store storefront only. Apple allows a button to an outside checkout there and nowhere else (guideline 3.1.1(a)), so elsewhere buying, its pitch and every "top up" go. The card, the balance and the history do not depend on it.
  *
  * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
@@ -343,6 +344,13 @@ expect val isUrbWebViewSupported: Boolean
  * the orrery triage row. See [LocationSharing].
  */
 expect val isLocationSharingSupported: Boolean
+
+/**
+ * Whether this device can send orrery a summary of each day's health:
+ * steps, workouts and sleep, read from the phone's health store. Gates
+ * the switch under the location one. See [HealthSharing].
+ */
+expect val isHealthSharingSupported: Boolean
 
 /**
  * Whether credit can be bought from inside the app.

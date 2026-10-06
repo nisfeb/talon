@@ -49,6 +49,7 @@ actual val isDrawerNavigation: Boolean = true
 actual val isTouchPrimary: Boolean = true
 
 actual val isLocationSharingSupported: Boolean = true
+actual val isHealthSharingSupported: Boolean = true
 
 /** Nothing here forbids an outside checkout. */
 actual val isArmillaryPurchaseSupported: Boolean = true

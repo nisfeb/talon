@@ -151,4 +151,4 @@ internal fun positionBody(fix: LocationFix): String =
  * The key's client, made once. It used to be made per fix and never
  * closed, so every move left a connection pool and its threads behind.
  */
-private val keyClient: HttpClient by lazy { createAppHttpClient() }
+internal val keyClient: HttpClient by lazy { createAppHttpClient() }

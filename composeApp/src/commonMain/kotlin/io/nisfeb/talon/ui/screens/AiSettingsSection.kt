@@ -1344,6 +1344,7 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
             }
         }
         if (io.nisfeb.talon.ui.isLocationSharingSupported) LocationRow()
+        if (io.nisfeb.talon.ui.isHealthSharingSupported) HealthRow()
     }
     (note ?: error)?.let { Quiet(it, error = true) }
     // An empty balance holds every message the pipe would read, so it
@@ -1699,6 +1700,34 @@ private fun LocationRow() {
             scope.launch {
                 if (!want) sharing.stop()
                 else if (!sharing.start()) note = "Talon needs location access all the time to hear a move with the app closed."
+            }
+        })
+    }
+    note?.let { Quiet(it, error = true) }
+}
+
+@Composable
+private fun HealthRow() {
+    val sharing = io.nisfeb.talon.ui.rememberHealthSharing() ?: return
+    val scope = rememberCoroutineScope()
+    val on by sharing.on.collectAsState()
+    var note by remember { mutableStateOf<String?>(null) }
+    var background by remember { mutableStateOf(true) }
+    LaunchedEffect(on) { if (on) background = sharing.background() }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Send my health", style = MaterialTheme.typography.bodyMedium)
+            Quiet("Each day's steps, workouts and sleep from Health Connect: totals and times, never heart rate or where. Your ship keeps them to itself.")
+            if (on && !background) Quiet("Health Connect lets Talon read only while it is open, so today goes up when you open Talon.")
+        }
+        Switch(checked = on, onCheckedChange = { want ->
+            note = null
+            scope.launch {
+                when {
+                    !want -> sharing.stop()
+                    !sharing.available() -> note = "Health Connect is not on this phone, or needs an update."
+                    !sharing.start() -> note = "Talon needs to read steps, exercise and sleep in Health Connect."
+                }
             }
         })
     }
