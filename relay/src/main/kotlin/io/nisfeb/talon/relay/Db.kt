@@ -103,6 +103,19 @@ class Db(private val path: String) {
     }
 
     /**
+     * Replace [deviceId]'s push endpoint, keeping its ships and caps: an
+     * iPhone whose alert token arrived after it registered, or whose
+     * tokens changed. False for a device the relay does not know.
+     */
+    fun setEndpoint(deviceId: String, pushEndpoint: String): Boolean = connect().use { c ->
+        c.prepareStatement("UPDATE devices SET push_endpoint = ? WHERE id = ?").use { ps ->
+            ps.setString(1, pushEndpoint)
+            ps.setString(2, deviceId)
+            ps.executeUpdate() > 0
+        }
+    }
+
+    /**
      * Replace what [deviceId]'s app says it understands. False for a
      * device the relay does not know.
      */

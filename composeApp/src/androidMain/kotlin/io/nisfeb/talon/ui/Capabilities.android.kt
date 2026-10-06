@@ -53,3 +53,5 @@ actual val isHealthSharingSupported: Boolean = true
 
 /** Nothing here forbids an outside checkout. */
 actual val isArmillaryPurchaseSupported: Boolean = true
+
+actual val isRelayNotificationSetupNeeded: Boolean = false

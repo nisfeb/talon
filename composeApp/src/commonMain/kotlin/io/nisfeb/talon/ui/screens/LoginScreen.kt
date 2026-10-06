@@ -89,6 +89,10 @@ fun LoginScreen(
     session: UrbitSession,
     onLoggedIn: (ship: String) -> Unit,
     notice: String? = null,
+    /** The +code a sign-in succeeded with, just before [onLoggedIn]: a
+     *  device that needs the relay offers to register with it. Kept in
+     *  memory only, until the owner answers. */
+    onLoginCode: (String) -> Unit = {},
     /** Optional Composable slot that wires Android's Autofill Framework
      *  to the ship-URL field. Receives the `(String) -> Unit` setter
      *  the user's typing would normally invoke and returns a Modifier
@@ -254,6 +258,7 @@ fun LoginScreen(
                                     // ship name — don't prepend another.
                                     status = "Connected as $ship"
                                     LoginDraft.clear()
+                                    onLoginCode(code)
                                     onLoggedIn(ship)
                                 }
                                 .onFailure { err ->

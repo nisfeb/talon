@@ -127,15 +127,24 @@ class Push(
         author: String? = null,
         preview: String? = null,
     ) {
+        // Every iOS drop is said: they were silent, and a week of the
+        // relay's log held no alert sent to an iPhone and no sign why.
         if (platform == IOS_VOIP) {
             // A VoIP push must trigger a call; Apple forbids using it
             // for a message. A device registered before alerts existed
             // has no alert token; it re-registers to get them.
+            log.warn("message for $patp dropped: an ios-voip device has no alert token")
             return
         }
         if (platform == IOS) {
-            val alert = iosAlertToken(endpoint) ?: return
-            val a = apns ?: return
+            val alert = iosAlertToken(endpoint) ?: run {
+                log.warn("message for $patp dropped: the iPhone registered without an alert token")
+                return
+            }
+            val a = apns ?: run {
+                log.warn("message for $patp dropped: APNs not configured")
+                return
+            }
             a.sendAlert(
                 token = alert,
                 title = author ?: patp,

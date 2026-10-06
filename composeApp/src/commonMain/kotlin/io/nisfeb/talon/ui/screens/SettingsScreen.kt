@@ -713,6 +713,10 @@ fun SettingsScreen(
             }
             }
             if (safeTab == SettingsTab.Notifications) {
+            if (relayConfig != null && io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
+                PhoneNotificationsRow(relayConfig)
+                Spacer(Modifier.height(8.dp))
+            }
             if (notificationHealth != null) {
                 NotificationHealthPanel(
                     health = notificationHealth,
@@ -1680,10 +1684,15 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
     )
     Text(
-        "Optional: register this device with a notification relay so " +
-            "pushes still arrive when Talon is killed by Android or " +
-            "force-stopped. The default endpoint is the Talon-operated " +
-            "host; self-host by pointing at your own.",
+        if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
+            "With the app closed, this iPhone hears from your ship only " +
+                "through a relay. The default endpoint is the Talon-operated host."
+        } else {
+            "Optional: register this device with a notification relay so " +
+                "pushes still arrive when Talon is killed by Android or " +
+                "force-stopped. The default endpoint is the Talon-operated " +
+                "host; self-host by pointing at your own."
+        },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -1867,47 +1876,16 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
                         codePrompt = false
                         code = ""
                         scope.launch {
-                            val endpoint = config.pushTokens.token()
-                            if (endpoint == null) {
-                                // token() suspends up to 10s waiting for the
-                                // distributor's NEW_ENDPOINT broadcast. A null
-                                // return at this point means either no
-                                // distributor is installed, or the one we
-                                // chose didn't respond — both call for user
-                                // action, but the message should distinguish.
-                                val report = config.pushTokens.diagnose()
-                                status = if (report.byConnector.isEmpty()) {
-                                    "No UnifiedPush distributor found. " +
-                                        "Install ntfy, NextPush, or another " +
-                                        "distributor app, then try again."
-                                } else {
-                                    "${report.byConnector.first()} didn't " +
-                                        "deliver an endpoint within 10s. " +
-                                        "Open it once to wake it up, then " +
-                                        "try again."
-                                }
-                                working = false
-                                return@launch
-                            }
-                            val newId = config.client.register(
-                                platform = config.pushTokens.platform,
-                                pushEndpoint = endpoint,
-                                existingDeviceId = config.settings.deviceIdFor(ship),
-                                shipUrl = shipUrl,
-                                patp = ship,
-                                code = codeSnapshot,
-                            )
-                            if (newId != null) {
-                                config.settings.setDeviceIdFor(ship, newId)
-                                // What this phone understands, so the relay may
-                                // send it; an older relay says 404, harmless.
-                                config.pushTokens.caps.takeIf { it.isNotEmpty() }
-                                    ?.let { config.client.declareCaps(newId, it) }
-                                status = "Registered (deviceId=${newId.take(8)}…)"
-                            } else {
-                                status = "Registration failed. Check the endpoint, " +
-                                    "your +code, and that the ship is reachable from " +
-                                    "the relay."
+                            status = when (
+                                val r = io.nisfeb.talon.notify.enrollDevice(
+                                    config.client, config.settings, config.pushTokens, ship, shipUrl, codeSnapshot,
+                                )
+                            ) {
+                                is io.nisfeb.talon.notify.Enrollment.On ->
+                                    "Registered (deviceId=${r.deviceId.take(8)}…)" +
+                                        if (r.alerts) "" else ". Messages won't alert until notifications are allowed for Talon."
+                                is io.nisfeb.talon.notify.Enrollment.NoToken -> r.why
+                                is io.nisfeb.talon.notify.Enrollment.Refused -> r.why
                             }
                             working = false
                         }
@@ -2432,3 +2410,37 @@ private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
         modifier = Modifier.fillMaxWidth(),
     )
 }
+
+/**
+ * On a device whose notifications come only through the relay (iOS):
+ * whether this one is on it, and the way on when it is not. The prompt
+ * after signing in asks once; this is where the owner says yes later.
+ */
+@Composable
+private fun PhoneNotificationsRow(config: RelayPanelConfig) {
+    val ship = config.activePatp ?: return
+    val shipUrl = config.activeShipUrl ?: return
+    var deviceId by remember(ship) { mutableStateOf(config.settings.deviceIdFor(ship)) }
+    var asking by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Notifications on this iPhone", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                if (deviceId.isNotBlank()) "On: the relay tells this iPhone when something arrives."
+                else "Off: with the app closed, this iPhone hears nothing from your ship.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(onClick = { asking = true }) { Text(if (deviceId.isBlank()) "Turn on" else "Set up again") }
+    }
+    if (asking) {
+        io.nisfeb.talon.ui.NotificationSetupDialog(
+            code = null,
+            enroll = { c -> io.nisfeb.talon.notify.enrollDevice(config.client, config.settings, config.pushTokens, ship, shipUrl, c) },
+            onDone = { asking = false; deviceId = config.settings.deviceIdFor(ship) },
+            onNotNow = { asking = false },
+        )
+    }
+}
+

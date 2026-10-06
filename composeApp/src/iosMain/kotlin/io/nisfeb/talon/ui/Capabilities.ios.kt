@@ -72,3 +72,5 @@ actual val isHealthSharingSupported: Boolean = false
 /** The US storefront only. Read each time: the storefront follows the Apple ID's country. */
 actual val isArmillaryPurchaseSupported: Boolean
     get() = outsideCheckoutAllowedOnAppStore(SKPaymentQueue.defaultQueue().storefront?.countryCode)
+
+actual val isRelayNotificationSetupNeeded: Boolean = true

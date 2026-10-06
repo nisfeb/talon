@@ -41,6 +41,25 @@ interface PushTokenProvider {
      *  manifest `<queries>` mismatch can leave both empty. The
      *  default impl returns an empty report. */
     suspend fun diagnose(): DistributorReport = DistributorReport()
+
+    /** Why [token] gave nothing, in words for the owner. The default is
+     *  UnifiedPush's: a distributor missing, or one that did not answer. */
+    suspend fun missingTokenReason(): String {
+        val report = diagnose()
+        return if (report.byConnector.isEmpty()) {
+            "No UnifiedPush distributor found. Install ntfy, NextPush, or another distributor app, then try again."
+        } else {
+            "${report.byConnector.first()} didn't deliver an endpoint within 10s. Open it once to wake it up, then try again."
+        }
+    }
+
+    /** Whether [endpoint] carries message alerts, not only rings. Always,
+     *  but on iOS, whose alert half is empty until notifications are allowed. */
+    fun alertsIn(endpoint: String): Boolean = true
+
+    /** Emits when this device's tokens may have changed since it
+     *  registered, so the endpoint is sent again. Never by default. */
+    val changes: kotlinx.coroutines.flow.Flow<Unit> get() = kotlinx.coroutines.flow.emptyFlow()
 }
 
 /** Snapshot of distributor discovery state. Intentionally flat

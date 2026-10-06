@@ -33,6 +33,16 @@ interface RelaySettings {
     fun setDeviceIdFor(patp: String, deviceId: String)
     fun clearDeviceIdFor(patp: String)
 
+    /** The push endpoint last registered for [patp], "" where unknown: a
+     *  token that changes since is sent again ([refreshRegisteredEndpoint]). */
+    fun registeredEndpointFor(patp: String): String = ""
+    fun setRegisteredEndpointFor(patp: String, endpoint: String) {}
+
+    /** The owner said not now to notifications for [patp] on this device:
+     *  not asked again at launch. Settings still turns them on. */
+    fun declinedFor(patp: String): Boolean = false
+    fun setDeclinedFor(patp: String, declined: Boolean) {}
+
     companion object {
         const val DEFAULT_ENDPOINT = "https://relay.nisfeb.com"
     }
@@ -55,4 +65,11 @@ class InMemoryRelaySettings(
     override fun clearDeviceIdFor(patp: String) {
         deviceIds.remove(patp)
     }
+
+    private val endpoints = mutableMapOf<String, String>()
+    override fun registeredEndpointFor(patp: String): String = endpoints[patp].orEmpty()
+    override fun setRegisteredEndpointFor(patp: String, endpoint: String) { endpoints[patp] = endpoint }
+    private val declined = mutableSetOf<String>()
+    override fun declinedFor(patp: String): Boolean = patp in declined
+    override fun setDeclinedFor(patp: String, declined: Boolean) { if (declined) this.declined += patp else this.declined -= patp }
 }
