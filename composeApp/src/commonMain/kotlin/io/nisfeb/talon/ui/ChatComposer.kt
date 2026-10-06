@@ -430,18 +430,27 @@ fun ChatComposer(
             val quote = state.pendingQuote
             val quoted = quote?.takeIf { strategy.supportsQuote }
             scope.launch {
-                runCatching {
-                    val hostedUrl = repo.uploadImage(pending.bytes, pending.mimeType, pending.displayName)
-                    if (pending.isImage) {
-                        val dims = decodeImageDimensions(pending.bytes)
-                        val w = dims?.first ?: 0
-                        val h = dims?.second ?: 0
-                        if (quoted != null) strategy.sendImageQuote(hostedUrl, w, h, pending.displayName, caption, quoted.whom, quoted.id)
-                        else strategy.sendImage(src = hostedUrl, width = w, height = h, alt = pending.displayName, caption = caption)
-                    } else {
-                        val text = if (caption.isEmpty()) hostedUrl else "$caption\n\n$hostedUrl"
-                        if (quoted != null) strategy.sendQuote(text, quoted.whom, quoted.id) else strategy.sendText(text)
+                // Uploaded and sent on the repo's scope: leaving the chat
+                // mid-upload cancelled both, and the photo never went. Only
+                // the bookkeeping below belongs to the screen.
+                val sent = repo.carry {
+                    io.nisfeb.talon.util.runSuspendCatching {
+                        val hostedUrl = repo.uploadImage(pending.bytes, pending.mimeType, pending.displayName)
+                        if (pending.isImage) {
+                            val dims = decodeImageDimensions(pending.bytes)
+                            val w = dims?.first ?: 0
+                            val h = dims?.second ?: 0
+                            if (quoted != null) strategy.sendImageQuote(hostedUrl, w, h, pending.displayName, caption, quoted.whom, quoted.id)
+                            else strategy.sendImage(src = hostedUrl, width = w, height = h, alt = pending.displayName, caption = caption)
+                        } else {
+                            val text = if (caption.isEmpty()) hostedUrl else "$caption\n\n$hostedUrl"
+                            if (quoted != null) strategy.sendQuote(text, quoted.whom, quoted.id) else strategy.sendText(text)
+                        }
+                        // Sent with the screen gone: its saved draft was what went.
+                        if (store.load(whom).trim() == caption) store.clear(whom)
                     }
+                }
+                sent.onSuccess {
                     // Sent, the text with it: clear the stage and the draft
                     // so the conversation list stops advertising "Draft:".
                     // Only if the box still says what went: the box stays

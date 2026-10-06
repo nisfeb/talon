@@ -10,6 +10,11 @@ import platform.UIKit.UIApplicationDidEnterBackgroundNotification
 import platform.UIKit.UIApplicationState
 import platform.UIKit.UIDevice
 import platform.UIKit.UIDeviceOrientationDidChangeNotification
+import platform.UIKit.UIKeyboardDidHideNotification
+import platform.UIKit.UIKeyboardDidShowNotification
+import platform.UIKit.UIKeyboardFrameEndUserInfoKey
+import platform.UIKit.UIKeyboardWillChangeFrameNotification
+import platform.UIKit.valueWithCGRect
 
 /**
  * Whether the app is in front, from UIKit's own notifications.
@@ -38,6 +43,12 @@ object IosAppLifecycle {
         val centre = NSNotificationCenter.defaultCenter
         centre.addObserverForName(UIApplicationDidBecomeActiveNotification, null, NSOperationQueue.mainQueue) {
             _foreground.value = true
+            if (!keyboardUp) keyboardIsDown()
+        }
+        centre.addObserverForName(UIKeyboardDidShowNotification, null, NSOperationQueue.mainQueue) { keyboardUp = true }
+        centre.addObserverForName(UIKeyboardDidHideNotification, null, NSOperationQueue.mainQueue) {
+            keyboardUp = false
+            keyboardIsDown()
         }
         centre.addObserverForName(UIApplicationDidEnterBackgroundNotification, null, NSOperationQueue.mainQueue) {
             _foreground.value = false
@@ -45,17 +56,57 @@ object IosAppLifecycle {
         // A rotation with the keyboard up leaves its inset behind: the
         // keyboard goes, its hide notification is lost in the turn, and
         // Compose keeps padding every screen for a keyboard that is not
-        // there any more. That padding is the white band along the
-        // bottom. Putting the keyboard down as the device turns makes
-        // the inset go with it.
+        // there any more. Putting the keyboard down as the screen turns
+        // makes the inset go with it. Only when the screen really turned:
+        // the device turning (laid flat, or with rotation locked) put the
+        // keyboard down mid-sentence.
         UIDevice.currentDevice.beginGeneratingDeviceOrientationNotifications()
+        var turnedTo = interfaceOrientation()
         centre.addObserverForName(UIDeviceOrientationDidChangeNotification, null, NSOperationQueue.mainQueue) {
-            UIApplication.sharedApplication.sendAction(
-                platform.Foundation.NSSelectorFromString("resignFirstResponder"),
-                to = null,
-                from = null,
-                forEvent = null,
-            )
+            platform.darwin.dispatch_after(
+                platform.darwin.dispatch_time(platform.darwin.DISPATCH_TIME_NOW, 300_000_000L),
+                platform.darwin.dispatch_get_main_queue(),
+            ) {
+                val now = interfaceOrientation()
+                if (now != turnedTo) {
+                    turnedTo = now
+                    UIApplication.sharedApplication.sendAction(
+                        platform.Foundation.NSSelectorFromString("resignFirstResponder"),
+                        to = null,
+                        from = null,
+                        forEvent = null,
+                    )
+                }
+            }
         }
     }
+
+    private var keyboardUp = false
+
+    /**
+     * Tell Compose the keyboard is down, once UIKit says it is. Compose
+     * 1.11 takes the keyboard's height only from frame-change animations,
+     * and keeps a mid-animation height when one is cut short (a picker
+     * presented, the app sent to the background): every screen then pads
+     * for a keyboard that has gone, the white band along the bottom. An
+     * empty end frame reads as height 0 at once.
+     * ponytail: remove with Compose 1.13, which sets the final height on
+     * every animation's end (KeyboardInsetsManager.ios.kt).
+     */
+    @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+    private fun keyboardIsDown() {
+        NSNotificationCenter.defaultCenter.postNotificationName(
+            UIKeyboardWillChangeFrameNotification,
+            `object` = null,
+            userInfo = mapOf<Any?, Any?>(
+                UIKeyboardFrameEndUserInfoKey to platform.Foundation.NSValue.valueWithCGRect(platform.CoreGraphics.CGRectMake(0.0, 0.0, 0.0, 0.0)),
+            ),
+        )
+    }
+
+    /** The screen's orientation (not the device's), 0 when unknown. */
+    private fun interfaceOrientation(): Long =
+        UIApplication.sharedApplication.connectedScenes
+            .filterIsInstance<platform.UIKit.UIWindowScene>()
+            .firstOrNull()?.interfaceOrientation ?: 0L
 }
