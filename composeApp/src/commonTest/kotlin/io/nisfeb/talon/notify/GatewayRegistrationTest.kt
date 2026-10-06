@@ -105,4 +105,14 @@ class GatewayRegistrationTest {
         settings.setViaShipPush("~zod", true)
         assertEquals(false, shouldOfferNotificationSetup(true, "~zod", settings, justSignedIn = true))
     }
+
+    @Test
+    fun settings_says_a_phone_on_its_ship_is_on() {
+        assertEquals(PhoneNotifications.Off, phoneNotifications(settings, "~zod"))
+        settings.setDeviceIdFor("~zod", "relay-dev")
+        assertEquals(PhoneNotifications.Relay, phoneNotifications(settings, "~zod"))
+        settings.clearDeviceIdFor("~zod")
+        settings.setViaShipPush("~zod", true)
+        assertEquals(PhoneNotifications.Ship, phoneNotifications(settings, "~zod"))
+    }
 }

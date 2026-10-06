@@ -2430,25 +2430,30 @@ private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
 private fun PhoneNotificationsRow(config: RelayPanelConfig) {
     val ship = config.activePatp ?: return
     val shipUrl = config.activeShipUrl ?: return
-    var deviceId by remember(ship) { mutableStateOf(config.settings.deviceIdFor(ship)) }
+    var from by remember(ship) { mutableStateOf(io.nisfeb.talon.notify.phoneNotifications(config.settings, ship)) }
     var asking by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("Notifications on this iPhone", style = MaterialTheme.typography.bodyMedium)
             Text(
-                if (deviceId.isNotBlank()) "On: the relay tells this iPhone when something arrives."
-                else "Off: with the app closed, this iPhone hears nothing from your ship.",
+                when (from) {
+                    io.nisfeb.talon.notify.PhoneNotifications.Ship -> "On: your ship tells this iPhone when something arrives."
+                    io.nisfeb.talon.notify.PhoneNotifications.Relay -> "On: the relay tells this iPhone when something arrives."
+                    io.nisfeb.talon.notify.PhoneNotifications.Off -> "Off: with the app closed, this iPhone hears nothing from your ship."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        TextButton(onClick = { asking = true }) { Text(if (deviceId.isBlank()) "Turn on" else "Set up again") }
+        if (from != io.nisfeb.talon.notify.PhoneNotifications.Ship) {
+            TextButton(onClick = { asking = true }) { Text(if (from == io.nisfeb.talon.notify.PhoneNotifications.Off) "Turn on" else "Set up again") }
+        }
     }
     if (asking) {
         io.nisfeb.talon.ui.NotificationSetupDialog(
             code = null,
             enroll = { c -> io.nisfeb.talon.notify.enrollDevice(config.client, config.settings, config.pushTokens, ship, shipUrl, c) },
-            onDone = { asking = false; deviceId = config.settings.deviceIdFor(ship) },
+            onDone = { asking = false; from = io.nisfeb.talon.notify.phoneNotifications(config.settings, ship) },
             onNotNow = { asking = false },
         )
     }
