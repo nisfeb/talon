@@ -146,6 +146,8 @@ fun TalonApp(
     initialOpenActions: Boolean = false,
     /** A tapped leave alert: open Orrery on the thing it is about ("activity/slug"). */
     initialOpenOrreryItem: String? = null,
+    /** A tapped calendar reminder: open the Calendar on its occurrence (the push's tag). */
+    initialOpenCalendarTag: String? = null,
     pendingShare: ShareIntent? = null,
     /** When non-null, the user already picked the share target in
      *  the system share sheet (Sharing Shortcut). Skip the in-app
@@ -766,6 +768,18 @@ fun TalonApp(
             onDeepLinkConsumed()
         }
     }
+    // A tapped calendar reminder: the Calendar, on its occurrence.
+    var calendarPushTag by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(initialOpenCalendarTag) {
+        if (initialOpenCalendarTag != null) {
+            closeSections()
+            calendarPushTag = initialOpenCalendarTag
+            calendarOpen = true
+            onDeepLinkConsumed()
+        }
+    }
+    // Left before its event was found, it is not opened later.
+    LaunchedEffect(calendarOpen) { if (!calendarOpen) calendarPushTag = null }
     // A tapped leave alert: Orrery, on the thing to leave for.
     LaunchedEffect(initialOpenOrreryItem) {
         if (initialOpenOrreryItem != null) {
@@ -1966,6 +1980,8 @@ fun TalonApp(
                     onBack = { calendarOpen = false },
                     onOpenWebSettings = { calendarPageOpen = true },
                     db = app.db, chat = app.repo, mail = mailRepo, ourShip = loggedInShip,
+                    openPushTag = calendarPushTag,
+                    onOpenedPush = { calendarPushTag = null },
                     modifier = mod,
                 )
             }

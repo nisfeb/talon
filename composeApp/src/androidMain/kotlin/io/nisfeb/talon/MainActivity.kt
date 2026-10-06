@@ -43,6 +43,8 @@ class MainActivity : ComponentActivity() {
     private val deepLinkOpenActions = mutableStateOf(false)
     /** Set by a tapped leave alert (EXTRA_OPEN_ORRERY): TalonApp opens Orrery on its thing. */
     private val deepLinkOpenOrrery = mutableStateOf<String?>(null)
+    /** Set by a tapped calendar reminder (EXTRA_OPEN_CALENDAR): its push tag. */
+    private val deepLinkOpenCalendar = mutableStateOf<String?>(null)
     /** Set when the user hit Answer on the incoming-call notification.
      *  The action can only open the activity — accepting needs the
      *  running CallController — so TalonApp does the accept. */
@@ -110,6 +112,7 @@ class MainActivity : ComponentActivity() {
             val openMail by deepLinkOpenMail
             val openActions by deepLinkOpenActions
             val openOrrery by deepLinkOpenOrrery
+            val openCalendar by deepLinkOpenCalendar
             val share by pendingShare
             val shareTarget by pendingShareTarget
             val answerFrom by pendingAnswerFrom
@@ -186,6 +189,7 @@ class MainActivity : ComponentActivity() {
                         initialOpenMail = openMail,
                         initialOpenActions = openActions,
                         initialOpenOrreryItem = openOrrery,
+                        initialOpenCalendarTag = openCalendar,
                         pendingShare = share,
                         pendingShareTarget = shareTarget,
                         onShareConsumed = {
@@ -206,6 +210,7 @@ class MainActivity : ComponentActivity() {
                             deepLinkOpenMail.value = false
                             deepLinkOpenActions.value = false
                             deepLinkOpenOrrery.value = null
+                            deepLinkOpenCalendar.value = null
                         },
                         initialAnswerFrom = answerFrom,
                         initialAnswerCallId = answerCallId,
@@ -281,6 +286,10 @@ class MainActivity : ComponentActivity() {
             deepLinkOpenOrrery.value = it
             consumedDeepLink = true
         }
+        intent.getStringExtra(Notifications.EXTRA_OPEN_CALENDAR)?.let {
+            deepLinkOpenCalendar.value = it
+            consumedDeepLink = true
+        }
         intent.getStringExtra(Notifications.EXTRA_ANSWER_FROM)?.let {
             pendingAnswerFrom.value = it
             pendingAnswerCallId.value =
@@ -324,6 +333,7 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra(Notifications.EXTRA_OPEN_MAIL)
             intent.removeExtra(Notifications.EXTRA_OPEN_ACTIONS)
             intent.removeExtra(Notifications.EXTRA_OPEN_ORRERY)
+            intent.removeExtra(Notifications.EXTRA_OPEN_CALENDAR)
             setIntent(intent)
         }
         ShareIntent.from(intent)?.let {

@@ -82,6 +82,8 @@ object Notifications {
     const val EXTRA_OPEN_ACTIONS = "open_actions"
     /** A leave alert's thing ("activity/slug"): the tap opens Orrery on it. */
     const val EXTRA_OPEN_ORRERY = "open_orrery"
+    /** A calendar reminder's push tag: TalonApp opens the Calendar on its occurrence. */
+    const val EXTRA_OPEN_CALENDAR = "open_calendar"
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -205,7 +207,9 @@ object Notifications {
         // A leave push or a running-late one: the alert channel, and the tap opens its appointment.
         val item = io.nisfeb.talon.orrery.alertItemOf(push.tag)
         post(context, push.tag ?: "ship:${push.title.hashCode()}", if (item != null) CHANNEL_LEAVE else CHANNEL_SHIP, push.title, push.body, item != null,
-            openItem = item)
+            openItem = item,
+            // A calendar reminder: the tap opens its event.
+            openCalendar = push.tag?.takeIf { it.startsWith(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX) })
     }
 
     /** The alarm: the ship's leave push did not come. */
@@ -218,6 +222,7 @@ object Notifications {
         context: Context, tag: String, channel: String, title: String, body: String, alarm: Boolean,
         whenMs: Long = System.currentTimeMillis(),
         openItem: String? = null,
+        openCalendar: String? = null,
     ) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java) ?: return
         val tap = PendingIntent.getActivity(
@@ -225,6 +230,7 @@ object Notifications {
             Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 if (openItem != null) putExtra(EXTRA_OPEN_ORRERY, openItem)
+                if (openCalendar != null) putExtra(EXTRA_OPEN_CALENDAR, openCalendar)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

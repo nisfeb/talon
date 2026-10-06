@@ -23,6 +23,22 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
+/** How the calendar app tags its reminder pushes: `cal-<id>-<idx>`, and `-<n>` more for an alarm. */
+const val CALENDAR_PUSH_PREFIX = "cal-"
+
+/**
+ * The occurrence a calendar reminder push is about, among [rows], or
+ * null. An event's id can hold dashes of its own (an ICS uid), so the
+ * tag is matched against the rows rather than split.
+ */
+fun calendarRowOfPushTag(tag: String?, rows: List<CalendarRow>): CalendarRow? {
+    val rest = tag?.takeIf { it.startsWith(CALENDAR_PUSH_PREFIX) }?.removePrefix(CALENDAR_PUSH_PREFIX) ?: return null
+    return rows.firstOrNull { r ->
+        val key = "${r.id}-${r.idx}"
+        rest == key || (rest.startsWith("$key-") && rest.removePrefix("$key-").let { n -> n.isNotEmpty() && n.all(Char::isDigit) })
+    }
+}
+
 /**
  * One occurrence of an event inside a window: [l]..[r] in unix ms,
  * [all] for whole days, and the event's display [meta] (name, note,
