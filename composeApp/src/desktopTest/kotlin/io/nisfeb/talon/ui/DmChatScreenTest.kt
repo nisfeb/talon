@@ -297,6 +297,22 @@ class DmChatScreenTest {
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Report message?").fetchSemanticsNodes().isNotEmpty() }
     }
 
+    // ─── an emoji alone draws large ────────────────────────────────
+
+    private fun ComposeUiTest.heightOf(text: String) = onNodeWithText(text).fetchSemanticsNode().size.height
+
+    @Test
+    fun `a message that is only emoji draws them large, and the same emoji in a sentence does not`() = chat(seed = {
+        messages().upsert(msg("~bus/170141184506", "~bus", "👍", 1_000))
+        messages().upsert(msg("~bus/170141184507", "~bus", "nice 👍", 2_000))
+        messages().upsert(msg("~bus/170141184508", "~bus", "😂😂😂😂", 3_000))
+    }) { _, _ ->
+        val alone = heightOf("👍")
+        val inText = heightOf("nice 👍")
+        assertTrue(alone >= inText * 1.8, "alone $alone, in a sentence $inText")
+        assertTrue(heightOf("😂😂😂😂") < alone, "four are text again")
+    }
+
     // ─── pinning, in a channel of a group we host ──────────────────
 
     private val ours = "chat/~zod/general"
@@ -308,6 +324,13 @@ class DmChatScreenTest {
 
     private fun post(id: String, author: String, text: String, sent: Long) =
         MessageEntity(ours, id, author, sent, """[{"inline":["$text"]}]""", "/chat")
+
+    @Test
+    fun `in a channel too, an emoji alone draws large`() = chat(whom = ours, seed = ourChannel(
+        post("170141184506", "~bus", "🎉", 1_000), post("170141184507", "~nec", "party 🎉", 2_000),
+    )) { _, _ ->
+        assertTrue(heightOf("🎉") >= heightOf("party 🎉") * 1.8)
+    }
 
     @Test
     fun `a post is pinned from its menu and shown above, then unpinned`() = chat(whom = ours, seed = ourChannel(

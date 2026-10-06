@@ -251,6 +251,9 @@ private fun Modifier.handOverSpans(text: AnnotatedString, layout: State<TextLayo
     }.pointerHoverIcon(if (over) PointerIcon.Hand else PointerIcon.Text, overrideDescendants = over)
 }
 
+/** How much larger an emoji-only message draws than body text. */
+internal const val JUMBO_EMOJI_SCALE = 2.5f
+
 @Composable
 fun StoryRenderer(
     parts: List<StoryPart>,
@@ -304,9 +307,14 @@ fun StoryRenderer(
                         .isNotEmpty()
 
                     if (!hasSpans && !hasAnnotations) {
+                        // A message that is only an emoji or three draws
+                        // them large; the same emoji in a sentence stays
+                        // text-sized.
+                        val jumbo = parts.size == 1 && remember(part.text) { isJumboEmoji(part.text.text) }
+                        val body = MaterialTheme.typography.bodyMedium
                         Text(
-                            remember(part.text) { part.text.text.applyEmojiSpans() },
-                            style = MaterialTheme.typography.bodyMedium,
+                            remember(part.text, jumbo) { (if (jumbo) part.text.text.trim() else part.text.text).applyEmojiSpans() },
+                            style = if (jumbo) body.copy(fontSize = body.fontSize * JUMBO_EMOJI_SCALE, lineHeight = body.fontSize * JUMBO_EMOJI_SCALE * 1.2f) else body,
                         )
                     } else {
                         val layout = remember { mutableStateOf<TextLayoutResult?>(null) }
