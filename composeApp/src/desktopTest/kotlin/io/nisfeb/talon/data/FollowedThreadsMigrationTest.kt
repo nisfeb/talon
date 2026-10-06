@@ -24,7 +24,7 @@ class FollowedThreadsMigrationTest {
             // No destructive fallback: an open that succeeds ran the step.
             fun open() = Room.databaseBuilder<AppDatabase>(name = path)
                 .setDriver(BundledSQLiteDriver())
-                .addMigrations(FOLLOWED_THREADS_MIGRATION, ORRERY_CACHE_MIGRATION)
+                .addMigrations(*SHARED_MIGRATIONS)
                 .build()
             open().apply {
                 messages().upsert(MessageEntity("chat/~bus/general", "170141184506", "~bus", 1_000, """[{"inline":["kept"]}]""", "/chat"))

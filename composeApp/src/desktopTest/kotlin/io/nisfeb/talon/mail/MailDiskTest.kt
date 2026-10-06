@@ -11,16 +11,6 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
 import io.nisfeb.talon.data.AppDatabase
-import io.nisfeb.talon.data.CALENDAR_ROWS_MIGRATION
-import io.nisfeb.talon.data.ORRERY_ACCOUNTS_MIGRATION
-import io.nisfeb.talon.data.ORRERY_SENT_MIGRATION
-import io.nisfeb.talon.data.COMET_DOMES_MIGRATION
-import io.nisfeb.talon.data.ORRERY_HANDOFF_MIGRATION
-import io.nisfeb.talon.data.ORRERY_SHIP_WORK_MIGRATION
-import io.nisfeb.talon.data.MESSAGE_SEARCH_TEXT_MIGRATION
-import io.nisfeb.talon.data.URB_UNFURLS_MIGRATION
-import io.nisfeb.talon.data.MESSAGE_STATUS_INDEX_MIGRATION
-import io.nisfeb.talon.data.MAIL_ROWS_MIGRATION
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
@@ -54,7 +44,7 @@ class MailDiskTest {
     // No destructive fallback: a migration that does not match the entity fails here.
     private fun db() = Room.databaseBuilder<AppDatabase>(name = dbPath)
         .setDriver(BundledSQLiteDriver())
-        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION, COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, io.nisfeb.talon.data.WATCHWORDS_DROP_MIGRATION, io.nisfeb.talon.data.ASSISTANT_LOG_MIGRATION, io.nisfeb.talon.data.FOLLOWED_THREADS_MIGRATION)
+        .addMigrations(*io.nisfeb.talon.data.SHARED_MIGRATIONS)
         .build()
 
     @Test
