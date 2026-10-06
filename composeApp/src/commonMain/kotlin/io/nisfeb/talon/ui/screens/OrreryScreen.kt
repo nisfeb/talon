@@ -82,10 +82,13 @@ fun OrreryRepoScreen(
     val answerProblem by orreryRepo.answerProblem.collectAsState()
     val error by orreryRepo.error.collectAsState()
     val generator by orreryRepo.generator.collectAsState()
+    val store = orreryRepo.view
     OrreryScreen(
         onBack = onBack,
-        readState = { orreryRepo.readState() },
-        readPlan = { orreryRepo.travelLast() },
+        view = store.view.collectAsState().value,
+        refreshing = store.refreshing.collectAsState().value,
+        problem = store.problem.collectAsState().value,
+        onOpen = store::open,
         onRefreshActions = { orreryRepo.opened() },
         modifier = modifier,
         openItem = openItem,
@@ -112,16 +115,21 @@ fun OrreryRepoScreen(
 
 /**
  * Orrery: Actions, Coming up and Browse, and one thing opened from any of
- * them. [openItem] (a leave alert's thing) opens on arrival, under Coming
- * up, and [onOpenedItem] says it was taken.
+ * them. It shows [view] as it is, kept from the last answer, while
+ * [onOpen] asks the ship again behind it ([io.nisfeb.talon.orrery.OrreryViewStore]).
+ * [openItem] (a leave alert's thing) opens on arrival, under Coming up,
+ * and [onOpenedItem] says it was taken.
  */
 @Composable
 fun OrreryScreen(
     onBack: () -> Unit,
-    /** Orrery's state now (GET /api/state). */
-    readState: suspend () -> Result<JsonObject>,
-    /** The ship's last time-to-leave pass (GET /api/travel/last), or null. */
-    readPlan: suspend () -> JsonObject?,
+    /** Orrery's state and the leave plan, as last answered; null before any answer. */
+    view: io.nisfeb.talon.orrery.OrreryView?,
+    refreshing: Boolean,
+    /** Why the last ask got nothing. */
+    problem: String?,
+    /** Opened (false) or Refresh (true): ask the ship if it is due. */
+    onOpen: (Boolean) -> Unit,
     onRefreshActions: suspend () -> Unit,
     modifier: Modifier = Modifier,
     openItem: String? = null,
@@ -130,24 +138,11 @@ fun OrreryScreen(
 ) {
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable { mutableStateOf(OrreryTab.ACTIONS) }
-    var state by remember { mutableStateOf<JsonObject?>(null) }
-    var plan by remember { mutableStateOf<LeaveBy?>(null) }
-    var problem by remember { mutableStateOf<String?>(null) }
-    var loading by remember { mutableStateOf(false) }
+    val state = view?.state
+    val plan = remember(view?.plan) { leaveByOf(view?.plan) }
     // Things opened one from another; back goes to the one before.
     var stack by remember { mutableStateOf(listOf<String>()) }
-    fun load() {
-        if (loading) return
-        loading = true
-        scope.launch {
-            readState()
-                .onSuccess { state = it; problem = null }
-                .onFailure { problem = "Orrery could not be read: ${it.message ?: "no answer"}" }
-            plan = leaveByOf(readPlan())
-            loading = false
-        }
-    }
-    LaunchedEffect(Unit) { load() }
+    LaunchedEffect(Unit) { onOpen(false) }
     LaunchedEffect(openItem) {
         if (openItem != null) {
             tab = OrreryTab.COMING_UP
@@ -177,10 +172,10 @@ fun OrreryScreen(
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.padding(start = 4.dp).weight(1f),
             )
-            if (loading) {
+            if (refreshing) {
                 CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.padding(12.dp).size(20.dp))
             } else {
-                io.nisfeb.talon.ui.IconButton(tip = "Refresh", onClick = { scope.launch { runCatching { onRefreshActions() } }; load() }) {
+                io.nisfeb.talon.ui.IconButton(tip = "Refresh", onClick = { scope.launch { runCatching { onRefreshActions() } }; onOpen(true) }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                 }
             }
@@ -190,12 +185,21 @@ fun OrreryScreen(
                 Tab(selected = tab == t, onClick = { tab = t; stack = emptyList() }, text = { Text(t.label) })
             }
         }
+        // Kept data on show and the ship not answering: say how old it is.
+        if (problem != null && view != null && tab != OrreryTab.ACTIONS) {
+            Text(
+                "The ship did not answer; this is as of ${formatClock(view.atMs)}.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
         val open = stack.lastOrNull()
         when {
             open != null -> ItemPage(open, byId[open], loaded = state != null, byId, me, plan) { stack = stack + it }
             tab == OrreryTab.ACTIONS -> actionsTab()
             state == null -> Text(
-                problem ?: "Looking…",
+                problem?.let { "Orrery could not be read: $it" } ?: "Looking…",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (problem != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),

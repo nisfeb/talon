@@ -23,7 +23,7 @@ class AssistantLogMigrationTest {
             // No destructive fallback: an open that succeeds ran the step.
             fun open() = Room.databaseBuilder<AppDatabase>(name = path)
                 .setDriver(BundledSQLiteDriver())
-                .addMigrations(ASSISTANT_LOG_MIGRATION, io.nisfeb.talon.data.FOLLOWED_THREADS_MIGRATION)
+                .addMigrations(ASSISTANT_LOG_MIGRATION, io.nisfeb.talon.data.FOLLOWED_THREADS_MIGRATION, ORRERY_CACHE_MIGRATION)
                 .build()
             open().apply {
                 assistantHistory().insert(AssistantHistoryEntity(gid = "t1", mode = "Assistant", question = "file this", answer = "Filed.", createdAt = 1_000, log = "✓ orrery_observe 2100ms, result 40 chars"))

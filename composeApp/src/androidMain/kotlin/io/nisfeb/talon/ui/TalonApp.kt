@@ -479,9 +479,8 @@ fun TalonApp(
         app.aiSettings.state.collect { io.nisfeb.talon.orrery.LocalModels.usePrivate(it.triagePrivateSlot()) }
     }
     var openAction by remember { mutableStateOf<io.nisfeb.talon.orrery.OrreryAction?>(null) }
-    // Whether the pipe is on at all: the actions section is its.
-    val orreryOn = orreryRepo.availability.collectAsState().value ==
-        io.nisfeb.talon.orrery.OrreryAvailability.PRESENT
+    // Whether the menu offers Orrery: on, and not known to be missing.
+    val orreryOn = io.nisfeb.talon.orrery.orreryOffered(orreryGate == true, orreryRepo.availability.collectAsState().value)
     openAction?.takeIf { orreryGate == true }?.let { action ->
         io.nisfeb.talon.ui.OrreryActionDialog(
             action = action,
