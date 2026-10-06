@@ -30,12 +30,18 @@ data class OrreryItem(
     val where: String? get() = text("location") ?: text("address")
 }
 
-/** Every thing in orrery's state (GET /api/state), as it stands. */
+/**
+ * Every thing in orrery's state, as it stands: the brief form (GET
+ * /api/state?brief=1, orrery 67+), where an attribute is its value, or the
+ * full one, where it is `{value, source, conf, at, ...}`. A copy kept from
+ * before the switch to brief is the full form.
+ */
 fun orreryItems(state: JsonObject): List<OrreryItem> = (state["bodies"] as? JsonArray).orEmpty().mapNotNull { b ->
     val o = b as? JsonObject ?: return@mapNotNull null
     fun str(k: String) = (o[k] as? JsonPrimitive)?.contentOrNull
     val id = str("id") ?: return@mapNotNull null
-    fun current(v: JsonElement): JsonElement? = (v as? JsonObject)?.get("value")?.takeUnless { it is JsonNull }
+    fun current(v: JsonElement): JsonElement? =
+        (if (v is JsonObject && "value" in v) v["value"] else v)?.takeUnless { it is JsonNull }
     OrreryItem(
         id = id,
         kind = str("kind") ?: id.substringBefore('/'),

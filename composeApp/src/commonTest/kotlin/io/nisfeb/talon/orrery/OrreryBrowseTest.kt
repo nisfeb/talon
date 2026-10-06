@@ -45,6 +45,22 @@ class OrreryBrowseTest {
     }
 
     @Test
+    fun `the brief state reads the same as the full one`() {
+        // GET /api/state?brief=1 (orrery 67+): each attribute is its value.
+        val brief = Json.parseToJsonElement(
+            """{"brief":true,"me":"person/me","bodies":[
+            {"id":"activity/fencing-lesson","kind":"activity","name":"Fencing lesson","aliases":["fencing"],"attrs":{
+                "next":"2026-10-05T20:00:00Z","location":"Fencing Club, 1 Main St",
+                "participants":[{"ref":"person/me"},{"ref":"person/kid"}],
+                "pick-up":{"ref":"person/me"},"until":null}}]}""",
+        ).jsonObject
+        val full = items.first { it.id == "activity/fencing-lesson" }
+        val read = orreryItems(brief).single()
+        assertEquals(full, read)
+        assertEquals(listOf("activity/fencing-lesson"), comingUp(listOf(read), now).map { it.item.id })
+    }
+
+    @Test
     fun `coming up is what is ahead or under way, soonest first`() {
         assertEquals(
             listOf("situation/under-way", "activity/fencing-lesson", "situation/visit"),
