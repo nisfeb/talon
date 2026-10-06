@@ -1,6 +1,7 @@
 package io.nisfeb.talon.notify
 
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withTimeoutOrNull
@@ -26,6 +27,19 @@ object TrunkPush {
             put("platform", "unifiedpush")
             put("endpoint", endpoint)
             put("caps", buildJsonArray { caps.forEach { add(JsonPrimitive(it)) } })
+        })
+    }
+
+    /** An iPhone: the ship pushes through the APNs gateway on the relay at
+     *  [gateway], which holds the phone's tokens behind [handle]. */
+    fun registerGateway(id: String, gateway: String, handle: String, secret: String): JsonElement = buildJsonObject {
+        put("push-register", buildJsonObject {
+            put("id", id)
+            put("platform", "ios-gateway")
+            put("gateway", gateway)
+            put("handle", handle)
+            put("secret", secret)
+            put("caps", buildJsonArray {})
         })
     }
 
@@ -76,8 +90,9 @@ class ShipPushPorts(
     val trunkWire: suspend () -> Int,
     /** A trunk-action poke to our own ship. */
     val poke: suspend (JsonElement) -> Unit,
-    /** This device's push endpoint, or null. */
-    val endpoint: suspend () -> String?,
+    /** The push-register poke for this device under [id] (Android's
+     *  endpoint, or an iPhone's gateway handle), or null for no endpoint. */
+    val register: suspend (id: String) -> JsonElement?,
     val awaitNonce: suspend (nonce: String, timeoutMs: Long) -> Boolean = PushTestNonces::await,
     /** Take this device off the public relay; true when it is off. */
     val relayUnregister: suspend (deviceId: String) -> Boolean,
@@ -97,7 +112,6 @@ suspend fun moveToShipPush(
     ship: String,
     settings: RelaySettings,
     ports: ShipPushPorts,
-    caps: List<String>,
     timeoutMs: Long = 60_000,
 ): ShipPushMove = try {
     if (settings.shipPushDeclined(ship)) {
@@ -105,12 +119,13 @@ suspend fun moveToShipPush(
     } else if (ports.trunkWire() < TrunkPush.WIRE) {
         ShipPushMove.NotSupported
     } else {
-        val endpoint = ports.endpoint()
-        if (endpoint == null) {
+        val id = settings.trunkDeviceIdFor(ship).ifBlank { ports.newId() }
+        val register = ports.register(id)
+        if (register == null) {
             ShipPushMove.NoEndpoint
         } else {
-            val id = settings.trunkDeviceIdFor(ship).ifBlank { ports.newId().also { settings.setTrunkDeviceIdFor(ship, it) } }
-            ports.poke(TrunkPush.register(id, endpoint, caps))
+            settings.setTrunkDeviceIdFor(ship, id)
+            ports.poke(register)
             val moved = settings.viaShipPush(ship) || run {
                 val nonce = ports.newId()
                 ports.poke(TrunkPush.test(id, nonce))
@@ -144,5 +159,39 @@ suspend fun leaveShipPush(ship: String, settings: RelaySettings, poke: suspend (
     settings.setShipPushDeclined(ship, true)
     settings.setViaShipPush(ship, false)
     settings.trunkDeviceIdFor(ship).takeIf { it.isNotBlank() }?.let { id -> runCatching { poke(TrunkPush.unregister(id)) } }
+}
+
+/** Try the move each time the ship's connection settles, until one try
+ *  gets an answer (a [ShipPushMove.Failed] could not be tried). */
+suspend fun keepMovingToShipPush(
+    ship: String,
+    settings: RelaySettings,
+    ports: ShipPushPorts,
+    bootstrapping: kotlinx.coroutines.flow.Flow<Boolean>,
+    log: (ShipPushMove) -> Unit = {},
+) {
+    bootstrapping.filter { !it }.first { moveToShipPush(ship, settings, ports).also(log) !is ShipPushMove.Failed }
+}
+
+/**
+ * An iPhone's registration (sneagan: "can iOS switch too and just use my
+ * relay for the apple requirement"): its tokens go to the relay's APNs
+ * gateway, which only signs and sends for Apple, and the ship gets the
+ * handle. The tokens behind a kept handle are replaced in place; a handle
+ * the gateway lost is minted again. Null without an alert token: the
+ * owner has not allowed notifications, so nothing would show.
+ */
+suspend fun gatewayRegistration(
+    ship: String,
+    id: String,
+    settings: RelaySettings,
+    relay: RelayClient,
+    tokens: PushTokenProvider,
+): JsonElement? {
+    val token = tokens.token()?.takeIf { tokens.alertsIn(it) } ?: return null
+    val dev = settings.gatewayFor(ship)?.let { relay.gatewayEnroll(token, it) }
+        ?: checkNotNull(relay.gatewayEnroll(token)) { "the gateway gave no device" }
+    settings.setGatewayFor(ship, dev)
+    return TrunkPush.registerGateway(id, settings.endpoint.value.trimEnd('/'), dev.handle, dev.secret)
 }
 

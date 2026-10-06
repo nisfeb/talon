@@ -65,7 +65,7 @@ class ShipPushE2ETest {
             val ports = ShipPushPorts(
                 trunkWire = { TrunkWire.parseWireVersion(ch.scry(TrunkWire.AGENT, "/version")) },
                 poke = { ch.poke(TrunkWire.AGENT, TrunkPush.MARK, it) },
-                endpoint = { endpoint },
+                register = { id -> TrunkPush.register(id, endpoint, listOf("read")) },
                 awaitNonce = { nonce, timeoutMs ->
                     withTimeoutOrNull(timeoutMs) {
                         while (true) {
@@ -78,7 +78,7 @@ class ShipPushE2ETest {
                 relayUnregister = { id -> unregistered += id; true },
                 newId = { UUID.randomUUID().toString() },
             )
-            val r = moveToShipPush(ship, settings, ports, listOf("read"), timeoutMs = 30_000)
+            val r = moveToShipPush(ship, settings, ports, timeoutMs = 30_000)
             println("SHIP_PUSH_E2E result=$r device=${settings.trunkDeviceIdFor(ship)} endpoint=$endpoint")
             assertEquals(ShipPushMove.ViaShip, r)
             assertEquals(listOf("relay-dev"), unregistered, "off the public relay once the ship's push arrived")

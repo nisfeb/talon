@@ -357,17 +357,15 @@ class TalonApplication : Application() {
         val ports = io.nisfeb.talon.notify.ShipPushPorts(
             trunkWire = { shipRepo.trunkWire() },
             poke = { body -> shipRepo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body) },
-            endpoint = { tokens.token() },
+            register = { id -> tokens.token()?.let { io.nisfeb.talon.notify.TrunkPush.register(id, it, tokens.caps) } },
             relayUnregister = { id ->
                 io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value }).unregister(id)
             },
             newId = { java.util.UUID.randomUUID().toString() },
         )
         shipPushMove = appScope.launch {
-            shipRepo.bootstrapping.filter { !it }.first {
-                val r = io.nisfeb.talon.notify.moveToShipPush(ship, relaySettings, ports, tokens.caps)
-                android.util.Log.i("Talon", "ship push for $ship: $r")
-                r !is io.nisfeb.talon.notify.ShipPushMove.Failed
+            io.nisfeb.talon.notify.keepMovingToShipPush(ship, relaySettings, ports, shipRepo.bootstrapping) {
+                android.util.Log.i("Talon", "ship push for $ship: $it")
             }
         }
     }

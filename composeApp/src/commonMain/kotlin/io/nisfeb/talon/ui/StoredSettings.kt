@@ -30,6 +30,7 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
         val trunkIds: Map<String, String> = emptyMap(),
         val viaShip: Set<String> = emptySet(),
         val shipDeclined: Set<String> = emptySet(),
+        val gateways: Map<String, io.nisfeb.talon.notify.GatewayDevice> = emptyMap(),
     )
 
     private val initial = store.load(Persisted())
@@ -41,6 +42,7 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
     private val trunkIds = initial.trunkIds.toMutableMap()
     private val viaShip = initial.viaShip.toMutableSet()
     private val shipDeclined = initial.shipDeclined.toMutableSet()
+    private val gateways = initial.gateways.toMutableMap()
 
     override fun setEndpoint(url: String) {
         if (_endpoint.value == url) return
@@ -102,9 +104,20 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
         save()
     }
 
+    override fun gatewayFor(patp: String): io.nisfeb.talon.notify.GatewayDevice? = gateways[patp]
+
+    override fun setGatewayFor(patp: String, device: io.nisfeb.talon.notify.GatewayDevice) {
+        if (gateways[patp] == device) return
+        gateways[patp] = device
+        save()
+    }
+
     private fun save() = store.write(
         JSON.encodeToString(
-            Persisted(_endpoint.value, deviceIds.toMap(), registered.toMap(), declined.toSet(), trunkIds.toMap(), viaShip.toSet(), shipDeclined.toSet()),
+            Persisted(
+                _endpoint.value, deviceIds.toMap(), registered.toMap(), declined.toSet(), trunkIds.toMap(), viaShip.toSet(),
+                shipDeclined.toSet(), gateways.toMap(),
+            ),
         ),
     )
 }

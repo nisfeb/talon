@@ -58,6 +58,11 @@ interface RelaySettings {
     fun shipPushDeclined(patp: String): Boolean = false
     fun setShipPushDeclined(patp: String, declined: Boolean) {}
 
+    /** An iPhone's handle on the relay's APNs gateway, for [patp]'s ship
+     *  to push through ([gatewayRegistration]). */
+    fun gatewayFor(patp: String): GatewayDevice? = null
+    fun setGatewayFor(patp: String, device: GatewayDevice) {}
+
     companion object {
         const val DEFAULT_ENDPOINT = "https://relay.nisfeb.com"
     }
@@ -96,4 +101,7 @@ class InMemoryRelaySettings(
     private val shipDeclined = mutableSetOf<String>()
     override fun shipPushDeclined(patp: String): Boolean = patp in shipDeclined
     override fun setShipPushDeclined(patp: String, declined: Boolean) { if (declined) shipDeclined += patp else shipDeclined -= patp }
+    private val gateways = mutableMapOf<String, GatewayDevice>()
+    override fun gatewayFor(patp: String): GatewayDevice? = gateways[patp]
+    override fun setGatewayFor(patp: String, device: GatewayDevice) { gateways[patp] = device }
 }

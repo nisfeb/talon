@@ -745,6 +745,26 @@ fun App(
             } else {
                 null
             }
+        // iOS: notifications from the owner's own ship once its %trunk can
+        // send them (wire 11), with the relay only the Apple hop. Again when
+        // the phone's tokens change, so the gateway has the new ones.
+        if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
+            LaunchedEffect(repo) {
+                val ship = loggedInShip ?: return@LaunchedEffect
+                val ports = io.nisfeb.talon.notify.ShipPushPorts(
+                    trunkWire = { repo.trunkWire() },
+                    poke = { body -> repo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body) },
+                    register = { id -> io.nisfeb.talon.notify.gatewayRegistration(ship, id, relaySettings, relayClient, pushTokenProvider) },
+                    relayUnregister = { id -> relayClient.unregister(id) },
+                    newId = { io.nisfeb.talon.data.newGid() },
+                )
+                kotlinx.coroutines.flow.merge(kotlinx.coroutines.flow.flowOf(Unit), pushTokenProvider.changes).collect {
+                    io.nisfeb.talon.notify.keepMovingToShipPush(ship, relaySettings, ports, repo.bootstrapping) {
+                        io.nisfeb.talon.util.Log.i("ShipPush", "$ship: $it")
+                    }
+                }
+            }
+        }
         // A comet's first login: join Nisfeb Software, put the calling
         // desk on the ship, and open the group's chat once it arrives.
         LaunchedEffect(repo, pendingLanding) {
@@ -2262,6 +2282,11 @@ fun App(
                                 pushTokens = pushTokenProvider,
                                 activePatp = ship,
                                 activeShipUrl = activeShipUrl,
+                                shipPoke = if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
+                                    { body -> repo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body) }
+                                } else {
+                                    null
+                                },
                             ),
                             onBack = {
                                 showSettings = false

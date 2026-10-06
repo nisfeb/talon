@@ -28,7 +28,7 @@ class ShipPushMoveTest {
     ) = ShipPushPorts(
         trunkWire = { wire },
         poke = { body: JsonElement -> if (pokeFails) error("not connected"); pokes += body.toString() },
-        endpoint = { endpoint },
+        register = { id -> endpoint?.let { TrunkPush.register(id, it, listOf("read")) } },
         awaitNonce = { _, _ -> delivered },
         relayUnregister = { id -> unregistered += id; relayLetsGo },
         newId = { "id${++ids}" },
@@ -39,7 +39,7 @@ class ShipPushMoveTest {
     @Test
     fun a_ship_whose_test_push_arrives_takes_over_from_the_relay() = runTest {
         val s = onRelay()
-        assertEquals(ShipPushMove.ViaShip, moveToShipPush("~zod", s, ports(), listOf("read")))
+        assertEquals(ShipPushMove.ViaShip, moveToShipPush("~zod", s, ports()))
         assertEquals(
             listOf(
                 """{"push-register":{"id":"id1","platform":"unifiedpush","endpoint":"https://ntfy.test/up/abc","caps":["read"]}}""",
@@ -56,7 +56,7 @@ class ShipPushMoveTest {
     @Test
     fun a_test_push_that_never_comes_leaves_the_relay_in_place() = runTest {
         val s = onRelay()
-        assertEquals(ShipPushMove.NotVerified, moveToShipPush("~zod", s, ports(delivered = false), listOf("read")))
+        assertEquals(ShipPushMove.NotVerified, moveToShipPush("~zod", s, ports(delivered = false)))
         assertEquals("""{"push-unregister":"id1"}""", pokes.last(), "the ship forgets the device it could not reach")
         assertTrue(unregistered.isEmpty())
         assertEquals("relay-dev", s.deviceIdFor("~zod"))
@@ -66,28 +66,28 @@ class ShipPushMoveTest {
     @Test
     fun an_older_trunk_or_none_is_left_alone() = runTest {
         val s = onRelay()
-        assertEquals(ShipPushMove.NotSupported, moveToShipPush("~zod", s, ports(wire = 10), listOf("read")))
-        assertEquals(ShipPushMove.NotSupported, moveToShipPush("~zod", s, ports(wire = 0), listOf("read")))
+        assertEquals(ShipPushMove.NotSupported, moveToShipPush("~zod", s, ports(wire = 10)))
+        assertEquals(ShipPushMove.NotSupported, moveToShipPush("~zod", s, ports(wire = 0)))
         assertTrue(pokes.isEmpty() && unregistered.isEmpty())
     }
 
     @Test
     fun no_push_endpoint_on_the_phone_asks_nothing_of_the_ship() = runTest {
-        assertEquals(ShipPushMove.NoEndpoint, moveToShipPush("~zod", onRelay(), ports(endpoint = null), listOf("read")))
+        assertEquals(ShipPushMove.NoEndpoint, moveToShipPush("~zod", onRelay(), ports(endpoint = null)))
         assertTrue(pokes.isEmpty())
     }
 
     @Test
     fun a_device_never_on_the_relay_moves_without_a_delete() = runTest {
         val s = InMemoryRelaySettings()
-        assertEquals(ShipPushMove.ViaShip, moveToShipPush("~zod", s, ports(), listOf("read")))
+        assertEquals(ShipPushMove.ViaShip, moveToShipPush("~zod", s, ports()))
         assertTrue(unregistered.isEmpty())
     }
 
     @Test
     fun once_moved_each_start_registers_again_without_another_test() = runTest {
         val s = InMemoryRelaySettings().apply { setTrunkDeviceIdFor("~zod", "kept"); setViaShipPush("~zod", true) }
-        assertEquals(ShipPushMove.ViaShip, moveToShipPush("~zod", s, ports(), listOf("read")))
+        assertEquals(ShipPushMove.ViaShip, moveToShipPush("~zod", s, ports()))
         assertEquals(1, pokes.size)
         assertTrue(pokes.single().startsWith("""{"push-register":{"id":"kept","""), "the same id, not a new device")
     }
@@ -95,9 +95,9 @@ class ShipPushMoveTest {
     @Test
     fun a_relay_that_would_not_let_go_is_asked_again_next_start() = runTest {
         val s = onRelay()
-        assertEquals(ShipPushMove.ViaShip, moveToShipPush("~zod", s, ports(relayLetsGo = false), listOf("read")))
+        assertEquals(ShipPushMove.ViaShip, moveToShipPush("~zod", s, ports(relayLetsGo = false)))
         assertEquals("relay-dev", s.deviceIdFor("~zod"), "kept, to ask again")
-        moveToShipPush("~zod", s, ports(), listOf("read"))
+        moveToShipPush("~zod", s, ports())
         assertEquals(listOf("relay-dev", "relay-dev"), unregistered)
         assertEquals("", s.deviceIdFor("~zod"))
     }
@@ -105,7 +105,7 @@ class ShipPushMoveTest {
     @Test
     fun no_connection_is_not_an_answer() = runTest {
         val s = onRelay()
-        assertTrue(moveToShipPush("~zod", s, ports(pokeFails = true), listOf("read")) is ShipPushMove.Failed)
+        assertTrue(moveToShipPush("~zod", s, ports(pokeFails = true)) is ShipPushMove.Failed)
         assertFalse(s.viaShipPush("~zod"))
         assertEquals("relay-dev", s.deviceIdFor("~zod"))
     }
@@ -125,9 +125,9 @@ class ShipPushMoveTest {
         assertEquals(listOf("""{"push-unregister":"dev-t"}"""), pokes)
         assertFalse(s.viaShipPush("~zod"))
         pokes.clear()
-        assertEquals(ShipPushMove.NotWanted, moveToShipPush("~zod", s, ports(), listOf("read")))
+        assertEquals(ShipPushMove.NotWanted, moveToShipPush("~zod", s, ports()))
         assertTrue(pokes.isEmpty(), "not moved back on the next start")
         s.setShipPushDeclined("~zod", false)
-        assertEquals(ShipPushMove.ViaShip, moveToShipPush("~zod", s, ports(), listOf("read")))
+        assertEquals(ShipPushMove.ViaShip, moveToShipPush("~zod", s, ports()))
     }
 }

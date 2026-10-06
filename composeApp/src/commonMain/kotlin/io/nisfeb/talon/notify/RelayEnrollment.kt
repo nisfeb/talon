@@ -82,4 +82,5 @@ fun shouldOfferNotificationSetup(
     settings: RelaySettings,
     justSignedIn: Boolean,
 ): Boolean =
-    needed && ship != null && settings.deviceIdFor(ship).isBlank() && (justSignedIn || !settings.declinedFor(ship))
+    needed && ship != null && settings.deviceIdFor(ship).isBlank() && !settings.viaShipPush(ship) &&
+        (justSignedIn || !settings.declinedFor(ship))
