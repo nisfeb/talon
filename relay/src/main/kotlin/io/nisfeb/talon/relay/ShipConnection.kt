@@ -427,12 +427,7 @@ class ShipConnection(
             .build()
         http.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) error("HTTP ${resp.code}")
-            val body = Json.parseToJsonElement(resp.body.string()).jsonObject
-            val desk = body["desk"]?.jsonObject ?: body
-            val bucket = desk["notify-prefs"]?.jsonObject ?: return emptyMap()
-            return bucket.entries.mapNotNull { (whom, v) ->
-                (v as? JsonObject)?.get("level")?.jsonPrimitive?.contentOrNull?.let { whom to it }
-            }.toMap()
+            return notifyLevels(Json.parseToJsonElement(resp.body.string()).jsonObject)
         }
     }
 
@@ -548,6 +543,23 @@ internal fun activityWhom(source: JsonObject): String? {
     (source["thread"] as? JsonObject)?.get("channel").text()?.let { return it }
     (source["club"] as? JsonObject)?.get("id").text()?.let { return it }
     return null
+}
+
+/**
+ * Talon's per-chat levels from %settings' talon desk: whom to level.
+ * %settings keeps strings, not objects, so each value is the string
+ * "{\"level\":\"mentions\"}". The relay read it as an object and got
+ * nothing, so no per-chat level ever applied to a push (2026-10-06).
+ * An object is read too.
+ */
+internal fun notifyLevels(settings: JsonObject): Map<String, String> {
+    val desk = settings["desk"] as? JsonObject ?: settings
+    val bucket = desk["notify-prefs"] as? JsonObject ?: return emptyMap()
+    return bucket.entries.mapNotNull { (whom, v) ->
+        val obj = v as? JsonObject
+            ?: (v as? JsonPrimitive)?.contentOrNull?.let { runCatching { Json.parseToJsonElement(it) as? JsonObject }.getOrNull() }
+        (obj?.get("level") as? JsonPrimitive)?.contentOrNull?.let { whom to it }
+    }.toMap()
 }
 
 /** Whether a device whose app declared [caps] is sent read pushes. */

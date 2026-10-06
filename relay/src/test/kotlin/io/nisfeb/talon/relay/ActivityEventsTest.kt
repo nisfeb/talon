@@ -90,4 +90,12 @@ class ActivityEventsTest {
             server.stop(0)
         }
     }
+
+    // As ~ricsul's %settings had them on 2026-10-06: strings of JSON.
+    @Test
+    fun `per-chat levels are read from the strings settings keeps`() {
+        val settings = obj("""{"desk":{"notify-prefs":{"chat/~darduc-mitfen/chat":"{\"level\":\"mentions\"}","~martyr-sanryg":"{\"level\":\"all\"}","~bus":{"level":"mute"},"~bad":"not json"}}}""")
+        assertEquals(mapOf("chat/~darduc-mitfen/chat" to "mentions", "~martyr-sanryg" to "all", "~bus" to "mute"), notifyLevels(settings))
+        assertEquals(emptyMap(), notifyLevels(obj("""{"desk":{}}""")))
+    }
 }
