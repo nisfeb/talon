@@ -34,6 +34,7 @@ class OrreryKeysTest {
     private val asked = CopyOnWriteArrayList<String>()
     @Volatile private var schemaAnswers = true
     @Volatile private var revokeStatus = 200
+    @Volatile private var healthStops = 0
 
     private val schema = """{"kinds":{"person":{"attrs":["name"]},"garden":{"attrs":["plot"]}},"actions":["task","message"]}"""
 
@@ -55,7 +56,8 @@ class OrreryKeysTest {
                 else -> respond("[]", headers = json)
             }
         })
-        val repo = OrreryRepo(http, scope, db, "test", bareClient = http).apply { attach("https://ship.test", "~zod") }
+        val repo = OrreryRepo(http, scope, db, "test", bareClient = http, stopHealth = { healthStops++ })
+            .apply { attach("https://ship.test", "~zod") }
         try {
             block(repo, db)
         } finally {
@@ -90,6 +92,7 @@ class OrreryKeysTest {
         assertTrue(asked.any { it.startsWith("DELETE") && it.contains("/api/clients/c1") }, asked.toString())
         assertNull(db.orreryAccounts().get("~zod"))
         assertTrue(!repo.enabled.value)
+        assertEquals(1, healthStops, "health sending goes off with the pipe")
     }
 
     @Test
@@ -107,5 +110,15 @@ class OrreryKeysTest {
         assertTrue(repo.disable().isFailure)
         assertNotNull(db.orreryAccounts().get("~zod"), "a key still good on the ship stays held")
         assertTrue(repo.enabled.value)
+        assertEquals(0, healthStops, "the pipe stays on, and health with it")
+    }
+
+    // Orrery turned off on another device, or the gate closed: forgotten
+    // here without the switch, and health goes with it.
+    @Test
+    fun `forgetting the pipe stops health sending`() = keys { repo, _ ->
+        repo.enable().getOrThrow()
+        assertTrue(repo.forget("https://ship.test", "~zod").isSuccess)
+        assertEquals(1, healthStops)
     }
 }

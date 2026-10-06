@@ -444,6 +444,7 @@ fun TalonApp(
             standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),
             decide = io.nisfeb.talon.orrery.DecideControl(app.uiSettings.orreryDecide, app.uiSettings::setOrreryDecide),
             location = io.nisfeb.talon.ui.AndroidLocationControl,
+            stopHealth = { io.nisfeb.talon.orrery.HealthWatch.set(app, false) },
         )
     }
     DisposableEffect(orreryRepo) {
