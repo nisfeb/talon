@@ -53,6 +53,11 @@ interface RelaySettings {
     fun viaShipPush(patp: String): Boolean = false
     fun setViaShipPush(patp: String, via: Boolean) {}
 
+    /** The owner chose the public relay over the ship's own pushes for
+     *  [patp] on this device: Talon does not move it to the ship again. */
+    fun shipPushDeclined(patp: String): Boolean = false
+    fun setShipPushDeclined(patp: String, declined: Boolean) {}
+
     companion object {
         const val DEFAULT_ENDPOINT = "https://relay.nisfeb.com"
     }
@@ -88,4 +93,7 @@ class InMemoryRelaySettings(
     private val viaShip = mutableSetOf<String>()
     override fun viaShipPush(patp: String): Boolean = patp in viaShip
     override fun setViaShipPush(patp: String, via: Boolean) { if (via) viaShip += patp else viaShip -= patp }
+    private val shipDeclined = mutableSetOf<String>()
+    override fun shipPushDeclined(patp: String): Boolean = patp in shipDeclined
+    override fun setShipPushDeclined(patp: String, declined: Boolean) { if (declined) shipDeclined += patp else shipDeclined -= patp }
 }

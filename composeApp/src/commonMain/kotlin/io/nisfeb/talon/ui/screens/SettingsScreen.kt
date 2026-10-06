@@ -1660,6 +1660,9 @@ data class RelayPanelConfig(
     val pushTokens: io.nisfeb.talon.notify.PushTokenProvider,
     val activePatp: String?,
     val activeShipUrl: String?,
+    /** A trunk-action poke to the signed-in ship, where this device can take
+     *  pushes from it (Android); null hides the choice between ship and relay. */
+    val shipPoke: (suspend (kotlinx.serialization.json.JsonElement) -> Unit)? = null,
 )
 
 @Composable
@@ -1683,12 +1686,7 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
         "Push relay",
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
     )
-    if (config.activePatp?.let { config.settings.viaShipPush(it) } == true) {
-        Text(
-            "Notifications on this device come from your own ship (its %trunk), not this relay.",
-            style = MaterialTheme.typography.bodySmall,
-        )
-    }
+    ShipPushChoice(config)
     Text(
         if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
             "With the app closed, this iPhone hears from your ship only " +
@@ -2452,6 +2450,54 @@ private fun PhoneNotificationsRow(config: RelayPanelConfig) {
             enroll = { c -> io.nisfeb.talon.notify.enrollDevice(config.client, config.settings, config.pushTokens, ship, shipUrl, c) },
             onDone = { asking = false; deviceId = config.settings.deviceIdFor(ship) },
             onNotNow = { asking = false },
+        )
+    }
+}
+
+/**
+ * Where this device's pushes come from, and the owner's way to change it
+ * (sneagan: manual only). Moved to the ship, it can go back to the relay;
+ * back on the relay by choice, it can go to the ship again, which Talon
+ * does the next time it connects.
+ */
+@Composable
+private fun ShipPushChoice(config: RelayPanelConfig) {
+    val ship = config.activePatp ?: return
+    val poke = config.shipPoke ?: return
+    val scope = rememberCoroutineScope()
+    var via by remember(ship) { mutableStateOf(config.settings.viaShipPush(ship)) }
+    var declined by remember(ship) { mutableStateOf(config.settings.shipPushDeclined(ship)) }
+    var backToShip by remember(ship) { mutableStateOf(false) }
+    when {
+        via -> Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Notifications on this device come from your own ship (its %trunk), not this relay.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = {
+                scope.launch {
+                    io.nisfeb.talon.notify.leaveShipPush(ship, config.settings, poke)
+                    via = false
+                    declined = true
+                }
+            }) { Text("Use the relay") }
+        }
+        declined -> Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "You chose this relay over your ship's own notifications. Register below to get them from the relay.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = {
+                config.settings.setShipPushDeclined(ship, false)
+                declined = false
+                backToShip = true
+            }) { Text("Use my ship") }
+        }
+        backToShip -> Text(
+            "Talon moves this device to your ship the next time it starts, once a test notification from the ship arrives.",
+            style = MaterialTheme.typography.bodySmall,
         )
     }
 }

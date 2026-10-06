@@ -60,6 +60,8 @@ sealed interface ShipPushMove {
     data object ViaShip : ShipPushMove
     /** The ship's %trunk is older than [TrunkPush.WIRE], or absent. */
     data object NotSupported : ShipPushMove
+    /** The owner chose the public relay ([leaveShipPush]); not asked again. */
+    data object NotWanted : ShipPushMove
     /** No push endpoint on this device to give the ship. */
     data object NoEndpoint : ShipPushMove
     /** The test push never came: the public relay stays. */
@@ -98,7 +100,9 @@ suspend fun moveToShipPush(
     caps: List<String>,
     timeoutMs: Long = 60_000,
 ): ShipPushMove = try {
-    if (ports.trunkWire() < TrunkPush.WIRE) {
+    if (settings.shipPushDeclined(ship)) {
+        ShipPushMove.NotWanted
+    } else if (ports.trunkWire() < TrunkPush.WIRE) {
         ShipPushMove.NotSupported
     } else {
         val endpoint = ports.endpoint()
@@ -128,3 +132,17 @@ suspend fun moveToShipPush(
 } catch (e: Exception) {
     ShipPushMove.Failed(e.message ?: e.toString())
 }
+
+/**
+ * Back to the public relay, by the owner's choice in Settings (sneagan:
+ * manual only, nothing automatic): the ship forgets this device, and
+ * Talon stops moving it to the ship. Registering with the relay again
+ * takes the +code, as it always has. The ship's answer is not waited
+ * on; the device is the owner's to leave.
+ */
+suspend fun leaveShipPush(ship: String, settings: RelaySettings, poke: suspend (JsonElement) -> Unit) {
+    settings.setShipPushDeclined(ship, true)
+    settings.setViaShipPush(ship, false)
+    settings.trunkDeviceIdFor(ship).takeIf { it.isNotBlank() }?.let { id -> runCatching { poke(TrunkPush.unregister(id)) } }
+}
+

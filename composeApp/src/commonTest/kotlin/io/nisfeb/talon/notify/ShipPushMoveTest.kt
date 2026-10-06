@@ -116,4 +116,18 @@ class ShipPushMoveTest {
         assertTrue(PushTestNonces.await("early-nonce", 1_000))
         assertFalse(PushTestNonces.await("never-sent", 50))
     }
+
+    // sneagan: "just make it manual only".
+    @Test
+    fun going_back_to_the_relay_is_the_owners_choice_and_holds() = runTest {
+        val s = InMemoryRelaySettings().apply { setTrunkDeviceIdFor("~zod", "dev-t"); setViaShipPush("~zod", true) }
+        leaveShipPush("~zod", s) { pokes += it.toString() }
+        assertEquals(listOf("""{"push-unregister":"dev-t"}"""), pokes)
+        assertFalse(s.viaShipPush("~zod"))
+        pokes.clear()
+        assertEquals(ShipPushMove.NotWanted, moveToShipPush("~zod", s, ports(), listOf("read")))
+        assertTrue(pokes.isEmpty(), "not moved back on the next start")
+        s.setShipPushDeclined("~zod", false)
+        assertEquals(ShipPushMove.ViaShip, moveToShipPush("~zod", s, ports(), listOf("read")))
+    }
 }

@@ -29,6 +29,7 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
         val declined: Set<String> = emptySet(),
         val trunkIds: Map<String, String> = emptyMap(),
         val viaShip: Set<String> = emptySet(),
+        val shipDeclined: Set<String> = emptySet(),
     )
 
     private val initial = store.load(Persisted())
@@ -39,6 +40,7 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
     private val declined = initial.declined.toMutableSet()
     private val trunkIds = initial.trunkIds.toMutableMap()
     private val viaShip = initial.viaShip.toMutableSet()
+    private val shipDeclined = initial.shipDeclined.toMutableSet()
 
     override fun setEndpoint(url: String) {
         if (_endpoint.value == url) return
@@ -92,8 +94,18 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
         save()
     }
 
+    override fun shipPushDeclined(patp: String): Boolean = patp in shipDeclined
+
+    override fun setShipPushDeclined(patp: String, declined: Boolean) {
+        if ((patp in shipDeclined) == declined) return
+        if (declined) shipDeclined += patp else shipDeclined -= patp
+        save()
+    }
+
     private fun save() = store.write(
-        JSON.encodeToString(Persisted(_endpoint.value, deviceIds.toMap(), registered.toMap(), declined.toSet(), trunkIds.toMap(), viaShip.toSet())),
+        JSON.encodeToString(
+            Persisted(_endpoint.value, deviceIds.toMap(), registered.toMap(), declined.toSet(), trunkIds.toMap(), viaShip.toSet(), shipDeclined.toSet()),
+        ),
     )
 }
 

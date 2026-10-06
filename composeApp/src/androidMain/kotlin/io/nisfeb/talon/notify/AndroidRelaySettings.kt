@@ -49,10 +49,17 @@ class AndroidRelaySettings(context: Context) : RelaySettings {
         prefs.edit().putBoolean(KEY_VIA_SHIP_PREFIX + patp, via).apply()
     }
 
+    override fun shipPushDeclined(patp: String): Boolean = prefs.getBoolean(KEY_SHIP_DECLINED_PREFIX + patp, false)
+
+    override fun setShipPushDeclined(patp: String, declined: Boolean) {
+        prefs.edit().putBoolean(KEY_SHIP_DECLINED_PREFIX + patp, declined).apply()
+    }
+
     private companion object {
         private const val KEY_ENDPOINT = "endpoint"
         private const val KEY_TRUNK_ID_PREFIX = "trunk_device_id::"
         private const val KEY_VIA_SHIP_PREFIX = "via_ship::"
+        private const val KEY_SHIP_DECLINED_PREFIX = "ship_push_declined::"
         private const val KEY_DEVICE_ID_PREFIX = "device_id::"
     }
 }
