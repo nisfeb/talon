@@ -93,8 +93,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -336,10 +338,14 @@ fun DmChatScreen(
     // null precisely when the conversation is caught up.
     var dividerAnchorId by remember(whom) { mutableStateOf<String?>(null) }
     var dividerResolved by remember(whom) { mutableStateOf(false) }
-    // Fade trigger. The divider element stays in the list once placed;
-    // flipping this true fades it to transparent (height preserved, no
-    // reflow). Never nulled back here — re-entry re-seeds the anchor.
-    var dividerFaded by remember(whom) { mutableStateOf(false) }
+    // Where the list stood (first visible item's key and offset) right
+    // after it put the divider at the top; null once the reader has moved
+    // it. A key, not an index: newer rows landing below shift the index.
+    var dividerPlaced by remember(whom) { mutableStateOf<Pair<Any, Int>?>(null) }
+    // The list's top edge in the window: it moves down when something
+    // above the list (the pinned post, the catch-me-up banner, the
+    // followed-threads chip) arrives after the divider was placed.
+    var listTop by remember(whom) { mutableStateOf<Float?>(null) }
 
     val displayRows = remember(rows, dividerAnchorId) {
         val anchor = dividerAnchorId
@@ -418,6 +424,46 @@ fun DmChatScreen(
             pendingJump = null
         }
     }
+    /**
+     * Land with the divider at the top of the viewport and the new
+     * messages reading down from it. Under reverseLayout scrollToItem
+     * puts the item at the bottom edge, so back off by the rest of the
+     * viewport (toward index 0, the newest). False with no divider.
+     */
+    fun listAt(): Pair<Any, Int>? = listState.layoutInfo.visibleItemsInfo.firstOrNull()
+        ?.let { it.key to listState.firstVisibleItemScrollOffset }
+    suspend fun placeDivider(rows: List<ChatListItem>): Boolean {
+        val dividerIdx = rows.indexOfFirst { it is ChatListItem.UnreadDivider }
+        if (dividerIdx < 0) return false
+        // At a frame boundary: the second scroll remeasures the list, and
+        // mid-frame that re-composes items whose last composition is unapplied.
+        withFrameNanos { }
+        listState.scrollToItem(rows.lastIndex - dividerIdx)
+        val info = listState.layoutInfo
+        val viewport = info.viewportEndOffset - info.viewportStartOffset
+        val dividerSize = info.visibleItemsInfo
+            .firstOrNull { it.key == ChatListItem.UnreadDivider.key }?.size ?: 0
+        listState.scrollBy(-(viewport - dividerSize).toFloat())
+        dividerPlaced = listAt()
+        return true
+    }
+    // Something above the list arrived after the divider was placed:
+    // the list lost that height from its top, and with the newest
+    // message holding the bottom the divider went up behind it. Place
+    // it again, unless the reader has moved the list since. Only the
+    // top edge counts, so a keyboard opening (which takes the bottom)
+    // never pulls the reader back.
+    val currentRows by rememberUpdatedState(displayRows)
+    LaunchedEffect(whom) {
+        snapshotFlow { listTop }.filterNotNull().distinctUntilChanged().collect {
+            val placed = dividerPlaced ?: return@collect
+            if (listAt() != placed) {
+                dividerPlaced = null
+                return@collect
+            }
+            placeDivider(currentRows)
+        }
+    }
     LaunchedEffect(displayRows.size, initialScrollMessageId, dividerResolved) {
         if (displayRows.isEmpty()) return@LaunchedEffect
         if (initialScrollMessageId != null && initialScrollMessageId != lastAppliedAnchor) {
@@ -439,22 +485,7 @@ fun DmChatScreen(
             // at the bottom in the meantime, which is also where a
             // caught-up chat belongs.
             if (!dividerResolved) return@LaunchedEffect
-            val dividerIdx = displayRows.indexOfFirst { it is ChatListItem.UnreadDivider }
-            if (dividerIdx >= 0) {
-                // Land with the divider at the top of the viewport and
-                // the new messages reading down from it. Under
-                // reverseLayout scrollToItem puts the item at the bottom
-                // edge, so back off by the rest of the viewport (toward
-                // index 0, the newest).
-                listState.scrollToItem(displayRows.lastIndex - dividerIdx)
-                val info = listState.layoutInfo
-                val viewport = info.viewportEndOffset - info.viewportStartOffset
-                val dividerSize = info.visibleItemsInfo
-                    .firstOrNull { it.key == ChatListItem.UnreadDivider.key }?.size ?: 0
-                listState.scrollBy(-(viewport - dividerSize).toFloat())
-            } else {
-                listState.scrollToItem(0)
-            }
+            if (!placeDivider(displayRows)) listState.scrollToItem(0)
         }
         hasAnchored = true
     }
@@ -518,6 +549,11 @@ fun DmChatScreen(
             firstVisibleItemIndex = listState.firstVisibleItemIndex,
             pendingSendBaselineSize = pendingSendBaselineSize,
             pendingSelfSendNewestId = pendingSelfSendNewestId,
+            // Until entry has placed the reader, the first load of rows is
+            // not an arrival. It counted as "a new message, near the
+            // bottom", and its scroll cancelled the divider's placement
+            // mid-scroll: the reader landed at the bottom, past it.
+            holdInbound = !hasAnchored,
         )
         lastNewestId = newestIdNow
         lastSize = rows.size
@@ -548,30 +584,9 @@ fun DmChatScreen(
         repo.setOpenChat(whom)
     }
 
-    // Dwell-fade: once the "New" divider has been continuously visible
-    // for 5s (the user scrolled to it and lingered — not a fixed timer
-    // from entry, which would fire before they reach it), fade it out.
-    // We flip [dividerFaded] rather than removing the element, so it
-    // fades in place over UNREAD_DIVIDER_FADE_MS with its height
-    // preserved — nothing below reflows and no tap target slides under
-    // the pointer. markRead already cleared the server + local boundary
-    // on entry, so it won't reappear on re-entry until a genuinely
-    // newer message arrives and %activity hands us a new firstUnreadId.
-    LaunchedEffect(dividerAnchorId, whom) {
-        if (dividerAnchorId == null || dividerFaded) return@LaunchedEffect
-        snapshotFlow {
-            listState.layoutInfo.visibleItemsInfo.any {
-                it.key == ChatListItem.UnreadDivider.key
-            }
-        }.collectLatest { visible ->
-            if (visible) {
-                delay(5_000)
-                // Reached only if still visible after 5s — collectLatest
-                // cancels this branch the moment visibility flips off.
-                dividerFaded = true
-            }
-        }
-    }
+    // The "New" divider stays for as long as the conversation is open.
+    // markRead cleared the server and local boundary on entry, so it is
+    // not there on the next entry unless something newer arrived.
 
     var refreshing by remember(whom) { mutableStateOf(false) }
     var refreshFailed by remember(whom) { mutableStateOf(false) }
@@ -950,7 +965,10 @@ fun DmChatScreen(
                 },
             )
         }
-        Box(modifier = Modifier.weight(1f).fillMaxSize()) {
+        Box(
+            modifier = Modifier.weight(1f).fillMaxSize()
+                .onGloballyPositioned { listTop = it.positionInRoot().y },
+        ) {
         // Empty-state placeholder. Triggers when the refresh has
         // finished and we still have no rows — usually a
         // never-DMed peer where the ship has no writ history. We
@@ -1141,7 +1159,7 @@ fun DmChatScreen(
                 when (item) {
                     is ChatListItem.DateDivider -> DateDividerRow(item.label)
                     is ChatListItem.UnreadDivider ->
-                        io.nisfeb.talon.ui.UnreadDividerRow(faded = dividerFaded)
+                        io.nisfeb.talon.ui.UnreadDividerRow()
                     is ChatListItem.Message -> {
                         val rowMsg = item.row.m
                         MessageRow(
