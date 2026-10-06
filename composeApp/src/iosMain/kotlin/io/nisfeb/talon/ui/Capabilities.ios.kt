@@ -74,3 +74,5 @@ actual val isArmillaryPurchaseSupported: Boolean
     get() = outsideCheckoutAllowedOnAppStore(SKPaymentQueue.defaultQueue().storefront?.countryCode)
 
 actual val isRelayNotificationSetupNeeded: Boolean = true
+
+actual val isAppIconBadgeSupported: Boolean = true

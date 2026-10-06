@@ -30,6 +30,25 @@ class StoredSettingsTest {
     }
 
     @Test
+    fun `ship pushes, the gateway handle and badges outlive a relaunch`() {
+        val store = Store()
+        assertEquals(false, StoredRelaySettings(store).badges.value)
+        StoredRelaySettings(store).apply {
+            setBadges(true)
+            setViaShipPush("~zod", true)
+            setTrunkDeviceIdFor("~zod", "t-1")
+            setGatewayFor("~zod", io.nisfeb.talon.notify.GatewayDevice("h1", "s1"))
+            setShipPushDeclined("~bus", true)
+        }
+        val again = StoredRelaySettings(store)
+        assertEquals(true, again.badges.value)
+        assertEquals(true, again.viaShipPush("~zod"))
+        assertEquals("t-1", again.trunkDeviceIdFor("~zod"))
+        assertEquals(io.nisfeb.talon.notify.GatewayDevice("h1", "s1"), again.gatewayFor("~zod"))
+        assertEquals(true, again.shipPushDeclined("~bus"))
+    }
+
+    @Test
     fun `seen dots stay seen, and a store that cannot be read starts fresh`() {
         val store = Store()
         StoredMenuSeenStore(store).apply { markStatusesSeenAt(42L); markInvitesSeen("abc") }

@@ -93,3 +93,5 @@ actual val isHealthSharingSupported: Boolean = false
 actual val isArmillaryPurchaseSupported: Boolean = true
 
 actual val isRelayNotificationSetupNeeded: Boolean = false
+
+actual val isAppIconBadgeSupported: Boolean = false

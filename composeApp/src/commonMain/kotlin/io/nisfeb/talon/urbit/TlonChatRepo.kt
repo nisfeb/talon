@@ -972,6 +972,18 @@ class TlonChatRepo(
      * line — bad payloads can crash a receiving agent, but they
      * can't corrupt our local state.
      */
+    /**
+     * The ship's %trunk wire, 0 where %trunk is not installed or will not
+     * say. Throws when not connected, so a caller can tell "not now" from
+     * "no trunk".
+     */
+    suspend fun trunkWire(): Int {
+        val ch = channel ?: error("not connected")
+        return runCatching {
+            io.nisfeb.talon.call.TrunkWire.parseWireVersion(ch.scry(io.nisfeb.talon.call.TrunkWire.AGENT, "/version"))
+        }.getOrDefault(0)
+    }
+
     suspend fun pokeRaw(
         app: String,
         mark: String,

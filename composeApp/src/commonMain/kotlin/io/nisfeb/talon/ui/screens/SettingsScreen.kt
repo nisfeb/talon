@@ -717,6 +717,10 @@ fun SettingsScreen(
                 PhoneNotificationsRow(relayConfig)
                 Spacer(Modifier.height(8.dp))
             }
+            if (relayConfig != null && io.nisfeb.talon.ui.isAppIconBadgeSupported) {
+                AppIconBadgeRow(relayConfig.settings)
+                Spacer(Modifier.height(8.dp))
+            }
             if (notificationHealth != null) {
                 NotificationHealthPanel(
                     health = notificationHealth,
@@ -1660,6 +1664,9 @@ data class RelayPanelConfig(
     val pushTokens: io.nisfeb.talon.notify.PushTokenProvider,
     val activePatp: String?,
     val activeShipUrl: String?,
+    /** A trunk-action poke to the signed-in ship, where this device can take
+     *  pushes from it (Android); null hides the choice between ship and relay. */
+    val shipPoke: (suspend (kotlinx.serialization.json.JsonElement) -> Unit)? = null,
 )
 
 @Composable
@@ -1683,6 +1690,7 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
         "Push relay",
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
     )
+    ShipPushChoice(config)
     Text(
         if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
             "With the app closed, this iPhone hears from your ship only " +
@@ -2426,26 +2434,97 @@ private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
 private fun PhoneNotificationsRow(config: RelayPanelConfig) {
     val ship = config.activePatp ?: return
     val shipUrl = config.activeShipUrl ?: return
-    var deviceId by remember(ship) { mutableStateOf(config.settings.deviceIdFor(ship)) }
+    var from by remember(ship) { mutableStateOf(io.nisfeb.talon.notify.phoneNotifications(config.settings, ship)) }
     var asking by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("Notifications on this iPhone", style = MaterialTheme.typography.bodyMedium)
             Text(
-                if (deviceId.isNotBlank()) "On: the relay tells this iPhone when something arrives."
-                else "Off: with the app closed, this iPhone hears nothing from your ship.",
+                when (from) {
+                    io.nisfeb.talon.notify.PhoneNotifications.Ship -> "On: your ship tells this iPhone when something arrives."
+                    io.nisfeb.talon.notify.PhoneNotifications.Relay -> "On: the relay tells this iPhone when something arrives."
+                    io.nisfeb.talon.notify.PhoneNotifications.Off -> "Off: with the app closed, this iPhone hears nothing from your ship."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        TextButton(onClick = { asking = true }) { Text(if (deviceId.isBlank()) "Turn on" else "Set up again") }
+        if (from != io.nisfeb.talon.notify.PhoneNotifications.Ship) {
+            TextButton(onClick = { asking = true }) { Text(if (from == io.nisfeb.talon.notify.PhoneNotifications.Off) "Turn on" else "Set up again") }
+        }
     }
     if (asking) {
         io.nisfeb.talon.ui.NotificationSetupDialog(
             code = null,
             enroll = { c -> io.nisfeb.talon.notify.enrollDevice(config.client, config.settings, config.pushTokens, ship, shipUrl, c) },
-            onDone = { asking = false; deviceId = config.settings.deviceIdFor(ship) },
+            onDone = { asking = false; from = io.nisfeb.talon.notify.phoneNotifications(config.settings, ship) },
             onNotNow = { asking = false },
+        )
+    }
+}
+
+/** The unread count on the app icon (iOS), off until the owner turns it on. */
+@Composable
+internal fun AppIconBadgeRow(settings: io.nisfeb.talon.notify.RelaySettings) {
+    val on by settings.badges.collectAsState()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Unread count on the app icon", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Messages that notified you: direct messages, mentions and replies. " +
+                    "If no number shows, turn on Badges for Talon in the iPhone's Settings, Notifications.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = on, onCheckedChange = { settings.setBadges(it) })
+    }
+}
+
+/**
+ * Where this device's pushes come from, and the owner's way to change it
+ * (sneagan: manual only). Moved to the ship, it can go back to the relay;
+ * back on the relay by choice, it can go to the ship again, which Talon
+ * does the next time it connects.
+ */
+@Composable
+private fun ShipPushChoice(config: RelayPanelConfig) {
+    val ship = config.activePatp ?: return
+    val poke = config.shipPoke ?: return
+    val scope = rememberCoroutineScope()
+    var via by remember(ship) { mutableStateOf(config.settings.viaShipPush(ship)) }
+    var declined by remember(ship) { mutableStateOf(config.settings.shipPushDeclined(ship)) }
+    var backToShip by remember(ship) { mutableStateOf(false) }
+    when {
+        via -> Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Notifications on this device come from your own ship (its %trunk), not this relay.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = {
+                scope.launch {
+                    io.nisfeb.talon.notify.leaveShipPush(ship, config.settings, poke)
+                    via = false
+                    declined = true
+                }
+            }) { Text("Use the relay") }
+        }
+        declined -> Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "You chose this relay over your ship's own notifications. Register below to get them from the relay.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = {
+                config.settings.setShipPushDeclined(ship, false)
+                declined = false
+                backToShip = true
+            }) { Text("Use my ship") }
+        }
+        backToShip -> Text(
+            "Talon moves this device to your ship the next time it starts, once a test notification from the ship arrives.",
+            style = MaterialTheme.typography.bodySmall,
         )
     }
 }

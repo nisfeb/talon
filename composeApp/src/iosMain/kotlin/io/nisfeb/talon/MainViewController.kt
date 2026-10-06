@@ -155,6 +155,7 @@ fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.Na
             // gets an APNs VoIP ring. The token itself arrives from
             // CallPush.swift via IosVoipBridge.
             pushTokenProvider = pushTokenProvider,
+            appIconBadge = io.nisfeb.talon.notify.IosAppIconBadge,
             appForeground = IosAppLifecycle.foreground,
             notifier = notifier,
             // Without one the viewer hid its download: nothing could save.

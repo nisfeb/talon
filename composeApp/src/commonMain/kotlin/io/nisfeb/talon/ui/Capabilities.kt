@@ -35,6 +35,7 @@ package io.nisfeb.talon.ui
  *  - isLocationSharingSupported — A (LocationManager wakes a receiver on a significant move). D: a computer does not move with you. i: port pending (CLLocationManager significant-change monitoring, Always authorization, Info.plist strings).
  *  - isHealthSharingSupported — A (Health Connect: steps, exercise, sleep). D: a computer holds no health data. i: port pending (HealthKit statistics and sample queries, the HealthKit entitlement, Info.plist strings).
  *  - isRelayNotificationSetupNeeded — i: the app is suspended in the background, so the relay's push is its only notification. A: a foreground service keeps the ship's stream. D: notifies while it runs.
+ *  - isAppIconBadgeSupported — i: the unread count on the app icon, a switch in Settings (off until turned on). A: launchers draw their own dot from the notifications. D: no icon to badge.
  *  - isArmillaryPurchaseSupported — A, D; i on the US App Store storefront only. Apple allows a button to an outside checkout there and nowhere else (guideline 3.1.1(a)), so elsewhere buying, its pitch and every "top up" go. The card, the balance and the history do not depend on it.
  *
  * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
@@ -380,4 +381,7 @@ fun outsideCheckoutAllowedOnAppStore(storefrontCountry: String?): Boolean = stor
  * technical Settings panel, and they got no notifications at all.
  */
 expect val isRelayNotificationSetupNeeded: Boolean
+
+/** The unread count on the app icon, by the owner's choice (iOS). */
+expect val isAppIconBadgeSupported: Boolean
 

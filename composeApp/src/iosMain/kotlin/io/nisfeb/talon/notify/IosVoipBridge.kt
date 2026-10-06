@@ -68,6 +68,10 @@ object IosVoipBridge {
      *  the user is already reading. */
     fun shouldPresentAlert(whom: String): Boolean = NotificationFocus.openWhom != whom
 
+    /** The ship's test push arrived (CallPush.swift): its notifications
+     *  reach this phone, so the move to them can finish. */
+    fun pushTestReceived(nonce: String) = PushTestNonces.received(nonce)
+
     /** A tapped alert: open its chat, on the ship it was for. */
     fun openChat(whom: String, postId: String?, forShip: String?) =
         OpenChatRequests.request(whom, postId, forShip)

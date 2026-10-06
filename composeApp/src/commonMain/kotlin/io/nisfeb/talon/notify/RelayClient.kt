@@ -135,6 +135,55 @@ class RelayClient(
     private data class EndpointRequest(val pushEndpoint: String)
 
     /**
+     * Give an iPhone's tokens ("<voip>|<alert>") to the relay's APNs
+     * gateway, which its own ship pushes through. With [kept], the tokens
+     * behind that handle are replaced; null back means the gateway no
+     * longer knows it (mint again). Throws on any other refusal or no
+     * answer, so the move tries again later.
+     */
+    suspend fun gatewayEnroll(token: String, kept: GatewayDevice? = null): GatewayDevice? = withContext(ioDispatcher) {
+        val resp = http.post("${endpoint().trimEnd('/')}/gateway/devices") {
+            contentType(ContentType.Application.Json)
+            setBody(JSON.encodeToString(GatewayEnrollRequest(token, kept?.handle, kept?.secret)))
+        }
+        when {
+            resp.status.isSuccess() -> JSON.decodeFromString<GatewayDevice>(resp.bodyAsText())
+            kept != null && resp.status.value in setOf(401, 404) -> null
+            else -> error("the relay's gateway answered ${resp.status.value}")
+        }
+    }
+
+    /** The app-icon count for a relay iPhone, null for badges off
+     *  ([reportBadge]). False on any failure. */
+    suspend fun setBadge(deviceId: String, count: Int?): Boolean = withContext(ioDispatcher) {
+        runCatching {
+            http.post("${endpoint().trimEnd('/')}/devices/$deviceId/badge") {
+                contentType(ContentType.Application.Json)
+                setBody(JSON.encodeToString(BadgeRequest(count)))
+            }.status.isSuccess()
+        }.getOrDefault(false)
+    }
+
+    /** The same for an iPhone its ship pushes to, by its gateway handle. */
+    suspend fun gatewayBadge(device: GatewayDevice, count: Int?): Boolean = withContext(ioDispatcher) {
+        runCatching {
+            http.post("${endpoint().trimEnd('/')}/gateway/badge") {
+                contentType(ContentType.Application.Json)
+                setBody(JSON.encodeToString(GatewayBadgeRequest(device.handle, device.secret, count)))
+            }.status.isSuccess()
+        }.getOrDefault(false)
+    }
+
+    @Serializable
+    private data class BadgeRequest(val count: Int?)
+
+    @Serializable
+    private data class GatewayBadgeRequest(val handle: String, val secret: String, val count: Int?)
+
+    @Serializable
+    private data class GatewayEnrollRequest(val token: String, val handle: String? = null, val secret: String? = null)
+
+    /**
      * Tell the relay to forget this device entirely. Idempotent —
      * a 404 is fine because "already gone" is the goal.
      */
@@ -163,3 +212,9 @@ class RelayClient(
         private val JSON = Json { ignoreUnknownKeys = true }
     }
 }
+
+/** An iPhone's handle on the relay's APNs gateway, and the secret its
+ *  ship pushes with. */
+@Serializable
+data class GatewayDevice(val handle: String, val secret: String)
+

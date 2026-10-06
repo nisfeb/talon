@@ -126,6 +126,10 @@ class Push(
          *  them. */
         author: String? = null,
         preview: String? = null,
+        /** A reply's parent post: the Android receiver opens the thread with it. */
+        parent: String? = null,
+        /** An iPhone's app-icon count ([Db.nextBadge]); null for none. */
+        badge: Int? = null,
     ) {
         // Every iOS drop is said: they were silent, and a week of the
         // relay's log held no alert sent to an iPhone and no sign why.
@@ -152,6 +156,8 @@ class Push(
                 patp = patp,
                 whom = whom,
                 postId = postId,
+                parent = parent,
+                badge = badge,
             )
             return
         }
@@ -171,6 +177,10 @@ class Push(
             append(escape(whom))
             append("""","id":"""")
             append(escape(postId))
+            if (parent != null) {
+                append("""","parent":"""")
+                append(escape(parent))
+            }
             append("\"}")
         }
         post(endpoint, body)
@@ -231,9 +241,7 @@ class Push(
     internal fun readBody(patp: String, whom: String): String =
         """{"event":"read","patp":"${escape(patp)}","whom":"${escape(whom)}"}"""
 
-    private fun escape(s: String): String = s
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
+    private fun escape(s: String): String = jsonEscape(s)
 
     companion object {
         private val JSON_MEDIA = "application/json".toMediaType()

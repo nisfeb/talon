@@ -27,6 +27,11 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
         val deviceIds: Map<String, String> = emptyMap(),
         val registered: Map<String, String> = emptyMap(),
         val declined: Set<String> = emptySet(),
+        val trunkIds: Map<String, String> = emptyMap(),
+        val viaShip: Set<String> = emptySet(),
+        val shipDeclined: Set<String> = emptySet(),
+        val gateways: Map<String, io.nisfeb.talon.notify.GatewayDevice> = emptyMap(),
+        val badges: Boolean = false,
     )
 
     private val initial = store.load(Persisted())
@@ -35,6 +40,18 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
     private val deviceIds = initial.deviceIds.toMutableMap()
     private val registered = initial.registered.toMutableMap()
     private val declined = initial.declined.toMutableSet()
+    private val trunkIds = initial.trunkIds.toMutableMap()
+    private val viaShip = initial.viaShip.toMutableSet()
+    private val shipDeclined = initial.shipDeclined.toMutableSet()
+    private val gateways = initial.gateways.toMutableMap()
+    private val _badges = MutableStateFlow(initial.badges)
+    override val badges: StateFlow<Boolean> = _badges.asStateFlow()
+
+    override fun setBadges(on: Boolean) {
+        if (_badges.value == on) return
+        _badges.value = on
+        save()
+    }
 
     override fun setEndpoint(url: String) {
         if (_endpoint.value == url) return
@@ -72,7 +89,46 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
         save()
     }
 
-    private fun save() = store.write(JSON.encodeToString(Persisted(_endpoint.value, deviceIds.toMap(), registered.toMap(), declined.toSet())))
+    override fun trunkDeviceIdFor(patp: String): String = trunkIds[patp].orEmpty()
+
+    override fun setTrunkDeviceIdFor(patp: String, id: String) {
+        if (trunkIds[patp] == id) return
+        trunkIds[patp] = id
+        save()
+    }
+
+    override fun viaShipPush(patp: String): Boolean = patp in viaShip
+
+    override fun setViaShipPush(patp: String, via: Boolean) {
+        if ((patp in viaShip) == via) return
+        if (via) viaShip += patp else viaShip -= patp
+        save()
+    }
+
+    override fun shipPushDeclined(patp: String): Boolean = patp in shipDeclined
+
+    override fun setShipPushDeclined(patp: String, declined: Boolean) {
+        if ((patp in shipDeclined) == declined) return
+        if (declined) shipDeclined += patp else shipDeclined -= patp
+        save()
+    }
+
+    override fun gatewayFor(patp: String): io.nisfeb.talon.notify.GatewayDevice? = gateways[patp]
+
+    override fun setGatewayFor(patp: String, device: io.nisfeb.talon.notify.GatewayDevice) {
+        if (gateways[patp] == device) return
+        gateways[patp] = device
+        save()
+    }
+
+    private fun save() = store.write(
+        JSON.encodeToString(
+            Persisted(
+                _endpoint.value, deviceIds.toMap(), registered.toMap(), declined.toSet(), trunkIds.toMap(), viaShip.toSet(),
+                shipDeclined.toSet(), gateways.toMap(), _badges.value,
+            ),
+        ),
+    )
 }
 
 /** One ship's [MenuSeenState]. */

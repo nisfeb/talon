@@ -119,7 +119,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        let whom = notification.request.content.userInfo["whom"] as? String ?? ""
+        let info = notification.request.content.userInfo
+        if let nonce = info["nonce"] as? String {
+            // The ship's test push: proof its notifications reach this
+            // phone. Nothing to show while Talon is open.
+            IosVoipBridge.shared.pushTestReceived(nonce: nonce)
+            completionHandler([])
+            return
+        }
+        let whom = info["whom"] as? String ?? ""
         if IosVoipBridge.shared.shouldPresentAlert(whom: whom) {
             completionHandler([.banner, .list, .sound])
         } else {
@@ -133,6 +141,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let info = response.notification.request.content.userInfo
+        if let nonce = info["nonce"] as? String {
+            IosVoipBridge.shared.pushTestReceived(nonce: nonce)
+        }
         if let whom = info["whom"] as? String, !whom.isEmpty {
             // The relay names the ship the alert was for; a tap goes
             // there first, since the same whom on another ship is a

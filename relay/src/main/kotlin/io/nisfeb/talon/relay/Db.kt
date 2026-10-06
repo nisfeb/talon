@@ -63,12 +63,16 @@ class Db(private val path: String) {
                 // What a device's app understands beyond messages and
                 // rings, added after devices were first kept: an older
                 // table gets the column, and its devices none of them.
-                val hasCaps = s.executeQuery("PRAGMA table_info(devices)").use { rs ->
+                fun has(table: String, column: String) = s.executeQuery("PRAGMA table_info($table)").use { rs ->
                     var found = false
-                    while (rs.next()) if (rs.getString("name") == "caps") found = true
+                    while (rs.next()) if (rs.getString("name") == column) found = true
                     found
                 }
-                if (!hasCaps) s.executeUpdate("ALTER TABLE devices ADD COLUMN caps TEXT NOT NULL DEFAULT ''")
+                if (!has("devices", "caps")) s.executeUpdate("ALTER TABLE devices ADD COLUMN caps TEXT NOT NULL DEFAULT ''")
+                // An iPhone's app-icon count, null while its owner has
+                // badges off ([nextBadge]).
+                if (!has("devices", "badge")) s.executeUpdate("ALTER TABLE devices ADD COLUMN badge INTEGER")
+                if (!has("gateway_devices", "badge")) s.executeUpdate("ALTER TABLE gateway_devices ADD COLUMN badge INTEGER")
             }
         }
     }
@@ -112,6 +116,64 @@ class Db(private val path: String) {
             ps.setString(1, pushEndpoint)
             ps.setString(2, deviceId)
             ps.executeUpdate() > 0
+        }
+    }
+
+    // ───────── app-icon badges ─────────
+
+    /**
+     * The number an iPhone's next alert shows on its icon: one more than
+     * the last, or null while its owner has badges off. The app sets the
+     * true count whenever it is open ([setBadge]); in between, each alert
+     * adds one. [table] is devices (by id) or gateway_devices (by handle).
+     */
+    fun nextBadge(table: String, key: String): Int? = connect().use { c ->
+        c.prepareStatement(
+            "UPDATE $table SET badge = badge + 1 WHERE ${keyOf(table)} = ? AND badge IS NOT NULL RETURNING badge",
+        ).use { ps ->
+            ps.setString(1, key)
+            ps.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else null }
+        }
+    }
+
+    /** Set the count, or null for badges off. False for no such device. */
+    fun setBadge(table: String, key: String, count: Int?): Boolean = connect().use { c ->
+        c.prepareStatement("UPDATE $table SET badge = ? WHERE ${keyOf(table)} = ?").use { ps ->
+            if (count == null) ps.setNull(1, java.sql.Types.INTEGER) else ps.setInt(1, count)
+            ps.setString(2, key)
+            ps.executeUpdate() > 0
+        }
+    }
+
+    private fun keyOf(table: String) = when (table) {
+        DEVICES -> "id"
+        GATEWAY -> "handle"
+        else -> error("no badge in $table")
+    }
+
+    // ───────── the APNs gateway ([Gateway]) ─────────
+
+    /** An iPhone's tokens ("<voip>|<alert>") behind a handle; the secret
+     *  is kept only as its SHA-256. */
+    data class GatewayRow(val secretSha256: String, val endpoint: String)
+
+    fun gatewayDevice(handle: String): GatewayRow? = connect().use { c ->
+        c.prepareStatement("SELECT secret_sha256, endpoint FROM gateway_devices WHERE handle = ?").use { ps ->
+            ps.setString(1, handle)
+            ps.executeQuery().use { rs -> if (rs.next()) GatewayRow(rs.getString(1), rs.getString(2)) else null }
+        }
+    }
+
+    fun putGatewayDevice(handle: String, secretSha256: String, endpoint: String) = connect().use { c ->
+        c.prepareStatement(
+            "INSERT INTO gateway_devices(handle, secret_sha256, endpoint, updated_at) VALUES(?, ?, ?, ?) " +
+                "ON CONFLICT(handle) DO UPDATE SET endpoint = excluded.endpoint, updated_at = excluded.updated_at",
+        ).use { ps ->
+            ps.setString(1, handle)
+            ps.setString(2, secretSha256)
+            ps.setString(3, endpoint)
+            ps.setLong(4, System.currentTimeMillis())
+            ps.executeUpdate()
         }
     }
 
@@ -288,8 +350,11 @@ class Db(private val path: String) {
         }
     }
 
-    private companion object {
-        const val SCHEMA = """
+    companion object {
+        const val DEVICES = "devices"
+        const val GATEWAY = "gateway_devices"
+
+        private const val SCHEMA = """
             CREATE TABLE IF NOT EXISTS devices (
                 id TEXT PRIMARY KEY,
                 push_endpoint TEXT NOT NULL,
@@ -318,6 +383,12 @@ class Db(private val path: String) {
                 PRIMARY KEY(ship_id, device_id),
                 FOREIGN KEY(ship_id) REFERENCES ships(id),
                 FOREIGN KEY(device_id) REFERENCES devices(id)
+            );
+            CREATE TABLE IF NOT EXISTS gateway_devices (
+                handle TEXT PRIMARY KEY,
+                secret_sha256 TEXT NOT NULL,
+                endpoint TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
             );
         """
     }

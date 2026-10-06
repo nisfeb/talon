@@ -82,4 +82,16 @@ fun shouldOfferNotificationSetup(
     settings: RelaySettings,
     justSignedIn: Boolean,
 ): Boolean =
-    needed && ship != null && settings.deviceIdFor(ship).isBlank() && (justSignedIn || !settings.declinedFor(ship))
+    needed && ship != null && settings.deviceIdFor(ship).isBlank() && !settings.viaShipPush(ship) &&
+        (justSignedIn || !settings.declinedFor(ship))
+
+/** Where an iPhone's notifications for a ship come from, as Settings says it. */
+enum class PhoneNotifications { Ship, Relay, Off }
+
+/** A phone moved to its ship's own pushes is off the relay, and still on. */
+fun phoneNotifications(settings: RelaySettings, ship: String): PhoneNotifications = when {
+    settings.viaShipPush(ship) -> PhoneNotifications.Ship
+    settings.deviceIdFor(ship).isNotBlank() -> PhoneNotifications.Relay
+    else -> PhoneNotifications.Off
+}
+

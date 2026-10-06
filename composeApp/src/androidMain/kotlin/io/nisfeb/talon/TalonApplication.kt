@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.util.createAppHttpClient
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filter
 import coil3.memoryCacheMaxSizePercentWhileInBackground
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -340,6 +342,34 @@ class TalonApplication : Application() {
      * the `SQLiteConnectionPool: connection was leaked` warning that
      * fired on every ship-switch.
      */
+    private var shipPushMove: kotlinx.coroutines.Job? = null
+
+    /**
+     * Notifications from the ship itself, where its %trunk can (wire 11):
+     * once a test push from the ship reaches this phone, the phone leaves
+     * the public relay ([io.nisfeb.talon.notify.moveToShipPush]). Tried each
+     * time the ship's stream comes up, until it has an answer; one that
+     * could not be tried (no connection) waits for the next.
+     */
+    private fun startShipPushMove(ship: String, shipRepo: TlonChatRepo) {
+        shipPushMove?.cancel()
+        val tokens = io.nisfeb.talon.notify.UnifiedPushTokenProvider(this)
+        val ports = io.nisfeb.talon.notify.ShipPushPorts(
+            trunkWire = { shipRepo.trunkWire() },
+            poke = { body -> shipRepo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body) },
+            register = { id -> tokens.token()?.let { io.nisfeb.talon.notify.TrunkPush.register(id, it, tokens.caps) } },
+            relayUnregister = { id ->
+                io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value }).unregister(id)
+            },
+            newId = { java.util.UUID.randomUUID().toString() },
+        )
+        shipPushMove = appScope.launch {
+            io.nisfeb.talon.notify.keepMovingToShipPush(ship, relaySettings, ports, shipRepo.bootstrapping) {
+                android.util.Log.i("Talon", "ship push for $ship: $it")
+            }
+        }
+    }
+
     private fun buildShipScoped(ship: String, afterPriorClose: (() -> Unit)? = null) {
         // A device registered with the relay before it asked what the app
         // understands has said nothing, and gets no read pushes: say it,
@@ -386,6 +416,7 @@ class TalonApplication : Application() {
             // chat read elsewhere should leave no notification behind.
             r.readListener = { whom -> Notifications.cancelAllForChat(this, whom, forShip = ship) }
         }
+        startShipPushMove(ship, repo)
         drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
         menuSeen = io.nisfeb.talon.ui.AndroidMenuSeenStore(this, ship)
         shortcuts = ShortcutsPublisher(this, db)

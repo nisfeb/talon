@@ -1,6 +1,7 @@
 @file:OptIn(DelicateCoroutinesApi::class)
 
 package io.nisfeb.talon.compose
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import io.nisfeb.talon.data.latestPerConversation
@@ -212,6 +213,8 @@ fun App(
      *  silently doing nothing. */
     pushTokenProvider: io.nisfeb.talon.notify.PushTokenProvider =
         io.nisfeb.talon.notify.NoPushTokenProvider,
+    /** The unread count on the app icon, where there is one (iOS). */
+    appIconBadge: io.nisfeb.talon.notify.AppIconBadge = io.nisfeb.talon.notify.NoopAppIconBadge,
     /** OS-level system notification probe (battery / restriction /
      *  permission status). Defaults to a no-op so desktop hosts and
      *  tests don't have to wire one — Android passes
@@ -745,6 +748,51 @@ fun App(
             } else {
                 null
             }
+        // iOS: notifications from the owner's own ship once its %trunk can
+        // send them (wire 11), with the relay only the Apple hop. Again when
+        // the phone's tokens change, so the gateway has the new ones.
+        if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
+            LaunchedEffect(repo) {
+                val ship = loggedInShip ?: return@LaunchedEffect
+                val ports = io.nisfeb.talon.notify.ShipPushPorts(
+                    trunkWire = { repo.trunkWire() },
+                    poke = { body -> repo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body) },
+                    register = { id -> io.nisfeb.talon.notify.gatewayRegistration(ship, id, relaySettings, relayClient, pushTokenProvider) },
+                    relayUnregister = { id -> relayClient.unregister(id) },
+                    newId = { io.nisfeb.talon.data.newGid() },
+                )
+                kotlinx.coroutines.flow.merge(kotlinx.coroutines.flow.flowOf(Unit), pushTokenProvider.changes).collect {
+                    io.nisfeb.talon.notify.keepMovingToShipPush(ship, relaySettings, ports, repo.bootstrapping) {
+                        io.nisfeb.talon.util.Log.i("ShipPush", "$ship: $it")
+                    }
+                }
+            }
+        }
+        // The unread count on the app icon, by the owner's choice (iOS):
+        // set while open, and told to whoever pushes, so each alert while
+        // closed adds one to the true count. Off clears it everywhere.
+        if (io.nisfeb.talon.ui.isAppIconBadgeSupported) {
+            val badgesOn by relaySettings.badges.collectAsState()
+            LaunchedEffect(db, badgesOn) {
+                val ship = loggedInShip ?: return@LaunchedEffect
+                if (!badgesOn) {
+                    appIconBadge.set(0)
+                    io.nisfeb.talon.notify.reportBadge(ship, null, relaySettings, relayClient)
+                    return@LaunchedEffect
+                }
+                kotlinx.coroutines.flow.combine(
+                    db.unreads().streamWithMentions(),
+                    db.threadUnreads().streamNotified(),
+                ) { chats, threads -> io.nisfeb.talon.notify.badgeCount(chats, threads) }
+                    .distinctUntilChanged()
+                    .collectLatest { n: Int ->
+                        appIconBadge.set(n)
+                        // A burst of reads settles before the relay hears of it.
+                        kotlinx.coroutines.delay(1_500)
+                        io.nisfeb.talon.notify.reportBadge(ship, n, relaySettings, relayClient)
+                    }
+            }
+        }
         // A comet's first login: join Nisfeb Software, put the calling
         // desk on the ship, and open the group's chat once it arrives.
         LaunchedEffect(repo, pendingLanding) {
@@ -2262,6 +2310,11 @@ fun App(
                                 pushTokens = pushTokenProvider,
                                 activePatp = ship,
                                 activeShipUrl = activeShipUrl,
+                                shipPoke = if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
+                                    { body -> repo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body) }
+                                } else {
+                                    null
+                                },
                             ),
                             onBack = {
                                 showSettings = false

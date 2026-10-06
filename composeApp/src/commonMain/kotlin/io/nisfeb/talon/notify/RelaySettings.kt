@@ -43,6 +43,30 @@ interface RelaySettings {
     fun declinedFor(patp: String): Boolean = false
     fun setDeclinedFor(patp: String, declined: Boolean) {}
 
+    /** This device's id on [patp]'s own %trunk, minted here, "" before
+     *  any ([moveToShipPush]). Not the relay's id. */
+    fun trunkDeviceIdFor(patp: String): String = ""
+    fun setTrunkDeviceIdFor(patp: String, id: String) {}
+
+    /** Notifications for [patp] come from the ship's own %trunk, its
+     *  test push having arrived; the public relay is not used for it. */
+    fun viaShipPush(patp: String): Boolean = false
+    fun setViaShipPush(patp: String, via: Boolean) {}
+
+    /** The owner chose the public relay over the ship's own pushes for
+     *  [patp] on this device: Talon does not move it to the ship again. */
+    fun shipPushDeclined(patp: String): Boolean = false
+    fun setShipPushDeclined(patp: String, declined: Boolean) {}
+
+    /** An iPhone's handle on the relay's APNs gateway, for [patp]'s ship
+     *  to push through ([gatewayRegistration]). */
+    fun gatewayFor(patp: String): GatewayDevice? = null
+    fun setGatewayFor(patp: String, device: GatewayDevice) {}
+
+    /** The unread count on the app icon, on this device ([AppIconBadge]). */
+    val badges: StateFlow<Boolean> get() = BADGES_OFF
+    fun setBadges(on: Boolean) {}
+
     companion object {
         const val DEFAULT_ENDPOINT = "https://relay.nisfeb.com"
     }
@@ -72,4 +96,22 @@ class InMemoryRelaySettings(
     private val declined = mutableSetOf<String>()
     override fun declinedFor(patp: String): Boolean = patp in declined
     override fun setDeclinedFor(patp: String, declined: Boolean) { if (declined) this.declined += patp else this.declined -= patp }
+    private val trunkIds = mutableMapOf<String, String>()
+    override fun trunkDeviceIdFor(patp: String): String = trunkIds[patp].orEmpty()
+    override fun setTrunkDeviceIdFor(patp: String, id: String) { trunkIds[patp] = id }
+    private val viaShip = mutableSetOf<String>()
+    override fun viaShipPush(patp: String): Boolean = patp in viaShip
+    override fun setViaShipPush(patp: String, via: Boolean) { if (via) viaShip += patp else viaShip -= patp }
+    private val shipDeclined = mutableSetOf<String>()
+    override fun shipPushDeclined(patp: String): Boolean = patp in shipDeclined
+    override fun setShipPushDeclined(patp: String, declined: Boolean) { if (declined) shipDeclined += patp else shipDeclined -= patp }
+    private val gateways = mutableMapOf<String, GatewayDevice>()
+    override fun gatewayFor(patp: String): GatewayDevice? = gateways[patp]
+    override fun setGatewayFor(patp: String, device: GatewayDevice) { gateways[patp] = device }
+    private val _badges = MutableStateFlow(false)
+    override val badges: StateFlow<Boolean> = _badges.asStateFlow()
+    override fun setBadges(on: Boolean) { _badges.value = on }
 }
+
+private val BADGES_OFF: StateFlow<Boolean> = MutableStateFlow(false)
+

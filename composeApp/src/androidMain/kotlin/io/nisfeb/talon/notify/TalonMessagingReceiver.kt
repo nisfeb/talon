@@ -146,6 +146,15 @@ class TalonMessagingReceiver : MessagingReceiver() {
             return
         }
 
+        // The ship's test push (its own %trunk, wire 11): it says the
+        // ship can reach this device, and is never shown. The move off
+        // the public relay waits for exactly this nonce.
+        if (event == "push-test") {
+            parsed?.get("nonce")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                ?.let { io.nisfeb.talon.notify.PushTestNonces.received(it) }
+            return
+        }
+
         if (whom.isNullOrBlank()) return
         // Read to the end on some client: its notifications go, as Tlon's
         // %notify dismisses them. Only that ship's: the same whom on
@@ -186,6 +195,9 @@ class TalonMessagingReceiver : MessagingReceiver() {
                     context = context,
                     whom = whom,
                     postId = eventId?.takeIf { it.isNotBlank() },
+                    // A reply's parent, from a relay (or a ship's trunk)
+                    // that sends one: the tap opens the thread on it.
+                    parentId = parsed?.get("parent")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() },
                     // A tap switches to the ship this is for, because the
                     // same whom on another one is a different conversation.
                     forShip = patp,

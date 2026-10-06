@@ -2284,6 +2284,9 @@ fun TalonApp(
                         },
                         activePatp = ourPatp,
                         activeShipUrl = activeShipUrl,
+                        shipPoke = { body ->
+                            app.repo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body)
+                        },
                     ),
                     onBack = { settingsOpen = false; settingsStartOnAi = false },
                     startOnAi = settingsStartOnAi,
