@@ -104,7 +104,10 @@ private fun present(picker: UIViewController, attempt: Int = 0, onDropped: () ->
     if (attempt == 0) activeWindow()?.endEditing(true)
     dispatch_async(dispatch_get_main_queue()) {
         val root = topViewController()
-        val busy = root == null || root.isBeingDismissed() || root.isBeingPresented()
+        // A controller whose child is still leaving cannot present either:
+        // a tap right after a pick or a cancel was dropped without a word.
+        val busy = root == null || root.isBeingDismissed() || root.isBeingPresented() ||
+            root.presentedViewController != null
         when (presentStep(busy, attempt)) {
             PresentStep.RETRY -> after(PRESENT_RETRY_MS) { present(picker, attempt + 1, onDropped) }
             PresentStep.GIVE_UP -> onDropped()
@@ -134,9 +137,30 @@ private suspend fun pickPhoto(): PickedImage? = suspendCancellableCoroutine { co
     picker.sourceType =
         UIImagePickerControllerSourceType.UIImagePickerControllerSourceTypePhotoLibrary
     picker.delegate = delegate
+    fullScreen(picker)
+    cont.invokeOnCancellation { gone(picker, delegate) }
     present(picker) {
         activeDelegates.remove(delegate)
         if (!done) { done = true; cont.resume(null) }
+    }
+}
+
+/**
+ * Full screen, not a sheet. A sheet swiped away tells its delegate
+ * nothing, so the pick never ended and both attach buttons stayed dead
+ * until the chat was left. And the screen under a sheet never "appears"
+ * again when it goes, so Compose never re-read the keyboard's height,
+ * and kept the space for a keyboard already gone: the white band.
+ */
+private fun fullScreen(picker: UIViewController) {
+    picker.modalPresentationStyle = platform.UIKit.UIModalPresentationFullScreen
+}
+
+/** A pick its caller stopped waiting for: close the picker, let go of it. */
+private fun gone(picker: UIViewController, delegate: NSObject) {
+    dispatch_async(dispatch_get_main_queue()) {
+        activeDelegates.remove(delegate)
+        if (picker.presentingViewController != null) picker.dismissViewControllerAnimated(true, completion = null)
     }
 }
 
@@ -151,6 +175,8 @@ private suspend fun pickDocument(): PickedImage? = suspendCancellableCoroutine {
     // and hands over a file of the app's own, no scoped access to keep.
     val picker = UIDocumentPickerViewController(forOpeningContentTypes = listOf(UTTypeItem), asCopy = true)
     picker.delegate = delegate
+    fullScreen(picker)
+    cont.invokeOnCancellation { gone(picker, delegate) }
     present(picker) {
         activeDelegates.remove(delegate)
         if (!done) { done = true; cont.resume(null) }
@@ -200,7 +226,11 @@ private fun jpegOf(image: UIImage): PickedImage? {
     val (pw, ph) = image.size.useContents { (width * image.scale).toInt() to (height * image.scale).toInt() }
     if (pw <= 0 || ph <= 0) return null
     val (w, h) = io.nisfeb.talon.ui.fitWithin(pw, ph)
-    val drawn = if (w == pw && h == ph) image else {
+    // Drawn whenever it is turned too, not only when too big: a photo
+    // that fit kept its turn as an EXIF tag, which Compose's decoder
+    // does not apply, so it showed sideways.
+    val upright = image.imageOrientation == platform.UIKit.UIImageOrientation.UIImageOrientationUp
+    val drawn = if (w == pw && h == ph && upright) image else {
         UIGraphicsBeginImageContextWithOptions(CGSizeMake(w.toDouble(), h.toDouble()), false, 1.0)
         try {
             image.drawInRect(CGRectMake(0.0, 0.0, w.toDouble(), h.toDouble()))

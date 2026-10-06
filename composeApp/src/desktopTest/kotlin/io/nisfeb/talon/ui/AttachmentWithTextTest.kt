@@ -7,6 +7,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
@@ -154,5 +156,64 @@ class AttachmentWithTextTest {
         waitForIdle()
         assertNull(state.pendingAttachment)
         assertEquals("look at this", state.draft.text)
+    }
+
+    // sneagan, 2026-10-06: "iOS users report attaching images is still very
+    // buggy". Leaving the chat while a photo uploaded cancelled the upload
+    // and the send with the screen, so it never went. Real time: the
+    // virtual clock hides waits.
+    @Test
+    fun `leaving the chat mid-upload still sends the picture`() {
+        val ship = hostingShip().apply {
+            val hosts = answerApi
+            answerApi = { method, path, body ->
+                if (path == "/put-here") Thread.sleep(1_000)
+                hosts(method, path, body)
+            }
+        }
+        val tmp = createTempDirectory(prefix = "talon-attach-").toFile()
+        val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
+            .setDriver(BundledSQLiteDriver())
+            .fallbackToDestructiveMigration(dropAllTables = true)
+            .build()
+        val events = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { ship.channel.events().collect {} }
+        try {
+            runComposeUiTest {
+                var shown by androidx.compose.runtime.mutableStateOf(true)
+                lateinit var state: ComposerState
+                val drafts = InMemoryDraftStore()
+                val repo = TlonChatRepo(db).also { it.attachForTest(ship.channel, "~zod", http = ship.http) }
+                setContent {
+                    TalonTheme(darkTheme = false) {
+                        if (shown) {
+                            state = rememberComposerState("~zod", drafts)
+                            ChatComposer(
+                                state = state, db = db, repo = repo, http = createAppHttpClient(),
+                                drafts = drafts, whom = "~zod", contactMap = ContactMap.EMPTY, allShips = emptyList(),
+                                canSend = true, hideComposerButtons = true, focusOnOpen = false, strategy = strategy,
+                            )
+                        }
+                    }
+                }
+                waitForIdle()
+                runOnIdle {
+                    state.draft = TextFieldValue("look at this")
+                    state.pendingAttachment = PendingAttachment(byteArrayOf(1, 2, 3, 4), "image/png", "cat.png", isImage = true)
+                }
+                waitForIdle()
+                onNodeWithText("look at this").performKeyInput { pressKey(Key.Enter) }
+                waitUntil(timeoutMillis = 2_000) { state.uploading }
+                runOnIdle { shown = false }
+                waitForIdle()
+                val until = System.currentTimeMillis() + 8_000
+                while (texts.isEmpty() && System.currentTimeMillis() < until) Thread.sleep(100)
+                assertEquals(listOf("image https://cdn.test/zod/cat.png [look at this]"), texts.toList())
+                assertEquals("", drafts.load("~zod"), "the words that went are not left behind as a draft")
+            }
+        } finally {
+            events.cancel()
+            db.close()
+            tmp.deleteRecursively()
+        }
     }
 }

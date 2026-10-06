@@ -1931,9 +1931,10 @@ class TlonChatRepo(
 
     /**
      * [block] on this repo's scope, awaited: an admin who leaves the screen
-     * mid-change does not stop it halfway, a role added and none taken away.
+     * mid-change does not stop it halfway, a role added and none taken away;
+     * a photo sent as the chat is left still goes.
      */
-    private suspend fun <T> carry(block: suspend () -> T): T = scope.async { block() }.await()
+    suspend fun <T> carry(block: suspend () -> T): T = scope.async { block() }.await()
 
     /** Update a group's title/description/image/cover via %meta poke. */
     suspend fun updateGroupMeta(
