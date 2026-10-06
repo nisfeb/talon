@@ -1414,6 +1414,7 @@ fun TalonApp(
         },
         LocalOpenProfile provides { ship: String -> profileSheetShip = ship },
         LocalCallTo provides callTarget,
+        LocalFetchProfile provides remember(app.repo) { { ship: String -> app.repo.meetIfUnknown(ship); Unit } },
         io.nisfeb.talon.mail.LocalMailTo provides
             if (mailAvailable) {
                 { peer: String ->

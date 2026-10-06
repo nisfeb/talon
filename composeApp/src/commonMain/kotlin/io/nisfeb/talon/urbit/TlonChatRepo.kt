@@ -1494,6 +1494,31 @@ class TlonChatRepo(
      * /v1/book re-scry on next login reconciles. Worth smoke-testing
      * the round-trip on a live ship.
      */
+    /**
+     * Ask our ship for [ship]'s profile when we hold nothing of it: no
+     * name, picture or bio. A ship can hold someone in its book without
+     * ever having met them, and then it has no profile to give: a comet
+     * on ~ricsul showed bare while another ship had his name and picture
+     * (2026-10-06). Tlon asks when a profile opens; so does Talon now. The
+     * contacts agent ignores a %meet for a peer it already tracks. On the
+     * repo's scope, so closing the profile does not cancel it.
+     */
+    fun meetIfUnknown(ship: String): kotlinx.coroutines.Job? {
+        if (!ship.startsWith("~") || ship == ourPatp) return null
+        return scope.launch {
+            val c = db.contacts().get(ship)
+            if (c != null && listOf(c.nickname, c.avatarUrl, c.bio).any { !it.isNullOrBlank() }) return@launch
+            val ch = channel ?: return@launch
+            runCatching {
+                ch.poke(
+                    app = "contacts",
+                    mark = "contact-action-1",
+                    payload = buildJsonObject { put("meet", buildJsonArray { add(JsonPrimitive(ship)) }) },
+                )
+            }.onFailure { Log.w(TAG, "asking for $ship's profile failed: ${it.message}") }
+        }
+    }
+
     suspend fun addContact(ship: String, nickname: String? = null) {
         val ch = channel ?: error("not connected")
         require(ship.startsWith("~")) { "addContact: $ship isn't a patp" }
