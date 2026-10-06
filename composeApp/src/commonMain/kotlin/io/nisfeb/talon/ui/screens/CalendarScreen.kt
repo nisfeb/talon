@@ -127,6 +127,7 @@ import kotlinx.coroutines.launch
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.DayOfWeek
 import kotlin.time.Instant
+import io.nisfeb.talon.calendar.calendarRowOfPushTag
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atTime
@@ -166,6 +167,9 @@ fun CalendarScreen(
     chat: io.nisfeb.talon.urbit.TlonChatRepo? = null,
     mail: io.nisfeb.talon.mail.MailRepo? = null,
     ourShip: String? = null,
+    /** A tapped reminder's push tag: its occurrence opens once the rows holding it are in. */
+    openPushTag: String? = null,
+    onOpenedPush: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val availability by repo.availability.collectAsState()
@@ -362,6 +366,18 @@ fun CalendarScreen(
         // the event's rule breakdown. Read it now, while the owner is
         // reading the event, rather than after they have asked.
         if (r.cal !in readOnly) repo.prefetchEvent(r.id)
+    }
+    // A tapped reminder: its day, and the occurrence open on it. A
+    // reminder is due soon, so the month on show holds it; until rows
+    // that hold it are in, it waits.
+    LaunchedEffect(openPushTag, rows) {
+        val r = calendarRowOfPushTag(openPushTag, rows.orEmpty()) ?: return@LaunchedEffect
+        val day = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(TimeZone.currentSystemDefault()).date
+        year = day.year
+        month = day.month.number
+        selected = day
+        view(r)
+        onOpenedPush()
     }
     fun tick(id: String, done: Boolean) {
         scope.launch {

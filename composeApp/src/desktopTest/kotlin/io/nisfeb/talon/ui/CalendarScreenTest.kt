@@ -113,7 +113,9 @@ class CalendarScreenTest {
         }
     })
 
-    private fun calendar(block: ComposeUiTest.(CalendarRepo) -> Unit) {
+    private val opened: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+
+    private fun calendar(pushTag: String? = null, block: ComposeUiTest.(CalendarRepo) -> Unit) {
         val scope = CoroutineScope(SupervisorJob())
         val repo = CalendarRepo(http, scope, pollIntervalMs = 60 * 60_000L).apply { attach("https://ship.test") }
         runBlocking { repo.refresh(); repo.refreshAll() }
@@ -121,7 +123,7 @@ class CalendarScreenTest {
             runComposeUiTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
-                        CalendarScreen(repo = repo, twentyFourHour = true, onBack = {})
+                        CalendarScreen(repo = repo, twentyFourHour = true, onBack = {}, openPushTag = pushTag, onOpenedPush = { opened += "opened" })
                     }
                 }
                 waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Dentist", substring = true).fetchSemanticsNodes().isNotEmpty() }
@@ -801,5 +803,21 @@ class CalendarScreenTest {
         onAllNodes(androidx.compose.ui.test.isRoot())[0].performTouchInput { click(androidx.compose.ui.geometry.Offset(2f, 2f)) }
         waitForIdle()
     }
-}
 
+    // "I just got a notification for opti sail leave soon and tapping it
+    // just took me to where I left the app": a calendar reminder's tap
+    // opens its event.
+    @Test
+    fun `a tapped reminder opens its occurrence`() = calendar(pushTag = "cal-s1-3-0") {
+        // The occurrence's sheet: its Edit button.
+        waitUntil(timeoutMillis = 15_000) { onAllNodesWithText("Edit").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(listOf("opened"), opened)
+        assertTrue(shows("Standup"))
+    }
+
+    @Test
+    fun `no reminder, nothing opens`() = calendar {
+        waitForIdle()
+        assertTrue(onAllNodesWithText("Edit").fetchSemanticsNodes().isEmpty() && opened.isEmpty())
+    }
+}
