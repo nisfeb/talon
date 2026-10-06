@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MailOutline
 import io.nisfeb.talon.ui.Button
@@ -42,8 +43,9 @@ import io.nisfeb.talon.data.ContactEntity
 
 /**
  * Bottom sheet showing a peer's profile, or our own. For peers, offers
- * a "Message" action that routes into the 1:1 DM. For self, offers
- * "Edit profile" — the caller decides which screen to push.
+ * a "Message" action that routes into the 1:1 DM, and "Call" where our
+ * ship has %trunk. For self, offers "Edit profile" — the caller decides
+ * which screen to push.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,6 +71,8 @@ fun ContactProfileSheet(
     // Where the viewer's ship has no mail app this is null and the
     // button is simply not drawn, rather than drawn and dead.
     val mailTo = io.nisfeb.talon.mail.LocalMailTo.current
+    // The same for calls: null where our ship has no %trunk.
+    val callTo = LocalCallTo.current
     // Open all the way: half open left Message, Mail and Close below
     // the fold on a short window, behind a drag nobody knows to make.
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -233,6 +237,16 @@ fun ContactProfileSheet(
                         // Shrinks rather than wrapping beside Mail and Close.
                         FitText("Message")
                     }
+                    if (callTo != null) {
+                        OutlinedButton(
+                            onClick = { onDismiss(); callTo(ship) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Filled.Call, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            FitText("Call")
+                        }
+                    }
                     if (mailTo != null) {
                         OutlinedButton(
                             onClick = { onDismiss(); mailTo(ship) },
@@ -257,3 +271,10 @@ fun ContactProfileSheet(
  * none, and the tap does nothing.
  */
 val LocalOpenProfile = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
+
+/**
+ * Rings a ship, where our ship has %trunk: the profile sheet's Call.
+ * Null without it, and the button is not drawn. Whether the other ship
+ * has %trunk nobody can ask; a ship without it is a call nobody answers.
+ */
+val LocalCallTo = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
