@@ -37,6 +37,13 @@ fun main() {
     // ios-voip device's rings are dropped with a warning.
     val apns = buildApns(log)
     val push = Push(apns)
+    val gateway = apns?.let { a ->
+        Gateway(
+            db,
+            alert = { token, p -> a.sendAlert(token, p.title, p.body, p.patp, p.whom, p.postId, parent = p.parent, nonce = p.nonce) },
+            voip = { token, payload -> a.sendVoip(token, payload) },
+        )
+    }
     val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)
@@ -49,7 +56,7 @@ fun main() {
 
     val server = embeddedServer(Netty, port = port) {
         install(CallLogging)
-        installRoutes(db = db, pool = pool, masterSecret = masterSecret, httpClient = httpClient)
+        installRoutes(db = db, pool = pool, masterSecret = masterSecret, httpClient = httpClient, gateway = gateway)
     }
     Runtime.getRuntime().addShutdownHook(Thread {
         log.info("shutting down")

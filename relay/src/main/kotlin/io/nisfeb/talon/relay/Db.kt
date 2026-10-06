@@ -115,6 +115,32 @@ class Db(private val path: String) {
         }
     }
 
+    // ───────── the APNs gateway ([Gateway]) ─────────
+
+    /** An iPhone's tokens ("<voip>|<alert>") behind a handle; the secret
+     *  is kept only as its SHA-256. */
+    data class GatewayRow(val secretSha256: String, val endpoint: String)
+
+    fun gatewayDevice(handle: String): GatewayRow? = connect().use { c ->
+        c.prepareStatement("SELECT secret_sha256, endpoint FROM gateway_devices WHERE handle = ?").use { ps ->
+            ps.setString(1, handle)
+            ps.executeQuery().use { rs -> if (rs.next()) GatewayRow(rs.getString(1), rs.getString(2)) else null }
+        }
+    }
+
+    fun putGatewayDevice(handle: String, secretSha256: String, endpoint: String) = connect().use { c ->
+        c.prepareStatement(
+            "INSERT INTO gateway_devices(handle, secret_sha256, endpoint, updated_at) VALUES(?, ?, ?, ?) " +
+                "ON CONFLICT(handle) DO UPDATE SET endpoint = excluded.endpoint, updated_at = excluded.updated_at",
+        ).use { ps ->
+            ps.setString(1, handle)
+            ps.setString(2, secretSha256)
+            ps.setString(3, endpoint)
+            ps.setLong(4, System.currentTimeMillis())
+            ps.executeUpdate()
+        }
+    }
+
     /**
      * Replace what [deviceId]'s app says it understands. False for a
      * device the relay does not know.
@@ -318,6 +344,12 @@ class Db(private val path: String) {
                 PRIMARY KEY(ship_id, device_id),
                 FOREIGN KEY(ship_id) REFERENCES ships(id),
                 FOREIGN KEY(device_id) REFERENCES devices(id)
+            );
+            CREATE TABLE IF NOT EXISTS gateway_devices (
+                handle TEXT PRIMARY KEY,
+                secret_sha256 TEXT NOT NULL,
+                endpoint TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
             );
         """
     }

@@ -237,9 +237,7 @@ class Push(
     internal fun readBody(patp: String, whom: String): String =
         """{"event":"read","patp":"${escape(patp)}","whom":"${escape(whom)}"}"""
 
-    private fun escape(s: String): String = s
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
+    private fun escape(s: String): String = jsonEscape(s)
 
     companion object {
         private val JSON_MEDIA = "application/json".toMediaType()

@@ -78,6 +78,8 @@ fun Application.installRoutes(
     pool: ConnectionPool,
     masterSecret: String,
     httpClient: OkHttpClient,
+    /** Null without APNs configured: the gateway routes answer 503. */
+    gateway: Gateway? = null,
 ) {
     val log = LoggerFactory.getLogger("Routes")
     install(ContentNegotiation) { json(RelayJson) }
@@ -124,6 +126,22 @@ fun Application.installRoutes(
                 ?.let { pool.ensureRunning(it) }
 
             call.respond(RegisterResponse(deviceId = deviceId, ok = true))
+        }
+
+        // The Apple hop for an iPhone its own ship pushes to ([Gateway]).
+        post("/gateway/devices") {
+            val g = gateway ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
+            val req = runCatching { call.receive<GatewayEnroll>() }.getOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val (code, dev) = g.enroll(req)
+            if (dev != null) call.respond(dev) else call.respond(HttpStatusCode.fromValue(code))
+        }
+
+        post("/gateway/push") {
+            val g = gateway ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
+            val req = runCatching { call.receive<GatewayPush>() }.getOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            call.respond(HttpStatusCode.fromValue(g.push(req)))
         }
 
         delete("/devices/{deviceId}") {
