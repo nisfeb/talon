@@ -560,6 +560,10 @@ fun DmChatScreen(
         pendingSendBaselineSize = decision.nextBaseline
         pendingSelfSendNewestId = decision.nextPendingSelfSendNewestId
         if (decision.scrollToBottom) {
+            // At a frame boundary, as placeDivider: a scroll remeasures the
+            // list, and mid-frame that re-composes items whose last
+            // composition is unapplied (a runtime error under test).
+            withFrameNanos { }
             listState.scrollToItem(0)
         }
     }
