@@ -50,7 +50,12 @@ class OrreryScreenTest {
         """{"next":{"key":"activity/fencing-lesson@$soon","leave_by":"${iso(soon - hour / 2)}","minutes":23}}""",
     ).jsonObject
 
-    private fun orrery(openItem: String? = null, readable: Boolean = true, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+    private fun orrery(
+        openItem: String? = null,
+        view: io.nisfeb.talon.orrery.OrreryView? = io.nisfeb.talon.orrery.OrreryView(state, plan, System.currentTimeMillis()),
+        problem: String? = null,
+        block: ComposeUiTest.() -> Unit,
+    ) = runComposeUiTest {
         val item = mutableStateOf(openItem)
         val uris = object : UriHandler { override fun openUri(uri: String) { opened += uri } }
         setContent {
@@ -58,8 +63,10 @@ class OrreryScreenTest {
                 CompositionLocalProvider(LocalUriHandler provides uris) {
                     OrreryScreen(
                         onBack = { did += "back" },
-                        readState = { if (readable) Result.success(state) else Result.failure(IllegalStateException("502")) },
-                        readPlan = { plan },
+                        view = view,
+                        refreshing = false,
+                        problem = problem,
+                        onOpen = { force -> did += if (force) "refresh" else "open" },
                         onRefreshActions = { did += "actions" },
                         openItem = item.value,
                         onOpenedItem = { did += "opened"; item.value = null },
@@ -99,7 +106,7 @@ class OrreryScreenTest {
     @Test
     fun `a leave alert lands on its thing, and back goes to the list, then leaves`() = orrery(openItem = "activity/fencing-lesson") {
         waitUntil(timeoutMillis = 5_000) { shows("Directions") }
-        assertTrue("opened" in did)
+        assertTrue("opened" in did && "open" in did, "it asks the ship again behind what it shows: $did")
         // A person from it opens in turn, and back retraces.
         onNodeWithText("Kid").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Elm Street") }
@@ -109,7 +116,7 @@ class OrreryScreenTest {
         waitUntil(timeoutMillis = 5_000) { shows("Grandparents visit") }
         assertTrue(shows("Coming up"))
         onNodeWithContentDescription("Back").performClick()
-        assertEquals(listOf("opened", "back"), did.filter { it != "actions" })
+        assertEquals(listOf("opened", "back"), did.filter { it == "opened" || it == "back" })
     }
 
     @Test
@@ -125,10 +132,21 @@ class OrreryScreenTest {
     }
 
     @Test
-    fun `a ship that does not answer says so, and the Actions tab still works`() = orrery(readable = false) {
+    fun `a ship that never answered says so, and the Actions tab still works`() = orrery(view = null, problem = "502") {
         onNodeWithText("Coming up").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Orrery could not be read") }
         onNodeWithText("Actions").performClick()
         assertTrue(shows("The actions list"))
     }
+
+    // "is this pane going to be ass slow with no caching or incremental loading"
+    @Test
+    fun `what was kept shows at once while the ship does not answer, and says how old it is`() =
+        orrery(view = io.nisfeb.talon.orrery.OrreryView(state, plan, System.currentTimeMillis() - 3 * hour), problem = "no answer") {
+            onNodeWithText("Coming up").performClick()
+            assertTrue(shows("Fencing lesson"), "the kept answer, not Looking…")
+            assertTrue(shows("The ship did not answer; this is as of"))
+            onNodeWithContentDescription("Refresh").performClick()
+            assertTrue("refresh" in did)
+        }
 }

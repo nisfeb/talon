@@ -1050,8 +1050,8 @@ fun App(
             if (mailShipUrl != null && ship != null) armillaryRepo.attach(mailShipUrl, ship) else armillaryRepo.detach()
         }
         val orreryActions by orreryRepo.actions.collectAsState()
-        val orreryOn = orreryRepo.availability.collectAsState().value ==
-        io.nisfeb.talon.orrery.OrreryAvailability.PRESENT
+        // Whether the menu offers Orrery: on, and not known to be missing.
+        val orreryOn = io.nisfeb.talon.orrery.orreryOffered(orreryGate == true, orreryRepo.availability.collectAsState().value)
         // The private model, from Settings, into the ladder.
         LaunchedEffect(aiSettings, uiSettings) {
             io.nisfeb.talon.orrery.movePrivateModelIn(aiSettings, uiSettings)

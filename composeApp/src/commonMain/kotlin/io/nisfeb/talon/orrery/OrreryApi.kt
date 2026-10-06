@@ -652,6 +652,15 @@ enum class OrreryAvailability {
     SIGNED_OUT,
 }
 
+/**
+ * Whether the menu offers the Orrery section: switched on, and not known
+ * to be missing. Still being looked for counts as there: the menu hid it
+ * until the ship first answered, which on a busy ship was a while after
+ * launch.
+ */
+fun orreryOffered(switchedOn: Boolean, availability: OrreryAvailability): Boolean =
+    switchedOn && availability != OrreryAvailability.MISSING && availability != OrreryAvailability.SIGNED_OUT
+
 data class MintedKey(val id: String, val token: String)
 
 /** A body the ship matched, and how. */

@@ -55,6 +55,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun cometDomes(): CometDomeDao
     actual abstract fun urbUnfurls(): UrbUnfurlDao
     actual abstract fun followedThreads(): FollowedThreadDao
+    actual abstract fun orreryCache(): OrreryCacheDao
 }
 
 /**

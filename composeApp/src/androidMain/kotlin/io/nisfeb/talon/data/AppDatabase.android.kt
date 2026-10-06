@@ -43,6 +43,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun cometDomes(): CometDomeDao
     actual abstract fun urbUnfurls(): UrbUnfurlDao
     actual abstract fun followedThreads(): FollowedThreadDao
+    actual abstract fun orreryCache(): OrreryCacheDao
 }
 
 /**
@@ -68,7 +69,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39,
             MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44, MIGRATION_44_45,
             MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50,
-            MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54,
+            MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -474,6 +475,13 @@ private val MIGRATION_52_53 = object : Migration(52, 53) {
 private val MIGRATION_53_54 = object : Migration(53, 54) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL(FOLLOWED_THREADS_SQL)
+    }
+}
+
+/** Orrery's last answer kept. Shared statement. */
+private val MIGRATION_54_55 = object : Migration(54, 55) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(ORRERY_CACHE_SQL)
     }
 }
 

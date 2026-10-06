@@ -657,6 +657,9 @@ class OrreryRepo(
     /** The ship's last time-to-leave pass (GET /api/travel/last), or null where it has none. */
     suspend fun travelLast(): JsonObject? = io.nisfeb.talon.util.runSuspendCatching { attached().travelLast() }.getOrNull()
 
+    /** The Orrery section's state and leave plan, kept and asked for again behind it. */
+    val view = OrreryViewStore(db.orreryCache(), scope, readState = { attached().stateJson(key()) }, readPlan = { travelLast() })
+
     /** Ask the ship which body a name means, before writing about it. */
     suspend fun resolveBody(q: String): Result<List<ResolvedBody>> = runCatching { attached().resolve(q, key()) }
 
