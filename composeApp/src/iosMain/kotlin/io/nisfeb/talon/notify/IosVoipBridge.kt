@@ -34,6 +34,14 @@ object IosVoipBridge {
      *  hands one over, empty forever if notifications were refused. */
     val alertToken = MutableStateFlow<String?>(null)
 
+    /** The owner's answer to iOS's notification prompt, asked at every
+     *  launch (answered at once after the first): null until it comes. */
+    val alertPermission = MutableStateFlow<Boolean?>(null)
+
+    fun setAlertPermission(granted: Boolean) {
+        alertPermission.value = granted
+    }
+
     /**
      * The user's microphone processing choice as libwebrtc audio-source
      * constraints, read by TalonRtc.swift when it creates the mic.
@@ -131,13 +139,30 @@ class IosPushTokenProvider : PushTokenProvider {
         val voip = withTimeoutOrNull(TOKEN_WAIT_MS) {
             IosVoipBridge.voipToken.first { it != null }
         } ?: return null
-        val alert = withTimeoutOrNull(TOKEN_WAIT_MS) {
+        // Alerts take the owner's yes to iOS's prompt, then APNs's token.
+        // Five seconds was not enough for either, and a registration
+        // without the alert half had every message to it dropped.
+        val allowed = withTimeoutOrNull(PERMISSION_WAIT_MS) {
+            IosVoipBridge.alertPermission.first { it != null }
+        } == true
+        val alert = if (!allowed) "" else withTimeoutOrNull(ALERT_WAIT_MS) {
             IosVoipBridge.alertToken.first { it != null }
         }.orEmpty()
         return "$voip|$alert"
     }
 
+    override suspend fun missingTokenReason(): String =
+        "Apple has not given Talon a push token yet. Check this iPhone is online, open Talon again, and try once more."
+
+    override fun alertsIn(endpoint: String): Boolean = endpoint.substringAfter('|', "").isNotBlank()
+
+    override val changes: kotlinx.coroutines.flow.Flow<Unit> =
+        kotlinx.coroutines.flow.combine(IosVoipBridge.voipToken, IosVoipBridge.alertToken) { _, _ -> }
+
     private companion object {
         private const val TOKEN_WAIT_MS = 5_000L
+        /** The prompt waits on the owner, on a first launch. */
+        private const val PERMISSION_WAIT_MS = 60_000L
+        private const val ALERT_WAIT_MS = 20_000L
     }
 }

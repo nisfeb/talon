@@ -49,6 +49,9 @@ data class RegisterRequest(
 @Serializable
 data class CapsRequest(val caps: List<String> = emptyList())
 
+@Serializable
+data class EndpointRequest(val pushEndpoint: String = "")
+
 /**
  * The relay's JSON: Ktor's own settings, but a field it does not know
  * is ignored rather than refused, so an app newer than the relay can
@@ -136,6 +139,18 @@ fun Application.installRoutes(
             val id = call.parameters["deviceId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
             val req = call.receive<CapsRequest>()
             if (db.setCaps(id, req.caps)) call.respond(HttpStatusCode.NoContent)
+            else call.respond(HttpStatusCode.NotFound)
+        }
+
+        // Its tokens, the same way: an iPhone's alert token comes from the
+        // owner's yes to iOS's prompt, which can come after registering,
+        // and every message to it was dropped until the +code was typed
+        // again.
+        post("/devices/{deviceId}/endpoint") {
+            val id = call.parameters["deviceId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val req = call.receive<EndpointRequest>()
+            if (req.pushEndpoint.isBlank()) return@post call.respond(HttpStatusCode.BadRequest)
+            if (db.setEndpoint(id, req.pushEndpoint)) call.respond(HttpStatusCode.NoContent)
             else call.respond(HttpStatusCode.NotFound)
         }
 

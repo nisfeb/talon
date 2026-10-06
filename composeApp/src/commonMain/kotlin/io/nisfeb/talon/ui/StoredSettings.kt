@@ -25,12 +25,16 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
     private data class Persisted(
         val endpoint: String = RelaySettings.DEFAULT_ENDPOINT,
         val deviceIds: Map<String, String> = emptyMap(),
+        val registered: Map<String, String> = emptyMap(),
+        val declined: Set<String> = emptySet(),
     )
 
     private val initial = store.load(Persisted())
     private val _endpoint = MutableStateFlow(initial.endpoint)
     override val endpoint: StateFlow<String> = _endpoint.asStateFlow()
     private val deviceIds = initial.deviceIds.toMutableMap()
+    private val registered = initial.registered.toMutableMap()
+    private val declined = initial.declined.toMutableSet()
 
     override fun setEndpoint(url: String) {
         if (_endpoint.value == url) return
@@ -47,11 +51,28 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
     }
 
     override fun clearDeviceIdFor(patp: String) {
-        if (deviceIds.remove(patp) == null) return
+        val had = deviceIds.remove(patp) != null
+        if (registered.remove(patp) == null && !had) return
         save()
     }
 
-    private fun save() = store.write(JSON.encodeToString(Persisted(_endpoint.value, deviceIds.toMap())))
+    override fun registeredEndpointFor(patp: String): String = registered[patp].orEmpty()
+
+    override fun setRegisteredEndpointFor(patp: String, endpoint: String) {
+        if (registered[patp] == endpoint) return
+        registered[patp] = endpoint
+        save()
+    }
+
+    override fun declinedFor(patp: String): Boolean = patp in declined
+
+    override fun setDeclinedFor(patp: String, declined: Boolean) {
+        if ((patp in this.declined) == declined) return
+        if (declined) this.declined += patp else this.declined -= patp
+        save()
+    }
+
+    private fun save() = store.write(JSON.encodeToString(Persisted(_endpoint.value, deviceIds.toMap(), registered.toMap(), declined.toSet())))
 }
 
 /** One ship's [MenuSeenState]. */

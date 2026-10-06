@@ -115,6 +115,26 @@ class RelayClient(
     private data class CapsRequest(val caps: List<String>)
 
     /**
+     * Tell the relay this device's push endpoint changed (an iPhone's
+     * alert token arriving after it registered), without the +code: the
+     * device id is the app's own secret, as for caps. A relay from before
+     * answers 404. False on any failure.
+     */
+    suspend fun updateEndpoint(deviceId: String, pushEndpoint: String): Boolean = withContext(ioDispatcher) {
+        if (deviceId.isBlank() || pushEndpoint.isBlank()) return@withContext false
+        runCatching {
+            val resp = http.post("${endpoint().trimEnd('/')}/devices/$deviceId/endpoint") {
+                contentType(ContentType.Application.Json)
+                setBody(JSON.encodeToString(EndpointRequest(pushEndpoint)))
+            }
+            resp.status.isSuccess()
+        }.getOrDefault(false)
+    }
+
+    @Serializable
+    private data class EndpointRequest(val pushEndpoint: String)
+
+    /**
      * Tell the relay to forget this device entirely. Idempotent —
      * a 404 is fine because "already gone" is the goal.
      */

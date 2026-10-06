@@ -248,6 +248,27 @@ fun App(
     // tryRestore() returns null while loggedInShip stays non-null
     // and repo.start crashes on session.ourPatp ("not logged in").
     var loggedInShip by remember { mutableStateOf(sessionStore.active()?.ship) }
+    // Notifications through the relay, where that is the only way
+    // (iOS): the +code just signed in with, held until the owner answers.
+    var notifyCode by remember { mutableStateOf<String?>(null) }
+    var notifyAsk by remember { mutableStateOf(false) }
+    val relayClient = remember(http) {
+        io.nisfeb.talon.notify.RelayClient(http = http, endpoint = { relaySettings.endpoint.value })
+    }
+    LaunchedEffect(loggedInShip) {
+        notifyAsk = io.nisfeb.talon.notify.shouldOfferNotificationSetup(
+            io.nisfeb.talon.ui.isRelayNotificationSetupNeeded, loggedInShip, relaySettings, justSignedIn = notifyCode != null,
+        )
+    }
+    // A token that changed since registering (an iPhone's alert token
+    // comes with the owner's yes, which can come later) goes to the relay.
+    LaunchedEffect(loggedInShip) {
+        val s = loggedInShip ?: return@LaunchedEffect
+        if (!io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) return@LaunchedEffect
+        pushTokenProvider.changes.collect {
+            io.nisfeb.talon.notify.refreshRegisteredEndpoint(relayClient, relaySettings, pushTokenProvider, s)
+        }
+    }
     // The ship "Add ship" left, which the login form's Cancel goes back
     // to. Null when there was none: a first sign-in has nowhere to return.
     var addingFrom by remember { mutableStateOf<String?>(null) }
@@ -1808,6 +1829,18 @@ fun App(
                             onMessage = jumpToChat,
                         )
                     }
+                    val notifyShip = loggedInShip
+                    val notifyShipUrl = notifyShip?.let { s -> sessionStore.all().firstOrNull { it.ship == s }?.shipUrl }
+                    if (notifyAsk && notifyShip != null && notifyShipUrl != null) {
+                        io.nisfeb.talon.ui.NotificationSetupDialog(
+                            code = notifyCode,
+                            enroll = { c ->
+                                io.nisfeb.talon.notify.enrollDevice(relayClient, relaySettings, pushTokenProvider, notifyShip, notifyShipUrl, c)
+                            },
+                            onDone = { notifyAsk = false; notifyCode = null },
+                            onNotNow = { relaySettings.setDeclinedFor(notifyShip, true); notifyAsk = false; notifyCode = null },
+                        )
+                    }
                     if (partyFloats) {
                         partyLine?.let { line ->
                             io.nisfeb.talon.ui.PartyLineBar(
@@ -2112,6 +2145,7 @@ fun App(
                     ship == null -> LoginScreen(
                         session = session,
                         onLoggedIn = { addingFrom = null; loggedInShip = it },
+                        onLoginCode = { notifyCode = it },
                         onCancel = addingFrom?.let { from -> { addingFrom = null; switchShip(from) } },
                         notice = loginNotice,
                         onRunLocalShip = if (io.nisfeb.talon.ui.isLocalCometSupported) {
@@ -2198,12 +2232,6 @@ fun App(
                         settingsSync = settingsSync,
                     )
                     showSettings -> {
-                        val relayClient = remember(http) {
-                            io.nisfeb.talon.notify.RelayClient(
-                                http = http,
-                                endpoint = { relaySettings.endpoint.value },
-                            )
-                        }
                         val activeShipUrl = remember(ship) {
                             ship?.let { sessionStore.all().firstOrNull { it.ship == ship } }?.shipUrl
                         }

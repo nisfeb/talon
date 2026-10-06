@@ -88,6 +88,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         center.delegate = self
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
             CallTrace.log("notifications \(granted ? "allowed" : "refused")")
+            // Registering with the relay waits on this answer before
+            // it waits on the alert token.
+            IosVoipBridge.shared.setAlertPermission(granted: granted)
             guard granted else { return }
             DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() }
         }
