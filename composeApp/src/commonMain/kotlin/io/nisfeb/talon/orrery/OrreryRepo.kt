@@ -85,6 +85,8 @@ class OrreryRepo(
     bareClient: HttpClient? = null,
     /** Location sharing, where the platform has it, which the pipe stops and holds. */
     private val location: io.nisfeb.talon.ui.LocationControl = io.nisfeb.talon.ui.NoopLocationControl,
+    /** Health sending off, its switch with it (Android's HealthWatch); nothing where there is none. */
+    private val stopHealth: () -> Unit = {},
     /** The model a test reads with, in place of the ladder, as [bareClient] is its ship. */
     private val readWith: LocalModel? = null,
 ) {
@@ -835,10 +837,10 @@ class OrreryRepo(
 
     /**
      * The pipe is off for good: turned off, or its key refused. The
-     * location switch lives under the pipe, so it goes off the screen
-     * with it, and is turned off with it: left on, the phone kept
-     * waking for moves with nowhere to send them and no way to say
-     * stop.
+     * location and health switches live under the pipe, so they go off
+     * the screen with it, and are turned off with it: left on, the phone
+     * kept waking for moves with nowhere to send them and no way to say
+     * stop, and health's 3-hourly worker kept waking for no key.
      *
      * Only here, not on detach; a ship with no pipe holds it instead
      * (see [attach]). Detaching is a restart, a ship switch, an Activity going away:
@@ -849,6 +851,7 @@ class OrreryRepo(
     private fun turnOff() {
         stopPipe()
         location.stop()
+        stopHealth()
     }
 
     suspend fun probe() {
