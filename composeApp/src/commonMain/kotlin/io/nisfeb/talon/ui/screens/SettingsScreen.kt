@@ -2512,7 +2512,7 @@ private fun ShipPushChoice(config: RelayPanelConfig) {
         }
         declined -> Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "You chose this relay over your ship's own notifications. Register below to get them from the relay.",
+                "You chose this relay over your ship's own notifications. Register this device with the relay to get them from it.",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1f),
             )
