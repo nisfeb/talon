@@ -66,9 +66,10 @@ class CalendarScreenTest {
     private fun alarms(json: String) = if (reminders) ",\"alarms\":$json" else ""
     @Volatile private var tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"}}]"""
     private val soon = java.time.LocalDate.now().atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
-    /** A weekly lesson at 16:00 in New York, from a CalDAV calendar, read in a UTC calendar: today's is on today's UTC date. */
+    /** A weekly lesson at 16:00 in New York, from a CalDAV calendar, read in a UTC calendar, on the same day as the
+     *  other rows: the device's date, whose 16:00 in New York (20:00 or 21:00 UTC) is that date in UTC too. */
     private val newYork = java.time.ZoneId.of("America/New_York")
-    private val lessonDay = java.time.LocalDate.now(java.time.ZoneOffset.UTC)
+    private val lessonDay = java.time.LocalDate.now()
     private val lessonAt = lessonDay.atTime(16, 0).atZone(newYork).toInstant().toEpochMilli()
     /** The series began on Monday 31 August at 16:00, its start written as that wall clock read as UTC. */
     private val lessonJson = """{"id":"f1","cal":"family","cat":"timed","kind":"rrule","start_ms":1788192000000,"zone":"America/New_York","dur_min":60,"fin":"dur","count":0,"args":{"rrule":"FREQ=WEEKLY;UNTIL=20261020T025959Z"},"meta":{"name":"Fencing lesson"}}"""
@@ -382,7 +383,8 @@ class CalendarScreenTest {
 
     /** Opens the lesson's editor on today's occurrence and sets its hour. */
     private fun ComposeUiTest.moveLesson(scope: String?, hour: String) {
-        open("Fencing lesson")
+        onAllNodesWithText("Fencing lesson", substring = true)[0].performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Close") }
         onNodeWithText("Edit").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("This change applies to") }
         // It opens on the occurrence, at 16:00 where the lesson is, not on the
