@@ -53,8 +53,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -182,9 +180,6 @@ fun ThreadList(
         mutableStateOf<Int?>(null)
     }
     var threadDividerResolved by remember(whom, parentId) { mutableStateOf(false) }
-    // Fade trigger for the in-thread "New" divider — same dwell-fade
-    // contract as the channel divider in DmChatScreen.
-    var threadDividerFaded by remember(whom, parentId) { mutableStateOf(false) }
     LaunchedEffect(whom, parentId) {
         if (!threadDividerResolved) {
             val row = db.threadUnreads().getOne(whom, parentId)
@@ -396,19 +391,8 @@ fun ThreadList(
             ?.m
             ?.id
     }
-    // Dwell-fade: same contract as the channel divider. Once the reply
-    // the divider sits above has been continuously visible 5s, fade.
-    LaunchedEffect(firstUnreadReplyId, whom, parentId) {
-        if (firstUnreadReplyId == null || threadDividerFaded) return@LaunchedEffect
-        snapshotFlow {
-            listState.layoutInfo.visibleItemsInfo.any { it.key == firstUnreadReplyId }
-        }.collectLatest { visible ->
-            if (visible) {
-                delay(5_000)
-                threadDividerFaded = true
-            }
-        }
-    }
+    // The in-thread "New" divider stays while the thread is open, as the
+    // channel's does: no timer takes it away while it is being read.
 
     // Follow it or stop, from inside: the same switch as on the post, so
     // its replies count (tint, notify, the Threads lists) or do not.
@@ -485,7 +469,7 @@ fun ThreadList(
                 contentType = { "reply" },
             ) { row ->
                 if (row.m.id == firstUnreadReplyId) {
-                    io.nisfeb.talon.ui.UnreadDividerRow(faded = threadDividerFaded)
+                    io.nisfeb.talon.ui.UnreadDividerRow()
                 }
                 val replyMsg = row.m
                 ThreadMessage(

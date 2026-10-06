@@ -11,6 +11,8 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
@@ -311,6 +313,61 @@ class DmChatScreenTest {
         val inText = heightOf("nice 👍")
         assertTrue(alone >= inText * 1.8, "alone $alone, in a sentence $inText")
         assertTrue(heightOf("😂😂😂😂") < alone, "four are text again")
+    }
+
+    // ─── the "New" divider ─────────────────────────────────────────
+
+    private fun unreadFrom(whom: String, firstUnreadId: String): suspend AppDatabase.() -> Unit = {
+        unreads().upsert(io.nisfeb.talon.data.UnreadEntity(whom, count = 8, notifyCount = 0, recencyMs = 1, firstUnreadId = firstUnreadId))
+    }
+
+    /** True when the node draws something: more than one colour in its pixels. */
+    private fun ComposeUiTest.drawn(text: String): Boolean {
+        val px = onNodeWithText(text).captureToImage().toPixelMap()
+        val colours = HashSet<androidx.compose.ui.graphics.Color>()
+        for (x in 0 until px.width step 2) for (y in 0 until px.height step 2) colours += px[x, y]
+        return colours.size > 1
+    }
+
+    // Users lost the divider to a 5 s dwell and a 3 s fade before they
+    // had read down to it. It stays while the conversation is open.
+    @Test
+    fun `the New divider stays drawn while the chat is open`() = chat(seed = {
+        (1..40).forEach { i -> messages().upsert(msg("~bus/1701411845${10 + i}", "~bus", "line $i", i * 1_000L)) }
+        unreadFrom("~bus", "~bus/170141184542")()
+    }) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("New").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("New").assertIsDisplayed()
+        mainClock.advanceTimeBy(20_000)
+        waitForIdle()
+        onNodeWithText("New").assertIsDisplayed()
+        assertTrue(drawn("New"), "the divider is still drawn after 20 s in the chat")
+    }
+
+    // The pinned post arrives after the list has put the divider at its
+    // top; the list loses that height from the top and, holding the
+    // newest message at the bottom, used to push the divider up behind
+    // the banner.
+    @Test
+    fun `the New divider sits below a pinned post that appears after the chat opened`() = chat(whom = ours, seed = {
+        ourChannel(*(1..40).map { i -> post("1701411845${10 + i}", "~bus", "post $i", i * 1_000L) }.toTypedArray())()
+        // More unread than fits on screen, so the divider lands at the very top.
+        unreadFrom(ours, "170141184525")()
+    }) { _, db ->
+        mainClock.advanceTimeBy(3_000); waitForIdle()
+        println("TRACE shown: " + (1..40).filter { onAllNodesWithText("post $it", substring = false).fetchSemanticsNodes().isNotEmpty() })
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("New").fetchSemanticsNodes().isNotEmpty() }
+        runBlocking { db.groups().setPinnedPostId(ours, "170141184511") }
+        // The banner is the row holding the "Pinned" icon.
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Pinned").fetchSemanticsNodes().isNotEmpty() }
+        waitForIdle()
+        val banner = onAllNodesWithContentDescription("Pinned").fetchSemanticsNodes().minBy { it.boundsInRoot.top }
+        val divider = onNodeWithText("New").fetchSemanticsNode()
+        assertTrue(
+            divider.boundsInRoot.top >= banner.boundsInRoot.bottom,
+            "divider top ${divider.boundsInRoot.top} under banner bottom ${banner.boundsInRoot.bottom}",
+        )
+        onNodeWithText("New").assertIsDisplayed()
     }
 
     // ─── pinning, in a channel of a group we host ──────────────────

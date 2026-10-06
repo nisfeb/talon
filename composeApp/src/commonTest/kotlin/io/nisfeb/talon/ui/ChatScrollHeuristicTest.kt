@@ -194,4 +194,32 @@ class ChatScrollHeuristicTest {
         assertEquals("optimistic-id", d.nextPendingSelfSendNewestId)
     }
 
+
+    // On entry the first load of rows counted as an arrival near the
+    // bottom, and its scroll cut short the "New" divider's placement.
+    @Test
+    fun `the first load does not move a reader the screen is still placing`() {
+        val held = decideAutoScroll(
+            rowsSize = 41, newestId = "m41", lastNewestId = "m40", lastSize = 40,
+            firstVisibleItemIndex = 7, pendingSendBaselineSize = null, pendingSelfSendNewestId = null,
+            holdInbound = true,
+        )
+        assertFalse(held.scrollToBottom)
+        val free = decideAutoScroll(
+            rowsSize = 41, newestId = "m41", lastNewestId = "m40", lastSize = 40,
+            firstVisibleItemIndex = 7, pendingSendBaselineSize = null, pendingSelfSendNewestId = null,
+            holdInbound = false,
+        )
+        assertTrue(free.scrollToBottom, "the same rows once placed still go to the bottom")
+    }
+
+    @Test
+    fun `a send still goes to the bottom while the screen is placing`() {
+        val d = decideAutoScroll(
+            rowsSize = 41, newestId = "local_1", lastNewestId = "m40", lastSize = 40,
+            firstVisibleItemIndex = 7, pendingSendBaselineSize = 40, pendingSelfSendNewestId = null,
+            holdInbound = true,
+        )
+        assertTrue(d.scrollToBottom)
+    }
 }
