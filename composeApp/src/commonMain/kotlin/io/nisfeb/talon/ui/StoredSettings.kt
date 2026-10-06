@@ -27,6 +27,8 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
         val deviceIds: Map<String, String> = emptyMap(),
         val registered: Map<String, String> = emptyMap(),
         val declined: Set<String> = emptySet(),
+        val trunkIds: Map<String, String> = emptyMap(),
+        val viaShip: Set<String> = emptySet(),
     )
 
     private val initial = store.load(Persisted())
@@ -35,6 +37,8 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
     private val deviceIds = initial.deviceIds.toMutableMap()
     private val registered = initial.registered.toMutableMap()
     private val declined = initial.declined.toMutableSet()
+    private val trunkIds = initial.trunkIds.toMutableMap()
+    private val viaShip = initial.viaShip.toMutableSet()
 
     override fun setEndpoint(url: String) {
         if (_endpoint.value == url) return
@@ -72,7 +76,25 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
         save()
     }
 
-    private fun save() = store.write(JSON.encodeToString(Persisted(_endpoint.value, deviceIds.toMap(), registered.toMap(), declined.toSet())))
+    override fun trunkDeviceIdFor(patp: String): String = trunkIds[patp].orEmpty()
+
+    override fun setTrunkDeviceIdFor(patp: String, id: String) {
+        if (trunkIds[patp] == id) return
+        trunkIds[patp] = id
+        save()
+    }
+
+    override fun viaShipPush(patp: String): Boolean = patp in viaShip
+
+    override fun setViaShipPush(patp: String, via: Boolean) {
+        if ((patp in viaShip) == via) return
+        if (via) viaShip += patp else viaShip -= patp
+        save()
+    }
+
+    private fun save() = store.write(
+        JSON.encodeToString(Persisted(_endpoint.value, deviceIds.toMap(), registered.toMap(), declined.toSet(), trunkIds.toMap(), viaShip.toSet())),
+    )
 }
 
 /** One ship's [MenuSeenState]. */

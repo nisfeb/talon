@@ -1683,6 +1683,12 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
         "Push relay",
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
     )
+    if (config.activePatp?.let { config.settings.viaShipPush(it) } == true) {
+        Text(
+            "Notifications on this device come from your own ship (its %trunk), not this relay.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
     Text(
         if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
             "With the app closed, this iPhone hears from your ship only " +
