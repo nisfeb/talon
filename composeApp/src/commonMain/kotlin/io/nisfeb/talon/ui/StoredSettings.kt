@@ -31,6 +31,7 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
         val viaShip: Set<String> = emptySet(),
         val shipDeclined: Set<String> = emptySet(),
         val gateways: Map<String, io.nisfeb.talon.notify.GatewayDevice> = emptyMap(),
+        val badges: Boolean = false,
     )
 
     private val initial = store.load(Persisted())
@@ -43,6 +44,14 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
     private val viaShip = initial.viaShip.toMutableSet()
     private val shipDeclined = initial.shipDeclined.toMutableSet()
     private val gateways = initial.gateways.toMutableMap()
+    private val _badges = MutableStateFlow(initial.badges)
+    override val badges: StateFlow<Boolean> = _badges.asStateFlow()
+
+    override fun setBadges(on: Boolean) {
+        if (_badges.value == on) return
+        _badges.value = on
+        save()
+    }
 
     override fun setEndpoint(url: String) {
         if (_endpoint.value == url) return
@@ -116,7 +125,7 @@ class StoredRelaySettings(private val store: UiSettingsStore) : RelaySettings {
         JSON.encodeToString(
             Persisted(
                 _endpoint.value, deviceIds.toMap(), registered.toMap(), declined.toSet(), trunkIds.toMap(), viaShip.toSet(),
-                shipDeclined.toSet(), gateways.toMap(),
+                shipDeclined.toSet(), gateways.toMap(), _badges.value,
             ),
         ),
     )

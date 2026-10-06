@@ -717,6 +717,10 @@ fun SettingsScreen(
                 PhoneNotificationsRow(relayConfig)
                 Spacer(Modifier.height(8.dp))
             }
+            if (relayConfig != null && io.nisfeb.talon.ui.isAppIconBadgeSupported) {
+                AppIconBadgeRow(relayConfig.settings)
+                Spacer(Modifier.height(8.dp))
+            }
             if (notificationHealth != null) {
                 NotificationHealthPanel(
                     health = notificationHealth,
@@ -2456,6 +2460,24 @@ private fun PhoneNotificationsRow(config: RelayPanelConfig) {
             onDone = { asking = false; from = io.nisfeb.talon.notify.phoneNotifications(config.settings, ship) },
             onNotNow = { asking = false },
         )
+    }
+}
+
+/** The unread count on the app icon (iOS), off until the owner turns it on. */
+@Composable
+internal fun AppIconBadgeRow(settings: io.nisfeb.talon.notify.RelaySettings) {
+    val on by settings.badges.collectAsState()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Unread count on the app icon", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Messages that notified you: direct messages, mentions and replies. " +
+                    "If no number shows, turn on Badges for Talon in the iPhone's Settings, Notifications.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = on, onCheckedChange = { settings.setBadges(it) })
     }
 }
 

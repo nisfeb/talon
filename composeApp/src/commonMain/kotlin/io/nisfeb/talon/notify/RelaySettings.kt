@@ -63,6 +63,10 @@ interface RelaySettings {
     fun gatewayFor(patp: String): GatewayDevice? = null
     fun setGatewayFor(patp: String, device: GatewayDevice) {}
 
+    /** The unread count on the app icon, on this device ([AppIconBadge]). */
+    val badges: StateFlow<Boolean> get() = BADGES_OFF
+    fun setBadges(on: Boolean) {}
+
     companion object {
         const val DEFAULT_ENDPOINT = "https://relay.nisfeb.com"
     }
@@ -104,4 +108,10 @@ class InMemoryRelaySettings(
     private val gateways = mutableMapOf<String, GatewayDevice>()
     override fun gatewayFor(patp: String): GatewayDevice? = gateways[patp]
     override fun setGatewayFor(patp: String, device: GatewayDevice) { gateways[patp] = device }
+    private val _badges = MutableStateFlow(false)
+    override val badges: StateFlow<Boolean> = _badges.asStateFlow()
+    override fun setBadges(on: Boolean) { _badges.value = on }
 }
+
+private val BADGES_OFF: StateFlow<Boolean> = MutableStateFlow(false)
+

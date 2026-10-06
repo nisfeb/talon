@@ -153,6 +153,33 @@ class RelayClient(
         }
     }
 
+    /** The app-icon count for a relay iPhone, null for badges off
+     *  ([reportBadge]). False on any failure. */
+    suspend fun setBadge(deviceId: String, count: Int?): Boolean = withContext(ioDispatcher) {
+        runCatching {
+            http.post("${endpoint().trimEnd('/')}/devices/$deviceId/badge") {
+                contentType(ContentType.Application.Json)
+                setBody(JSON.encodeToString(BadgeRequest(count)))
+            }.status.isSuccess()
+        }.getOrDefault(false)
+    }
+
+    /** The same for an iPhone its ship pushes to, by its gateway handle. */
+    suspend fun gatewayBadge(device: GatewayDevice, count: Int?): Boolean = withContext(ioDispatcher) {
+        runCatching {
+            http.post("${endpoint().trimEnd('/')}/gateway/badge") {
+                contentType(ContentType.Application.Json)
+                setBody(JSON.encodeToString(GatewayBadgeRequest(device.handle, device.secret, count)))
+            }.status.isSuccess()
+        }.getOrDefault(false)
+    }
+
+    @Serializable
+    private data class BadgeRequest(val count: Int?)
+
+    @Serializable
+    private data class GatewayBadgeRequest(val handle: String, val secret: String, val count: Int?)
+
     @Serializable
     private data class GatewayEnrollRequest(val token: String, val handle: String? = null, val secret: String? = null)
 
