@@ -1384,6 +1384,13 @@ fun TalonApp(
     val citeDisplayName: (String) -> String = remember(citeContacts) {
         { ship -> citeContacts.displayName(ship) }
     }
+    // Call from a profile: where this ship has %trunk, as App.kt.
+    val trunkWire by remember(callController) {
+        callController?.wire ?: kotlinx.coroutines.flow.MutableStateFlow(0)
+    }.collectAsState()
+    val callTarget: ((String) -> Unit)? = remember(callController, trunkWire > 0) {
+        if (callController != null && trunkWire > 0) { peer: String -> callController.placeCall(peer) } else null
+    }
     androidx.compose.runtime.CompositionLocalProvider(
         // The density setting and the font scale, as App.kt provides them.
         *io.nisfeb.talon.ui.chatDensityLocals(app.uiSettings),
@@ -1407,6 +1414,7 @@ fun TalonApp(
             app.session.baseUrl?.takeIf { it.isNotBlank() }?.let { CometDomes(app.session.http, it, app.db) }
         },
         LocalOpenProfile provides { ship: String -> profileSheetShip = ship },
+        LocalCallTo provides callTarget,
         io.nisfeb.talon.mail.LocalMailTo provides
             if (mailAvailable) {
                 { peer: String ->

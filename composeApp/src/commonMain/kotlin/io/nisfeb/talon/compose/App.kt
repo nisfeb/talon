@@ -996,6 +996,13 @@ fun App(
         val mailAvailability by mailRepo.availability.collectAsState()
         // Null until the nexus answers, so nothing offers mail on a ship
         // that has none.
+        // Call from a profile: where this ship has %trunk (a wire read off it).
+        val trunkWire by remember(callController) {
+            callController?.wire ?: kotlinx.coroutines.flow.MutableStateFlow(0)
+        }.collectAsState()
+        val callTarget: ((String) -> Unit)? = remember(callController, trunkWire > 0) {
+            if (callController != null && trunkWire > 0) { peer: String -> callController.placeCall(peer) } else null
+        }
         val mailTarget: ((String) -> Unit)? =
             if (mailAvailability == io.nisfeb.talon.mail.MailAvailability.PRESENT) {
                 { peer ->
@@ -1629,6 +1636,7 @@ fun App(
               io.nisfeb.talon.notify.LocalNotificationClearer provides remember(notifier) { { key: String -> notifier.clear(key) } },
               io.nisfeb.talon.calendar.LocalCalendarRepo provides calendarRepo,
               io.nisfeb.talon.mail.LocalMailTo provides mailTarget,
+              io.nisfeb.talon.ui.LocalCallTo provides callTarget,
               io.nisfeb.talon.ui.LocalOpenProfile provides { ship: String -> profileSheetShip = ship },
               io.nisfeb.talon.ui.LocalCometDomes provides remember(session, db) {
                   session.baseUrl?.takeIf { it.isNotBlank() }?.let { io.nisfeb.talon.ui.CometDomes(session.http, it, db) }
