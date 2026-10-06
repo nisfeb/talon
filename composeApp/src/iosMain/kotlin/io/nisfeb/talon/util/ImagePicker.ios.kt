@@ -143,10 +143,13 @@ private suspend fun pickPhoto(): PickedImage? = suspendCancellableCoroutine { co
 private suspend fun pickDocument(): PickedImage? = suspendCancellableCoroutine { cont ->
     var done = false
     val delegate = DocumentPickerDelegate { result ->
-        if (!done) { done = true; cont.resume(result) }
+        if (!done) { done = true; cont.resumeWith(result) }
     }
     activeDelegates.add(delegate)
-    val picker = UIDocumentPickerViewController(forOpeningContentTypes = listOf(UTTypeItem))
+    // As a copy: iOS fetches the file first (one in iCloud Drive that was
+    // not downloaded read as nothing, and a font picked so "did nothing"),
+    // and hands over a file of the app's own, no scoped access to keep.
+    val picker = UIDocumentPickerViewController(forOpeningContentTypes = listOf(UTTypeItem), asCopy = true)
     picker.delegate = delegate
     present(picker) {
         activeDelegates.remove(delegate)
@@ -211,7 +214,8 @@ private fun jpegOf(image: UIImage): PickedImage? {
 }
 
 private class DocumentPickerDelegate(
-    private val onResult: (PickedImage?) -> Unit,
+    /** The file, null when cancelled, or why it could not be read: said where it was picked, not dropped. */
+    private val onResult: (Result<PickedImage?>) -> Unit,
 ) : NSObject(), UIDocumentPickerDelegateProtocol {
 
     @OptIn(ExperimentalForeignApi::class)
@@ -234,12 +238,12 @@ private class DocumentPickerDelegate(
         }
         controller.dismissViewControllerAnimated(true, completion = null)
         activeDelegates.remove(this)
-        onResult(result)
+        onResult(result?.let { Result.success(it) } ?: Result.failure(IllegalStateException("That file could not be read.")))
     }
 
     override fun documentPickerWasCancelled(controller: UIDocumentPickerViewController) {
         controller.dismissViewControllerAnimated(true, completion = null)
         activeDelegates.remove(this)
-        onResult(null)
+        onResult(Result.success(null))
     }
 }

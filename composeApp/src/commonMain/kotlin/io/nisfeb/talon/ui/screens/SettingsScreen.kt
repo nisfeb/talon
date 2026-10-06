@@ -2339,6 +2339,8 @@ private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
     val pick = io.nisfeb.talon.util.rememberAnyFilePicker()
     val scope = rememberCoroutineScope()
     var removing by remember { mutableStateOf<String?>(null) }
+    // Why a picked file never reached the installer: it said nothing.
+    var pickProblem by remember { mutableStateOf<String?>(null) }
     val files = repo?.files ?: io.nisfeb.talon.ui.FontFiles.default
     Text("Font", style = MaterialTheme.typography.bodyMedium)
     Text(
@@ -2365,7 +2367,9 @@ private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
     if (repo != null) {
         TextButton(onClick = {
             scope.launch {
-                val f = runCatching { pick() }.getOrNull() ?: return@launch
+                pickProblem = null
+                val f = runCatching { pick() }
+                    .getOrElse { pickProblem = it.message ?: "The file could not be read."; null } ?: return@launch
                 repo.install(f.bytes, f.displayName)
             }
         }) { Text("Add a font (.ttf or .otf)…") }
@@ -2380,7 +2384,9 @@ private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
                 TextButton(onClick = { removing = family }) { Text("Remove") }
             }
         }
-        status?.let {
+        pickProblem?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+        } ?: status?.let {
             Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
