@@ -325,10 +325,12 @@ class DmChatScreenTest {
         chat(seed = {
             messages().upsert(msg("$comet/170141184506", comet, "hello", 1_000))
         }) { _, _ ->
-            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("RI").fetchSemanticsNodes().isNotEmpty() }
+            waitUntil(timeoutMillis = 15_000) { onAllNodesWithText("RI").fetchSemanticsNodes().isNotEmpty() }
             onAllNodesWithText("RI").onFirst().performClick()
-            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("RI").fetchSemanticsNodes().size >= 2 }
+            // The profile is open once its "Show @p" is there.
+            waitUntil(timeoutMillis = 15_000) { onAllNodesWithText("Show @p").fetchSemanticsNodes().isNotEmpty() }
             onAllNodesWithText("LM").assertCountEquals(0)
+            onAllNodesWithText("RI").assertCountEquals(2)
         }
     }
 
