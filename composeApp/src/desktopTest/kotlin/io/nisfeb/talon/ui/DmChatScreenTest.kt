@@ -315,6 +315,23 @@ class DmChatScreenTest {
         assertTrue(heightOf("😂😂😂😂") < alone, "four are text again")
     }
 
+    // ─── a ship's tile ─────────────────────────────────────────────
+
+    // A comet with no picture showed "RI" (its words, ..retrieves...invests)
+    // in the chat and "LM" (its @p, ~larwyx-monder-...) on its profile.
+    @Test
+    fun `a comet's tile is its words in the chat and on its profile`() {
+        val comet = "~larwyx-monder-winpel-timwyd--timben-botfun-harpub-daplyd"
+        chat(seed = {
+            messages().upsert(msg("$comet/170141184506", comet, "hello", 1_000))
+        }) { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("RI").fetchSemanticsNodes().isNotEmpty() }
+            onAllNodesWithText("RI").onFirst().performClick()
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("RI").fetchSemanticsNodes().size >= 2 }
+            onAllNodesWithText("LM").assertCountEquals(0)
+        }
+    }
+
     // ─── the "New" divider ─────────────────────────────────────────
 
     private fun unreadFrom(whom: String, firstUnreadId: String): suspend AppDatabase.() -> Unit = {

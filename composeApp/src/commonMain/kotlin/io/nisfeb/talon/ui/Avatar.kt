@@ -36,8 +36,15 @@ fun Avatar(
     colorHex: String? = null,
 ) {
     val isHttp = url?.let { it.startsWith("http://") || it.startsWith("https://") } == true
-    val tint = remember(label, colorHex) { colorHex?.let(::parseHexColor) ?: colorForLabel(label) }
-    val mono = remember(label) { monogramFor(label) }
+    // A bare @p is a ship the caller had no name for: draw the name the
+    // reader sees for it everywhere else, so a ship's tile is one tile.
+    // A comet was "RI" (its words) in a chat and "LM" (its @p) on its
+    // profile, in two colours. Before any contacts are read the resolver
+    // hands the @p back; a comet's words need nothing read.
+    val name = if (!label.startsWith("~")) label
+    else ShipNames.resolve(label).takeUnless { it == label } ?: Mnemonym.display(label) ?: label
+    val tint = remember(name, colorHex) { colorHex?.let(::parseHexColor) ?: colorForLabel(name) }
+    val mono = remember(name) { monogramFor(name) }
 
     Box(
         modifier = modifier
