@@ -54,6 +54,7 @@ class OrreryScreenTest {
         openItem: String? = null,
         view: io.nisfeb.talon.orrery.OrreryView? = io.nisfeb.talon.orrery.OrreryView(state, plan, System.currentTimeMillis()),
         problem: String? = null,
+        turnOn: (suspend () -> Result<Unit>)? = null,
         block: ComposeUiTest.() -> Unit,
     ) = runComposeUiTest {
         val item = mutableStateOf(openItem)
@@ -70,6 +71,7 @@ class OrreryScreenTest {
                         onRefreshActions = { did += "actions" },
                         openItem = item.value,
                         onOpenedItem = { did += "opened"; item.value = null },
+                        turnOn = turnOn,
                     ) { Text("The actions list") }
                 }
             }
@@ -149,4 +151,34 @@ class OrreryScreenTest {
             onNodeWithContentDescription("Refresh").performClick()
             assertTrue("refresh" in did)
         }
+
+    // "getting 'Orrery could not be read: This install has no orrery key
+    // yet' when it absolutely does": the ship held a key for this desktop,
+    // and the desktop had lost its copy weeks before.
+    @Test
+    fun `not on for this device, it says so and offers to turn it on`() =
+        orrery(view = null, problem = "This install has no orrery key yet.", turnOn = { did += "turned on"; Result.success(Unit) }) {
+            onNodeWithText("Coming up").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("isn't turned on for this device") }
+            assertTrue(!shows("could not be read"), "not a failure to read")
+            onNodeWithText("Turn on").performClick()
+            waitUntil(timeoutMillis = 5_000) { "refresh" in did }
+            assertTrue("turned on" in did, did.toString())
+        }
+
+    @Test
+    fun `turning on that fails says why`() =
+        orrery(view = null, turnOn = { Result.failure(IllegalStateException("Orrery is not on this ship.")) }) {
+            onNodeWithText("Coming up").performClick()
+            onNodeWithText("Turn on").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Orrery is not on this ship.") }
+            assertTrue("refresh" !in did)
+        }
+
+    @Test
+    fun `on for this device, a read that failed still says so`() = orrery(view = null, problem = "502") {
+        onNodeWithText("Coming up").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Orrery could not be read") }
+        assertTrue(!shows("Turn on"))
+    }
 }
