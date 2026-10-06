@@ -74,7 +74,8 @@ fun leaveBody(plan: LeavePlan, zone: TimeZone): String =
 suspend fun readLeavePlan(api: OrreryApi, token: String): LeavePlan? {
     val travel = api.travel(token)
     if (travel["enabled"]?.jsonPrimitive?.booleanOrNull != true) return null
-    return leavePlanOf(travel, api.travelLast())
+    // The pass's record by scry where the ship allows it: no request, no history.
+    return leavePlanOf(travel, api.travelLastByScry() ?: api.travelLast())
 }
 
 /** What the alarm does when it fires. */
