@@ -285,7 +285,7 @@ class ShipConnection(
         // every real notification because that field doesn't exist.
         val add = json["add"]?.jsonObject ?: return
         val sourceObj = add["source"]?.jsonObject ?: return
-        val whom = extractWhom(sourceObj) ?: return
+        val whom = activityWhom(sourceObj) ?: return
         val event = add["event"]?.jsonObject ?: return
         val notify = (event["notified"] as? JsonPrimitive)?.booleanOrNull == true
         if (!notify) return
@@ -295,7 +295,7 @@ class ShipConnection(
         // means a reconnect-and-replay won't re-push events we
         // already delivered (the SSE event id resets to 1 on every
         // channel open).
-        val postId = extractPostId(event) ?: return
+        val postId = activityPostId(event) ?: return
 
         val cursor = db.lastEventId(shipRowId, deviceId)
         if (cursor == postId) return
@@ -342,6 +342,7 @@ class ShipConnection(
             platform = dev.platform,
             author = postId.substringBefore('/').takeIf { it.startsWith("~") },
             preview = ActivityPreview.of(event),
+            parent = activityParentId(event),
         )
         db.setLastEventId(shipRowId, deviceId, postId)
     }
@@ -444,28 +445,6 @@ class ShipConnection(
         return false
     }
 
-    private fun extractPostId(event: JsonObject): String? {
-        for (kind in arrayOf("dm-post", "chan-post", "club-post")) {
-            event[kind]?.jsonObject?.get("key")
-                ?.jsonObject?.get("id")
-                ?.jsonPrimitive?.contentOrNull
-                ?.let { return it }
-        }
-        return null
-    }
-
-    private fun extractWhom(source: JsonObject): String? {
-        // Tlon's source can be { dm: { ship: "~..." } }, { club: { id }},
-        // or { channel: { nest: "chat/...", group: "~.../..." } }.
-        // We surface a stable string for each.
-        source["dm"]?.jsonObject?.get("ship")?.jsonPrimitive?.contentOrNull
-            ?.let { return it }
-        source["club"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
-            ?.let { return it }
-        source["channel"]?.jsonObject?.get("nest")?.jsonPrimitive?.contentOrNull
-            ?.let { return it }
-        return null
-    }
 
     private fun ackEvent(channelId: String, id: String) {
         if (!ackedIds.add(id)) return
@@ -523,10 +502,52 @@ internal fun readWhom(json: JsonObject): String? {
     val counts = listOf("count", "notify-count").map { (summary[it] as? JsonPrimitive)?.content?.toIntOrNull() }
     if (counts.any { it != 0 }) return null
     val source = read["source"] as? JsonObject ?: return null
-    return ((source["dm"] as? JsonObject)?.get("ship")
+    return ((source["dm"] as? JsonObject)?.let { it["ship"] ?: it["club"] }
         ?: (source["club"] as? JsonObject)?.get("id")
         ?: (source["channel"] as? JsonObject)?.get("nest"))
         ?.let { (it as? JsonPrimitive)?.content }
+}
+
+/**
+ * %activity /v4's message events (landscape sur/activity.hoon): a channel
+ * post, a reply in a thread, and their DM twins; chan-post and club-post
+ * are older names. The relay read only dm-post, chan-post and club-post,
+ * so it never pushed a channel post, a reply or a club DM (2026-10-06).
+ */
+internal val ACTIVITY_MESSAGE_TAGS = arrayOf("post", "reply", "dm-post", "dm-reply", "chan-post", "club-post")
+
+/** The message an /v4 event is about: its key.id, "<author>/<id>". */
+internal fun activityPostId(event: JsonObject): String? {
+    for (kind in ACTIVITY_MESSAGE_TAGS) {
+        (((event[kind] as? JsonObject)?.get("key") as? JsonObject)?.get("id") as? JsonPrimitive)
+            ?.contentOrNull?.let { return it }
+    }
+    return null
+}
+
+/** A reply's parent post, so a tap opens the thread; null for a top-level post. */
+internal fun activityParentId(event: JsonObject): String? {
+    for (kind in arrayOf("reply", "dm-reply")) {
+        (((event[kind] as? JsonObject)?.get("parent") as? JsonObject)?.get("id") as? JsonPrimitive)
+            ?.contentOrNull?.let { return it }
+    }
+    return null
+}
+
+/**
+ * The chat an /v4 source names: a DM (a ship, or a club's id), a channel,
+ * a thread (its channel) or a DM thread (its whom); `club.id` from
+ * before v4. The relay wanted `club.id` and had no thread forms.
+ */
+internal fun activityWhom(source: JsonObject): String? {
+    fun JsonElement?.text() = (this as? JsonPrimitive)?.contentOrNull
+    (source["dm"] as? JsonObject)?.let { d -> (d["ship"].text() ?: d["club"].text())?.let { return it } }
+    ((source["dm-thread"] as? JsonObject)?.get("whom") as? JsonObject)
+        ?.let { w -> (w["ship"].text() ?: w["club"].text())?.let { return it } }
+    (source["channel"] as? JsonObject)?.get("nest").text()?.let { return it }
+    (source["thread"] as? JsonObject)?.get("channel").text()?.let { return it }
+    (source["club"] as? JsonObject)?.get("id").text()?.let { return it }
+    return null
 }
 
 /** Whether a device whose app declared [caps] is sent read pushes. */

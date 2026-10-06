@@ -186,6 +186,9 @@ class TalonMessagingReceiver : MessagingReceiver() {
                     context = context,
                     whom = whom,
                     postId = eventId?.takeIf { it.isNotBlank() },
+                    // A reply's parent, from a relay (or a ship's trunk)
+                    // that sends one: the tap opens the thread on it.
+                    parentId = parsed?.get("parent")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() },
                     // A tap switches to the ship this is for, because the
                     // same whom on another one is a different conversation.
                     forShip = patp,

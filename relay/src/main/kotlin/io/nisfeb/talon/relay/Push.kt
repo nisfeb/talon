@@ -126,6 +126,8 @@ class Push(
          *  them. */
         author: String? = null,
         preview: String? = null,
+        /** A reply's parent post: the Android receiver opens the thread with it. */
+        parent: String? = null,
     ) {
         // Every iOS drop is said: they were silent, and a week of the
         // relay's log held no alert sent to an iPhone and no sign why.
@@ -171,6 +173,10 @@ class Push(
             append(escape(whom))
             append("""","id":"""")
             append(escape(postId))
+            if (parent != null) {
+                append("""","parent":"""")
+                append(escape(parent))
+            }
             append("\"}")
         }
         post(endpoint, body)

@@ -15,7 +15,7 @@ object ActivityPreview {
     private const val MAX = 140
 
     fun of(event: JsonObject): String? {
-        for (kind in arrayOf("dm-post", "chan-post", "club-post")) {
+        for (kind in ACTIVITY_MESSAGE_TAGS) {
             val content = event[kind]?.jsonObject?.get("content") ?: continue
             val sb = StringBuilder()
             walk(content, sb)
