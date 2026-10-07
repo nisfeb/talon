@@ -156,15 +156,7 @@ class ShipConnection(
     }
 
     private fun subscribe(channelId: String): Boolean {
-        // %activity /v4 — same subscribe path Talon-the-app uses — plus
-        // %trunk /calls for rings. Most ships have no %trunk installed;
-        // eyre nacks that one subscription individually and the channel
-        // (and %activity with it) carries on, so a missing desk costs
-        // nothing but a logged warning.
-        val ship = patp.removePrefix("~")
-        val payload =
-            """[{"id":$SUB_ACTIVITY,"action":"subscribe","ship":"$ship","app":"activity","path":"/v4"},""" +
-                """{"id":$SUB_CALLS,"action":"subscribe","ship":"$ship","app":"trunk","path":"/calls"}]"""
+        val payload = subscribePayload(patp)
         val req = Request.Builder()
             .url("$shipUrl/~/channel/$channelId")
             .put(payload.toRequestBody(JSON_MEDIA))
@@ -259,17 +251,21 @@ class ShipConnection(
         }
         val json = body["json"]?.jsonObject ?: return
 
-        // Route by subscription id — the two streams have nothing in
-        // common beyond the channel they share.
-        if (body["id"]?.jsonPrimitive?.contentOrNull == SUB_CALLS.toString()) {
+        // Route by subscription id: the streams have nothing in common
+        // beyond the channel they share.
+        val stream = streamOf(body["id"]?.jsonPrimitive?.contentOrNull)
+        if (stream == Stream.CALLS) {
             handleRing(json)
             return
         }
 
         // Read to the end, on this ship's own client or any other: the
         // phone's notifications for it go, as Tlon's %notify dismisses
-        // them. Off the message cursor, like a ring.
+        // them. Off the message cursor, like a ring. Only from /v4/reads:
+        // /v4 carries no ordinary read, only a deleted chat's dummy one,
+        // which /v4/reads carries too.
         if (json.containsKey("read")) {
+            if (stream != Stream.READS) return
             val dev = db.deviceFor(deviceId) ?: return
             val whom = readPushWhom(json, dev.caps) ?: return
             log.info("read whom=$whom")
@@ -458,10 +454,11 @@ class ShipConnection(
     private val JsonPrimitive.booleanOrNull: Boolean?
         get() = runCatching { boolean }.getOrNull()
 
-    private companion object {
+    internal companion object {
         /** Subscription ids on the shared eyre channel. */
         const val SUB_ACTIVITY = 1
         const val SUB_CALLS = 2
+        const val SUB_READS = 3
 
         private val JSON_MEDIA = "application/json".toMediaType()
     }
@@ -561,6 +558,38 @@ internal fun notifyLevels(settings: JsonObject): Map<String, String> {
             ?: (v as? JsonPrimitive)?.contentOrNull?.let { runCatching { Json.parseToJsonElement(it) as? JsonObject }.getOrNull() }
         (obj?.get("level") as? JsonPrimitive)?.contentOrNull?.let { whom to it }
     }.toMap()
+}
+
+/**
+ * The channel's subscriptions: %activity /v4 (the path Talon itself uses)
+ * for messages, /v4/reads for reads, and %trunk /calls for rings.
+ *
+ * Tlon sends an ordinary read only to /v4/reads (give-reads is
+ * `[%only /reads]` in app/activity.hoon, /v4/unreads before late 2025),
+ * so watching /v4 alone, the relay never sent a read push (found in the
+ * gwbtc/trunk#1 review, 2026-10-06). Most ships have no %trunk, and a
+ * ship on a Tlon without /v4/reads has no such path: eyre nacks that one
+ * subscription and the channel carries on, so either costs nothing but a
+ * logged warning.
+ */
+internal fun subscribePayload(patp: String): String {
+    val ship = patp.removePrefix("~")
+    fun sub(id: Int, app: String, path: String) =
+        """{"id":$id,"action":"subscribe","ship":"$ship","app":"$app","path":"$path"}"""
+    return listOf(
+        sub(ShipConnection.SUB_ACTIVITY, "activity", "/v4"),
+        sub(ShipConnection.SUB_READS, "activity", "/v4/reads"),
+        sub(ShipConnection.SUB_CALLS, "trunk", "/calls"),
+    ).joinToString(",", "[", "]")
+}
+
+internal enum class Stream { ACTIVITY, READS, CALLS }
+
+/** The stream an event came on, by the subscription id eyre gives it. */
+internal fun streamOf(subscriptionId: String?): Stream = when (subscriptionId) {
+    ShipConnection.SUB_CALLS.toString() -> Stream.CALLS
+    ShipConnection.SUB_READS.toString() -> Stream.READS
+    else -> Stream.ACTIVITY
 }
 
 /** Whether a device whose app declared [caps] is sent read pushes. */
