@@ -268,8 +268,8 @@ fun DmChatScreen(
     // jumping to an older post move it back (see [reach]).
     var windowFromMs by remember(whom) { mutableStateOf<Long?>(null) }
     fun widenTo(fromMs: Long) { windowFromMs = minOf(windowFromMs ?: Long.MAX_VALUE, fromMs) }
-    /** Take in [id]'s post, if it is kept here and older than the window. */
-    suspend fun reach(id: String) { db.messages().getOne(whom, id)?.sentMs?.let(::widenTo) }
+    /** Take in [id]'s post, if it is kept here and older than the window; whether it is kept. */
+    suspend fun reach(id: String): Boolean = db.messages().getOne(whom, id)?.sentMs?.let { widenTo(it); true } ?: false
     LaunchedEffect(whom) { widenTo(db.messages().sentMsAfterNewest(whom, CHAT_WINDOW - 1) ?: Long.MIN_VALUE) }
     LaunchedEffect(initialScrollMessageId) { initialScrollMessageId?.let { reach(it) } }
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -338,6 +338,9 @@ fun DmChatScreen(
     // null precisely when the conversation is caught up.
     var dividerAnchorId by remember(whom) { mutableStateOf<String?>(null) }
     var dividerResolved by remember(whom) { mutableStateOf(false) }
+    // The first unread is kept here, so its row (and the divider over it)
+    // is on its way into the window: entry waits for it.
+    var dividerComing by remember(whom) { mutableStateOf(false) }
     // Where the list stood (first visible item's key and offset) right
     // after it put the divider at the top; null once the reader has moved
     // it. A key, not an index: newer rows landing below shift the index.
@@ -427,8 +430,9 @@ fun DmChatScreen(
     /**
      * Land with the divider at the top of the viewport and the new
      * messages reading down from it. Under reverseLayout scrollToItem
-     * puts the item at the bottom edge, so back off by the rest of the
-     * viewport (toward index 0, the newest). False with no divider.
+     * puts the item at the bottom edge, or as near it as the oldest
+     * message lets it go in a short chat, so back off by what is left
+     * above it (toward index 0, the newest). False with no divider.
      */
     fun listAt(): Pair<Any, Int>? = listState.layoutInfo.visibleItemsInfo.firstOrNull()
         ?.let { it.key to listState.firstVisibleItemScrollOffset }
@@ -440,10 +444,12 @@ fun DmChatScreen(
         withFrameNanos { }
         listState.scrollToItem(rows.lastIndex - dividerIdx)
         val info = listState.layoutInfo
-        val viewport = info.viewportEndOffset - info.viewportStartOffset
-        val dividerSize = info.visibleItemsInfo
-            .firstOrNull { it.key == ChatListItem.UnreadDivider.key }?.size ?: 0
-        listState.scrollBy(-(viewport - dividerSize).toFloat())
+        val divider = info.visibleItemsInfo.firstOrNull { it.key == ChatListItem.UnreadDivider.key }
+        // Its top edge to the viewport's. Assuming it sat on the bottom
+        // edge overshot by its distance from it: in a short chat the whole
+        // divider went past the top, and the reader saw no "New" (2026-10-07).
+        val top = (divider?.offset ?: info.viewportStartOffset) + (divider?.size ?: 0)
+        listState.scrollBy(-(info.viewportEndOffset - top).toFloat())
         dividerPlaced = listAt()
         return true
     }
@@ -485,6 +491,9 @@ fun DmChatScreen(
             // at the bottom in the meantime, which is also where a
             // caught-up chat belongs.
             if (!dividerResolved) return@LaunchedEffect
+            // The window is still taking the first unread in: settling at
+            // the bottom now left the divider out of sight for good.
+            if (dividerComing && displayRows.none { it is ChatListItem.UnreadDivider }) return@LaunchedEffect
             if (!placeDivider(displayRows)) listState.scrollToItem(0)
         }
         hasAnchored = true
@@ -582,7 +591,7 @@ fun DmChatScreen(
             unreadSnapshot = u?.count ?: 0
             dividerAnchorId = u?.firstUnreadId
             // The first unread may be further back than the window.
-            u?.firstUnreadId?.let { reach(it) }
+            dividerComing = u?.firstUnreadId?.let { reach(it) } ?: false
             dividerResolved = true
         }
         repo.setOpenChat(whom)

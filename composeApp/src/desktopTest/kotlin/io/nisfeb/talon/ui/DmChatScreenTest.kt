@@ -11,6 +11,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.performClick
@@ -374,8 +375,11 @@ class DmChatScreenTest {
         unreadFrom(ours, "170141184525")()
     }) { _, db ->
         mainClock.advanceTimeBy(3_000); waitForIdle()
-        println("TRACE shown: " + (1..40).filter { onAllNodesWithText("post $it", substring = false).fetchSemanticsNodes().isNotEmpty() })
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("New").fetchSemanticsNodes().isNotEmpty() }
+        // All of it, not a sliver: a short chat put all but a pixel of
+        // it past the list's top, and on CI the pixel too.
+        val list = onNode(hasScrollToIndexAction()).fetchSemanticsNode().boundsInRoot
+        assertTrue(onNodeWithText("New").fetchSemanticsNode().boundsInRoot.top >= list.top, "the whole divider is in the list")
         runBlocking { db.groups().setPinnedPostId(ours, "170141184511") }
         // The banner is the row holding the "Pinned" icon.
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithContentDescription("Pinned").fetchSemanticsNodes().isNotEmpty() }
@@ -532,7 +536,10 @@ class DmChatScreenTest {
         // the rest kept here is taken in, and the ship is not asked.
         onNode(hasScrollAction()).performScrollToIndex(200)
         waitUntil(timeoutMillis = 20_000) { runCatching { onNode(hasScrollAction()).performScrollToIndex(260) }.isSuccess }
-        assertTrue(ship.scried.none { "/older/" in it && "/30/" in it }, "posts kept here were asked of the ship: ${ship.scried.filter { "/older/" in it }}")
+        // Past the oldest kept here (post 000) the ship is asked, rightly;
+        // CI's scroll sometimes got there before this looked.
+        val asked = ship.scried.filter { "/older/" in it && "/30/" in it }
+        assertTrue(asked.all { "/1701411845000/" in it }, "posts kept here were asked of the ship: $asked")
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("post 000").fetchSemanticsNodes().isNotEmpty() }
     }
 

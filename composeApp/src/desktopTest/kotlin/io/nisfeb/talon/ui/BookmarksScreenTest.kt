@@ -110,6 +110,8 @@ class BookmarksScreenTest {
     @Test
     fun `a new folder is kept here and sent`() = bookmarks { ship, db ->
         onNodeWithText("+ New").performClick()
+        // The dialog's field, once it is there: CI typed before it was.
+        waitUntil(timeoutMillis = 20_000) { onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
         onNode(hasSetTextAction()).performTextInput("Work")
         onNodeWithText("Save").performClick()
         settled { runBlocking { db.bookmarkFolders().streamFolders().first().any { it.name == "Work" } } }
