@@ -21,6 +21,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.filter
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -1112,11 +1114,33 @@ fun TalonApp(
     // the ship finishing turns it off, "Use the relay" before registering
     // turns it back on.
     var keepAlive by remember { mutableStateOf(true) }
+    val keepAliveLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(loggedInShip) {
         val ship = loggedInShip ?: return@LaunchedEffect
-        kotlinx.coroutines.flow.merge(kotlinx.coroutines.flow.flowOf(Unit), app.relaySettings.changes).collect {
-            val endpoint = io.nisfeb.talon.notify.TalonMessagingReceiver.cachedEndpoint(context)
-            keepAlive = io.nisfeb.talon.notify.keepAliveNeeded(app.relaySettings, ship, endpoint)
+        kotlinx.coroutines.flow.merge(
+            kotlinx.coroutines.flow.flowOf(Unit),
+            app.relaySettings.changes,
+            // The push app gave a new endpoint, or unregistered Talon.
+            io.nisfeb.talon.notify.TalonMessagingReceiver.endpointFlow(context).map { },
+            // Mail notifies only from the running app.
+            snapshotFlow { mailAvailabilityState.value }.map { },
+            // The ship's trunk stopped answering after the move.
+            io.nisfeb.talon.notify.ShipPushHealth.broken.map { },
+            // Back in front: a start Android refused from the background
+            // (Talon behind, a setting changed) is tried again here.
+            keepAliveLifecycle.lifecycle.currentStateFlow
+                .filter { it.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED) }.map { },
+        ).collect {
+            // An endpoint with no distributor left to deliver to is none:
+            // uninstalling it sends Talon no word.
+            val endpoint = io.nisfeb.talon.notify.TalonMessagingReceiver.cachedEndpoint(context)?.takeIf {
+                runCatching { org.unifiedpush.android.connector.UnifiedPush.getDistributors(context).isNotEmpty() }.getOrDefault(true)
+            }
+            keepAlive = io.nisfeb.talon.notify.keepAliveNeeded(
+                app.relaySettings, ship, endpoint,
+                mailNeedsProcess = mailAvailabilityState.value == io.nisfeb.talon.mail.MailAvailability.PRESENT,
+                shipPushBroken = ship in io.nisfeb.talon.notify.ShipPushHealth.broken.value,
+            )
             if (keepAlive) {
                 runCatching { TalonSyncService.start(context) }
             } else {
@@ -2303,8 +2327,10 @@ fun TalonApp(
                         },
                         activePatp = ourPatp,
                         activeShipUrl = activeShipUrl,
+                        // On the repo's scope: "Use the relay" and then leaving
+                        // Settings at once must not cancel the ship's unregister.
                         shipPoke = { body ->
-                            app.repo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body)
+                            app.repo.carry { app.repo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body) }
                         },
                         shipPushStatus = { app.repo.trunkDebug() },
                     ),

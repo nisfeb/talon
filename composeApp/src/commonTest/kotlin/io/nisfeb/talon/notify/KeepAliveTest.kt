@@ -38,4 +38,13 @@ class KeepAliveTest {
         kotlinx.coroutines.test.runTest { leaveShipPush("~zod", s) {} }
         assertTrue(keepAliveNeeded(s, "~zod", endpoint))
     }
+
+    // Review of 1.8.1: mail notifies only from the running app.
+    @Test
+    fun mail_keeps_talon_running_even_with_push() {
+        val s = InMemoryRelaySettings().apply { setViaShipPush("~zod", true) }
+        assertTrue(keepAliveNeeded(s, "~zod", endpoint, mailNeedsProcess = true))
+        assertFalse(keepAliveNeeded(s, "~zod", endpoint, mailNeedsProcess = false))
+    }
 }
+

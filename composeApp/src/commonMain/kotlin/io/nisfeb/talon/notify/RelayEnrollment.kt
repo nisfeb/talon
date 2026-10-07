@@ -107,6 +107,16 @@ fun phoneNotifications(settings: RelaySettings, ship: String): PhoneNotification
  * trunk that dropped the device, still reads as covered. Ask the ship's
  * push status (trunk wire 12) when that lands.
  */
-fun keepAliveNeeded(settings: RelaySettings, ship: String, pushEndpoint: String?): Boolean =
-    pushEndpoint.isNullOrBlank() || !(settings.viaShipPush(ship) || settings.deviceIdFor(ship).isNotBlank())
+fun keepAliveNeeded(
+    settings: RelaySettings,
+    ship: String,
+    pushEndpoint: String?,
+    /** Mail notifies only from the running app: auspex has no push path. */
+    mailNeedsProcess: Boolean = false,
+    /** The ship's %trunk stopped answering after the move ([ShipPushHealth]). */
+    shipPushBroken: Boolean = false,
+): Boolean =
+    mailNeedsProcess || pushEndpoint.isNullOrBlank() ||
+        (settings.viaShipPush(ship) && shipPushBroken) ||
+        !(settings.viaShipPush(ship) || settings.deviceIdFor(ship).isNotBlank())
 

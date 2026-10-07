@@ -3,6 +3,7 @@
 package io.nisfeb.talon.compose
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import io.nisfeb.talon.data.latestPerConversation
@@ -258,6 +259,11 @@ fun App(
     var notifyAsk by remember { mutableStateOf(false) }
     val relayClient = remember(http) {
         io.nisfeb.talon.notify.RelayClient(http = http, endpoint = { relaySettings.endpoint.value })
+    }
+    // Outlives any one ship's tree: signing out of a ship tears its tree
+    // down while its push cleanup is still on the wire.
+    val pushCleanupScope = remember {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
     }
     LaunchedEffect(loggedInShip) {
         notifyAsk = io.nisfeb.talon.notify.shouldOfferNotificationSetup(
@@ -778,15 +784,30 @@ fun App(
                     relayUnregister = { id -> relayClient.unregister(id) },
                     newId = { io.nisfeb.talon.data.newGid() },
                 )
-                // Again when the badge switch moves: the ship counts the badge
-                // only for a device that says so ("badge" cap, wire 12).
+                // Only in front: the test push counts only when Talon is open
+                // to take it, and a backgrounded wait unregistered a working
+                // device. Again when %trunk lands after sign-in (Talon
+                // installs it), not only at the next start.
+                launch {
+                    io.nisfeb.talon.notify.keepMovingToShipPush(
+                        ship, relaySettings, ports,
+                        bootstrapping = kotlinx.coroutines.flow.combine(
+                            repo.bootstrapping, appForeground ?: kotlinx.coroutines.flow.flowOf(true),
+                        ) { busy, front -> busy || !front },
+                        trunkArrived = io.nisfeb.talon.call.TrunkArrivals.arrived.filter { it == ship }.map { },
+                    ) {
+                        io.nisfeb.talon.util.Log.i("ShipPush", "$ship: $it")
+                    }
+                }
+                // Once moved, a new token or the badge switch is told to the
+                // ship at once (an upsert): the ship counts the badge only for
+                // a device that says so ("badge" cap, wire 12).
                 kotlinx.coroutines.flow.merge(
-                    kotlinx.coroutines.flow.flowOf(Unit),
-                    pushTokenProvider.changes,
+                    pushTokenProvider.changes.drop(1),
                     relaySettings.badges.drop(1).map { },
                 ).collect {
-                    io.nisfeb.talon.notify.keepMovingToShipPush(ship, relaySettings, ports, repo.bootstrapping) {
-                        io.nisfeb.talon.util.Log.i("ShipPush", "$ship: $it")
+                    if (relaySettings.viaShipPush(ship)) {
+                        io.nisfeb.talon.util.Log.i("ShipPush", "$ship: ${io.nisfeb.talon.notify.moveToShipPush(ship, relaySettings, ports)}")
                     }
                 }
             }
@@ -2021,6 +2042,20 @@ fun App(
                  */
                 val forgetShip: (String, Boolean) -> Unit = { gone, alsoData ->
                     val wasActive = gone == loggedInShip
+                    // Nothing pushes here for it any more: the relay, and the
+                    // ship's own %trunk, with the saved cookie, since the
+                    // session goes next. Best effort, on the app's scope.
+                    val goneSaved = sessionStore.all().firstOrNull { it.ship == gone }
+                    val goneRelayId = relaySettings.deviceIdFor(gone)
+                    pushCleanupScope.launch {
+                        if (goneRelayId.isNotBlank()) {
+                            runCatching { relayClient.unregister(goneRelayId) }
+                            relaySettings.clearDeviceIdFor(gone)
+                        }
+                        io.nisfeb.talon.notify.forgetShipPush(gone, relaySettings) { body ->
+                            goneSaved?.let { io.nisfeb.talon.notify.pokeTrunkSignedOut(it, body, http) }
+                        }
+                    }
                     if (wasActive) {
                         leaveShip()
                     }
@@ -2339,7 +2374,8 @@ fun App(
                                 activePatp = ship,
                                 activeShipUrl = activeShipUrl,
                                 shipPoke = if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
-                                    { body -> repo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body) }
+                                    // On the repo's scope: leaving Settings must not cancel it.
+                                    { body -> repo.carry { repo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body) } }
                                 } else {
                                     null
                                 },

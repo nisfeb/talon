@@ -204,6 +204,10 @@ object Notifications {
      * alarm kept for it share one slot.
      */
     fun showShipPush(context: Context, push: io.nisfeb.talon.notify.ShipPushMessage) {
+        // An orrery action: under the app's own slot for it, so the pushed
+        // copy and the app's replace each other, and an answer anywhere
+        // takes back both ([clearAction]).
+        io.nisfeb.talon.orrery.actionIdOfTag(push.tag)?.let { return showAction(context, it, push.title, push.body) }
         // A leave push or a running-late one: the alert channel, and the tap opens its appointment.
         val item = io.nisfeb.talon.orrery.alertItemOf(push.tag)
         post(context, push.tag ?: "ship:${push.title.hashCode()}", if (item != null) CHANNEL_LEAVE else CHANNEL_SHIP, push.title, push.body, item != null,

@@ -1,6 +1,7 @@
 package io.nisfeb.talon.notify
 
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -130,4 +131,83 @@ class ShipPushMoveTest {
         s.setShipPushDeclined("~zod", false)
         assertEquals(ShipPushMove.ViaShip, moveToShipPush("~zod", s, ports()))
     }
+
+    // Review of 1.8.1: trunk installed minutes after sign-in was not
+    // noticed until the next app start.
+    @Test
+    fun trunk_arriving_after_sign_in_moves_the_device_then() = runTest {
+        var wire = 0
+        val s = onRelay()
+        val arrived = kotlinx.coroutines.flow.MutableSharedFlow<Unit>()
+        val results = mutableListOf<ShipPushMove>()
+        val job = launch {
+            keepMovingToShipPush(
+                "~zod", s,
+                ShipPushPorts(
+                    trunkWire = { wire },
+                    poke = { pokes += it.toString() },
+                    register = { id -> TrunkPush.register(id, "https://ntfy.test/up/abc", listOf("read")) },
+                    awaitNonce = { _, _ -> true },
+                    relayUnregister = { id -> unregistered += id; true },
+                    newId = { "id${++ids}" },
+                ),
+                bootstrapping = kotlinx.coroutines.flow.flowOf(false),
+                trunkArrived = arrived,
+            ) { results += it }
+        }
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf<ShipPushMove>(ShipPushMove.NotSupported), results, "no trunk yet: still waiting")
+        wire = 12
+        arrived.emit(Unit)
+        testScheduler.advanceUntilIdle()
+        assertEquals(ShipPushMove.ViaShip, results.last())
+        assertTrue(job.isCompleted, "moved: nothing left to wait for")
+    }
+
+    @Test
+    fun a_move_stopped_midway_leaves_the_ship_pushing_nothing_here() = runTest {
+        val s = onRelay()
+        val job = launch {
+            moveToShipPush(
+                "~zod", s,
+                ShipPushPorts(
+                    trunkWire = { 12 },
+                    poke = { pokes += it.toString() },
+                    register = { id -> TrunkPush.register(id, "https://ntfy.test/up/abc", listOf("read")) },
+                    awaitNonce = { _, _ -> kotlinx.coroutines.awaitCancellation() },
+                    relayUnregister = { id -> unregistered += id; true },
+                    newId = { "id${++ids}" },
+                ),
+            )
+        }
+        testScheduler.advanceUntilIdle()
+        job.cancel()
+        job.join()
+        assertEquals("""{"push-unregister":"id1"}""", pokes.last(), "or every alert came twice")
+        assertFalse(s.viaShipPush("~zod"))
+        assertEquals("relay-dev", s.deviceIdFor("~zod"), "the relay stays")
+    }
+
+    @Test
+    fun a_moved_device_whose_trunk_went_says_so() = runTest {
+        val s = onRelay().apply { setViaShipPush("~zod", true) }
+        assertEquals(ShipPushMove.NotSupported, moveToShipPush("~zod", s, ports(wire = 0)))
+        assertTrue("~zod" in ShipPushHealth.broken.value)
+        assertTrue(keepAliveNeeded(s, "~zod", "https://ntfy.test/up/abc", shipPushBroken = true), "Talon keeps itself running to hear the ship")
+        assertEquals(ShipPushMove.ViaShip, moveToShipPush("~zod", s, ports(wire = 12)))
+        assertFalse("~zod" in ShipPushHealth.broken.value, "back: cleared")
+    }
+
+    @Test
+    fun signing_out_takes_the_device_off_the_ships_trunk() = runTest {
+        val s = InMemoryRelaySettings().apply { setViaShipPush("~zod", true); setTrunkDeviceIdFor("~zod", "t-1"); setShipPushDeclined("~zod", false) }
+        forgetShipPush("~zod", s) { pokes += it.toString() }
+        assertEquals(listOf("""{"push-unregister":"t-1"}"""), pokes)
+        assertFalse(s.viaShipPush("~zod"))
+        assertEquals("", s.trunkDeviceIdFor("~zod"))
+        pokes.clear()
+        forgetShipPush("~zod", s) { pokes += it.toString() }
+        assertTrue(pokes.isEmpty(), "nothing registered, nothing to say")
+    }
 }
+

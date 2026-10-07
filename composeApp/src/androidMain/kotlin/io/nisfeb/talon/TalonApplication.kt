@@ -28,6 +28,7 @@ import io.nisfeb.talon.util.createAppHttpClient
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import coil3.memoryCacheMaxSizePercentWhileInBackground
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -371,6 +372,31 @@ class TalonApplication : Application() {
      * time the ship's stream comes up, until it has an answer; one that
      * could not be tried (no connection) waits for the next.
      */
+    /**
+     * Signing out of or forgetting [ship]: nothing pushes here for it any
+     * more, from grubbery, the relay or the ship's own %trunk. A
+     * notification for a ship no longer signed in has nowhere right to
+     * land, and the trunk's went on with no way to stop it. Best effort,
+     * with the saved cookie, since the session itself goes next; the
+     * device's own records go either way.
+     */
+    private fun stopPushesFor(ship: String) {
+        runCatching { io.nisfeb.talon.notify.ShipPushes.forget(this, ship) }
+        val saved = sessionStore.all().firstOrNull { it.ship == ship }
+        val deviceId = relaySettings.deviceIdFor(ship)
+        appScope.launch {
+            if (deviceId.isNotBlank()) {
+                runCatching {
+                    io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value }).unregister(deviceId)
+                }
+                relaySettings.clearDeviceIdFor(ship)
+            }
+            io.nisfeb.talon.notify.forgetShipPush(ship, relaySettings) { body ->
+                saved?.let { io.nisfeb.talon.notify.pokeTrunkSignedOut(it, body, ktorHttp) }
+            }
+        }
+    }
+
     private fun startShipPushMove(ship: String, shipRepo: TlonChatRepo) {
         shipPushMove?.cancel()
         val tokens = io.nisfeb.talon.notify.UnifiedPushTokenProvider(this)
@@ -384,7 +410,10 @@ class TalonApplication : Application() {
             newId = { java.util.UUID.randomUUID().toString() },
         )
         shipPushMove = appScope.launch {
-            io.nisfeb.talon.notify.keepMovingToShipPush(ship, relaySettings, ports, shipRepo.bootstrapping) {
+            io.nisfeb.talon.notify.keepMovingToShipPush(
+                ship, relaySettings, ports, shipRepo.bootstrapping,
+                trunkArrived = io.nisfeb.talon.call.TrunkArrivals.arrived.filter { it == ship }.map { },
+            ) {
                 android.util.Log.i("Talon", "ship push for $ship: $it")
             }
         }
@@ -395,9 +424,17 @@ class TalonApplication : Application() {
         // understands has said nothing, and gets no read pushes: say it,
         // once a launch. Registering needs the +code; this does not.
         relaySettings.deviceIdFor(ship).takeIf { it.isNotBlank() }?.let { deviceId ->
-            appScope.launch {
-                io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value })
-                    .declareCaps(deviceId, io.nisfeb.talon.notify.UnifiedPushTokenProvider(this@TalonApplication).caps)
+            // Only when it changed: this ran on every process start, workers'
+            // and alarms' too, one request each time to say the same thing.
+            val caps = io.nisfeb.talon.notify.UnifiedPushTokenProvider(this@TalonApplication).caps
+            val said = getSharedPreferences("talon.relay.caps", MODE_PRIVATE)
+            val key = "declared::$deviceId"
+            if (said.getString(key, null) != caps.joinToString(",")) {
+                appScope.launch {
+                    val ok = io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value })
+                        .declareCaps(deviceId, caps)
+                    if (ok) said.edit().putString(key, caps.joinToString(",")).apply()
+                }
             }
         }
         val priorDb = if (::db.isInitialized) db else null
@@ -521,7 +558,7 @@ class TalonApplication : Application() {
      * show the login screen.
      */
     fun signOutActive() {
-        _activeShip.value?.let { runCatching { io.nisfeb.talon.notify.ShipPushes.forget(this, it) } }
+        _activeShip.value?.let { stopPushesFor(it) }
         runCatching { repo.stop() }
         runCatching { shortcuts.stop() }
         session.logout()
@@ -555,23 +592,7 @@ class TalonApplication : Application() {
      */
     fun forgetShip(ship: String, alsoData: Boolean) {
         val wasActive = ship == _activeShip.value
-        runCatching { io.nisfeb.talon.notify.ShipPushes.forget(this, ship) }
-        // The relay keeps pushing a ship's activity until told to stop,
-        // and a notification for a ship no longer signed in has nowhere
-        // right to land. Best effort; the device id is dropped either
-        // way so nothing tries to use it again.
-        val deviceId = relaySettings.deviceIdFor(ship)
-        if (deviceId.isNotBlank()) {
-            appScope.launch {
-                runCatching {
-                    io.nisfeb.talon.notify.RelayClient(
-                        http = ktorHttp,
-                        endpoint = { relaySettings.endpoint.value },
-                    ).unregister(deviceId)
-                }
-                relaySettings.clearDeviceIdFor(ship)
-            }
-        }
+        stopPushesFor(ship)
         val erase: () -> Unit = {
             if (alsoData) {
                 shipDataEraser.erase(ship)

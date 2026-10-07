@@ -123,3 +123,18 @@ fun leaveByOf(last: JsonObject?): LeaveBy? {
         minutes = (next["minutes"] as? JsonPrimitive)?.intOrNull ?: 0,
     )
 }
+
+/**
+ * The action a ship push is about, from its tag: orrery tags a proposed
+ * or filed action `orrery-<id>`, beside its leave, late and nudge tags
+ * and the review. Talon shows that action under its own slot, so the
+ * pushed copy and the app's own replace each other, and answering it
+ * anywhere takes back both. Null for anything else.
+ */
+fun actionIdOfTag(tag: String?): String? {
+    val rest = tag?.takeIf { it.startsWith("orrery-") }?.removePrefix("orrery-") ?: return null
+    if (rest.isBlank() || rest == "review") return null
+    if (listOf("leave-", "late-", "nudge-").any { rest.startsWith(it) }) return null
+    return rest
+}
+

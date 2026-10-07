@@ -1286,6 +1286,11 @@ class CallController(
             if (got != null) {
                 _policy.value = got
                 Log.i(TAG, "%trunk installed from " + publisher)
+                // Its wire, read again: it was 0 at connect, before the desk
+                // came, and calls (the profile's Call) and the move to the
+                // ship's own pushes both wait on it.
+                runCatching { _wire.value = TrunkWire.parseWireVersion(ch.scry(TrunkWire.AGENT, "/version")) }
+                runCatching { session.ourPatp }.getOrNull()?.let { TrunkArrivals.arrived(it) }
                 return null
             }
         }
