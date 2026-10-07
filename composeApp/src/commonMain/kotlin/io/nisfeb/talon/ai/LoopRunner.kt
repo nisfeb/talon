@@ -128,3 +128,24 @@ class LoopRunner(
         val DESTRUCTIVE_TOOLS = setOf("delete_event")
     }
 }
+
+/**
+ * [block] on a scope of its own under [parent], ended when it returns.
+ * A run that builds its own mail and calendar builds their workers too,
+ * which never end by themselves (the mail's relister and its listing's
+ * flows), so on the process scope every scheduled run left a repo
+ * running for good.
+ */
+suspend fun <T> withRunScope(
+    parent: kotlinx.coroutines.CoroutineScope,
+    block: suspend (kotlinx.coroutines.CoroutineScope) -> T,
+): T {
+    val run = kotlinx.coroutines.CoroutineScope(
+        parent.coroutineContext + kotlinx.coroutines.SupervisorJob(parent.coroutineContext[kotlinx.coroutines.Job]),
+    )
+    try {
+        return block(run)
+    } finally {
+        run.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+    }
+}

@@ -28,8 +28,13 @@ object Notifications {
     const val CHANNEL_MAIL = "mail"
     const val CHANNEL_ORRERY = "orrery"
     const val CHANNEL_SYNC = "sync"
-    const val CHANNEL_WATCHWORDS = "watchwords"
     const val CHANNEL_LOOPS = "loops"
+    /** The ship's own pushes (grubbery web push): calendar reminders and the like. */
+    const val CHANNEL_SHIP = "ship"
+    /** Time to leave: the ship's leave push, and the alarm kept in case it does not come. */
+    const val CHANNEL_LEAVE = "leave"
+    /** A trip under way: silent, ongoing, while the phone tells the ship where it is each minute. */
+    const val CHANNEL_TRIP = "trip"
     // v2: the Ringer owns sound and vibration now, so the channel must
     // do neither. A channel's alerting cannot be changed after it is
     // created, so changing it means a new id.
@@ -75,6 +80,10 @@ object Notifications {
     const val EXTRA_OPEN_MAIL = "open_mail"
     /** Set by a tapped orrery notification: the app opens Actions. */
     const val EXTRA_OPEN_ACTIONS = "open_actions"
+    /** A leave alert's thing ("activity/slug"): the tap opens Orrery on it. */
+    const val EXTRA_OPEN_ORRERY = "open_orrery"
+    /** A calendar reminder's push tag: TalonApp opens the Calendar on its occurrence. */
+    const val EXTRA_OPEN_CALENDAR = "open_calendar"
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -154,19 +163,9 @@ object Notifications {
                 ).apply { description = "Proposals waiting for your answer" },
             )
         }
-        if (mgr.getNotificationChannel(CHANNEL_WATCHWORDS) == null) {
-            mgr.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_WATCHWORDS,
-                    "Watchwords",
-                    NotificationManager.IMPORTANCE_HIGH,
-                ).apply {
-                    description = "Hits on user-defined watchword terms"
-                    enableLights(true)
-                    enableVibration(true)
-                }
-            )
-        }
+        // Watchwords were taken out; their channel would stay in the
+        // phone's settings with nothing ever posted to it.
+        mgr.deleteNotificationChannel("watchwords")
         if (mgr.getNotificationChannel(CHANNEL_LOOPS) == null) {
             mgr.createNotificationChannel(
                 NotificationChannel(
@@ -179,6 +178,79 @@ object Notifications {
                 }
             )
         }
+        if (mgr.getNotificationChannel(CHANNEL_SHIP) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(CHANNEL_SHIP, "From your ship", NotificationManager.IMPORTANCE_DEFAULT)
+                    .apply { description = "Reminders and other pushes your ship sends" },
+            )
+        }
+        if (mgr.getNotificationChannel(CHANNEL_LEAVE) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(CHANNEL_LEAVE, "Time to leave", NotificationManager.IMPORTANCE_HIGH)
+                    .apply { description = "When to leave for an appointment, with traffic, and when you are running late" },
+            )
+        }
+        if (mgr.getNotificationChannel(CHANNEL_TRIP) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(CHANNEL_TRIP, "On the way", NotificationManager.IMPORTANCE_LOW)
+                    .apply { description = "Shown while your ship hears where you are each minute on the way to an appointment" },
+            )
+        }
+    }
+
+    /**
+     * A push from the owner's ship. Tagged with its own tag, so a second
+     * push with the same tag replaces the first, and a leave push and the
+     * alarm kept for it share one slot.
+     */
+    fun showShipPush(context: Context, push: io.nisfeb.talon.notify.ShipPushMessage) {
+        // An orrery action: under the app's own slot for it, so the pushed
+        // copy and the app's replace each other, and an answer anywhere
+        // takes back both ([clearAction]).
+        io.nisfeb.talon.orrery.actionIdOfTag(push.tag)?.let { return showAction(context, it, push.title, push.body) }
+        // A leave push or a running-late one: the alert channel, and the tap opens its appointment.
+        val item = io.nisfeb.talon.orrery.alertItemOf(push.tag)
+        post(context, push.tag ?: "ship:${push.title.hashCode()}", if (item != null) CHANNEL_LEAVE else CHANNEL_SHIP, push.title, push.body, item != null,
+            openItem = item,
+            // A calendar reminder: the tap opens its event.
+            openCalendar = push.tag?.takeIf { it.startsWith(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX) })
+    }
+
+    /** The alarm: the ship's leave push did not come. */
+    fun showLeave(context: Context, plan: io.nisfeb.talon.orrery.LeavePlan, title: String, body: String) {
+        val tag = io.nisfeb.talon.orrery.LEAVE_TAG_PREFIX + plan.key
+        post(context, tag, CHANNEL_LEAVE, title, body, alarm = true, openItem = io.nisfeb.talon.orrery.alertItemOf(tag))
+    }
+
+    private fun post(
+        context: Context, tag: String, channel: String, title: String, body: String, alarm: Boolean,
+        whenMs: Long = System.currentTimeMillis(),
+        openItem: String? = null,
+        openCalendar: String? = null,
+    ) {
+        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java) ?: return
+        val tap = PendingIntent.getActivity(
+            context, tag.hashCode(),
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                if (openItem != null) putExtra(EXTRA_OPEN_ORRERY, openItem)
+                if (openCalendar != null) putExtra(EXTRA_OPEN_CALENDAR, openCalendar)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(context, channel)
+            .setSmallIcon(R.drawable.ic_stat_talon)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .setPriority(if (alarm) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(if (alarm) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
+            .setWhen(whenMs)
+            .setShowWhen(true)
+            .build()
+        mgr.notify(tag, NOTIFICATION_ID, n)
     }
 
     /**
@@ -196,7 +268,7 @@ object Notifications {
      * showed the in-app ring and the user had to press Answer twice.
      * Declining works from here alone, being one poke and no media.
      */
-    fun showIncomingCall(context: Context, from: String, callId: String) {
+    fun showIncomingCall(context: Context, from: String, callId: String, name: String = from) {
         ensureChannel(context)
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
@@ -246,7 +318,7 @@ object Notifications {
 
         val builder = NotificationCompat.Builder(context, CHANNEL_CALLS)
             .setSmallIcon(android.R.drawable.sym_call_incoming)
-            .setContentTitle(from)
+            .setContentTitle(name)
             .setContentText("Incoming call")
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
@@ -271,7 +343,7 @@ object Notifications {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             builder.setStyle(
                 NotificationCompat.CallStyle.forIncomingCall(
-                    Person.Builder().setName(from).setImportant(true).build(),
+                    Person.Builder().setName(name).setImportant(true).build(),
                     decline,
                     answer,
                 ),
@@ -284,6 +356,7 @@ object Notifications {
         mgr.notify(CALL_NOTIFICATION_ID, builder.build())
         shownCallId = callId
         shownCallFrom = from
+        shownCallName = name
         when {
             inAppRingExpected -> Unit // the in-app ring is already sounding
             // Notifications denied means notify() above was dropped on
@@ -313,6 +386,8 @@ object Notifications {
     /** Who rang, for the missed-call notice a cancel may become. */
     @Volatile
     private var shownCallFrom: String? = null
+    @Volatile
+    private var shownCallName: String? = null
 
     /** True while TalonApp has a live CallController composed — the
      *  thing that actually plays the in-app ring. Set by TalonApp; the
@@ -320,6 +395,14 @@ object Notifications {
      *  up or be the only ring this call gets. */
     @Volatile
     var callControllerLive: Boolean = false
+
+    /** The ring this device is showing, if any. */
+    val shownCall: String? get() = shownCallId
+
+    /** The call the app is in, if any. Set by TalonApp while a controller
+     *  lives; a push ending a call checks it is this one. */
+    @Volatile
+    var liveCallId: () -> String? = { null }
 
     /** True while the in-app ringer is actually sounding. Set by
      *  AndroidCallSoundPlayer, not inferred from window state. */
@@ -394,9 +477,10 @@ object Notifications {
     fun ringCancelled(context: Context, callId: String, reason: String?) {
         if (shownCallId != callId) return
         val from = shownCallFrom
+        val name = shownCallName ?: from
         cancelIncomingCall(context)
-        if (reason == "answered" || callControllerLive || from == null) return
-        showMissedCall(context, from, from)
+        if (reason == "answered" || callControllerLive || from == null || name == null) return
+        showMissedCall(context, from, name)
     }
 
     fun showMessage(
@@ -455,67 +539,6 @@ object Notifications {
         // the same whom on two ships keeps two rows, matching the
         // request code above.
         mgr.notify(forShip.orEmpty() + whom, NOTIFICATION_ID, notification)
-    }
-
-    /**
-     * Watchword-hit notification. Same tap intent shape as [showMessage]
-     * but on a separate channel and tag namespace so it can be tuned
-     * independently and never collides with regular chat notifications.
-     */
-    fun showWatchwordHit(
-        context: Context,
-        whom: String,
-        postId: String?,
-        parentId: String? = null,
-        /** The ship this arrived for. A tap switches to it first. */
-        forShip: String? = null,
-        terms: List<String>,
-        label: String,
-        body: String,
-        sentMs: Long,
-    ) {
-        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
-            ?: return
-
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_OPEN_WHOM, whom)
-            if (forShip != null) putExtra(EXTRA_FOR_SHIP, forShip)
-            if (parentId != null) {
-                putExtra(EXTRA_OPEN_THREAD, parentId)
-                if (postId != null) putExtra(EXTRA_THREAD_ANCHOR, postId)
-            } else if (postId != null) {
-                putExtra(EXTRA_SCROLL_TO_MESSAGE, postId)
-            }
-        }
-        val pending = PendingIntent.getActivity(
-            context,
-            // The ship is part of the identity, as in showMessage.
-            ("watchword:" + forShip.orEmpty() + whom).hashCode(),
-            tapIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
-        val title = "${terms.joinToString(", ")} in $label"
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_WATCHWORDS)
-            .setSmallIcon(R.drawable.ic_stat_talon)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setContentIntent(pending)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setWhen(sentMs)
-            .setShowWhen(true)
-            .build()
-
-        // Tag = "watchword:<ship><whom>" so repeated hits in the same
-        // chat collapse into one row, but never collide with
-        // showMessage's row for the same chat — or with the same
-        // chat's watchword row on another ship.
-        mgr.notify("watchword:" + forShip.orEmpty() + whom, NOTIFICATION_ID, notification)
     }
 
     /**
@@ -599,36 +622,8 @@ object Notifications {
      * separate rows even if they share a name (Android dedupes per
      * (tag, id)). Tap just opens the app — there's no per-loop deep link yet.
      */
-    fun showLoop(context: Context, loopId: Long, title: String, body: String, whenMs: Long) {
-        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
-            ?: return
-
-        val tag = "loop:$loopId"
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val pending = PendingIntent.getActivity(
-            context,
-            tag.hashCode(),
-            tapIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_LOOPS)
-            .setSmallIcon(R.drawable.ic_stat_talon)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setContentIntent(pending)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .setWhen(whenMs)
-            .setShowWhen(true)
-            .build()
-
-        mgr.notify(tag, NOTIFICATION_ID, notification)
-    }
+    fun showLoop(context: Context, loopId: Long, title: String, body: String, whenMs: Long) =
+        post(context, "loop:$loopId", CHANNEL_LOOPS, title, body, alarm = false, whenMs = whenMs)
 
     fun clear(context: Context, whom: String) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
@@ -637,8 +632,7 @@ object Notifications {
     }
 
     /** Cancel all notifications associated with a chat — called when the
-     *  user opens the conversation. Also cancels the watchword tag for the
-     *  same chat so both notification rows disappear together.
+     *  user opens the conversation.
      *
      *  Rows are tagged with the ship they were posted for, and
      *  [forShip] is the ship the open conversation belongs to. The
@@ -650,11 +644,7 @@ object Notifications {
             ?: return
         val tagged = forShip.orEmpty() + whom
         mgr.cancel(tagged, NOTIFICATION_ID)
-        mgr.cancel("watchword:$tagged", NOTIFICATION_ID)
-        if (forShip != null) {
-            mgr.cancel(whom, NOTIFICATION_ID)
-            mgr.cancel("watchword:$whom", NOTIFICATION_ID)
-        }
+        if (forShip != null) mgr.cancel(whom, NOTIFICATION_ID)
     }
 
     private const val NOTIFICATION_ID = 1001

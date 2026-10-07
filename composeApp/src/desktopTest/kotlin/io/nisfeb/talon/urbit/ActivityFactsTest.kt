@@ -72,4 +72,21 @@ class ActivityFactsTest {
         assertNull(db.unreads().getOne(nest))
         assertEquals(7, db.unreads().getOne("~sampel")?.count)
     }
+
+    // Tlon's %notify dismisses a chat's notifications when it is read on
+    // any client. Here, the read fact says so; a count of zero alone does
+    // not, since a chat the ship does not count unreads for still notifies.
+    @Test
+    fun `a chat read to the end on another client takes its notifications back`() = runBlocking {
+        seed()
+        val cleared = java.util.concurrent.CopyOnWriteArrayList<String>()
+        repo.readListener = { cleared += it }
+        repo.applyActivityUpdate(fact("""{"read":{"source":{"dm":{"ship":"~sampel"}},"activity":$caughtUp}}"""))
+        assertEquals(listOf("~sampel"), cleared.toList())
+        // Read only partway, a thread's read, a zero count with no read: nothing.
+        repo.applyActivityUpdate(fact("""{"read":{"source":{"channel":{"nest":"$nest","group":"~host/group"}},"activity":${caughtUp.replace("\"count\":0", "\"count\":2")}}}"""))
+        repo.applyActivityUpdate(fact("""{"read":{"source":$threadSource,"activity":$caughtUp}}"""))
+        repo.applyActivityUpdate(fact("""{"activity":{"channel/$nest":$caughtUp}}"""))
+        assertEquals(listOf("~sampel"), cleared.toList())
+    }
 }

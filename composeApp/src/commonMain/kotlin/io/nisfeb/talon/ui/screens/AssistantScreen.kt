@@ -31,7 +31,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -157,8 +156,10 @@ class AssistantSession(internal val scope: kotlinx.coroutines.CoroutineScope) {
     internal val transcript = mutableStateListOf<Line>()
     internal var question by mutableStateOf(TextFieldValue(""))
     internal var busy by mutableStateOf(false)
-    internal var error by mutableStateOf<String?>(null)
+    internal var error by mutableStateOf<io.nisfeb.talon.util.Problem?>(null)
     internal var pending by mutableStateOf<Pending?>(null)
+    /** "Allow all" was pressed in this answer: its calendar adds and edits go ahead. */
+    internal var allowAll by mutableStateOf(false)
     internal var convId by mutableStateOf<Long?>(null)
     internal var convGid by mutableStateOf<String?>(null)
     internal var centroid by mutableStateOf<FloatArray?>(null)
@@ -454,9 +455,12 @@ fun AssistantScreen(
         val q = questionField.text.trim()
         if (q.isEmpty() || busy) return
         questionField = TextFieldValue("")
-        busy = true; error = null
+        busy = true; error = null; session.allowAll = false
         transcript.add(Line.You(q))
         var finalAnswer = ""
+        // What the run did, kept with the turn: the next "(no reply)" is
+        // read from the row, not reconstructed from the model's bill.
+        val turnLog = StringBuilder()
         // Snapshot the conversation this question belongs to. The run below
         // suspends for seconds-to-minutes, during which the user can select
         // another conversation (or hit New) — re-reading the live state after
@@ -514,17 +518,23 @@ fun AssistantScreen(
                     question = q,
                     priorTurns = priorTurns,
                     confirm = { call, tool ->
-                        val gate = CompletableDeferred<Boolean>()
-                        pending = Pending(call, tool, gate)
-                        // It cannot go on without the owner: say so.
-                        session.tell()
-                        val ok = gate.await()
-                        pending = null
-                        ok
+                        if (session.allowAll && call.name in io.nisfeb.talon.ai.ALLOW_ALL_TOOLS) {
+                            transcript.add(Line.Note("✓ ${describe(call, contactMap, calendar)} (allowed with Allow all)"))
+                            true
+                        } else {
+                            val gate = CompletableDeferred<Boolean>()
+                            pending = Pending(call, tool, gate)
+                            // It cannot go on without the owner: say so.
+                            session.tell()
+                            val ok = gate.await()
+                            pending = null
+                            ok
+                        }
                     },
                     onEvent = { ev ->
                         if (ev is AgentLoop.Event.Answer) finalAnswer = ev.text
                         transcript.add(ev.toLine())
+                        turnLog.append(ev.toLogLine()).append('\n')
                     },
                 )
 
@@ -598,6 +608,7 @@ fun AssistantScreen(
                         createdAt = now,
                         conversationId = convEntity.id,
                         convGid = convEntity.gid,
+                        log = turnLog.toString(),
                     )
                     historyDao.insert(turnEntity)
                     historyDao.trim(HISTORY_KEEP)
@@ -608,7 +619,7 @@ fun AssistantScreen(
                 }
             }.onFailure {
                 if (it is CancellationException) throw it
-                error = it.message ?: it::class.simpleName
+                error = io.nisfeb.talon.ai.modelProblem("Couldn't complete", it)
                 // Restore the question so a network timeout doesn't cost
                 // the user their typed text — unless they've started
                 // typing something new while the run was in flight.
@@ -617,6 +628,7 @@ fun AssistantScreen(
                 }
             }
             busy = false
+            session.allowAll = false
             session.tell()
         }
     }
@@ -686,7 +698,7 @@ fun AssistantScreen(
                             // conversations/jobs sidebar. Hidden when wide,
                             // where the sidebar is always on-screen.
                             if (!expanded) {
-                                IconButton(onClick = { mobileShowSidebar = true }) {
+                                io.nisfeb.talon.ui.IconButton(tip = "Conversations", onClick = { mobileShowSidebar = true }) {
                                     Icon(Icons.Filled.Menu, contentDescription = "Conversations")
                                 }
                             }
@@ -741,7 +753,7 @@ fun AssistantScreen(
                 enabled = ready && !busy,
                 trailingIcon = if (dictate != null && io.nisfeb.talon.ui.isDictationSupported) {
                     {
-                        androidx.compose.material3.IconButton(onClick = dictate, enabled = ready && !busy) {
+                        io.nisfeb.talon.ui.IconButton(tip = "Speak to your assistant", onClick = dictate, enabled = ready && !busy) {
                             androidx.compose.material3.Icon(
                                 TalonIcons.Mic,
                                 contentDescription = "Speak to your assistant",
@@ -790,12 +802,8 @@ fun AssistantScreen(
             if (busy && pending == null) CircularProgressIndicator()
 
             error?.let {
-                Text(
-                    "Couldn't complete: $it",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(it)) {
+                io.nisfeb.talon.ui.ProblemLine(it)
+                if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(it.line)) {
                     TextButton(onClick = { error = null; onTopUp() }) { Text("Top up") }
                 }
             }
@@ -805,6 +813,9 @@ fun AssistantScreen(
                 ConfirmCard(
                     summary = describe(p.call, contactMap, calendar),
                     onAllow = { p.gate.complete(true) },
+                    onAllowAll = if (p.call.name in io.nisfeb.talon.ai.ALLOW_ALL_TOOLS) {
+                        { session.allowAll = true; p.gate.complete(true) }
+                    } else null,
                     onDeny = { p.gate.complete(false) },
                 )
             }
@@ -1026,7 +1037,7 @@ private fun ConversationsTab(
     modifier: Modifier = Modifier,
 ) {
     // Clearing wipes every conversation locally AND on the ship, with no
-    // undo — gate it behind a confirmation like watchword-term deletion.
+    // undo — gate it behind a confirmation.
     var confirmClear by remember { mutableStateOf(false) }
     if (confirmClear) {
         AlertDialog(
@@ -1034,7 +1045,7 @@ private fun ConversationsTab(
             title = { Text("Delete all conversations?") },
             text = { Text("This also removes them from your ship.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     confirmClear = false
                     onClearAll()
                 }) { Text("Delete") }
@@ -1154,17 +1165,35 @@ private fun ConversationRow(
 }
 
 @Composable
-private fun ConfirmCard(summary: String, onAllow: () -> Unit, onDeny: () -> Unit) {
+private fun ConfirmCard(summary: String, onAllow: () -> Unit, onAllowAll: (() -> Unit)?, onDeny: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Allow this action?", style = MaterialTheme.typography.titleSmall)
             Text(summary, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onAllow) { Text("Allow") }
+                onAllowAll?.let { OutlinedButton(onClick = it) { Text("Allow all") } }
                 OutlinedButton(onClick = onDeny) { Text("Deny") }
+            }
+            if (onAllowAll != null) {
+                Text(
+                    "Allow all lets the rest of this answer's calendar adds and edits, and its orrery entries, go ahead. Deletes, messages and mail still ask.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
+}
+
+/** One line of the turn's kept log, sized and timed where the line is a tool. */
+internal fun AgentLoop.Event.toLogLine(): String = when (this) {
+    is AgentLoop.Event.Thinking -> "thinking: ${text.take(200)}"
+    is AgentLoop.Event.ToolStarted -> "→ ${call.name}${if (write) " (write)" else ""} args ${call.args.toString().length} chars"
+    is AgentLoop.Event.ToolFinished -> "✓ ${call.name} ${ms}ms, result ${result.length} chars" +
+        if (result.startsWith("Error:")) ": ${result.take(200)}" else ""
+    is AgentLoop.Event.Declined -> "✗ declined ${call.name}"
+    is AgentLoop.Event.Answer -> "answer ${text.length} chars"
 }
 
 private fun AgentLoop.Event.toLine(): Line = when (this) {

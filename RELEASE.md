@@ -243,7 +243,7 @@ Run through this every tag. It's not automated — don't skip it.
 - [ ] New message arrives while group info is open: count increments live.
 
 **Customizable rail items (≥0.11.0):**
-- [ ] Wide window: rail shows all 10 items by default (Chats, Statuses, Bookmarks, Activity, My profile, Watchwords, Today's brief — when digest enabled, Administration, Invites, Settings).
+- [ ] Wide window: rail shows all 9 items by default (Chats, Statuses, Bookmarks, Activity, My profile, Today's brief — when digest enabled, Administration, Invites, Settings).
 - [ ] Today's brief icon hides automatically when daily digest is disabled.
 - [ ] Tap rail icon for a list-pane item (Statuses / Bookmarks / Activity) → list pane swaps; chat detail stays.
 - [ ] Tap rail icon for a modal item (Settings / Profile / etc.) → corresponding screen opens full-screen.

@@ -22,7 +22,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-: "${JAVA_HOME:=/home/sneagan/jdk-install/jdk-17.0.12+7}"
+: "${JAVA_HOME:=$HOME/jdk-install/jdk-25.0.4.1+1}"
 export JAVA_HOME
 export PATH="$JAVA_HOME/bin:$PATH"
 
@@ -49,7 +49,6 @@ DEFAULT_TARGETS=(
     "composeApp/src/commonMain/kotlin/io/nisfeb/talon/ai/DailyDigestMentionMatcher.kt"
     "composeApp/src/commonMain/kotlin/io/nisfeb/talon/ai/DailyDigestPrompt.kt"
     "composeApp/src/commonMain/kotlin/io/nisfeb/talon/ai/DailyDigestSelector.kt"
-    "composeApp/src/commonMain/kotlin/io/nisfeb/talon/ai/WatchwordSanitizer.kt"
     # Pure helpers added during the rc1-rc20 stretch. Each has range
     # checks / threshold comparisons / loop conditions worth mutating.
     "composeApp/src/commonMain/kotlin/io/nisfeb/talon/ui/RailItem.kt"

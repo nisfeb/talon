@@ -45,12 +45,29 @@ data class RegisterRequest(
     val code: String,
 )
 
+/** POST /devices/{id}/caps: an app saying, after registering, what it understands. */
+@Serializable
+data class CapsRequest(val caps: List<String> = emptyList())
+
+@Serializable
+data class EndpointRequest(val pushEndpoint: String = "")
+
+/**
+ * The relay's JSON: Ktor's own settings, but a field it does not know
+ * is ignored rather than refused, so an app newer than the relay can
+ * still register.
+ */
+val RelayJson = kotlinx.serialization.json.Json(io.ktor.serialization.kotlinx.json.DefaultJson) { ignoreUnknownKeys = true }
+
 @Serializable
 data class RegisterResponse(
     val deviceId: String,
     val ok: Boolean,
     val error: String? = null,
 )
+
+@Serializable
+data class BadgeRequest(val count: Int? = null)
 
 @Serializable
 data class HealthResponse(
@@ -64,9 +81,11 @@ fun Application.installRoutes(
     pool: ConnectionPool,
     masterSecret: String,
     httpClient: OkHttpClient,
+    /** Null without APNs configured: the gateway routes answer 503. */
+    gateway: Gateway? = null,
 ) {
     val log = LoggerFactory.getLogger("Routes")
-    install(ContentNegotiation) { json() }
+    install(ContentNegotiation) { json(RelayJson) }
     install(StatusPages) {
         exception<Throwable> { call, cause ->
             log.error("unhandled error: ${cause.message}", cause)
@@ -112,11 +131,65 @@ fun Application.installRoutes(
             call.respond(RegisterResponse(deviceId = deviceId, ok = true))
         }
 
+        // The Apple hop for an iPhone its own ship pushes to ([Gateway]).
+        post("/gateway/devices") {
+            val g = gateway ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
+            val req = runCatching { call.receive<GatewayEnroll>() }.getOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val (code, dev) = g.enroll(req)
+            if (dev != null) call.respond(dev) else call.respond(HttpStatusCode.fromValue(code))
+        }
+
+        post("/gateway/push") {
+            val g = gateway ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
+            val req = runCatching { call.receive<GatewayPush>() }.getOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            call.respond(HttpStatusCode.fromValue(g.push(req)))
+        }
+
+        post("/gateway/badge") {
+            val g = gateway ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
+            val req = runCatching { call.receive<GatewayBadge>() }.getOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            call.respond(HttpStatusCode.fromValue(g.badge(req)))
+        }
+
+        // An iPhone's app-icon count from the app while it is open, null
+        // for badges off; each alert adds one until the next ([Db.nextBadge]).
+        post("/devices/{deviceId}/badge") {
+            val id = call.parameters["deviceId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val req = runCatching { call.receive<BadgeRequest>() }.getOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            if (req.count != null && req.count !in 0..99_999) return@post call.respond(HttpStatusCode.BadRequest)
+            call.respond(if (db.setBadge(Db.DEVICES, id, req.count)) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
+        }
+
         delete("/devices/{deviceId}") {
             val id = call.parameters["deviceId"] ?: return@delete call.respond(HttpStatusCode.BadRequest)
             for (row in db.shipsForDevice(id)) pool.stopRow(row.rowId)
             db.deleteDevice(id)
             call.respond(HttpStatusCode.NoContent)
+        }
+
+        // The device id is the app's own secret here, as for its deletion
+        // and its health: it may say what it understands without its +code.
+        post("/devices/{deviceId}/caps") {
+            val id = call.parameters["deviceId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val req = call.receive<CapsRequest>()
+            if (db.setCaps(id, req.caps)) call.respond(HttpStatusCode.NoContent)
+            else call.respond(HttpStatusCode.NotFound)
+        }
+
+        // Its tokens, the same way: an iPhone's alert token comes from the
+        // owner's yes to iOS's prompt, which can come after registering,
+        // and every message to it was dropped until the +code was typed
+        // again.
+        post("/devices/{deviceId}/endpoint") {
+            val id = call.parameters["deviceId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val req = call.receive<EndpointRequest>()
+            if (req.pushEndpoint.isBlank()) return@post call.respond(HttpStatusCode.BadRequest)
+            if (db.setEndpoint(id, req.pushEndpoint)) call.respond(HttpStatusCode.NoContent)
+            else call.respond(HttpStatusCode.NotFound)
         }
 
         get("/health/{deviceId}") {

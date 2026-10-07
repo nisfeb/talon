@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import kotlinx.datetime.number
 import kotlin.time.Instant
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
@@ -48,7 +49,7 @@ class CalParseTest {
         assertEquals(15, ldt(r.endMs).hour)
         assertEquals(0, ldt(r.endMs).minute)
         // Sunday Jan 7 + 4 days = Thursday Jan 11.
-        assertEquals(11, ldt(r.startMs).dayOfMonth)
+        assertEquals(11, ldt(r.startMs).day)
         assertEquals(false, r.defaultDate)
         assertEquals(false, r.defaultDuration)
     }
@@ -59,8 +60,8 @@ class CalParseTest {
         assertTrue(r is CalParseResult.Ok)
         r as CalParseResult.Ok
         assertEquals(2024, ldt(r.startMs).year)
-        assertEquals(3, ldt(r.startMs).monthNumber)
-        assertEquals(15, ldt(r.startMs).dayOfMonth)
+        assertEquals(3, ldt(r.startMs).month.number)
+        assertEquals(15, ldt(r.startMs).day)
         assertEquals(15, ldt(r.startMs).hour)
         assertEquals(30, ldt(r.startMs).minute)
         // No end given → 60-min default.
@@ -156,8 +157,8 @@ class CalParseTest {
         assertTrue(r is CalParseResult.Ok)
         r as CalParseResult.Ok
         assertEquals(2025, ldt(r.startMs).year)
-        assertEquals(3, ldt(r.startMs).monthNumber)
-        assertEquals(15, ldt(r.startMs).dayOfMonth)
+        assertEquals(3, ldt(r.startMs).month.number)
+        assertEquals(15, ldt(r.startMs).day)
     }
 
     @Test
@@ -166,12 +167,12 @@ class CalParseTest {
         assertTrue(r is CalParseResult.Ok)
         r as CalParseResult.Ok
         // tomorrow is Jan 8 from the Sun Jan 7 anchor. Both start AND end on Jan 8.
-        assertEquals(8, ldt(r.startMs).dayOfMonth)
-        assertEquals(8, ldt(r.endMs).dayOfMonth)
+        assertEquals(8, ldt(r.startMs).day)
+        assertEquals(8, ldt(r.endMs).day)
         // 11pm to 1am ends on the next day, not before it starts.
         val late = parseCalText("tomorrow 11p-1a Meet", nowMs = now) as CalParseResult.Ok
-        assertEquals(8, ldt(late.startMs).dayOfMonth)
-        assertEquals(9, ldt(late.endMs).dayOfMonth)
+        assertEquals(8, ldt(late.startMs).day)
+        assertEquals(9, ldt(late.endMs).day)
     }
 
     @Test

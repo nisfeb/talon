@@ -167,4 +167,35 @@ class GroupsScryParserTest {
         assertEquals("Empty", out.groups[0].title)
         assertTrue(out.channelGroups.isEmpty())
     }
+
+    // Tlon 12.3.0's %buckets registers file spaces in %groups; Talon
+    // cannot open one, and stored, it showed as a chat that did nothing.
+    @Test
+    fun `a channel kind Talon cannot open is left out, the rest keep their order`() {
+        val out = parse(
+            """
+            {
+              "~host/g": {
+                "meta": {"title": "G"},
+                "channels": {
+                  "chat/~host/general": { "meta": {"title": "general"} },
+                  "buckets/~host/files": { "meta": {"title": "files"} },
+                  "notes/~host/book": { "meta": {"title": "book"} },
+                  "heap/~host/pics": { "meta": {"title": "pics"} }
+                }
+              }
+            }
+            """,
+        )
+        assertEquals(listOf("chat/~host/general", "notes/~host/book", "heap/~host/pics"), out.channelGroups.map { it.nest })
+        assertEquals(listOf(0, 2, 3), out.channelGroups.map { it.ordinal }, "host order kept")
+        // One stored by an older Talon goes at the bootstrap's reconcile.
+        val plan = planGroupReconcile(
+            existingGroups = out.groups,
+            existingChannels = out.channelGroups + io.nisfeb.talon.data.ChannelGroupEntity(nest = "buckets/~host/files", groupFlag = "~host/g", title = "files"),
+            liveGroupFlags = setOf("~host/g"),
+            liveChannelNests = out.channelGroups.map { it.nest }.toSet(),
+        )
+        assertEquals(setOf("buckets/~host/files"), plan.deletedChannelNests)
+    }
 }

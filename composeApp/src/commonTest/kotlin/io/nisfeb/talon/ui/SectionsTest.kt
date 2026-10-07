@@ -62,4 +62,19 @@ class SectionsTest {
         assertFalse(mail.value)
     }
 
+    @Test
+    fun `a guard holds the leave until it lets it go, and none lets it straight through`() {
+        val s = Sections()
+        val profile = s.flag()
+        profile.value = true
+        s.leave { s.closeAll() }
+        assertFalse(profile.value, "no guard, no question")
+        profile.value = true
+        var held: (() -> Unit)? = null
+        s.guard = { leave -> held = leave }
+        s.leave { s.closeAll() }
+        assertTrue(profile.value, "asked, not yet left")
+        held!!()
+        assertFalse(profile.value, "left once the owner agrees")
+    }
 }

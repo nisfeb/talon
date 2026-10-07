@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
-import io.nisfeb.talon.util.formatTime12
+import kotlinx.datetime.number
+import io.nisfeb.talon.util.formatClock
 import io.nisfeb.talon.util.formatWeekdayShort
 import io.nisfeb.talon.util.nowMs
 import io.nisfeb.talon.util.timeZoneShortLabel
@@ -140,7 +141,7 @@ fun formatIsoUtc(ms: Long): String {
     val dt = Instant.fromEpochMilliseconds(ms).toLocalDateTime(TimeZone.UTC)
     fun p(n: Int, w: Int) = n.toString().padStart(w, '0')
     val millis = dt.nanosecond / 1_000_000
-    return "${p(dt.year, 4)}-${p(dt.monthNumber, 2)}-${p(dt.dayOfMonth, 2)}T" +
+    return "${p(dt.year, 4)}-${p(dt.month.number, 2)}-${p(dt.day, 2)}T" +
         "${p(dt.hour, 2)}:${p(dt.minute, 2)}:${p(dt.second, 2)}.${p(millis, 3)}Z"
 }
 
@@ -154,7 +155,7 @@ fun parseIsoUtc(s: String): Long? =
  */
 fun formatInZone(ms: Long, zoneId: String, nowMs: Long = nowMs()): String {
     val zone = TimeZone.of(zoneId)
-    val time = formatTime12(ms, zone)
+    val time = formatClock(ms, zone)
     val target = Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone).date
     val today = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
     if (target == today) return time

@@ -9,6 +9,7 @@ import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
+import io.nisfeb.talon.comet.shipOfGaleneName
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.backgroundExceptionHandler
 import io.nisfeb.talon.util.ioDispatcher
@@ -69,6 +70,10 @@ data class PartyMember(
      * only the muted person about their own permission change.
      */
     val mutedByAdmin: Boolean = false,
+    /** The name this person gave Galène on joining (its join `data.name`),
+     *  for a ship this app has no name of its own for. Self-chosen, like a
+     *  nickname; the ship is still [ship]. */
+    val name: String? = null,
 )
 
 sealed interface PartyState {
@@ -138,6 +143,10 @@ class PartyLine(
      *  (isPartyVideoSupported). Off keeps the SFU request audio-only so
      *  a client with no video path (iOS) never gets video m-lines. */
     private val videoSupported: Boolean = false,
+    /** What the room calls us: our nickname, a comet's mnemonym, else the
+     *  @p. Asked at each join, since a nickname can arrive or change after
+     *  the line is made. Sent as the join's `data.name`. */
+    private val displayName: () -> String = { "" },
 ) {
     private val scope =
         CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
@@ -249,6 +258,12 @@ class PartyLine(
     // videoLinkFor) and collects their PeerLink.video.
     private val _cameraOn = MutableStateFlow(false)
     val cameraOn: StateFlow<Boolean> = _cameraOn.asStateFlow()
+    // The screen or window we share, on the same sender as the camera;
+    // kept to share it again on a republished up link.
+    private val _shared = MutableStateFlow<ScreenSource?>(null)
+    val shared: StateFlow<ScreenSource?> = _shared.asStateFlow()
+    // The up link that took the share: only it can end it by itself.
+    private var sharedOn: PeerLink? = null
     // The pinned speaker who gets the focused tile. Local only today:
     // see [setFocusedVideo] — no up link is labelled and none publishes
     // simulcast, so "video-low" bounds nothing yet.
@@ -276,10 +291,17 @@ class PartyLine(
         // Connections -> the ships they belong to. A person is
         // camera-on if ANY of their connections is.
         val ships = videoOnBy.mapNotNull { roster[it]?.ship }.toSet()
-        _videoOn.value = ships + (if (_cameraOn.value) setOf(ourId) else emptySet())
+        _videoOn.value = ships + (if (_cameraOn.value || (_shared.value != null)) setOf(ourId) else emptySet())
     }
     private var room = ""
+    // Our @p, for everything compared here: the roster, video, mutes.
     private var ourId = ""
+    // Who Galène knows us as: the token's subject, which since trunk wire
+    // 10 is a comet's mnemonym, not its @p. Galène refuses any message
+    // whose `username` is not this one ("spoofed username") and drops the
+    // socket, so every frame says this, never [ourId]. Seeded from the
+    // token, then taken from the server's own "joined".
+    private var galeneName = ""
     // Galène's client id must be unique per *connection*, not per
     // user: reusing the @p means a rejoin (or a stale socket the
     // server hasn't reaped) is refused with "duplicate client id".
@@ -317,6 +339,7 @@ class PartyLine(
         if (_state.value !is PartyState.Idle) return
         room = ticket.name
         ourId = ourShip
+        galeneName = TrunkWire.jwtSubject(ticket.token) ?: ourShip
         // Join muted. Stepping onto a line should never start
         // broadcasting someone's room before they've decided to
         // speak — the mic button is one tap away, an accidental hot
@@ -585,12 +608,41 @@ class PartyLine(
         val ok = up.setCameraEnabled(enabled)
         if (ok) {
             _cameraOn.value = enabled
+            // The camera took the sender back from a share.
+            if (enabled) stopSharingState()
             refreshVideoOn()
             // Tell the room: a disabled track still sends (frozen) frames,
             // so peers can't tell camera-off from a still scene without this.
             broadcastVideo()
         }
         return ok
+    }
+
+    /**
+     * Share a screen or window on the line, or stop with null. It goes
+     * out on the camera's sender, so the room sees our video tile, and a
+     * share turns the camera off. False when the capture could not start
+     * or we have no up link.
+     */
+    suspend fun setScreenShare(source: ScreenSource?): Boolean {
+        val up = upLink ?: return false
+        val ok = up.setScreenShare(source)
+        if (ok) {
+            _shared.value = source
+            sharedOn = up.takeIf { source != null }
+            if (source != null) _cameraOn.value = false
+            refreshVideoOn()
+            broadcastVideo()
+        }
+        return ok
+    }
+
+    /** What our up link could share; empty without one. */
+    suspend fun screenSources(): List<ScreenSource> = upLink?.screenSources().orEmpty()
+
+    private fun stopSharingState() {
+        _shared.value = null
+        sharedOn = null
     }
 
     /** Broadcast our camera on/off so peers' tiles show video vs avatar.
@@ -602,9 +654,10 @@ class PartyLine(
                     put("type", "usermessage")
                     put("source", connectionId)
                     put("dest", "")
-                    put("username", ourId)
+                    put("username", galeneName)
                     put("kind", VIDEO_KIND)
-                    put("value", _cameraOn.value)
+                    // A shared screen is video too: the tile shows it.
+                    put("value", _cameraOn.value || (_shared.value != null))
                 },
             )
         }
@@ -690,7 +743,7 @@ class PartyLine(
                 put("type", "usermessage")
                 put("source", connectionId)
                 put("dest", "")
-                put("username", ourId)
+                put("username", galeneName)
                 put("kind", MUTE_KIND)
                 put("value", muted)
             },
@@ -710,6 +763,17 @@ class PartyLine(
     private var lastNotice: String? = null
     private var lastNoticeAtMs = 0L
 
+    /**
+     * Our join. The token is who we are, and Galène holds us to it; the
+     * name in `data` is only what the room shows for us (a listen page has
+     * no contacts to ask).
+     */
+    internal fun joinFrame(group: String, token: String): JsonObject = buildJsonObject {
+        put("type", "join"); put("kind", "join")
+        put("group", group); put("token", token)
+        putJsonObject("data") { put("name", displayName().ifBlank { ourId }) }
+    }
+
     /** One session on the SFU. Returns true when it ended in a way worth retrying. */
     private suspend fun run(ticket: TrunkTicket, ourShip: String): Boolean {
         try {
@@ -727,10 +791,7 @@ class PartyLine(
                 put("type", "handshake"); put("id", connectionId)
                 putJsonArray("version") { add(kotlinx.serialization.json.JsonPrimitive("2")) }
             })
-            send(buildJsonObject {
-                put("type", "join"); put("kind", "join")
-                put("group", galeneGroup); put("token", ticket.token)
-            })
+            send(joinFrame(galeneGroup, ticket.token))
 
             for (frame in ws.incoming) {
                 val text = (frame as? Frame.Text)?.readText() ?: continue
@@ -860,7 +921,8 @@ class PartyLine(
 
             "user" -> {
                 val id = msg["id"]?.jsonPrimitive?.content ?: return
-                val name = msg["username"]?.jsonPrimitive?.content ?: id
+                // A comet's username is its mnemonym (trunk wire 10).
+                val name = msg["username"]?.jsonPrimitive?.content?.let(::shipOfGaleneName) ?: id
                 when (msg["kind"]?.jsonPrimitive?.content) {
                     "add" -> {
                         // Not for our own arrival, and not for anyone
@@ -874,7 +936,9 @@ class PartyLine(
                         if (firstSeen && joined && !replaying && name != ourId) {
                             sounds.play(CallSounds.joined())
                         }
-                        roster[id] = PartyMember(id, name)
+                        val given = ((msg["data"] as? JsonObject)?.get("name") as? JsonPrimitive)
+                            ?.takeUnless { it is JsonNull }?.content?.takeIf { it.isNotBlank() }
+                        roster[id] = PartyMember(id, ship = name, name = given)
                         // Someone who just arrived missed every mute
                         // broadcast so far. Say ours again rather than
                         // making them show us wrong until we next touch
@@ -939,7 +1003,9 @@ class PartyLine(
                     return
                 }
                 if (kind == MUTE_KIND) {
-                    val who = msg["username"]?.jsonPrimitive?.content ?: return
+                    // A comet sends as its mnemonym (trunk wire 10); the
+                    // roster holds its @p.
+                    val who = msg["username"]?.jsonPrimitive?.content?.let(::shipOfGaleneName) ?: return
                     // Keyed by ship, not connection: the roster dedupes
                     // by ship too, so a person on two devices reads as
                     // one row and one mute state.
@@ -1009,6 +1075,9 @@ class PartyLine(
                 )
             }
         sfuIce = ice
+        // The server's word on who we are beats the token's.
+        (msg["username"] as? JsonPrimitive)?.takeUnless { it is JsonNull }?.content
+            ?.takeIf { it.isNotEmpty() }?.let { galeneName = it }
         // Anyone reported from here on is genuinely arriving — once the
         // replayed roster has gone past. clientCount includes us, and a
         // missing/!0 count simply means nothing to skip.
@@ -1076,6 +1145,7 @@ class PartyLine(
         when {
             had && !speak -> {
                 upWatch?.cancel()
+                upShareWatch?.cancel()
                 upWatch = null
                 upLink?.close()
                 upLink = null
@@ -1088,8 +1158,9 @@ class PartyLine(
                 // sent, and a later restore had publishUp reopen the
                 // camera with no user tap — exactly the auto-open the
                 // teardown path documents as forbidden.
-                if (_cameraOn.value) {
+                if (_cameraOn.value || (_shared.value != null)) {
                     _cameraOn.value = false
+                    stopSharingState()
                     refreshVideoOn()
                     broadcastVideo()
                 }
@@ -1122,6 +1193,7 @@ class PartyLine(
      *  the new link was live, the exact lie the retry was built to
      *  kill. It also leaked one collector per republish. */
     private var upWatch: Job? = null
+    private var upShareWatch: kotlinx.coroutines.Job? = null
     /** Whether we have offered an up stream yet this join, so the first
      *  publish doesn't claim to replace an id the server never saw. */
     private var upOffered = false
@@ -1166,9 +1238,28 @@ class PartyLine(
             upId = "up-$connectionId-${Uuid.random()}"
             val old = upLink
             val up = links.create(sfuIce, sendAudio = true)
+            // A share moves to the new link before the old one lets it go,
+            // so its capture is handed over, not opened again: on Wayland
+            // that asked the system's dialog again in the middle of a share.
+            // A share that will not restart is dropped below.
+            val shared = _shared.value
+            val reshared = shared != null && up.setScreenShare(shared)
             old?.close()
             upLink = up
             _upLink.value = up
+            if (reshared) sharedOn = up
+            // A share the link ended itself (its dialog cancelled, nothing
+            // sent) ends here too, so the room and the button follow it.
+            upShareWatch?.cancel()
+            upShareWatch = scope.launch {
+                up.video.collect { v ->
+                    if (!v.sharing && sharedOn === up && upLink === up) {
+                        stopSharingState()
+                        refreshVideoOn()
+                        broadcastVideo()
+                    }
+                }
+            }
             startLevelPolling()
             up.setMuted(muted)
             // Carry an in-flight recording across the republish. The old
@@ -1188,6 +1279,13 @@ class PartyLine(
                     refreshVideoOn()
                     broadcastVideo()
                 }
+            }
+            // The share, moved above, is dropped the same way when its
+            // screen or window is gone.
+            if (shared != null && !reshared) {
+                stopSharingState()
+                refreshVideoOn()
+                broadcastVideo()
             }
             // Say our mute state before anyone renders us as live.
             broadcastMuted()
@@ -1220,7 +1318,7 @@ class PartyLine(
             upOffered = true
             send(buildJsonObject {
                 put("type", "offer"); put("id", upId); put("label", "")
-                put("username", ourId); put("sdp", sdp)
+                put("username", galeneName); put("sdp", sdp)
                 // Tells Galène to delUpConn the corpse rather than keep it.
                 if (previousUpId.isNotEmpty()) put("replace", previousUpId)
             })
@@ -1233,7 +1331,7 @@ class PartyLine(
         // Galène names the publisher on the offer, which is the only
         // place a stream is tied to a person — the roster is keyed by
         // client, and audio levels arrive per stream.
-        msg["username"]?.jsonPrimitive?.content?.let { streamOwner[id] = it }
+        msg["username"]?.jsonPrimitive?.content?.let { streamOwner[id] = shipOfGaleneName(it) }
         // The same servers the up link got. A down link needs them just
         // as much: it is the side that has to traverse to the SFU.
         val fresh = id !in downLinks
@@ -1335,7 +1433,7 @@ class PartyLine(
                 // else — a server that validates it drops the operator's
                 // socket, and one that rewrites it silently retargets the
                 // mute at the operator. The target rides its own field.
-                put("username", ourId)
+                put("username", galeneName)
                 put("kind", ADMIN_MUTE_KIND)
                 // See the handler: the subject has to travel inside
                 // `value`, the one free-form field the SFU relays.
@@ -1354,7 +1452,7 @@ class PartyLine(
                         put("type", "useraction")
                         put("source", connectionId)
                         put("dest", dest)
-                        put("username", ourId)
+                        put("username", galeneName)
                         put("kind", kind)
                     },
                 )
@@ -1417,6 +1515,7 @@ class PartyLine(
         levelPoll?.cancel()
         levelPoll = null
         upWatch?.cancel()
+        upShareWatch?.cancel()
         upWatch = null
         streamOwner.clear()
         speaking = emptySet()
@@ -1430,12 +1529,14 @@ class PartyLine(
         // Bounded: a socket that has stalled takes the close frame no
         // more than any other, and the links below are what stop the
         // sound.
-        runCatching {
-            withTimeoutOrNull(GOODBYE_MS) {
-                session?.close(
-                    CloseReason(CloseReason.Codes.NORMAL, "left"),
-                )
-            } ?: Log.w(TAG, "the socket did not close in time; dropping it")
+        // Only a socket there is: with none, the null close read as a
+        // timeout, and every screen that let go of an idle line said so.
+        session?.let { open ->
+            runCatching {
+                withTimeoutOrNull(GOODBYE_MS) {
+                    open.close(CloseReason(CloseReason.Codes.NORMAL, "left"))
+                } ?: Log.w(TAG, "the socket did not close in time; dropping it")
+            }
         }
         session = null
         Log.i(TAG, "closing the line: ${downLinks.size} down links${if (upLink != null) " and the up link" else ""}")
@@ -1464,6 +1565,7 @@ class PartyLine(
         recStartMs = 0L
         upOffered = false
         _cameraOn.value = false
+        stopSharingState()
         _focusedVideo.value = null
         videoOnBy.clear()
         _videoOn.value = emptySet()

@@ -22,6 +22,7 @@ import io.nisfeb.talon.ui.screens.unreadableThreadLine
 import io.nisfeb.talon.ui.theme.TalonTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import androidx.compose.ui.test.onAllNodesWithText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -320,4 +321,58 @@ class MailThreadPaneTest {
         assertEquals(listOf("~zod"), to["0vnobus"], "~bus was taken off it")
         assertEquals(listOf("~zod", "~bus"), to["0vroot"], "the root still went to ~bus")
     }
+
+    // A subject changed in a reply read one way in the list (the ship draws
+    // the row from the newest honest message) and another at the top of
+    // the thread (the first message's). A reply took the old one back.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `the thread is headed as its row is, and a reply takes the subject it answers`() = runComposeUiTest {
+        val repo = repoServing(
+            """{"id":"0vt","participants":["~zod","~nec"],"last":30,"unreadable":0,
+                "archived":false,"labels":[],"messages":[
+                {"id":"0va","from":"~zod","to":["~nec"],"subject":"Plans","body":"first","sent":10,"prev":null,"verdict":"verified","read":true},
+                {"id":"0vb","from":"~nec","to":["~zod"],"subject":"Plans, now Friday","body":"second","sent":20,"prev":"0va","verdict":"verified","read":true},
+                {"id":"0vc","from":"~zod","to":["~nec"],"subject":"Click here","body":"forged","sent":30,"prev":"0vb","verdict":"forged","read":true}]}""",
+        )
+        val intents = mutableListOf<io.nisfeb.talon.ui.screens.MailIntent>()
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailThreadPane(repo = repo, threadId = "0vt", contacts = ContactMap.EMPTY, ourShip = "~zod", onCompose = { intents += it })
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Plans, now Friday").fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(onAllNodesWithText("Plans").fetchSemanticsNodes().isEmpty(), "the first subject does not head it")
+        assertTrue(onAllNodesWithText("Click here").fetchSemanticsNodes().isEmpty(), "nor a forged one")
+        onAllNodesWithContentDescription("Reply")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { intents.isNotEmpty() }
+        assertEquals("Re: Plans", intents.last().subject, "the first message answered keeps its own subject")
+        onAllNodesWithContentDescription("Reply")[1].performClick()
+        waitUntil(timeoutMillis = 5_000) { intents.size == 2 }
+        assertEquals("Re: Plans, now Friday", intents.last().subject)
+    }
+
+    // A long list of names pushed the thread down the screen.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a long list of people folds, opens on its count, and folds back`() = runComposeUiTest {
+        val ships = listOf("~zod", "~nec", "~bud", "~wes", "~sev", "~per", "~sut", "~let", "~ful")
+        val repo = repoServing(
+            """{"id":"0vt","participants":[${ships.joinToString { "\"$it\"" }}],"last":10,"unreadable":0,
+                "archived":false,"labels":[],"messages":[
+                {"id":"0va","from":"~zod","to":["~nec"],"subject":"Party","body":"all of you","sent":10,"prev":null,"verdict":"verified","read":true}]}""",
+        )
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailThreadPane(repo = repo, threadId = "0vt", contacts = ContactMap.EMPTY, ourShip = "~zod", onCompose = {})
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("and 4 more", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(onAllNodesWithText("~ful", substring = true).fetchSemanticsNodes().isEmpty(), "folded away")
+        onNodeWithText("and 4 more", substring = true).performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("~ful", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("Show fewer", substring = true).performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("~ful", substring = true).fetchSemanticsNodes().isEmpty() }
+    }
 }
+

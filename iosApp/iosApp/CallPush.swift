@@ -45,6 +45,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
     // Kotlin side knows.
     private var uuidToCallId: [UUID: String] = [:]
     private var callIdToUuid: [String: UUID] = [:]
+    /// Calls already ended here, by id, with who rang: the ship sends a
+    /// cancel when another device answers and again when that call ends,
+    /// and the second reached a phone that had forgotten the call, which
+    /// then reported a missed call from "Unknown".
+    private var endedCallers: [String: String] = [:]
     // Calls the user actually answered. Trunk emits %handled on every
     // accept, and the relay turns that into a ring-cancel — so without
     // this the cancel for our OWN accept reported the call ended and
@@ -88,6 +93,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         center.delegate = self
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
             CallTrace.log("notifications \(granted ? "allowed" : "refused")")
+            // Registering with the relay waits on this answer before
+            // it waits on the alert token.
+            IosVoipBridge.shared.setAlertPermission(granted: granted)
             guard granted else { return }
             DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() }
         }
@@ -109,6 +117,37 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         CallTrace.log("apns alert token failed: \(error.localizedDescription)")
     }
 
+    // MARK: - Background pushes
+
+    /// A chat read to the end on another client, from the ship's own
+    /// %trunk through the relay's gateway (wire 12 "clear"): its delivered
+    /// notifications go, as Android's do. Only that ship's: the same whom
+    /// on another ship is another conversation. iOS throttles background
+    /// pushes, so this is best effort; the badge comes in its own push.
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        guard (userInfo["event"] as? String) == "read",
+              let whom = userInfo["whom"] as? String, !whom.isEmpty else {
+            completionHandler(.noData)
+            return
+        }
+        let patp = userInfo["patp"] as? String
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            let ids = delivered.filter { note in
+                let info = note.request.content.userInfo
+                guard (info["whom"] as? String) == whom else { return false }
+                guard let p = patp, let forShip = info["patp"] as? String else { return true }
+                return p == forShip
+            }.map { $0.request.identifier }
+            center.removeDeliveredNotifications(withIdentifiers: ids)
+            completionHandler(ids.isEmpty ? .noData : .newData)
+        }
+    }
+
     // MARK: - UNUserNotificationCenterDelegate
 
     func userNotificationCenter(
@@ -116,7 +155,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        let whom = notification.request.content.userInfo["whom"] as? String ?? ""
+        let info = notification.request.content.userInfo
+        if let nonce = info["nonce"] as? String {
+            // The ship's test push: proof its notifications reach this
+            // phone. Nothing to show while Talon is open.
+            IosVoipBridge.shared.pushTestReceived(nonce: nonce)
+            completionHandler([])
+            return
+        }
+        let whom = info["whom"] as? String ?? ""
         if IosVoipBridge.shared.shouldPresentAlert(whom: whom) {
             completionHandler([.banner, .list, .sound])
         } else {
@@ -130,6 +177,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let info = response.notification.request.content.userInfo
+        if let nonce = info["nonce"] as? String {
+            IosVoipBridge.shared.pushTestReceived(nonce: nonce)
+        }
+        // A notice from another app on the ship (calendar, orrery): its
+        // "whom" is its tag, not a chat.
+        if (info["event"] as? String) == "notice" {
+            if let tag = info["whom"] as? String, !tag.isEmpty {
+                IosVoipBridge.shared.openNotice(tag: tag)
+            }
+            completionHandler()
+            return
+        }
         if let whom = info["whom"] as? String, !whom.isEmpty {
             // The relay names the ship the alert was for; a tap goes
             // there first, since the same whom on another ship is a
@@ -203,15 +262,19 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
             // branch runs on essentially every call — repeat offenders
             // get the app terminated and VoIP delivery revoked.
             let uuid = callIdToUuid[callId] ?? UUID()
+            // A second cancel for a call this phone already ended (answered
+            // elsewhere, then hung up): who rang, and not a missed call.
+            let endedBy = callIdToUuid[callId] == nil ? endedCallers[callId] : nil
+            let caller = endedBy ?? from
             let update = CXCallUpdate()
-            update.remoteHandle = CXHandle(type: .generic, value: from)
-            update.localizedCallerName = from
+            update.remoteHandle = CXHandle(type: .generic, value: caller)
+            update.localizedCallerName = caller
             // Why it was cancelled decides how Recents files it: the
             // caller gave up (missed), or another of the user's
             // devices answered (not missed). Older relays say nothing,
             // which reads as the caller giving up.
             let reason: CXCallEndedReason =
-                (dict["reason"] as? String) == "answered" ? .answeredElsewhere : .unanswered
+                ((dict["reason"] as? String) == "answered" || endedBy != nil) ? .answeredElsewhere : .unanswered
             CallTrace.log("ring-cancel \(callId): ending as \(reason == .answeredElsewhere ? "answered elsewhere" : "unanswered")")
             provider.reportNewIncomingCall(with: uuid, update: update) { _ in
                 self.provider.reportCall(with: uuid, endedAt: nil, reason: reason)
@@ -243,6 +306,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         let uuid = UUID()
         uuidToCallId[uuid] = callId
         callIdToUuid[callId] = uuid
+        callerNames[uuid] = from
 
         // MUST happen before completion() — this is the report Apple
         // requires for every VoIP push. A report CallKit refuses (Do Not
@@ -413,8 +477,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         outgoing.remove(uuid)
         if let callId = uuidToCallId.removeValue(forKey: uuid) {
             callIdToUuid.removeValue(forKey: callId)
+            if endedCallers.count > 32 { endedCallers.removeAll() }
+            endedCallers[callId] = callerNames[uuid] ?? endedCallers[callId]
         }
+        callerNames.removeValue(forKey: uuid)
     }
+
+    /// Who rang, by call, while it lasts: for [endedCallers].
+    private var callerNames: [UUID: String] = [:]
 }
 
 /// A call trace the user can read in the Files app (Documents is

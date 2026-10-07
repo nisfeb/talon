@@ -27,6 +27,8 @@ enum class MediaState { Idle, Gathering, Connecting, Live, Failed, Closed }
 data class VideoState(
     val localOn: Boolean = false,
     val remoteOn: Boolean = false,
+    /** Our video is a shared screen or window, not the camera. [localOn] stays true while it is. */
+    val sharing: Boolean = false,
 ) {
     val anyOn: Boolean get() = localOn || remoteOn
 }
@@ -89,8 +91,26 @@ interface CallEngine {
      */
     suspend fun setCameraEnabled(enabled: Boolean): Boolean
 
+    /** Screens, then windows, that [setScreenShare] can send. Empty where sharing isn't built. */
+    suspend fun screenSources(): List<ScreenSource> = emptyList()
+
+    /**
+     * Send [source] on the video sender in place of the camera, or stop
+     * with null. Like the camera, a local track swap with no signalling:
+     * the far side just sees our video change. Sharing and the camera
+     * take turns on the one sender, so either one stops the other.
+     * Returns false when the capture could not start.
+     */
+    suspend fun setScreenShare(source: ScreenSource?): Boolean = false
+
     fun close()
 }
+
+/**
+ * A screen or a window to share. [id] is the platform's; on Wayland the
+ * system's own picker chooses, and the one source stands for it.
+ */
+data class ScreenSource(val id: Long, val title: String, val isWindow: Boolean)
 
 /** Per-call engine factory the platform entry point injects into App. */
 fun interface CallEngineProvider {

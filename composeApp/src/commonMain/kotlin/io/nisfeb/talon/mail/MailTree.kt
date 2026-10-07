@@ -334,3 +334,22 @@ fun litPath(layout: TreeLayout, id: String?): Set<String> {
     }
     return lit
 }
+
+/**
+ * What a thread is called: the subject of its newest message that is not
+ * forged, or the newest at all where every copy is. The ship draws the
+ * listing's row from that message, so the open thread and its row say
+ * the same thing; headed by the first message, a subject changed in a
+ * reply read one way in the list and another in the thread.
+ */
+fun threadSubject(messages: List<MailMessage>): String =
+    (messages.lastOrNull { it.verdict != Verdict.FORGED } ?: messages.lastOrNull())?.subject.orEmpty()
+
+/**
+ * The first [limit] of [names] and how many more there are, or all of
+ * them when [open] or when folding would hide only one: a long list of
+ * recipients pushed the thread down the screen.
+ */
+fun foldNames(names: List<String>, open: Boolean, limit: Int = 5): Pair<List<String>, Int> =
+    if (open || names.size <= limit + 1) names to 0 else names.take(limit) to names.size - limit
+

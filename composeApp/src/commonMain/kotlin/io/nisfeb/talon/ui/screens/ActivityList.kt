@@ -1,5 +1,5 @@
 package io.nisfeb.talon.ui.screens
-import io.nisfeb.talon.util.formatMonthDayTime
+import io.nisfeb.talon.util.formatMonthDayClock
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +19,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
+import kotlinx.coroutines.flow.map
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -65,10 +66,16 @@ fun ActivityList(
     // from last-known-good. Null = never loaded; non-null (incl.
     // empty list) = at least one fetch has completed.
     val cached by repo.activityFeedFlow.collectAsState()
+    // The threads the owner follows, from the database: every screen
+    // that shows a thread reads the same rows.
+    val threads by androidx.compose.runtime.remember {
+        db.followedThreads().streamThreads().map { io.nisfeb.talon.data.threadsInOrder(it) }
+    }.collectAsState(initial = emptyList())
+    val unreadThreads = threads.count { it.unread > 0 }
     var tab by rememberSaveable { mutableStateOf(TlonChatRepo.ActivityTab.ALL) }
     val items = cached?.forTab(tab) ?: emptyList()
     var refreshing by remember { mutableStateOf(cached == null) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<Throwable?>(null) }
     // Bumped by the error-state Retry button; re-keys the fetch effect.
     // Without it a failed first load was terminal on the desktop rail,
     // where the tab stays mounted and the effect never re-ran.
@@ -82,7 +89,7 @@ fun ActivityList(
         refreshing = true
         error = null
         runCatching { repo.fetchActivityFeed() }
-            .onFailure { error = it.message ?: it::class.simpleName }
+            .onFailure { error = it }
         refreshing = false
     }
 
@@ -90,16 +97,36 @@ fun ActivityList(
         // The ship computes `mentions` and `replies` itself and hands
         // all three views back in the one feed/init scry — switching
         // tabs is free, no refetch.
-        if (cached != null) {
-            TabRow(selectedTabIndex = tab.ordinal) {
-                TlonChatRepo.ActivityTab.entries.forEach { t ->
-                    Tab(
-                        selected = t == tab,
-                        onClick = { tab = t },
-                        text = { Text(t.label, style = MaterialTheme.typography.labelLarge) },
-                    )
-                }
+        // Shown before the feed loads too: Threads needs no feed.
+        TabRow(selectedTabIndex = tab.ordinal) {
+            TlonChatRepo.ActivityTab.entries.forEach { t ->
+                Tab(
+                    selected = t == tab,
+                    onClick = { tab = t },
+                    text = {
+                        Text(
+                            if (t == TlonChatRepo.ActivityTab.THREADS && unreadThreads > 0) "${t.label} · $unreadThreads" else t.label,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    },
+                )
             }
+        }
+        if (tab == TlonChatRepo.ActivityTab.THREADS) {
+            if (unreadThreads > 0) {
+                TextButton(
+                    onClick = { repo.markThreadsRead(threads.filter { it.unread > 0 }.map { it.whom to it.parentPostId }) },
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                ) { Text("Mark all read") }
+            }
+            io.nisfeb.talon.ui.FollowedThreadsList(
+                rows = threads,
+                contactMap = contactMap,
+                showChat = true,
+                onOpen = { row -> onOpenReply(row.whom, row.parentPostId, row.lastReplyId ?: row.parentPostId) },
+                modifier = Modifier.fillMaxSize(),
+            )
+            return@Column
         }
         // Thin progress bar above the list while a background refresh
         // is in flight AND we already have cached content to show
@@ -125,19 +152,8 @@ fun ActivityList(
                 modifier = Modifier.padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text(
-                    "Couldn't load activity. Check your connection.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                error?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                TextButton(onClick = { retryCount++ }) { Text("Retry") }
+                io.nisfeb.talon.ui.ProblemLine(io.nisfeb.talon.util.problemOf("Couldn't load activity", error!!))
+                TextButton(onClick = { retryCount++ }) { Text("Try again") }
             }
 
             items.isEmpty() -> Text(
@@ -146,6 +162,7 @@ fun ActivityList(
                         "No activity yet. Mentions and replies to your posts will show up here."
                     TlonChatRepo.ActivityTab.MENTIONS -> "Nobody has mentioned you yet."
                     TlonChatRepo.ActivityTab.REPLIES -> "No replies to your posts yet."
+                    TlonChatRepo.ActivityTab.THREADS -> ""
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -200,7 +217,7 @@ private fun ActivityRow(
         }
     }
     val timestamp = remember(item.sentMs) {
-        if (item.sentMs > 0) formatMonthDayTime(item.sentMs) else ""
+        if (item.sentMs > 0) formatMonthDayClock(item.sentMs) else ""
     }
 
     Row(

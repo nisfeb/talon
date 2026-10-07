@@ -31,7 +31,6 @@ import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -65,7 +64,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.login.TalonLoginUri
 import io.nisfeb.talon.ui.UpdateBanner
-import io.nisfeb.talon.ui.talonLogoPainter
 import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.update.UpdateStatus
 import io.nisfeb.talon.urbit.UrbitSession
@@ -91,6 +89,10 @@ fun LoginScreen(
     session: UrbitSession,
     onLoggedIn: (ship: String) -> Unit,
     notice: String? = null,
+    /** The ship and the +code a sign-in succeeded with, just before
+     *  [onLoggedIn]: a device that needs the relay offers to register
+     *  with it. Kept in memory only, until the owner answers. */
+    onLoginCode: (ship: String, code: String) -> Unit = { _, _ -> },
     /** Optional Composable slot that wires Android's Autofill Framework
      *  to the ship-URL field. Receives the `(String) -> Unit` setter
      *  the user's typing would normally invoke and returns a Modifier
@@ -196,13 +198,7 @@ fun LoginScreen(
                 modifier = Modifier.size(96.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Image(
-                        painter = talonLogoPainter(),
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape),
-                    )
+                    io.nisfeb.talon.ui.TalonLogo(contentDescription = null, modifier = Modifier.size(72.dp))
                 }
             }
             Spacer(Modifier.height(20.dp))
@@ -248,12 +244,36 @@ fun LoginScreen(
                 ) {
                     val usernameAutofillModifier = usernameAutofill { shipUrl = it }
                     val passwordAutofillModifier = passwordAutofill { code = it }
+                    // Connect, from its button or Enter in the code: the code
+                    // was typed and then the mouse fetched to click.
+                    val connect: () -> Unit = connect@{
+                        if (connecting) return@connect
+                        status = "Connecting…"
+                        statusIsError = false
+                        connecting = true
+                        scope.launch {
+                            session.login(shipUrl, code)
+                                .onSuccess { ship ->
+                                    // login() keeps the leading ~ on the
+                                    // ship name — don't prepend another.
+                                    status = "Connected as $ship"
+                                    LoginDraft.clear()
+                                    onLoginCode(ship, code)
+                                    onLoggedIn(ship)
+                                }
+                                .onFailure { err ->
+                                    status = friendlyError(err)
+                                    statusIsError = true
+                                }
+                            connecting = false
+                        }
+                    }
                     OutlinedTextField(
                         value = shipUrl,
                         onValueChange = { shipUrl = it },
                         label = { Text("Ship URL") },
                         placeholder = { Text("https://your-ship.example.com") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = androidx.compose.ui.text.input.ImeAction.Next),
                         enabled = !connecting,
                         singleLine = true,
                         modifier = usernameAutofillModifier.fillMaxWidth(),
@@ -264,11 +284,12 @@ fun LoginScreen(
                         label = { Text("+code") },
                         visualTransformation = if (codeVisible) VisualTransformation.None
                             else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = androidx.compose.ui.text.input.ImeAction.Go),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { connect() }),
                         enabled = !connecting,
                         singleLine = true,
                         trailingIcon = {
-                            IconButton(onClick = { codeVisible = !codeVisible }) {
+                            io.nisfeb.talon.ui.IconButton(tip = if (codeVisible) "Hide code" else "Show code", onClick = { codeVisible = !codeVisible }) {
                                 Icon(
                                     imageVector = if (codeVisible) TalonIcons.VisibilityOff
                                         else TalonIcons.Visibility,
@@ -316,26 +337,7 @@ fun LoginScreen(
                         }
                     }
                     Button(
-                        onClick = {
-                            status = "Connecting…"
-                            statusIsError = false
-                            connecting = true
-                            scope.launch {
-                                session.login(shipUrl, code)
-                                    .onSuccess { ship ->
-                                        // login() keeps the leading ~ on the
-                                        // ship name — don't prepend another.
-                                        status = "Connected as $ship"
-                                        LoginDraft.clear()
-                                        onLoggedIn(ship)
-                                    }
-                                    .onFailure { err ->
-                                        status = friendlyError(err)
-                                        statusIsError = true
-                                    }
-                                connecting = false
-                            }
-                        },
+                        onClick = connect,
                         enabled = !connecting,
                         shape = RoundedCornerShape(12.dp),
                         contentPadding = ButtonDefaults.ContentPadding,
@@ -474,7 +476,7 @@ private fun ClickableLinkText(
  * the underlying message for anything we don't recognise — which is
  * still better than `IllegalStateException: login HTTP 401`.
  */
-private fun friendlyError(err: Throwable): String {
+internal fun friendlyError(err: Throwable): String {
     val msg = err.message.orEmpty()
     return when {
         // Eyre answers a wrong +code with 400.
@@ -499,7 +501,11 @@ private fun friendlyError(err: Throwable): String {
             "That address answered, but no ship signed you in there. Check the URL."
         "ConnectException" in err::class.simpleName.orEmpty() ->
             "Connection refused — is the ship running?"
-        msg.isNotBlank() -> "Couldn't sign in: $msg"
-        else -> "Couldn't sign in: ${err::class.simpleName ?: "unknown error"}"
+        // A timeout or a dropped connection: the network or a busy ship,
+        // not the code. It read as "Couldn't sign in: Request timeout has
+        // expired [url=…]".
+        io.nisfeb.talon.util.isTransientNetworkError(err) ->
+            "The ship didn't answer in time. Check your connection and try again."
+        else -> "Couldn't sign in: " + (io.nisfeb.talon.util.readableReason(msg) ?: "something went wrong.")
     }
 }

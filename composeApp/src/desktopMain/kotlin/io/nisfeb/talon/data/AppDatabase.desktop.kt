@@ -39,7 +39,6 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun reactionUsage(): ReactionUsageDao
     actual abstract fun embeddings(): EmbeddingDao
     actual abstract fun bookmarkFolders(): BookmarkFolderDao
-    actual abstract fun watchwords(): WatchwordsDao
     actual abstract fun messageMedia(): MessageMediaDao
     actual abstract fun railItemPrefs(): RailItemPrefDao
     actual abstract fun dmInvites(): DmInviteDao
@@ -55,6 +54,8 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun orrerySent(): OrrerySentDao
     actual abstract fun cometDomes(): CometDomeDao
     actual abstract fun urbUnfurls(): UrbUnfurlDao
+    actual abstract fun followedThreads(): FollowedThreadDao
+    actual abstract fun orreryCache(): OrreryCacheDao
 }
 
 /**
@@ -123,7 +124,7 @@ private const val SMOKE_TEST_TIMEOUT_MS = 15_000L
 private fun buildAndPing(dbFile: File): AppDatabase {
     val db = Room.databaseBuilder<AppDatabase>(name = dbFile.absolutePath)
         .setDriver(BundledSQLiteDriver())
-        .addMigrations(MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION, COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION, URB_UNFURLS_MIGRATION)
+        .addMigrations(*SHARED_MIGRATIONS)
         .fallbackToDestructiveMigration(dropAllTables = true)
         .build()
     try {

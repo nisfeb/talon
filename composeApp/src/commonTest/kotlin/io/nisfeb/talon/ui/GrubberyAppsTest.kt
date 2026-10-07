@@ -79,5 +79,6 @@ class GrubberyAppsTest {
     fun `the permits page hangs off the ship, however its url was written`() {
         assertEquals("https://ship.example/apps/grubbery/permits", permitsUrl("https://ship.example"))
         assertEquals("https://ship.example/apps/grubbery/permits", permitsUrl("https://ship.example/"))
+        assertEquals("https://ship.example/~/login?redirect=/apps/grubbery/permits", permitsLoginUrl("https://ship.example/"))
     }
 }

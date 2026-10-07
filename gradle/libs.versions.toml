@@ -1,44 +1,46 @@
 [versions]
-agp = "9.3.0"
-kotlin = "2.3.20"
-ksp = "2.3.10"
-coreKtx = "1.19.0"
+agp = "9.4.1"
+kotlin = "2.4.20"
+ksp = "2.3.12"
+coreKtx = "1.19.1"
 activityCompose = "1.13.0"
-composeBom = "2026.06.01"
-room = "2.8.4"
-sqliteBundled = "2.6.2"
-okhttp = "5.4.0"
+composeBom = "2026.06.01"  # stays with composeMultiplatform
+room = "2.8.5"
+sqliteBundled = "2.7.1"
+okhttp = "5.5.0"
 kotlinxSerialization = "1.11.0"
 kotlinxCoroutines = "1.11.0"
 kotlinxDatetime = "0.8.0"
 bignum = "0.3.10"
-okio = "3.17.0"
+okio = "3.18.2"
 atomicfu = "0.33.0"
-coil = "3.4.0"
-media3 = "1.10.1"
+coil = "3.5.0"  # 3.6 pulls Compose 1.12; see composeMultiplatform
+filekit = "0.16.0"
+media3 = "1.11.1"
 lifecycle = "2.11.0"
 reorderable = "3.1.0"
 securityCrypto = "1.1.0"
 zxingCore = "3.5.4"
 zxingAndroidEmbedded = "4.3.0"
 mediapipeTasksText = "0.10.35"
-composeMultiplatform = "1.11.1"
+composeMultiplatform = "1.11.1"  # 1.12.1 throws measuring a popup it disposed mid-measure (AppShellTest)
 junit = "4.13.2"
-djl = "0.36.0"
-webrtcJava = "0.14.0"  # 0.15.0 lacks linux natives on maven central
+djl = "0.38.0"
+webrtcJava = "0.17.0"  # 0.18 intermittently breaks audio device switching after a call (DesktopAudioDevicesTest)
 webrtcAndroid = "1.3.10"
-pty4j = "0.13.10"  # pseudo-terminal for the local comet runtime
+pty4j = "0.14.0"  # pseudo-terminal for the local comet runtime
 coreTelecom = "1.1.0-beta01"
-androidxWork = "2.11.2"
-unifiedpush = "3.3.3"
+androidxWork = "2.12.0"
+unifiedpush = "3.3.5"
 
 # Relay subproject (relay/) — Talon's notification push relay. Pulls
 # Ktor 3 for the HTTP server, sqlite-jdbc for the per-user device
 # registry, firebase-admin for FCM dispatch, slf4j-simple for the
 # Ktor request log. Kept here so version bumps stay in one place.
-ktor = "3.5.1"
-sqliteJdbc = "3.53.2.0"
-slf4j = "2.0.18"
+ktor = "3.6.0"
+sqliteJdbc = "3.53.4.0"
+slf4j = "2.0.20"
+jna = "5.18.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -57,6 +59,7 @@ androidx-compose-material-icons-extended = { group = "androidx.compose.material"
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "androidxWork" }
+androidx-health-connect = { group = "androidx.health.connect", name = "connect-client", version = "1.1.0" }
 unifiedpush-connector = { group = "org.unifiedpush.android", name = "connector", version.ref = "unifiedpush" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 androidx-sqlite-bundled = { group = "androidx.sqlite", name = "sqlite-bundled", version.ref = "sqliteBundled" }
@@ -77,6 +80,7 @@ kotlinx-coroutines-swing = { group = "org.jetbrains.kotlinx", name = "kotlinx-co
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil" }
 coil-network-okhttp = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
 coil-network-ktor = { group = "io.coil-kt.coil3", name = "coil-network-ktor3", version.ref = "coil" }
+filekit-dialogs = { group = "io.github.vinceglb", name = "filekit-dialogs", version.ref = "filekit" }
 webrtc-java = { group = "dev.onvoid.webrtc", name = "webrtc-java", version.ref = "webrtcJava" }
 webrtc-android = { group = "io.getstream", name = "stream-webrtc-android", version.ref = "webrtcAndroid" }
 
@@ -117,6 +121,7 @@ ktor-client-mock = { group = "io.ktor", name = "ktor-client-mock", version.ref =
 ktor-client-websockets = { group = "io.ktor", name = "ktor-client-websockets", version.ref = "ktor" }
 sqlite-jdbc = { group = "org.xerial", name = "sqlite-jdbc", version.ref = "sqliteJdbc" }
 slf4j-simple = { group = "org.slf4j", name = "slf4j-simple", version.ref = "slf4j" }
+jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

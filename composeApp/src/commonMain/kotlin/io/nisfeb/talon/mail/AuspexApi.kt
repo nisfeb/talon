@@ -287,13 +287,7 @@ class AuspexApi(
      * headers cannot come back without the request having got there.
      */
     private suspend fun send(path: String, build: HttpRequestBuilder.() -> Unit) =
-        try {
-            http.request(root + path, build)
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Unreachable(t)
-        }
+        reachShip { http.request(root + path, build) }
 
     /** Reading an answer that did arrive. A failure here is the body,
      *  not the ship, so it is [AuspexError.Garbled]. */
@@ -305,15 +299,31 @@ class AuspexApi(
         throw AuspexError.Garbled(t)
     }
 
-    /** The ship's own words for a refusal. Every route answers JSON,
-     *  errors included, so this is the reason rather than a guess. */
-    private fun reasonOf(text: String): String = runCatching {
-        (json.parseToJsonElement(text) as JsonObject)["error"]?.jsonPrimitive?.content
-    }.getOrNull() ?: text.take(200).ifBlank { "no reason given" }
 
     private inline fun <reified T> decode(text: String): T = reading { json.decodeFromString<T>(text) }
 
     companion object {
+        /** The ship's own words for a refusal. Every route answers JSON,
+         *  errors included, so this is the reason rather than a guess;
+         *  an error page's words are markup, and never shown. */
+        internal fun reasonOf(text: String): String = runCatching {
+            (json.parseToJsonElement(text) as JsonObject)["error"]?.jsonPrimitive?.content
+        }.getOrNull() ?: bodyAsReason(text, 200)
+
+        /**
+         * The web server in front of a ship answering for it (nginx's 502
+         * while the ship is down or restarting): no answer from the ship,
+         * not a refusal. Taken for one, its error page went on screen as
+         * raw HTML, and a calendar said the ship would not take a change.
+         */
+        internal fun throwIfShipDown(resp: io.ktor.client.statement.HttpResponse) {
+            val s = resp.status.value
+            // 502/503: no ship behind the web server, down or restarting.
+            // 504: it waited for a ship that is there but slow; no answer,
+            // and not one to be asked again any sooner.
+            if (s in 502..504) throw AuspexError.Unreachable(IllegalStateException("HTTP $s from the web server in front of the ship"), down = s != 504)
+        }
+
         /** Where grubbery binds the nexus. */
         const val APP_PATH = "/apps/auspex"
         const val DEFAULT_PAGE = 50
@@ -350,6 +360,17 @@ class AuspexApi(
 
 // ---- errors ------------------------------------------------------------
 
+/**
+ * An answer that is not the app's JSON, as a reason: its text, unless it
+ * is an error page (nginx's 502 for a ship that is down, eyre's 500),
+ * whose words are markup and went on screen as raw HTML.
+ */
+internal fun bodyAsReason(text: String, max: Int): String = when {
+    text.isBlank() -> "no reason given"
+    text.trimStart().startsWith("<") -> "the ship answered with an error page"
+    else -> text.take(max)
+}
+
 /** Why a call did not produce an answer we can use. */
 sealed class AuspexError(message: String, cause: Throwable? = null) : Exception(message, cause) {
     /** The ship answered and said no, in its own words. */
@@ -359,8 +380,15 @@ sealed class AuspexError(message: String, cause: Throwable? = null) : Exception(
      *  the request, which is the part worth reporting. */
     class Garbled(cause: Throwable) : AuspexError("unreadable answer from the ship", cause)
 
-    /** Nothing came back at all. */
-    class Unreachable(cause: Throwable) : AuspexError("no answer from the ship", cause)
+    /** Nothing came back at all; [down] when the web server in front of the ship said it is not there. */
+    class Unreachable(cause: Throwable, val down: Boolean = false) : AuspexError(if (down) "the ship is not answering" else "no answer from the ship", cause)
+
+    /** What this says to the person waiting on it. */
+    fun said(): String = when (this) {
+        is Refused -> reason
+        is Garbled -> "The ship answered something we could not read."
+        is Unreachable -> if (down) "Your ship isn't answering. It may be restarting." else "No answer from the ship."
+    }
 }
 
 /** The session died. Stop polling and say so; retrying never helps. */
@@ -609,3 +637,13 @@ class Blob(val bytes: ByteArray, val name: String)
 internal fun dispositionName(header: String?): String? =
     header?.let { runCatching { io.ktor.http.ContentDisposition.parse(it).parameter("filename") }.getOrNull() }
         ?.ifBlank { null }
+
+/**
+ * A request to a ship's app: not reaching the ship is
+ * [AuspexError.Unreachable], and a proxy's page for a ship that is down
+ * says so too ([AuspexApi.throwIfShipDown]).
+ */
+internal suspend fun reachShip(request: suspend () -> io.ktor.client.statement.HttpResponse): io.ktor.client.statement.HttpResponse =
+    io.nisfeb.talon.util.runSuspendCatching { request() }
+        .getOrElse { throw AuspexError.Unreachable(it) }
+        .also(AuspexApi::throwIfShipDown)

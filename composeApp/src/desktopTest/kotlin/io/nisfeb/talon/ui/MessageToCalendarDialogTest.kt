@@ -10,6 +10,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performTouchInput
 import io.nisfeb.talon.calendar.EventCat
 import io.nisfeb.talon.calendar.EventDraft
 import io.nisfeb.talon.ui.screens.FromMessage
@@ -31,6 +33,7 @@ import kotlin.test.assertNull
 @OptIn(ExperimentalTestApi::class)
 class MessageToCalendarDialogTest {
     private val saved = mutableListOf<EventDraft>()
+    private var dismissed = 0
 
     private fun at(hour: Int, minute: Int) = LocalDateTime(2026, 9, 25, hour, minute).toInstant(TimeZone.UTC).toEpochMilliseconds()
 
@@ -40,7 +43,7 @@ class MessageToCalendarDialogTest {
                 MessageToCalendarDialog(
                     kind = kind, initialTitle = "Lunch with Bus", initialNote = "at the usual place",
                     zone = TimeZone.UTC, nowMs = nowMs, twentyFourHour = true,
-                    onDismiss = {}, onSave = { saved += it },
+                    onDismiss = { dismissed++ }, onSave = { saved += it },
                 )
             }
         }
@@ -89,4 +92,20 @@ class MessageToCalendarDialogTest {
         onNodeWithText("Add").assertIsNotEnabled()
         kotlin.test.assertTrue(onAllNodesWithText("New event").fetchSemanticsNodes().isNotEmpty(), "the dialog stays")
     }
+
+    // A tap outside dropped what was being written.
+    @Test
+    fun `a tap outside closes it untouched, and not once something is changed`() = dialog(FromMessage.Event) {
+        tapOutside()
+        assertEquals(1, dismissed, "untouched: it closes")
+        onNode(hasSetTextAction() and hasText("Lunch with Bus")).performTextReplacement("Lunch with Nec")
+        tapOutside()
+        assertEquals(1, dismissed, "changed: it stays")
+    }
+
+    private fun ComposeUiTest.tapOutside() {
+        onAllNodes(androidx.compose.ui.test.isRoot())[0].performTouchInput { click(androidx.compose.ui.geometry.Offset(2f, 2f)) }
+        waitForIdle()
+    }
 }
+

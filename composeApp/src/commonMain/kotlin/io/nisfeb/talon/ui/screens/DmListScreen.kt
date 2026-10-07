@@ -1,9 +1,11 @@
 package io.nisfeb.talon.ui.screens
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.nisfeb.talon.data.latestPerConversation
 import io.nisfeb.talon.ui.reorderHandle
 import kotlin.concurrent.Volatile
 import io.nisfeb.talon.util.ConcurrentMap
 import io.nisfeb.talon.util.formatMonthDay
-import io.nisfeb.talon.util.formatTime24
+import io.nisfeb.talon.util.formatClock
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -49,7 +51,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -58,6 +59,7 @@ import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -68,6 +70,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -133,7 +137,6 @@ fun DmListScreen(
     /** Open the curated Contacts (book) screen. Always shown in the
      *  overflow menu (not a rail item). */
     onOpenContacts: () -> Unit = {},
-    onOpenWatchwords: () -> Unit = {},
     /** Open the home page. Null where the host has no Home surface,
      *  which hides the entry rather than offering a dead one. */
     onOpenHome: (() -> Unit)? = null,
@@ -242,7 +245,7 @@ fun DmListScreen(
     }.collectAsState(initial = emptyList())
     val rows by remember {
         combine(
-            db.messages().conversationLatest().distinctUntilChanged(),
+            db.latestPerConversation().distinctUntilChanged(),
             db.unreads().stream().distinctUntilChanged(),
         ) { messages, unreads ->
             val unreadMap = HashMap<String, Int>(unreads.size)
@@ -260,7 +263,7 @@ fun DmListScreen(
             snap.rows = result
             result
         }.flowOn(Dispatchers.Default)
-    }.collectAsState(initial = snap.rows)
+    }.collectAsStateWithLifecycle(initialValue = snap.rows)
 
     // Mention-bearing unread rows from %activity. We collect the full
     // entities (not just counts) so the Mentions tab can render rows
@@ -290,29 +293,24 @@ fun DmListScreen(
             mentionUnreads = notifyUnreads
             return@LaunchedEffect
         }
-        val filtered = mutableListOf<UnreadEntity>()
-        for (u in notifyUnreads) {
-            // Not runCatching: it caught the cancellation of a scan the
-            // next emission replaced, every row after it read as having
-            // nothing cached and so passed, and the stale list was shown.
-            val recent = try {
-                db.messages().latestAnyFor(u.whom, MENTION_SCAN_LIMIT)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                emptyList()
-            }
-            val include = if (recent.isEmpty()) {
-                true
-            } else {
-                recent.any { m ->
-                    val text = StoryCache.textFor(m.id, m.contentJson)
-                    io.nisfeb.talon.ui.MentionMatcher.containsMention(text, patp)
+        // Off the main thread: up to 50 posts a chat, every unread change.
+        mentionUnreads = kotlinx.coroutines.withContext(Dispatchers.Default) {
+            val filtered = mutableListOf<UnreadEntity>()
+            for (u in notifyUnreads) {
+                // A scan the next emission replaced must stop, not read as
+                // nothing cached: plain runCatching showed the stale list.
+                val recent = io.nisfeb.talon.util.runSuspendCatching {
+                    db.messages().latestAnyFor(u.whom, MENTION_SCAN_LIMIT)
+                }.getOrDefault(emptyList())
+                val include = if (recent.isEmpty()) {
+                    true
+                } else {
+                    recent.any { m -> io.nisfeb.talon.ui.MentionMatcher.mentionsIn(m.contentJson, patp) }
                 }
+                if (include) filtered.add(u)
             }
-            if (include) filtered.add(u)
+            filtered
         }
-        mentionUnreads = filtered
     }
     val mentionCounts = remember(mentionUnreads) {
         val out = HashMap<String, Int>(mentionUnreads.size)
@@ -559,6 +557,30 @@ fun DmListScreen(
     // Reuse a singleton LazyListState so the user's scroll position in
     // the home list survives navigating into a chat and back out.
     val listState = snap.listState
+    // At the top, what moves up stays in view. A conversation that moved
+    // above the first row with new messages landed half out of sight: five
+    // unread in one group, and only the jump chip said so. Off the top while
+    // the row that was first is still on screen, and nobody scrolled: the
+    // list goes back to the top. Any scroll of the user's own ends it.
+    LaunchedEffect(listState) {
+        var topKey: Any? = null
+        snapshotFlow {
+            // The position from firstVisibleItemIndex: the visible items
+            // include one sitting in the top padding, above the real first.
+            Triple(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset, listState.isScrollInProgress) to
+                listState.layoutInfo.visibleItemsInfo
+        }.collect { (at, visible) ->
+            val (index, offset, scrolling) = at
+            when {
+                scrolling -> topKey = null
+                index == 0 && offset == 0 -> topKey = visible.firstOrNull { it.index == 0 }?.key
+                // Requested, not scrolled: this can run inside a layout pass.
+                topKey != null && visible.any { it.key == topKey } -> listState.requestScrollToItem(0)
+                else -> topKey = null
+            }
+        }
+    }
+
     // Leaving a tab remembers where it was; arriving restores it.
     val switchHomeTab: (HomeTab) -> Unit = { tab ->
         if (tab != selectedHomeTab) {
@@ -796,12 +818,12 @@ fun DmListScreen(
                 )
             }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = onOpenSearch) {
+            io.nisfeb.talon.ui.IconButton(tip = "Search", onClick = onOpenSearch) {
                 Icon(Icons.Filled.Search, contentDescription = "Search")
             }
             // Assistant moved off the top bar — it's now a rail / kebab item
             // ("A"), unifying it with the other panel-based features.
-            IconButton(onClick = { editMode = !editMode }) {
+            io.nisfeb.talon.ui.IconButton(tip = if (editMode) "Finish reordering" else "Reorder", onClick = { editMode = !editMode }) {
                 Icon(
                     imageVector = if (editMode) Icons.Filled.Done else Icons.Filled.Edit,
                     contentDescription = if (editMode) "Finish reordering" else "Reorder",
@@ -860,7 +882,7 @@ fun DmListScreen(
             // the drawer, and two ways to one set of sections is
             // one way too many.
             if (!io.nisfeb.talon.ui.isDrawerNavigation) Box {
-                IconButton(onClick = { menuOpen = true }) {
+                io.nisfeb.talon.ui.IconButton(tip = "More", onClick = { menuOpen = true }) {
                     Box {
                         Icon(Icons.Filled.MoreVert, contentDescription = "More")
                         if (anyMenuBadge) MenuBadgeDot(
@@ -968,15 +990,6 @@ fun DmListScreen(
                             onOpenContacts()
                         },
                     )
-                    if (RailItem.Watchwords in kebabItems) {
-                        DropdownMenuItem(
-                            text = { Text("Watchwords") },
-                            onClick = {
-                                menuOpen = false
-                                onOpenWatchwords()
-                            },
-                        )
-                    }
                     if (RailItem.Administration in kebabItems) {
                         DropdownMenuItem(
                             text = { Text("Administration") },
@@ -1029,11 +1042,8 @@ fun DmListScreen(
                 }
             }
             // The brand mark on the right, where the ellipsis was, and
-            // it is what opens the ship picker. Kept as an Image: an
-            // Icon would tint every non-transparent pixel and flatten a
-            // multi-colour logo into a silhouette.
-            androidx.compose.foundation.Image(
-                painter = io.nisfeb.talon.ui.talonLogoPainter(),
+            // it is what opens the ship picker.
+            io.nisfeb.talon.ui.TalonLogo(
                 contentDescription = "Switch ship",
                 modifier = Modifier
                     .padding(end = 4.dp)
@@ -1153,7 +1163,8 @@ fun DmListScreen(
         else
         LazyColumn(
             state = listState,
-            contentPadding = PaddingValues(vertical = 8.dp),
+            // Room under the last row for the new-message button.
+            contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             // Claims the triage noticed, above everything: each is one tap
@@ -1296,7 +1307,7 @@ fun DmListScreen(
                     // gesture (long-press a chat) is undiscoverable —
                     // say so instead of rendering a blank list.
                     item(key = "__folder_empty") {
-                        SpecialEmpty("This folder is empty. Long-press a chat or group to add it.")
+                        SpecialEmpty("This folder is empty. ${io.nisfeb.talon.ui.holdWord} a chat or group to add it.")
                     }
                 }
                 var i = 0
@@ -1478,7 +1489,7 @@ fun DmListScreen(
                             when {
                                 bootstrapping && homeRows.isEmpty() -> "Loading your chats and groups…"
                                 selectedHomeTab == HomeTab.Groups -> "No groups yet."
-                                else -> "No direct messages yet. Tap + to start one."
+                                else -> "No direct messages yet. ${io.nisfeb.talon.ui.tapWord} + to start one."
                             }
                         )
                     }
@@ -1793,7 +1804,7 @@ fun DmListScreen(
             title = { Text("Delete '${folder.name}'?") },
             text = { Text("The conversations themselves stay; they just leave this folder.") },
             confirmButton = {
-                TextButton(onClick = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     scope.launch {
                         repo.settingsSync?.deleteFolder(folder.id)
                     }
@@ -1861,11 +1872,7 @@ internal fun ShipSwitcherDrawer(
                         .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    androidx.compose.foundation.Image(
-                        painter = io.nisfeb.talon.ui.talonLogoPainter(),
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                    )
+                    io.nisfeb.talon.ui.TalonLogo(contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.size(12.dp))
                     Column {
                         if (!nickname.isNullOrBlank()) {
@@ -1894,7 +1901,7 @@ internal fun ShipSwitcherDrawer(
                     if (onSignOut != null || onForget != null) {
                         Spacer(Modifier.weight(1f))
                         Box {
-                            IconButton(onClick = { menuFor = ship }) {
+                            io.nisfeb.talon.ui.IconButton(tip = "What to do with $ship", onClick = { menuFor = ship }) {
                                 Icon(
                                     Icons.Filled.MoreVert,
                                     contentDescription = "What to do with $ship",
@@ -1963,8 +1970,8 @@ internal fun ShipSwitcherDrawer(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { confirmForget = null; onForget?.invoke(ship) }) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirmForget = null; onForget?.invoke(ship) }) {
+                    Text("Delete")
                 }
             },
             dismissButton = {
@@ -2146,8 +2153,8 @@ private fun FolderRenameDialog(
         },
         confirmButton = {
             Row {
-                TextButton(onClick = onDelete) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = onDelete) {
+                    Text("Delete")
                 }
                 Spacer(Modifier.width(8.dp))
                 TextButton(
@@ -2472,7 +2479,9 @@ internal fun MenuBadgeDot(modifier: Modifier = Modifier) {
         modifier = modifier
             .size(8.dp)
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary),
+            .background(MaterialTheme.colorScheme.primary)
+            // A dot is color alone: a screen reader said nothing of it.
+            .semantics { contentDescription = "Unread" },
     )
 }
 
@@ -2486,7 +2495,7 @@ private const val MENTION_SCAN_LIMIT = 50
 private fun formatRelative(ms: Long): String {
     val diff = nowMs() - ms
     return when {
-        diff < 24 * 3600_000L -> formatTime24(ms)
+        diff < 24 * 3600_000L -> formatClock(ms)
         else -> formatMonthDay(ms)
     }
 }

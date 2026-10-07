@@ -56,26 +56,28 @@ APPDIR="$WORK_DIR/Talon.AppDir"
 # 1. Build the jpackage distributable unless asked to skip.
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
     echo "==> Building Talon distributable"
-    # Prefer a JDK that ships full jmods (system openjdk-headless on
-    # some distros only ships ~8 jmods, missing java.sql / java.desktop
-    # which jlink needs). Override by exporting JAVA_HOME.
+    # JDK 25: the release builds with it, and the AppImage carries its
+    # runtime. Since JDK 24, jlink links from the JDK itself, so Temurin
+    # 25 has no jmods to look for. Override by exporting JAVA_HOME.
     if [[ -z "${JAVA_HOME:-}" ]]; then
-        for cand in /home/sneagan/jdk-install/jdk-17.0.12+7 /usr/lib/jvm/temurin-17 /usr/lib/jvm/java-17-openjdk; do
-            if [[ -d "$cand/jmods" && -e "$cand/jmods/java.sql.jmod" ]]; then
+        for cand in "$HOME"/jdk-install/jdk-25* /usr/lib/jvm/temurin-25 /usr/lib/jvm/java-25-openjdk; do
+            if [[ -x "$cand/bin/jlink" ]] && grep -q 'JAVA_VERSION="25' "$cand/release" 2>/dev/null; then
                 export JAVA_HOME="$cand"
                 break
             fi
         done
     fi
-    : "${JAVA_HOME:?JAVA_HOME must point to a JDK with full jmods (java.sql, java.desktop)}"
-    # `slimReleaseDistributable` depends on `createReleaseDistributable`
-    # and runs after — so a single Gradle call gives us a slim host-
-    # native-only distributable. The Gradle slim is host-OS-aware
+    : "${JAVA_HOME:?JAVA_HOME must point to a JDK 25}"
+    # `trainReleaseAotCache` runs after `slimReleaseDistributable`, which
+    # runs after `createReleaseDistributable` — so a single Gradle call
+    # gives us a slim host-native-only distributable with its startup
+    # cache trained in (or without one, if training failed; it needs a
+    # display, so CI runs this under xvfb-run). The Gradle slim is host-OS-aware
     # (linux-x64 here) and shared by every package* task; the
     # post-cp slim block below stays as a belt-and-suspenders
     # idempotent fallback for `--skip-build` runs against an
     # unslimmed dist.
-    PATH="$JAVA_HOME/bin:$PATH" "$ROOT/gradlew" :composeApp:slimReleaseDistributable
+    PATH="$JAVA_HOME/bin:$PATH" "$ROOT/gradlew" :composeApp:trainReleaseAotCache
 fi
 
 if [[ ! -d "$DIST_SRC" ]]; then
@@ -101,7 +103,8 @@ mkdir -p "$APPDIR"
 # native launcher at `bin/Talon` already knows how to find its
 # bundled JRE under `lib/runtime/` via relative path, so we don't
 # have to rewrite anything.
-cp -r "$DIST_SRC/." "$APPDIR/"
+# -a keeps mtimes: the JVM rejects the AOT cache if a jar's mtime changed.
+cp -a "$DIST_SRC/." "$APPDIR/"
 
 # Slim cross-platform native libs out of bundled JARs. The Linux
 # AppImage doesn't need Windows DLLs, macOS dylibs (especially their

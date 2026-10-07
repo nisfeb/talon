@@ -26,13 +26,13 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.Surface
@@ -56,6 +56,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -263,6 +264,13 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // It opens a page, as Menu below does: without the arrow
+                // it read as a heading.
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             val drawerNav = io.nisfeb.talon.ui.isDrawerNavigation
             Row(
@@ -350,14 +358,23 @@ fun SettingsScreen(
                 }) { Text("New theme") }
                 themeSettings.active?.let { t ->
                     io.nisfeb.talon.ui.OutlinedButton(onClick = { themeDraft = t }) { Text("Edit") }
-                    TextButton(onClick = {
-                        uiSettings.setThemeSettings(
-                            themeSettings.copy(
-                                themes = themeSettings.themes.filter { it.id != t.id },
-                                activeId = null,
-                            ),
-                        )
-                    }) { Text("Delete") }
+                    var deletingTheme by remember { mutableStateOf(false) }
+                    TextButton(onClick = { deletingTheme = true }) { Text("Delete") }
+                    // A theme is a few minutes of picking colors, and gone here
+                    // and on every device it travelled to with one tap.
+                    if (deletingTheme) io.nisfeb.talon.ui.ConfirmDestructive(
+                        title = "Delete ${t.name}?",
+                        text = "It goes from this device and every device your settings reach.",
+                        onConfirm = {
+                            uiSettings.setThemeSettings(
+                                themeSettings.copy(
+                                    themes = themeSettings.themes.filter { it.id != t.id },
+                                    activeId = null,
+                                ),
+                            )
+                        },
+                        onDismiss = { deletingTheme = false },
+                    )
                 }
             }
             themeDraft?.let { d ->
@@ -390,6 +407,8 @@ fun SettingsScreen(
                     )
                 }
             }
+            Spacer(Modifier.height(8.dp))
+            FontSection(uiSettings)
             Spacer(Modifier.height(8.dp))
 
             // ── Ship naming ─────────────────────────────────────────
@@ -569,6 +588,33 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(8.dp))
 
+            // Every time shown, not only the dial's: it sat under Home's
+            // clock while the chats, search and calendar went their own way.
+            Text(
+                "Time",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = !homeTwentyFourHour,
+                    onClick = { uiSettings.setHomeTwentyFourHour(false) },
+                    label = { Text("12-hour") },
+                )
+                FilterChip(
+                    selected = homeTwentyFourHour,
+                    onClick = { uiSettings.setHomeTwentyFourHour(true) },
+                    label = { Text("24-hour") },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+
+            // Where there is a keyboard to press them on.
+            if (!io.nisfeb.talon.ui.isTouchPrimary) {
+                KeybindsSection(uiSettings)
+                Spacer(Modifier.height(8.dp))
+            }
+
             }
             if (safeTab == SettingsTab.Home) {
             Text(
@@ -586,7 +632,7 @@ fun SettingsScreen(
                 modifier = Modifier.padding(top = 4.dp),
             )
             Text(
-                "How the dial reads out temperature and the hour. Kept on this " +
+                "How the dial reads out temperature. Kept on this " +
                     "device rather than on the ship: which units somebody reads " +
                     "is a fact about them, not about their identity.",
                 style = MaterialTheme.typography.bodySmall,
@@ -604,20 +650,8 @@ fun SettingsScreen(
                     label = { Text("Celsius") },
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = !homeTwentyFourHour,
-                    onClick = { uiSettings.setHomeTwentyFourHour(false) },
-                    label = { Text("12-hour") },
-                )
-                FilterChip(
-                    selected = homeTwentyFourHour,
-                    onClick = { uiSettings.setHomeTwentyFourHour(true) },
-                    label = { Text("24-hour") },
-                )
-            }
             Text(
-                "The place the dial uses is set on the dial itself.",
+                "The hour reads as set under Appearance, Time. The place the dial uses is set on the dial itself.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
@@ -681,6 +715,15 @@ fun SettingsScreen(
             }
             }
             if (safeTab == SettingsTab.Notifications) {
+            if (relayConfig != null) ShipNotificationsRow(relayConfig)
+            if (relayConfig != null && io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
+                PhoneNotificationsRow(relayConfig)
+                Spacer(Modifier.height(8.dp))
+            }
+            if (relayConfig != null && io.nisfeb.talon.ui.isAppIconBadgeSupported) {
+                AppIconBadgeRow(relayConfig.settings)
+                Spacer(Modifier.height(8.dp))
+            }
             if (notificationHealth != null) {
                 NotificationHealthPanel(
                     health = notificationHealth,
@@ -767,7 +810,7 @@ fun SettingsScreen(
                     visualTransformation = if (revealBrave) VisualTransformation.None
                     else PasswordVisualTransformation(),
                     trailingIcon = {
-                        IconButton(onClick = { revealBrave = !revealBrave }) {
+                        io.nisfeb.talon.ui.IconButton(tip = if (revealBrave) "Hide key" else "Show key", onClick = { revealBrave = !revealBrave }) {
                             Icon(
                                 imageVector = if (revealBrave) TalonIcons.VisibilityOff
                                 else TalonIcons.Visibility,
@@ -1624,6 +1667,11 @@ data class RelayPanelConfig(
     val pushTokens: io.nisfeb.talon.notify.PushTokenProvider,
     val activePatp: String?,
     val activeShipUrl: String?,
+    /** A trunk-action poke to the signed-in ship, where this device can take
+     *  pushes from it (Android); null hides the choice between ship and relay. */
+    val shipPoke: (suspend (kotlinx.serialization.json.JsonElement) -> Unit)? = null,
+    /** The ship's %trunk status (wire 12), for how its pushes are going. */
+    val shipPushStatus: (suspend () -> kotlinx.serialization.json.JsonElement?)? = null,
 )
 
 @Composable
@@ -1648,10 +1696,15 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
     )
     Text(
-        "Optional: register this device with a notification relay so " +
-            "pushes still arrive when Talon is killed by Android or " +
-            "force-stopped. The default endpoint is the Talon-operated " +
-            "host; self-host by pointing at your own.",
+        if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
+            "With the app closed, this iPhone hears from your ship only " +
+                "through a relay. The default endpoint is the Talon-operated host."
+        } else {
+            "Optional: register this device with a notification relay so " +
+                "pushes still arrive when Talon is killed by Android or " +
+                "force-stopped. The default endpoint is the Talon-operated " +
+                "host; self-host by pointing at your own."
+        },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -1835,43 +1888,16 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
                         codePrompt = false
                         code = ""
                         scope.launch {
-                            val endpoint = config.pushTokens.token()
-                            if (endpoint == null) {
-                                // token() suspends up to 10s waiting for the
-                                // distributor's NEW_ENDPOINT broadcast. A null
-                                // return at this point means either no
-                                // distributor is installed, or the one we
-                                // chose didn't respond — both call for user
-                                // action, but the message should distinguish.
-                                val report = config.pushTokens.diagnose()
-                                status = if (report.byConnector.isEmpty()) {
-                                    "No UnifiedPush distributor found. " +
-                                        "Install ntfy, NextPush, or another " +
-                                        "distributor app, then try again."
-                                } else {
-                                    "${report.byConnector.first()} didn't " +
-                                        "deliver an endpoint within 10s. " +
-                                        "Open it once to wake it up, then " +
-                                        "try again."
-                                }
-                                working = false
-                                return@launch
-                            }
-                            val newId = config.client.register(
-                                platform = config.pushTokens.platform,
-                                pushEndpoint = endpoint,
-                                existingDeviceId = config.settings.deviceIdFor(ship),
-                                shipUrl = shipUrl,
-                                patp = ship,
-                                code = codeSnapshot,
-                            )
-                            if (newId != null) {
-                                config.settings.setDeviceIdFor(ship, newId)
-                                status = "Registered (deviceId=${newId.take(8)}…)"
-                            } else {
-                                status = "Registration failed. Check the endpoint, " +
-                                    "your +code, and that the ship is reachable from " +
-                                    "the relay."
+                            status = when (
+                                val r = io.nisfeb.talon.notify.enrollDevice(
+                                    config.client, config.settings, config.pushTokens, ship, shipUrl, codeSnapshot,
+                                )
+                            ) {
+                                is io.nisfeb.talon.notify.Enrollment.On ->
+                                    "Registered (deviceId=${r.deviceId.take(8)}…)" +
+                                        if (r.alerts) "" else ". Messages won't alert until notifications are allowed for Talon."
+                                is io.nisfeb.talon.notify.Enrollment.NoToken -> r.why
+                                is io.nisfeb.talon.notify.Enrollment.Refused -> r.why
                             }
                             working = false
                         }
@@ -2048,7 +2074,7 @@ private fun SettingsTabRow(
 
 /** A hex field with a swatch; tapping the swatch opens a colour wheel under the row. */
 @Composable
-private fun ColorRow(label: String, value: String, onValue: (String) -> Unit) {
+internal fun ColorRow(label: String, value: String, onValue: (String) -> Unit) {
     val parsed = io.nisfeb.talon.ui.parseHexColor(value)
     var wheelOpen by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -2309,3 +2335,221 @@ private fun HomeWidgetRow(
         }
     }
 }
+
+/**
+ * The font text is set in, and its size. The font travels to the
+ * owner's other devices (one they install is kept on their ship); the
+ * size stays with this device, whose screen it is for.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
+    val fonts by uiSettings.fontSettings.collectAsState()
+    val scale by uiSettings.fontScale.collectAsState()
+    val repo = io.nisfeb.talon.ui.LocalFontRepo.current
+    val status = repo?.status?.collectAsState()?.value
+    val pick = io.nisfeb.talon.util.rememberAnyFilePicker()
+    val scope = rememberCoroutineScope()
+    var removing by remember { mutableStateOf<String?>(null) }
+    // Why a picked file never reached the installer: it said nothing.
+    var pickProblem by remember { mutableStateOf<String?>(null) }
+    val files = repo?.files ?: io.nisfeb.talon.ui.FontFiles.default
+    Text("Font", style = MaterialTheme.typography.bodyMedium)
+    Text(
+        "Set on all your devices. A font you add is kept on your ship, private to you, and your other devices fetch it. A .ttf or .otf put in talon/fonts on your ship's grubbery is offered too.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val choices = listOf<Pair<String?, String>>(
+            null to "System",
+            io.nisfeb.talon.ui.FontSettings.SERIF to "Serif",
+            io.nisfeb.talon.ui.FontSettings.MONOSPACE to "Monospace",
+        ) + fonts.families.map { it to it }
+        choices.forEach { (family, label) ->
+            // Each named in its own face, so the choice can be seen.
+            val face = remember(fonts, family) { io.nisfeb.talon.ui.appFontFamily(fonts.copy(family = family), files) }
+            FilterChip(
+                selected = fonts.family == family,
+                onClick = { uiSettings.setFontSettings(fonts.copy(family = family)) },
+                label = { Text(label, fontFamily = face) },
+            )
+        }
+    }
+    if (repo != null) {
+        TextButton(onClick = {
+            scope.launch {
+                pickProblem = null
+                val f = runCatching { pick() }
+                    .getOrElse { pickProblem = it.message ?: "The file could not be read."; null } ?: return@launch
+                repo.install(f.bytes, f.displayName)
+            }
+        }) { Text("Add a font (.ttf or .otf)…") }
+        fonts.families.forEach { family ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val n = fonts.fonts.count { it.family == family }
+                Text(
+                    "$family · $n file${if (n == 1) "" else "s"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { removing = family }) { Text("Remove") }
+            }
+        }
+        pickProblem?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+        } ?: status?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    removing?.let { family ->
+        io.nisfeb.talon.ui.ConfirmDestructive(
+            title = "Remove $family?",
+            text = "It goes from all your devices and from your ship. To use it again, add the file again.",
+            confirm = "Remove",
+            dismiss = "Keep",
+            onConfirm = { repo?.remove(family) },
+            onDismiss = { removing = null },
+        )
+    }
+    Spacer(Modifier.height(8.dp))
+    Text("Text size · ${(scale * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
+    Text(
+        "On this device only.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    androidx.compose.material3.Slider(
+        value = scale,
+        onValueChange = { uiSettings.setFontScale(it) },
+        valueRange = io.nisfeb.talon.ui.FONT_SCALE_MIN..io.nisfeb.talon.ui.FONT_SCALE_MAX,
+        // One stop per step of the keyboard's Ctrl +/-.
+        steps = kotlin.math.round((io.nisfeb.talon.ui.FONT_SCALE_MAX - io.nisfeb.talon.ui.FONT_SCALE_MIN) / io.nisfeb.talon.ui.FONT_SCALE_STEP).toInt() - 1,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/**
+ * On a device whose notifications come only through the relay (iOS):
+ * whether this one is on it, and the way on when it is not. The prompt
+ * after signing in asks once; this is where the owner says yes later.
+ */
+@Composable
+private fun PhoneNotificationsRow(config: RelayPanelConfig) {
+    val ship = config.activePatp ?: return
+    val shipUrl = config.activeShipUrl ?: return
+    var from by remember(ship) { mutableStateOf(io.nisfeb.talon.notify.phoneNotifications(config.settings, ship)) }
+    // Said, with the ship's name, by ShipNotificationsRow above.
+    if (from == io.nisfeb.talon.notify.PhoneNotifications.Ship) return
+    var asking by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Notifications on this iPhone", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                when (from) {
+                    io.nisfeb.talon.notify.PhoneNotifications.Ship -> "On: your ship tells this iPhone when something arrives."
+                    io.nisfeb.talon.notify.PhoneNotifications.Relay -> "On: the relay tells this iPhone when something arrives."
+                    io.nisfeb.talon.notify.PhoneNotifications.Off -> "Off: with the app closed, this iPhone hears nothing from your ship."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (from != io.nisfeb.talon.notify.PhoneNotifications.Ship) {
+            TextButton(onClick = { asking = true }) { Text(if (from == io.nisfeb.talon.notify.PhoneNotifications.Off) "Turn on" else "Set up again") }
+        }
+    }
+    if (asking) {
+        io.nisfeb.talon.ui.NotificationSetupDialog(
+            code = null,
+            enroll = { c -> io.nisfeb.talon.notify.enrollDevice(config.client, config.settings, config.pushTokens, ship, shipUrl, c) },
+            onDone = { asking = false; from = io.nisfeb.talon.notify.phoneNotifications(config.settings, ship) },
+            onNotNow = { asking = false },
+        )
+    }
+}
+
+/** The unread count on the app icon (iOS), off until the owner turns it on. */
+@Composable
+internal fun AppIconBadgeRow(settings: io.nisfeb.talon.notify.RelaySettings) {
+    val on by settings.badges.collectAsState()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Unread count on the app icon", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Messages that notified you: direct messages, mentions and replies. " +
+                    "If no number shows, turn on Badges for Talon in the iPhone's Settings, Notifications.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = on, onCheckedChange = { settings.setBadges(it) })
+    }
+}
+
+/**
+ * Where this device's notifications come from, first in Notifications and
+ * naming the ship (sneagan: "make it more obvious and also name the ship";
+ * the line sat inside the relay panel and said only "your own ship"), and
+ * the owner's way to change it (manual only). Moved to the ship, it can go
+ * back to the relay; back on the relay by choice, it can go to the ship
+ * again, which Talon does the next time it connects. Nothing while the
+ * device has never been on its ship's notifications.
+ */
+@Composable
+internal fun ShipNotificationsRow(config: RelayPanelConfig) {
+    val ship = config.activePatp ?: return
+    val poke = config.shipPoke ?: return
+    val scope = rememberCoroutineScope()
+    var via by remember(ship) { mutableStateOf(config.settings.viaShipPush(ship)) }
+    var declined by remember(ship) { mutableStateOf(config.settings.shipPushDeclined(ship)) }
+    var backToShip by remember(ship) { mutableStateOf(false) }
+    val device = if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) "this iPhone" else "this device"
+    val (title, body) = when {
+        via -> "Notifications come from $ship" to (
+            if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
+                "Your ship sends them to $device itself, through its %trunk. The Talon relay only hands them to Apple."
+            } else {
+                "Your ship sends them to $device itself, through its %trunk. The Talon relay is not used."
+            }
+            )
+        declined -> "Notifications come from the Talon relay" to
+            "You chose the relay over $ship's own notifications. Register $device with the relay below to get them from it."
+        backToShip -> "Moving to $ship's notifications" to
+            "Talon moves $device the next time it starts, once a test notification from $ship arrives."
+        else -> return
+    }
+    val status by produceState<String?>(null, ship, via) {
+        if (via) value = config.shipPushStatus?.invoke()?.let {
+            io.nisfeb.talon.notify.shipPushStatusLine(it, config.settings.trunkDeviceIdFor(ship))
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+        Icon(
+            Icons.Filled.Notifications,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(end = 12.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
+            Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            status?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        when {
+            via -> TextButton(onClick = {
+                scope.launch {
+                    io.nisfeb.talon.notify.leaveShipPush(ship, config.settings, poke)
+                    via = false
+                    declined = true
+                }
+            }) { Text("Use the relay") }
+            declined -> TextButton(onClick = {
+                config.settings.setShipPushDeclined(ship, false)
+                declined = false
+                backToShip = true
+            }) { Text("Use my ship") }
+        }
+    }
+}
+

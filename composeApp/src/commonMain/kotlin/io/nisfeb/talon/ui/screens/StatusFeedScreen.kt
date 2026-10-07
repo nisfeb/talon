@@ -1,7 +1,7 @@
 package io.nisfeb.talon.ui.screens
 import io.nisfeb.talon.ui.shipHandle
 import io.nisfeb.talon.util.formatMonthDay
-import io.nisfeb.talon.util.formatTime24
+import io.nisfeb.talon.util.formatClock
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
@@ -19,7 +19,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -118,7 +117,7 @@ internal fun SelfStatusRow(
                 )
             } else {
                 Text(
-                    "Tap to set a status",
+                    "${io.nisfeb.talon.ui.tapWord} to set a status",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -198,15 +197,25 @@ internal fun StatusRow(c: ContactEntity, onClick: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // One line each. A long nickname took the row's width and
+                // left the @p beside it a column one letter wide, spelled
+                // down the side of the row.
                 Text(
                     label,
                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
-                if (!c.nickname.isNullOrBlank()) {
+                // Not where the nickname already says it ("~nomryg-nilref (Jack Fox)").
+                val handle = shipHandle(c.ship)
+                if (!c.nickname.isNullOrBlank() && handle !in label) {
                     Text(
-                        shipHandle(c.ship),
+                        handle,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        softWrap = false,
                     )
                 }
             }
@@ -234,7 +243,7 @@ private fun formatRelative(ms: Long): String {
     return when {
         diff < 60_000L -> "now"
         diff < 3600_000L -> "${diff / 60_000L}m"
-        diff < 24 * 3600_000L -> formatTime24(ms)
+        diff < 24 * 3600_000L -> formatClock(ms)
         else -> formatMonthDay(ms)
     }
 }

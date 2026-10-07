@@ -156,15 +156,7 @@ class ShipConnection(
     }
 
     private fun subscribe(channelId: String): Boolean {
-        // %activity /v4 — same subscribe path Talon-the-app uses — plus
-        // %trunk /calls for rings. Most ships have no %trunk installed;
-        // eyre nacks that one subscription individually and the channel
-        // (and %activity with it) carries on, so a missing desk costs
-        // nothing but a logged warning.
-        val ship = patp.removePrefix("~")
-        val payload =
-            """[{"id":$SUB_ACTIVITY,"action":"subscribe","ship":"$ship","app":"activity","path":"/v4"},""" +
-                """{"id":$SUB_CALLS,"action":"subscribe","ship":"$ship","app":"trunk","path":"/calls"}]"""
+        val payload = subscribePayload(patp)
         val req = Request.Builder()
             .url("$shipUrl/~/channel/$channelId")
             .put(payload.toRequestBody(JSON_MEDIA))
@@ -259,10 +251,25 @@ class ShipConnection(
         }
         val json = body["json"]?.jsonObject ?: return
 
-        // Route by subscription id — the two streams have nothing in
-        // common beyond the channel they share.
-        if (body["id"]?.jsonPrimitive?.contentOrNull == SUB_CALLS.toString()) {
+        // Route by subscription id: the streams have nothing in common
+        // beyond the channel they share.
+        val stream = streamOf(body["id"]?.jsonPrimitive?.contentOrNull)
+        if (stream == Stream.CALLS) {
             handleRing(json)
+            return
+        }
+
+        // Read to the end, on this ship's own client or any other: the
+        // phone's notifications for it go, as Tlon's %notify dismisses
+        // them. Off the message cursor, like a ring. Only from /v4/reads:
+        // /v4 carries no ordinary read, only a deleted chat's dummy one,
+        // which /v4/reads carries too.
+        if (json.containsKey("read")) {
+            if (stream != Stream.READS) return
+            val dev = db.deviceFor(deviceId) ?: return
+            val whom = readPushWhom(json, dev.caps) ?: return
+            log.info("read whom=$whom")
+            push.sendRead(endpoint = dev.pushEndpoint, patp = patp, whom = whom, platform = dev.platform)
             return
         }
 
@@ -274,7 +281,7 @@ class ShipConnection(
         // every real notification because that field doesn't exist.
         val add = json["add"]?.jsonObject ?: return
         val sourceObj = add["source"]?.jsonObject ?: return
-        val whom = extractWhom(sourceObj) ?: return
+        val whom = activityWhom(sourceObj) ?: return
         val event = add["event"]?.jsonObject ?: return
         val notify = (event["notified"] as? JsonPrimitive)?.booleanOrNull == true
         if (!notify) return
@@ -284,7 +291,7 @@ class ShipConnection(
         // means a reconnect-and-replay won't re-push events we
         // already delivered (the SSE event id resets to 1 on every
         // channel open).
-        val postId = extractPostId(event) ?: return
+        val postId = activityPostId(event) ?: return
 
         val cursor = db.lastEventId(shipRowId, deviceId)
         if (cursor == postId) return
@@ -331,6 +338,8 @@ class ShipConnection(
             platform = dev.platform,
             author = postId.substringBefore('/').takeIf { it.startsWith("~") },
             preview = ActivityPreview.of(event),
+            parent = activityParentId(event),
+            badge = if (dev.platform == Push.IOS) db.nextBadge(Db.DEVICES, deviceId) else null,
         )
         db.setLastEventId(shipRowId, deviceId, postId)
     }
@@ -415,12 +424,7 @@ class ShipConnection(
             .build()
         http.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) error("HTTP ${resp.code}")
-            val body = Json.parseToJsonElement(resp.body.string()).jsonObject
-            val desk = body["desk"]?.jsonObject ?: body
-            val bucket = desk["notify-prefs"]?.jsonObject ?: return emptyMap()
-            return bucket.entries.mapNotNull { (whom, v) ->
-                (v as? JsonObject)?.get("level")?.jsonPrimitive?.contentOrNull?.let { whom to it }
-            }.toMap()
+            return notifyLevels(Json.parseToJsonElement(resp.body.string()).jsonObject)
         }
     }
 
@@ -433,28 +437,6 @@ class ShipConnection(
         return false
     }
 
-    private fun extractPostId(event: JsonObject): String? {
-        for (kind in arrayOf("dm-post", "chan-post", "club-post")) {
-            event[kind]?.jsonObject?.get("key")
-                ?.jsonObject?.get("id")
-                ?.jsonPrimitive?.contentOrNull
-                ?.let { return it }
-        }
-        return null
-    }
-
-    private fun extractWhom(source: JsonObject): String? {
-        // Tlon's source can be { dm: { ship: "~..." } }, { club: { id }},
-        // or { channel: { nest: "chat/...", group: "~.../..." } }.
-        // We surface a stable string for each.
-        source["dm"]?.jsonObject?.get("ship")?.jsonPrimitive?.contentOrNull
-            ?.let { return it }
-        source["club"]?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull
-            ?.let { return it }
-        source["channel"]?.jsonObject?.get("nest")?.jsonPrimitive?.contentOrNull
-            ?.let { return it }
-        return null
-    }
 
     private fun ackEvent(channelId: String, id: String) {
         if (!ackedIds.add(id)) return
@@ -472,10 +454,11 @@ class ShipConnection(
     private val JsonPrimitive.booleanOrNull: Boolean?
         get() = runCatching { boolean }.getOrNull()
 
-    private companion object {
+    internal companion object {
         /** Subscription ids on the shared eyre channel. */
         const val SUB_ACTIVITY = 1
         const val SUB_CALLS = 2
+        const val SUB_READS = 3
 
         private val JSON_MEDIA = "application/json".toMediaType()
     }
@@ -500,6 +483,126 @@ internal sealed interface CallFact {
  *  hangup  {"recv":{"from":"~zod","sig":{"hangup":{"id":i}}}}
  *  handled {"handled":"<id>"} — our own ship saying another of the
  *          user's clients answered. */
+/**
+ * The chat an %activity /v4 read update says is read to the end:
+ * `{read: {source, activity: {count, notify-count, …}}}` with both counts
+ * zero. Null for a thread's read (its chat may still be unread), a read
+ * that leaves some unread, and anything else.
+ */
+internal fun readWhom(json: JsonObject): String? {
+    val read = json["read"] as? JsonObject ?: return null
+    val summary = read["activity"] as? JsonObject ?: return null
+    val counts = listOf("count", "notify-count").map { (summary[it] as? JsonPrimitive)?.content?.toIntOrNull() }
+    if (counts.any { it != 0 }) return null
+    val source = read["source"] as? JsonObject ?: return null
+    return ((source["dm"] as? JsonObject)?.let { it["ship"] ?: it["club"] }
+        ?: (source["club"] as? JsonObject)?.get("id")
+        ?: (source["channel"] as? JsonObject)?.get("nest"))
+        ?.let { (it as? JsonPrimitive)?.content }
+}
+
+/**
+ * %activity /v4's message events (landscape sur/activity.hoon): a channel
+ * post, a reply in a thread, and their DM twins; chan-post and club-post
+ * are older names. The relay read only dm-post, chan-post and club-post,
+ * so it never pushed a channel post, a reply or a club DM (2026-10-06).
+ */
+internal val ACTIVITY_MESSAGE_TAGS = arrayOf("post", "reply", "dm-post", "dm-reply", "chan-post", "club-post")
+
+/** The message an /v4 event is about: its key.id, "<author>/<id>". */
+internal fun activityPostId(event: JsonObject): String? {
+    for (kind in ACTIVITY_MESSAGE_TAGS) {
+        (((event[kind] as? JsonObject)?.get("key") as? JsonObject)?.get("id") as? JsonPrimitive)
+            ?.contentOrNull?.let { return it }
+    }
+    return null
+}
+
+/** A reply's parent post, so a tap opens the thread; null for a top-level post. */
+internal fun activityParentId(event: JsonObject): String? {
+    for (kind in arrayOf("reply", "dm-reply")) {
+        (((event[kind] as? JsonObject)?.get("parent") as? JsonObject)?.get("id") as? JsonPrimitive)
+            ?.contentOrNull?.let { return it }
+    }
+    return null
+}
+
+/**
+ * The chat an /v4 source names: a DM (a ship, or a club's id), a channel,
+ * a thread (its channel) or a DM thread (its whom); `club.id` from
+ * before v4. The relay wanted `club.id` and had no thread forms.
+ */
+internal fun activityWhom(source: JsonObject): String? {
+    fun JsonElement?.text() = (this as? JsonPrimitive)?.contentOrNull
+    (source["dm"] as? JsonObject)?.let { d -> (d["ship"].text() ?: d["club"].text())?.let { return it } }
+    ((source["dm-thread"] as? JsonObject)?.get("whom") as? JsonObject)
+        ?.let { w -> (w["ship"].text() ?: w["club"].text())?.let { return it } }
+    (source["channel"] as? JsonObject)?.get("nest").text()?.let { return it }
+    (source["thread"] as? JsonObject)?.get("channel").text()?.let { return it }
+    (source["club"] as? JsonObject)?.get("id").text()?.let { return it }
+    return null
+}
+
+/**
+ * Talon's per-chat levels from %settings' talon desk: whom to level.
+ * %settings keeps strings, not objects, so each value is the string
+ * "{\"level\":\"mentions\"}". The relay read it as an object and got
+ * nothing, so no per-chat level ever applied to a push (2026-10-06).
+ * An object is read too.
+ */
+internal fun notifyLevels(settings: JsonObject): Map<String, String> {
+    val desk = settings["desk"] as? JsonObject ?: settings
+    val bucket = desk["notify-prefs"] as? JsonObject ?: return emptyMap()
+    return bucket.entries.mapNotNull { (whom, v) ->
+        val obj = v as? JsonObject
+            ?: (v as? JsonPrimitive)?.contentOrNull?.let { runCatching { Json.parseToJsonElement(it) as? JsonObject }.getOrNull() }
+        (obj?.get("level") as? JsonPrimitive)?.contentOrNull?.let { whom to it }
+    }.toMap()
+}
+
+/**
+ * The channel's subscriptions: %activity /v4 (the path Talon itself uses)
+ * for messages, /v4/reads for reads, and %trunk /calls for rings.
+ *
+ * Tlon sends an ordinary read only to /v4/reads (give-reads is
+ * `[%only /reads]` in app/activity.hoon, /v4/unreads before late 2025),
+ * so watching /v4 alone, the relay never sent a read push (found in the
+ * gwbtc/trunk#1 review, 2026-10-06). Most ships have no %trunk, and a
+ * ship on a Tlon without /v4/reads has no such path: eyre nacks that one
+ * subscription and the channel carries on, so either costs nothing but a
+ * logged warning.
+ */
+internal fun subscribePayload(patp: String): String {
+    val ship = patp.removePrefix("~")
+    fun sub(id: Int, app: String, path: String) =
+        """{"id":$id,"action":"subscribe","ship":"$ship","app":"$app","path":"$path"}"""
+    return listOf(
+        sub(ShipConnection.SUB_ACTIVITY, "activity", "/v4"),
+        sub(ShipConnection.SUB_READS, "activity", "/v4/reads"),
+        sub(ShipConnection.SUB_CALLS, "trunk", "/calls"),
+    ).joinToString(",", "[", "]")
+}
+
+internal enum class Stream { ACTIVITY, READS, CALLS }
+
+/** The stream an event came on, by the subscription id eyre gives it. */
+internal fun streamOf(subscriptionId: String?): Stream = when (subscriptionId) {
+    ShipConnection.SUB_CALLS.toString() -> Stream.CALLS
+    ShipConnection.SUB_READS.toString() -> Stream.READS
+    else -> Stream.ACTIVITY
+}
+
+/** Whether a device whose app declared [caps] is sent read pushes. */
+internal fun wantsRead(caps: Set<String>): Boolean = "read" in caps
+
+/**
+ * The chat to send a read push about, for a device whose app declared
+ * [caps]: only one that said it understands one, since an older app
+ * shows any push it does not know as a new message.
+ */
+internal fun readPushWhom(json: JsonObject, caps: Set<String>): String? =
+    if (wantsRead(caps)) readWhom(json) else null
+
 internal fun parseCallFact(json: JsonObject): CallFact? {
     fun JsonElement?.str(): String? =
         runCatching { (this as? JsonPrimitive)?.content }.getOrNull()

@@ -36,7 +36,11 @@ import java.util.concurrent.ConcurrentHashMap
  * `channel.events()`, as in the app; without that every poke waits out
  * its ack timeout.
  */
-internal class FakeShip(val us: String = "~zod") {
+/**
+ * [timeouts] gives the client the app's own request timeouts (HttpTimeout):
+ * without it a held answer waits forever, so no read here ever times out.
+ */
+internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
     data class Poke(val app: String, val mark: String, val json: JsonElement, val ship: String)
 
     val pokes: MutableList<Poke> = java.util.concurrent.CopyOnWriteArrayList()
@@ -44,6 +48,10 @@ internal class FakeShip(val us: String = "~zod") {
 
     /** Every subscription opened, as `app/path`. */
     val subscribed: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    /** How many subscriptions each PUT that carried any carried. */
+    val subscribePuts: MutableList<Int> = java.util.concurrent.CopyOnWriteArrayList()
+    /** The event ids each ack named, in order. */
+    val acked: MutableList<Long> = java.util.concurrent.CopyOnWriteArrayList()
 
     /** Every scry path asked for, answered or not, in order. */
     val scried: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
@@ -74,12 +82,40 @@ internal class FakeShip(val us: String = "~zod") {
     @Volatile var answerApi: (method: String, path: String, body: String) -> String? = { _, _, _ -> null }
     /** A scry the ship fails on (500), as a crashed or busy agent does; unlike one it has no answer for (404). */
     @Volatile var failScry: (path: String) -> Boolean = { false }
+    /** How long a scry waits before it is answered: a busy ship, by path. */
+    @Volatile var holdScry: (path: String) -> Long = { 0 }
+    /** A scry that never comes back: the connection dropped, or a busy ship timed out. */
+    @Volatile var loseScry: (path: String) -> Throwable? = { null }
+    /** How long a poke waits before the ship takes it: a slow ship, at work. */
+    @Volatile var holdPoke: Long = 0
     /** How long a channel's delete waits for an answer: a dead socket, as an iOS app finds coming back. */
     @Volatile var holdDelete: Long = 0
     /** While true the event stream is refused, as with no network yet. */
     @Volatile var refuseStream: Boolean = false
+    /** A subscription refused, by `app/path` (e.g. "activity/v6"): an older ship without it. */
+    @Volatile var refuseWatch: (String) -> String? = { null }
+    /** A subscription whose PUT is lost on the way, by `app/path`: what the request fails with, or null to deliver it. */
+    @Volatile var loseWatch: (String) -> Throwable? = { null }
     /** Every request, "METHOD path", whatever it was for: what an app that must say nothing did say. */
     val requests: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    /** Each event stream asked for: its channel, and the Last-Event-ID it carried. */
+    val streamsOpened: MutableList<Pair<String, String?>> = java.util.concurrent.CopyOnWriteArrayList()
+
+    // Channels a PUT made, and those reaped since: a stream on a reaped one is
+    // a 404 until a PUT makes it again, as with eyre.
+    private val known: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val reaped: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    // Channels refused to this login since [forbid]: a 403 on stream and PUT.
+    private val forbidden: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** The request id each watch (app + path) was last made with, for [quit]. */
+    val subIds = ConcurrentHashMap<String, Long>()
+
+    /** Vere's own /~_~/healthz: 204 idle, 429 busy, a proxy's 502 down. */
+    @Volatile var health: Int = 204
+
+    /** A scry with no entry in [scries] is answered by this, for paths that carry a time. */
+    @Volatile var answerScry: (path: String) -> String? = { null }
 
     // One event stream per channel, as eyre keeps one per channel: the app
     // runs several (the repo's, the call controller's), and two channels
@@ -112,11 +148,51 @@ internal class FakeShip(val us: String = "~zod") {
             }
         }
 
+    /**
+     * The stream for a GET on the channel at [path]. One whose last reader
+     * went away is closed; a stream opened on that channel again gets a new
+     * one fed from the same queue, as eyre resumes a channel. Called under [writing].
+     */
+    private fun streamOf(path: String): ByteChannel {
+        val id = path.removePrefix("/~/channel/")
+        val old = pipes[id] ?: return pipeOf(path).stream
+        if (!old.stream.isClosedForWrite) return old.stream
+        // A new queue, with what the old one had not written: the old pump
+        // still waits on its queue and would take the next frame to a
+        // stream nobody reads.
+        val fresh = Pipe(ByteChannel(autoFlush = true), Channel(Channel.UNLIMITED))
+        while (true) fresh.queue.trySend(old.queue.tryReceive().getOrNull() ?: break)
+        old.queue.close()
+        pipes[id] = fresh
+        pumps.launch { runCatching { for (f in fresh.queue) fresh.stream.writeStringUtf8(f) } }
+        return fresh.stream
+    }
+
+    /** The id of the last event framed so far. */
+    val lastEventId: Long get() = nextEventId - 1
+
     /** End every open event stream, as a dropped connection does. */
     suspend fun endStreams() = writing.withLock {
         pipes.values.forEach { it.queue.close(); it.stream.close() }
         pipes.clear()
     }
+
+    /** Forget every channel, as eyre reaps one twelve hours after its stream: streams end, and a channel asked for again is a 404. */
+    suspend fun reap() = writing.withLock {
+        reaped += known
+        pipes.values.forEach { it.queue.close(); it.stream.close() }
+        pipes.clear()
+    }
+
+    /** Refuse every channel made so far, as eyre does one made by another login: 403 on stream and PUT. */
+    suspend fun forbid() = writing.withLock {
+        forbidden += known
+        pipes.values.forEach { it.queue.close(); it.stream.close() }
+        pipes.clear()
+    }
+
+    /** Drop the watch [watch] (app + path), as gall's kick reaches a channel: eyre's quit, on its id. */
+    suspend fun quit(watch: String) = emit("""{"id":${subIds.getValue(watch)},"response":"quit"}""")
 
     /** Put a fact on every channel's event stream, framed as eyre frames it. */
     suspend fun emit(json: String) = writing.withLock {
@@ -132,12 +208,21 @@ internal class FakeShip(val us: String = "~zod") {
         val path = req.url.encodedPath
         requests += "${req.method.value} $path"
         when {
+            (req.method == HttpMethod.Put || req.method == HttpMethod.Get) && path.startsWith("/~/channel/") &&
+                path.removePrefix("/~/channel/") in forbidden -> {
+                if (req.method == HttpMethod.Get) streamsOpened += path.removePrefix("/~/channel/") to req.headers["Last-Event-ID"]
+                respond("", HttpStatusCode.Forbidden)
+            }
             req.method == HttpMethod.Put && path.startsWith("/~/channel/") -> {
-                for (msg in Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonArray) {
+                path.removePrefix("/~/channel/").let { known += it; reaped -= it }
+                val batch = Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonArray
+                batch.count { it.jsonObject["action"]?.jsonPrimitive?.content == "subscribe" }.takeIf { it > 0 }?.let { subscribePuts += it }
+                for (msg in batch) {
                     val o = msg.jsonObject
                     val id = o["id"]!!.jsonPrimitive.long
                     when (o["action"]?.jsonPrimitive?.content) {
                         "poke" -> {
+                            if (holdPoke > 0) kotlinx.coroutines.delay(holdPoke)
                             val p = Poke(
                                 o["app"]!!.jsonPrimitive.content,
                                 o["mark"]!!.jsonPrimitive.content,
@@ -155,24 +240,51 @@ internal class FakeShip(val us: String = "~zod") {
                             )
                             landThenFail(p)?.let { throw it }
                         }
+                        "ack" -> { o["event-id"]?.jsonPrimitive?.content?.toLongOrNull()?.let { acked += it } }
                         "subscribe" -> {
-                            subscribed += "${o["app"]?.jsonPrimitive?.content}${o["path"]?.jsonPrimitive?.content}"
-                            answer(path, """{"id":$id,"response":"subscribe","ok":"ok"}""")
+                            val watch = "${o["app"]?.jsonPrimitive?.content}${o["path"]?.jsonPrimitive?.content}"
+                            loseWatch(watch)?.let { throw it }
+                            subscribed += watch
+                            subIds[watch] = id
+                            val err = refuseWatch(watch)
+                            answer(
+                                path,
+                                if (err == null) """{"id":$id,"response":"subscribe","ok":"ok"}"""
+                                else """{"id":$id,"response":"subscribe","err":${JsonPrimitive(err)}}""",
+                            )
                         }
                         "delete" -> if (holdDelete > 0) kotlinx.coroutines.delay(holdDelete)
                     }
                 }
                 respond("", HttpStatusCode.NoContent)
             }
+            req.method == HttpMethod.Get && path.startsWith("/~/channel/") &&
+                path.removePrefix("/~/channel/").also { streamsOpened += it to req.headers["Last-Event-ID"] } in reaped ->
+                respond("", HttpStatusCode.NotFound)
             req.method == HttpMethod.Get && path.startsWith("/~/channel/") && refuseStream ->
                 respond("", HttpStatusCode.ServiceUnavailable)
-            req.method == HttpMethod.Get && path.startsWith("/~/channel/") ->
-                respond(writing.withLock { pipeOf(path) }.stream, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+            // Checked again under the lock: a reap or a forbid between the
+            // checks above and here would otherwise leave a stream open on
+            // a channel that is gone.
+            req.method == HttpMethod.Get && path.startsWith("/~/channel/") -> {
+                val id = path.removePrefix("/~/channel/")
+                when (val stream = writing.withLock { if (id in reaped || id in forbidden) null else streamOf(path) }) {
+                    null -> respond("", if (id in forbidden) HttpStatusCode.Forbidden else HttpStatusCode.NotFound)
+                    else -> respond(stream, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+                }
+            }
+            req.method == HttpMethod.Get && path == "/~_~/healthz" -> respond("", HttpStatusCode.fromValue(health))
+            path.startsWith("/~/scry/") && loseScry(path.removePrefix("/~/scry/").removeSuffix(".json")) != null -> {
+                val asked = path.removePrefix("/~/scry/").removeSuffix(".json")
+                scried += asked
+                throw loseScry(asked)!!
+            }
             path.startsWith("/~/scry/") && failScry(path.removePrefix("/~/scry/").removeSuffix(".json")) ->
                 respond("", HttpStatusCode.InternalServerError)
             path.startsWith("/~/scry/") ->
                 path.removePrefix("/~/scry/").removeSuffix(".json").also { scried += it }
-                    .let { scries[it] }
+                    .also { p -> holdScry(p).takeIf { it > 0 }?.let { kotlinx.coroutines.delay(it) } }
+                    .let { scries[it] ?: answerScry(it) }
                     ?.let { respond(it, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
                     ?: respond("", HttpStatusCode.NotFound)
             // An app's own HTTP API (%notes' v1, …): recorded, and answered by [answerApi].
@@ -185,7 +297,7 @@ internal class FakeShip(val us: String = "~zod") {
             }
             else -> respond("", HttpStatusCode.NotFound)
         }
-    })
+    }) { if (timeouts) install(io.ktor.client.plugins.HttpTimeout) }
 
     /** Signed in to this ship at https://ship.test, and nothing else. */
     val session = object : SessionStore {

@@ -68,6 +68,7 @@ actual val isBackgroundCallRingSupported: Boolean = true
 // No touch edge on desktop; the logo click opens the switcher.
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = true
+actual val isScreenShareSupported: Boolean = true
 actual val isCameraSwitchSupported: Boolean = false
 
 actual val isEdgeSwipeBackSupported: Boolean = false
@@ -86,6 +87,11 @@ actual val isTouchPrimary: Boolean = false
 
 // A computer does not move with you.
 actual val isLocationSharingSupported: Boolean = false
+actual val isHealthSharingSupported: Boolean = false
 
 /** Nothing here forbids an outside checkout. */
 actual val isArmillaryPurchaseSupported: Boolean = true
+
+actual val isRelayNotificationSetupNeeded: Boolean = false
+
+actual val isAppIconBadgeSupported: Boolean = false

@@ -159,6 +159,9 @@ const val MENTION_TAG = "mention"
 /** Inline URL annotation tag — value is the absolute href. */
 const val URL_TAG = "url"
 
+/** How a mention is drawn, sent or in the composer, so the box shows what will be sent. */
+internal val MENTION_SPAN = SpanStyle(color = Color(0xFF4F63D2), fontWeight = FontWeight.Medium)
+
 object Story {
 
     /**
@@ -331,7 +334,7 @@ object Story {
             val url = text.substring(r.first, r.last + 1)
             out.pushStringAnnotation(URL_TAG, url)
             out.withSpan(SpanStyle(color = LINK_COLOR, textDecoration = TextDecoration.Underline)) {
-                append(url)
+                append(shortLinkLabel(url))
             }
             out.pop()
             cursor = r.last + 1
@@ -431,7 +434,7 @@ object Story {
             // person's view. The annotation stays the @p so taps still
             // resolve the right ship.
             out.pushStringAnnotation(MENTION_TAG, patp)
-            out.withSpan(SpanStyle(color = MENTION_COLOR, fontWeight = FontWeight.Medium)) {
+            out.withSpan(MENTION_SPAN) {
                 append(io.nisfeb.talon.ui.ShipNames.resolve(patp))
             }
             out.pop()
@@ -440,7 +443,9 @@ object Story {
         (obj["link"] as? JsonObject)?.let { link ->
             val href = link["href"].asStr()
             val content = link["content"].asStr()
-            val label = content ?: href ?: "[link]"
+            // A link written as its own address is cut short; one the
+            // author named reads as they named it.
+            val label = content?.takeUnless { it == href } ?: href?.let(::shortLinkLabel) ?: content ?: "[link]"
             if (href != null) out.pushStringAnnotation(URL_TAG, href)
             out.withSpan(SpanStyle(color = LINK_COLOR, textDecoration = TextDecoration.Underline)) {
                 append(label)
@@ -786,7 +791,6 @@ object Story {
 
     // ───────── style constants ─────────
 
-    private val MENTION_COLOR = Color(0xFF4F63D2)
     private val LINK_COLOR = io.nisfeb.talon.ui.theme.LINK_BLUE
     private val MONO_SPAN = SpanStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
 }
@@ -803,3 +807,15 @@ private inline fun androidx.compose.ui.text.AnnotatedString.Builder.withSpan(
         pop(idx)
     }
 }
+
+/**
+ * A long address as a link shows it: without its http(s):// and cut to
+ * [keep] characters and an ellipsis. Long addresses ran across the
+ * message; the link still goes to the whole of it. One that fits is left
+ * as written.
+ */
+fun shortLinkLabel(url: String, keep: Int = 20): String {
+    val shown = url.removePrefix("https://").removePrefix("http://")
+    return if (shown.length <= keep + 1) url else shown.take(keep) + "…"
+}
+

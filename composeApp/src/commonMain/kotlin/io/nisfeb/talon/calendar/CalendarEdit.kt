@@ -1,9 +1,10 @@
 package io.nisfeb.talon.calendar
 
+import kotlinx.datetime.number
 import io.nisfeb.talon.util.nowMs
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.DayOfWeek
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.LocalTime
@@ -83,13 +84,14 @@ data class EventDraft(
     /** every: the period, in minutes. */
     val periodMin: Int = 60,
     /**
-     * A rule the editor does not model (an imported rrule or cron): the
-     * kind, its arguments and its anchor are kept verbatim, so the rest
-     * of the event can still be edited without rewriting the rule.
+     * A rule the editor does not model (an rrule, which is every series
+     * the calendar holds since it turned its presets into rrules): the
+     * kind and its arguments are kept verbatim, so the rest of the event
+     * can still be edited without rewriting the rule. When it starts is
+     * [date] and [minuteOfDay], like any other event's.
      */
     val rawKind: String? = null,
     val rawArgs: JsonObject? = null,
-    val rawStartMs: Long? = null,
     /** A task: when it is due, if ever, and whether it is done. The
      *  done moment is kept across an edit rather than reset to now. */
     val due: LocalDate? = null,
@@ -104,6 +106,18 @@ data class EventDraft(
      * the entry from the fields above and dropped the rest.
      */
     val otherMeta: JsonObject = JsonObject(emptyMap()),
+    /** Its reminders; null where the calendar does not say (one older than reminders), and then none are shown or sent. */
+    val alarms: List<CalAlarm>? = null,
+    /**
+     * Whether [alarms] were changed here. An edit sends them only then:
+     * one sent unchanged would undo a change made elsewhere since this
+     * was read. A new event sends them always.
+     */
+    val alarmsChanged: Boolean = false,
+    /** A task's priority, 0 to 9 ([PRIORITY_CHOICES]); null where the calendar does not say, and then none is shown or sent. */
+    val priority: Int? = null,
+    /** Whether [priority] was changed here: an edit sends it only then, as with reminders. */
+    val priorityChanged: Boolean = false,
 ) {
     val repeats: Boolean get() = cat != EventCat.TODO && cat != EventCat.DATE && (rawKind != null || repeat != Repeat.ONCE)
 }
@@ -148,20 +162,24 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
         if (d.tags.isNotEmpty()) put("tags", JsonArray(d.tags.map { JsonPrimitive(it) }))
     }
     d.cal?.let { put("cal", it) }
+    d.alarms?.let { a -> if (id == null || d.alarmsChanged) put("alarms", JsonArray(a.map { it.raw })) }
     if (d.cat == EventCat.TODO) {
+        d.priority?.let { p -> if (id == null || d.priorityChanged) put("priority", p) }
         d.due?.let { put("due_ms", it.utcMidnightMs()) }
         if (d.done) put("done_ms", d.doneMs ?: nowMs())
         return@buildJsonObject
     }
     if (d.cat == EventCat.DATE) {
-        put("month", d.date.monthNumber)
-        put("day", d.date.dayOfMonth)
+        put("month", d.date.month.number)
+        put("day", d.date.day)
         return@buildJsonObject
     }
     if (d.rawKind != null) {
-        // An imported rule, sent back as it came.
+        // The rule's text as it came. Its start is the form's: it sent the
+        // start it was read with, so a moved series stayed where it was.
         put("kind", d.rawKind)
-        put("start_ms", d.rawStartMs ?: d.date.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds())
+        val at = if (d.cat == EventCat.TIMED) LocalTime(d.minuteOfDay / 60, d.minuteOfDay % 60) else LocalTime(0, 0)
+        put("start_ms", d.date.atTime(at).toInstant(TimeZone.UTC).toEpochMilliseconds())
         put("args", d.rawArgs ?: JsonObject(emptyMap()))
     } else {
         put("kind", d.repeat.kind)
@@ -174,12 +192,12 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
             if (d.cat == EventCat.TIMED && d.repeat != Repeat.ONCE && d.repeat != Repeat.EVERY) put("at", d.minuteOfDay)
             when (d.repeat) {
                 Repeat.WEEKLY -> put("days", JsonArray(d.weekdays.sortedBy { it.isoDayNumber }.map { JsonPrimitive(WIRE_DAYS[it.isoDayNumber - 1]) }))
-                Repeat.MONTHLY -> put("day", d.date.dayOfMonth)
+                Repeat.MONTHLY -> put("day", d.date.day)
                 Repeat.MONTHLY_NTH -> {
                     put("ord", d.ordinal.takeIf { it in ORDINALS } ?: "first")
                     put("day", WIRE_DAYS[(d.nthDay ?: d.date.dayOfWeek).isoDayNumber - 1])
                 }
-                Repeat.YEARLY -> { put("month", d.date.monthNumber); put("day", d.date.dayOfMonth) }
+                Repeat.YEARLY -> { put("month", d.date.month.number); put("day", d.date.day) }
                 Repeat.EVERY -> put("period", d.periodMin.coerceAtLeast(1))
                 else -> Unit
             }
@@ -198,23 +216,28 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
     }
 }
 
-/**
- * The event this occurrence becomes on its own: a one-off at the
- * occurrence's own day and time, the rest as edited. Sent after a
- * skip-event for the occurrence, the way the calendar's page does it.
- */
-fun onlyBody(d: EventDraft, occurrence: LocalDateTime): JsonObject = eventBody(
-    d.copy(
-        repeat = Repeat.ONCE, rawKind = null, rawArgs = null, rawStartMs = null, count = 0, until = null,
-        date = occurrence.date,
-        minuteOfDay = if (d.cat == EventCat.TIMED) occurrence.hour * 60 + occurrence.minute else d.minuteOfDay,
-    ),
-)
+/** The draft opened on one occurrence of a series: its day and time are that occurrence's. */
+fun EventDraft.atOccurrence(at: LocalDateTime): EventDraft =
+    copy(date = at.date, minuteOfDay = if (cat == EventCat.TIMED) at.hour * 60 + at.minute else minuteOfDay)
 
-/** The series as edited, restarted from the occurrence's day. Sent
- *  after a cap-event that ends the old series before it. */
-fun followingBody(d: EventDraft, occurrence: LocalDateTime): JsonObject =
-    eventBody(d.copy(date = occurrence.date, rawStartMs = d.rawStartMs?.let { occurrence.date.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds() }))
+/**
+ * The event this occurrence becomes on its own: a one-off at the day and
+ * time in the editor, which opened on the occurrence. Added before a
+ * skip-event for the occurrence, so a refused add loses nothing.
+ */
+fun onlyBody(d: EventDraft): JsonObject =
+    eventBody(d.copy(repeat = Repeat.ONCE, rawKind = null, rawArgs = null, count = 0, until = null))
+
+/**
+ * Every occurrence, edited from [opened] (the draft as it opened on one
+ * of them): the series moves as far as that occurrence was moved, from
+ * its own start in [series], and takes everything else as [edited].
+ */
+fun seriesEdit(edited: EventDraft, opened: EventDraft, series: EventDraft): EventDraft {
+    fun EventDraft.wall() = date.atTime(minuteOfDay / 60, minuteOfDay % 60).toInstant(TimeZone.UTC)
+    val moved = (series.wall() + (edited.wall() - opened.wall())).toLocalDateTime(TimeZone.UTC)
+    return edited.copy(date = moved.date, minuteOfDay = moved.hour * 60 + moved.minute)
+}
 
 /** The editor's draft for an event.json answer, or null for a shape it cannot edit. */
 /** The meta fields the editor shows and writes itself. Everything else rides through. */
@@ -234,6 +257,7 @@ fun taskDraft(r: CalendarRow, zone: TimeZone, today: LocalDate): EventDraft? = d
         put("cal", r.cal)
         put("meta", r.meta)
         put("done", r.done)
+        r.priority?.let { put("priority", it) }
         if (r.l > 0) {
             val due = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(zone).date
             put("due_ms", due.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds())
@@ -254,6 +278,7 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
         tags = (meta?.get("tags") as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
         color = metaStr("color"),
         otherMeta = JsonObject(meta.orEmpty().filterKeys { it !in EDITED_META }),
+        alarms = alarmsOf(e["alarms"] as? JsonArray),
     )
     if (cat == EventCat.TODO) {
         val due = e["due_ms"]?.jsonPrimitive?.longOrNull?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date }
@@ -261,6 +286,7 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
             date = due ?: today, due = due,
             done = e["done"]?.jsonPrimitive?.booleanOrNull ?: false,
             doneMs = e["done_ms"]?.jsonPrimitive?.longOrNull,
+            priority = e["priority"]?.jsonPrimitive?.intOrNull?.takeIf { it in 0..9 },
         )
     }
     if (cat == EventCat.DATE) {
@@ -288,7 +314,7 @@ fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
     val repeat = Repeat.entries.firstOrNull { it.kind == kind }
         // A rule the form does not model is kept whole: the rest of the
         // event stays editable.
-        ?: return common.copy(rawKind = kind, rawArgs = args, rawStartMs = startMs, minuteOfDay = wall.hour * 60 + wall.minute)
+        ?: return common.copy(rawKind = kind, rawArgs = args, minuteOfDay = wall.hour * 60 + wall.minute)
     val at = args?.get("at")?.jsonPrimitive?.intOrNull
     val days = (args?.get("days") as? JsonArray)?.mapNotNull { j ->
         WIRE_DAYS.indexOf(j.jsonPrimitive.contentOrNull).takeIf { it >= 0 }?.let { DayOfWeek(it + 1) }
@@ -375,4 +401,68 @@ fun daysOf(row: CalendarRow, zone: TimeZone): List<LocalDate> {
     val last = Instant.fromEpochMilliseconds(row.r - 1).toLocalDateTime(z).date
     if (last < first) return listOf(first)
     return generateSequence(first) { d -> d.plus(1, DateTimeUnit.DAY).takeIf { it <= last } }.take(62).toList()
+}
+
+/**
+ * One reminder, as the calendar gives it: before the start ("before",
+ * seconds `s`), at a moment ("at", `at_ms`), or offset from the start
+ * or the end ("offset", `from`, `after`, `s`). Kept whole, so a kind or
+ * a field this app does not edit goes back as it came.
+ */
+data class CalAlarm(val raw: JsonObject) {
+    val kind: String get() = raw["kind"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    val s: Long get() = raw["s"]?.jsonPrimitive?.longOrNull ?: 0L
+
+    companion object {
+        /** [s] seconds before the start: what the editor adds. */
+        fun before(s: Long) = CalAlarm(buildJsonObject { put("kind", "before"); put("s", s); put("desc", "") })
+    }
+}
+
+/** The reminders in a calendar answer, or null where it has none to say (an older calendar). */
+fun alarmsOf(a: JsonArray?): List<CalAlarm>? = a?.mapNotNull { (it as? JsonObject)?.let(::CalAlarm) }
+
+/** What the editor offers to add, in seconds before the start. */
+val ALARM_PRESETS: List<Long> = listOf(0L, 300L, 900L, 1_800L, 3_600L, 86_400L)
+
+/** "15 min", "1 hour", "2 days": a reminder's distance, in the largest whole unit. */
+fun alarmSpan(s: Long): String {
+    fun n(v: Long, one: String, many: String = one + "s") = "$v ${if (v == 1L) one else many}"
+    return when {
+        s >= 86_400 && s % 86_400 == 0L -> n(s / 86_400, "day")
+        s >= 3_600 && s % 3_600 == 0L -> n(s / 3_600, "hour")
+        s >= 60 && s % 60 == 0L -> "${s / 60} min"
+        else -> n(s, "second")
+    }
+}
+
+/** A reminder in words: "15 min before", "At the start", "At 9:00 on 2026-10-01". */
+fun alarmLabel(a: CalAlarm, zone: TimeZone, twentyFourHour: Boolean): String = when (a.kind) {
+    "before" -> if (a.s == 0L) "At the start" else "${alarmSpan(a.s)} before"
+    "at" -> a.raw["at_ms"]?.jsonPrimitive?.longOrNull?.let {
+        val t = Instant.fromEpochMilliseconds(it).toLocalDateTime(zone)
+        "At ${io.nisfeb.talon.ui.SkyClock.clockLabel(t.hour * 60 + t.minute, twentyFourHour)} on ${io.nisfeb.talon.util.formatDate(t.date)}"
+    } ?: "At a set time"
+    "offset" -> {
+        val end = a.raw["from"]?.jsonPrimitive?.contentOrNull == "end"
+        val after = a.raw["after"]?.jsonPrimitive?.booleanOrNull ?: false
+        if (a.s == 0L) (if (end) "At the end" else "At the start")
+        else "${alarmSpan(a.s)} ${if (after) "after" else "before"} the ${if (end) "end" else "start"}"
+    }
+    else -> "A reminder of a kind this app does not know"
+}
+
+/**
+ * What the editor offers, as the calendar's page does: none, and one of
+ * each of iCalendar's three bands. Any other number stays as it came
+ * unless the owner picks one of these.
+ */
+val PRIORITY_CHOICES: List<Pair<Int, String>> = listOf(0 to "None", 1 to "High", 5 to "Medium", 9 to "Low")
+
+/** A priority's band, as RFC 5545 has them (1-4 high, 5 medium, 6-9 low); null for none. */
+fun priorityBand(p: Int?): String? = when (p) {
+    in 1..4 -> "High"
+    5 -> "Medium"
+    in 6..9 -> "Low"
+    else -> null
 }

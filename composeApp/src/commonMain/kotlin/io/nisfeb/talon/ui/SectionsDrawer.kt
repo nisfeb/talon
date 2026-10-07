@@ -28,7 +28,7 @@ import io.nisfeb.talon.ui.icons.TalonIcons
  * The same list the desktop rail shows, in the same order, under the
  * same names and icons, hidden and reordered by the same preferences.
  * Two presentations of one set of sections rather than two lists that
- * drift: somebody who turns Watchwords off on their desktop has turned
+ * drift: somebody who turns Invites off on their desktop has turned
  * it off, not turned it off in one of the two places it appears.
  *
  * Only built where [isDrawerNavigation] is true. A desktop has the
@@ -66,16 +66,7 @@ fun SectionsDrawer(
                         fontWeight = if (item == active) FontWeight.SemiBold else FontWeight.Normal,
                     )
                 },
-                icon = {
-                    val icon = railIcon(item)
-                    if (icon != null) {
-                        Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
-                    } else {
-                        // The assistant has no glyph of its own; the
-                        // rail draws it as a letter and so does this.
-                        Text("A", style = MaterialTheme.typography.titleMedium)
-                    }
-                },
+                icon = { Icon(railIcon(item), contentDescription = null, modifier = Modifier.size(22.dp)) },
                 badge = if (badges[item] == true) {
                     { MenuBadgeDot() }
                 } else {

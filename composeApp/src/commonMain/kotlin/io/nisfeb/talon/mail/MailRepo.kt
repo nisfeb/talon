@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.nisfeb.talon.urbit.LatticeInstall
 import io.nisfeb.talon.urbit.jittered
 import io.nisfeb.talon.util.Log
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -14,6 +15,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import io.nisfeb.talon.util.nowMs
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -75,6 +78,8 @@ class MailRepo(
     private val rows: io.nisfeb.talon.data.MailRowDao? = null,
     /** This ship's thread directory, from [MailThreadFiles.dirFor]. Null keeps none. */
     threadDir: String? = null,
+    /** The first wait before asking again a ship that did not answer. */
+    private val firstRetryMs: Long = FIRST_RETRY_MS,
 ) {
     private val files = threadDir?.let { MailThreadFiles(it.toPath()) }
     private var api: AuspexApi? = null
@@ -275,6 +280,7 @@ class MailRepo(
     }
 
     fun detach() {
+        askAgain?.cancel()
         poller?.cancel()
         poller = null
         api = null
@@ -309,12 +315,16 @@ class MailRepo(
      * the refresh control can all land together and the ship runs its
      * events one at a time.
      */
-    suspend fun refresh() = gate.withLock {
+    suspend fun refresh(asked: Boolean = false) = gate.withLock {
         val a = api ?: return@withLock
         // Re-read everything already on screen, not just the first page:
         // a refresh that threw away what somebody had paged into would
         // look like mail disappearing.
-        val p = read(a, maxOf(_page.value?.threads?.size ?: 0, AuspexApi.DEFAULT_PAGE))
+        // The spinner is for someone waiting: who asked, or who has
+        // nothing on screen yet. A read behind mail already shown (the
+        // timer, coming back, after an action) is quiet; it spun on every
+        // thread opened, since opening one marks it read and re-reads.
+        val p = read(a, maxOf(_page.value?.threads?.size ?: 0, AuspexApi.DEFAULT_PAGE), spin = asked || _page.value == null)
             ?: return@withLock
         _availability.value = MailAvailability.PRESENT
         if (ourShip == null) {
@@ -324,11 +334,7 @@ class MailRepo(
                 // Mail still works; filing to Lattice is what breaks,
                 // and a quiet null there reads as "no address" rather
                 // than a failure. Say which it was.
-                _error.value = when (e) {
-                    is AuspexError.Refused -> e.reason
-                    is AuspexError.Garbled -> "The ship answered something we could not read."
-                    is AuspexError.Unreachable -> "No answer from the ship."
-                }
+                _error.value = e.said()
                 null
             }
         }
@@ -344,8 +350,8 @@ class MailRepo(
         call(probeAbsentApp = true) { it.inbox(view = view, query = query?.takeIf { q -> q.isNotBlank() }, limit = limit.coerceAtMost(MAX_PAGE)) }
 
     /** One listing read for the open folder, or null after [onFailure]. */
-    private suspend fun read(a: AuspexApi, limit: Int): InboxPage? {
-        _loading.value = true
+    private suspend fun read(a: AuspexApi, limit: Int, spin: Boolean = true): InboxPage? {
+        if (spin) _loading.value = true
         try {
             val key = pageKey()
             val p = a.inbox(
@@ -359,12 +365,13 @@ class MailRepo(
             // Somebody who changed folder while this was on its way sees the new one.
             if (pageKey() == key) _page.value = p
             _error.value = null
+            askAgainMs = firstRetryMs
             return p
         } catch (e: AuspexError) {
             onFailure(e, probeAbsentApp = true)
             return null
         } finally {
-            _loading.value = false
+            if (spin) _loading.value = false
         }
     }
 
@@ -420,16 +427,38 @@ class MailRepo(
                 _error.value = null
             }
             else -> {
-                _error.value = said(e)
+                _error.value = e.said()
                 Log.w(TAG, "mail refresh failed", e)
+                // Soon only for a ship that is down, back from a restart in
+                // minutes. A slow one (a timeout, a 504) asked every few
+                // seconds is only made slower; the poll asks it again.
+                if (e is AuspexError.Unreachable && e.down) askAgainSoon()
             }
         }
     }
 
-    private fun said(e: AuspexError): String = when (e) {
-        is AuspexError.Refused -> e.reason
-        is AuspexError.Garbled -> "The ship answered something we could not read."
-        is AuspexError.Unreachable -> "No answer from the ship."
+    @kotlin.concurrent.Volatile private var askAgain: Job? = null
+    @kotlin.concurrent.Volatile private var askAgainMs = firstRetryMs
+
+    /**
+     * No answer: ask again soon, a little later each time, rather than at
+     * the next poll ten minutes on. A ship back from a restart cleared the
+     * line only then, and it read as stuck.
+     */
+    private fun askAgainSoon() {
+        if (askAgain?.isActive == true) return
+        val wait = askAgainMs
+        askAgainMs = (wait * 2).coerceAtMost(MAX_RETRY_MS)
+        askAgain = scope.launch {
+            delay(jittered(wait))
+            askAgain = null
+            if (foreground) refresh()
+        }
+    }
+
+    /** The listing line put away; the next read that fails says it again. */
+    fun clearError() {
+        _error.value = null
     }
 
     /** True while there is more of this view than we have asked for. */
@@ -589,13 +618,35 @@ class MailRepo(
     /** A file going out with a message, uploaded before it is sent. */
     class Outgoing(val bytes: ByteArray, val name: String, val mime: String)
 
-    private val _sendProblem = MutableStateFlow<String?>(null)
+    /** A send under way: which message, and where it has got to. */
+    data class Sending(val draftId: String, val subject: String, val stage: String)
 
-    /** A send that failed, said on the mail list until dismissed, since its composer may be gone. */
-    val sendProblem: StateFlow<String?> = _sendProblem.asStateFlow()
+    private val _outbox = MutableStateFlow<List<Sending>>(emptyList())
 
-    fun clearSendProblem() {
-        _sendProblem.value = null
+    /**
+     * Sends under way, for a line on the list. The composer closes at
+     * Send: it held the reading pane until the ship took the message, and
+     * no other mail could be opened meanwhile.
+     */
+    val outbox: StateFlow<List<Sending>> = _outbox.asStateFlow()
+
+    /** A message that did not go, whole: why, and its text and files, to open again. */
+    class Unsent(val line: String, val draft: Draft, val files: List<Outgoing>)
+
+    private val _unsent = MutableStateFlow<List<Unsent>>(emptyList())
+
+    /**
+     * Every message that did not go, oldest first. Its draft may not have
+     * reached the ship either (a ship that is down takes no draft), and its
+     * files never did: this is where they are kept. All of them, since two
+     * sent to a ship that is down both fail, and the first is not to be
+     * written over by the second.
+     */
+    val unsent: StateFlow<List<Unsent>> = _unsent.asStateFlow()
+
+    /** [message] put away, opened again or dismissed. */
+    fun dismiss(message: Unsent) {
+        _unsent.update { it - message }
     }
 
     private val _problem = MutableStateFlow<String?>(null)
@@ -620,34 +671,49 @@ class MailRepo(
      * in Drafts, and it is dropped once the ship takes the message.
      * [progress] is told where it is, for whoever is still watching. The
      * answer is null when it went, else why not, which is also left in
-     * [sendProblem] for a composer no longer there to show it.
+     * [unsent] for a composer no longer there to show it.
      */
     fun sendMessage(draft: Draft, files: List<Outgoing>, progress: (String?) -> Unit = {}): Deferred<String?> =
         scope.async {
-            val errorBefore = _error.value
-            fun why(fallback: String) = _error.value?.takeIf { it != errorBefore } ?: fallback
-            var kept = false
-            val problem = run {
-                if (!saveDraft(draft)) return@run why("the message did not reach the ship.")
-                kept = true
-                val refs = mutableListOf<AttachRef>()
-                for ((i, f) in files.withIndex()) {
-                    progress("Uploading ${i + 1} of ${files.size}")
-                    val hash = runSuspendCatching { uploadBlob(f.bytes) }
-                        .getOrElse { return@run "${f.name}: ${it.message ?: "the upload gave no reason"}." }
-                    refs += AttachRef(name = f.name, mime = f.mime, hash = hash)
+            fun stage(s: String?) {
+                progress(s)
+                _outbox.update { list ->
+                    list.filterNot { it.draftId == draft.id } +
+                        listOfNotNull(s?.let { Sending(draft.id, draft.subject, it) })
                 }
-                progress("Sending")
-                if (!send(draft.to, draft.subject, draft.body, draft.prev, refs)) return@run why("the ship did not take it.")
-                runSuspendCatching { deleteDraft(draft.id) }
-                null
             }
-            progress(null)
-            problem?.also {
-                val what = draft.subject.ifBlank { "A message" }.let { s -> if (s == "A message") s else "\"$s\"" }
-                _sendProblem.value = "$what was not sent: $it" + if (kept) " It is in Drafts." else ""
-            }
+            try { sendNow(draft, files, ::stage) } finally { stage(null) }
         }
+
+    private suspend fun sendNow(draft: Draft, files: List<Outgoing>, progress: (String?) -> Unit): String? {
+        progress("Saving")
+        val errorBefore = _error.value
+        fun why(fallback: String) = _error.value?.takeIf { it != errorBefore } ?: fallback
+        var kept = false
+        val problem = run {
+            if (!saveDraft(draft)) return@run why("the message did not reach the ship.")
+            kept = true
+            val refs = mutableListOf<AttachRef>()
+            for ((i, f) in files.withIndex()) {
+                progress("Uploading ${i + 1} of ${files.size}")
+                val hash = runSuspendCatching { uploadBlob(f.bytes) }
+                    .getOrElse { e ->
+                        val why = (e as? AuspexError)?.said() ?: io.nisfeb.talon.util.readableReason(e.message)?.let { "$it." }
+                        return@run "${f.name}: ${why ?: "the upload gave no reason."}"
+                    }
+                refs += AttachRef(name = f.name, mime = f.mime, hash = hash)
+            }
+            progress("Sending")
+            if (!send(draft.to, draft.subject, draft.body, draft.prev, refs)) return@run why("the ship did not take it.")
+            runSuspendCatching { deleteDraft(draft.id) }
+            null
+        }
+        return problem?.also {
+            val what = draft.subject.ifBlank { "A message" }.let { s -> if (s == "A message") s else "\"$s\"" }
+            val line = "$what was not sent: $it" + if (kept) " It is in Drafts." else ""
+            _unsent.update { list -> list + Unsent(line, draft, files) }
+        }
+    }
 
     /** Distinguishes two phantom replies minted inside one millisecond. */
     private var localSeq = 0
@@ -690,45 +756,130 @@ class MailRepo(
      * write was out. [relist] re-reads the listing once the write lands,
      * which a write that changes no row can skip.
      */
-    private fun act(tid: String?, local: () -> Unit, relist: Boolean = true, write: suspend (AuspexApi) -> Unit) {
+    private fun act(tid: String?, local: () -> Unit, relist: Boolean = true, write: suspend (AuspexApi) -> Unit): Job {
         val threadBefore = tid?.let { threadCache.value[it] }
         val rowsBefore = tid?.let { id -> pageCache.value.mapValues { (_, p) -> p.rowAt(id) } }.orEmpty()
         val shownKey = pageKey()
         val shownRowBefore = tid?.let { id -> _page.value?.rowAt(id) }
         local()
-        scope.launch {
-            val a = api ?: return@launch
+        writesOut.update { it + 1 }
+        return scope.launch {
             try {
-                write(a)
-            } catch (e: AuspexError) {
-                // A 404 on a write is the thing being written to having
-                // gone -- a thread another client deleted -- not the nexus
-                // being absent. onFailure reads every 404 as the latter and
-                // replaced the whole inbox with an install prompt. Refresh
-                // instead, which drops the vanished row.
-                if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) {
-                    refresh()
+                val a = api ?: return@launch
+                try {
+                    write(a)
+                } catch (e: AuspexError) {
+                    // A 404 on a write is the thing being written to having
+                    // gone -- a thread another client deleted -- not the nexus
+                    // being absent. onFailure reads every 404 as the latter and
+                    // replaced the whole inbox with an install prompt. Refresh
+                    // instead, which drops the vanished row.
+                    if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) {
+                        refresh()
+                        return@launch
+                    }
+                    if (tid != null) {
+                        // Only what local() touched goes back. Anything a
+                        // refresh landed meanwhile is newer than the snapshot
+                        // and stays.
+                        if (threadBefore != null) threadCache.update { it + (tid to threadBefore) }
+                        pageCache.update { m -> m.mapValues { (k, p) -> p.restoring(tid, rowsBefore[k]) } }
+                        if (pageKey() == shownKey) {
+                            _page.value?.let { _page.value = it.restoring(tid, shownRowBefore) }
+                        }
+                        _rollbacks.update { it + 1 }
+                    }
+                    // Signed out is the whole app's state; anything else is
+                    // this one write, said until dismissed.
+                    if (e.isSignedOut) onFailure(e) else _problem.value =
+                        if (e is AuspexError.Unreachable) e.said() + " That was not done." else "The ship did not do that: ${e.said()}"
                     return@launch
                 }
-                if (tid != null) {
-                    // Only what local() touched goes back. Anything a
-                    // refresh landed meanwhile is newer than the snapshot
-                    // and stays.
-                    if (threadBefore != null) threadCache.update { it + (tid to threadBefore) }
-                    pageCache.update { m -> m.mapValues { (k, p) -> p.restoring(tid, rowsBefore[k]) } }
-                    if (pageKey() == shownKey) {
-                        _page.value?.let { _page.value = it.restoring(tid, shownRowBefore) }
-                    }
-                    _rollbacks.update { it + 1 }
-                }
-                // Signed out is the whole app's state; anything else is
-                // this one write, said until dismissed.
-                if (e.isSignedOut) onFailure(e) else _problem.value = "The ship did not do that: ${said(e)}"
-                return@launch
+                if (relist) relistSoon()
+            } finally {
+                writesOut.update { it - 1 }
             }
-            if (relist) refresh()
         }
     }
+
+    /** Writes sent and not yet answered. */
+    private val writesOut = MutableStateFlow(0)
+    /** Bumped for each read asked of [relistSoon]; [relister] answers the latest. */
+    private val relistAsked = MutableStateFlow(0L)
+
+    // One worker, restarted by each ask: writes finish on several threads
+    // at once, and a timer job swapped by each of them was not atomic, so
+    // two survived and the listing was read twice.
+    private val relister = scope.launch {
+        relistAsked.collectLatest { n ->
+            if (n == 0L) return@collectLatest
+            // After the last write is answered, not a fixed time after the
+            // first: a slow one would otherwise land after the read.
+            writesOut.first { it == 0 }
+            delay(RELIST_AFTER_MS)
+            refresh()
+        }
+    }
+
+    /**
+     * Re-read the listing once the writes have settled: one read for a
+     * burst (threads opened one after another, a selection archived)
+     * rather than one per write, each seconds of the ship's one thread
+     * and each holding the gate a folder switch then waited behind.
+     */
+    private fun relistSoon() = relistAsked.update { it + 1 }
+
+    // ---- several threads at once ---------------------------------------
+
+    /**
+     * Do [each] to every thread in [ids] (a selection): each shows at
+     * once and is written behind it, a refused one goes back as it was,
+     * and the listing is read once when they are all in. On this repo's
+     * scope, so leaving the screen does not stop it halfway. [done] is
+     * said if any were refused: "3 of 10 were not archived".
+     */
+    private fun many(ids: Collection<String>, done: String, each: suspend (String) -> Job?): Job = scope.launch {
+        val before = _rollbacks.value
+        ids.toList().mapNotNull { each(it) }.joinAll()
+        val refused = _rollbacks.value - before
+        if (refused > 0) _problem.value = "$refused of ${ids.size} were not $done; they are back as they were."
+        relistSoon()
+    }
+
+    /** Archive the threads, or bring them back. */
+    fun archiveMany(ids: Collection<String>, archived: Boolean): Job =
+        many(ids, if (archived) "archived" else "brought back") { id ->
+            act(id, {
+                editPages { key, p -> p.archived(key.view, id, archived) }
+                editThread(id) { it.copy(archived = archived) }
+            }, relist = false) { it.setArchived(id, archived) }
+        }
+
+    /** Delete the threads. */
+    fun deleteMany(ids: Collection<String>): Job =
+        many(ids, "deleted") { id ->
+            act(id, {
+                editPages { _, p -> p.without(id) }
+                threadCache.update { it - id }
+            }, relist = false) { it.deleteThread(id); forget(id) }
+        }
+
+    /**
+     * Mark the threads read, or unread. The ship marks messages, not
+     * threads, and a listing row names none, so a thread not already
+     * here is read for its messages first: every unread one to mark read,
+     * the newest to mark unread, as the reader does.
+     */
+    fun markManyRead(ids: Collection<String>, read: Boolean): Job =
+        many(ids, if (read) "marked read" else "marked unread") { id ->
+            val t = threadCache.value[id] ?: loadThread(id) ?: return@many null
+            val msgs = if (read) t.messages.filter { !it.read }.map { it.id }
+            else listOfNotNull(t.messages.maxByOrNull { it.sent }?.id)
+            if (msgs.isEmpty()) return@many null
+            act(id, { readState(msgs, id, read) }, relist = false) {
+                if (read) it.markRead(id, msgs) else it.markUnread(id, msgs)
+            }
+        }
 
     // ---- labels, filters, lists ----------------------------------------
 
@@ -857,6 +1008,11 @@ class MailRepo(
         /** Mail is considered correspondence, not chat. The refresh
          *  control covers the case where the reader knows better. */
         const val DEFAULT_POLL_MS = 10 * 60 * 1000L
+        const val FIRST_RETRY_MS = 15_000L
+        private const val MAX_RETRY_MS = 2 * 60_000L
+
+        /** How long the listing waits after a write before it is read again. */
+        const val RELIST_AFTER_MS = 1_500L
 
         /** The ship's own ceiling on a listing. Asking past it answers
          *  the same page, so the control has to stop here and say so. */

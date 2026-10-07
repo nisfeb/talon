@@ -1,6 +1,7 @@
 package io.nisfeb.talon.calendar
 
 import io.ktor.client.HttpClient
+import io.nisfeb.talon.mail.reachShip
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -22,6 +23,22 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
+/** How the calendar app tags its reminder pushes: `cal-<id>-<idx>`, and `-<n>` more for an alarm. */
+const val CALENDAR_PUSH_PREFIX = "cal-"
+
+/**
+ * The occurrence a calendar reminder push is about, among [rows], or
+ * null. An event's id can hold dashes of its own (an ICS uid), so the
+ * tag is matched against the rows rather than split.
+ */
+fun calendarRowOfPushTag(tag: String?, rows: List<CalendarRow>): CalendarRow? {
+    val rest = tag?.takeIf { it.startsWith(CALENDAR_PUSH_PREFIX) }?.removePrefix(CALENDAR_PUSH_PREFIX) ?: return null
+    return rows.firstOrNull { r ->
+        val key = "${r.id}-${r.idx}"
+        rest == key || (rest.startsWith("$key-") && rest.removePrefix("$key-").let { n -> n.isNotEmpty() && n.all(Char::isDigit) })
+    }
+}
+
 /**
  * One occurrence of an event inside a window: [l]..[r] in unix ms,
  * [all] for whole days, and the event's display [meta] (name, note,
@@ -41,6 +58,10 @@ data class CalendarRow(
     val r: Long,
     /** A task's tick; false for events. */
     val done: Boolean = false,
+    /** Its reminders ([CalAlarm]); null from a calendar too old to say. */
+    val alarms: kotlinx.serialization.json.JsonArray? = null,
+    /** A task's priority, iCalendar's: 1 highest, 9 lowest, 0 none; null from a calendar too old to say. */
+    val priority: Int? = null,
 ) {
     /** One of a series: timed or all-day with a repeating kind. */
     val repeats: Boolean get() = (cat == "timed" || cat == "allday") && kind != "once"
@@ -66,6 +87,8 @@ data class CalendarTask(
     val cat: String = "timed",
     @SerialName("due_ms") val dueMs: Long? = null,
     val done: Boolean = false,
+    /** iCalendar's priority: 1 highest, 9 lowest, 0 none; null from a calendar too old to say. */
+    val priority: Int? = null,
 ) {
     val name: String get() = meta.metaStr("name")
     val note: String get() = meta.metaStr("note")
@@ -134,7 +157,13 @@ data class GoogleStatus(val connected: Boolean = false, val linked: Map<String, 
 data class CaldavSubscription(val id: String, val url: String = "", @SerialName("last_ms") val lastMs: Long = 0, val error: String = "")
 
 @Serializable
-data class CalendarConfig(val title: String = "", val zone: String? = null, val ball: String = "")
+data class CalendarConfig(
+    val title: String = "",
+    val zone: String? = null,
+    val ball: String = "",
+    /** Minutes of the heads-up the ship sends before every timed event, 0 for none; null from a calendar too old to say. */
+    @SerialName("lead_min") val leadMin: Int? = null,
+)
 
 /**
  * The calendar nexus on the user's ship, at /apps/calendar, over the
@@ -181,15 +210,11 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
 
     /** Every event in an .ics onto calendar [calId]; true when the calendar took it. */
     suspend fun importIcs(calId: String, ics: String): Boolean {
-        val resp = try {
+        val resp = reachShip {
             http.post("$root/import?cal=" + calId.encodeURLParameter()) {
                 contentType(ContentType.parse("text/calendar"))
                 setBody(ics)
             }
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Unreachable(t)
         }
         return resp.status.isSuccess()
     }
@@ -231,45 +256,25 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
     suspend fun poke(ball: String, body: JsonObject): Boolean =
         postJson("$base/grubbery/api/poke/${ball.asPath()}/calendar.calendar?blot=/json", body)
 
-    private suspend fun postForJson(url: String, body: JsonObject): JsonObject? {
-        val resp = try {
-            http.post(url) {
-                contentType(ContentType.Application.Json)
-                setBody(body.toString())
-            }
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Unreachable(t)
+    private suspend fun post(url: String, body: JsonObject) = reachShip {
+        http.post(url) {
+            contentType(ContentType.Application.Json)
+            setBody(body.toString())
         }
+    }
+
+    private suspend fun postForJson(url: String, body: JsonObject): JsonObject? {
+        val resp = post(url, body)
         if (!resp.status.isSuccess()) return null
         return runCatching { AuspexApi.json.parseToJsonElement(resp.bodyAsText()) as? JsonObject }.getOrNull()
     }
 
-    private suspend fun postJson(url: String, body: JsonObject): Boolean {
-        val resp = try {
-            http.post(url) {
-                contentType(ContentType.Application.Json)
-                setBody(body.toString())
-            }
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Unreachable(t)
-        }
-        return resp.status.isSuccess()
-    }
+    private suspend fun postJson(url: String, body: JsonObject): Boolean = post(url, body).status.isSuccess()
 
     private suspend fun get(path: String): String {
-        val resp = try {
-            http.get(root + path)
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw AuspexError.Unreachable(t)
-        }
+        val resp = reachShip { http.get(root + path) }
         val text = try { resp.bodyAsText() } catch (c: CancellationException) { throw c } catch (t: Throwable) { throw AuspexError.Garbled(t) }
-        if (!resp.status.isSuccess()) throw AuspexError.Refused(resp.status.value, text.take(200))
+        if (!resp.status.isSuccess()) throw AuspexError.Refused(resp.status.value, AuspexApi.reasonOf(text))
         return text
     }
 

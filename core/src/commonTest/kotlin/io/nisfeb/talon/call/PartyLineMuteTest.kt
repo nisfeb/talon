@@ -61,6 +61,36 @@ class PartyLineMuteTest {
     }
 
     @Test
+    fun aCometListedByItsMnemonymIsItsShip() = runTest {
+        // Since trunk wire 10 Galène lists a comet by the mnemonym in its
+        // ticket, while its Talon still writes its @p on a mute. Both
+        // have to land on the one row, under the @p.
+        val comet = "~foppel-fitdyn-doznux-fithut--somdur-famdev-forpet-daplyd"
+        val l = line()
+        l.handle(userAdd("c1", ".renewed.erupt.prepare.ablate.outdid.demote.disburse.ensures.perfects.imbue.defames.involve"))
+        l.handle(muteMsg(comet, true))
+
+        val row = members(l).single()
+        assertEquals(comet, row.ship)
+        assertTrue(row.muted, "the comet's own mute should land on its row")
+    }
+
+    @Test
+    fun aCometsOwnMuteSaysItsMnemonym() = runTest {
+        // What a comet's Talon sends now: Galène holds it to the name in
+        // its token. The mute still lands on the comet's row, its @p.
+        val comet = "~foppel-fitdyn-doznux-fithut--somdur-famdev-forpet-daplyd"
+        val nym = ".renewed.erupt.prepare.ablate.outdid.demote.disburse.ensures.perfects.imbue.defames.involve"
+        val l = line()
+        l.handle(userAdd("c1", nym))
+        l.handle(muteMsg(nym, true))
+
+        val row = members(l).single()
+        assertEquals(comet, row.ship)
+        assertTrue(row.muted, "the mnemonym's mute should land on the comet's row")
+    }
+
+    @Test
     fun unmutingClearsIt() = runTest {
         val l = line()
         l.handle(userAdd("c1", "~hapnyl-fotlyx"))

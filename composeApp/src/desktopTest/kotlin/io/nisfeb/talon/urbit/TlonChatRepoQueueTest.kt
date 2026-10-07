@@ -9,6 +9,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.io.IOException
 import java.io.File
 import kotlin.io.path.createTempDirectory
@@ -72,18 +74,47 @@ class TlonChatRepoQueueTest {
         assertNull(repo.shipSlow.first(), "nothing waits")
     }
 
+    // "Slow" covered a ship mid-event, one down behind its proxy and one
+    // out of reach. Vere's healthz tells them apart for nothing: the
+    // runtime answers it, so the ship works no event.
+    @Test
+    fun `a write that waits says whether the ship is busy, down or out of reach`() = live {
+        ship.lose = { lost }
+        ship.health = 429
+        repo.send("~bus", "are you there")
+        val busy = kotlinx.coroutines.withTimeout(5_000) { repo.shipSlow.first { it?.health != null }!! }
+        assertEquals(ShipHealth.BUSY, busy.health)
+        assertEquals("Your ship is busy. 1 queued for when it catches up.", io.nisfeb.talon.util.shipSlowLine(busy.queued, busy.health))
+        assertTrue("healthz: BUSY" in busy.details, busy.details)
+        assertTrue(ship.requests.any { it == "GET /~_~/healthz" }, "${ship.requests}")
+
+        ship.health = 502
+        repo.drainQueue()
+        assertEquals(ShipHealth.DOWN, kotlinx.coroutines.withTimeout(5_000) { repo.shipSlow.first { it?.health == ShipHealth.DOWN } }!!.health)
+
+        ship.lose = { null }
+        repo.drainQueue()
+        assertNull(repo.shipSlow.first(), "nothing waits")
+    }
+
     @Test
     fun `a reply, a club message and a channel post go again exactly as first sent`() = live {
         ship.lose = { lost }
         repo.send("0v4.abcde", "all of you")
         repo.reply("~bus", "~bus/170141184507933044937549665940933705728", "in the thread")
         repo.send(nest, "in the channel")
-        val first = ship.attempted.map { it.json }
+        // The messages alone: replying in the thread also follows it, a
+        // poke of its own to %activity, which FollowedThreadsTest covers.
+        val first = ship.attempted.filter { it.app != "activity" }.map { it.json }
         ship.lose = { null }
         // The channel's newest posts, asked for before its post goes again: not there.
         ship.scries["channels/v4/$nest/posts/newest/30/post"] = """{"posts":{}}"""
         repo.drainQueue()
-        assertEquals(first.map { it.toString() }.joinToString("\n"), ship.pokes.map { it.json.toString() }.joinToString("\n"), "oldest first, and as they were")
+        assertEquals(
+            first.map { it.toString() }.joinToString("\n"),
+            ship.pokes.filter { it.app != "activity" }.map { it.json.toString() }.joinToString("\n"),
+            "oldest first, and as they were",
+        )
     }
 
     @Test
@@ -133,9 +164,16 @@ class TlonChatRepoQueueTest {
         assertEquals("queued", db.messages().getOne("~bus", stored(id))?.status)
         ship.lose = { null }
         ship.refuse = { "nope" }
-        assertFailsWith<PokeNacked> { repo.send("~bus", "refused") }
+        // A conversation with nothing waiting hears the refusal at once.
+        assertFailsWith<PokeNacked> { repo.send("~nec", "refused") }
+        // One behind the queued message waits with it, and hears it there.
+        // Held, so the drain it wakes has not yet heard back.
+        ship.holdPoke = 300
+        val behind = repo.send("~bus", "behind")
+        assertEquals("queued", db.messages().getOne("~bus", stored(behind))?.status)
         repo.drainQueue()
         assertEquals("failed", db.messages().getOne("~bus", stored(id))?.status, "refused once it reached the ship")
+        assertEquals("failed", db.messages().getOne("~bus", stored(behind))?.status)
     }
 
     @Test
@@ -186,4 +224,99 @@ class TlonChatRepoQueueTest {
         assertEquals(1, sent.size, "$sent")
         assertTrue("del-react" in sent.single())
     }
+
+    // "the UI said one message was queued. I sent another. the ui never
+    // updated to say 2 messages were queued even though the second message
+    // remained greyed out."
+    @Test
+    fun `one sent while another of its conversation waits is queued behind it, counted, and goes after it`() = live {
+        ship.lose = { lost }
+        val first = repo.send("~bus", "first")
+        // Still out of reach: the drain the second wakes does not empty the queue.
+        val second = repo.send("~bus", "second")
+        assertEquals("queued", db.messages().getOne("~bus", stored(second))?.status)
+        assertEquals(2, repo.shipSlow.first { (it?.queued ?: 0) == 2 }!!.queued)
+        ship.lose = { null }
+        repo.drainQueue()
+        assertEquals(listOf(null, null), listOf(first, second).map { db.messages().getOne("~bus", stored(it))?.status })
+        val sent = ship.pokesTo("chat").map { it.json.toString() }
+        assertEquals(2, sent.size, sent.toString())
+        assertTrue("first" in sent[0] && "second" in sent[1], "in the order written: $sent")
+    }
+
+    // "the first message lost its queued text but remained gray for over a
+    // minute before turning white."
+    @Test
+    fun `a queued message keeps its label while it goes again, until the ship takes it`() = live {
+        ship.lose = { lost }
+        val id = repo.send("~bus", "are you there")
+        ship.lose = { null }
+        ship.holdPoke = 800
+        val draining = launch(kotlinx.coroutines.Dispatchers.Default) { repo.drainQueue() }
+        delay(300)
+        assertEquals("queued", db.messages().getOne("~bus", stored(id))?.status, "still waiting on the ship")
+        draining.join()
+        assertNull(db.messages().getOne("~bus", stored(id))?.status)
+    }
+
+    @Test
+    fun `one queued while the queue goes out goes with it, not at the next try`() = live {
+        ship.lose = { lost }
+        val first = repo.send("~bus", "first")
+        ship.lose = { null }
+        ship.holdPoke = 600
+        val draining = launch(kotlinx.coroutines.Dispatchers.Default) { repo.drainQueue() }
+        delay(200)
+        val second = repo.send("~bus", "second") // behind the first, still going
+        draining.join()
+        assertEquals(listOf(null, null), listOf(first, second).map { db.messages().getOne("~bus", stored(it))?.status })
+    }
+
+    // ─── what the queue may cost a slow ship (rc9 felt slower) ───────
+
+    @Test
+    fun `a channel post queued behind another was never sent, so the channel is not read to ask`() = live {
+        ship.lose = { lost }
+        repo.send(nest, "first")
+        ship.lose = { null }
+        ship.scries["channels/v4/$nest/posts/newest/30/post"] = """{"posts":{}}"""
+        repo.send(nest, "second")
+        repo.drainQueue()
+        assertEquals(2, ship.pokesTo("channels").size)
+        assertEquals(1, ship.scried.count { it == "channels/v4/$nest/posts/newest/30/post" }, "asked for the first only: ${ship.scried}")
+    }
+
+    // Queued behind the first, it never tried the ship, and the drain
+    // asleep in its backoff did not wake for it: back, the ship sat
+    // unasked for the rest of a backoff of up to ninety seconds.
+    @Test
+    fun `one written behind a queued one asks the ship at once`() = live {
+        ship.lose = { lost }
+        val first = repo.send("~bus", "first")
+        ship.lose = { null }
+        val wroteAt = System.currentTimeMillis()
+        val second = repo.send("~bus", "second")
+        kotlinx.coroutines.withTimeout(5_000) {
+            while (listOf(first, second).any { db.messages().getOne("~bus", stored(it))?.status != null }) delay(10)
+        }
+        val tookMs = System.currentTimeMillis() - wroteAt
+        assertTrue(tookMs < 800, "went in $tookMs ms, not after the backoff (1 to 3 s)")
+        val sent = ship.pokesTo("chat").map { it.json.toString() }
+        assertTrue("first" in sent[0] && "second" in sent[1], "in the order written: $sent")
+    }
+
+    @Test
+    fun `a drain asleep in its backoff goes as soon as the ship answers`() = live {
+        ship.lose = { lost }
+        val id = repo.send("~bus", "waiting")
+        assertEquals("queued", db.messages().getOne("~bus", stored(id))?.status)
+        // The ship is back: a send elsewhere goes through.
+        ship.lose = { null }
+        val answeredAt = System.currentTimeMillis()
+        repo.send("~nec", "hello")
+        kotlinx.coroutines.withTimeout(5_000) { while (db.messages().getOne("~bus", stored(id))?.status != null) delay(10) }
+        val tookMs = System.currentTimeMillis() - answeredAt
+        assertTrue(tookMs < 800, "went in $tookMs ms, not after the backoff (1 to 3 s)")
+    }
 }
+

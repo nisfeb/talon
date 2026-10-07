@@ -24,6 +24,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.updateAndGet
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -38,7 +40,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import io.nisfeb.talon.util.nowMs
 import kotlinx.datetime.toLocalDateTime
 import io.nisfeb.talon.ui.parseIsoUtc
@@ -83,6 +85,8 @@ class OrreryRepo(
     bareClient: HttpClient? = null,
     /** Location sharing, where the platform has it, which the pipe stops and holds. */
     private val location: io.nisfeb.talon.ui.LocationControl = io.nisfeb.talon.ui.NoopLocationControl,
+    /** Health sending off, its switch with it (Android's HealthWatch); nothing where there is none. */
+    private val stopHealth: () -> Unit = {},
     /** The model a test reads with, in place of the ladder, as [bareClient] is its ship. */
     private val readWith: LocalModel? = null,
 ) {
@@ -395,7 +399,7 @@ class OrreryRepo(
     }
 
     /** The owner's calendar day at [ms], which is what a day's tally is kept under. */
-    private fun localDay(ms: Long): String = kotlinx.datetime.Instant.fromEpochMilliseconds(ms)
+    private fun localDay(ms: Long): String = kotlin.time.Instant.fromEpochMilliseconds(ms)
         .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).date.toString()
 
     /** The tally kept for [day], or an empty one. */
@@ -403,13 +407,34 @@ class OrreryRepo(
         db.orrerySent().get(s, "decide:$day")?.value
             ?.let { runCatching { Json.decodeFromString(DecideDay.serializer(), it) }.getOrNull() } ?: DecideDay()
 
+    /**
+     * Answers given here that the ship's list has not shown yet: the status
+     * sent, and when. Orrery applies an answer after it replies, so a list
+     * read meanwhile (the home screen's, the poll's, the one after an
+     * earlier answer) still had them open, and it replaced the lists: "I
+     * just quickly approved a bunch of facts ... they all reappeared a few
+     * seconds later". Each is kept over the ship's list until that list
+     * shows it, or [ANSWER_GRACE_MS] passes with the ship never showing it.
+     */
+    private val answering = MutableStateFlow<Map<String, Pair<String, Long>>>(emptyMap())
+
     /** The open list as the ship just said it, and what that means for notifications. */
-    private fun published(list: List<OrreryAction>) {
+    private fun published(fromShip: List<OrreryAction>) {
         // Approved and gone with no answer from here: the ship carried it
         // out, or could not. Only the second is news, and it said so
         // nowhere Talon looked.
         val left = _actions.value.filter { it.status == "approved" || it.status == "claimed" }
-            .map { it.id }.filter { id -> list.none { it.id == id } }
+            .map { it.id }.filter { id -> fromShip.none { it.id == id } }
+        val now = nowMs()
+        val waiting = answering.updateAndGet { m ->
+            m.filter { (id, sent) ->
+                val there = fromShip.firstOrNull { it.id == id }
+                // Shown: gone from the open list, or no longer a proposal.
+                val shown = there == null || there.status != "proposed"
+                !shown && now - sent.second < ANSWER_GRACE_MS
+            }
+        }
+        val list = waiting.entries.fold(fromShip) { l, (id, sent) -> settledActions(l, id, sent.first) }
         _actions.value = list
         val news = diffActionNotifications(list, seenProposals)
         seenProposals = news.seen
@@ -465,7 +490,9 @@ class OrreryRepo(
         watching = scope.launch {
             while (isActive) {
                 delay(ACTIONS_EVERY_MS)
-                if (_availability.value == OrreryAvailability.PRESENT) refreshWaiting()
+                // The net only where the beacon may have died: one that sent
+                // anything in the interval is alive and told us of every move.
+                if (_availability.value == OrreryAvailability.PRESENT && now() - beaconHeardMs > ACTIONS_EVERY_MS) refreshWaiting()
             }
         }
     }
@@ -476,22 +503,27 @@ class OrreryRepo(
      * opened again after a pause that grows, with jitter; a quiet one is
      * left alone, since quiet is not dead.
      */
+    /** When the beacon last sent anything, keepalives included. */
+    @kotlin.concurrent.Volatile private var beaconHeardMs = 0L
+
     private fun watchBeacon(shipUrl: String) {
         beacon?.cancel()
         beacon = scope.launch {
-            var pause = 3_000L
+            var pause = BEACON_FIRST_PAUSE_MS
             var last: String? = null
             while (isActive) {
+                var openedMs = 0L
                 runCatching {
                     http.prepareGet(shipUrl.trimEnd('/') + BEACON_PATH) {
                         header(io.ktor.http.HttpHeaders.Accept, "text/event-stream")
                     }.execute { resp ->
                         if (!resp.status.isSuccess()) error("the beacon answered ${resp.status.value}")
-                        pause = 3_000L
+                        openedMs = now()
                         val body = resp.bodyAsChannel()
                         val reader = BeaconReader()
                         while (isActive) {
                             val line = body.readUTF8Line() ?: break
+                            beaconHeardMs = now()
                             val rev = reader.feed(line) ?: continue
                             // The first revision on a connection is where
                             // things stand: a read only if it moved while
@@ -501,6 +533,10 @@ class OrreryRepo(
                         }
                     }
                 }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; Log.i(TAG, "beacon: ${it.message}") }
+                // Short again only after a stream that lived. Reset on being
+                // let in, a stream ~ricsul accepted and then broke at once
+                // came back every three seconds, all afternoon.
+                pause = beaconPauseAfter(pause, if (openedMs != 0L) now() - openedMs else null)
                 delay(pause + kotlin.random.Random.nextLong(0, 2_000))
                 pause = (pause * 2).coerceAtMost(5 * 60_000L)
             }
@@ -617,7 +653,27 @@ class OrreryRepo(
     suspend fun readRegistration(name: String): Result<String> = runCatching { attached().registration(name) }
 
     /** The state view under this install's key: bodies and what is known of them. */
-    suspend fun readState(): Result<JsonObject> = runCatching { attached().stateJson(key()) }
+    /** The state view; [brief] is the assistant's, see [OrreryApi.stateJson]. */
+    suspend fun readState(brief: Boolean = false): Result<JsonObject> = runCatching { attached().stateJson(key(), brief) }
+
+    /** The ship's last time-to-leave pass, by scry where it can be, else GET /api/travel/last; null where it has none. */
+    suspend fun travelLast(): JsonObject? =
+        io.nisfeb.talon.util.runSuspendCatching { attached().let { it.travelLastByScry() ?: it.travelLast() } }.getOrNull()
+
+    /** Orrery's change beacon by scry, or null where it cannot be read. */
+    suspend fun beacon(): Long? = io.nisfeb.talon.util.runSuspendCatching { attached().beacon() }.getOrNull()
+
+    /**
+     * The Orrery section's state and leave plan, kept and asked for again
+     * behind it. The brief state: values without each fact's provenance,
+     * a third the size to send, keep and read, and all the section shows.
+     */
+    val view = OrreryViewStore(
+        db.orreryCache(), scope,
+        readState = { attached().stateJson(key(), brief = true) },
+        readPlan = { travelLast() },
+        readBeacon = { beacon() },
+    )
 
     /** Ask the ship which body a name means, before writing about it. */
     suspend fun resolveBody(q: String): Result<List<ResolvedBody>> = runCatching { attached().resolve(q, key()) }
@@ -693,6 +749,7 @@ class OrreryRepo(
         // Nothing of the ship left is waiting on the owner: with Orrery off,
         // or another ship, its proposals and their notifications go.
         val shown = _actions.value.map { it.id }.toSet()
+        answering.value = emptyMap()
         _actions.value = emptyList()
         if (shown.isNotEmpty()) onActions?.invoke(emptyList(), shown)
     }
@@ -780,10 +837,10 @@ class OrreryRepo(
 
     /**
      * The pipe is off for good: turned off, or its key refused. The
-     * location switch lives under the pipe, so it goes off the screen
-     * with it, and is turned off with it: left on, the phone kept
-     * waking for moves with nowhere to send them and no way to say
-     * stop.
+     * location and health switches live under the pipe, so they go off
+     * the screen with it, and are turned off with it: left on, the phone
+     * kept waking for moves with nowhere to send them and no way to say
+     * stop, and health's 3-hourly worker kept waking for no key.
      *
      * Only here, not on detach; a ship with no pipe holds it instead
      * (see [attach]). Detaching is a restart, a ship switch, an Activity going away:
@@ -794,6 +851,7 @@ class OrreryRepo(
     private fun turnOff() {
         stopPipe()
         location.stop()
+        stopHealth()
     }
 
     suspend fun probe() {
@@ -812,8 +870,12 @@ class OrreryRepo(
             .onFailure { _availability.value = OrreryAvailability.UNKNOWN; probeSaid = it.message; _error.value = it.message }
     }
 
-    /** Mint this install's key and start the walk. */
-    suspend fun enable(): Result<Unit> = runCatching {
+    /**
+     * Mint this install's key and start the walk. On this repo's scope:
+     * left midway, a key minted on the ship and never kept here was a key
+     * nobody held.
+     */
+    suspend fun enable(): Result<Unit> = scope.async { runCatching {
         val a = attached()
         val s = ship ?: error("Not attached to a ship.")
         // Everything the ship has; the lists are only a fallback.
@@ -835,10 +897,10 @@ class OrreryRepo(
         location.pause(false)
         _error.value = null
         startLoop()
-    }
+    } }.await()
 
-    /** Revoke the key on the ship and forget it here. */
-    suspend fun disable(): Result<Unit> = runCatching {
+    /** Revoke the key on the ship and forget it here, on this repo's scope as [enable] is. */
+    suspend fun disable(): Result<Unit> = scope.async { runCatching {
         val s = ship ?: return@runCatching
         // All under the lock a pass writes back under and replaces the
         // key under: one still running cannot put back the row this
@@ -862,7 +924,7 @@ class OrreryRepo(
             db.orreryAccounts().delete(s)
         }
         _error.value = null
-    }
+    } }.await()
 
     private fun startLoop() {
         loop?.cancel()
@@ -1830,6 +1892,7 @@ class OrreryRepo(
         // This install's key where it has one, else the owner's own say.
         val token = db.orreryAccounts().get(s)?.token
         a.transition(token, id, status, note)
+        answering.update { it + (id to (status to nowMs())) }
         _actions.value = settledActions(_actions.value, id, status)
         // The mirror reads every action and the whole calendar before it
         // makes the todo: seconds on a busy ship, so it runs behind the
@@ -1870,11 +1933,13 @@ class OrreryRepo(
     fun answer(id: String, status: String, note: String = "") {
         _answerProblem.value = null
         val was = _actions.value.firstOrNull { it.id == id }
+        answering.update { it + (id to (status to nowMs())) }
         _actions.value = settledActions(_actions.value, id, status)
         // Answered here: its notification goes now, not on the next read.
         onActions?.invoke(emptyList(), setOf(id))
         scope.launch {
             setAction(id, status, note).onFailure { e ->
+                answering.update { it - id }
                 if (was != null) _actions.value = listOf(was) + _actions.value.filterNot { it.id == id }
                 _answerProblem.value = "Orrery did not take that answer: ${e.message ?: "no reason given"}"
                 Log.w(TAG, "answer $status on $id refused: ${e.message}")
@@ -1992,6 +2057,9 @@ class OrreryRepo(
         /** What the ship calls open: the three statuses `?status=open` answers with. */
         val OPEN_STATUSES = setOf("proposed", "approved", "claimed")
 
+        /** How long an answer is kept over a ship's list that does not show it. */
+        const val ANSWER_GRACE_MS = 5 * 60_000L
+
         /** When the key's scope was last measured against the ship's schema. */
         private const val SCOPE_KEY = "scope:checked"
         private const val SCOPE_GAP_MS = 12L * 60 * 60 * 1000
@@ -2094,3 +2162,14 @@ suspend fun settleOrreryGate(
         gate == false && holdsKey -> repo.forget(shipUrl, ship)
     }
 }
+
+/** The beacon's first pause after a stream ends, and the floor it goes back to. */
+internal const val BEACON_FIRST_PAUSE_MS = 3_000L
+
+/** A beacon stream that lived this long was healthy; its end is no sign of trouble. */
+internal const val BEACON_HEALTHY_MS = 60_000L
+
+/** The pause before opening the beacon again; see [io.nisfeb.talon.urbit.pauseAfterStream]. */
+internal fun beaconPauseAfter(pause: Long, livedMs: Long?): Long =
+    io.nisfeb.talon.urbit.pauseAfterStream(pause, livedMs, BEACON_FIRST_PAUSE_MS, BEACON_HEALTHY_MS)
+

@@ -23,7 +23,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -132,7 +131,7 @@ fun NotebookListScreen(
                 modifier = Modifier.padding(start = 4.dp).weight(1f),
                 maxLines = 1,
             )
-            IconButton(onClick = onCompose) {
+            io.nisfeb.talon.ui.IconButton(tip = "New post", onClick = onCompose) {
                 Icon(Icons.Filled.Edit, contentDescription = "New post")
             }
         }
@@ -145,7 +144,7 @@ fun NotebookListScreen(
 
             posts.isEmpty() -> Text(
                 if (unread) "Your ship did not send these posts. Open the channel again to retry."
-                else "No posts yet — tap the edit icon to write one.",
+                else "No posts yet. ${io.nisfeb.talon.ui.tapWord} the edit icon to write one.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(24.dp),
@@ -207,8 +206,8 @@ private fun NotebookCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(10.dp))
-                val excerpt = remember(post.id, post.contentJson) {
-                    plainTextExcerpt(post.id, post.contentJson, limit = 240)
+                val excerpt = remember(post.id, post.contentJson, post.searchText) {
+                    excerptOf(post, limit = 240)
                 }
                 if (excerpt.isNotBlank()) {
                     Text(
@@ -223,16 +222,25 @@ private fun NotebookCard(
     }
 }
 
-private fun plainTextExcerpt(id: String, contentJson: String, limit: Int): String {
-    val parts = StoryCache.partsFor(id, contentJson)
-    val text = parts.joinToString(" ") { p ->
-        when (p) {
-            is io.nisfeb.talon.urbit.StoryPart.Text -> p.text.text
-            else -> ""
+/**
+ * The post's words as stored for search, less the title shown above
+ * them: no story parsed for each row drawn. A row from before
+ * searchText existed is parsed, as all were.
+ */
+private fun excerptOf(post: io.nisfeb.talon.data.MessageEntity, limit: Int): String {
+    val stored = post.searchText
+    val words = if (stored == null) {
+        StoryCache.partsFor(post.id, post.contentJson).joinToString(" ") { p ->
+            if (p is io.nisfeb.talon.urbit.StoryPart.Text) p.text.text else ""
         }
-    }.replace(Regex("\\s+"), " ").trim()
+    } else {
+        post.title?.trim()?.takeIf { it.isNotEmpty() }?.let { stored.removePrefix(it) } ?: stored
+    }
+    val text = words.replace(SPACES, " ").trim()
     return if (text.length <= limit) text else text.take(limit - 1) + "…"
 }
+
+private val SPACES = Regex("\\s+")
 
 private fun formatDate(ms: Long): String = formatMonthDayYear(ms)
 

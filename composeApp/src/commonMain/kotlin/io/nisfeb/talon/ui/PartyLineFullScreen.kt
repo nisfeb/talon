@@ -39,7 +39,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.Surface
@@ -115,6 +114,9 @@ fun PartyLineFullScreen(
     cameraOn: Boolean = false,
     /** Toggle our camera, or null to hide the control. */
     onToggleCamera: (() -> Unit)? = null,
+    /** Screen sharing, shown only when non-null (isScreenShareSupported). */
+    screenShare: ScreenShareControl? = null,
+    sharing: Boolean = false,
     /** Our up link, for the self-preview tile. */
     localVideoLink: io.nisfeb.talon.call.PeerLink? = null,
     /** The down link carrying a given speaker's camera. */
@@ -153,7 +155,7 @@ fun PartyLineFullScreen(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onMinimize, modifier = Modifier.size(48.dp)) {
+                io.nisfeb.talon.ui.IconButton(tip = "Minimize the call", onClick = onMinimize, modifier = Modifier.size(48.dp)) {
                     Icon(
                         TalonIcons.ExpandMore,
                         contentDescription = "Minimize the call",
@@ -366,6 +368,30 @@ fun PartyLineFullScreen(
                             contentDescription = null,
                             modifier = Modifier.size(26.dp),
                         )
+                    }
+                }
+                if (screenShare != null) {
+                    ScreenShareMenu(screenShare, sharing) { press ->
+                        ControlButton(
+                            label = if (sharing) "Stop sharing" else "Share",
+                            onClick = press,
+                            containerColor = if (sharing) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            contentColor = if (sharing) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        ) {
+                            Icon(
+                                if (sharing) TalonIcons.StopScreenShare else TalonIcons.ScreenShare,
+                                contentDescription = null,
+                                modifier = Modifier.size(26.dp),
+                            )
+                        }
                     }
                 }
                 if (onToggleCamera != null && videoDevices.supported && onSelectCamera != null) {
@@ -595,7 +621,7 @@ private fun ParticipantRow(
         if (!isSelf && (onMessage != null || showOps)) {
             var menuOpen by remember(member.id) { mutableStateOf(false) }
             Box {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
+                io.nisfeb.talon.ui.IconButton(tip = "Options for ${nameFor(member.ship)}", onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
                     Icon(
                         Icons.Filled.MoreVert,
                         contentDescription = "Options for ${nameFor(member.ship)}",

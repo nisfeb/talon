@@ -3,7 +3,6 @@ package io.nisfeb.talon.compose
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toComposeImageBitmap
-import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Notification
 import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
@@ -16,8 +15,6 @@ import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.notify.SystemNotifier
 import org.jetbrains.skia.Image as SkiaImage
 import io.nisfeb.talon.ai.AiSettingsRepository
-import io.nisfeb.talon.ai.DesktopWatchwordsSyncSettings
-import io.nisfeb.talon.ai.WatchwordsSyncSettings
 import io.nisfeb.talon.ai.createAiSettings
 import io.nisfeb.talon.ui.DesktopUiSettings
 import io.nisfeb.talon.ui.UiSettings
@@ -67,12 +64,7 @@ import java.util.concurrent.TimeUnit
 private class DesktopAppGraph {
     // OkHttp client for the desktop-only leaf consumers (image
     // downloader). The session/repo/UI path uses [ktorHttp] instead.
-    val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        // long-lived SSE — no read timeout
-        .readTimeout(0, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
-        .build()
+    val http: OkHttpClient = io.nisfeb.talon.util.sharedOkHttp
     // Shared multiplatform HTTP client threaded into common (UrbitSession,
     // TlonChatRepo, link previews). Ktor over an OkHttp engine on desktop.
     val ktorHttp: HttpClient = createAppHttpClient()
@@ -80,10 +72,9 @@ private class DesktopAppGraph {
     /** The comet Talon runs on this machine, if the user set one up. */
     val localShip = io.nisfeb.talon.comet.DesktopLocalShip(ktorHttp)
     val aiSettings: AiSettingsRepository = createAiSettings()
-    val watchwordsSync: WatchwordsSyncSettings = DesktopWatchwordsSyncSettings()
     val themePreference: ThemePreference = DesktopThemePreference()
     val relaySettings: io.nisfeb.talon.notify.RelaySettings =
-        io.nisfeb.talon.notify.DesktopRelaySettings()
+        io.nisfeb.talon.ui.StoredRelaySettings(io.nisfeb.talon.ui.JvmUiSettingsStore(File(io.nisfeb.talon.util.AppDirs.userData, "relay.json")))
     val lastOpenChatStore: io.nisfeb.talon.notify.LastOpenChatStore =
         io.nisfeb.talon.notify.DesktopLastOpenChatStore()
     val drafts: DraftStore = InMemoryDraftStore()
@@ -144,22 +135,16 @@ private class DesktopAppGraph {
         installer = DesktopUpdateInstaller(
             http = ktorHttp,
             updatesDir = File(AppDirs.userData, "updates"),
-            quit = {
-                Thread {
-                    runCatching { shutdown() }
-                    kotlin.system.exitProcess(0)
-                }.apply { isDaemon = true; name = "Talon-update-restart" }.start()
-            },
+            quit = { ExitPolicy.exitAfterShutdown { shutdown() } },
         ),
     )
 
     init {
-        // Cold-start update check. Same throttle Android uses (12h);
-        // the timestamp persists in AppDirs/update.properties so a
-        // user re-launching Talon many times in one session doesn't
-        // re-hit GitHub each time. No window-focus re-trigger yet —
-        // desktop users typically restart the app between sessions,
-        // which is enough to surface a new release within a day.
+        // Update checks: at launch and every hour while Talon runs, the
+        // network asked at most every six hours (the timestamp persists
+        // in AppDirs/update.properties, so relaunching does not re-ask
+        // GitHub). Asked only at launch, a Talon left in the tray never
+        // saw a release that came out after it started.
         val updatePrefs = File(AppDirs.userData, "update.properties")
         val readLastChecked: () -> Long = {
             runCatching {
@@ -184,11 +169,10 @@ private class DesktopAppGraph {
             now = { System.currentTimeMillis() },
             lastCheckedAtMs = readLastChecked,
             recordCheckedAt = writeLastChecked,
-            minIntervalMs = 12L * 60L * 60L * 1000L,
+            minIntervalMs = io.nisfeb.talon.update.UPDATE_MIN_INTERVAL_MS,
         )
         updateScope.launch {
-            val m = checker.check()
-            if (m != null) updateState.onManifest(m)
+            io.nisfeb.talon.update.keepCheckingForUpdates(checker, io.nisfeb.talon.update.UPDATE_RECHECK_MS, updateState::onManifest)
         }
     }
 
@@ -259,6 +243,15 @@ private fun showStartupError(title: String, body: String) {
     )
 }
 
+/** Milliseconds from process start to now, and the heap still in use after a collection. */
+internal fun startupProbeLine(): String {
+    val ms = ProcessHandle.current().info().startInstant()
+        .map { java.time.Duration.between(it, java.time.Instant.now()).toMillis() }.orElse(-1L)
+    System.gc()
+    val rt = Runtime.getRuntime()
+    return "talon-first-frame-ms=$ms heap-used-mb=${(rt.totalMemory() - rt.freeMemory()) / (1024 * 1024)}"
+}
+
 fun main() {
     io.nisfeb.talon.util.DesktopNetworkWatcher.start()
     io.nisfeb.talon.util.UiWatchdog.start()
@@ -267,6 +260,11 @@ fun main() {
     // SSE channel, etc. See SingleInstance.kt for the full post-mortem
     // of what 10 simultaneous Talons did to one user's machine.
     SingleInstance.acquireOrExit()
+    // Out of memory anywhere ends the process at once, rather than leave
+    // it holding the lock above with no window: see ExitPolicy.
+    Thread.setDefaultUncaughtExceptionHandler(
+        ExitPolicy.fatalHandler(Thread.getDefaultUncaughtExceptionHandler(), { m, e -> io.nisfeb.talon.util.Log.e("Talon", m, e) }),
+    )
 
     // Decide once, in a child JVM, whether this host's libstdc++ can run
     // the DJL tokenizer without a SIGSEGV. Fire-and-forget; the verdict
@@ -318,8 +316,11 @@ fun main() {
     // gets packaged onto the classpath at /icon.png. Skia decodes
     // and we hand a Painter to Window. Best-effort: if loading
     // fails for any reason the window just gets the JVM default.
+    // macOS draws the Dock and menu bar icon as given: its own file is on
+    // Apple's grid, the size of the icons beside it.
+    val iconName = if ("mac" in System.getProperty("os.name", "").lowercase()) "icon-macos.png" else "icon.png"
     val iconBytes = runCatching {
-        ClassLoader.getSystemResourceAsStream("icon.png")?.use { it.readBytes() }
+        ClassLoader.getSystemResourceAsStream(iconName)?.use { it.readBytes() }
     }.getOrNull()
     val iconPainter = iconBytes?.let {
         runCatching {
@@ -365,10 +366,9 @@ fun main() {
         // background thread runs shutdown + exitProcess so the user
         // sees the window vanish immediately.
         val quitToOs: () -> Unit = {
-            Thread {
-                runCatching { graph.shutdown() }
-                kotlin.system.exitProcess(0)
-            }.apply { isDaemon = true; name = "Talon-shutdown" }.start()
+            // With a deadline: a shutdown that hangs used to leave the
+            // process behind holding the single-instance lock.
+            ExitPolicy.exitAfterShutdown { graph.shutdown() }
             exitApplication()
         }
         // A comet set up earlier boots before the app connects; the
@@ -468,6 +468,16 @@ fun main() {
                 }
             },
         ) {
+            // Startup probe: the AOT cache's training run and launch
+            // timing set this to quit once the first frame has drawn.
+            System.getenv("TALON_EXIT_AFTER_FIRST_FRAME_MS")?.toLongOrNull()?.let { linger ->
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    println(startupProbeLine())
+                    kotlinx.coroutines.delay(linger)
+                    kotlin.system.exitProcess(0)
+                }
+            }
             // Override Compose's default desktop UriHandler. The
             // default delegates to java.awt.Desktop.browse, which
             // throws on Wayland-only Linux setups (Hyprland, Sway,
@@ -489,7 +499,6 @@ fun main() {
                     drafts = graph.drafts,
                     updateState = graph.updateState,
                     createSettingsSync = graph.createSettingsSync,
-                    watchwordsSync = graph.watchwordsSync,
                     themePreference = graph.themePreference,
                     callEngineProvider = io.nisfeb.talon.call.DesktopCallEngineProvider,
                     peerLinkFactory = io.nisfeb.talon.call.DesktopPeerLinkFactory,
@@ -520,7 +529,9 @@ fun main() {
                     // this on each switch so the JSON file for the
                     // active ship is loaded fresh.
                     createMenuSeen = { ship ->
-                        io.nisfeb.talon.ui.DesktopMenuSeenStore(ship = ship)
+                        io.nisfeb.talon.ui.StoredMenuSeenStore(
+                            io.nisfeb.talon.ui.JvmUiSettingsStore(File(io.nisfeb.talon.util.AppDirs.userData, io.nisfeb.talon.ui.menuSeenFileName(ship))),
+                        )
                     },
                     lastOpenChatStore = graph.lastOpenChatStore,
                     urbLinkLauncher = io.nisfeb.talon.urbit.DesktopUrbLinkLauncher,

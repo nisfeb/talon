@@ -16,6 +16,8 @@
          (DEFAULT + BROWSABLE) so the visibility match is exact. -->
     <queries>
         <package android:name="io.nisfeb.lattice" />
+        <!-- Health Connect before Android 14, where it is an app (orrery/HealthWatch.kt). -->
+        <package android:name="com.google.android.apps.healthdata" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.DEFAULT" />
@@ -27,6 +29,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+      The time-to-leave alarm rings at a set minute, through Doze
+      (orrery/LeaveAlarm.kt). USE_EXACT_ALARM is granted at install from
+      13 on; 12 asks for SCHEDULE_EXACT_ALARM. Without either the alarm
+      falls back to an inexact one.
+    -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Incoming calls take over a locked screen. Auto-granted for
          apps that post CATEGORY_CALL notifications; without it the
@@ -61,6 +71,13 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- Where the owner is, for orrery, when they move with the app closed (orrery/LocationWatch.kt). -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- Daily health summaries for orrery (orrery/HealthWatch.kt): read only, these three kinds, and in the background where granted. -->
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+    <!-- Trip mode (orrery/TripService.kt): a fix each minute on the way to an appointment. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!--
       Sideload distribution only — required by UpdateInstaller to
@@ -92,17 +109,23 @@
         android:enableOnBackInvokedCallback="true"
         android:allowBackup="false"
         android:theme="@style/Theme.Talon"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config">
 
         <!-- configChanges: CallController / PartyLine live in this
              activity's composition, so recreating the activity on a
              rotation, split-screen resize, dark-mode flip, or density
              change hangs up a live call. Handle them in-process —
              Compose relayouts on its own; nothing here needs the
-             recreate. -->
+             recreate.
+             singleTask: one instance, whatever opens it. As standard, a
+             shortcut, the call screen or a plain start put another copy
+             on top, each with its own calls loop, beacon and pollers:
+             eight at once on one phone, and the ship paid for each. -->
         <activity
             android:name="io.nisfeb.talon.MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Talon">
@@ -186,6 +209,42 @@
         <receiver
             android:name="io.nisfeb.talon.orrery.LocationReceiver"
             android:exported="false" />
+
+        <!-- Health Connect's "why does this app read" link opens Talon:
+             Android 14 and later ask through VIEW_PERMISSION_USAGE,
+             earlier ones through the Health Connect app's own action.
+             Without one of them the permission screen refuses. -->
+        <activity-alias
+            android:name="io.nisfeb.talon.HealthPermissionsUsage"
+            android:exported="true"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE"
+            android:targetActivity="io.nisfeb.talon.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name="io.nisfeb.talon.HealthPermissionsRationale"
+            android:exported="true"
+            android:targetActivity="io.nisfeb.talon.MainActivity">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity-alias>
+
+        <receiver
+            android:name="io.nisfeb.talon.orrery.LeaveAlarmReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name="io.nisfeb.talon.orrery.TripAlarmReceiver"
+            android:exported="false" />
+
+        <service
+            android:name="io.nisfeb.talon.orrery.TripService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
 
         <receiver
             android:name="io.nisfeb.talon.CallActionReceiver"

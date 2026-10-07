@@ -23,11 +23,13 @@ data class MenuBadges(
     val mailUnread: Boolean = false,
     /** An assistant run finished, or waits on a confirmation, while it was not on screen. */
     val assistantNews: Boolean = false,
+    /** A thread the owner follows has unread replies: Activity's Threads tab. */
+    val threadsUnread: Boolean = false,
 ) {
     /**
      * Read-site helper: returns true if [item]'s rail icon should
      * show a badge dot. Items without a freshness concept (Chats /
-     * Bookmarks / Activity / Profile / Watchwords / Administration /
+     * Bookmarks / Activity / Profile / Administration /
      * Settings) always return false.
      */
     fun forItem(item: RailItem): Boolean = when (item) {
@@ -37,6 +39,7 @@ data class MenuBadges(
         RailItem.Actions -> actionsWaiting
         RailItem.Mail -> mailUnread
         RailItem.Assistant -> assistantNews
+        RailItem.Activity -> threadsUnread
         else -> false
     }
 

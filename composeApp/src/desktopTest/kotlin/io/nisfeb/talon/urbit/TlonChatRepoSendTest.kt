@@ -11,6 +11,9 @@ import io.nisfeb.talon.data.ThreadUnreadEntity
 import io.nisfeb.talon.data.UnreadEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -268,7 +271,49 @@ class TlonChatRepoSendTest {
         repo.markRead("~bus")
         val row = db.unreads().getOne("~bus")!!
         assertEquals(0 to 0, row.count to row.notifyCount)
-        assertEquals("activity-action", ship.pokesTo("activity").single().mark)
+        // The mark Tlon's client sends (12.1.0); see the next for older ships.
+        assertEquals("activity-action-2", ship.pokesTo("activity").single().mark)
+    }
+
+    @Test
+    fun `a ship too old for activity-action-2 is told under the mark it has`() = live {
+        ship.refuse = { p -> if (p.mark == "activity-action-2") "no mark activity-action-2" else null }
+        db.unreads().upsert(UnreadEntity("~bus", count = 1, notifyCount = 0, recencyMs = 1))
+        db.unreads().upsert(UnreadEntity("~nec", count = 1, notifyCount = 0, recencyMs = 1))
+        repo.markRead("~bus")
+        val marks = ship.pokesTo("activity").map { it.mark }
+        assertEquals(listOf("activity-action-2", "activity-action"), marks)
+        assertEquals(ship.pokesTo("activity")[0].json, ship.pokesTo("activity")[1].json, "the same read")
+        // Remembered: the next read is not refused first.
+        repo.markRead("~nec")
+        assertEquals(listOf("activity-action-2", "activity-action", "activity-action"), ship.pokesTo("activity").map { it.mark })
+    }
+
+    // Wire pinned against desk/lib/activity-json.hoon's read decoder (ot
+    // asks for `group`, null allowed) and Tlon's activityApi.ts, which
+    // sends the same for a notebook.
+    @Test
+    fun `opening a notebook reads it and its notes, under activity-action-2`() = live {
+        db.groups().upsertChannelGroupsKeepingPin(listOf(io.nisfeb.talon.data.ChannelGroupEntity(nest = "notes/~bus/recipes", groupFlag = "~bus/garden")))
+        db.unreads().upsert(UnreadEntity("notes/~bus/recipes", count = 3, notifyCount = 0, recencyMs = 1))
+        repo.markRead("notes/~bus/recipes")
+        assertEquals(0, db.unreads().getOne("notes/~bus/recipes")!!.count)
+        val read = ship.pokesTo("activity").single()
+        assertEquals("activity-action-2", read.mark)
+        assertEquals(
+            """{"read":{"source":{"notebook":{"flag":"~bus/recipes","group":"~bus/garden"}},"action":{"all":{"time":null,"deep":true}}}}""",
+            read.json.toString(),
+        )
+    }
+
+    @Test
+    fun `a notebook in no group is read with a null group, and not under the old mark`() = live {
+        ship.refuse = { p -> if (p.mark == "activity-action-2") "no mark activity-action-2" else null }
+        db.unreads().upsert(UnreadEntity("notes/~bus/loose", count = 1, notifyCount = 0, recencyMs = 1))
+        repo.markRead("notes/~bus/loose")
+        val sent = ship.pokesTo("activity")
+        assertEquals(1, sent.size, "the old mark cannot name a notebook: not sent again under it")
+        assertTrue(""""group":null""" in sent.single().json.toString(), sent.single().json.toString())
     }
 
     @Test
@@ -286,4 +331,201 @@ class TlonChatRepoSendTest {
         assertNull(db.threadUnreads().getOne("~bus", "~bus/170141184506"))
         assertEquals(1, ship.pokesTo("activity").size)
     }
+
+    // group-action-5 (12.2.0): the mark Tlon's client sends, the body the
+    // same as -4's (a-groups:v11 is v8's plus a blob variant).
+    @Test
+    fun `a group action goes under group-action-5, and again under -4 where a ship lacks it`() = live {
+        repo.kickFromGroup("~bus/garden", "~nec")
+        assertEquals("group-action-5", ship.pokesTo("groups").single().mark)
+        ship.refuse = { p -> if (p.mark == "group-action-5") "no mark group-action-5" else null }
+        repo.kickFromGroup("~bus/garden", "~dev")
+        val last = ship.pokesTo("groups").takeLast(2)
+        assertEquals(listOf("group-action-5", "group-action-4"), last.map { it.mark })
+        assertEquals(last[0].json, last[1].json, "the same action")
+        repo.kickFromGroup("~bus/garden", "~wex")
+        assertEquals("group-action-4", ship.pokesTo("groups").last().mark, "remembered")
+        assertEquals(4, ship.pokesTo("groups").size)
+    }
+
+    // /v1/self is our own card alone; the directory is every contact.
+    @Test
+    fun `our own card is re-read alone, not with the whole directory`() = live {
+        ship.scries["contacts/v1/self"] = """{"nickname":{"type":"text","value":"Zed"}}"""
+        repo.refreshSelf()
+        assertEquals("Zed", db.contacts().get("~zod")?.nickname)
+        assertTrue("contacts/v1/directory" !in ship.scried, "${ship.scried}")
+    }
+
+    // Our own card's change on /v1/news, applied as it comes: it was read
+    // back from /v1/self, a path Tlon's client no longer calls.
+    @Test
+    fun `our own profile's change is applied off the fact`() = live {
+        repo.applyEvent(kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"id":1,"response":"diff","json":{"self":{"contact":{"nickname":{"type":"text","value":"Zed"}}}}}""",
+        ))
+        assertEquals("Zed", db.contacts().get("~zod")?.nickname)
+        assertTrue(ship.scried.none { it.startsWith("contacts/") }, "${ship.scried}")
+    }
+
+    // ─── reads the ship is told of (each a poke and two events) ──────
+
+    @Test
+    fun `opening a chat with nothing unread tells the ship nothing`() = live {
+        // Once the ship's word on what is unread has been read this connect.
+        ship.scries["activity/v6/activity/full"] = "{}"
+        repo.bootstrapActivityForTest()
+        repo.setOpenChat("~bus")
+        delay(300)
+        repo.setOpenChat(null)
+        delay(300)
+        assertTrue(ship.pokesTo("activity").isEmpty(), "opened and left with nothing new: ${ship.pokesTo("activity")}")
+    }
+
+    @Test
+    fun `messages arriving in the chat in view are read once, not once each`() = live {
+        ship.scries["activity/v6/activity/full"] = "{}"
+        repo.bootstrapActivityForTest()
+        repo.setForeground(true)
+        repo.setOpenChat("~bus")
+        repeat(5) { n ->
+            repo.applyActivityUpdate(kotlinx.serialization.json.Json.parseToJsonElement(
+                """{"activity":{"ship/~bus":{"recency":${1_000 + n},"count":${n + 1},"notify-count":0,"notify":false,"unread":{"id":"~bus/170.141.184.50$n","time":"1","count":${n + 1},"notify":false}}}}""",
+            ) as kotlinx.serialization.json.JsonObject)
+        }
+        delay(300)
+        assertTrue(ship.pokesTo("activity").isEmpty(), "paced, not sent at once")
+        kotlinx.coroutines.withTimeout(TlonChatRepo.FOCUSED_READ_EVERY_MS + 2_000) { while (ship.pokesTo("activity").isEmpty()) delay(50) }
+        delay(300)
+        assertEquals(1, ship.pokesTo("activity").size, "one read for five messages")
+    }
+
+    @Test
+    fun `leaving sends the read that was waiting, at once`() = live {
+        ship.scries["activity/v6/activity/full"] = "{}"
+        repo.bootstrapActivityForTest()
+        repo.setForeground(true)
+        repo.setOpenChat("~bus")
+        repo.applyActivityUpdate(kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"activity":{"ship/~bus":{"recency":1000,"count":1,"notify-count":0,"notify":false,"unread":{"id":"~bus/170.141.184.501","time":"1","count":1,"notify":false}}}}""",
+        ) as kotlinx.serialization.json.JsonObject)
+        repo.setOpenChat(null)
+        kotlinx.coroutines.withTimeout(1_000) { while (ship.pokesTo("activity").isEmpty()) delay(20) }
+        delay(TlonChatRepo.FOCUSED_READ_EVERY_MS + 300)
+        assertEquals(1, ship.pokesTo("activity").size, "sent on leaving, and not again when its time came")
+    }
+
+    // Every open read 500 posts, a reopen seconds later included.
+    @Test
+    fun `a chat is read as it opens once a connect, its newest fifty`() = live {
+        ship.scries["chat/v4/dm/~bus/writs/newest/50/heavy"] = """{"writs":{}}"""
+        repo.refreshOnOpen("~bus")
+        repo.refreshOnOpen("~bus")
+        assertEquals(1, ship.scried.count { it.startsWith("chat/") && "/writs/newest/" in it }, "${ship.scried}")
+        assertTrue(ship.scried.any { it.endsWith("/newest/50/heavy") })
+    }
+
+    // A screen-on and the 15-minute worker re-read every chat's recent
+    // slice and the whole activity, a healthy socket or not.
+    @Test
+    fun `a live stream is not caught up again`() = live {
+        ship.emit("""{"nothing":1}""")
+        kotlinx.coroutines.withTimeout(2_000) { while (ship.channel.streamIdleMs > 1_000) delay(20) }
+        repo.catchUp()
+        delay(500)
+        assertTrue(ship.scried.none { "init-posts" in it || it.startsWith("activity/") }, "${ship.scried}")
+    }
+
+    @Test
+    fun `a stream gone quiet is caught up`() = live {
+        repo.catchUp()
+        kotlinx.coroutines.withTimeout(3_000) { while (ship.scried.none { it.startsWith("activity/") }) delay(20) }
+    }
+
+    // A ship serving only an older version was walked through every newer
+    // one, both marks each, on every chat opened. Remembered per login.
+    @Test
+    fun `the version a ship answers a conversation on is asked first after`() = live {
+        ship.scries["chat/v3/dm/~bus/writs/newest/50/heavy"] = """{"writs":{}}"""
+        ship.scries["chat/v3/dm/~nec/writs/newest/50/heavy"] = """{"writs":{}}"""
+        repo.refreshOnOpen("~bus")
+        val before = ship.scried.size
+        repo.refreshOnOpen("~nec")
+        assertEquals(listOf("chat/v3/dm/~nec/writs/newest/50/heavy"), ship.scried.drop(before))
+    }
+
+    // Each group row ran two queries of its own on every write; it reads
+    // the newest of its channels' newest posts from the shared list now.
+    @Test
+    fun `a group was last active when its newest channel post was sent`() = live {
+        db.groups().upsertChannelGroups(listOf(
+            io.nisfeb.talon.data.ChannelGroupEntity("chat/~bus/a", "~bus/garden"),
+            io.nisfeb.talon.data.ChannelGroupEntity("chat/~bus/b", "~bus/garden"),
+            io.nisfeb.talon.data.ChannelGroupEntity("chat/~nec/c", "~nec/shed"),
+        ))
+        db.messages().upsertAll(listOf(
+            MessageEntity("chat/~bus/a", "1", "~bus", 1_000, "[]", "/chat"),
+            MessageEntity("chat/~bus/b", "2", "~bus", 5_000, "[]", "/chat"),
+            MessageEntity("chat/~bus/b", "3", "~bus", 9_000, "[]", "/chat", parentId = "2"), // a reply
+            MessageEntity("chat/~nec/c", "4", "~nec", 7_000, "[]", "/chat"),
+        ))
+        assertEquals(5_000L, repo.groupLastActive("~bus/garden").filterNotNull().first())
+        assertEquals(7_000L, repo.groupLastActive("~nec/shed").filterNotNull().first())
+    }
+
+    // ─── a read the ship did not hear ─────────────────────────────
+    // The same messages came back unread, again and again: a read that
+    // timed out was lost (the badge here was cleared first, so the next
+    // open sent nothing) and the ship's next word brought them back.
+
+    private suspend fun shipSays(whom: String, recency: Long, count: Int) = repo.applyActivityUpdate(
+        kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"activity":{"ship/$whom":{"recency":$recency,"count":$count,"notify-count":0,"notify":false,"unread":{"id":"$whom/170.141.184.506","time":"1","count":$count,"notify":false}}}}""",
+        ) as kotlinx.serialization.json.JsonObject,
+    )
+
+    @Test
+    fun `a read the ship did not hear is owed, kept read here, and sent up to when it was read`() = live {
+        db.unreads().upsert(UnreadEntity("~bus", count = 2, notifyCount = 0, recencyMs = 1))
+        ship.lose = { if (it.app == "activity") kotlinx.io.IOException("The network connection was lost.") else null }
+        val before = io.nisfeb.talon.util.nowMs()
+        repo.markRead("~bus")
+        val after = io.nisfeb.talon.util.nowMs()
+        assertTrue(ship.pokesTo("activity").isEmpty(), "never reached the ship")
+        // The ship, not having heard, says the same messages are unread.
+        shipSays("~bus", recency = before - 1_000, count = 2)
+        assertEquals(0, db.unreads().getOne("~bus")!!.count, "read here, and kept read")
+        // The ship back: the owed read goes, up to when it was read.
+        ship.lose = { null }
+        repo.drainQueue()
+        val read = ship.pokesTo("activity").single().json
+        val time = read.at("read", "action", "all", "time").jsonPrimitive.content
+        assertTrue(Regex("\\d{1,3}(\\.\\d{3})+").matches(time), "a dotted @ud, as all-read decodes it: $time")
+        val ms = UrbitTime.daToUnixMs(com.ionspin.kotlin.bignum.integer.BigInteger.parseString(time.replace(".", "")))!!
+        assertTrue(ms in before..after, "up to the read, not to now: $ms not in $before..$after")
+        // Paid: a message after the read is unread again, as it should be.
+        shipSays("~bus", recency = after + 60_000, count = 1)
+        assertEquals(1, db.unreads().getOne("~bus")!!.count)
+        repo.drainQueue()
+        assertEquals(1, ship.pokesTo("activity").size, "nothing owed any more")
+    }
+
+    @Test
+    fun `a message newer than an owed read still shows unread`() = live {
+        db.unreads().upsert(UnreadEntity("~bus", count = 1, notifyCount = 0, recencyMs = 1))
+        ship.lose = { if (it.app == "activity") kotlinx.io.IOException("The network connection was lost.") else null }
+        repo.markRead("~bus")
+        shipSays("~bus", recency = io.nisfeb.talon.util.nowMs() + 60_000, count = 3)
+        assertEquals(3, db.unreads().getOne("~bus")!!.count)
+    }
+
+    // The ship's counts had not been read yet (that read took minutes on a
+    // busy ship): a chat with none here was opened and nothing was sent, and
+    // when the counts landed its messages came back unread.
+    @Test
+    fun `before the ship's counts are read, opening a chat reads it there anyway`() = live {
+        repo.markRead("~bus")
+        assertEquals(1, ship.pokesTo("activity").size)
+    }
 }
+

@@ -31,6 +31,10 @@ interface ThreadUnreadDao {
     @Query("DELETE FROM thread_unreads WHERE whom = :whom AND parentPostId = :parentPostId")
     suspend fun deleteOne(whom: String, parentPostId: String)
 
+    /** Threads with something that notified: the app-icon count. */
+    @Query("SELECT * FROM thread_unreads WHERE notifyCount > 0")
+    fun streamNotified(): Flow<List<ThreadUnreadEntity>>
+
     @Query("DELETE FROM thread_unreads")
     suspend fun clear()
 }

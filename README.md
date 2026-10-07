@@ -26,7 +26,7 @@ Everything is self-contained. Desktop builds bundle a JRE, so you don't need Jav
 - Mail on your ship, through Grubbery's Auspex: inbox, threads drawn as a tree, labels, drafts, rules, lists, attachments and notifications, with an inbox that stays on the device between launches. A calendar with month, week and day views, several calendars, tasks, sharing, and calendars synced from ICS, CalDAV or Google. Your ship's public keys on your profile, where you can sign a message or a file and check a signature. See [docs/grubbery-apps.md](docs/grubbery-apps.md).
 - A home screen of widgets you arrange: the sky clock (a 24-hour dial with the real sky and weather), New, chat, mail, today, statuses and the assistant. On Android the sky clock is a home-screen widget as well. See [docs/home-screen.md](docs/home-screen.md).
 - Invites by QR code, an invite-me code on your profile, and `/invite` from the composer. Comets go by word names, never by @p. See [docs/invites-and-names.md](docs/invites-and-names.md).
-- An assistant over your own chat history that can mail, schedule, message and call for you, by text or by voice. Loops run a saved prompt on a schedule. Catch-up summaries, watchwords and emoji-react suggestions. All opt-in, with your own API key. See [docs/assistant.md](docs/assistant.md).
+- An assistant over your own chat history that can mail, schedule, message and call for you, by text or by voice. Loops run a saved prompt on a schedule. Catch-up summaries and emoji-react suggestions. All opt-in, with your own API key. See [docs/assistant.md](docs/assistant.md).
 - Semantic search across chat history. Android uses MediaPipe. Desktop uses an on-device sentence-transformer (DJL ONNX, model cached on first use under `~/.djl.ai/cache`, about 30 MB).
 - Native OS notifications (libnotify on Linux, Notification Center on macOS, system toasts on Windows, Android and iOS), a system tray on desktop, dark, light or system theme, per-chat mute, folders. Desktop updates itself, and Android takes the APK for its ABI. An Apps page in Settings shows what the ship has and installs what is missing.
 
@@ -174,7 +174,7 @@ You only need this section if you're contributing or building Talon yourself.
 
 ### Requirements
 
-- JDK 17 (Temurin or any full JDK with the standard jmods)
+- JDK 25 (Temurin, or any JDK 25 whose jlink can build a runtime)
 - Android SDK 34, build-tools 34 (Android target only)
 - Gradle wrapper handles its own version
 

@@ -15,6 +15,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 
 /**
@@ -66,6 +68,8 @@ fun ThreadIndicator(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(bg)
+            // Said aloud as well as tinted: only a thread that counts has it.
+            .semantics { if (hasUnread) stateDescription = "New replies" }
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {

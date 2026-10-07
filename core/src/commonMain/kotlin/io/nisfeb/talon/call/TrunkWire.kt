@@ -187,6 +187,18 @@ sealed interface TrunkUpdate {
     ) : TrunkUpdate
 }
 
+/**
+ * %trunk arriving on a ship, by the ship: an install Talon started has
+ * landed. The move to the ship's own pushes waits for this rather than
+ * the next app start (it found no %trunk at sign-in, before the desk had
+ * come over ames).
+ */
+object TrunkArrivals {
+    private val _arrived = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val arrived: kotlinx.coroutines.flow.SharedFlow<String> = _arrived
+    fun arrived(ship: String) { _arrived.tryEmit(ship) }
+}
+
 object TrunkWire {
     const val AGENT = "trunk"
     const val ACTION_MARK = "trunk-action"
@@ -214,7 +226,9 @@ object TrunkWire {
     // /party roll call and the party-lines list.
     // 9: the host announces %on-line when a line's roster changes, so
     // knowing who is on a line costs a join, not a poll interval.
-    const val WIRE_VERSION = 9
+    // 10: a comet's Galène username is its full mnemonym, not its @p,
+    // and a listen link carries host= and room= instead of group=.
+    const val WIRE_VERSION = 10
 
     /** The wire that added the call-recording announcement. A ship
      *  below this relays no %recording-on, so nobody on the line would
@@ -773,17 +787,22 @@ object TrunkWire {
      * before wire 5.
      */
     fun jwtPermissions(token: String): Set<String> = runCatching {
-        val payload = token.split('.')[1]
+        (jwtClaims(token)["permissions"] as JsonArray)
+            .map { it.jsonPrimitive.content }
+            .toSet()
+    }.getOrDefault(setOf("present", "message"))
+
+    /** Who a trunk-jwt [token] names: Galène's username for us. Null for an opaque token. */
+    fun jwtSubject(token: String): String? = runCatching { jwtClaims(token)["sub"]!!.jsonPrimitive.content }.getOrNull()
+
+    private fun jwtClaims(token: String): JsonObject {
         // JWTs are base64url ('-'/'_') and minted unpadded; tolerate
         // padding anyway rather than fail a token that carries it.
         val bytes = Base64.UrlSafe
             .withPadding(Base64.PaddingOption.ABSENT_OPTIONAL)
-            .decode(payload)
-        val claims = json.parseToJsonElement(bytes.decodeToString()) as JsonObject
-        (claims["permissions"] as JsonArray)
-            .map { it.jsonPrimitive.content }
-            .toSet()
-    }.getOrDefault(setOf("present", "message"))
+            .decode(token.split('.')[1])
+        return json.parseToJsonElement(bytes.decodeToString()) as JsonObject
+    }
 
     val json = Json { ignoreUnknownKeys = true }
 }

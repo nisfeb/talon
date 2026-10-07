@@ -1,5 +1,5 @@
 package io.nisfeb.talon.ui.screens
-import io.nisfeb.talon.util.formatMonthDayTime
+import io.nisfeb.talon.util.formatMonthDayClock
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -41,7 +41,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -54,13 +53,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.flow.map
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -182,9 +180,6 @@ fun ThreadList(
         mutableStateOf<Int?>(null)
     }
     var threadDividerResolved by remember(whom, parentId) { mutableStateOf(false) }
-    // Fade trigger for the in-thread "New" divider — same dwell-fade
-    // contract as the channel divider in DmChatScreen.
-    var threadDividerFaded by remember(whom, parentId) { mutableStateOf(false) }
     LaunchedEffect(whom, parentId) {
         if (!threadDividerResolved) {
             val row = db.threadUnreads().getOne(whom, parentId)
@@ -291,7 +286,7 @@ fun ThreadList(
         }
     }
     val canSend = remember(whom) {
-        whom.startsWith("~") || whom.startsWith("0v") || isChannelNest(whom)
+        io.nisfeb.talon.urbit.isDirect(whom) || isChannelNest(whom)
     }
     var pendingDelete by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
     var pendingReport by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
@@ -396,21 +391,36 @@ fun ThreadList(
             ?.m
             ?.id
     }
-    // Dwell-fade: same contract as the channel divider. Once the reply
-    // the divider sits above has been continuously visible 5s, fade.
-    LaunchedEffect(firstUnreadReplyId, whom, parentId) {
-        if (firstUnreadReplyId == null || threadDividerFaded) return@LaunchedEffect
-        snapshotFlow {
-            listState.layoutInfo.visibleItemsInfo.any { it.key == firstUnreadReplyId }
-        }.collectLatest { visible ->
-            if (visible) {
-                delay(5_000)
-                threadDividerFaded = true
-            }
-        }
-    }
+    // The in-thread "New" divider stays while the thread is open, as the
+    // channel's does: no timer takes it away while it is being read.
+
+    // Follow it or stop, from inside: the same switch as on the post, so
+    // its replies count (tint, notify, the Threads lists) or do not.
+    val followHere by remember(whom, parentId) {
+        db.followedThreads().streamForWhom(whom).map { rows -> rows.firstOrNull { it.parentPostId == parentId }?.follow }
+    }.collectAsState(initial = null)
+    val following = io.nisfeb.talon.urbit.threadCounts(
+        followHere, io.nisfeb.talon.urbit.isDirect(whom), parent?.author == ourPatp,
+    )
 
     Column(modifier = modifier) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        ) {
+            Text(
+                if (following) "You follow this thread" else "You don't follow this thread",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            io.nisfeb.talon.ui.TextButton(onClick = {
+                scope.launch {
+                    runCatching { repo.setFollow(whom, parentId, !following) }
+                        .onFailure { composerState.failed("follow", it) }
+                }
+            }) { Text(if (following) "Unfollow" else "Follow") }
+        }
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxSize(),
@@ -459,7 +469,7 @@ fun ThreadList(
                 contentType = { "reply" },
             ) { row ->
                 if (row.m.id == firstUnreadReplyId) {
-                    io.nisfeb.talon.ui.UnreadDividerRow(faded = threadDividerFaded)
+                    io.nisfeb.talon.ui.UnreadDividerRow()
                 }
                 val replyMsg = row.m
                 ThreadMessage(
@@ -514,33 +524,16 @@ fun ThreadList(
             pendingDelete = null
             return@let
         }
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("Delete this message?") },
-            text = { Text("This cannot be undone.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    val t = target
-                    pendingDelete = null
-                    scope.launch {
-                        runCatching {
-                            repo.delete(whom, t.id, parentId = t.parentId)
-                        }.onFailure {
-                            composerState.failed("delete", it)
-                        }
-                    }
-                }) {
-                    Text(
-                        if (isMine) "Delete" else "Delete (admin)",
-                        color = MaterialTheme.colorScheme.error,
-                    )
+        DeleteMessageDialog(
+            mine = isMine,
+            onDelete = {
+                pendingDelete = null
+                scope.launch {
+                    runCatching { repo.delete(whom, target.id, parentId = target.parentId) }
+                        .onFailure { composerState.failed("delete", it) }
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) {
-                    Text("Cancel")
-                }
-            },
+            onDismiss = { pendingDelete = null },
         )
     }
 
@@ -692,7 +685,7 @@ private fun ThreadMessage(
     flashAmber: Boolean = false,
 ) {
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
-    val stamp = remember(m.sentMs) { formatMonthDayTime(m.sentMs) }
+    val stamp = remember(m.sentMs) { formatMonthDayClock(m.sentMs) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
     val grouped = remember(reactions) {
         // Normalize on read too: rows stored before we normalized on write
@@ -752,13 +745,15 @@ private fun ThreadMessage(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        "$authorLabel · $stamp",
+                        contactMap.byline(m.author, authorLabel, stamp),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (m.status == "pending") SendingIcon()
                 }
             }
+            // Only a post that could run long is measured for a fold.
+            val body: @Composable () -> Unit = {
             StoryRenderer(
                 parts,
                 onMentionTap = onMentionTap,
@@ -771,6 +766,10 @@ private fun ThreadMessage(
                 // text rather than opening the menu (hover "⋯" opens it).
                 onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
+            }
+            if (remember(parts) { io.nisfeb.talon.ui.mightFold(parts) }) {
+                io.nisfeb.talon.ui.FoldLongPost(m.id, hasMedia = remember(parts) { io.nisfeb.talon.ui.hasMedia(parts) }, content = body)
+            } else body()
             SendStateNote(m.status)
             if (grouped.isNotEmpty()) {
                 FlowRow(
@@ -915,8 +914,7 @@ private fun ThreadActionMenu(
                         .weight(1f)
                         .padding(start = 4.dp),
                 )
-                IconButton(
-                    onClick = {
+                io.nisfeb.talon.ui.IconButton(tip = "Search emojis", onClick = {
                         searchOpen = !searchOpen
                         if (!searchOpen) searchQuery = ""
                     },

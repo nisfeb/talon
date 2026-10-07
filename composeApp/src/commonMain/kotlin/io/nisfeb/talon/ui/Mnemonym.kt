@@ -1,6 +1,10 @@
 package io.nisfeb.talon.ui
 
 import com.ionspin.kotlin.bignum.integer.BigInteger
+import io.nisfeb.talon.comet.MNEMONYM_WORDS
+import io.nisfeb.talon.comet.PATP_PREFIXES
+import io.nisfeb.talon.comet.PATP_SUFFIXES
+import io.nisfeb.talon.comet.cometPatp
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlin.concurrent.Volatile
@@ -62,6 +66,14 @@ object Mnemonym {
         }
         // Names are rendered from the ContactMap, rebuilt on this.
         if (added) AzimuthNames.generation.value = AzimuthNames.generation.value + 1
+    }
+
+    /** [ship]'s Jael says no again ([CometDomes.recheck]): back to the two-dot form. */
+    fun unmarkGroundwire(ship: String) {
+        val removed = synchronized(nymLock) {
+            groundwire.remove(ship).also { if (it) { nymCache.remove(ship); abridgedCache.remove(ship) } }
+        }
+        if (removed) AzimuthNames.generation.value = AzimuthNames.generation.value + 1
     }
 
     /** Display form: the scheme's own abridgement, `..first...last`,
@@ -199,15 +211,7 @@ object Mnemonym {
     }
 
     /** The @p whose sixteen syllables spell [bytes]. */
-    internal fun patpOf(bytes: ByteArray): String {
-        if (bytes.size != 16) return ""
-        val syllables = (0 until 16).map {
-            if (it % 2 == 0) PATP_PREFIXES[bytes[it].toInt() and 0xff]
-            else PATP_SUFFIXES[bytes[it].toInt() and 0xff]
-        }
-        val pairs = (0 until 16 step 2).map { syllables[it] + syllables[it + 1] }
-        return "~" + pairs.take(4).joinToString("-") + "--" + pairs.drop(4).joinToString("-")
-    }
+    internal fun patpOf(bytes: ByteArray): String = cometPatp(bytes)
 
     private const val COMET_WORDS = 12
     private const val CS_BITS = 4

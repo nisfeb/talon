@@ -42,7 +42,7 @@ object MailGemtext {
         val names = { s: String -> oneLine(nameFor(s)) }
         return buildString {
         val shown = collapse(t.messages)
-        val subject = shown.firstOrNull()?.subject?.let { oneLine(it) }?.ifBlank { null } ?: "(no subject)"
+        val subject = oneLine(threadSubject(t.messages)).ifBlank { "(no subject)" }
         append("# ").append(subject).append("\n\n")
         // Messages, not copies: several grubs under one id are one
         // message, and counting copies would overstate the conversation.

@@ -86,8 +86,58 @@ class UrbitChannel internal constructor(
     }
 
     /**
+     * The newest event the caller has finished with, or -1: a stream
+     * opened on this channel again asks eyre to start after it, and a
+     * replay of anything up to it is skipped. See [applied].
+     */
+    @Volatile
+    private var appliedId: Long = -1L
+
+    /**
+     * Event [id] is handled. Eyre keeps a channel, its subscriptions and
+     * every event since the last one acked for twelve hours after its
+     * stream drops, so a stream opened again resumes where this one
+     * stopped instead of a new channel watching everything again.
+     */
+    fun applied(id: Long) {
+        if (id > appliedId) appliedId = id
+    }
+
+    /**
+     * The ship no longer has this channel (eyre answered 404), or it was
+     * retired or deleted here: a stream cannot be opened on it again.
+     */
+    @Volatile
+    var gone: Boolean = false
+        private set
+
+    /** Never resume this channel: a subscription on it was dropped, or it is being given up. */
+    fun retire() {
+        gone = true
+    }
+
+    /** The open stream's inbox, so a refused PUT can end the stream too. */
+    @Volatile
+    private var streamInbox: Channel<UrbitEvent>? = null
+
+    /**
+     * Eyre ties a channel to the identity that made it and answers 403 to
+     * anyone else, a lapsed login included. Nothing on this channel will
+     * work again, so the open stream ends with it and the next pass opens
+     * another.
+     */
+    private fun forbidden(): Nothing {
+        gone = true
+        val e = ChannelGone(forbidden = true)
+        streamInbox?.close(e)
+        throw e
+    }
+
+    /**
      * Opens the SSE stream. Hot flow — every collector shares the same
-     * connection for the life of this UrbitChannel instance.
+     * connection for the life of this UrbitChannel instance. Called again
+     * after a stream ends, it resumes the channel; on a channel the ship
+     * has reaped it fails with [ChannelGone].
      *
      * Events are buffered through an UNLIMITED intermediate Channel so
      * that bursts (e.g. 10 messages delivered back-to-back after a
@@ -96,7 +146,9 @@ class UrbitChannel internal constructor(
      * rendezvous/buffered channel would shed events under load.
      */
     fun events(): Flow<UrbitEvent> = channelFlow {
+        if (gone) throw ChannelGone()
         val inbox = Channel<UrbitEvent>(Channel.UNLIMITED)
+        streamInbox = inbox
         // Drive the SSE session on its own coroutine. The sse{} block
         // stays suspended for the life of the connection; when this
         // job is cancelled (awaitClose below) the session closes.
@@ -113,11 +165,19 @@ class UrbitChannel internal constructor(
                 // makes eyre emit each frame uncompressed the instant it's
                 // ready; parsing frames ourselves keeps this in commonMain
                 // for every platform.
+                val resumeAfter = appliedId
                 http.prepareGet(channelUrl) {
                     header(HttpHeaders.Accept, "text/event-stream")
                     header(HttpHeaders.CacheControl, "no-cache")
                     header(HttpHeaders.AcceptEncoding, "identity")
+                    // Eyre acks every event up to this one and replays the rest.
+                    if (resumeAfter >= 0) header(HttpHeaders.LastEventID, resumeAfter.toString())
                 }.execute { resp ->
+                    if (resp.status.value == 404) {
+                        gone = true
+                        throw ChannelGone()
+                    }
+                    if (resp.status.value == 403) forbidden()
                     if (!resp.status.isSuccess()) error("channel SSE: HTTP ${resp.status.value}")
                     lastStreamMs = nowMs()
                     val body = resp.bodyAsChannel()
@@ -138,7 +198,10 @@ class UrbitChannel internal constructor(
                                     val element = runCatching { json.parseToJsonElement(data.toString()) }.getOrNull()
                                     // inbox is UNLIMITED so trySend only fails
                                     // after close, when the flow is shutting down.
-                                    if (element != null) inbox.trySend(UrbitEvent(id, element))
+                                    // Eyre may replay events already handled here;
+                                    // its own note says the client must skip them.
+                                    val replayed = id != null && id <= appliedId
+                                    if (element != null && !replayed) inbox.trySend(UrbitEvent(id, element))
                                 }
                                 id = null
                                 data.setLength(0)
@@ -193,17 +256,28 @@ class UrbitChannel internal constructor(
     @Volatile
     private var lastStreamMs: Long = 0L
 
-    suspend fun subscribe(app: String, path: String, onShip: String = ship): Long {
-        val id = nextRequestId()
-        val msg = buildJsonObject {
-            put("id", id)
-            put("action", "subscribe")
-            put("ship", onShip)
-            put("app", app)
-            put("path", path)
-        }
-        put(buildJsonArray { add(msg) })
-        return id
+    suspend fun subscribe(app: String, path: String): Long = subscribeAll(listOf(app to path)).single()
+
+    /**
+     * Several subscriptions in one PUT, answering their request ids in the
+     * order given. One PUT each, as it was, was an event on the ship for
+     * every one of them, on every connect.
+     */
+    suspend fun subscribeAll(watches: List<Pair<String, String>>): List<Long> {
+        if (watches.isEmpty()) return emptyList()
+        val ids = watches.map { nextRequestId() }
+        put(buildJsonArray {
+            watches.forEachIndexed { i, (app, path) ->
+                add(buildJsonObject {
+                    put("id", ids[i])
+                    put("action", "subscribe")
+                    put("ship", ship)
+                    put("app", app)
+                    put("path", path)
+                })
+            }
+        })
+        return ids
     }
 
     suspend fun unsubscribe(subscriptionId: Long) {
@@ -299,7 +373,18 @@ class UrbitChannel internal constructor(
      * nobody reads ("eyre: clogged"). Call it before opening a
      * replacement and on the way out.
      */
+    /**
+     * Give this channel up now and end it on the ship in [scope], waiting
+     * at most [timeoutMs]: a ship that does not answer keeps it until
+     * eyre reaps it, and nothing here waits on that.
+     */
+    fun deleteSoon(scope: kotlinx.coroutines.CoroutineScope, timeoutMs: Long = 5_000) {
+        retire()
+        scope.launch { io.nisfeb.talon.util.runSuspendCatching { withTimeoutOrNull(timeoutMs) { delete() } } }
+    }
+
     suspend fun delete() {
+        retire()
         val msg = buildJsonObject {
             put("id", nextRequestId())
             put("action", "delete")
@@ -386,6 +471,19 @@ class UrbitChannel internal constructor(
         if (text.isBlank()) JsonNull else json.parseToJsonElement(text)
     }
 
+    /**
+     * Whether the ship is busy, down or out of reach, from vere's own
+     * /~_~/healthz: no event on the ship, so it can be asked of one too
+     * slow to answer anything else. Three seconds, then out of reach.
+     */
+    suspend fun health(): ShipHealth = shipHealthOf(
+        io.nisfeb.talon.util.runSuspendCatching {
+            withContext(ioDispatcher) {
+                http.get("${baseUrl.trimEnd('/')}/~_~/healthz") { timeout { requestTimeoutMillis = 3_000 } }.status.value
+            }
+        }.getOrNull(),
+    )
+
     /** PUT a batch of channel actions. Runs on the IO dispatcher. */
     private suspend fun put(messages: JsonArray) = withContext(ioDispatcher) {
         val resp = http.put(channelUrl) {
@@ -393,6 +491,7 @@ class UrbitChannel internal constructor(
             setBody(messages.toString())
             timeout { requestTimeoutMillis = RPC_TIMEOUT_SECS * 1000 }
         }
+        if (resp.status.value == 403) forbidden()
         if (!resp.status.isSuccess()) error("channel PUT: HTTP ${resp.status.value}")
     }
 
@@ -413,6 +512,14 @@ class UrbitChannel internal constructor(
 
 /** Raw SSE event: optional sequence id from the server, plus JSON payload. */
 data class UrbitEvent(val id: Long?, val body: JsonElement)
+
+/**
+ * The ship reaped the channel (twelve hours without a stream) or never had
+ * it: open a new one. [forbidden]: eyre refused it to this login (403), so
+ * the new one waits out a backoff, in case the login itself has lapsed.
+ */
+class ChannelGone(val forbidden: Boolean = false) :
+    RuntimeException(if (forbidden) "the ship refused this channel to this login" else "the ship no longer has this channel")
 
 /**
  * The ship refused a poke.
@@ -440,3 +547,47 @@ class PokeUnacked(
     val app: String,
     val mark: String,
 ) : RuntimeException("$app never answered a $mark poke: it may or may not have landed")
+
+/** Events waiting before an ack is sent for them all. */
+const val ACK_EVERY = 20
+
+/** Quiet before the events waiting are acked. */
+const val ACK_QUIET_MS = 5_000L
+
+/**
+ * Ack the event ids from [ids] in batches: the newest once [every] are
+ * waiting, or once [quietMs] pass with none newer, and whatever waits
+ * when [ids] closes. Eyre's ack prunes every event up to the id it names,
+ * so one covers the run before it. One PUT per event, as it was, made
+ * every fact cost the ship a second event of its own. Well inside eyre's
+ * clog limits: 50 events unacked and 30 seconds old.
+ */
+suspend fun ackInBatches(
+    ids: kotlinx.coroutines.channels.ReceiveChannel<Long>,
+    every: Int = ACK_EVERY,
+    quietMs: Long = ACK_QUIET_MS,
+    ack: suspend (Long) -> Unit,
+) {
+    var newest = -1L
+    var waiting = 0
+    suspend fun flush() {
+        if (waiting == 0) return
+        waiting = 0
+        runCatching { ack(newest) }
+    }
+    while (true) {
+        // Nothing owed: wait for the next event without waking every [quietMs].
+        val next = if (waiting == 0) ids.receiveCatching()
+        else kotlinx.coroutines.withTimeoutOrNull(quietMs) { ids.receiveCatching() }
+        when {
+            next == null -> flush()
+            next.isClosed -> { flush(); return }
+            else -> {
+                newest = maxOf(newest, next.getOrThrow())
+                waiting += 1
+                if (waiting >= every) flush()
+            }
+        }
+    }
+}
+

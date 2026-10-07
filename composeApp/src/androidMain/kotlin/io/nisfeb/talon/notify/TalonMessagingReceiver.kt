@@ -2,10 +2,15 @@ package io.nisfeb.talon.notify
 
 import android.content.Context
 import android.content.SharedPreferences
+import io.nisfeb.talon.ui.contactMapNow
 import io.nisfeb.talon.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -44,11 +49,14 @@ class TalonMessagingReceiver : MessagingReceiver() {
 
     override fun onNewEndpoint(context: Context, endpoint: PushEndpoint, instance: String) {
         Log.i(TAG, "new endpoint for instance=$instance: ${endpoint.url.take(48)}…")
+        // The ship's own pushes are another registration, with its own endpoint.
+        if (instance == ShipPushes.INSTANCE) return ShipPushes.onEndpoint(context, endpoint)
         cacheEndpoint(context, endpoint.url)
     }
 
     override fun onUnregistered(context: Context, instance: String) {
         Log.i(TAG, "unregistered instance=$instance")
+        if (instance == ShipPushes.INSTANCE) return ShipPushes.onUnregistered(context)
         clearEndpoint(context)
     }
 
@@ -61,6 +69,7 @@ class TalonMessagingReceiver : MessagingReceiver() {
     }
 
     override fun onMessage(context: Context, message: PushMessage, instance: String) {
+        if (instance == ShipPushes.INSTANCE) return ShipPushes.onMessage(context, message)
         // Hint-only payload from the Talon relay:
         //   { "event": "new-message", "patp": "...", "whom": "...",
         //     "id": "..." }
@@ -95,15 +104,21 @@ class TalonMessagingReceiver : MessagingReceiver() {
                 Log.w(TAG, "dropping ring for a ship we are not signed into: $patp")
                 return
             }
-            io.nisfeb.talon.Notifications.showIncomingCall(context, from, eventId)
+            // The last names this process saw: a ring waits for no database.
+            val name = pushNames(
+                patp,
+                (context.applicationContext as? io.nisfeb.talon.TalonApplication)?.activeShipFlow?.value,
+                io.nisfeb.talon.ui.LastContactMap.value,
+            ).displayName(from)
+            io.nisfeb.talon.Notifications.showIncomingCall(context, from, eventId, name)
             // Telecom hears about the ring from here, not only from the
             // app: this is the path a phone in a pocket takes, and a
             // call telecom never saw is not in the call log. If the
             // app answers, it adopts this connection by id.
             if (io.nisfeb.talon.call.ModernTelecom.active) {
-                io.nisfeb.talon.call.ModernTelecom.start(context, eventId, from, from, incoming = true)
+                io.nisfeb.talon.call.ModernTelecom.start(context, eventId, from, name, incoming = true)
             } else {
-                io.nisfeb.talon.call.TalonTelecom.startIncoming(context, eventId, from, from)
+                io.nisfeb.talon.call.TalonTelecom.startIncoming(context, eventId, from, name)
             }
             return
         }
@@ -114,7 +129,18 @@ class TalonMessagingReceiver : MessagingReceiver() {
         // the caller had already given up. Id-matched so a late
         // cancel for a previous call leaves a newer ring alone.
         if (event == "ring-cancel") {
-            if (!eventId.isNullOrBlank()) {
+            // Only for a call this device rang or is in: the ship's trunk
+            // cancels on every device it has, one that never rang too.
+            val ours = !eventId.isNullOrBlank() && io.nisfeb.talon.notify.ringCancelIsOurs(
+                eventId,
+                io.nisfeb.talon.Notifications.shownCall,
+                io.nisfeb.talon.Notifications.liveCallId(),
+                eventId.takeIf {
+                    io.nisfeb.talon.call.TalonTelecom.connection(it) != null || io.nisfeb.talon.call.ModernTelecom.call(it) != null
+                },
+            )
+            if (!ours) Log.i(TAG, "ring-cancel for a call this device never rang: $eventId")
+            if (ours && eventId != null) {
                 val reason = parsed?.get("reason")?.jsonPrimitive?.content
                 io.nisfeb.talon.Notifications.ringCancelled(context, eventId, reason)
                 io.nisfeb.talon.call.TalonTelecom.connection(eventId)
@@ -131,19 +157,42 @@ class TalonMessagingReceiver : MessagingReceiver() {
             return
         }
 
+        // The ship's test push (its own %trunk, wire 11): it says the
+        // ship can reach this device, and is never shown. The move off
+        // the public relay waits for exactly this nonce.
+        if (event == "push-test") {
+            parsed?.get("nonce")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                ?.let { io.nisfeb.talon.notify.PushTestNonces.received(it) }
+            return
+        }
+
+        // From another app on the ship (calendar, orrery), through its %trunk:
+        // shown by its tag, as grubbery's web push is.
+        if (event == "notice") {
+            parsed?.let { io.nisfeb.talon.notify.noticeOf(it) }?.let { ShipPushes.shown(context, it) }
+            return
+        }
+
         if (whom.isNullOrBlank()) return
+        // Read to the end on some client: its notifications go, as Tlon's
+        // %notify dismisses them. Only that ship's: the same whom on
+        // another is another conversation. A forged one clears a
+        // notification and nothing else.
+        if (event == "read") {
+            io.nisfeb.talon.notify.ReadPushes.read(patp, whom, System.currentTimeMillis())
+            io.nisfeb.talon.Notifications.cancelAllForChat(context, whom, forShip = patp)
+            return
+        }
         // On screen right now: the app already shows it, and a
         // notification would only need clearing. Only when the push is
         // for the ship actually signed in, though — the same whom open
         // on ship A says nothing about ship B's conversation of that
         // name. A missing patp (older relay) keeps the old behaviour.
-        val currentShip = (context.applicationContext as? io.nisfeb.talon.TalonApplication)
-            ?.activeShipFlow?.value
+        val app = context.applicationContext as? io.nisfeb.talon.TalonApplication
+        val currentShip = app?.activeShipFlow?.value
         if ((patp == null || patp == currentShip) &&
             whom in io.nisfeb.talon.notify.ShownConversation.keys
         ) return
-        val title = patp ?: "Talon"
-        val body = "New activity in $whom"
         // The relay sends the globally-unique post id as `id`
         // (`<author>/<128-bit-id>` from the activity event's
         // dm-post.key.id). Plumbing it through as `postId` makes the
@@ -153,19 +202,40 @@ class TalonMessagingReceiver : MessagingReceiver() {
         // local id which won't resolve to a real row — passing it
         // anyway is harmless (MainActivity scrolls to "best effort"
         // and falls back to the chat's newest message).
-        io.nisfeb.talon.Notifications.showMessage(
-            context = context,
-            whom = whom,
-            postId = eventId?.takeIf { it.isNotBlank() },
-            // The relay has always told us which ship this is for; it
-            // was only ever used as the title. A tap now switches to
-            // that ship, because the same whom on another one is a
-            // different conversation or none.
-            forShip = patp,
-            title = title,
-            body = body,
-            sentMs = System.currentTimeMillis(),
-        )
+        // Named as the app names it, from the database: off this thread,
+        // and kept alive with goAsync until the notification is up.
+        val pending = goAsync()
+        val arrivedMs = System.currentTimeMillis()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val names = app?.let { a -> runCatching { withTimeoutOrNull(5_000) { a.db.contactMapNow() } }.getOrNull() }
+                    ?: io.nisfeb.talon.ui.ContactMap(alwaysPatp = io.nisfeb.talon.ui.ShipNames.alwaysPatp.value)
+                val n = pushHintNotification(whom, patp, currentShip, names)
+                // Read on another client while this waited: nothing to tell.
+                if (io.nisfeb.talon.notify.ReadPushes.readSince(patp, whom, arrivedMs)) return@launch
+                io.nisfeb.talon.Notifications.showMessage(
+                    context = context,
+                    whom = whom,
+                    postId = eventId?.takeIf { it.isNotBlank() },
+                    // A reply's parent, from a relay (or a ship's trunk)
+                    // that sends one: the tap opens the thread on it.
+                    parentId = parsed?.get("parent")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() },
+                    // A tap switches to the ship this is for, because the
+                    // same whom on another one is a different conversation.
+                    forShip = patp,
+                    title = n.title,
+                    body = n.body,
+                    sentMs = System.currentTimeMillis(),
+                )
+                // A read that came while this waited, or as it posted: the
+                // chat is read, so its notification goes.
+                if (io.nisfeb.talon.notify.ReadPushes.readSince(patp, whom, arrivedMs)) {
+                    io.nisfeb.talon.Notifications.cancelAllForChat(context, whom, forShip = patp)
+                }
+            } finally {
+                pending.finish()
+            }
+        }
     }
 
     companion object {

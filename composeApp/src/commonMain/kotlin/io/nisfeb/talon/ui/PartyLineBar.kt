@@ -21,7 +21,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -103,6 +102,7 @@ fun PartyLineBar(
     val w = rememberPartyWiring(party, videoDevices)
     PartyLineBarContent(
         state = state,
+        nameFor = withLineNames(nameFor, state),
         modifier = modifier,
         onToggleMute = { party.setMuted(it) },
         onLeave = { party.leave() },
@@ -110,6 +110,8 @@ fun PartyLineBar(
         cameraOn = w.cameraOn,
         cameraError = w.cameraError,
         onToggleCamera = w.onToggleCamera,
+        screenShare = w.screenShare,
+        sharing = w.sharing,
         localVideoLink = w.localLink,
         videoLinkFor = { party.videoLinkFor(it) },
         videoOnShips = w.videoOnShips,
@@ -118,7 +120,6 @@ fun PartyLineBar(
         onSelectCamera = w.onSelectCamera,
         onSwitchCamera = w.onSwitchCamera,
         onOpenMeeting = onOpenMeeting,
-        nameFor = nameFor,
         audioDevices = audioDevices,
         videoDevices = videoDevices,
         onDismiss = onDismiss ?: { party.dismissFailure() },
@@ -209,6 +210,9 @@ fun PartyLineBarContent(
      *  own: the toggle looks identical whether the camera opened or the
      *  machine has no webcam at all. */
     cameraError: Boolean = false,
+    /** Screen sharing, shown only when non-null (isScreenShareSupported). */
+    screenShare: ScreenShareControl? = null,
+    sharing: Boolean = false,
     /** Video conference: render tiles in the full-screen view. */
     partyVideoSupported: Boolean = false,
     localVideoLink: io.nisfeb.talon.call.PeerLink? = null,
@@ -367,7 +371,7 @@ fun PartyLineBarContent(
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (s.canSpeak) {
-                            IconButton(onClick = { onToggleMute(!s.muted) }) {
+                            io.nisfeb.talon.ui.IconButton(tip = if (s.muted) "Unmute" else "Mute", onClick = { onToggleMute(!s.muted) }) {
                                 Icon(
                                     if (s.muted) TalonIcons.MicOff else TalonIcons.Mic,
                                     contentDescription = if (s.muted) "Unmute" else "Mute",
@@ -392,7 +396,8 @@ fun PartyLineBarContent(
                         // opens — setCameraEnabled returns false before
                         // it reaches a device.
                         if (onToggleCamera != null && s.canSpeak) {
-                            IconButton(onClick = {
+                            io.nisfeb.talon.ui.IconButton(tip = if (cameraOn) "Turn the camera off"
+                                        else "Turn the camera on", onClick = {
                                 // Turning the camera on blind broadcasts a
                                 // framing nobody here can see: the self
                                 // tile lives only in PartyVideoGrid, and
@@ -414,8 +419,30 @@ fun PartyLineBarContent(
                                 )
                             }
                         }
+                        // A share goes out on the camera's sender, so a
+                        // listener (no up link) has nothing to share on.
+                        if (screenShare != null && s.canSpeak) {
+                            ScreenShareMenu(screenShare, sharing) { press ->
+                                val tip = if (sharing) "Stop sharing" else "Share your screen"
+                                io.nisfeb.talon.ui.IconButton(tip = tip, onClick = {
+                                    // Show the self tile, as the camera does.
+                                    if (!sharing) {
+                                        if (immersive) fullScreen = true
+                                        else if (partyVideoSupported && headline == null) expanded = true
+                                    }
+                                    press()
+                                }) {
+                                    Icon(
+                                        if (sharing) TalonIcons.StopScreenShare else TalonIcons.ScreenShare,
+                                        contentDescription = tip,
+                                    )
+                                }
+                            }
+                        }
                         if (expandable) {
-                            IconButton(onClick = {
+                            io.nisfeb.talon.ui.IconButton(tip = if (immersive) "Open the full-screen call"
+                                        else if (expanded) "Hide who's on the line"
+                                        else "Who's on the line", onClick = {
                                 if (immersive) fullScreen = true else expanded = !expanded
                             }) {
                                 Icon(
@@ -443,6 +470,16 @@ fun PartyLineBarContent(
                 PartyState.Idle -> {}
             }
         }
+    }
+    if (screenShare?.failed == true) {
+        Text(
+            "Couldn't share: nothing to share, or the system refused the capture.",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.error,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+        )
     }
     if (cameraError) {
         Text(
@@ -657,8 +694,7 @@ private fun Roster(
                     if (m.ship != selfShip && (onMessage != null || ops)) {
                         Box {
                             var menuOpen by remember(m.id) { mutableStateOf(false) }
-                            IconButton(
-                                onClick = { menuOpen = true },
+                            io.nisfeb.talon.ui.IconButton(tip = "Options for ${nameFor(m.ship)}", onClick = { menuOpen = true },
                                 modifier = Modifier.size(24.dp),
                             ) {
                                 Icon(
@@ -780,6 +816,9 @@ class PartyWiring(
     val cameraOn: Boolean,
     val cameraError: Boolean,
     val onToggleCamera: (() -> Unit)?,
+    val sharing: Boolean,
+    /** Null where the platform can't share a screen (isScreenShareSupported). */
+    val screenShare: ScreenShareControl?,
     val localLink: io.nisfeb.talon.call.PeerLink?,
     val videoOnShips: Set<String>,
     val focused: String?,
@@ -791,6 +830,10 @@ class PartyWiring(
 @Composable
 fun rememberPartyWiring(party: PartyLine, videoDevices: io.nisfeb.talon.call.VideoDevices): PartyWiring {
     val cameraOn by party.cameraOn.collectAsState()
+    val sharing = party.shared.collectAsState().value != null
+    val screenShare = remember(party) {
+        if (isScreenShareSupported) ScreenShareControl({ party.screenSources() }, { party.setScreenShare(it) }) else null
+    }
     val localLink by party.localVideoLink.collectAsState()
     val videoOnShips by party.videoOn.collectAsState()
     val focused by party.focusedVideo.collectAsState()
@@ -800,6 +843,8 @@ fun rememberPartyWiring(party: PartyLine, videoDevices: io.nisfeb.talon.call.Vid
     return PartyWiring(
         cameraOn = cameraOn,
         cameraError = cameraError,
+        sharing = sharing,
+        screenShare = screenShare,
         onToggleCamera = if (isPartyVideoSupported) {
             {
                 if (!camera.granted) camera.request()
@@ -837,6 +882,18 @@ fun rememberPartyWiring(party: PartyLine, videoDevices: io.nisfeb.talon.call.Vid
 }
 
 /**
+ * [nameFor], falling back for a ship it has no name for (it hands back the
+ * @p) to the name that member gave the line on joining. Not while names
+ * are set aside for the bare @p.
+ */
+internal fun withLineNames(nameFor: (String) -> String, state: PartyState): (String) -> String {
+    val given = (state as? PartyState.Live)?.members.orEmpty()
+        .mapNotNull { m -> m.name?.let { m.ship to it } }.toMap()
+    if (given.isEmpty() || ShipNames.alwaysPatp.value) return nameFor
+    return { ship -> nameFor(ship).takeIf { it != ship } ?: given[ship] ?: ship }
+}
+
+/**
  * The meeting view for desktop: the full-screen call view hosted in
  * the main window over everything, with its own Full screen control
  * for the OS window. Phones get the same view as an immersive dialog
@@ -866,7 +923,7 @@ fun PartyLineMeeting(
         PartyLineFullScreen(
             state = live,
             roomName = live.room,
-            nameFor = nameFor,
+            nameFor = withLineNames(nameFor, live),
             selfShip = selfShip,
             onToggleMute = { party.setMuted(it) },
             onLeave = { party.leave(); onClose() },
@@ -883,6 +940,8 @@ fun PartyLineMeeting(
             partyVideoSupported = isPartyVideoSupported,
             cameraOn = w.cameraOn,
             onToggleCamera = w.onToggleCamera,
+            screenShare = w.screenShare,
+            sharing = w.sharing,
             localVideoLink = w.localLink,
             videoLinkFor = { party.videoLinkFor(it) },
             videoOnShips = w.videoOnShips,

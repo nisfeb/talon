@@ -172,8 +172,24 @@ class AssistantActionsToolsTest {
 
     @Test
     fun `an event the calendar takes but does not show is not said to be added`() = withHarness(calendars = family) { h ->
+        val began = System.currentTimeMillis()
         val out = h.run("create_event", argsOf("name" to "Dentist", "date" to "2026-10-01", "time" to "10:00", "calendar" to "Family"))
         assertTrue(!out.startsWith("Added") && "not showing there yet" in out, out)
+        // It waited out the lists' read-back, fifteen seconds and more, on
+        // every add of a batch.
+        assertTrue(System.currentTimeMillis() - began < 5_000, "took ${System.currentTimeMillis() - began} ms")
+    }
+
+    @Test
+    fun `a change answers once the ship takes it, not once the lists are read back`() = withHarness(
+        window = """{"rows":[{"id":"e1","cal":"default","cat":"timed","kind":"once","all":false,"l":1790848800000,"r":1790852400000,"meta":{"name":"Dentist"}}]}""",
+        event = """{"cat":"timed","kind":"once","start_ms":1790848800000,"dur_min":60,"cal":"default","meta":{"name":"Dentist"},"args":{}}""",
+    ) { h ->
+        val began = System.currentTimeMillis()
+        val out = h.run("update_event", argsOf("event" to "e1", "name" to "Dentist (moved)"))
+        assertEquals("Updated \"Dentist (moved)\".", out)
+        assertTrue(System.currentTimeMillis() - began < 3_000, "took ${System.currentTimeMillis() - began} ms")
+        assertEquals("edit-event", h.pokes.single()["action"]!!.jsonPrimitive.content)
     }
 
     @Test

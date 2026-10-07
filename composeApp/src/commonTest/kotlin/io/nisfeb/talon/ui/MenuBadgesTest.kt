@@ -17,6 +17,7 @@ class MenuBadgesTest {
             MenuBadges(statusesFresh = true) to RailItem.Statuses,
             MenuBadges(invitesPending = true) to RailItem.Invites,
             MenuBadges(assistantNews = true) to RailItem.Assistant,
+            MenuBadges(threadsUnread = true) to RailItem.Activity,
         )) {
             assertEquals(setOf(own), RailItem.entries.filter(b::forItem).toSet(), "$b")
         }

@@ -1,8 +1,9 @@
 package io.nisfeb.talon.ui.screens
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.util.formatMonthDay
-import io.nisfeb.talon.util.ConcurrentMap
-import io.nisfeb.talon.util.formatMonthDayTime
+import kotlinx.coroutines.flow.update
+import io.nisfeb.talon.util.formatMonthDayClock
 import io.nisfeb.talon.util.formatMonthDayYear
 import kotlin.time.Clock
 import kotlinx.datetime.DateTimeUnit
@@ -60,7 +61,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
@@ -72,7 +72,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -94,8 +93,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -136,8 +137,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.ui.icons.TalonIcons
@@ -243,24 +247,55 @@ fun DmChatScreen(
     }
     var catchUpSummary by remember(whom) { mutableStateOf<String?>(null) }
     var catchingUp by remember(whom) { mutableStateOf(false) }
-    var catchUpError by remember(whom) { mutableStateOf<String?>(null) }
+    var catchUpError by remember(whom) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     // Latches once a summary succeeds — unreadSnapshot never clears, so
     // without this the banner reoffered (and would re-spend an AI call
     // on) the exact content the user just dismissed.
     var caughtUp by remember(whom) { mutableStateOf(false) }
     var topicsSheetOpen by remember(whom) { mutableStateOf(false) }
+    // The threads the owner follows here: the way back to one that
+    // scrolled away, from the chip over the chat or the header.
+    var threadsSheetOpen by remember(whom) { mutableStateOf(false) }
+    val followedHere by remember(whom) {
+        db.followedThreads().streamThreads(whom).map { io.nisfeb.talon.data.threadsInOrder(it) }
+    }.collectAsState(initial = emptyList())
+    // Read once: the rows below take it from here, not from a second query.
+    val follows by remember(whom) { db.followedThreads().streamForWhom(whom) }.collectAsState(initial = emptyList())
+    val followOfPost = remember(follows) { follows.associate { it.parentPostId to it.follow } }
     val composerState = io.nisfeb.talon.ui.rememberComposerState(whom, drafts)
+    // The chat's window: its posts sent from this time on, the newest
+    // CHAT_WINDOW at first. New posts fall inside it; scrolling back and
+    // jumping to an older post move it back (see [reach]).
+    var windowFromMs by remember(whom) { mutableStateOf<Long?>(null) }
+    fun widenTo(fromMs: Long) { windowFromMs = minOf(windowFromMs ?: Long.MAX_VALUE, fromMs) }
+    /** Take in [id]'s post, if it is kept here and older than the window; whether it is kept. */
+    suspend fun reach(id: String): Boolean = db.messages().getOne(whom, id)?.sentMs?.let { widenTo(it); true } ?: false
+    LaunchedEffect(whom) { widenTo(db.messages().sentMsAfterNewest(whom, CHAT_WINDOW - 1) ?: Long.MIN_VALUE) }
+    LaunchedEffect(initialScrollMessageId) { initialScrollMessageId?.let { reach(it) } }
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val rows by remember(whom) {
         var prevByMsgId: Map<String, DisplayRow> = emptyMap()
         kotlinx.coroutines.flow.combine(
-            db.messages().stream(whom).distinctUntilChanged(),
+            snapshotFlow { windowFromMs }.filterNotNull().distinctUntilChanged()
+                .flatMapLatest { from -> db.messages().streamFrom(whom, from) }
+                .distinctUntilChanged(),
             db.reactions().stream(whom).distinctUntilChanged()
                 .onStart { emit(emptyList()) },
             db.messages().streamReplyCounts(whom).distinctUntilChanged()
                 .onStart { emit(emptyList()) },
             db.threadUnreads().streamForWhom(whom).distinctUntilChanged()
                 .onStart { emit(emptyList()) },
-        ) { messages, reactions, replyCounts, threadUnreads ->
+            snapshotFlow { follows },
+        ) { messages, reactions, replyCounts, allThreadUnreads, follows ->
+            // Only a thread that counts tints: one the owner follows, a
+            // DM's, or under their own post. A channel's thread they never
+            // joined has replies, not unread ones.
+            val followOf = follows.associate { it.parentPostId to it.follow }
+            val authorOf = messages.associate { it.id to it.author }
+            val dm = io.nisfeb.talon.urbit.isDirect(whom)
+            val threadUnreads = allThreadUnreads.filter {
+                io.nisfeb.talon.urbit.threadCounts(followOf[it.parentPostId], dm, ours = authorOf[it.parentPostId] == ourPatp)
+            }
             if (messages.isEmpty()) {
                 prevByMsgId = emptyMap()
                 emptyList()
@@ -286,7 +321,7 @@ fun DmChatScreen(
                 ChatRowsSnapshot.put(whom, items)
             }
             .flowOn(Dispatchers.Default)
-    }.collectAsState(initial = ChatRowsSnapshot.get(whom))
+    }.collectAsStateWithLifecycle(initialValue = ChatRowsSnapshot.get(whom))
 
     // Unread COUNT — drives the catch-me-up banner only. Captured on
     // entry; not used for the divider anymore (see dividerAnchorId).
@@ -303,10 +338,17 @@ fun DmChatScreen(
     // null precisely when the conversation is caught up.
     var dividerAnchorId by remember(whom) { mutableStateOf<String?>(null) }
     var dividerResolved by remember(whom) { mutableStateOf(false) }
-    // Fade trigger. The divider element stays in the list once placed;
-    // flipping this true fades it to transparent (height preserved, no
-    // reflow). Never nulled back here — re-entry re-seeds the anchor.
-    var dividerFaded by remember(whom) { mutableStateOf(false) }
+    // The first unread is kept here, so its row (and the divider over it)
+    // is on its way into the window: entry waits for it.
+    var dividerComing by remember(whom) { mutableStateOf(false) }
+    // Where the list stood (first visible item's key and offset) right
+    // after it put the divider at the top; null once the reader has moved
+    // it. A key, not an index: newer rows landing below shift the index.
+    var dividerPlaced by remember(whom) { mutableStateOf<Pair<Any, Int>?>(null) }
+    // The list's top edge in the window: it moves down when something
+    // above the list (the pinned post, the catch-me-up banner, the
+    // followed-threads chip) arrives after the divider was placed.
+    var listTop by remember(whom) { mutableStateOf<Float?>(null) }
 
     val displayRows = remember(rows, dividerAnchorId) {
         val anchor = dividerAnchorId
@@ -346,13 +388,6 @@ fun DmChatScreen(
         .collectAsState(initial = null)
     val notifyLevel = notifyPref?.level ?: NotifyLevel.DEFAULT
 
-    val excludedWhoms by remember {
-        db.watchwords().streamExcludes()
-    }.collectAsState(initial = emptyList())
-    val isExcludedFromWatchwords = remember(excludedWhoms, whom) {
-        excludedWhoms.any { it.whom == whom }
-    }
-
     // Fall back to locally-owned state when the caller doesn't hoist it.
     // Both are always created (no conditional composable calls) so the
     // fallback stays valid across recompositions.
@@ -378,6 +413,63 @@ fun DmChatScreen(
     // for the chat they're already in (hasAnchored is already true from
     // the initial bottom-snap). Keyed on whom so a chat switch resets.
     var lastAppliedAnchor by remember(whom) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    // A post jumped to (the pin, a topic) that the window is taking in.
+    var pendingJump by remember(whom) { mutableStateOf<String?>(null) }
+    LaunchedEffect(displayRows.size, pendingJump) {
+        val id = pendingJump ?: return@LaunchedEffect
+        val idx = displayRows.indexOfFirst { it is ChatListItem.Message && it.row.m.id == id }
+        if (idx >= 0) {
+            // In the screen's scope: clearing the key below ends this effect,
+            // and a scroll run inside it went with it.
+            scope.launch { listState.animateScrollToItem(displayRows.size - 1 - idx) }
+            flashMessageId = id
+            pendingJump = null
+        }
+    }
+    /**
+     * Land with the divider at the top of the viewport and the new
+     * messages reading down from it. Under reverseLayout scrollToItem
+     * puts the item at the bottom edge, or as near it as the oldest
+     * message lets it go in a short chat, so back off by what is left
+     * above it (toward index 0, the newest). False with no divider.
+     */
+    fun listAt(): Pair<Any, Int>? = listState.layoutInfo.visibleItemsInfo.firstOrNull()
+        ?.let { it.key to listState.firstVisibleItemScrollOffset }
+    suspend fun placeDivider(rows: List<ChatListItem>): Boolean {
+        val dividerIdx = rows.indexOfFirst { it is ChatListItem.UnreadDivider }
+        if (dividerIdx < 0) return false
+        // At a frame boundary: the second scroll remeasures the list, and
+        // mid-frame that re-composes items whose last composition is unapplied.
+        withFrameNanos { }
+        listState.scrollToItem(rows.lastIndex - dividerIdx)
+        val info = listState.layoutInfo
+        val divider = info.visibleItemsInfo.firstOrNull { it.key == ChatListItem.UnreadDivider.key }
+        // Its top edge to the viewport's. Assuming it sat on the bottom
+        // edge overshot by its distance from it: in a short chat the whole
+        // divider went past the top, and the reader saw no "New" (2026-10-07).
+        val top = (divider?.offset ?: info.viewportStartOffset) + (divider?.size ?: 0)
+        listState.scrollBy(-(info.viewportEndOffset - top).toFloat())
+        dividerPlaced = listAt()
+        return true
+    }
+    // Something above the list arrived after the divider was placed:
+    // the list lost that height from its top, and with the newest
+    // message holding the bottom the divider went up behind it. Place
+    // it again, unless the reader has moved the list since. Only the
+    // top edge counts, so a keyboard opening (which takes the bottom)
+    // never pulls the reader back.
+    val currentRows by rememberUpdatedState(displayRows)
+    LaunchedEffect(whom) {
+        snapshotFlow { listTop }.filterNotNull().distinctUntilChanged().collect {
+            val placed = dividerPlaced ?: return@collect
+            if (listAt() != placed) {
+                dividerPlaced = null
+                return@collect
+            }
+            placeDivider(currentRows)
+        }
+    }
     LaunchedEffect(displayRows.size, initialScrollMessageId, dividerResolved) {
         if (displayRows.isEmpty()) return@LaunchedEffect
         if (initialScrollMessageId != null && initialScrollMessageId != lastAppliedAnchor) {
@@ -399,22 +491,10 @@ fun DmChatScreen(
             // at the bottom in the meantime, which is also where a
             // caught-up chat belongs.
             if (!dividerResolved) return@LaunchedEffect
-            val dividerIdx = displayRows.indexOfFirst { it is ChatListItem.UnreadDivider }
-            if (dividerIdx >= 0) {
-                // Land with the divider at the top of the viewport and
-                // the new messages reading down from it. Under
-                // reverseLayout scrollToItem puts the item at the bottom
-                // edge, so back off by the rest of the viewport (toward
-                // index 0, the newest).
-                listState.scrollToItem(displayRows.lastIndex - dividerIdx)
-                val info = listState.layoutInfo
-                val viewport = info.viewportEndOffset - info.viewportStartOffset
-                val dividerSize = info.visibleItemsInfo
-                    .firstOrNull { it.key == ChatListItem.UnreadDivider.key }?.size ?: 0
-                listState.scrollBy(-(viewport - dividerSize).toFloat())
-            } else {
-                listState.scrollToItem(0)
-            }
+            // The window is still taking the first unread in: settling at
+            // the bottom now left the divider out of sight for good.
+            if (dividerComing && displayRows.none { it is ChatListItem.UnreadDivider }) return@LaunchedEffect
+            if (!placeDivider(displayRows)) listState.scrollToItem(0)
         }
         hasAnchored = true
     }
@@ -478,12 +558,21 @@ fun DmChatScreen(
             firstVisibleItemIndex = listState.firstVisibleItemIndex,
             pendingSendBaselineSize = pendingSendBaselineSize,
             pendingSelfSendNewestId = pendingSelfSendNewestId,
+            // Until entry has placed the reader, the first load of rows is
+            // not an arrival. It counted as "a new message, near the
+            // bottom", and its scroll cancelled the divider's placement
+            // mid-scroll: the reader landed at the bottom, past it.
+            holdInbound = !hasAnchored,
         )
         lastNewestId = newestIdNow
         lastSize = rows.size
         pendingSendBaselineSize = decision.nextBaseline
         pendingSelfSendNewestId = decision.nextPendingSelfSendNewestId
         if (decision.scrollToBottom) {
+            // At a frame boundary, as placeDivider: a scroll remeasures the
+            // list, and mid-frame that re-composes items whose last
+            // composition is unapplied (a runtime error under test).
+            withFrameNanos { }
             listState.scrollToItem(0)
         }
     }
@@ -501,48 +590,31 @@ fun DmChatScreen(
             val u = db.unreads().getOne(whom)
             unreadSnapshot = u?.count ?: 0
             dividerAnchorId = u?.firstUnreadId
+            // The first unread may be further back than the window.
+            dividerComing = u?.firstUnreadId?.let { reach(it) } ?: false
             dividerResolved = true
         }
         repo.setOpenChat(whom)
     }
 
-    // Dwell-fade: once the "New" divider has been continuously visible
-    // for 5s (the user scrolled to it and lingered — not a fixed timer
-    // from entry, which would fire before they reach it), fade it out.
-    // We flip [dividerFaded] rather than removing the element, so it
-    // fades in place over UNREAD_DIVIDER_FADE_MS with its height
-    // preserved — nothing below reflows and no tap target slides under
-    // the pointer. markRead already cleared the server + local boundary
-    // on entry, so it won't reappear on re-entry until a genuinely
-    // newer message arrives and %activity hands us a new firstUnreadId.
-    LaunchedEffect(dividerAnchorId, whom) {
-        if (dividerAnchorId == null || dividerFaded) return@LaunchedEffect
-        snapshotFlow {
-            listState.layoutInfo.visibleItemsInfo.any {
-                it.key == ChatListItem.UnreadDivider.key
-            }
-        }.collectLatest { visible ->
-            if (visible) {
-                delay(5_000)
-                // Reached only if still visible after 5s — collectLatest
-                // cancels this branch the moment visibility flips off.
-                dividerFaded = true
-            }
-        }
-    }
+    // The "New" divider stays for as long as the conversation is open.
+    // markRead cleared the server and local boundary on entry, so it is
+    // not there on the next entry unless something newer arrived.
 
     var refreshing by remember(whom) { mutableStateOf(false) }
     var refreshFailed by remember(whom) { mutableStateOf(false) }
     LaunchedEffect(whom) {
         Log.i("DmChatScreen", "mount whom=$whom rows=${rows.size}")
         refreshing = true
-        refreshFailed = runSuspendCatching { repo.refreshConversation(whom, count = 500) }
+        refreshFailed = runSuspendCatching { repo.refreshOnOpen(whom) }
             .onFailure { Log.w("DmChatScreen", "refresh $whom failed: ${it.message}") }
             .isFailure
         refreshing = false
     }
 
     var paginating by remember(whom) { mutableStateOf(false) }
+
+    var olderFailedAtMs by remember(whom) { mutableStateOf(0L) }
     var paginationExhausted by remember(whom) { mutableStateOf(false) }
     LaunchedEffect(whom) {
         snapshotFlow {
@@ -556,16 +628,31 @@ fun DmChatScreen(
                 !paginationExhausted
             ) {
                 paginating = true
-                // A failed page is not the bottom: the next scroll asks again.
-                runSuspendCatching { repo.loadOlder(whom) }
-                    .onSuccess { if (!it) paginationExhausted = true }
-                    .onFailure { Log.w("DmChatScreen", "older $whom failed: ${it.message}") }
+                // Older posts kept here first; the ship only past them.
+                val shown = rows.count { it is ChatListItem.Message }
+                // Another window's start, or, with less than a window left,
+                // whether anything older is kept here at all.
+                val nextWindow = db.messages().sentMsAfterNewest(whom, shown + CHAT_WINDOW - 1)
+                if (nextWindow != null || db.messages().sentMsAfterNewest(whom, shown) != null) {
+                    widenTo(nextWindow ?: Long.MIN_VALUE)
+                } else if (nowMs() - olderFailedAtMs >= OLDER_RETRY_MS) {
+                    widenTo(Long.MIN_VALUE)
+                    // A failed page is not the bottom: the next scroll asks
+                    // again, but not at once. A short chat keeps its top in
+                    // view, so every layout change asked again: eight failed
+                    // pages, sixty-four scries, in the first tenth of a second.
+                    runSuspendCatching { repo.loadOlder(whom) }
+                        .onSuccess { if (!it) paginationExhausted = true }
+                        .onFailure {
+                            olderFailedAtMs = nowMs()
+                            Log.w("DmChatScreen", "older $whom failed: ${it.message}")
+                        }
+                }
                 paginating = false
             }
         }
     }
 
-    val scope = rememberCoroutineScope()
 
     // ── message action sheet state ──
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
@@ -618,7 +705,7 @@ fun DmChatScreen(
     }
 
     val canSend = remember(whom) {
-        whom.startsWith("~") || whom.startsWith("0v") || whom.startsWith("chat/")
+        io.nisfeb.talon.urbit.isDirect(whom) || whom.startsWith("chat/")
     }
 
     val contactList by remember {
@@ -660,6 +747,17 @@ fun DmChatScreen(
                 quoteId: String,
             ) {
                 repo.sendQuote(whom, body, quoteWhom, quoteId)
+            }
+            override suspend fun sendImageQuote(
+                src: String,
+                width: Int,
+                height: Int,
+                alt: String,
+                caption: String,
+                quoteWhom: String,
+                quoteId: String,
+            ) {
+                repo.sendImage(whom, src, width, height, alt, caption, quotedNest = quoteWhom, quotedPostId = quoteId)
             }
         }
     }
@@ -738,7 +836,7 @@ fun DmChatScreen(
             // non-null only for 1:1 DMs on platforms with a call
             // engine (isCallsSupported gates the wiring upstream).
             if (onStartCall != null) {
-                IconButton(onClick = onStartCall) {
+                io.nisfeb.talon.ui.IconButton(tip = "Voice call", onClick = onStartCall) {
                     Icon(Icons.Filled.Call, contentDescription = "Voice call")
                 }
             }
@@ -750,7 +848,11 @@ fun DmChatScreen(
                         }
                     },
                 ) {
-                    IconButton(onClick = onPartyLine) {
+                    io.nisfeb.talon.ui.IconButton(tip = if (partyPresent > 0) {
+                                "Party line — $partyPresent on the line"
+                            } else {
+                                "Party line"
+                            }, onClick = onPartyLine) {
                         Icon(
                             TalonIcons.Groups,
                             contentDescription = if (partyPresent > 0) {
@@ -762,9 +864,14 @@ fun DmChatScreen(
                     }
                 }
             }
+            if (followedHere.isNotEmpty()) {
+                io.nisfeb.talon.ui.IconButton(tip = "Threads you follow", onClick = { threadsSheetOpen = true }) {
+                    Icon(TalonIcons.Reply, contentDescription = "Threads you follow")
+                }
+            }
             val hasInfoPane = onOpenGroupInfo != null && whom.startsWith("chat/")
             if (hasInfoPane) {
-                IconButton(onClick = onOpenGroupInfo) {
+                io.nisfeb.talon.ui.IconButton(tip = "Info", onClick = onOpenGroupInfo) {
                     Icon(Icons.Filled.Info, contentDescription = "Info")
                 }
             }
@@ -779,7 +886,7 @@ fun DmChatScreen(
                     io.nisfeb.talon.ai.AiSettings.Feature.SmartFeatures,
                 )
             ) {
-                IconButton(onClick = { topicsSheetOpen = true }) {
+                io.nisfeb.talon.ui.IconButton(tip = "Topics in this chat", onClick = { topicsSheetOpen = true }) {
                     Icon(TalonIcons.Topic, contentDescription = "Topics in this chat")
                 }
             }
@@ -791,20 +898,10 @@ fun DmChatScreen(
                 NotifyLevelDropdown(
                     level = notifyLevel,
                     enabled = repo.settingsSync != null,
-                    isExcludedFromWatchwords = isExcludedFromWatchwords,
                     onSelect = { level ->
                         scope.launch {
                             runCatching { repo.settingsSync?.setNotifyLevel(whom, level) }
                                 .onFailure { composerState.failed("notify", it) }
-                        }
-                    },
-                    onToggleWatchwordExclude = {
-                        scope.launch {
-                            runCatching {
-                                repo.watchwords.excludeChat(whom, !isExcludedFromWatchwords)
-                            }.onFailure {
-                                composerState.failed("watchword toggle", it)
-                            }
                         }
                     },
                 )
@@ -844,11 +941,15 @@ fun DmChatScreen(
                             catchUpSummary = it
                             caughtUp = true
                         }
-                            .onFailure { catchUpError = it.message ?: it::class.simpleName }
+                            .onFailure { catchUpError = io.nisfeb.talon.ai.modelProblem("Couldn't catch you up", it) }
                         catchingUp = false
                     }
                 },
             )
+        }
+        // Followed threads with new replies, which may be far up the chat.
+        followedHere.count { it.unread > 0 }.takeIf { it > 0 }?.let { n ->
+            io.nisfeb.talon.ui.FollowedThreadsChip(n) { threadsSheetOpen = true }
         }
         // Pinned-post banner — chat channels only, surfaces just
         // above the message list when an admin has pinned a post.
@@ -869,15 +970,26 @@ fun DmChatScreen(
                         scope.launch { listState.animateScrollToItem(reverseIdx) }
                         flashMessageId = pinId
                     } else {
-                        // Pinned post sits outside the loaded window —
-                        // say so instead of a dead tap.
-                        composerState.sendError =
-                            "Pinned message is older than what's loaded — scroll up to load more"
+                        // Older than the window: take it in and go there.
+                        // Not kept here at all, say so instead of a dead tap.
+                        pendingJump = pinId
+                        scope.launch {
+                            reach(pinId)
+                            kotlinx.coroutines.delay(2_000)
+                            if (pendingJump == pinId) {
+                                pendingJump = null
+                                composerState.sendError =
+                                    "Pinned message is older than what's loaded — scroll up to load more"
+                            }
+                        }
                     }
                 },
             )
         }
-        Box(modifier = Modifier.weight(1f).fillMaxSize()) {
+        Box(
+            modifier = Modifier.weight(1f).fillMaxSize()
+                .onGloballyPositioned { listTop = it.positionInRoot().y },
+        ) {
         // Empty-state placeholder. Triggers when the refresh has
         // finished and we still have no rows — usually a
         // never-DMed peer where the ship has no writ history. We
@@ -892,8 +1004,8 @@ fun DmChatScreen(
             )
         }
         val chatDensity = io.nisfeb.talon.ui.LocalChatDensity.current
-        // Admin-groups cache for the pin gate. Null until the
-        // bootstrap refresh in App.kt completes; we fall back to
+        // Admin-groups cache for the pin gate. Null until the menu's
+        // first open reads it (below); we fall back to
         // "is the user the group host?" until it lands so the
         // option still appears immediately for host-admins. See
         // [io.nisfeb.talon.urbit.canPinInGroup].
@@ -906,6 +1018,11 @@ fun DmChatScreen(
         // bookmark/pinned lookups don't run for every list row.
         val clipboardManager = LocalClipboardManager.current
         val messageActionMenuFor: @Composable (MessageEntity) -> Unit = { target ->
+            val followingTarget = target.parentId == null && io.nisfeb.talon.urbit.threadCounts(
+                followOfPost[target.id], io.nisfeb.talon.urbit.isDirect(whom), target.author == ourPatp,
+            )
+            // Read here, not at launch: a scry per group, cached 5 minutes.
+            if (whom.startsWith("chat/")) LaunchedEffect(Unit) { repo.prefetchAdminGroups() }
             val isBookmarked by remember(target.whom, target.id) {
                 db.bookmarks().isBookmarked(target.whom, target.id)
             }.collectAsState(initial = false)
@@ -1018,6 +1135,14 @@ fun DmChatScreen(
                 onMakeTask = calendar?.takeIf { calendarHere }?.let {
                     { actionTarget = null; calendarTarget = FromMessage.Task to target }
                 },
+                followLabel = if (target.parentId != null) null else if (followingTarget) "Unfollow thread" else "Follow thread",
+                onToggleFollow = {
+                    actionTarget = null
+                    scope.launch {
+                        runCatching { repo.setFollow(whom, target.id, !followingTarget) }
+                            .onFailure { composerState.failed("follow", it) }
+                    }
+                },
                 onTogglePin = {
                     val wasPinned = pinnedPostId == target.id
                     actionTarget = null
@@ -1055,7 +1180,7 @@ fun DmChatScreen(
                 when (item) {
                     is ChatListItem.DateDivider -> DateDividerRow(item.label)
                     is ChatListItem.UnreadDivider ->
-                        io.nisfeb.talon.ui.UnreadDividerRow(faded = dividerFaded)
+                        io.nisfeb.talon.ui.UnreadDividerRow()
                     is ChatListItem.Message -> {
                         val rowMsg = item.row.m
                         MessageRow(
@@ -1277,40 +1402,27 @@ fun DmChatScreen(
         AlertDialog(
             onDismissRequest = { catchUpError = null },
             title = { Text("Catch me up failed") },
-            text = { Text(err) },
+            text = { io.nisfeb.talon.ui.ProblemLine(err) },
             confirmButton = {
                 TextButton(onClick = { catchUpError = null }) { Text("OK") }
             },
-            dismissButton = if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(err)) ({
+            dismissButton = if (onTopUp != null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && io.nisfeb.talon.ai.isOutOfCredit(err.line)) ({
                 TextButton(onClick = { catchUpError = null; onTopUp() }) { Text("Top up") }
             }) else null,
         )
     }
 
     confirmingDelete?.let { target ->
-        AlertDialog(
-            onDismissRequest = { confirmingDelete = null },
-            title = { Text("Delete message?") },
-            text = {
-                Text(
-                    "This will remove the message for everyone in the chat. " +
-                        "Channel admins can delete other users' messages; otherwise " +
-                        "the server only allows deleting your own.",
-                )
+        DeleteMessageDialog(
+            mine = target.author == ourPatp,
+            onDelete = {
+                confirmingDelete = null
+                scope.launch {
+                    runCatching { repo.delete(whom, target.id, target.parentId) }
+                        .onFailure { composerState.failed("delete", it) }
+                }
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    val toDelete = target
-                    confirmingDelete = null
-                    scope.launch {
-                        runCatching { repo.delete(whom, toDelete.id, toDelete.parentId) }
-                            .onFailure { composerState.failed("delete", it) }
-                    }
-                }) { Text("Delete") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingDelete = null }) { Text("Cancel") }
-            },
+            onDismiss = { confirmingDelete = null },
         )
     }
 
@@ -1363,7 +1475,7 @@ fun DmChatScreen(
         }
         var publishing by remember(target.id) { mutableStateOf(false) }
         var resultUrb by remember(target.id) { mutableStateOf<String?>(null) }
-        var pubError by remember(target.id) { mutableStateOf<String?>(null) }
+        var pubError by remember(target.id) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
         AlertDialog(
             onDismissRequest = { if (!publishing) publishTarget = null },
             title = { Text(if (resultUrb != null) "Published to Lattice" else "Publish to Lattice") },
@@ -1387,10 +1499,7 @@ fun DmChatScreen(
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        pubError?.let {
-                            Text(it, color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall)
-                        }
+                        pubError?.let { io.nisfeb.talon.ui.ProblemLine(it) }
                     }
                 }
             },
@@ -1419,7 +1528,7 @@ fun DmChatScreen(
                                     val entries = (listOf(target) + replies).map {
                                         io.nisfeb.talon.urbit.StoryToGemtext.Entry(
                                             byline = contactMap.displayName(it.author) +
-                                                " · " + io.nisfeb.talon.util.formatMonthDayTime(it.sentMs),
+                                                " · " + io.nisfeb.talon.util.formatMonthDayClock(it.sentMs),
                                             contentJson = it.contentJson,
                                         )
                                     }
@@ -1431,7 +1540,7 @@ fun DmChatScreen(
                                     )
                                 }.onSuccess { resultUrb = it }
                                     .onFailure {
-                                        pubError = "Publish failed: ${it.message ?: it::class.simpleName}"
+                                        pubError = io.nisfeb.talon.util.problemOf("Couldn't publish", it)
                                     }
                                 publishing = false
                             }
@@ -1444,6 +1553,18 @@ fun DmChatScreen(
                     Text(if (resultUrb != null) "Done" else "Cancel")
                 }
             },
+        )
+    }
+
+    if (threadsSheetOpen) {
+        io.nisfeb.talon.ui.FollowedThreadsSheet(
+            rows = followedHere,
+            contactMap = contactMap,
+            onOpen = { row ->
+                threadsSheetOpen = false
+                row.lastReplyId?.let { onOpenThreadAt(row.parentPostId, it) } ?: onOpenThread(row.parentPostId)
+            },
+            onDismiss = { threadsSheetOpen = false },
         )
     }
 
@@ -1464,6 +1585,9 @@ fun DmChatScreen(
                         val reverseIdx = displayRows.size - 1 - idx
                         scope.launch { listState.scrollToItem(reverseIdx) }
                         flashMessageId = msgId
+                    } else {
+                        pendingJump = msgId
+                        scope.launch { reach(msgId) }
                     }
                 }
             },
@@ -1512,7 +1636,7 @@ private fun MessageRow(
 ) {
     val m = row.m
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
-    val stamp = remember(m.sentMs) { formatMonthDayTime(m.sentMs) }
+    val stamp = remember(m.sentMs) { formatMonthDayClock(m.sentMs) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
     val avatarUrl = remember(m.author, contactMap) { contactMap.avatar(m.author) }
     val avatarColor = remember(m.author, contactMap) { contactMap.shipColor(m.author) }
@@ -1624,7 +1748,7 @@ private fun MessageRow(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        "$authorLabel · $stamp",
+                        contactMap.byline(m.author, authorLabel, stamp),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1638,6 +1762,8 @@ private fun MessageRow(
                     if (m.status == "pending") SendingIcon()
                 }
             }
+            // Only a post that could run long is measured for a fold.
+            val body: @Composable () -> Unit = {
             StoryRenderer(
                 parts = parts,
                 onMentionTap = onMentionTap,
@@ -1652,6 +1778,10 @@ private fun MessageRow(
                 // opening the menu (right-click opens it instead).
                 onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
+            }
+            if (remember(parts) { io.nisfeb.talon.ui.mightFold(parts) }) {
+                io.nisfeb.talon.ui.FoldLongPost(m.id, hasMedia = remember(parts) { io.nisfeb.talon.ui.hasMedia(parts) }, content = body)
+            } else body()
             SendStateNote(m.status)
             val firstLink = remember(parts) { firstLinkUrl(parts) }
             if (firstLink != null) {
@@ -1882,7 +2012,7 @@ private fun PartyNoteRow(text: String, onDismiss: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            "Only you can see this. Tap to dismiss.",
+            "Only you can see this. ${io.nisfeb.talon.ui.tapWord} to dismiss.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             modifier = Modifier.padding(top = 2.dp),
@@ -1918,6 +2048,9 @@ private val AVATAR_SIZE = 36.dp
 private const val GROUP_GAP_MS = 5L * 60_000L
 
 private const val STORY_WARM_TAIL = 30
+
+/** Posts a chat shows at first, and adds from what is kept as it is scrolled back. */
+private const val CHAT_WINDOW = 200
 
 /**
  * Minimum unread count before the catch-me-up banner appears. Below
@@ -1970,9 +2103,19 @@ private data class DisplayRow(
 )
 
 private object ChatRowsSnapshot {
-    private val byWhom = ConcurrentMap<String, List<ChatListItem>>()
-    fun get(whom: String): List<ChatListItem> = byWhom[whom].orEmpty()
-    fun put(whom: String, rows: List<ChatListItem>) { byWhom[whom] = rows }
+    /** The last few chats shown: each kept all its rows for the life of the process. */
+    private val recent = RecentByKey<List<ChatListItem>>(keep = 6)
+    fun get(whom: String): List<ChatListItem> = recent[whom].orEmpty()
+    fun put(whom: String, rows: List<ChatListItem>) = recent.put(whom, rows)
+}
+
+/** The last [keep] values put, by key; past that, the one put longest ago goes. */
+internal class RecentByKey<V>(private val keep: Int) {
+    private val byKey = kotlinx.coroutines.flow.MutableStateFlow<Map<String, V>>(emptyMap())
+    operator fun get(key: String): V? = byKey.value[key]
+    fun put(key: String, value: V) {
+        byKey.update { m -> (m - key + (key to value)).let { if (it.size > keep) it - it.keys.first() else it } }
+    }
 }
 
 private fun buildChatListItemsReusing(
@@ -2120,13 +2263,11 @@ private fun CatchMeUpBanner(
 private fun NotifyLevelDropdown(
     level: String,
     enabled: Boolean,
-    isExcludedFromWatchwords: Boolean,
     onSelect: (String) -> Unit,
-    onToggleWatchwordExclude: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { if (enabled) open = true }, enabled = enabled) {
+        io.nisfeb.talon.ui.IconButton(tip = "Notifications", onClick = { if (enabled) open = true }, enabled = enabled) {
             Icon(
                 imageVector = if (level == NotifyLevel.NONE)
                     TalonIcons.NotificationsOff
@@ -2146,16 +2287,6 @@ private fun NotifyLevelDropdown(
             DropdownMenuItem(
                 text = { Text(if (level == NotifyLevel.NONE) "✓ Mute" else "Mute") },
                 onClick = { open = false; onSelect(NotifyLevel.NONE) },
-            )
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        if (isExcludedFromWatchwords) "Include in watchwords"
-                        else "Exclude from watchwords"
-                    )
-                },
-                onClick = { open = false; onToggleWatchwordExclude() },
             )
         }
     }
@@ -2196,6 +2327,9 @@ private fun MessageActionMenu(
     onReport: () -> Unit,
     onPublish: () -> Unit,
     onTogglePin: () -> Unit,
+    /** "Follow thread" or "Unfollow thread" for a top-level post; null for none. */
+    followLabel: String? = null,
+    onToggleFollow: () -> Unit = {},
     /** Make an event or a task of what was said. Null where the ship has no calendar. */
     onMakeEvent: (() -> Unit)? = null,
     onMakeTask: (() -> Unit)? = null,
@@ -2250,8 +2384,7 @@ private fun MessageActionMenu(
                         .weight(1f)
                         .padding(start = 4.dp),
                 )
-                IconButton(
-                    onClick = {
+                io.nisfeb.talon.ui.IconButton(tip = "Search emojis", onClick = {
                         searchOpen = !searchOpen
                         if (!searchOpen) searchQuery = ""
                     },
@@ -2369,6 +2502,7 @@ private fun MessageActionMenu(
             if (isMine && isChannel && message.parentId == null) {
                 ActionRow(onClick = onEdit, label = "Edit")
             }
+            followLabel?.let { ActionRow(onClick = onToggleFollow, label = it) }
             // Pin / Unpin — chat channels only, top-level posts only.
             if (canPin) {
                 ActionRow(
@@ -2791,3 +2925,20 @@ internal fun SendFailedNote() {
         )
     }
 }
+
+/**
+ * Deleting a message, said the same wherever it is asked: the chat and
+ * a thread worded it differently, and only one of them in red.
+ * Another's message is deleted as an admin, and says so.
+ */
+@Composable
+internal fun DeleteMessageDialog(mine: Boolean, onDelete: () -> Unit, onDismiss: () -> Unit) = io.nisfeb.talon.ui.ConfirmDestructive(
+    title = "Delete message?",
+    text = "It goes for everyone in the chat. This cannot be undone.",
+    confirm = if (mine) "Delete" else "Delete (admin)",
+    onConfirm = onDelete,
+    onDismiss = onDismiss,
+)
+
+/** How long after a failed older page before the list asks again. */
+private const val OLDER_RETRY_MS = 15_000L

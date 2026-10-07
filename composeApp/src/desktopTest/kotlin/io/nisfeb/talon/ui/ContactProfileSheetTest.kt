@@ -15,6 +15,7 @@ import androidx.compose.ui.text.AnnotatedString
 import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.ui.theme.TalonTheme
 import kotlin.test.Test
+import androidx.compose.ui.test.assertCountEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -22,8 +23,9 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class ContactProfileSheetTest {
     private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    private val fetched: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val ship = "~mitlyn-ditrel"
-    private fun card(self: Boolean = false, inBook: Boolean = true, bio: String = "bakes on weekends", block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+    private fun card(self: Boolean = false, inBook: Boolean = true, bio: String = "bakes on weekends", trunk: Boolean = true, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
         val person = ContactEntity(ship, "Mittens", bio, null, status = "at the market")
         setContent {
             CompositionLocalProvider(
@@ -32,6 +34,8 @@ class ContactProfileSheetTest {
                     override fun setText(annotatedString: AnnotatedString) { did += "copied ${annotatedString.text}" }
                 },
                 io.nisfeb.talon.mail.LocalMailTo provides { to: String -> did += "mail $to" },
+                LocalCallTo provides if (trunk) { to: String -> did += "call $to" } else null,
+                LocalFetchProfile provides { who: String -> fetched += who },
             ) {
                 TalonTheme(darkTheme = false) {
                     ContactProfileSheet(
@@ -101,5 +105,61 @@ class ContactProfileSheetTest {
         onNodeWithText(ship).performClick()
         // The sheet's own layer holds the clipboard, so the card's word for it is what is checked.
         waitUntil(timeoutMillis = 5_000) { shows("Copied") }
+    }
+
+    // Tlon 12.3.0 bot-liveness: the card says whether a bot is up.
+    @Test
+    fun `a bot's card says whether it is up`() {
+        io.nisfeb.talon.urbit.BotLiveness.record(
+            ship,
+            kotlinx.serialization.json.buildJsonObject {
+                put("bot-info", kotlinx.serialization.json.buildJsonObject { put("type", kotlinx.serialization.json.JsonPrimitive("text")); put("value", kotlinx.serialization.json.JsonPrimitive("{}")) })
+                put("bot-liveness", kotlinx.serialization.json.buildJsonObject {
+                    put("type", kotlinx.serialization.json.JsonPrimitive("text"))
+                    put("value", kotlinx.serialization.json.JsonPrimitive("""{"v":1,"state":"offline"}"""))
+                })
+            },
+        )
+        try {
+            card { assertTrue(shows("Bot · Offline")) }
+        } finally {
+            io.nisfeb.talon.urbit.BotLiveness.record(ship, kotlinx.serialization.json.JsonObject(emptyMap()))
+        }
+    }
+
+    @Test
+    fun `a person's card says nothing of bots`() = card { assertTrue(!shows("Bot ·")) }
+
+    // "if a user has trunk installed ... there should be a Call button next
+    // to the message button when viewing a user's profile."
+    @Test
+    fun `a peer's card rings them where our ship has trunk`() = card {
+        onNodeWithText("Call").performClick()
+        waitForIdle()
+        assertTrue("call $ship" in did, did.toString())
+        assertTrue("close" in did, "the card closes as the call starts: $did")
+    }
+
+    @Test
+    fun `no trunk on our ship, no Call`() = card(trunk = false) {
+        onAllNodesWithText("Call").assertCountEquals(0)
+        onNodeWithText("Message").assertExists()
+    }
+
+    @Test
+    fun `our own card has no Call`() = card(self = true) {
+        onAllNodesWithText("Call").assertCountEquals(0)
+    }
+
+    @Test
+    fun `opening someone's card asks the ship for their profile`() = card {
+        waitForIdle()
+        assertEquals(listOf(ship), fetched)
+    }
+
+    @Test
+    fun `our own card asks for nothing`() = card(self = true) {
+        waitForIdle()
+        assertTrue(fetched.isEmpty(), fetched.toString())
     }
 }

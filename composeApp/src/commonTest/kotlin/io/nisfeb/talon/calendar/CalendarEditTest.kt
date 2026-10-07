@@ -102,16 +102,62 @@ class CalendarEditTest {
         assertEquals("Standup, renamed", b["meta"]!!.jsonObject["name"]!!.jsonPrimitive.content)
     }
 
-    @Test fun `this one only becomes a one-off at the occurrence, this and following restarts the series there`() {
+    @Test fun `this one only is a one-off where the editor put it, this and following restarts the series there`() {
         val d = EventDraft(name = "Gym", date = LocalDate(2026, 9, 1), minuteOfDay = 7 * 60, repeat = Repeat.DAILY)
-        val occurrence = kotlinx.datetime.LocalDateTime(2026, 9, 20, 7, 0)
-        val only = onlyBody(d, occurrence)
+            .atOccurrence(kotlinx.datetime.LocalDateTime(2026, 9, 20, 7, 0)).copy(minuteOfDay = 8 * 60)
+        val only = onlyBody(d)
         assertEquals("once", only["kind"]!!.jsonPrimitive.content)
         assertEquals("add-event", only["action"]!!.jsonPrimitive.content)
-        assertEquals(LocalDate(2026, 9, 20).let { it.atTime(7, 0).toInstant(TimeZone.UTC).toEpochMilliseconds() }, only["start_ms"]!!.jsonPrimitive.content.toLong())
-        val following = followingBody(d, occurrence)
+        assertEquals(LocalDate(2026, 9, 20).atTime(8, 0).toInstant(TimeZone.UTC).toEpochMilliseconds(), only["start_ms"]!!.jsonPrimitive.content.toLong(), "at the time it was moved to")
+        val following = eventBody(d)
         assertEquals("daily", following["kind"]!!.jsonPrimitive.content)
         assertEquals(LocalDate(2026, 9, 20).atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds(), following["start_ms"]!!.jsonPrimitive.content.toLong())
+        assertEquals("480", following["args"]!!.jsonObject["at"]!!.jsonPrimitive.content)
+    }
+
+    /** A series as the calendar holds every one now (presets became rrules), shaped as one from a CalDAV calendar. */
+    private val weekly = io.nisfeb.talon.mail.AuspexApi.json.parseToJsonElement(
+        """{"id":"f1","cal":"family","cat":"timed","kind":"rrule","start_ms":1788192000000,"zone":"America/New_York","dur_min":60,"fin":"dur","count":0,"args":{"rrule":"FREQ=WEEKLY;UNTIL=20261020T025959Z"},"meta":{"name":"Fencing lesson"}}""",
+    ).jsonObject
+    private fun startOf(b: kotlinx.serialization.json.JsonObject) = b["start_ms"]!!.jsonPrimitive.content.toLong()
+    private fun wall(y: Int, m: Int, d: Int, h: Int, min: Int) = LocalDate(y, m, d).atTime(h, min).toInstant(TimeZone.UTC).toEpochMilliseconds()
+
+    @Test fun `an rrule series moves when its time is changed`() {
+        // It sent back the start it was read with, so the move never took.
+        val d = draftFromEvent(weekly, day)!!
+        assertEquals(LocalDate(2026, 8, 31) to 16 * 60, d.date to d.minuteOfDay)
+        val b = eventBody(d.copy(minuteOfDay = 17 * 60), "f1")
+        assertEquals("edit-event", b["action"]!!.jsonPrimitive.content)
+        assertEquals("rrule", b["kind"]!!.jsonPrimitive.content)
+        assertEquals(wall(2026, 8, 31, 17, 0), startOf(b))
+        assertEquals("FREQ=WEEKLY;UNTIL=20261020T025959Z", b["args"]!!.jsonObject["rrule"]!!.jsonPrimitive.content)
+        assertEquals("America/New_York", b["zone"]!!.jsonPrimitive.content)
+        assertEquals("family", b["cal"]!!.jsonPrimitive.content)
+    }
+
+    @Test fun `every occurrence, edited from one, moves the series as far as that one moved`() {
+        val series = draftFromEvent(weekly, day)!!
+        val opened = series.atOccurrence(kotlinx.datetime.LocalDateTime(2026, 10, 5, 16, 0))
+        assertEquals(LocalDate(2026, 10, 5), opened.date, "the editor shows the occurrence")
+        assertEquals(wall(2026, 8, 31, 17, 0), startOf(eventBody(seriesEdit(opened.copy(minuteOfDay = 17 * 60), opened, series), "f1")))
+        val further = opened.copy(date = LocalDate(2026, 10, 6), minuteOfDay = 23 * 60 + 30)
+        assertEquals(wall(2026, 9, 1, 23, 30), startOf(eventBody(seriesEdit(further, opened, series), "f1")), "a day and a time on, across midnight")
+        val renamed = seriesEdit(opened.copy(name = "Fencing"), opened, series)
+        assertEquals(series.date to series.minuteOfDay, renamed.date to renamed.minuteOfDay, "a rename leaves the series where it was")
+        assertEquals("Fencing", renamed.name)
+    }
+
+    @Test fun `this one only and this and following keep the time given, on an rrule series`() {
+        val moved = draftFromEvent(weekly, day)!!.atOccurrence(kotlinx.datetime.LocalDateTime(2026, 10, 5, 16, 0)).copy(minuteOfDay = 17 * 60)
+        val only = onlyBody(moved)
+        assertEquals(listOf("add-event", "once"), listOf(only["action"]!!.jsonPrimitive.content, only["kind"]!!.jsonPrimitive.content))
+        assertEquals(wall(2026, 10, 5, 17, 0), startOf(only))
+        assertEquals("America/New_York", only["zone"]!!.jsonPrimitive.content)
+        assertNull(only["id"])
+        val following = eventBody(moved)
+        assertEquals("rrule", following["kind"]!!.jsonPrimitive.content)
+        assertEquals(wall(2026, 10, 5, 17, 0), startOf(following), "not midnight")
+        assertEquals("FREQ=WEEKLY;UNTIL=20261020T025959Z", following["args"]!!.jsonObject["rrule"]!!.jsonPrimitive.content)
     }
 
     @Test fun `a task carries its due day at utc midnight and keeps its done moment`() {
@@ -256,5 +302,86 @@ class CalendarEditTest {
         assertEquals(true, d.done)
         assertEquals(true, "list" in d.otherMeta, "meta the form does not edit is kept")
         assertNull(taskDraft(CalendarRow(id = "t2", cat = "todo", l = 0, r = 0), ny, day)!!.due, "no day, no due")
+    }
+
+    // ─── reminders ───────────────────────────────────────────────
+
+    private val oct1 = LocalDate(2026, 10, 1)
+    private fun alarms(vararg raw: String) = raw.map { CalAlarm(kotlinx.serialization.json.Json.parseToJsonElement(it).jsonObject) }
+
+    @Test
+    fun `an event's reminders are read, and a calendar that does not say gives none`() {
+        val e = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"cat":"timed","kind":"once","start_ms":1790000000000,"meta":{"name":"x"},"alarms":[{"kind":"before","s":900,"desc":""},{"kind":"at","at_ms":1790000000000,"desc":""}]}""",
+        ).jsonObject
+        assertEquals(listOf("before", "at"), draftFromEvent(e, oct1)!!.alarms!!.map { it.kind })
+        val old = kotlinx.serialization.json.Json.parseToJsonElement("""{"cat":"timed","kind":"once","start_ms":1790000000000,"meta":{"name":"x"}}""").jsonObject
+        assertNull(draftFromEvent(old, oct1)!!.alarms)
+    }
+
+    // The wire, as the contract handed to the calendar reads it: a new
+    // event sends its list; an edit only when it changed; an older
+    // calendar never.
+    @Test
+    fun `reminders go on the wire only where the calendar takes them and the edit changed them`() {
+        val d = EventDraft(name = "Dentist", date = oct1, cal = "default", alarms = alarms("""{"kind":"before","s":900,"desc":""}"""))
+        assertEquals("""[{"kind":"before","s":900,"desc":""}]""", eventBody(d)["alarms"].toString(), "a new event")
+        assertNull(eventBody(d, "e1")["alarms"], "an edit that left them alone")
+        assertEquals("[]", eventBody(d.copy(alarms = emptyList(), alarmsChanged = true), "e1")["alarms"].toString(), "cleared")
+        assertNull(eventBody(d.copy(alarms = null))["alarms"], "a calendar older than reminders")
+        assertEquals("[]", eventBody(d.copy(alarms = emptyList()))["alarms"].toString(), "a new event with none")
+    }
+
+    @Test
+    fun `a kind this app does not edit goes back exactly as it came`() {
+        val kept = """{"kind":"offset","from":"end","after":true,"s":600,"desc":"wrap up","x-extra":1}"""
+        val d = EventDraft(name = "x", date = oct1, alarms = alarms(kept) + CalAlarm.before(300), alarmsChanged = true)
+        assertEquals("""[$kept,{"kind":"before","s":300,"desc":""}]""", eventBody(d, "e1")["alarms"].toString())
+    }
+
+    @Test
+    fun `a reminder says itself in words`() {
+        val z = TimeZone.UTC
+        fun say(raw: String) = alarmLabel(alarms(raw).single(), z, twentyFourHour = true)
+        assertEquals("At the start", say("""{"kind":"before","s":0}"""))
+        assertEquals("15 min before", say("""{"kind":"before","s":900}"""))
+        assertEquals("1 hour before", say("""{"kind":"before","s":3600}"""))
+        assertEquals("2 days before", say("""{"kind":"before","s":172800}"""))
+        assertEquals("90 seconds before", say("""{"kind":"before","s":90}"""))
+        assertEquals("10 min after the start", say("""{"kind":"offset","from":"start","after":true,"s":600}"""))
+        assertEquals("5 min before the end", say("""{"kind":"offset","from":"end","after":false,"s":300}"""))
+        assertEquals("At the end", say("""{"kind":"offset","from":"end","after":true,"s":0}"""))
+        assertEquals("At 09:00 on Thu, Oct 1, 2026", say("""{"kind":"at","at_ms":${oct1.atTime(9, 0).toInstant(z).toEpochMilliseconds()}}"""))
+        assertEquals("A reminder of a kind this app does not know", say("""{"kind":"geofence"}"""))
+    }
+
+    // ─── task priority ───────────────────────────────────────────
+
+    // As the calendar takes it (version 25): absent keeps, a number sets,
+    // 0 clears; on a todo only.
+    @Test
+    fun `a task's priority goes on the wire only where the calendar keeps one and it changed`() {
+        val t = EventDraft(name = "Pay rent", cat = EventCat.TODO, date = oct1, cal = "default", priority = 1)
+        assertEquals("1", eventBody(t)["priority"].toString(), "a new task")
+        assertNull(eventBody(t, "t1")["priority"], "an edit that left it alone")
+        assertEquals("0", eventBody(t.copy(priority = 0, priorityChanged = true), "t1")["priority"].toString(), "cleared")
+        assertNull(eventBody(t.copy(priority = null))["priority"], "a calendar older than priority")
+        assertNull(eventBody(t.copy(cat = EventCat.TIMED))["priority"], "an event has none")
+    }
+
+    @Test
+    fun `a task's priority is read, from the event and from its row`() {
+        val e = kotlinx.serialization.json.Json.parseToJsonElement("""{"cat":"todo","meta":{"name":"x"},"priority":3}""").jsonObject
+        assertEquals(3, draftFromEvent(e, oct1)!!.priority)
+        val old = kotlinx.serialization.json.Json.parseToJsonElement("""{"cat":"todo","meta":{"name":"x"}}""").jsonObject
+        assertNull(draftFromEvent(old, oct1)!!.priority)
+        val row = CalendarRow(id = "t1", cat = "todo", kind = "todo", all = true, l = 0, r = 0, priority = 9)
+        assertEquals(9, taskDraft(row, TimeZone.UTC, oct1)!!.priority)
+    }
+
+    @Test
+    fun `priorities read as the RFC's bands`() {
+        assertEquals(listOf("High", "High", "Medium", "Low", "Low", null, null),
+            listOf(1, 4, 5, 6, 9, 0, null).map { priorityBand(it) })
     }
 }

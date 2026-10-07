@@ -13,7 +13,25 @@ import io.nisfeb.talon.call.CallController
 import io.nisfeb.talon.call.PartyLine
 import io.nisfeb.talon.call.RecordedCall
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
+
+/**
+ * [ask] every [everyMs] while [front] is true, and never sooner. Focus
+ * comes back each time a menu or dialog closes, and each was a poke at
+ * the host; back in front after the interval asks at once.
+ */
+internal suspend fun askWhileInFront(front: Flow<Boolean>, everyMs: Long, ask: suspend () -> Unit) {
+    var lastMs: Long? = null
+    front.collectLatest { inFront ->
+        while (inFront) {
+            lastMs?.let { delay(it + everyMs - io.nisfeb.talon.util.nowMs()) }
+            lastMs = io.nisfeb.talon.util.nowMs()
+            ask()
+        }
+    }
+}
 
 /** The recording controls a party bar needs: our state, who's recording
  *  (the room-wide badge), and the toggle (null when unsupported). */
@@ -57,12 +75,14 @@ fun rememberPartyRecording(
     // "N on the line" with no hint it was being recorded — while a
     // joiner's up link is tapped the moment its offer reaches the
     // recorder. Trunk only answers an ask, so nothing else would tell.
+    // Only while the window is in front: in the background it asked the
+    // host every 15 s for a badge nobody saw. Back in front asks at once.
+    val window = androidx.compose.ui.platform.LocalWindowInfo.current
     LaunchedEffect(partyRoomHere) {
         val (h, n) = partyRoomHere ?: return@LaunchedEffect
         val cc = callController ?: return@LaunchedEffect
-        while (true) {
+        askWhileInFront(androidx.compose.runtime.snapshotFlow { window.isWindowFocused }, 15_000) {
             cc.recordersOf(h, n)
-            delay(15_000)
         }
     }
 

@@ -9,6 +9,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonElevation
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
 
@@ -47,6 +49,25 @@ fun OutlinedButton(
     content: @Composable RowScope.() -> Unit,
 ) = androidx.compose.material3.OutlinedButton(onClick, modifier, enabled, shape, colors, elevation, border, contentPadding, interactionSource, content)
 
+/**
+ * The confirm of something that cannot be taken back (delete, remove,
+ * kick, ban, leave, discard), in the error colour: one look for every
+ * such button, where some were red and most were not.
+ */
+@Composable
+fun DestructiveTextButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit,
+) = TextButton(
+    onClick = onClick,
+    modifier = modifier,
+    enabled = enabled,
+    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+    content = content,
+)
+
 @Composable
 fun TextButton(
     onClick: () -> Unit,
@@ -60,3 +81,78 @@ fun TextButton(
     interactionSource: MutableInteractionSource? = null,
     content: @Composable RowScope.() -> Unit,
 ) = androidx.compose.material3.TextButton(onClick, modifier, enabled, shape, colors, elevation, border, contentPadding, interactionSource, content)
+
+/**
+ * Asked before something that cannot be taken back: [title] ("Delete
+ * this theme?"), [text] saying what goes, [confirm] in the error colour,
+ * [dismiss] beside it.
+ */
+@Composable
+fun ConfirmDestructive(
+    title: String,
+    text: String,
+    confirm: String = "Delete",
+    dismiss: String = "Cancel",
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) = androidx.compose.material3.AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { androidx.compose.material3.Text(title) },
+    text = { androidx.compose.material3.Text(text) },
+    confirmButton = { DestructiveTextButton(onClick = { onDismiss(); onConfirm() }) { androidx.compose.material3.Text(confirm) } },
+    dismissButton = { TextButton(onClick = onDismiss) { androidx.compose.material3.Text(dismiss) } },
+)
+
+/**
+ * Copies [text] and reads "Copied" for a moment: most copy buttons said
+ * nothing, and people pasted somewhere to see whether they had worked.
+ */
+@Composable
+fun CopyButton(
+    text: () -> String,
+    label: String = "Copy",
+    modifier: Modifier = Modifier,
+    style: androidx.compose.ui.text.TextStyle = androidx.compose.material3.LocalTextStyle.current,
+) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var copied by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(copied) {
+        if (copied) { kotlinx.coroutines.delay(COPIED_FOR_MS); copied = false }
+    }
+    TextButton(onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(text())); copied = true }, modifier = modifier) {
+        androidx.compose.material3.Text(if (copied) "Copied" else label, style = style)
+    }
+}
+
+/** How long a copy says "Copied". */
+const val COPIED_FOR_MS = 2_000L
+
+/**
+ * An icon button whose [tip], the icon's own description, shows on
+ * hover where there is a pointer: an icon alone said nothing on desktop
+ * until it was clicked.
+ */
+@Composable
+fun IconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tip: String? = null,
+    content: @Composable () -> Unit,
+) {
+    if (tip == null) {
+        androidx.compose.material3.IconButton(onClick = onClick, modifier = modifier, enabled = enabled, content = content)
+    } else {
+        HoverTip(tip) {
+            androidx.compose.material3.IconButton(onClick = onClick, modifier = modifier, enabled = enabled, content = content)
+        }
+    }
+}
+
+/**
+ * [content] with [tip] shown while a pointer rests on it; [content] alone
+ * where nothing hovers (touch). Hover only: material3's TooltipBox takes
+ * the anchor's presses, and a button under it stopped answering touches.
+ */
+@Composable
+expect fun HoverTip(tip: String, content: @Composable () -> Unit)

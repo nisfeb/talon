@@ -104,7 +104,7 @@ class OrreryApiTest {
         val steps = """[{"at":"2026-09-27T09:00:00Z","status":"approved","by":"owner"},{"at":"2026-09-28T09:00:00Z","status":"failed","by":"executor"}]"""
         val failed = api(body = "[" + row(steps) + "]").actions(null, "failed").single()
         assertEquals("no DM with ~bus", failed.note)
-        assertEquals(kotlinx.datetime.Instant.parse("2026-09-28T09:00:00Z").toEpochMilliseconds(), failed.movedMs, "the last step, not the first")
+        assertEquals(kotlin.time.Instant.parse("2026-09-28T09:00:00Z").toEpochMilliseconds(), failed.movedMs, "the last step, not the first")
         assertEquals(null, api(body = "[" + row("[]") + "]").actions(null, "failed").single().movedMs)
         val garbled = """[{"at":"soon","status":"failed","by":"executor"}]"""
         assertEquals(null, api(body = "[" + row(garbled) + "]").actions(null, "failed").single().movedMs)
@@ -120,6 +120,34 @@ class OrreryApiTest {
         assertEquals(1, answer.refused.size)
         assertEquals("unknown subject thing/x", answer.refused.single().error)
         assertEquals(true, answer.observations[0].existing)
+    }
+
+    @Test
+    fun `the brief view is asked for with brief=1, the whole one without`() = runTest {
+        val api = api(body = """{"bodies":[]}""")
+        api.stateJson("k1.secret", brief = true)
+        assertEquals("https://ship/apps/orrery/api/state?brief=1", seen!!.url.toString())
+        assertEquals("Bearer k1.secret", seen!!.headers[HttpHeaders.Authorization])
+        api.stateJson("k1.secret")
+        assertEquals("https://ship/apps/orrery/api/state", seen!!.url.toString())
+    }
+
+    @Test
+    fun `travel is read with the key, its last pass with the owner's session`() = runTest {
+        val keyed = mutableListOf<HttpRequestData>()
+        val owned = mutableListOf<HttpRequestData>()
+        val api = OrreryApi(
+            owner = HttpClient(MockEngine { req -> owned += req; respond("""{"next":null}""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }),
+            bare = HttpClient(MockEngine { req -> keyed += req; respond("""{"enabled":false,"lead_min":10}""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }),
+            baseUrl = "https://ship/",
+        )
+        assertEquals(null, io.nisfeb.talon.orrery.readLeavePlan(api, "k1.secret"))
+        assertEquals("https://ship/apps/orrery/api/travel", keyed.single().url.toString())
+        assertEquals("Bearer k1.secret", keyed.single().headers[HttpHeaders.Authorization])
+        assertEquals(emptyList(), owned, "off: the pass's record is not asked for")
+        api.travelLast()
+        assertEquals("https://ship/apps/orrery/api/travel/last", owned.single().url.toString())
+        assertEquals(null, owned.single().headers[HttpHeaders.Authorization], "the owner's, by cookie, not the key")
     }
 
     @Test
@@ -215,5 +243,70 @@ class OrreryApiTest {
         val schema = assertFailsWith<OrreryError.Refused> { api(HttpStatusCode.ServiceUnavailable, "down").schema() }
         assertEquals(503, schema.status, "a proxy with no ship behind it cost the ship nothing")
         assertFailsWith<OrreryError.Garbled> { api(body = "not json").mint("Talon on x", "talon/x") }
+    }
+
+    // ---- reads by scry (grubbery's file scry, as ricsul answered it on 2026-10-06) ----
+
+    private val scryRoot = "https://ship/~/scry/grubbery/peek/file/apps/shell.shell/desks/orrery.desk/desk/data/orrery.orrery_app"
+    private val leaveLast = """{"quiet":[],"next":null,"alerted":["activity/x@1"],"at":"2026-10-06T03:54:51Z","notes":[]}"""
+
+    /** A ship that answers each path as [routes] says, and remembers what was asked. */
+    private fun ship(routes: (String) -> Pair<HttpStatusCode, String>): Pair<OrreryApi, MutableList<String>> {
+        val asked = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val engine = MockEngine { req ->
+            val url = req.url.toString()
+            asked += url
+            val (status, body) = routes(url)
+            respond(body, status, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        return OrreryApi(owner = HttpClient(engine), bare = HttpClient(engine), baseUrl = "https://ship/") to asked
+    }
+
+    @Test
+    fun `the beacon and the leave plan are read by scry, at the paths grubbery's shell installs orrery`() = runTest {
+        val (api, asked) = ship { url ->
+            when (url) {
+                "$scryRoot/beacon/rev.json" -> HttpStatusCode.OK to "1791245441525"
+                "$scryRoot/leave-last.json.json" -> HttpStatusCode.OK to leaveLast
+                else -> HttpStatusCode.NotFound to ""
+            }
+        }
+        assertEquals(1791245441525L, api.beacon())
+        assertEquals(Json.parseToJsonElement(leaveLast).jsonObject, api.travelLastByScry())
+        assertEquals(listOf("$scryRoot/beacon/rev.json", "$scryRoot/leave-last.json.json"), asked.toList())
+    }
+
+    @Test
+    fun `a ship that cannot scry them answers null, and the login stops asking`() = runTest {
+        val (api, asked) = ship { HttpStatusCode.NotFound to "" }
+        assertNull(api.beacon())
+        assertNull(api.travelLastByScry())
+        assertNull(api.beacon())
+        assertEquals(1, asked.size, "one 404, then no more scries on this login")
+    }
+
+    @Test
+    fun `the leave plan reads the pass's record by scry, and through orrery only when it cannot`() = runTest {
+        val travel = """{"enabled":true,"lead_min":10}"""
+        val next = """{"next":{"key":"activity/x@1791230400000","name":"Lesson","leave_by":"2026-10-05T19:32:37Z","alert_at":"2026-10-05T19:22:37Z","minutes":23}}"""
+        val (byScry, asked) = ship { url ->
+            when {
+                url.endsWith("/api/travel") -> HttpStatusCode.OK to travel
+                url == "$scryRoot/leave-last.json.json" -> HttpStatusCode.OK to next
+                else -> HttpStatusCode.NotFound to ""
+            }
+        }
+        assertEquals("activity/x@1791230400000", readLeavePlan(byScry, "k1.secret")?.key)
+        assertTrue(asked.none { it.endsWith("/api/travel/last") }, "no request when the scry answers: $asked")
+
+        val (fallback, asked2) = ship { url ->
+            when {
+                url.endsWith("/api/travel") -> HttpStatusCode.OK to travel
+                url.endsWith("/api/travel/last") -> HttpStatusCode.OK to next
+                else -> HttpStatusCode.NotFound to ""
+            }
+        }
+        assertEquals("activity/x@1791230400000", readLeavePlan(fallback, "k1.secret")?.key)
+        assertTrue(asked2.any { it.endsWith("/api/travel/last") }, "the route when the scry cannot: $asked2")
     }
 }

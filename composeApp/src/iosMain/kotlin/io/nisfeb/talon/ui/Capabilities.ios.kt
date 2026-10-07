@@ -46,6 +46,8 @@ actual val isBackgroundCallRingSupported: Boolean = true
 // Supplied by MainViewController's edge strip -> IosBackDispatcher.
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = true
+// iOS: port pending (a ReplayKit broadcast extension).
+actual val isScreenShareSupported: Boolean = false
 actual val isCameraSwitchSupported: Boolean = true
 
 actual val isEdgeSwipeBackSupported: Boolean = true
@@ -65,7 +67,12 @@ actual val isTouchPrimary: Boolean = true
 
 // Port pending: CLLocationManager significant-change monitoring.
 actual val isLocationSharingSupported: Boolean = false
+actual val isHealthSharingSupported: Boolean = false
 
 /** The US storefront only. Read each time: the storefront follows the Apple ID's country. */
 actual val isArmillaryPurchaseSupported: Boolean
     get() = outsideCheckoutAllowedOnAppStore(SKPaymentQueue.defaultQueue().storefront?.countryCode)
+
+actual val isRelayNotificationSetupNeeded: Boolean = true
+
+actual val isAppIconBadgeSupported: Boolean = true

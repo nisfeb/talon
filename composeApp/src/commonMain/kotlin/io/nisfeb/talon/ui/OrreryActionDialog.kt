@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,9 +30,9 @@ import io.nisfeb.talon.urbit.asText
 import kotlinx.datetime.toLocalDateTime
 
 /**
- * One of the analyst's proposals, and what to do with it: approve,
- * dismiss with the owner's reason, say what it should have said, or
- * mark it done. Carrying it out is the ship's, bar a chat message,
+ * One of the analyst's proposals, and what to do with it: approve it,
+ * reject it with the owner's reason, leave it for later, change it, add
+ * a note for Orrery's model, or mark it done. Carrying it out is the ship's, bar a chat message,
  * which Talon's executor claims and sends.
  */
 @Composable
@@ -77,7 +79,9 @@ fun OrreryActionDialog(
         onDismissRequest = onClose,
         title = { Text(action.title.ifBlank { action.kind }) },
         text = {
-            Column {
+            // Scrolls: a long message pushed the buttons off a phone's screen.
+            // The buttons stay outside it, always in reach.
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(
                     // "The analyst", as the notification says: the
                     // assistant is the one you talk to, and did not.
@@ -108,13 +112,15 @@ fun OrreryActionDialog(
                     Text("About " + action.about.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Spacer(Modifier.height(8.dp))
+                // What each button does, in its own words: "Waiting for you.
+                // Approved, the ship sends it" read as if it had been sent.
                 Text(
                     when {
-                        proposed && action.kind == "task" -> "Waiting for you. Approved, the ship puts it on your calendar's task list."
-                        proposed && event != null -> "Waiting for you. Approved, the ship puts it on your calendar at that time; move it there if it is wrong."
-                        proposed && how != null -> "Waiting for you. Approved, the ship sends it $how."
-                        proposed && change != null -> "Waiting for you. Approved, the ship makes the change itself."
-                        proposed -> "Waiting for you."
+                        proposed && action.kind == "task" -> "Approve adds it to your task list."
+                        proposed && event != null -> "Approve puts it on your calendar at that time. You can move it there after."
+                        proposed && how != null -> "Approve sends this message $how."
+                        proposed && change != null -> "Approve lets the ship make this change."
+                        proposed -> "Approve accepts it. Talon cannot carry this kind out, so mark it done once you have."
                         action.status == "failed" -> "It did not go through. " + action.note.ifBlank { "The ship gave no reason." }
                         // The ship carries it out on its own executor, the
                         // moment the owner approves.
@@ -122,33 +128,39 @@ fun OrreryActionDialog(
                         how != null -> "Approved. The ship sends it $how."
                         change != null -> "Approved. The ship makes the change itself."
                         action.kind == "task" -> "Approved, and on your task list. Tick it there, or mark it done here."
-                        else -> "Approved. Talon cannot carry this kind out; mark it done once you have."
+                        else -> "Approved. Talon cannot carry this kind out. Mark it done once you have."
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
-                // Three things can be done with a proposal and only one
-                // of them is approving, so the other two are a word each
-                // until they are asked for. Everything was on screen at
-                // once before: two fields, a row of chips and two
-                // sentences under the proposal itself, which on a phone
-                // is a window that scrolls before it says anything.
-                if (proposed || action.status == "approved") {
+                if (proposed && saying == Saying.NOTHING) {
+                    Text(
+                        "Later keeps it waiting on the Actions page.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // The other things that can be done with it, a word each
+                // until asked for. Each opens its field, and its button
+                // takes the place of Approve below, with Back beside it.
+                if ((proposed || action.status == "approved") && saying == Saying.NOTHING) {
                     Spacer(Modifier.height(12.dp))
-                    // Wrapping, not a Row: three of them do not fit across a
-                    // phone's dialog, and the last was squeezed to a column
-                    // one letter wide.
+                    // Wrapping, not a Row: side by side they did not fit
+                    // across a phone's dialog.
                     @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
                     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "Or:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.CenterVertically),
+                        )
                         if (proposed && action.kind in REFINABLE) {
-                            TextButton(onClick = { saying = if (saying == Saying.REFINE) Saying.NOTHING else Saying.REFINE }) {
-                                io.nisfeb.talon.ui.FitText("Say what it should be")
+                            TextButton(onClick = { saying = Saying.REFINE }) {
+                                io.nisfeb.talon.ui.FitText("Change it")
                             }
                         }
-                        TextButton(onClick = { saying = if (saying == Saying.TELL) Saying.NOTHING else Saying.TELL }) {
-                            io.nisfeb.talon.ui.FitText("Tell Orrery")
-                        }
-                        TextButton(onClick = { saying = if (saying == Saying.DISMISS) Saying.NOTHING else Saying.DISMISS }) {
-                            Text("Not this", color = MaterialTheme.colorScheme.error, maxLines = 1)
+                        TextButton(onClick = { saying = Saying.TELL }) {
+                            io.nisfeb.talon.ui.FitText("Note for Orrery")
                         }
                     }
                 }
@@ -156,76 +168,39 @@ fun OrreryActionDialog(
                     androidx.compose.material3.OutlinedTextField(
                         value = telling,
                         onValueChange = { telling = it },
-                        label = { Text("Tell Orrery") },
+                        label = { Text("Note for Orrery") },
                         placeholder = { Text("she moved to Lisbon") },
                         enabled = !refining,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(
-                        "Orrery's model reads it with this proposal and files what it asks for, for you to approve.",
+                        "Orrery's model reads it with this proposal. Anything it proposes from it waits on the Actions page for you.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    // Taken at once, like Approve: the model can take two
-                    // minutes, and the dialog waited on it. What it says
-                    // comes up on the Actions page.
-                    TextButton(
-                        enabled = !refining && telling.isNotBlank(),
-                        onClick = {
-                            orrery.tell(telling, action.id)
-                            onClose()
-                        },
-                        modifier = Modifier.align(Alignment.End),
-                    ) { Text("Send") }
                 }
                 if (proposed && action.kind in REFINABLE && saying == Saying.REFINE) {
                     androidx.compose.material3.OutlinedTextField(
                         value = refinement,
                         onValueChange = { refinement = it },
-                        label = { Text("Say what it should be") },
+                        label = { Text("What should change?") },
                         placeholder = { Text("include susan egan in this") },
                         enabled = !refining,
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(
-                            enabled = !refining && refinement.isNotBlank(),
-                            onClick = {
-                                refining = true
-                                refined = null
-                                val said = refinement
-                                scope.launch {
-                                    orrery.refine(action.id, said).fold(
-                                        onSuccess = { answer ->
-                                            // The ship's word for it, not the owner's:
-                                            // it may have resolved a name loosely
-                                            // spelled, kept a time it could not move,
-                                            // or refused.
-                                            answer.action?.let { shown = it; refinement = ""; saying = Saying.NOTHING }
-                                            refined = when {
-                                                answer.action == null -> answer.note.ifBlank { "The ship would not take that." }
-                                                answer.extras.isEmpty() -> answer.note.ifBlank { "Revised." }
-                                                // Filed the way any proposal is: under the
-                                                // owner's auto list a task can land approved,
-                                                // so this does not say which it did.
-                                                else -> (answer.note.ifBlank { "Revised." }) +
-                                                    " And filed beside it: " + answer.extras.joinToString { it.title }
-                                            }
-                                        },
-                                        onFailure = { refined = it.message ?: "The ship did not answer." },
-                                    )
-                                    refining = false
-                                }
-                            },
-                        ) { Text(if (refining) "Asking" else "Refine") }
-                    }
+                    Text(
+                        "The ship rewrites the proposal and shows it here, still waiting for you.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                if (saying == Saying.DISMISS) {
+                if (saying == Saying.REJECT) {
+                    Spacer(Modifier.height(12.dp))
                     androidx.compose.material3.OutlinedTextField(
                         value = reason,
                         onValueChange = { reason = it },
-                        label = { Text("Why not? (optional)") },
+                        label = { Text("Reason (optional)") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -235,42 +210,104 @@ fun OrreryActionDialog(
                         }
                     }
                     Text(
-                        "A reason goes to the generator with the dismissal, so it stops proposing things like this one.",
+                        "Orrery learns from a reason and proposes fewer like this.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    TextButton(
-                        enabled = !refining,
-                        onClick = { move("dismissed", reason) },
-                        modifier = Modifier.align(Alignment.End),
-                    ) { Text("Dismiss", color = MaterialTheme.colorScheme.error) }
                 }
-                // What the ship said about a refinement outlives the field.
+                // What the ship said about a change outlives the field.
                 refined?.let {
                     Spacer(Modifier.height(4.dp))
                     Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         },
-        // The app's own order: the way out on the left, the one thing
-        // this window is for on the right, filled, and no third button
-        // between them. Saying no lives in the body, beside the reason
-        // it sends, which is where it was being explained anyway.
+        // Every button that does something sits here, outside the scroll,
+        // so none is lost below a long message: the way out on the left,
+        // no in the middle, yes on the right and filled. "Close" beside a
+        // "Dismiss" read as the same thing, so a proposal's way out is
+        // "Later" and saying no is "Reject". Opening a field swaps Approve
+        // for that field's own button, and the way out for Back.
         confirmButton = {
-            when {
-                // Held while a note is being applied: an approval that
-                // lands mid-refinement is refused by the ship and files
-                // nothing, so the tap would be a tap that did nothing.
-                proposed -> io.nisfeb.talon.ui.Button(enabled = !refining, onClick = { move("approved") }) {
-                    Text(if (message != null) "Approve and send" else "Approve")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val noWord = if (proposed) "Reject" else "Remove"
+                when (saying) {
+                    Saying.REJECT -> io.nisfeb.talon.ui.Button(
+                        enabled = !refining,
+                        onClick = { move("dismissed", reason) },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
+                    ) { Text(noWord) }
+                    // Taken at once, like Approve: the model can take two
+                    // minutes, and the dialog waited on it. What it says
+                    // comes up on the Actions page.
+                    Saying.TELL -> io.nisfeb.talon.ui.Button(
+                        enabled = !refining && telling.isNotBlank(),
+                        onClick = { orrery.tell(telling, action.id); onClose() },
+                    ) { Text("Send note") }
+                    Saying.REFINE -> io.nisfeb.talon.ui.Button(
+                        enabled = !refining && refinement.isNotBlank(),
+                        onClick = {
+                            refining = true
+                            refined = null
+                            val said = refinement
+                            scope.launch {
+                                orrery.refine(action.id, said).fold(
+                                    onSuccess = { answer ->
+                                        // The ship's word for it, not the owner's:
+                                        // it may have resolved a name loosely
+                                        // spelled, kept a time it could not move,
+                                        // or refused.
+                                        answer.action?.let { shown = it; refinement = ""; saying = Saying.NOTHING }
+                                        refined = when {
+                                            answer.action == null -> answer.note.ifBlank { "The ship would not take that." }
+                                            answer.extras.isEmpty() -> answer.note.ifBlank { "Revised." }
+                                            // Filed the way any proposal is: under the
+                                            // owner's auto list a task can land approved,
+                                            // so this does not say which it did.
+                                            else -> (answer.note.ifBlank { "Revised." }) +
+                                                " And filed beside it: " + answer.extras.joinToString { it.title }
+                                        }
+                                    },
+                                    onFailure = { refined = io.nisfeb.talon.util.problemOf("Couldn't ask for the change", it).line },
+                                )
+                                refining = false
+                            }
+                        },
+                    ) { Text(if (refining) "Asking…" else "Ask for the change") }
+                    Saying.NOTHING -> when {
+                        // Held while a change is being asked for: an approval
+                        // that lands mid-refinement is refused by the ship and
+                        // files nothing, so the tap would be a tap that did nothing.
+                        proposed -> {
+                            io.nisfeb.talon.ui.DestructiveTextButton(onClick = { saying = Saying.REJECT }) { Text(noWord) }
+                            io.nisfeb.talon.ui.Button(enabled = !refining, onClick = { move("approved") }) {
+                                Text(if (message != null) "Approve and send" else "Approve")
+                            }
+                        }
+                        action.status == "approved" -> {
+                            io.nisfeb.talon.ui.DestructiveTextButton(onClick = { saying = Saying.REJECT }) { Text(noWord) }
+                            // What the ship carries out reports itself; marking
+                            // it done here would skip the doing.
+                            if (event == null && message == null && change == null) {
+                                io.nisfeb.talon.ui.Button(onClick = { move("done") }) { Text("Mark done") }
+                            }
+                        }
+                        // Failed, done or dismissed: nothing leaves those.
+                        else -> Unit
+                    }
                 }
-                // What the ship carries out reports itself; marking it
-                // done here would skip the doing. Nothing leaves failed.
-                event != null || message != null || change != null || action.status == "failed" -> Unit
-                else -> io.nisfeb.talon.ui.Button(onClick = { move("done") }) { Text("Mark done") }
             }
         },
-        dismissButton = { TextButton(onClick = onClose) { Text("Close") } },
+        dismissButton = {
+            when {
+                saying != Saying.NOTHING -> TextButton(onClick = { saying = Saying.NOTHING }) { Text("Back") }
+                proposed -> TextButton(onClick = onClose) { Text("Later") }
+                else -> TextButton(onClick = onClose) { Text("Close") }
+            }
+        },
     )
 }
 
@@ -282,7 +319,7 @@ fun OrreryActionDialog(
 private val REFINABLE = setOf("task", "calendar", "message")
 
 /** Which of the things that are not approving the owner is doing. */
-private enum class Saying { NOTHING, REFINE, TELL, DISMISS }
+private enum class Saying { NOTHING, REFINE, TELL, REJECT }
 
 /** The reasons the client guide gives as examples, one tap each; the owner's own words go in the field. */
 val DISMISS_REASONS = listOf("just the event", "I always do this")
@@ -290,7 +327,7 @@ val DISMISS_REASONS = listOf("just the event", "I always do this")
 /** The event as the owner reads it: local times, and the place where there is one. */
 private fun whenLine(e: io.nisfeb.talon.orrery.EventToAdd): String {
     val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
-    fun at(ms: Long) = kotlinx.datetime.Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone)
+    fun at(ms: Long) = kotlin.time.Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone)
     val start = at(e.startMs)
     val end = e.endMs?.let(::at)
     val span = "${start.date} ${start.time}" + (end?.let { if (it.date == start.date) " to ${it.time}" else " to ${it.date} ${it.time}" } ?: "")

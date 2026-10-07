@@ -25,8 +25,7 @@ import kotlinx.serialization.json.put
  * which we trust for the echo. Tests for this rule live in
  * `ChatWireShapesTest`.
  */
-internal fun whomNeedsOptimisticDelete(whom: String): Boolean =
-    whom.startsWith("~") || whom.startsWith("0v")
+internal fun whomNeedsOptimisticDelete(whom: String): Boolean = isDirect(whom)
 
 /**
  * Dot-group the @da inside an `~author/<da>` writ id for the wire.

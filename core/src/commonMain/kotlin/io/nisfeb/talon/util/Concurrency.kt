@@ -20,7 +20,26 @@ class ConcurrentMap<K, V> {
     fun remove(key: K): V? = synchronized(lock) { map.remove(key) }
     fun getOrPut(key: K, default: () -> V): V =
         synchronized(lock) { map.getOrPut(key, default) }
+    /** [key]'s value replaced by [f] of it, in one step; null removes it. Returns what [f] made. */
+    fun update(key: K, f: (V?) -> V?): V? = synchronized(lock) {
+        f(map[key]).also { if (it == null) map.remove(key) else map[key] = it }
+    }
     fun clear() { synchronized(lock) { map.clear() } }
+}
+
+/**
+ * One [V] for the [K] in use, made on first ask and remade when the key
+ * changes: a flow several screens share for the database signed in to.
+ * One slot, so switching ships drops the old one rather than keeping it.
+ */
+class OneSlot<K : Any, V : Any>(private val make: (K) -> V) {
+    private val lock = SynchronizedObject()
+    private var key: K? = null
+    private var value: V? = null
+
+    fun of(k: K): V = synchronized(lock) {
+        value?.takeIf { key === k } ?: make(k).also { key = k; value = it }
+    }
 }
 
 class ConcurrentSet<E> {

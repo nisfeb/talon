@@ -15,7 +15,13 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.withKeyDown
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
+import io.ktor.client.engine.mock.respond
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.runComposeUiTest
@@ -34,6 +40,7 @@ import io.nisfeb.talon.urbit.FakeAiSettings
 import io.nisfeb.talon.urbit.FakeShip
 import io.nisfeb.talon.urbit.UrbitSession
 import kotlin.test.Test
+import kotlinx.datetime.toInstant
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -55,10 +62,12 @@ class SettingsScreenTest {
         calls: CallController? = null,
         pinCandidates: List<Pair<String, String>> = emptyList(),
         ai: FakeAiSettings = FakeAiSettings(),
+        fontRepo: FontRepo? = null,
         block: ComposeUiTest.() -> Unit,
     ) = runComposeUiTest {
         setContent {
             CompositionLocalProvider(
+                LocalFontRepo provides fontRepo,
                 LocalClipboardManager provides object : ClipboardManager {
                     override fun getText(): AnnotatedString? = null
                     override fun setText(annotatedString: AnnotatedString) { did += "copied ${annotatedString.text}" }
@@ -104,6 +113,52 @@ class SettingsScreenTest {
         assertEquals(ThemePreference.Mode.Light, theme.mode.value)
         tap("System")
         assertEquals(ThemePreference.Mode.System, theme.mode.value)
+    }
+
+    // "the ability for the user to change the font and font size".
+    @Test
+    fun `the font is chosen for every device, and the text size for this one`() = settings {
+        tap("Serif")
+        assertEquals(FontSettings.SERIF, ui.fontSettings.value.family)
+        // The font's System, not the theme's, which comes first.
+        onAllNodesWithText("System").let { it[it.fetchSemanticsNodes().size - 1] }.performScrollTo().performClick()
+        assertEquals(null, ui.fontSettings.value.family)
+        onNode(androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsActions.SetProgress))
+            .performScrollTo()
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(1.5f) }
+        assertEquals(1.5f, ui.fontScale.value, 0.001f)
+        assertTrue(shows("Text size · 150%"))
+    }
+
+    @Test
+    fun `an installed font is listed, chosen, and removed from all devices after asking`() {
+        ui.setFontSettings(FontSettings(listOf(InstalledFont("f1", "Testa"), InstalledFont("f2", "Testa", 700)), family = null))
+        val tmp = kotlin.io.path.createTempDirectory(prefix = "talon-fonts-ui-").toFile()
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob())
+        val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
+            did += "${req.method.value} ${req.url.encodedPath}"
+            respond("", io.ktor.http.HttpStatusCode.OK)
+        })
+        val repo = FontRepo(ui, FontShip(http, { "https://ship.test" }, { null }), scope, FontFiles(okio.Path.Companion.run { tmp.absolutePath.toPath() }))
+        try {
+            settings(fontRepo = repo) {
+                assertTrue(shows("Testa · 2 files"))
+                tap("Testa")
+                assertEquals("Testa", ui.fontSettings.value.family)
+                tap("Remove")
+                assertTrue(shows("Remove Testa?"))
+                onAllNodesWithText("Remove").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
+                waitForIdle()
+                assertTrue(ui.fontSettings.value.fonts.isEmpty())
+                assertEquals(listOf("f1", "f2"), ui.fontSettings.value.removed)
+                assertEquals(null, ui.fontSettings.value.family)
+                waitUntil(timeoutMillis = 5_000) { did.count { it.startsWith("DELETE") } == 2 }
+                assertTrue("DELETE /grubbery/api/file/talon/fonts/f1.font" in did, did.toString())
+            }
+        } finally {
+            scope.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+            tmp.deleteRecursively()
+        }
     }
 
     @Test
@@ -165,6 +220,9 @@ class SettingsScreenTest {
         assertTrue(!shows("Save and use"), "the editor closes")
 
         tap("Delete")
+        assertTrue(ui.themeSettings.value.themes.isNotEmpty(), "asked first")
+        onAllNodesWithText("Delete").onLast().performClick()
+        waitForIdle()
         assertTrue(ui.themeSettings.value.themes.isEmpty() && ui.themeSettings.value.activeId == null)
     }
 
@@ -216,8 +274,7 @@ class SettingsScreenTest {
         settings(pinCandidates = listOf("~bus" to "Bus", "~nec" to "Nec")) {
             tap("Home")
             tap("Celsius")
-            tap("24-hour")
-            assertTrue(!ui.homeFahrenheit.value && ui.homeTwentyFourHour.value)
+            assertTrue(!ui.homeFahrenheit.value)
 
             tap("8")
             assertEquals(8, widget(HomeWidgetKind.MESSAGES).count)
@@ -229,6 +286,24 @@ class SettingsScreenTest {
             switchBeside("Chat").performClick()
             waitForIdle()
             assertTrue(!widget(HomeWidgetKind.MESSAGES).visible)
+        }
+    }
+
+    // The hour sat under Home's dial, while chats, search and the calendar
+    // each kept a clock of their own.
+    @Test
+    fun `the clock is chosen once, under Appearance, and every time shown follows it`() {
+        settings {
+            tap("Appearance")
+            tap("24-hour")
+            assertTrue(ui.homeTwentyFourHour.value)
+            val oneTwentySixPm = kotlinx.datetime.LocalDateTime(2026, 7, 10, 13, 26)
+                .toInstant(kotlinx.datetime.TimeZone.currentSystemDefault()).toEpochMilliseconds()
+            io.nisfeb.talon.util.ClockStyle.twentyFourHour.value = ui.homeTwentyFourHour.value
+            assertEquals("13:26", io.nisfeb.talon.util.formatClock(oneTwentySixPm))
+            tap("12-hour")
+            io.nisfeb.talon.util.ClockStyle.twentyFourHour.value = ui.homeTwentyFourHour.value
+            assertEquals("1:26 PM", io.nisfeb.talon.util.formatClock(oneTwentySixPm))
         }
     }
 
@@ -305,7 +380,7 @@ class SettingsScreenTest {
                 assertTrue(shows(io.nisfeb.talon.TalonBuild.versionName))
                 tap("Copy version info")
                 val copied = did.single()
-                assertTrue(io.nisfeb.talon.TalonBuild.versionName in copied && "%trunk wire 8 (app speaks 9)" in copied, copied)
+                assertTrue(io.nisfeb.talon.TalonBuild.versionName in copied && "%trunk wire 8 (app speaks ${io.nisfeb.talon.call.TrunkWire.WIRE_VERSION})" in copied, copied)
             }
         } finally {
             controller.stop()
@@ -380,4 +455,33 @@ class SettingsScreenTest {
         tap("Login QR generator")
         assertEquals(listOf("login qr"), did.toList())
     }
+
+    // Shortcuts are set here: click one, press its keys. A combo another
+    // action had moves, and says so; a key alone is refused.
+    @Test
+    fun `a shortcut is set by pressing its keys, and moves from the action that had it`() {
+        val mac = io.nisfeb.talon.util.isMacOsHost
+        settings {
+            tap("Appearance")
+            val search = defaultKeybinds(mac).getValue("search").label(mac)
+            onAllNodesWithText(search)[0].performScrollTo()
+            // Mail: a key on its own is typing, and is refused.
+            onAllNodesWithText("None")[2].performScrollTo().performClick()
+            waitForIdle()
+            onAllNodesWithText("Press keys…")[0].performKeyInput { pressKey(Key.M) }
+            waitForIdle()
+            assertTrue(onAllNodesWithText("a key on its own is typing", substring = true).fetchSemanticsNodes().isNotEmpty())
+            // Search's own keys: Mail takes them, Search has none.
+            onAllNodesWithText("Press keys…")[0].performKeyInput {
+                withKeyDown(if (mac) Key.MetaLeft else Key.CtrlLeft) { pressKey(Key.K) }
+            }
+            waitForIdle()
+            assertEquals(defaultKeybinds(mac)["search"], ui.keybinds.value["open:Mail"])
+            assertTrue("search" in ui.keybinds.value && ui.keybinds.value["search"] == null)
+            assertTrue(onAllNodesWithText("was for Search", substring = true).fetchSemanticsNodes().isNotEmpty())
+            tap("Restore the defaults")
+            assertTrue(ui.keybinds.value.isEmpty())
+        }
+    }
 }
+

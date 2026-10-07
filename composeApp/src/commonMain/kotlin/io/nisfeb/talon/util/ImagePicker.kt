@@ -6,7 +6,7 @@ import androidx.compose.runtime.Composable
  * Compose-bound image picker. The Android impl uses
  * rememberLauncherForActivityResult(PickVisualMedia) under the hood,
  * which requires being inside a Composable scope. The desktop impl
- * delegates to DesktopFilePicker (Swing JFileChooser).
+ * delegates to DesktopFilePicker (the system's own picker, via FileKit).
  *
  * Returns a suspend lambda that opens the platform's image picker and
  * resolves to a PickedImage, or null when the user CANCELS. A read/decode

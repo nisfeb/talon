@@ -13,10 +13,11 @@ import java.nio.file.StandardCopyOption
  * write is an atomic move so a JVM crash mid-write can't leave a
  * truncated, unparseable file.
  */
-private class JvmUiSettingsStore(private val file: File) : UiSettingsStore {
+internal class JvmUiSettingsStore(private val file: File) : UiSettingsStore {
     override fun read(): String? = if (file.exists()) file.readText() else null
 
     override fun write(text: String) {
+        file.parentFile?.mkdirs()
         val tmp = File(file.parentFile, file.name + ".tmp")
         tmp.writeText(text)
         Files.move(

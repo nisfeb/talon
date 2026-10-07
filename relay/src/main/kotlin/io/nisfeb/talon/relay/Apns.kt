@@ -74,7 +74,7 @@ class Apns(
 
     /** Push [payload] (a JSON body the iOS app parses to report the
      *  call to CallKit) to [voipToken], a hex PushKit token. */
-    fun sendVoip(voipToken: String, payload: String, expirationSecs: Int = 60) {
+    fun sendVoip(voipToken: String, payload: String, expirationSecs: Int = 60): ApnsResult {
         val req = Request.Builder()
             .url("$host/3/device/$voipToken")
             .header("authorization", "bearer ${jwt()}")
@@ -87,19 +87,9 @@ class Apns(
             )
             .post(payload.toRequestBody(JSON_MEDIA))
             .build()
-        try {
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    // 410 Gone = the token is dead; the device must
-                    // re-register. Surface the reason for the log; we
-                    // don't side-effect the DB from here.
-                    val reason = resp.body.string().take(200)
-                    log.warn("apns voip HTTP ${resp.code} → ${voipToken.take(12)}… $reason")
-                }
-            }
-        } catch (e: Throwable) {
-            log.warn("apns voip failed → ${voipToken.take(12)}…: ${e.message}")
-        }
+        // 410 Gone = the token is dead; the device must re-register. The
+        // reason is logged and returned; the DB is not touched from here.
+        return execute(req, "voip", voipToken)
     }
 
     /**
@@ -116,50 +106,74 @@ class Apns(
         whom: String,
         postId: String,
         expirationSecs: Int = 24 * 3600,
-    ) {
-        val payload = "{\"aps\":{\"alert\":{\"title\":\"" + jsonEscape(title) +
-            "\",\"body\":\"" + jsonEscape(body) +
-            "\"},\"sound\":\"default\",\"thread-id\":\"" + jsonEscape(whom) +
-            "\"},\"event\":\"new-message\",\"patp\":\"" + jsonEscape(patp) +
-            "\",\"whom\":\"" + jsonEscape(whom) +
-            "\",\"id\":\"" + jsonEscape(postId) + "\"}"
+        /** The thread a reply is in, so a tap opens it. */
+        parent: String? = null,
+        /** A ship's test push ([Gateway]): the app takes it as proof. */
+        nonce: String? = null,
+        /** The app-icon count, when its owner has badges on. */
+        badge: Int? = null,
+        /** "notice" for a push from another app on the ship. */
+        event: String? = null,
+        /** A notice's target in the app, as JSON. */
+        open: String? = null,
+    ): ApnsResult {
+        val payload = alertPayload(title, body, patp, whom, postId, parent, nonce, badge, event, open)
         val req = Request.Builder()
             .url("$host/3/device/$token")
             .header("authorization", "bearer ${jwt()}")
             .header("apns-topic", bundleId)
             .header("apns-push-type", "alert")
             .header("apns-priority", "10")
-            .header("apns-collapse-id", whom.take(64))
+            .apply { if (whom.isNotBlank()) header("apns-collapse-id", whom.take(64)) }
             .header(
                 "apns-expiration",
                 (System.currentTimeMillis() / 1000 + expirationSecs).toString(),
             )
             .post(payload.toRequestBody(JSON_MEDIA))
             .build()
-        try {
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    val reason = resp.body.string().take(200)
-                    log.warn("apns alert HTTP ${resp.code} → ${token.take(12)}… $reason")
-                }
-            }
-        } catch (e: Throwable) {
-            log.warn("apns alert failed → ${token.take(12)}…: ${e.message}")
-        }
+        return execute(req, "alert", token)
     }
 
-    private fun jsonEscape(s: String): String = buildString {
-        for (c in s) {
-            when (c) {
-                '"' -> append("\\\"")
-                '\\' -> append("\\\\")
-                '\n' -> append("\\n")
-                '\r' -> append("\\r")
-                '\t' -> append("\\t")
-                else -> if (c < ' ') append("\\u%04x".format(c.code)) else append(c)
+    /** Only the app-icon number: an alert push with nothing to show, at
+     *  low priority, so the count changes without a sound or a banner. */
+    fun sendBadge(token: String, badge: Int): ApnsResult = execute(
+        quiet(token, "alert", "{\"aps\":{\"badge\":$badge}}", expirationSecs = 24 * 3600),
+        "badge", token,
+    )
+
+    /** A background push: the app wakes briefly with [payload]. iOS
+     *  throttles these, so what they carry is best effort. */
+    fun sendBackground(token: String, payload: String): ApnsResult =
+        execute(quiet(token, "background", payload, expirationSecs = 3600), "background", token)
+
+    private fun quiet(token: String, pushType: String, payload: String, expirationSecs: Int): Request =
+        Request.Builder()
+            .url("$host/3/device/$token")
+            .header("authorization", "bearer ${jwt()}")
+            .header("apns-topic", bundleId)
+            .header("apns-push-type", pushType)
+            // 5: delivered when the phone is awake anyway. Apple requires it
+            // for background pushes; a count can wait the same.
+            .header("apns-priority", "5")
+            .header("apns-expiration", (System.currentTimeMillis() / 1000 + expirationSecs).toString())
+            .post(payload.toRequestBody(JSON_MEDIA))
+            .build()
+
+    private fun execute(req: Request, kind: String, token: String): ApnsResult = try {
+        http.newCall(req).execute().use { resp ->
+            if (resp.isSuccessful) {
+                ApnsResult(resp.code, "")
+            } else {
+                val text = resp.body.string().take(200)
+                log.warn("apns $kind HTTP ${resp.code} → ${token.take(12)}… $text")
+                ApnsResult(resp.code, REASON.find(text)?.groupValues?.get(1).orEmpty())
             }
         }
+    } catch (e: Throwable) {
+        log.warn("apns $kind failed → ${token.take(12)}…: ${e.message}")
+        ApnsResult(0, e.message.orEmpty())
     }
+
 
     /** A cached bearer JWT, refreshed every [JWT_REFRESH_MS]. */
     private fun jwt(): String {
@@ -218,5 +232,80 @@ class Apns(
         private val JSON_MEDIA = "application/json".toMediaType()
         // APNs rejects a token older than 1h; refresh at 40 min.
         private const val JWT_REFRESH_MS = 40L * 60L * 1000L
+        private val REASON = Regex("\"reason\"\\s*:\\s*\"(\\w+)\"")
+    }
+}
+
+/** What APNs answered: its status, 0 when it was not reached, and its
+ *  reason (e.g. "BadDeviceToken") when it refused. */
+data class ApnsResult(val code: Int, val reason: String)
+
+/** An alert's payload: the aps part iOS shows, and the fields the app
+ *  reads on a tap (the same ones the Android data push carries). */
+internal fun alertPayload(
+    title: String,
+    body: String,
+    patp: String,
+    whom: String,
+    postId: String,
+    parent: String? = null,
+    nonce: String? = null,
+    badge: Int? = null,
+    /** "notice" for a push from another app on the ship. */
+    event: String? = null,
+    /** A notice's target in the app, as JSON, passed through. */
+    open: String? = null,
+): String {
+    val full = buildAlert(title, body, patp, whom, postId, parent, nonce, badge, event, open)
+    val over = full.encodeToByteArray().size - MAX_ALERT_BYTES
+    if (over <= 0) return full
+    // APNs refuses an alert over 4 KiB (413). Shorten the body to fit,
+    // rather than lose the alert: what is cut is the end of a long text.
+    val keep = (body.encodeToByteArray().size - over - 8).coerceAtLeast(0)
+    val cut = body.encodeToByteArray().copyOf(keep).decodeToString().trimEnd('\uFFFD') + "…"
+    return buildAlert(title, cut, patp, whom, postId, parent, nonce, badge, event, open)
+}
+
+/** APNs' limit for an alert's payload, less a little for safety. */
+internal const val MAX_ALERT_BYTES = 4000
+
+private fun buildAlert(
+    title: String,
+    body: String,
+    patp: String,
+    whom: String,
+    postId: String,
+    parent: String?,
+    nonce: String?,
+    badge: Int?,
+    event: String?,
+    open: String?,
+): String = buildString {
+    append("{\"aps\":{\"alert\":{\"title\":\"").append(jsonEscape(title))
+    append("\",\"body\":\"").append(jsonEscape(body))
+    append("\"},\"sound\":\"default\",\"thread-id\":\"").append(jsonEscape(whom)).append('"')
+    if (badge != null) append(",\"badge\":").append(badge)
+    append("},\"event\":\"").append(jsonEscape(if (nonce != null) "push-test" else event ?: "new-message"))
+    append("\",\"patp\":\"").append(jsonEscape(patp))
+    append("\",\"whom\":\"").append(jsonEscape(whom))
+    append("\",\"id\":\"").append(jsonEscape(postId)).append('"')
+    if (parent != null) append(",\"parent\":\"").append(jsonEscape(parent)).append('"')
+    if (nonce != null) append(",\"nonce\":\"").append(jsonEscape(nonce)).append('"')
+    if (open != null && open != "null") append(",\"open\":").append(open)
+    append('}')
+}
+
+/** A JSON string's contents: quote, backslash, and every control
+ *  character escaped, so no text a peer chose can break the body. */
+internal fun jsonEscape(s: String): String = buildString {
+    for (c in s) {
+        when (c) {
+            '"' -> append("\\\"")
+            '\\' -> append("\\\\")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            else -> if (c < ' ') append("\\u%04x".format(c.code)) else append(c)
+        }
     }
 }

@@ -175,6 +175,43 @@ object TalonIcons {
         }
     }
 
+    val AutoAwesome: ImageVector by lazy {
+        materialIcon(name = "Filled.AutoAwesome") {
+            materialPath() {
+                moveTo(19.0f, 9.0f)
+                lineToRelative(1.25f, -2.75f)
+                lineTo(23.0f, 5.0f)
+                lineToRelative(-2.75f, -1.25f)
+                lineTo(19.0f, 1.0f)
+                lineToRelative(-1.25f, 2.75f)
+                lineTo(15.0f, 5.0f)
+                lineToRelative(2.75f, 1.25f)
+                lineTo(19.0f, 9.0f)
+                close()
+                moveTo(11.5f, 9.5f)
+                lineTo(9.0f, 4.0f)
+                lineTo(6.5f, 9.5f)
+                lineTo(1.0f, 12.0f)
+                lineToRelative(5.5f, 2.5f)
+                lineTo(9.0f, 20.0f)
+                lineToRelative(2.5f, -5.5f)
+                lineTo(17.0f, 12.0f)
+                lineToRelative(-5.5f, -2.5f)
+                close()
+                moveTo(19.0f, 15.0f)
+                lineToRelative(-1.25f, 2.75f)
+                lineTo(15.0f, 19.0f)
+                lineToRelative(2.75f, 1.25f)
+                lineTo(19.0f, 23.0f)
+                lineToRelative(1.25f, -2.75f)
+                lineTo(23.0f, 19.0f)
+                lineToRelative(-2.75f, -1.25f)
+                lineTo(19.0f, 15.0f)
+                close()
+            }
+        }
+    }
+
     val BrokenImage: ImageVector by lazy {
         materialIcon(name = "Filled.BrokenImage") {
             materialPath() {
@@ -1679,12 +1716,85 @@ object TalonIcons {
         }
     }
 
+    val ScreenShare: ImageVector by lazy {
+        materialIcon(name = "AutoMirrored.Filled.ScreenShare", autoMirror = true) {
+            materialPath() {
+                moveTo(20.0f, 18.0f)
+                curveToRelative(1.1f, 0.0f, 1.99f, -0.9f, 1.99f, -2.0f)
+                lineTo(22.0f, 6.0f)
+                curveToRelative(0.0f, -1.11f, -0.9f, -2.0f, -2.0f, -2.0f)
+                lineTo(4.0f, 4.0f)
+                curveToRelative(-1.11f, 0.0f, -2.0f, 0.89f, -2.0f, 2.0f)
+                verticalLineToRelative(10.0f)
+                curveToRelative(0.0f, 1.1f, 0.89f, 2.0f, 2.0f, 2.0f)
+                lineTo(0.0f, 18.0f)
+                verticalLineToRelative(2.0f)
+                horizontalLineToRelative(24.0f)
+                verticalLineToRelative(-2.0f)
+                horizontalLineToRelative(-4.0f)
+                close()
+                moveTo(13.0f, 14.47f)
+                verticalLineToRelative(-2.19f)
+                curveToRelative(-2.78f, 0.0f, -4.61f, 0.85f, -6.0f, 2.72f)
+                curveToRelative(0.56f, -2.67f, 2.11f, -5.33f, 6.0f, -5.87f)
+                lineTo(13.0f, 7.0f)
+                lineToRelative(4.0f, 3.73f)
+                lineToRelative(-4.0f, 3.74f)
+                close()
+            }
+        }
+    }
+
+    val StopScreenShare: ImageVector by lazy {
+        materialIcon(name = "AutoMirrored.Filled.StopScreenShare", autoMirror = true) {
+            materialPath() {
+                moveTo(21.22f, 18.02f)
+                lineToRelative(2.0f, 2.0f)
+                lineTo(24.0f, 20.02f)
+                verticalLineToRelative(-2.0f)
+                horizontalLineToRelative(-2.78f)
+                close()
+                moveTo(21.99f, 16.02f)
+                lineToRelative(0.01f, -10.0f)
+                curveToRelative(0.0f, -1.11f, -0.9f, -2.0f, -2.0f, -2.0f)
+                lineTo(7.22f, 4.02f)
+                lineToRelative(5.23f, 5.23f)
+                curveToRelative(0.18f, -0.04f, 0.36f, -0.07f, 0.55f, -0.1f)
+                lineTo(13.0f, 7.02f)
+                lineToRelative(4.0f, 3.73f)
+                lineToRelative(-1.58f, 1.47f)
+                lineToRelative(5.54f, 5.54f)
+                curveToRelative(0.61f, -0.33f, 1.03f, -0.99f, 1.03f, -1.74f)
+                close()
+                moveTo(2.39f, 1.73f)
+                lineTo(1.11f, 3.0f)
+                lineToRelative(1.54f, 1.54f)
+                curveToRelative(-0.4f, 0.36f, -0.65f, 0.89f, -0.65f, 1.48f)
+                verticalLineToRelative(10.0f)
+                curveToRelative(0.0f, 1.1f, 0.89f, 2.0f, 2.0f, 2.0f)
+                lineTo(0.0f, 18.02f)
+                verticalLineToRelative(2.0f)
+                horizontalLineToRelative(18.13f)
+                lineToRelative(2.71f, 2.71f)
+                lineToRelative(1.27f, -1.27f)
+                lineTo(2.39f, 1.73f)
+                close()
+                moveTo(7.0f, 15.02f)
+                curveToRelative(0.31f, -1.48f, 0.92f, -2.95f, 2.07f, -4.06f)
+                lineToRelative(1.59f, 1.59f)
+                curveToRelative(-1.54f, 0.38f, -2.7f, 1.18f, -3.66f, 2.47f)
+                close()
+            }
+        }
+    }
+
     /** Every icon by name, for the fidelity test. */
     fun entries(): List<Pair<String, ImageVector>> = listOf(
         "AcUnit" to AcUnit,
         "Air" to Air,
         "Archive" to Archive,
         "AttachFile" to AttachFile,
+        "AutoAwesome" to AutoAwesome,
         "BrokenImage" to BrokenImage,
         "CalendarMonth" to CalendarMonth,
         "CalendarToday" to CalendarToday,
@@ -1730,5 +1840,7 @@ object TalonIcons {
         "Logout" to Logout,
         "Reply" to Reply,
         "Forward" to Forward,
+        "ScreenShare" to ScreenShare,
+        "StopScreenShare" to StopScreenShare,
     )
 }

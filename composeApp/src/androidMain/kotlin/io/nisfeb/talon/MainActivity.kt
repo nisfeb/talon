@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,6 +41,10 @@ class MainActivity : ComponentActivity() {
     private val deepLinkOpenMail = mutableStateOf(false)
     /** Set by a tapped orrery notification (EXTRA_OPEN_ACTIONS): TalonApp opens Actions. */
     private val deepLinkOpenActions = mutableStateOf(false)
+    /** Set by a tapped leave alert (EXTRA_OPEN_ORRERY): TalonApp opens Orrery on its thing. */
+    private val deepLinkOpenOrrery = mutableStateOf<String?>(null)
+    /** Set by a tapped calendar reminder (EXTRA_OPEN_CALENDAR): its push tag. */
+    private val deepLinkOpenCalendar = mutableStateOf<String?>(null)
     /** Set when the user hit Answer on the incoming-call notification.
      *  The action can only open the activity — accepting needs the
      *  running CallController — so TalonApp does the accept. */
@@ -92,6 +97,12 @@ class MainActivity : ComponentActivity() {
         }
 
         val app = applicationContext as TalonApplication
+        // Back at the root sends Talon behind, as Android does for a
+        // launcher's root activity, instead of finishing it: a finished
+        // activity took its calls loop, beacon and repos with it, and each
+        // reopen read the ship from the start again. Added before
+        // setContent, so every screen's BackHandler comes first.
+        onBackPressedDispatcher.addCallback(this) { moveTaskToBack(true) }
         setContent {
             val forShip by deepLinkForShip
             val whom by deepLinkWhom
@@ -100,6 +111,8 @@ class MainActivity : ComponentActivity() {
             val threadAnchor by deepLinkThreadAnchor
             val openMail by deepLinkOpenMail
             val openActions by deepLinkOpenActions
+            val openOrrery by deepLinkOpenOrrery
+            val openCalendar by deepLinkOpenCalendar
             val share by pendingShare
             val shareTarget by pendingShareTarget
             val answerFrom by pendingAnswerFrom
@@ -162,7 +175,10 @@ class MainActivity : ComponentActivity() {
             androidx.compose.runtime.LaunchedEffect(app) {
                 app.uiSettings.micProcessing.collect { io.nisfeb.talon.call.MicProcessingSettings.current = it }
             }
-            TalonTheme(darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active) {
+            TalonTheme(
+                darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active,
+                fontFamily = io.nisfeb.talon.ui.rememberAppFontFamily(app.uiSettings),
+            ) {
                 CompositionLocalProvider(LocalImageDownloader provides imageDownloader) {
                     TalonApp(
                         initialForShip = forShip,
@@ -172,6 +188,8 @@ class MainActivity : ComponentActivity() {
                         initialThreadAnchor = threadAnchor,
                         initialOpenMail = openMail,
                         initialOpenActions = openActions,
+                        initialOpenOrreryItem = openOrrery,
+                        initialOpenCalendarTag = openCalendar,
                         pendingShare = share,
                         pendingShareTarget = shareTarget,
                         onShareConsumed = {
@@ -191,6 +209,8 @@ class MainActivity : ComponentActivity() {
                             deepLinkThreadAnchor.value = null
                             deepLinkOpenMail.value = false
                             deepLinkOpenActions.value = false
+                            deepLinkOpenOrrery.value = null
+                            deepLinkOpenCalendar.value = null
                         },
                         initialAnswerFrom = answerFrom,
                         initialAnswerCallId = answerCallId,
@@ -262,6 +282,14 @@ class MainActivity : ComponentActivity() {
             deepLinkOpenActions.value = true
             consumedDeepLink = true
         }
+        intent.getStringExtra(Notifications.EXTRA_OPEN_ORRERY)?.let {
+            deepLinkOpenOrrery.value = it
+            consumedDeepLink = true
+        }
+        intent.getStringExtra(Notifications.EXTRA_OPEN_CALENDAR)?.let {
+            deepLinkOpenCalendar.value = it
+            consumedDeepLink = true
+        }
         intent.getStringExtra(Notifications.EXTRA_ANSWER_FROM)?.let {
             pendingAnswerFrom.value = it
             pendingAnswerCallId.value =
@@ -304,6 +332,8 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra(Notifications.EXTRA_THREAD_ANCHOR)
             intent.removeExtra(Notifications.EXTRA_OPEN_MAIL)
             intent.removeExtra(Notifications.EXTRA_OPEN_ACTIONS)
+            intent.removeExtra(Notifications.EXTRA_OPEN_ORRERY)
+            intent.removeExtra(Notifications.EXTRA_OPEN_CALENDAR)
             setIntent(intent)
         }
         ShareIntent.from(intent)?.let {

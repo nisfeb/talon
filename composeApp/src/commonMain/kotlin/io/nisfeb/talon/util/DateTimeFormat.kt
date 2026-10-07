@@ -30,32 +30,46 @@ private fun localIn(ms: Long, zone: TimeZone): LocalDateTime =
 
 private val MONTH_DAY_TIME = LocalDateTime.Format {
     monthName(MonthNames.ENGLISH_ABBREVIATED); char(' ')
-    dayOfMonth(Padding.NONE); char(' ')
+    day(Padding.NONE); char(' ')
     hour(); char(':'); minute()
 }
 private val MONTH_DAY_YEAR = LocalDateTime.Format {
     monthName(MonthNames.ENGLISH_ABBREVIATED); char(' ')
-    dayOfMonth(Padding.NONE); chars(", "); year()
+    day(Padding.NONE); chars(", "); year()
 }
 private val MONTH_DAY = LocalDateTime.Format {
-    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); dayOfMonth(Padding.NONE)
+    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); day(Padding.NONE)
 }
 private val TIME_24 = LocalDateTime.Format {
     hour(); char(':'); minute()
 }
 private val WEEKDAY_MONTH_DAY = LocalDateTime.Format {
     dayOfWeek(DayOfWeekNames.ENGLISH_ABBREVIATED); chars(", ")
-    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); dayOfMonth(Padding.NONE)
+    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); day(Padding.NONE)
 }
 private val TIME_12 = LocalDateTime.Format {
     amPmHour(Padding.NONE); char(':'); minute(); char(' '); amPmMarker("AM", "PM")
 }
+private val DATE_LONG = kotlinx.datetime.LocalDate.Format {
+    dayOfWeek(DayOfWeekNames.ENGLISH_ABBREVIATED); chars(", ")
+    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); day(Padding.NONE); chars(", "); year()
+}
+private val DATE_NO_YEAR = kotlinx.datetime.LocalDate.Format {
+    monthName(MonthNames.ENGLISH_ABBREVIATED); char(' '); day(Padding.NONE)
+}
+
+/** "Fri, Jul 10, 2026": a calendar date in words, where "2026-07-10" was shown. */
+fun formatDate(date: kotlinx.datetime.LocalDate): String = DATE_LONG.format(date)
+
+/** "Jul 10": a date whose year does not matter, as a birthday's. */
+fun formatDateNoYear(date: kotlinx.datetime.LocalDate): String = DATE_NO_YEAR.format(date)
+
 private val WEEKDAY_SHORT = LocalDateTime.Format {
     dayOfWeek(DayOfWeekNames.ENGLISH_ABBREVIATED)
 }
 private val FULL_LOCAL = LocalDateTime.Format {
     dayOfWeek(DayOfWeekNames.ENGLISH_FULL); chars(", ")
-    monthName(MonthNames.ENGLISH_FULL); char(' '); dayOfMonth(Padding.NONE); char(' '); year()
+    monthName(MonthNames.ENGLISH_FULL); char(' '); day(Padding.NONE); char(' '); year()
     chars(" at "); hour(); char(':'); minute()
 }
 
@@ -67,6 +81,18 @@ fun formatMonthDayYear(ms: Long): String = MONTH_DAY_YEAR.format(local(ms))
 
 /** "MMM d" — e.g. "Jul 10". */
 fun formatMonthDay(ms: Long): String = MONTH_DAY.format(local(ms))
+
+/** The 12 or 24 hour clock the owner chose (Settings, Appearance, Time), set by the platform UiSettings. */
+object ClockStyle {
+    val twentyFourHour = kotlinx.coroutines.flow.MutableStateFlow(false)
+}
+
+/** A time of day as the owner reads clocks: "13:26" or "1:26 PM". */
+fun formatClock(ms: Long, zone: TimeZone = TimeZone.currentSystemDefault()): String =
+    (if (ClockStyle.twentyFourHour.value) TIME_24 else TIME_12).format(localIn(ms, zone))
+
+/** "Jul 10 13:26" or "Jul 10 1:26 PM", as the owner reads clocks. */
+fun formatMonthDayClock(ms: Long): String = "${formatMonthDay(ms)} ${formatClock(ms)}"
 
 /** "HH:mm" — 24-hour, e.g. "13:26". */
 fun formatTime24(ms: Long): String = TIME_24.format(local(ms))

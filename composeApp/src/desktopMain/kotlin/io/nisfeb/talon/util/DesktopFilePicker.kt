@@ -1,90 +1,69 @@
 package io.nisfeb.talon.util
 
+import io.github.vinceglb.filekit.FileKit
+import io.github.vinceglb.filekit.dialogs.FileKitDialogParent
+import io.github.vinceglb.filekit.dialogs.FileKitDialogSettings
+import io.github.vinceglb.filekit.dialogs.FileKitType
+import io.github.vinceglb.filekit.dialogs.openFilePicker
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import javax.swing.JFileChooser
-import javax.swing.filechooser.FileNameExtensionFilter
+import java.io.File
 
 /**
- * Swing-based image picker for desktop. Swing components must only
- * be touched on the AWT event thread (EDT) — calling
- * showOpenDialog() from an arbitrary IO thread is undefined
- * behavior and on macOS specifically tends to deadlock or crash
- * AppKit. The dialog blocks the EDT while open, but Compose's
- * coroutine isn't on the Swing thread so the UI stays responsive.
+ * The system's own file picker on desktop, through FileKit: the
+ * xdg-desktop-portal on Linux (the desktop's dialog, KDE's or GNOME's;
+ * AWT's when no portal runs), NSOpenPanel on macOS, the Windows dialog.
+ * It used Swing's JFileChooser, which looks like no system's. FileKit
+ * puts each dialog on the thread its platform needs, so this does not.
  *
- * File reads run on Dispatchers.IO afterward so they don't park
- * the EDT for large images.
+ * Reentry guard: a Mutex serializes concurrent picks. Without it,
+ * double-tapping the attach button would queue two dialogs — the user
+ * picks once, dismisses, then a second picker pops up unexpectedly.
  *
- * Reentry guard: a Mutex serializes concurrent pickImage() calls.
- * Without it, double-tapping the attach button would queue two
- * modal dialogs — the user picks once, dismisses, then a second
- * picker pops up unexpectedly.
+ * A file that cannot be read throws, as [rememberImagePicker] promises,
+ * so the caller says so rather than the pick doing nothing. The read runs
+ * on Dispatchers.IO so a large file does not hold up the UI.
  */
-private const val TAG = "DesktopFilePicker"
-
 class DesktopFilePicker : FilePicker {
     private val mutex = Mutex()
 
-    override suspend fun pickImage(): PickedImage? = mutex.withLock {
-        val file = withContext(Dispatchers.Swing) {
-            val chooser = JFileChooser().apply {
-                dialogTitle = "Pick an image"
-                fileFilter = FileNameExtensionFilter(
-                    "Images (jpg, png, gif, webp, bmp)",
-                    "jpg", "jpeg", "png", "gif", "webp", "bmp",
-                )
-                isAcceptAllFileFilterUsed = false
-            }
-            if (chooser.showOpenDialog(appFrame()) != JFileChooser.APPROVE_OPTION) null
-            else chooser.selectedFile
-        } ?: return null
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                PickedImage(
-                    bytes = file.readBytes(),
-                    mimeType = io.nisfeb.talon.ui.mimeForName(file.name),
-                    displayName = file.name,
-                )
-            }.onFailure {
-                Log.w(TAG, "read failed for ${file.absolutePath}: ${it.message}")
-            }.getOrNull()
-        }
+    override suspend fun pickImage(): PickedImage? {
+        val file = pick(FileKitType.File(IMAGE_EXTENSIONS), "Pick an image") ?: return null
+        return read(file, io.nisfeb.talon.ui.mimeForName(file.name))
     }
 
-    override suspend fun pickAnyFile(): PickedImage? = mutex.withLock {
-        val file = withContext(Dispatchers.Swing) {
-            val chooser = JFileChooser().apply {
-                dialogTitle = "Pick a file"
-                isAcceptAllFileFilterUsed = true
-            }
-            if (chooser.showOpenDialog(appFrame()) != JFileChooser.APPROVE_OPTION) null
-            else chooser.selectedFile
-        } ?: return null
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                val probedMime = runCatching {
-                    java.nio.file.Files.probeContentType(file.toPath())
-                }.getOrNull()
-                PickedImage(
-                    bytes = file.readBytes(),
-                    mimeType = probedMime
-                        ?: io.nisfeb.talon.ui.mimeForName(file.name),
-                    displayName = file.name,
-                )
-            }.onFailure {
-                Log.w(TAG, "read failed for ${file.absolutePath}: ${it.message}")
-            }.getOrNull()
+    override suspend fun pickAnyFile(): PickedImage? {
+        val file = pick(FileKitType.File(), "Pick a file") ?: return null
+        val probed = withContext(Dispatchers.IO) {
+            runCatching { java.nio.file.Files.probeContentType(file.toPath()) }.getOrNull()
         }
+        return read(file, probed ?: io.nisfeb.talon.ui.mimeForName(file.name))
     }
 
-    // Parent the chooser to the app window so it opens over Talon and
-    // stays in front — showOpenDialog(null) lets some WMs center it on
-    // the primary monitor or stack it behind the app. Same title-based
-    // lookup Main.kt's bring-to-front routine uses; runs on the EDT.
+    private suspend fun pick(type: FileKitType, title: String): File? = mutex.withLock {
+        FileKit.openFilePicker(
+            type = type,
+            dialogSettings = FileKitDialogSettings(title = title, parent = appFrame()?.let(FileKitDialogParent::awt)),
+        )?.file
+    }
+
+    private suspend fun read(file: File, mimeType: String): PickedImage = withContext(Dispatchers.IO) {
+        PickedImage(bytes = file.readBytes(), mimeType = mimeType, displayName = file.name)
+    }
+
+    // Parent the dialog to the app window so it opens over Talon and
+    // stays in front — with no parent some WMs center it on the primary
+    // monitor or stack it behind the app. Same title-based lookup
+    // Main.kt's bring-to-front routine uses.
     private fun appFrame(): java.awt.Frame? =
         java.awt.Frame.getFrames().firstOrNull { it.title == "Talon" }
+
+    private companion object {
+        // Both cases: the Linux portal matches its globs case-sensitively,
+        // and a camera's IMG_0412.JPG was not offered.
+        val IMAGE_EXTENSIONS = listOf("jpg", "jpeg", "png", "gif", "webp", "bmp")
+            .flatMap { listOf(it, it.uppercase()) }.toSet()
+    }
 }

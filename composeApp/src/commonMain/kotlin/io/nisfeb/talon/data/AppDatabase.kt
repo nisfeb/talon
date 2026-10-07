@@ -1,9 +1,11 @@
 package io.nisfeb.talon.data
 
+
 import androidx.room.ConstructedBy
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.RoomDatabaseConstructor
+import androidx.sqlite.execSQL
 
 /**
  * KMP-aware copy of the production AppDatabase. The `@Database`
@@ -43,9 +45,6 @@ import androidx.room.RoomDatabaseConstructor
         MessageEmbeddingEntity::class,
         BookmarkFolderEntity::class,
         BookmarkFolderMemberEntity::class,
-        WatchwordEntity::class,
-        WatchwordHitEntity::class,
-        WatchwordChatExcludeEntity::class,
         MessageMediaEntity::class,
         RailItemPrefEntity::class,
         DmInviteEntity::class,
@@ -63,8 +62,10 @@ import androidx.room.RoomDatabaseConstructor
         OrrerySentEntity::class,
         CometDomeEntity::class,
         UrbUnfurlEntity::class,
+        FollowedThreadEntity::class,
+        OrreryCacheEntity::class,
     ],
-    version = 50,
+    version = 55,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -83,7 +84,6 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun reactionUsage(): ReactionUsageDao
     abstract fun embeddings(): EmbeddingDao
     abstract fun bookmarkFolders(): BookmarkFolderDao
-    abstract fun watchwords(): WatchwordsDao
     abstract fun messageMedia(): MessageMediaDao
     abstract fun railItemPrefs(): RailItemPrefDao
     abstract fun dmInvites(): DmInviteDao
@@ -99,6 +99,8 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun orrerySent(): OrrerySentDao
     abstract fun cometDomes(): CometDomeDao
     abstract fun urbUnfurls(): UrbUnfurlDao
+    abstract fun followedThreads(): FollowedThreadDao
+    abstract fun orreryCache(): OrreryCacheDao
 }
 
 /**
@@ -113,3 +115,46 @@ expect abstract class AppDatabase : RoomDatabase {
 expect object AppDatabaseConstructor : RoomDatabaseConstructor<AppDatabase> {
     override fun initialize(): AppDatabase
 }
+
+/**
+ * 51 to 52: watchwords were taken out of Talon, and their three tables
+ * with them. Named here so every platform drops the same ones; without a
+ * step the fallback would have dropped every table instead.
+ */
+internal val WATCHWORDS_DROP_SQL = listOf(
+    "DROP TABLE IF EXISTS `watchword_hits`",
+    "DROP TABLE IF EXISTS `watchword_chat_excludes`",
+    "DROP TABLE IF EXISTS `watchwords`",
+)
+
+/** See [WATCHWORDS_DROP_SQL]. Android runs the same statements its own way. */
+val WATCHWORDS_DROP_MIGRATION = object : androidx.room.migration.Migration(51, 52) {
+    override fun migrate(connection: androidx.sqlite.SQLiteConnection) {
+        WATCHWORDS_DROP_SQL.forEach { connection.execSQL(it) }
+    }
+}
+
+/**
+ * 52 to 53: a turn keeps what its run did ([AssistantHistoryEntity.log]).
+ * One column; the fallback would have dropped every table for it.
+ */
+internal const val ASSISTANT_LOG_SQL = "ALTER TABLE `assistant_history` ADD COLUMN `log` TEXT NOT NULL DEFAULT ''"
+
+/** See [ASSISTANT_LOG_SQL]. Android runs the same statement its own way. */
+val ASSISTANT_LOG_MIGRATION = object : androidx.room.migration.Migration(52, 53) {
+    override fun migrate(connection: androidx.sqlite.SQLiteConnection) {
+        connection.execSQL(ASSISTANT_LOG_SQL)
+    }
+}
+
+/**
+ * Every migration the desktop and iOS databases take, so neither can miss
+ * one the other has: this PR added four, to both by hand. Android runs
+ * the same changes through its own Migration objects.
+ */
+val SHARED_MIGRATIONS = arrayOf(
+    MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION,
+    COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION,
+    URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, WATCHWORDS_DROP_MIGRATION, ASSISTANT_LOG_MIGRATION,
+    FOLLOWED_THREADS_MIGRATION, ORRERY_CACHE_MIGRATION,
+)

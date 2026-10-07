@@ -22,7 +22,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -53,7 +52,7 @@ fun GroupAdminListScreen(
     val cached by repo.adminGroupsFlow.collectAsState()
     val groups = cached ?: emptyList()
     var refreshing by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<Throwable?>(null) }
     // Nothing loaded yet and nothing gone wrong: a failed first load is
     // an error to show, not a spinner to leave running.
     val loading = cached == null && error == null
@@ -61,12 +60,13 @@ fun GroupAdminListScreen(
     var creating by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
-        refreshing = cached == null
-        runCatching { repo.refreshAdminGroups() }
-            .onFailure { error = it.message ?: it::class.simpleName }
+    suspend fun refresh(force: Boolean) {
+        refreshing = true
+        error = null
+        runCatching { repo.refreshAdminGroups(force = force) }.onFailure { error = it }
         refreshing = false
     }
+    LaunchedEffect(Unit) { refresh(force = false) }
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -85,23 +85,13 @@ fun GroupAdminListScreen(
                     strokeWidth = 2.dp,
                 )
             }
-            IconButton(
-                enabled = !creating,
+            io.nisfeb.talon.ui.IconButton(tip = "New group", enabled = !creating,
                 onClick = { newGroupOpen = true },
             ) {
                 Icon(Icons.Filled.Add, contentDescription = "New group")
             }
-            IconButton(
-                enabled = !refreshing,
-                onClick = {
-                    scope.launch {
-                        refreshing = true
-                        error = null
-                        runCatching { repo.refreshAdminGroups(force = true) }
-                            .onFailure { error = it.message ?: it::class.simpleName }
-                        refreshing = false
-                    }
-                },
+            io.nisfeb.talon.ui.IconButton(tip = "Refresh", enabled = !refreshing,
+                onClick = { scope.launch { refresh(force = true) } },
             ) {
                 Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
             }
@@ -115,12 +105,10 @@ fun GroupAdminListScreen(
 
             // Full-screen error only when the cache has nothing to show;
             // a failed refresh over a populated list becomes a banner.
-            error != null && groups.isEmpty() -> Text(
-                "Couldn't load groups: $error",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(24.dp),
-            )
+            error != null && groups.isEmpty() -> Column(Modifier.padding(vertical = 16.dp)) {
+                io.nisfeb.talon.ui.ProblemLine(io.nisfeb.talon.util.problemOf("Couldn't load groups", error!!))
+                TextButton(onClick = { scope.launch { refresh(force = true) } }, modifier = Modifier.padding(start = 8.dp)) { Text("Try again") }
+            }
 
             groups.isEmpty() -> Text(
                 "You're not an admin of any groups.",
@@ -130,15 +118,7 @@ fun GroupAdminListScreen(
             )
 
             else -> Column {
-                error?.let {
-                    Text(
-                        "Couldn't refresh: $it",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        maxLines = 1,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    )
-                }
+                error?.let { io.nisfeb.talon.ui.ProblemLine(io.nisfeb.talon.util.problemOf("Couldn't refresh", it)) }
                 LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 4.dp),
@@ -185,7 +165,7 @@ fun GroupAdminListScreen(
         var description by remember { mutableStateOf("") }
         // Dialog-local: the screen-level `error` renders behind the
         // dialog where the user can't see it.
-        var dialogError by remember { mutableStateOf<String?>(null) }
+        var dialogError by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
         AlertDialog(
             onDismissRequest = { if (!creating) newGroupOpen = false },
             title = { Text("New group") },
@@ -220,13 +200,7 @@ fun GroupAdminListScreen(
                             )
                         }
                     }
-                    dialogError?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
+                    dialogError?.let { io.nisfeb.talon.ui.ProblemLine(it) }
                 }
             },
             confirmButton = {
@@ -247,7 +221,7 @@ fun GroupAdminListScreen(
                                 onOpenGroup(flag)
                             }.onFailure {
                                 creating = false
-                                dialogError = it.message ?: it::class.simpleName
+                                dialogError = io.nisfeb.talon.util.problemOf("Couldn't create the group", it)
                             }
                         }
                     },

@@ -10,6 +10,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
@@ -61,6 +63,8 @@ class HomeListTest {
         seed: suspend AppDatabase.() -> Unit,
         synced: Boolean = false,
         shown: androidx.compose.runtime.State<Boolean> = androidx.compose.runtime.mutableStateOf(true),
+        /** Groups by their latest activity, as a phone set to Recent has them; else the saved order. */
+        recent: Boolean = false,
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-home-").toFile()
@@ -88,10 +92,11 @@ class HomeListTest {
                             onOpenStatusFeed = { did += "Statuses" }, onOpenBookmarks = { did += "Bookmarks" },
                             onOpenActivity = { did += "Activity" }, onOpenSettings = { did += "Settings" },
                             onOpenMail = { did += "Mail" }, onOpenCalendar = { did += "Calendar" },
-                            onOpenContacts = { did += "Contacts" }, onOpenWatchwords = { did += "Watchwords" },
+                            onOpenContacts = { did += "Contacts" },
                             onOpenAdministration = { did += "Administration" }, onOpenInvites = { did += "Invites" },
                             onOpenHome = { did += "Home" },
                             activeShip = "~zod", allShips = listOf("~zod"),
+                            folderItemOrder = if (recent) io.nisfeb.talon.ui.FolderItemOrder.Recent else io.nisfeb.talon.ui.FolderItemOrder.Manual,
                         )
                     }
                 }
@@ -196,6 +201,62 @@ class HomeListTest {
         }
     }
 
+    private val manyGroups: suspend AppDatabase.() -> Unit = {
+        val names = (0 until 40).map { "Group %02d".format(it) }
+        groups().upsertGroups(names.mapIndexed { i, n -> GroupEntity("~bus/g$i", n, null) })
+        groups().upsertChannelGroups(names.indices.map { i -> ChannelGroupEntity("chat/~bus/c$i", "~bus/g$i", title = "general") })
+        // Newest first, so the list reads Group 00 down to Group 39.
+        messages().upsertAll(names.indices.map { i -> msg("chat/~bus/c$i", "1701411845${100 + i}", "~bus", "hi", 100_000L - i) })
+    }
+
+    /** What new messages do to a group, the oldest here: a post, and an unread count with its recency. */
+    private fun newsForLast() = runBlocking {
+        db.messages().upsert(msg("chat/~bus/c39", "170141184599", "~bus", "news", 200_000L))
+        db.unreads().upsert(UnreadEntity("chat/~bus/c39", count = 1, notifyCount = 0, recencyMs = 200_000L))
+    }
+
+    private fun ComposeUiTest.top(text: String) = onNodeWithText(text).fetchSemanticsNode().boundsInRoot.top
+
+    // At the top, a group with new messages moved above the first row; the
+    // list anchored on that row, so the group landed just out of sight.
+    @Test
+    fun `at the top, a conversation that moves up stays in view`() = home(seed = manyGroups, recent = true) {
+        shows("Group 00")
+        val list = io.nisfeb.talon.ui.screens.HomeListSnapshot.active!!.listState
+        newsForLast()
+        waitUntil(timeoutMillis = 5_000) {
+            onAllNodesWithText("Group 39").fetchSemanticsNodes().isNotEmpty() && top("Group 39") < top("Group 00")
+        }
+        waitForIdle()
+        assertEquals(0 to 0, list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset)
+    }
+
+    @Test
+    fun `scrolled down, a conversation that moves up does not pull the list to the top`() = home(seed = manyGroups, recent = true) {
+        shows("Group 00")
+        val list = io.nisfeb.talon.ui.screens.HomeListSnapshot.active!!.listState
+        runOnIdle { runBlocking { list.scrollToItem(10) } }
+        shows("Group 10")
+        newsForLast()
+        waitForIdle()
+        Thread.sleep(500)
+        waitForIdle()
+        assertTrue(list.firstVisibleItemIndex > 0, "pulled to the top")
+    }
+
+    // Moved a little by the user, the list stays where it was put: the
+    // check that brings a new arrival into view must not take it back.
+    @Test
+    fun `a small scroll from the top stays where it was put`() = home(seed = manyGroups, recent = true) {
+        shows("Group 00")
+        val list = io.nisfeb.talon.ui.screens.HomeListSnapshot.active!!.listState
+        onNodeWithText("Group 02").performTouchInput { swipeUp(startY = centerY, endY = centerY - 60f, durationMillis = 400) }
+        waitForIdle()
+        Thread.sleep(300)
+        waitForIdle()
+        assertTrue(list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 0, "taken back to the top")
+    }
+
     @Test
     fun `each tab keeps its own place across a switch`() = home(seed = {
         val names = (0 until 40).map { "Group %02d".format(it) }
@@ -296,7 +357,7 @@ class HomeListTest {
     @Test
     fun `every place in the More menu opens, and signing out is last`() = home(seed = {}) {
         val places = listOf("Home", "My profile", "Statuses", "Mail", "Bookmarks", "Activity", "Calendar", "Contacts",
-            "Watchwords", "Administration", "Invites", "Settings", "Sign out")
+            "Administration", "Invites", "Settings", "Sign out")
         for (place in places) {
             onNodeWithContentDescription("More").performClick()
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(place).fetchSemanticsNodes().isNotEmpty() }
@@ -314,7 +375,7 @@ class HomeListTest {
         onNode(hasSetTextAction() and hasText("Name")).performTextInput("Friends")
         onNodeWithText("Create").performClick()
         tap("Friends")
-        shows("This folder is empty. Long-press a chat or group to add it.")
+        shows("This folder is empty. Right-click a chat or group to add it.")
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("settings").any { "Friends" in it.json.toString() } }
     }
 

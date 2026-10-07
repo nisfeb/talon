@@ -19,7 +19,7 @@ class AssistantActionsTest {
     }
 
     @Test fun `dates and clocks are strict`() {
-        assertEquals(19, parseDate("2026-09-19")!!.dayOfMonth)
+        assertEquals(19, parseDate("2026-09-19")!!.day)
         assertNull(parseDate("Saturday"))
         assertEquals(12 * 60 + 30, parseClock("12:30"))
         assertNull(parseClock("25:00"))

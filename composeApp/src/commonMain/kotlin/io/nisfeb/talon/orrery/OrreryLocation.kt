@@ -1,10 +1,13 @@
 package io.nisfeb.talon.orrery
 
+import io.nisfeb.talon.util.formatDecimals
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.OrrerySentDao
 import io.nisfeb.talon.data.OrrerySentEntity
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.createAppHttpClient
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -96,8 +99,12 @@ suspend fun sendLocation(
 ): Result<Unit> = runCatching {
     val token = db.orreryAccounts().get(ship)?.token ?: return Result.success(Unit)
     val api = OrreryApi(http, bare, url)
-    val state = api.stateJson(token)
     val sent = db.orrerySent()
+    // First and on every fix, before the places below, whose read is the
+    // whole view and the slow part on a busy ship: the leave alert needs
+    // where the owner is now, not only when the place changed.
+    sendPosition(api, sent, ship, token, fix)
+    val state = knownPlaces(api, sent, ship, token, fix.atMs)
     val last = sent.get(ship, LAST_KEY)?.value?.let { runCatching { kotlinx.serialization.json.Json.parseToJsonElement(it) }.getOrNull() }
     val value = locationValue(fix, geoPlaces(state), name, last) ?: return Result.success(Unit)
     if (value == last) return Result.success(Unit)
@@ -112,7 +119,63 @@ suspend fun sendLocation(
 private const val LAST_KEY = "location:last"
 
 /**
+ * The owner and the places, from a state read whole at most every
+ * [PLACES_EVERY_MS]. On a trip a fix comes each minute, and a whole
+ * state read with each was 3.5 s of a busy ship's time a minute for the
+ * whole drive; places hardly change in ten. Kept as a state of just
+ * those, so [geoPlaces] and [OrreryText.me] read it as they read the
+ * whole one, and arriving somewhere known is still said at that fix.
+ */
+private suspend fun knownPlaces(api: OrreryApi, sent: OrrerySentDao, ship: String, token: String, atMs: Long): JsonObject {
+    sent.get(ship, PLACES_KEY)?.takeIf { atMs - it.atMs in 0 until PLACES_EVERY_MS }
+        ?.let { row -> runCatching { kotlinx.serialization.json.Json.parseToJsonElement(row.value) as? JsonObject }.getOrNull() }
+        ?.let { return it }
+    val state = api.stateJson(token)
+    val kept = buildJsonObject {
+        state["me"]?.let { put("me", it) }
+        put("bodies", JsonArray(OrreryText.bodies(state).filter { it["id"].asText()?.startsWith("place/") == true }))
+    }
+    sent.put(OrrerySentEntity(ship, PLACES_KEY, kept.toString(), atMs))
+    return kept
+}
+
+private const val PLACES_KEY = "location:places"
+
+/** How long the places read for a fix serve the fixes after it. */
+const val PLACES_EVERY_MS = 10 * 60_000L
+
+/**
+ * The fix to the metre, for the ship's leave alerts. An orrery without
+ * the route (before 69) answers 404: remembered a day per ship, so an
+ * older ship is not asked on every move, and asked again once it may
+ * have been updated. Any other refusal fails the send, so the worker
+ * tries again.
+ */
+private suspend fun sendPosition(api: OrreryApi, sent: OrrerySentDao, ship: String, token: String, fix: LocationFix) {
+    val missing = sent.get(ship, POSITION_MISSING)
+    if (missing != null && fix.atMs - missing.atMs < DAY_MS) return
+    try {
+        api.postPosition(token, fix)
+    } catch (e: OrreryError.Refused) {
+        if (e.status != 404) throw e
+        sent.put(OrrerySentEntity(ship, POSITION_MISSING, "", fix.atMs))
+        Log.i("OrreryLocation", "this orrery takes no position (before 69); asking again in a day")
+    }
+}
+
+private const val POSITION_MISSING = "position:missing"
+
+/**
+ * `{"lat":30.201200,"lon":-81.603400,"acc":12,"at":"…Z"}`: decimal
+ * degrees as JSON numbers in fixed decimals, because the ship reads each
+ * as `-?\d+(\.\d+)?` (orrery's +coordinate) and a Double's own text can
+ * be `1.0E-4`. Six places is a tenth of a metre; the accuracy is metres.
+ */
+internal fun positionBody(fix: LocationFix): String =
+    """{"lat":${fix.lat.formatDecimals(6)},"lon":${fix.lon.formatDecimals(6)},"acc":${fix.accuracyM.formatDecimals(0)},"at":"${isoUtc(fix.atMs)}"}"""
+
+/**
  * The key's client, made once. It used to be made per fix and never
  * closed, so every move left a connection pool and its threads behind.
  */
-private val keyClient: HttpClient by lazy { createAppHttpClient() }
+internal val keyClient: HttpClient by lazy { createAppHttpClient() }

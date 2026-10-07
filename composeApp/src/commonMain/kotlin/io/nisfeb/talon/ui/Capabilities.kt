@@ -23,6 +23,7 @@ package io.nisfeb.talon.ui
  *  - isVideoCallsSupported — A, D, i: camera capture + render end-to-end on all three.
  *  - isPartyVideoSupported — A, D, i: PeerLink publishes and renders cameras on all three.
  *  - isCameraSwitchSupported — A, i; D: a webcam has one lens and no switch.
+ *  - isScreenShareSupported — D (webrtc-java captures a screen or window). A: port pending (MediaProjection behind a foreground service). i: port pending (a ReplayKit broadcast extension).
  *  - isEdgeSwipeBackSupported — i (Compose gets none of UIKit's gesture); A: the system back owns the edge; D: no touch edge.
  *  - isDrawerNavigation — A, i (no room for a rail); D: the permanent rail is already one click from anywhere.
  *  - isTouchPrimary — A, i (thumb-sized rows); D: mouse + close screen favour density.
@@ -32,6 +33,9 @@ package io.nisfeb.talon.ui
  *  - isUrbWebViewSupported — A, i (in-app webview popover); D: hands off to the system browser.
  *  - isLocalTriageSupported — D (llama.cpp on the JVM, or a local Ollama), A (MediaPipe LLM Inference), i (Apple's system model on iOS 26, else llama.cpp).
  *  - isLocationSharingSupported — A (LocationManager wakes a receiver on a significant move). D: a computer does not move with you. i: port pending (CLLocationManager significant-change monitoring, Always authorization, Info.plist strings).
+ *  - isHealthSharingSupported — A (Health Connect: steps, exercise, sleep). D: a computer holds no health data. i: port pending (HealthKit statistics and sample queries, the HealthKit entitlement, Info.plist strings).
+ *  - isRelayNotificationSetupNeeded — i: the app is suspended in the background, so the relay's push is its only notification. A: a foreground service keeps the ship's stream. D: notifies while it runs.
+ *  - isAppIconBadgeSupported — i: the unread count on the app icon, a switch in Settings (off until turned on). A: launchers draw their own dot from the notifications. D: no icon to badge.
  *  - isArmillaryPurchaseSupported — A, D; i on the US App Store storefront only. Apple allows a button to an outside checkout there and nowhere else (guideline 3.1.1(a)), so elsewhere buying, its pitch and every "top up" go. The card, the balance and the history do not depend on it.
  *
  * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
@@ -247,6 +251,14 @@ expect val isVideoCallsSupported: Boolean
 expect val isPartyVideoSupported: Boolean
 
 /**
+ * Sharing a screen or a window on a call or a party line, sent in place
+ * of the camera. Desktop only: webrtc-java captures screens and windows
+ * on X11, Wayland (through the system portal), macOS and Windows. Gates
+ * the share control (CLAUDE.md #3); everyone can still see a share.
+ */
+expect val isScreenShareSupported: Boolean
+
+/**
  * Whether the camera can be flipped front/back. Android: true
  * (CameraVideoCapturer.switchCamera). iOS: true (the capturer restarts
  * on the other device). Desktop: false — a webcam has one lens and no
@@ -280,6 +292,12 @@ expect val isDrawerNavigation: Boolean
  * the useful one; more rows on screen is the point there.
  */
 expect val isTouchPrimary: Boolean
+
+/** "Tap" where touch is the way in, "Click" where a pointer is: hints said tap on desktop. */
+val tapWord: String get() = if (isTouchPrimary) "Tap" else "Click"
+
+/** How a thing's own menu is opened: "Long-press" on touch, "Right-click" with a pointer. */
+val holdWord: String get() = if (isTouchPrimary) "Long-press" else "Right-click"
 
 /**
  * Whether emoji need an explicit font span to render in colour.
@@ -330,6 +348,13 @@ expect val isUrbWebViewSupported: Boolean
 expect val isLocationSharingSupported: Boolean
 
 /**
+ * Whether this device can send orrery a summary of each day's health:
+ * steps, workouts and sleep, read from the phone's health store. Gates
+ * the switch under the location one. See [HealthSharing].
+ */
+expect val isHealthSharingSupported: Boolean
+
+/**
  * Whether credit can be bought from inside the app.
  *
  * Armillary's card shows the balance, the warning, the history and the
@@ -348,3 +373,15 @@ expect val isArmillaryPurchaseSupported: Boolean
  * alpha-3 code, null when StoreKit has none, which counts as not.
  */
 fun outsideCheckoutAllowedOnAppStore(storefrontCountry: String?): Boolean = storefrontCountry == "USA"
+
+/**
+ * Whether this device gets notifications only through the relay, so
+ * signing in asks about it once and Settings offers it plainly. Every
+ * iPhone but one had never registered (2026-10-06): the way in was a
+ * technical Settings panel, and they got no notifications at all.
+ */
+expect val isRelayNotificationSetupNeeded: Boolean
+
+/** The unread count on the app icon, by the owner's choice (iOS). */
+expect val isAppIconBadgeSupported: Boolean
+

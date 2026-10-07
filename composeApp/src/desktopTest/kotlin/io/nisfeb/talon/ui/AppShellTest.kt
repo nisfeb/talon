@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.withKeyDown
@@ -20,6 +21,8 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.unit.dp
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
@@ -52,6 +55,7 @@ class AppShellTest {
     private fun app(
         seed: suspend AppDatabase.() -> Unit = {},
         ai: FakeAiSettings = FakeAiSettings(),
+        ui: UiSettings = InMemoryUiSettings(),
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -84,6 +88,7 @@ class AppShellTest {
                             },
                             drafts = InMemoryDraftStore(),
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
+                            createUiSettings = { ui },
                         )
                     }
                 }
@@ -96,8 +101,11 @@ class AppShellTest {
             scope.cancel()
             // The app closes its databases itself, two seconds after it
             // goes, so work still in flight can finish. Closing them here
-            // too pulled SQLite out from under a running query.
-            tmp.deleteRecursively()
+            // too pulled SQLite out from under a running query, and deleting
+            // the files at once did the same: a read in those two seconds
+            // could not open them (SQLite 14), failing the NEXT test with
+            // "uncaught exceptions before the test started" (CI, 2026-10-07).
+            Thread { Thread.sleep(5_000); tmp.deleteRecursively() }.apply { isDaemon = true }.start()
         }
     }
 
@@ -113,7 +121,6 @@ class AppShellTest {
     fun `every full-screen section opens from the rail and its Back returns to the list`() = app {
         for ((item, marker) in listOf(
             "My profile" to "Edit profile",
-            "Watchwords" to "Add a watchword",
             "Administration" to "Administration",
             "Invites" to "No pending invites",
             "Settings" to "Appearance",
@@ -187,6 +194,27 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { showing("Select a chat to begin") }
     }
 
+    // One Escape closed the image and the chat with it: the image took
+    // the click's focus, went with the post when the viewer replaced it,
+    // and the shell took focus back from the viewer.
+    @Test
+    fun `Escape closes an open image first, and the chat on the second`() = app(seed = {
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"block":{"image":{"src":"https://x.test/cat.png","alt":"a cat","height":300,"width":400}}}]""", "/chat"))
+    }) {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("~bus").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("~bus")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("a cat").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithContentDescription("a cat")[0].performMouseInput { click() }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Close").fetchSemanticsNodes().isNotEmpty() }
+        waitForIdle()
+        onAllNodes(androidx.compose.ui.test.isRoot())[0].performKeyInput { pressKey(Key.Escape) }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Close").fetchSemanticsNodes().isEmpty() }
+        assertTrue(!showing("Select a chat to begin"), "the chat is still open")
+        onAllNodes(androidx.compose.ui.test.isRoot())[0].performKeyInput { pressKey(Key.Escape) }
+        waitUntil(timeoutMillis = 5_000) { showing("Select a chat to begin") }
+    }
+
     @Test
     fun `closing a section by mouse leaves the keyboard working, and a field keeps its focus`() = app(seed = {
         messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat"))
@@ -245,4 +273,69 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("shall we meet").fetchSemanticsNodes().size >= 2 }
         assertTrue(onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size >= 2, "the chat's composer and the thread's, side by side")
     }
+
+    private fun ComposeUiTest.press(key: Key, ctrl: Boolean = false) =
+        onAllNodes(isRoot()).onFirst().performKeyInput { if (ctrl) withKeyDown(Key.CtrlLeft) { pressKey(key) } else pressKey(key) }
+
+    // A shortcut's handler was in the list view, which is not drawn while a
+    // section is: Ctrl+, in the profile did nothing, then opened Settings
+    // as soon as Escape had left the profile.
+    @Test
+    fun `a shortcut works from inside a section, and Escape then leaves for good`() = app {
+        onNodeWithContentDescription("My profile").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Edit profile") }
+        press(Key.Comma, ctrl = true)
+        waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
+        assertTrue(!showing("Edit profile"), "the profile is put down")
+        press(Key.Escape)
+        home()
+        Thread.sleep(500)
+        waitForIdle()
+        assertTrue(!showing("Appearance"), "Settings does not come back")
+    }
+
+    // The profile asked before dropping edits only on Android's back:
+    // on desktop Escape, and a shortcut, dropped them without a word.
+    @Test
+    fun `edits in the profile ask before Escape or a shortcut leave them`() = app {
+        onNodeWithContentDescription("My profile").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+        onAllNodes(hasSetTextAction())[0].performTextInput("Zod")
+        press(Key.Escape)
+        waitUntil(timeoutMillis = 5_000) { showing("Discard your changes?") }
+        onNodeWithText("Cancel").performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("Discard your changes?") }
+        assertTrue(showing("Edit profile") && showing("Zod"), "still editing, the edit kept")
+        press(Key.Comma, ctrl = true)
+        waitUntil(timeoutMillis = 5_000) { showing("Discard your changes?") }
+        assertTrue(!showing("Appearance"))
+        onNodeWithText("Discard").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
+        assertTrue(!showing("Edit profile"), "where the shortcut was going")
+    }
+
+    // A tapped calendar reminder (iOS) set the calendar's flag under the
+    // section open at the time: nothing showed, and back seemed dead.
+    @Test
+    fun `a tapped calendar reminder opens the calendar over an open section`() = app {
+        onNodeWithContentDescription("My profile").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Edit profile") }
+        io.nisfeb.talon.notify.OpenNoticeRequests.request(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX + "nowhere")
+        waitUntil(timeoutMillis = 5_000) { showing("The Today widget on the home page can install it.") }
+        assertTrue(!showing("Edit profile"))
+        press(Key.Escape)
+        home()
+    }
+
+    // Areas of the app get shortcuts the owner sets: pressed anywhere, the
+    // area opens as its rail item would open it.
+    @Test
+    fun `a shortcut the owner set opens its area`() {
+        val ui = InMemoryUiSettings().apply { setKeybinds(mapOf("open:Settings" to null, "open:Contacts" to null, "open:Profile" to KeyCombo("P", alt = true))) }
+        app(ui = ui) {
+            onAllNodes(androidx.compose.ui.test.isRoot())[0].performKeyInput { withKeyDown(Key.AltLeft) { pressKey(Key.P) } }
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Edit profile").fetchSemanticsNodes().isNotEmpty() }
+        }
+    }
 }
+

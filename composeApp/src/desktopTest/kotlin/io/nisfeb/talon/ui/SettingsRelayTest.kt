@@ -50,12 +50,18 @@ class SettingsRelayTest {
         override suspend fun token() = endpoint
     }
 
-    private fun panel(client: RelayClient = relay(), tokens: PushTokenProvider = Tokens("https://push.test/abc"), block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+    private fun panel(
+        client: RelayClient = relay(),
+        tokens: PushTokenProvider = Tokens("https://push.test/abc"),
+        shipPoke: (suspend (kotlinx.serialization.json.JsonElement) -> Unit)? = null,
+        shipPushStatus: (suspend () -> kotlinx.serialization.json.JsonElement?)? = null,
+        block: ComposeUiTest.() -> Unit,
+    ) = runComposeUiTest {
         setContent {
             TalonTheme(darkTheme = false) {
                 SettingsScreen(
                     aiSettings = FakeAiSettings(), themePreference = InMemoryThemePreference(), uiSettings = InMemoryUiSettings(), onBack = {},
-                    relayConfig = RelayPanelConfig(client, relaySettings, tokens, activePatp = "~zod", activeShipUrl = "https://zod.test"),
+                    relayConfig = RelayPanelConfig(client, relaySettings, tokens, activePatp = "~zod", activeShipUrl = "https://zod.test", shipPoke = shipPoke, shipPushStatus = shipPushStatus),
                 )
             }
         }
@@ -86,10 +92,26 @@ class SettingsRelayTest {
         assertEquals("dev-12345678-abc", relaySettings.deviceIdFor("~zod"))
     }
 
+    // A push the receiver does not know shows as a new message on an
+    // older app, so the relay sends "read" only to a device that said it
+    // understands one, on its own route: a relay from before refuses a
+    // registration carrying a field it does not know.
+    @Test
+    fun `a phone whose receiver understands reads says so after registering, not inside it`() = panel(tokens = object : PushTokenProvider {
+        override val platform = "unifiedpush"
+        override val caps = listOf("read")
+        override suspend fun token() = "https://push.test/abc"
+    }) {
+        register("lidlut-tabwed")
+        waitUntil(timeoutMillis = 5_000) { asked.size == 2 }
+        assertTrue(asked[0].startsWith("POST https://relay.test/register") && "caps" !in asked[0], asked[0])
+        assertEquals("""POST https://relay.test/devices/dev-12345678-abc/caps {"caps":["read"]}""", asked[1])
+    }
+
     @Test
     fun `a refused registration says what to check, and keeps nothing`() = panel(client = relay(ok = false)) {
         register("wrong")
-        waitUntil(timeoutMillis = 5_000) { shows("Registration failed.") }
+        waitUntil(timeoutMillis = 5_000) { shows("The relay could not sign in to your ship.") }
         assertEquals("", relaySettings.deviceIdFor("~zod"))
     }
 
@@ -118,4 +140,43 @@ class SettingsRelayTest {
         onNodeWithText("Save endpoint").performClick()
         assertEquals("https://relay.example/v2", relaySettings.endpoint.value)
     }
+
+    // sneagan, on rc42: "I don't see the ricsul relay anywhere in settings",
+    // then "make it more obvious and also name the ship". The line sat
+    // inside the relay panel and said only "your own ship".
+    @Test
+    fun `a device on its ship's notifications says so first, naming the ship`() {
+        val pokes = java.util.concurrent.CopyOnWriteArrayList<String>()
+        relaySettings.setViaShipPush("~zod", true)
+        relaySettings.setTrunkDeviceIdFor("~zod", "t-1")
+        panel(shipPoke = { pokes += it.toString() }) {
+            assertTrue(shows("Notifications come from ~zod"))
+            val row = onNodeWithText("Notifications come from ~zod").fetchSemanticsNode().boundsInRoot.top
+            val relay = onNodeWithText("Push relay").fetchSemanticsNode().boundsInRoot.top
+            assertTrue(row < relay, "above the relay panel, not inside it")
+            onNodeWithText("Use the relay").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Notifications come from the Talon relay") }
+            assertEquals(listOf("""{"push-unregister":"t-1"}"""), pokes.toList())
+            assertTrue(shows("Use my ship"))
+        }
+    }
+
+    @Test
+    fun `a device never on its ship's notifications shows no such row`() = panel(shipPoke = {}) {
+        assertTrue(!shows("Notifications come from"))
+    }
+
+    // Trunk wire 12's status: when the ship last pushed to this device.
+    @Test
+    fun `the ship row says when the ship last pushed here`() {
+        relaySettings.setViaShipPush("~zod", true)
+        relaySettings.setTrunkDeviceIdFor("~zod", "t-1")
+        val status = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"wire":12,"now":1000000,"devices":[{"id":"t-1","sent":{"at":880000,"kind":"message"},"last":{"at":880000,"code":200}}],"drops":[]}""",
+        )
+        panel(shipPoke = {}, shipPushStatus = { status }) {
+            waitUntil(timeoutMillis = 5_000) { shows("Last notification 2 min ago.") }
+        }
+    }
 }
+

@@ -98,7 +98,7 @@ class RemoteAdminE2ETest {
             adminCtl.clearListenLink()
             adminCtl.shareRoom(host, room)
             val first = withTimeout(25_000) { adminCtl.listenLink.first { it != null } }!!
-            assertTrue("/listen/?group=" in first.url, "not a listen page: ${first.url}")
+            assertTrue("/listen/?host=" in first.url, "not a listen page: ${first.url}")
             println("3. link minted by the host")
 
             // 4. Mint a SECOND one. A link expires, so "create another"
@@ -106,7 +106,7 @@ class RemoteAdminE2ETest {
             adminCtl.clearListenLink()
             adminCtl.shareRoom(host, room)
             val second = withTimeout(25_000) { adminCtl.listenLink.first { it != null } }!!
-            assertTrue("/listen/?group=" in second.url, "second link malformed: ${second.url}")
+            assertTrue("/listen/?host=" in second.url, "second link malformed: ${second.url}")
             println("4. a second link can be minted")
 
             // 5. Turn listening back off, and see THAT too.

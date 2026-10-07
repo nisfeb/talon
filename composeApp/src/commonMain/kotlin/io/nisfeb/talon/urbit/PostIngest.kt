@@ -3,6 +3,8 @@ package io.nisfeb.talon.urbit
 import io.nisfeb.talon.data.MessageDao
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.MessageMediaDao
+import io.nisfeb.talon.data.normalized
+import io.nisfeb.talon.data.searchable
 import io.nisfeb.talon.data.ReactionEntity
 import io.nisfeb.talon.ui.ReactionPalette
 import kotlinx.serialization.json.Json
@@ -204,33 +206,23 @@ internal suspend fun MessageDao.upsertWithMedia(
     media: MessageMediaDao,
     message: MessageEntity,
 ) {
-    upsert(message)
-    media.replaceForMessage(
-        whom = message.whom,
-        messageId = message.id,
-        rows = MediaClassifier.extractMedia(message),
-    )
+    // One transaction for the row and its media, as a page's are.
+    upsertPage(media, listOf(message.normalized().searchable()))
 }
 
 /**
- * Upsert a batch of messages + sync each one's media-index rows.
- * `replaceForMessage` is per-message so a partial-batch fixup can't
- * leave the index out of sync with one message but in sync with
- * another.
+ * Upsert a batch of messages + sync each one's media-index rows, in one
+ * transaction, writing only what differs from what is stored.
  */
 internal suspend fun MessageDao.upsertAllWithMedia(
     media: MessageMediaDao,
     messages: List<MessageEntity>,
 ) {
     if (messages.isEmpty()) return
-    upsertAll(messages)
-    for (m in messages) {
-        media.replaceForMessage(
-            whom = m.whom,
-            messageId = m.id,
-            rows = MediaClassifier.extractMedia(m),
-        )
-    }
+    // ponytail: an unchanged row keeps its media rows, so a MediaClassifier
+    // change reaches stored rows only through a reindex (MediaBackfillWorker).
+    val fresh = changedOf(messages)
+    if (fresh.isNotEmpty()) upsertPage(media, fresh)
 }
 
 /**

@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import kotlinx.datetime.number
 import io.nisfeb.talon.util.createTempFileUri
 import io.nisfeb.talon.util.formatDecimals
 import kotlinx.datetime.toLocalDateTime
@@ -122,6 +123,14 @@ internal object CiteCache {
     private val cache = HashMap<Pair<String, String>, MessageEntity>()
     private val mutexes = HashMap<Pair<String, String>, kotlinx.coroutines.sync.Mutex>()
 
+    /**
+     * When a quote last could not be found. Forgotten, one that does not
+     * resolve (deleted, or a reply now read with its whole thread) was
+     * asked of the ship again each time its row came back into view.
+     */
+    private val misses = HashMap<Pair<String, String>, Long>()
+    private const val MISS_KEPT_MS = 2 * 60_000L
+
     suspend fun resolve(
         whom: String,
         da: String,
@@ -129,6 +138,8 @@ internal object CiteCache {
     ): MessageEntity? {
         val key = whom to da
         kotlinx.atomicfu.locks.synchronized(lock) { cache[key] }?.let { return it }
+        val missedAt = kotlinx.atomicfu.locks.synchronized(lock) { misses[key] }
+        if (missedAt != null && io.nisfeb.talon.util.nowMs() - missedAt < MISS_KEPT_MS) return null
         val mutex = kotlinx.atomicfu.locks.synchronized(lock) {
             mutexes.getOrPut(key) { kotlinx.coroutines.sync.Mutex() }
         }
@@ -137,7 +148,7 @@ internal object CiteCache {
             if (cached != null) return@withLock cached
             val result = load()
             kotlinx.atomicfu.locks.synchronized(lock) {
-                if (result != null) cache[key] = result
+                if (result != null) { cache[key] = result; misses.remove(key) } else misses[key] = io.nisfeb.talon.util.nowMs()
                 mutexes.remove(key)
             }
             result
@@ -240,6 +251,9 @@ private fun Modifier.handOverSpans(text: AnnotatedString, layout: State<TextLayo
     }.pointerHoverIcon(if (over) PointerIcon.Hand else PointerIcon.Text, overrideDescendants = over)
 }
 
+/** How much larger an emoji-only message draws than body text. */
+internal const val JUMBO_EMOJI_SCALE = 2.5f
+
 @Composable
 fun StoryRenderer(
     parts: List<StoryPart>,
@@ -293,14 +307,19 @@ fun StoryRenderer(
                         .isNotEmpty()
 
                     if (!hasSpans && !hasAnnotations) {
+                        // A message that is only an emoji or three draws
+                        // them large; the same emoji in a sentence stays
+                        // text-sized.
+                        val jumbo = parts.size == 1 && remember(part.text) { isJumboEmoji(part.text.text) }
+                        val body = MaterialTheme.typography.bodyMedium
                         Text(
-                            part.text.text.applyEmojiSpans(),
-                            style = MaterialTheme.typography.bodyMedium,
+                            remember(part.text, jumbo) { (if (jumbo) part.text.text.trim() else part.text.text).applyEmojiSpans() },
+                            style = if (jumbo) body.copy(fontSize = body.fontSize * JUMBO_EMOJI_SCALE, lineHeight = body.fontSize * JUMBO_EMOJI_SCALE * 1.2f) else body,
                         )
                     } else {
                         val layout = remember { mutableStateOf<TextLayoutResult?>(null) }
                         Text(
-                            text = part.text.withLinkColor(linkColor).applyEmojiSpans(),
+                            text = remember(part.text, linkColor) { part.text.withLinkColor(linkColor).applyEmojiSpans() },
                             style = MaterialTheme.typography.bodyMedium,
                             onTextLayout = { layout.value = it },
                             modifier = if (hasAnnotations) {
@@ -723,8 +742,8 @@ private fun PollWidgetBlock(
                 ),
             )
             Text(
-                if (totalVotes == 0) "Tap an option to vote."
-                else "$totalVotes vote${if (totalVotes == 1) "" else "s"} · tap to change.",
+                if (totalVotes == 0) "${io.nisfeb.talon.ui.tapWord} an option to vote."
+                else "$totalVotes vote${if (totalVotes == 1) "" else "s"} · ${io.nisfeb.talon.ui.tapWord.lowercase()} to change.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
@@ -977,7 +996,7 @@ private fun icsUtc(ms: Long): String {
     val dt = kotlin.time.Instant.fromEpochMilliseconds(ms)
         .toLocalDateTime(kotlinx.datetime.TimeZone.UTC)
     fun p(n: Int, w: Int) = n.toString().padStart(w, '0')
-    return "${p(dt.year, 4)}${p(dt.monthNumber, 2)}${p(dt.dayOfMonth, 2)}T" +
+    return "${p(dt.year, 4)}${p(dt.month.number, 2)}${p(dt.day, 2)}T" +
         "${p(dt.hour, 2)}${p(dt.minute, 2)}${p(dt.second, 2)}Z"
 }
 

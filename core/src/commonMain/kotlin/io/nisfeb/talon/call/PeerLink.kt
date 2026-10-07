@@ -97,6 +97,12 @@ interface PeerLink {
      */
     suspend fun setCameraEnabled(enabled: Boolean): Boolean = false
 
+    /** As [CallEngine.screenSources]. Empty on a down link. */
+    suspend fun screenSources(): List<ScreenSource> = emptyList()
+
+    /** As [CallEngine.setScreenShare], on the up link. False on a down link. */
+    suspend fun setScreenShare(source: ScreenSource?): Boolean = false
+
     /** Flip between front and back cameras. No-op where the camera isn't
      *  switchable (desktop) or the camera is off. Gated in the UI by
      *  [io.nisfeb.talon.ui.isCameraSwitchSupported]. */

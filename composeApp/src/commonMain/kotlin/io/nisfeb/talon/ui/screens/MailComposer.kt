@@ -28,8 +28,8 @@ import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
@@ -252,8 +252,7 @@ fun MailComposer(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(
-                onClick = {
+            io.nisfeb.talon.ui.IconButton(tip = "Close", onClick = {
                     // Closing is instant. What is written is kept by the
                     // dispose above, on the repo's scope; waiting here for
                     // the save and the re-read that follows it meant the
@@ -291,7 +290,6 @@ fun MailComposer(
                         to.isEmpty() -> problem = "Say who this is going to."
                         edits.body.isBlank() -> problem = "Nothing to send."
                         else -> {
-                            sending = true
                             problem = null
                             // The send owns the text from here, on the repo's
                             // scope, so leaving does not stop it and the
@@ -302,21 +300,12 @@ fun MailComposer(
                             // removing a file while an upload waits threw
                             // out of the iterator.
                             val outgoing = files.map { io.nisfeb.talon.mail.MailRepo.Outgoing(it.bytes, it.displayName, it.mimeType) }
-                            val sent = repo.sendMessage(asDraft().copy(to = to), outgoing) { progress = it }
-                            scope.launch {
-                                val failed = sent.await()
-                                if (failed == null) {
-                                    onSent()
-                                } else {
-                                    // Said here, so not again on the list.
-                                    repo.clearSendProblem()
-                                    // Leaving now files what is written, which
-                                    // may have changed since.
-                                    filed = false
-                                    problem = failed.replaceFirstChar { it.uppercase() }
-                                    sending = false
-                                }
-                            }
+                            repo.sendMessage(asDraft().copy(to = to), outgoing)
+                            // Gone at once: held open until the ship took it,
+                            // the composer kept every other message out of
+                            // the pane. The list says it is sending, and a
+                            // send that fails comes back from there whole.
+                            onSent()
                         }
                     }
                 },
@@ -408,7 +397,10 @@ fun MailComposer(
                                 Icon(
                                     androidx.compose.material.icons.Icons.Filled.Close,
                                     contentDescription = "Remove ${nameFor(r)}",
-                                    modifier = Modifier.size(16.dp).clickable(enabled = !sending) { recipients.remove(r) },
+                                    // A 16dp target on a phone; 48 where a finger aims.
+                                    modifier = Modifier.clickable(enabled = !sending) { recipients.remove(r) }
+                                        .then(if (io.nisfeb.talon.ui.isTouchPrimary) Modifier.minimumInteractiveComponentSize() else Modifier)
+                                        .size(16.dp),
                                 )
                             },
                         )

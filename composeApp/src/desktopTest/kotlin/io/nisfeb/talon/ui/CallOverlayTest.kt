@@ -35,7 +35,8 @@ import kotlin.test.assertTrue
 class CallOverlayTest {
     private val ship = FakeShip("~zod").apply {
         scries["trunk/policy"] = "{}"
-        scries["trunk/version"] = """{"wire":9}"""
+        // A ship as current as the app: an older one is offered the update instead of the call.
+        scries["trunk/version"] = """{"wire":${io.nisfeb.talon.call.TrunkWire.WIRE_VERSION}}"""
     }
 
     /** Media that goes where the test says. */

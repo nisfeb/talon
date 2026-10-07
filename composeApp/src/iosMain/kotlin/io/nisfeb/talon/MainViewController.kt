@@ -67,6 +67,8 @@ fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.Na
         IosFiles.write("last-crash.txt", report)
     }
     val http = createAppHttpClient()
+    val imageDownloader = io.nisfeb.talon.ui.IosImageDownloader(http)
+    val relaySettings = io.nisfeb.talon.ui.StoredRelaySettings(io.nisfeb.talon.ui.IosTextStore("relay.json"))
     val sessionStore = createSessionStore()
     val aiSettings = createAiSettings()
     val themePreference = IosThemePreference()
@@ -153,8 +155,16 @@ fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.Na
             // gets an APNs VoIP ring. The token itself arrives from
             // CallPush.swift via IosVoipBridge.
             pushTokenProvider = pushTokenProvider,
+            appIconBadge = io.nisfeb.talon.notify.IosAppIconBadge,
             appForeground = IosAppLifecycle.foreground,
             notifier = notifier,
+            // Without one the viewer hid its download: nothing could save.
+            imageDownloader = imageDownloader,
+            // These two were left to App's in-memory defaults and forgot
+            // themselves on every launch: the relay's endpoint and device
+            // ids, and the drawer's seen dots.
+            relaySettings = relaySettings,
+            createMenuSeen = { s -> io.nisfeb.talon.ui.StoredMenuSeenStore(io.nisfeb.talon.ui.IosTextStore(io.nisfeb.talon.ui.menuSeenFileName(s))) },
         )
         // Back gesture. A Compose view controller gets none of UIKit's
         // navigation edge-swipe, so we draw our own: a narrow strip on

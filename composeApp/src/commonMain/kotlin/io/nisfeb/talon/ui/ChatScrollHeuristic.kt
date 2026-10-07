@@ -54,6 +54,10 @@ fun decideAutoScroll(
     firstVisibleItemIndex: Int,
     pendingSendBaselineSize: Int?,
     pendingSelfSendNewestId: String?,
+    /** The screen is still placing the reader (at the "New" divider, or
+     *  at the bottom): newer rows are the first load, not an arrival, and
+     *  do not take them to the bottom. A send still does. */
+    holdInbound: Boolean = false,
 ): ScrollDecision {
     // Self-send catch-up: when our optimistic upsert has landed (rows
     // grew past the baseline), scroll regardless of position — the
@@ -87,7 +91,7 @@ fun decideAutoScroll(
     val gotNewerHead = newestId != null &&
         newestId != lastNewestId &&
         rowsSize > lastSize
-    val shouldScroll = gotNewerHead && firstVisibleItemIndex <= NEAR_BOTTOM_THRESHOLD
+    val shouldScroll = gotNewerHead && firstVisibleItemIndex <= NEAR_BOTTOM_THRESHOLD && !holdInbound
     return ScrollDecision(
         scrollToBottom = shouldScroll,
         nextBaseline = pendingSendBaselineSize,

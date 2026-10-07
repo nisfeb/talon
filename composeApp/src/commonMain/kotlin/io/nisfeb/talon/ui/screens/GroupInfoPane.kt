@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.submitOnEnter
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,7 +22,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
@@ -87,7 +87,7 @@ fun GroupInfoPane(
     val isPublic = group.public
     var pendingLeave by remember(whom) { mutableStateOf(false) }
     var leaving by remember(whom) { mutableStateOf(false) }
-    var leaveError by remember(whom) { mutableStateOf<String?>(null) }
+    var leaveError by remember(whom) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     var inviteOpen by remember(whom) { mutableStateOf(false) }
     var inviteShip by remember(whom) { mutableStateOf("") }
     var inviteBusy by remember(whom) { mutableStateOf(false) }
@@ -107,6 +107,20 @@ fun GroupInfoPane(
         )
     }
     if (inviteOpen) {
+        // The invite, from its button or Enter in the name.
+        val inviteTo = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
+        val canInvite = !inviteBusy && inviteTo != null && groupFlag != null
+        val sendInvite: () -> Unit = send@{
+            val flag = groupFlag ?: return@send
+            val ship = inviteTo ?: return@send
+            inviteBusy = true
+            inviteResult = null
+            scope.launch {
+                inviteResult = runCatching { repo.inviteToGroup(flag, ship) }
+                    .fold({ "Invited ${io.nisfeb.talon.ui.shipHandle(ship)}." }, { e -> io.nisfeb.talon.ui.inviteFailure(e) })
+                inviteBusy = false
+            }
+        }
         AlertDialog(
             onDismissRequest = { if (!inviteBusy) { inviteOpen = false; inviteResult = null } },
             title = { Text("Invite someone") },
@@ -129,7 +143,9 @@ fun GroupInfoPane(
                         singleLine = false,
                         maxLines = 6,
                         enabled = !inviteBusy,
-                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = io.nisfeb.talon.ui.GoKeyboard,
+                        keyboardActions = io.nisfeb.talon.ui.goActions { if (canInvite) sendInvite() },
+                        modifier = Modifier.fillMaxWidth().submitOnEnter(canInvite, sendInvite),
                     )
                     io.nisfeb.talon.ui.ShipSuggestions(inviteShip, onPick = { inviteShip = it; inviteResult = null }, Modifier.padding(top = 4.dp))
                     val landed = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
@@ -143,21 +159,7 @@ fun GroupInfoPane(
                 }
             },
             confirmButton = {
-                val ship = (invited as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
-                TextButton(
-                    enabled = !inviteBusy && ship != null && groupFlag != null,
-                    onClick = {
-                        val flag = groupFlag ?: return@TextButton
-                        if (ship == null) return@TextButton
-                        inviteBusy = true
-                        inviteResult = null
-                        scope.launch {
-                            inviteResult = runCatching { repo.inviteToGroup(flag, ship) }
-                                .fold({ "Invited ${io.nisfeb.talon.ui.shipHandle(ship)}." }, { e -> io.nisfeb.talon.ui.inviteFailure(e) })
-                            inviteBusy = false
-                        }
-                    },
-                ) { Text(if (inviteBusy) "Inviting…" else "Invite") }
+                TextButton(enabled = canInvite, onClick = sendInvite) { Text(if (inviteBusy) "Inviting…" else "Invite") }
             },
             dismissButton = {
                 TextButton(enabled = !inviteBusy, onClick = { inviteOpen = false; inviteResult = null }) { Text("Close") }
@@ -182,12 +184,6 @@ fun GroupInfoPane(
 
     val notifyPref by remember(whom) { db.notifyPrefs().stream(whom) }
         .collectAsState(initial = null)
-    val excludedWhoms by remember {
-        db.watchwords().streamExcludes()
-    }.collectAsState(initial = emptyList())
-    val isExcludedFromWatchwords = remember(excludedWhoms, whom) {
-        excludedWhoms.any { it.whom == whom }
-    }
     val countsList by remember(whom) {
         db.messageMedia().streamCounts(whom)
     }.collectAsState(initial = emptyList())
@@ -234,9 +230,6 @@ fun GroupInfoPane(
             //   ALL       — every message in the channel
             //   MENTIONS  — only when our patp is referenced (default)
             //   NONE      — muted; nothing surfaces
-            // Plus a watchword-exclusion toggle so chats the user
-            // doesn't want scanned for watchword hits can opt out
-            // even when the level is ALL/MENTIONS.
             val level = levelNow
             val canMutate = repo.settingsSync != null
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -285,23 +278,6 @@ fun GroupInfoPane(
                         }
                     },
                 )
-                Spacer(Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Exclude from watchwords",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Switch(
-                        checked = isExcludedFromWatchwords,
-                        onCheckedChange = { exclude ->
-                            scope.launch { runCatching { repo.watchwords.excludeChat(whom, exclude) } }
-                        },
-                    )
-                }
             }
             HorizontalDivider()
         }
@@ -419,20 +395,18 @@ fun GroupInfoPane(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("You'll be removed from every channel in the group.")
-                    leaveError?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    }
+                    leaveError?.let { io.nisfeb.talon.ui.ProblemLine(it) }
                 }
             },
             confirmButton = {
-                TextButton(enabled = !leaving, onClick = {
-                    val flag = groupFlag ?: return@TextButton
+                io.nisfeb.talon.ui.DestructiveTextButton(enabled = !leaving, onClick = {
+                    val flag = groupFlag ?: return@DestructiveTextButton
                     leaving = true
                     leaveError = null
                     scope.launch {
                         runCatching { repo.leaveGroup(flag) }
                             .onSuccess { pendingLeave = false }
-                            .onFailure { leaveError = it.message ?: it::class.simpleName }
+                            .onFailure { leaveError = io.nisfeb.talon.util.problemOf("Couldn't leave the group", it) }
                         leaving = false
                     }
                 }) { Text(if (leaving) "Leaving…" else "Leave") }

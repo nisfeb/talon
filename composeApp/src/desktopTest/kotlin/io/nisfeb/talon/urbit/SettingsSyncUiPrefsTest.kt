@@ -107,6 +107,71 @@ class SettingsSyncUiPrefsTest {
         assertEquals(sent, pushed("power-features").size, "the same value again is not a change")
     }
 
+    // ─── fonts ────────────────────────────────────────────────────
+
+    private fun fontJson(vararg ids: String, family: String? = null, removed: List<String> = emptyList()) =
+        io.nisfeb.talon.ui.FontSettings(ids.map { io.nisfeb.talon.ui.InstalledFont(it, "F-$it") }, family, removed).toJson()
+
+    // Another device's list is merged in, never taken whole: what this one
+    // has and the other does not goes back up, so the ship holds both.
+    @Test
+    fun `fonts from another device join this one's, and this one's go back up`() = live {
+        watching()
+        ui.setFontSettings(io.nisfeb.talon.ui.FontSettings.fromJson(fontJson("aaaa1111", family = "F-aaaa1111"))!!)
+        settled { pushed("fonts").isNotEmpty() }
+        arrives("fonts", fontJson("bbbb2222", family = "F-bbbb2222"))
+        settled { ui.fontSettings.value.fonts.map { it.id }.sorted() == listOf("aaaa1111", "bbbb2222") }
+        assertEquals("F-bbbb2222", ui.fontSettings.value.family, "the choice is the latest word")
+        settled { pushed("fonts").any { "aaaa1111" in it && "bbbb2222" in it } }
+    }
+
+    // "an empty list should not win" (settings-sync rule): only a removal said is one.
+    @Test
+    fun `an empty font list from the ship takes nothing off, and a removal does`() = live {
+        watching()
+        ui.setFontSettings(io.nisfeb.talon.ui.FontSettings.fromJson(fontJson("a", family = "F-a"))!!)
+        arrives("fonts", fontJson())
+        delay(200)
+        assertEquals(listOf("a"), ui.fontSettings.value.fonts.map { it.id })
+        arrives("fonts", fontJson(removed = listOf("a")))
+        settled { ui.fontSettings.value.fonts.isEmpty() }
+    }
+
+    // Fonts installed through Talon were on the ship, offered nowhere
+    // else: the list's one push had gone, and a ship whose ui-prefs held
+    // other entries was never sent it again.
+    @Test
+    fun `a font list the ship never got goes up when the device connects`() = live {
+        // Installed before anything listened: its push never went.
+        ui.setFontSettings(io.nisfeb.talon.ui.FontSettings.fromJson(fontJson("aaaa1111", family = "F-aaaa1111"))!!)
+        sync.attachUiSettings(ui, watchers)
+        delay(300)
+        assertTrue(pushed("fonts").isEmpty())
+        ship.scries["settings/desk/talon"] = """{"desk":{"ui-prefs":{"power-features":${JsonPrimitive("""{"enabled":true}""")}}}}"""
+        sync.bootstrap()
+        settled { pushed("fonts").any { "aaaa1111" in it } }
+    }
+
+    @Test
+    fun `a device with no fonts sends no list`() = live {
+        sync.attachUiSettings(ui, watchers)
+        ship.scries["settings/desk/talon"] = """{"desk":{"ui-prefs":{"power-features":${JsonPrimitive("""{"enabled":true}""")}}}}"""
+        sync.bootstrap()
+        delay(300)
+        assertTrue(pushed("fonts").isEmpty(), "${ship.pokesTo("settings")}")
+    }
+
+    @Test
+    fun `a font list that changes nothing here is not sent back`() = live {
+        watching()
+        ui.setFontSettings(io.nisfeb.talon.ui.FontSettings.fromJson(fontJson("a", family = "F-a"))!!)
+        settled { pushed("fonts").isNotEmpty() }
+        val sent = pushed("fonts").size
+        arrives("fonts", fontJson("a", family = "F-a"))
+        delay(300)
+        assertEquals(sent, pushed("fonts").size)
+    }
+
     @Test
     fun `a preference that arrives before the store waits for it`() = live {
         arrives("power-features", """{"enabled":true}""")

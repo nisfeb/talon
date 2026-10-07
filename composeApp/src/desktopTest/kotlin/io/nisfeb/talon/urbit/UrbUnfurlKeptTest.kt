@@ -10,7 +10,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.nisfeb.talon.data.AppDatabase
-import io.nisfeb.talon.data.URB_UNFURLS_MIGRATION
 import io.nisfeb.talon.data.UrbUnfurlDao
 import io.nisfeb.talon.data.UrbUnfurlEntity
 import kotlinx.coroutines.flow.toList
@@ -101,11 +100,12 @@ class UrbUnfurlKeptTest {
     fun `the kept cards' table comes in by migration, with the rest of the database kept`() = runBlocking<Unit> {
         val path = File(dir, "talon.db").absolutePath
         fun open() = Room.databaseBuilder<AppDatabase>(name = path).setDriver(BundledSQLiteDriver())
-            .addMigrations(URB_UNFURLS_MIGRATION).build()
+            .addMigrations(*io.nisfeb.talon.data.SHARED_MIGRATIONS).build()
         open().also { it.cometDomes().put(io.nisfeb.talon.data.CometDomeEntity("~sampel", "gw-btc")); it.close() }
         // Wind the file back to 49: no table.
         BundledSQLiteDriver().open(path).also { c ->
             c.execSQL("DROP TABLE urb_unfurls")
+            c.execSQL("ALTER TABLE assistant_history DROP COLUMN log") // added at 53
             c.execSQL("PRAGMA user_version = 49")
             c.close()
         }

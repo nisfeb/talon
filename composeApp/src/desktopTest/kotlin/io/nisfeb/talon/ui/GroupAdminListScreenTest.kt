@@ -95,8 +95,11 @@ class GroupAdminListScreenTest {
         }
 
     @Test
-    fun `a list the ship will not give says it failed, rather than spinning`() = admin(prepare = { scries.remove("groups/v2/groups") }) {
+    fun `a list the ship will not give says it failed, rather than spinning, and Try again asks again`() = admin(prepare = { scries.remove("groups/v2/groups") }) { ship ->
         showing("Couldn't load groups")
+        ship.scries["groups/v2/groups"] = """{"~zod/garden":{},"~nec/book-club":{},"~bus/elsewhere":{}}"""
+        onNodeWithText("Try again").performClick()
+        showing("The Garden")
     }
 
     @Test
@@ -123,4 +126,19 @@ class GroupAdminListScreenTest {
         waitUntil(timeoutMillis = 5_000) { shows("HTTP 404") }
         assertTrue(shows("New group") && opened.isEmpty())
     }
+
+    // The page waited ten to twenty seconds: every group in the list was
+    // read again on its own, though %groups sends each one whole in it.
+    @Test
+    fun `a list that holds every group whole is read once`() = admin(prepare = {
+        val garden = scries.getValue("groups/v2/groups/~zod/garden")
+        val club = scries.getValue("groups/v2/groups/~nec/book-club")
+        val elsewhere = scries.getValue("groups/v2/groups/~bus/elsewhere")
+        scries["groups/v3/groups"] = """{"~zod/garden":$garden,"~nec/book-club":$club,"~bus/elsewhere":$elsewhere}"""
+    }) { ship ->
+        showing("The Garden")
+        assertTrue(shows("Book Club") && !shows("Elsewhere"))
+        assertTrue(ship.scried.none { it.startsWith("groups/v3/groups/~") || it.startsWith("groups/v2/groups/~") }, "${ship.scried}")
+    }
 }
+

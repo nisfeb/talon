@@ -62,12 +62,13 @@ class EmbeddingIndexer(
         var indexed = existing.size
         _progress.value = Progress(total = totalSoFar, indexed = indexed, running = true)
 
-        var offset = 0
+        var after = "" to ""
         val pageSize = 500
         val pendingRows = mutableListOf<MessageEmbeddingEntity>()
         while (true) {
-            val page = pageMessages(offset, pageSize)
+            val page = pageMessages(after, pageSize)
             if (page.isEmpty()) break
+            after = page.last().whom to page.last().id
             totalSoFar += page.count { keyOf(it.whom, it.id) !in existing }
             for (m in page) {
                 yield()
@@ -101,7 +102,6 @@ class EmbeddingIndexer(
                 }
             }
             if (page.size < pageSize) break
-            offset += pageSize
         }
         if (pendingRows.isNotEmpty()) db.embeddings().upsertAll(pendingRows)
         _progress.value = Progress(totalSoFar, indexed, running = false)
@@ -110,8 +110,8 @@ class EmbeddingIndexer(
     /** Pull a page of messages, including deleted rows (we want to
      *  mark them as "seen" in the existence set so the indexer
      *  doesn't try to embed them every launch). */
-    private suspend fun pageMessages(offset: Int, limit: Int) =
-        db.messages().pageAll(offset, limit)
+    private suspend fun pageMessages(after: Pair<String, String>, limit: Int) =
+        db.messages().pageAfter(after.first, after.second, limit)
 
     private fun keyOf(whom: String, id: String) = "$whom:$id"
 }

@@ -30,11 +30,7 @@ fun EmptyChatPane(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Image(
-            painter = talonLogoPainter(),
-            contentDescription = null,
-            modifier = Modifier.size(64.dp),
-        )
+        TalonLogo(contentDescription = null, modifier = Modifier.size(64.dp))
         Text(
             text = "Select a chat to begin",
             style = MaterialTheme.typography.bodyMedium,

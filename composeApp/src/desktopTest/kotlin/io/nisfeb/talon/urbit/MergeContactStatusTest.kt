@@ -166,10 +166,9 @@ class MergeContactStatusTest {
         }
 
     @Test
-    fun `nickname bio avatar still survive when incoming omits them`() = runBlocking {
-        // Same merge function carries the other contact fields. Pin
-        // the existing behaviour so a regression doesn't take those
-        // out alongside the status fix.
+    fun `a record that says nothing of the profile keeps the nickname, bio and avatar`() = runBlocking {
+        // A book entry for a ship we have no profile of: its gaps are not
+        // removals. A full profile's are (see the test below).
         db.contacts().upsert(
             ContactEntity(
                 ship = "~sampel",
@@ -196,5 +195,13 @@ class MergeContactStatusTest {
         assertEquals("Earth", merged.bio)
         assertEquals("https://example.com/sam.png", merged.avatarUrl)
         assertEquals(100L, merged.statusUpdatedMs)
+    }
+
+    // A whole published profile lacking a field means it was removed.
+    @Test
+    fun `a full profile without a nickname, bio or avatar clears them`() = runBlocking {
+        db.contacts().upsert(ContactEntity(ship = "~sampel", nickname = "Sam", bio = "Earth", avatarUrl = "https://example.com/sam.png"))
+        val merged = repo.mergeContact(ContactEntity(ship = "~sampel", nickname = null, bio = null, avatarUrl = null), full = true)
+        assertEquals(listOf<String?>(null, null, null), listOf(merged.nickname, merged.bio, merged.avatarUrl))
     }
 }

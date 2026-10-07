@@ -126,16 +126,29 @@ class Push(
          *  them. */
         author: String? = null,
         preview: String? = null,
+        /** A reply's parent post: the Android receiver opens the thread with it. */
+        parent: String? = null,
+        /** An iPhone's app-icon count ([Db.nextBadge]); null for none. */
+        badge: Int? = null,
     ) {
+        // Every iOS drop is said: they were silent, and a week of the
+        // relay's log held no alert sent to an iPhone and no sign why.
         if (platform == IOS_VOIP) {
             // A VoIP push must trigger a call; Apple forbids using it
             // for a message. A device registered before alerts existed
             // has no alert token; it re-registers to get them.
+            log.warn("message for $patp dropped: an ios-voip device has no alert token")
             return
         }
         if (platform == IOS) {
-            val alert = iosAlertToken(endpoint) ?: return
-            val a = apns ?: return
+            val alert = iosAlertToken(endpoint) ?: run {
+                log.warn("message for $patp dropped: the iPhone registered without an alert token")
+                return
+            }
+            val a = apns ?: run {
+                log.warn("message for $patp dropped: APNs not configured")
+                return
+            }
             a.sendAlert(
                 token = alert,
                 title = author ?: patp,
@@ -143,6 +156,8 @@ class Push(
                 patp = patp,
                 whom = whom,
                 postId = postId,
+                parent = parent,
+                badge = badge,
             )
             return
         }
@@ -162,9 +177,23 @@ class Push(
             append(escape(whom))
             append("""","id":"""")
             append(escape(postId))
+            if (parent != null) {
+                append("""","parent":"""")
+                append(escape(parent))
+            }
             append("\"}")
         }
         post(endpoint, body)
+    }
+
+    /**
+     * [whom] was read to the end on some client: the device takes back
+     * its notifications for it. Android only: an iOS alert stays until
+     * the app can be woken to clear it, which needs a handler it lacks.
+     */
+    fun sendRead(endpoint: String, patp: String, whom: String, platform: String = "") {
+        if (platform == IOS || platform == IOS_VOIP) return
+        post(endpoint, readBody(patp, whom))
     }
 
     /**
@@ -209,9 +238,10 @@ class Push(
         }
     }
 
-    private fun escape(s: String): String = s
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
+    internal fun readBody(patp: String, whom: String): String =
+        """{"event":"read","patp":"${escape(patp)}","whom":"${escape(whom)}"}"""
+
+    private fun escape(s: String): String = jsonEscape(s)
 
     companion object {
         private val JSON_MEDIA = "application/json".toMediaType()

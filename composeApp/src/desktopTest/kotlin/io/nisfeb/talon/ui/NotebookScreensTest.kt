@@ -53,6 +53,9 @@ class NotebookScreensTest {
         published: String? = "[]",
         /** The note's markdown. */
         body: String = "Simmer **long**.",
+        /** The notebook has something unread: a read is sent only then. */
+        unread: Boolean = false,
+        prepare: FakeShip.() -> Unit = {},
         content: @androidx.compose.runtime.Composable (TlonChatRepo) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-nbui-").toFile()
@@ -67,28 +70,33 @@ class NotebookScreensTest {
             scries["notes/v0/notes/~bus/recipes"] = """[{"folderId":9,"notebookId":7,"title":"Pho","revision":3,"id":11,"createdBy":"~bus",
                 "createdAt":1784592455,"bodyMd":${kotlinx.serialization.json.JsonPrimitive(body)},"updatedAt":1784592505,"updatedBy":"~bus","slug":null}]"""
             if (published != null) scries["notes/v0/published"] = published
-        }
+        }.apply(prepare)
         val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod"); notes.attach(ship.channel) }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         ship.channel.events().launchIn(scope)
         try {
             runBlocking { repo.notes.bootstrap() }
+            if (unread) runBlocking { db.unreads().upsertAll(listOf(io.nisfeb.talon.data.UnreadEntity(whom = whom, count = 1, notifyCount = 1, recencyMs = 1_000))) }
             runComposeUiTest {
                 setContent { TalonTheme(darkTheme = false) { content(repo) } }
                 block(ship, repo)
             }
         } finally {
             scope.cancel()
+            // The repo's own work stopped before its database closes: a
+            // read sent as the screen left wrote to a closed database, and
+            // SQLite's native code took the test JVM down with it.
+            runBlocking { repo.stopAndJoinForTest() }
             db.close()
             tmp.deleteRecursively()
         }
     }
 
-    private fun channel(moreFolders: String = "", block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block, moreFolders) { repo ->
+    private fun channel(moreFolders: String = "", unread: Boolean = false, block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block, moreFolders, unread = unread) { repo ->
         NotesChannelScreen(repo = repo, whom = whom, onBack = { did += "back" }, onOpenNote = { did += "note $it" })
     }
 
-    private fun note(published: String? = "[]", body: String = "Simmer **long**.", block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block, published = published, body = body) { repo ->
+    private fun note(published: String? = "[]", body: String = "Simmer **long**.", unread: Boolean = false, block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) = notebook(block, published = published, body = body, unread = unread) { repo ->
         NoteScreen(repo = repo, whom = whom, noteId = 11, onBack = { did += "back" })
     }
 
@@ -139,7 +147,7 @@ class NotebookScreensTest {
         showing("Pho")
         add("New note", "Laksa")
         showing("Laksa")
-        assertEquals(listOf("""POST /notes/~/v1/notebooks/~bus/recipes/notes {"folder":9,"title":"Laksa","body":""}"""), ship.api.toList())
+        assertEquals(listOf("""POST /notes/~/v1/notebooks/~bus/recipes/notes {"folder":9,"title":"Laksa","body":""}"""), ship.api.filterNot { it.startsWith("GET ") })
     }
 
     @Test
@@ -154,7 +162,7 @@ class NotebookScreensTest {
         add("New folder", "Stocks")
         showing("Stocks")
         // folderName, not name: the route's path has a name already.
-        assertEquals(listOf("""POST /notes/~/v1/notebooks/~bus/recipes/folders {"folderName":"Stocks","parent":8}"""), ship.api.toList())
+        assertEquals(listOf("""POST /notes/~/v1/notebooks/~bus/recipes/folders {"folderName":"Stocks","parent":8}"""), ship.api.filterNot { it.startsWith("GET ") })
     }
 
     @Test
@@ -229,7 +237,7 @@ class NotebookScreensTest {
         onNode(hasSetTextAction()).performTextInput("Simmer all day.")
         onNodeWithContentDescription("Save").performClick()
         waitUntil(timeoutMillis = 5_000) { !shows("Markdown") }
-        val sent = ship.api.single()
+        val sent = ship.api.single { !it.startsWith("GET ") }
         assertTrue("\"expectedRevision\":3" in sent && "Simmer all day." in sent, sent)
     }
 
@@ -332,4 +340,36 @@ class NotebookScreensTest {
         onAllNodesWithText("Delete").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
         assertTrue("\"recursive\":true" in notesPoke(ship, "recursive"))
     }
+
+    // "once I'm mentioned in a talon notebook I can't clear the unread":
+    // the notes screens never marked their notebook read, so its unread,
+    // a mention among it, stayed whatever was opened.
+    @Test
+    fun `opening a notebook reads it, notes and all`() = channel(unread = true) { ship, _ ->
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("activity").isNotEmpty() }
+        val read = ship.pokesTo("activity").first()
+        assertEquals("activity-action-2", read.mark)
+        assertEquals(
+            """{"read":{"source":{"notebook":{"flag":"~bus/recipes","group":null}},"action":{"all":{"time":null,"deep":true}}}}""",
+            read.json.toString(),
+        )
+    }
+
+    @Test
+    fun `opening a note reads its notebook`() = note(unread = true) { ship, _ ->
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("activity").any { "\"notebook\"" in it.json.toString() } }
+    }
+
+    // Every notebook said "isn't synced yet" for the moment it took to open.
+    @Test
+    fun `a notebook being opened says so, not that it is unsynced`() = notebook(
+        block = { _, _ ->
+            showing("Opening the notebook")
+            assertTrue(!shows("isn't synced yet"))
+        },
+        prepare = { holdPoke = 3_000 },
+    ) { repo ->
+        NotesChannelScreen(repo = repo, whom = "notes/~nec/unjoined", onBack = {}, onOpenNote = {})
+    }
 }
+

@@ -28,10 +28,10 @@ import kotlinx.serialization.json.jsonPrimitive
  * MockEngine harness for CallController tests that push facts
  * mid-test and inspect what the controller PUT back up the channel.
  *
- * The SSE body is a ByteChannel that never closes, so the controller's
- * reconnect loop never fires: every emitted frame lands on the one
- * live channel, and a fact can't be replayed by a reconnect after the
- * test has moved on. Pokes are acked "ok" from the PUT handler so
+ * The SSE body is a ByteChannel that closes only on [endStream], so the
+ * controller's reconnect loop fires only when a test asks: every emitted
+ * frame lands on the one live channel, and a fact can't be replayed by a
+ * reconnect after the test has moved on. Pokes are acked "ok" from the PUT handler so
  * controller code sequenced after a poke doesn't sit out the 15s ack
  * timeout mid-test.
  */
@@ -40,11 +40,40 @@ internal class TrunkHarness(ship: String = "~nec") {
     /** Every channel PUT body, in arrival order. Guarded by [puts]. */
     private val puts = mutableListOf<String>()
 
+    /** The channel each PUT went to, in step with [puts]. */
+    private val putPaths = mutableListOf<String>()
+
+    /** Every PUT as (channel path, body), in arrival order. */
+    fun putsWithPaths(): List<Pair<String, String>> = synchronized(puts) { putPaths.zip(puts) }
+
     /** Called with each PUT body as it arrives, before the poke ack.
      *  Runs on the engine's thread — keep it tiny. */
     var onPut: ((String) -> Unit)? = null
 
-    private val sse = ByteChannel(autoFlush = true)
+    /** The answer to a scry, by its path (e.g. "/~/scry/trunk/version.json"). */
+    @Volatile var scryBody: (String) -> String = { "{}" }
+
+    /** How long each scry takes to answer: a slow ship. */
+    @Volatile var scryDelayMs = 0L
+
+    /** Scries answered, and event streams opened, so far. */
+    val scries = java.util.concurrent.atomic.AtomicInteger()
+    val streams = java.util.concurrent.atomic.AtomicInteger()
+
+    /** Each event stream asked for: its channel path, and the Last-Event-ID it carried. */
+    val opened: MutableList<Pair<String, String?>> = java.util.concurrent.CopyOnWriteArrayList()
+
+    /** Channels the ship has reaped: a stream asked for on one is a 404. */
+    val reaped: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    @Volatile private var sse = ByteChannel(autoFlush = true)
+
+    /** End the live event stream, as a ship dropping it does; the next GET gets a new one. */
+    fun endStream() {
+        val old = sse
+        sse = ByteChannel(autoFlush = true)
+        old.cancel(null)
+    }
     private val emitLock = Mutex()
     // Well clear of the request ids echoed back in poke acks.
     private var eventId = 100L
@@ -62,7 +91,7 @@ internal class TrunkHarness(ship: String = "~nec") {
         when {
             req.method.value == "PUT" -> {
                 val body = (req.body as TextContent).text
-                synchronized(puts) { puts += body }
+                synchronized(puts) { puts += body; putPaths += req.url.encodedPath }
                 onPut?.invoke(body)
                 // Ack every poke in the batch so poke() returns promptly.
                 val pokeIds = runCatching {
@@ -75,10 +104,15 @@ internal class TrunkHarness(ship: String = "~nec") {
                 for (id in pokeIds) emit("""{"id":$id,"response":"poke","ok":true}""")
                 respond("", HttpStatusCode.NoContent)
             }
-            req.url.encodedPath.startsWith("/~/scry") ->
-                respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+            req.url.encodedPath.startsWith("/~/scry") -> {
+                scries.incrementAndGet()
+                if (scryDelayMs > 0) kotlinx.coroutines.delay(scryDelayMs)
+                respond(scryBody(req.url.encodedPath), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+            }
+            req.url.encodedPath.also { opened += it to req.headers["Last-Event-ID"] } in reaped ->
+                respond("", HttpStatusCode.NotFound)
             else -> respond(
-                sse, HttpStatusCode.OK,
+                sse.also { streams.incrementAndGet() }, HttpStatusCode.OK,
                 headersOf(HttpHeaders.ContentType, "text/event-stream"),
             )
         }

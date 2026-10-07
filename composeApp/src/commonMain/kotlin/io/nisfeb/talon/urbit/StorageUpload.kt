@@ -182,3 +182,34 @@ private fun String.takeUtf8Bytes(max: Int): String {
     }
     return substring(0, i)
 }
+
+/**
+ * An upload neither route took. [message] is a sentence for the person
+ * who tried; what each route said is in [cause], for "Copy error
+ * details". The line used to be the routes' own text, S3's XML and all:
+ * "image failed: image upload failed: memex=memex upload-url failed:
+ * HTTP 500; storage=S3 PUT failed: HTTP 403 — <?xml …".
+ */
+class UploadFailed(message: String, cause: Throwable) : Exception(message, cause)
+
+/** What [memex] and [storage] failing to take one upload says, plainly. */
+internal fun uploadFailureLine(memex: Throwable?, storage: Throwable?): String {
+    fun status(t: Throwable?) = t?.message?.let { Regex("HTTP (\\d{3})").find(it)?.groupValues?.get(1)?.toInt() }
+    val hosting = when {
+        memex == null || memex.message.orEmpty().startsWith("no memex token") -> null
+        io.nisfeb.talon.util.isTransientNetworkError(memex) -> "Tlon's image hosting didn't answer"
+        (status(memex) ?: 0) >= 500 -> "Tlon's image hosting had a problem on its side"
+        status(memex) != null -> "Tlon's image hosting refused it"
+        else -> "Tlon's image hosting couldn't take it"
+    }
+    val own = when {
+        storage == null || storage.message.orEmpty().startsWith("no %storage") -> null
+        status(storage) == 401 || status(storage) == 403 ->
+            "your ship's storage turned down its keys (see Storage in Landscape's settings)"
+        io.nisfeb.talon.util.isTransientNetworkError(storage) -> "your ship's storage didn't answer"
+        else -> "your ship's storage couldn't take it"
+    }
+    val why = listOfNotNull(hosting, own)
+    return if (why.isEmpty()) "The upload didn't go through: this ship has no image storage set up."
+    else "The upload didn't go through: ${why.joinToString(", and ")}."
+}

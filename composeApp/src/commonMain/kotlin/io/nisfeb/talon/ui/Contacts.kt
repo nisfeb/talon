@@ -12,12 +12,17 @@ import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.data.GroupEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlin.concurrent.Volatile
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.first
 
 /**
  * Synchronous directory built from snapshots of the contacts, clubs,
@@ -36,7 +41,13 @@ data class ContactMap(
     /** Bumped as looked-up names arrive or the setting for them flips,
      *  so a map built before is not equal to one built after. */
     val namesGeneration: Int = 0,
+    /** Bot ship to whether its gateway is up ([io.nisfeb.talon.urbit.BotLiveness]); absent is unknown. */
+    val botOnline: Map<String, Boolean> = emptyMap(),
 ) {
+    /** A message's byline: the name, "Bot · Offline" for a bot that is, and the time. */
+    fun byline(ship: String, name: String, stamp: String): String =
+        if (botOnline[ship] == false) "$name · Bot · Offline · $stamp" else "$name · $stamp"
+
     private val byShip: Map<String, ContactEntity> =
         contacts.associateBy(ContactEntity::ship)
     private val byClub: Map<String, ClubEntity> = clubs.associateBy(ClubEntity::id)
@@ -165,6 +176,10 @@ fun shipHandle(ship: String, nonCometNames: Boolean = AzimuthNames.enabled.value
         ?: (if (nonCometNames) AzimuthNames.nameFor(ship) else null)
         ?: ship
 
+/** What a party line calls [ship] for those with no name of their own for it: its nickname, a comet's mnemonym, else the @p. */
+fun partyName(contacts: ContactMap, ship: String): String =
+    contacts.nickname(ship)?.takeIf { it.isNotBlank() } ?: Mnemonym.forShip(ship) ?: ship
+
 /**
  * The unabridged word name, for telling apart two ships whose short
  * names came out the same.
@@ -241,17 +256,19 @@ fun contactMapFlow(
     /** Ticks as looked-up names arrive, so a row drawn before the
      *  answer landed is redrawn once it has. */
     namesGenerationFlow: Flow<Int> = AzimuthNames.generation,
+    botOnlineFlow: Flow<Map<String, Boolean>> = io.nisfeb.talon.urbit.BotLiveness.online,
 ): Flow<ContactMap> = combine(
     contactsFlow.distinctUntilChanged(::sameContactDisplay),
     clubsFlow.distinctUntilChanged(),
     groupsFlow.distinctUntilChanged(),
     channelGroupsFlow.distinctUntilChanged(),
-    // Two naming inputs ride one slot: `combine` only types five.
+    // Three inputs ride one slot: `combine` only types five.
     combine(
         alwaysPatpFlow.distinctUntilChanged(),
         namesGenerationFlow.distinctUntilChanged(),
-    ) { patp, gen -> patp to gen },
-) { c, cl, g, cg, (patp, gen) -> ContactMap(c, cl, g, cg, patp, gen) }
+        botOnlineFlow.distinctUntilChanged(),
+    ) { patp, gen, bots -> Triple(patp, gen, bots) },
+) { c, cl, g, cg, (patp, gen, bots) -> ContactMap(c, cl, g, cg, patp, gen, bots) }
     .onEach {
         LastContactMap.remember(it)
         // Story parsing runs outside composition (StoryCache, ingest),
@@ -286,17 +303,27 @@ internal fun sameContactDisplay(a: List<ContactEntity>, b: List<ContactEntity>):
     return true
 }
 
+private val sharedContactMaps = io.nisfeb.talon.util.OneSlot<AppDatabase, StateFlow<ContactMap>> { db ->
+    contactMapFlow(
+        db.contacts().stream(),
+        db.clubs().stream(),
+        db.groups().streamGroups(),
+        db.groups().streamChannelGroups(),
+    ).stateIn(io.nisfeb.talon.data.sharing, SharingStarted.WhileSubscribed(5_000), LastContactMap.value)
+}
+
 /**
- * The contact map, as every screen wants it: built once per database,
- * starting from the last one anybody had rather than from none.
+ * The contact map, built once per database and shared, starting from the
+ * last one anybody had rather than from none. Each of the ~19 screens
+ * holding one ran its four queries and built its maps on every write.
  */
+fun AppDatabase.contactMap(): StateFlow<ContactMap> = sharedContactMaps.of(this)
+
+/** The contact map as the database has it now, for code no screen is running (a push woke the app). */
+suspend fun AppDatabase.contactMapNow(): ContactMap =
+    contactMapFlow(contacts().stream(), clubs().stream(), groups().streamGroups(), groups().streamChannelGroups()).first()
+
+/** [contactMap], as a screen holds it: not collected while the app is out of sight. */
 @Composable
 fun rememberContactMap(db: AppDatabase): State<ContactMap> =
-    remember(db) {
-        contactMapFlow(
-            db.contacts().stream(),
-            db.clubs().stream(),
-            db.groups().streamGroups(),
-            db.groups().streamChannelGroups(),
-        )
-    }.collectAsState(LastContactMap.value)
+    db.contactMap().collectAsStateWithLifecycle()

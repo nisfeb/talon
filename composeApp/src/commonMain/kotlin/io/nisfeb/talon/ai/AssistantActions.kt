@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ai
 
+import kotlinx.datetime.number
 import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.daysOf
@@ -25,7 +26,7 @@ import io.nisfeb.talon.ui.shipHandleLong
 import io.nisfeb.talon.urbit.isValidPatp
 import io.nisfeb.talon.util.nowMs
 import kotlinx.datetime.DayOfWeek
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atTime
@@ -58,14 +59,14 @@ class AssistantActions(
  * as its UTC day, which is how the calendar keeps one.
  */
 internal fun eventWhenLine(startMs: Long, endMs: Long, allDay: Boolean, zone: TimeZone): String {
-    fun day(d: LocalDate) = "${d.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }} ${d.dayOfMonth} ${MONTHS[d.monthNumber - 1]} ${d.year}"
+    fun day(d: LocalDate) = "${d.dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }} ${d.day} ${MONTHS[d.month.number - 1]} ${d.year}"
     if (allDay) {
         val first = Instant.fromEpochMilliseconds(startMs).toLocalDateTime(TimeZone.UTC).date
         val days = ((endMs - startMs) / 86_400_000L).toInt()
         return day(first) + if (days > 1) " · $days days" else " · all day"
     }
     val s = Instant.fromEpochMilliseconds(startMs).toLocalDateTime(zone)
-    return "${day(s.date)} · ${io.nisfeb.talon.util.formatTime12(startMs, zone)}–${io.nisfeb.talon.util.formatTime12(endMs, zone)}"
+    return "${day(s.date)} · ${io.nisfeb.talon.util.formatClock(startMs, zone)}–${io.nisfeb.talon.util.formatClock(endMs, zone)}"
 }
 
 private val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -323,7 +324,11 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 zone = if (minute != null) zoneArg else null,
                 tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
             )
-            if (!cal.pokeEvent(eventBody(draft))) return@Tool "The calendar did not take it."
+            // Not waiting for the lists to be read back: that went on until
+            // they moved, fifteen seconds and more for an event off screen,
+            // and a batch of adds waited it out each time. They are read
+            // behind; the check below is this event's own.
+            if (!cal.writeEvent(eventBody(draft)).ok) return@Tool "The calendar did not take it."
             val target = cal.calendars.value.firstOrNull { it.id == calId }
             val where = target?.let { "the ${it.name.ifBlank { it.id }} calendar" } ?: "the default calendar"
             val whenText = "$date${if (time != null) " at $time${zoneArg?.let { " $it" } ?: ""}" else ""}"
@@ -333,7 +338,12 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             // weeks on (the nth weekday of the month), so look that far.
             val zone = zoneArg?.let { TimeZone.of(it) } ?: a.zone()
             val from = date.atTime(0, 0).toInstant(zone).toEpochMilliseconds() - 86_400_000L
-            val seen = cal.windowRows(from, from + 40 * 86_400_000L)
+            var seen: List<io.nisfeb.talon.calendar.CalendarRow>? = null
+            for (beat in longArrayOf(400L, 600L, 1_000L)) {
+                kotlinx.coroutines.delay(beat)
+                seen = cal.windowRows(from, from + 40 * 86_400_000L) ?: seen
+                if (seen?.any { it.name == name && (calId == null || it.cal == calId) } == true) break
+            }
             val synced = target?.kind?.takeIf { it == "google" || it == "caldav" }?.let {
                 " It is synced there: it goes out to the other side on the next sync, which sync_calendars runs now."
             }.orEmpty()
@@ -429,17 +439,18 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 // add-first can only leave a visible duplicate, and the
                 // partial state is reported honestly below.
                 val one = d.copy(
-                    repeat = Repeat.ONCE, rawKind = null, rawArgs = null, rawStartMs = null, count = 0, until = null,
+                    repeat = Repeat.ONCE, rawKind = null, rawArgs = null, count = 0, until = null,
                     date = newDate ?: at.date,
                     minuteOfDay = newMinute ?: (at.hour * 60 + at.minute),
                 )
                 if (!cal.pokeEvent(eventBody(one), readBack = false)) return@Tool "The calendar did not take it."
-                if (!cal.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })) {
+                if (!cal.writeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) }).ok) {
                     return@Tool "Half done: the changed \"${d.name}\" was added, but the original occurrence on $occ is still there too — the calendar refused the skip. Skip it by hand, or try again."
                 }
                 return@Tool "Updated \"${d.name}\" for that occurrence."
             }
-            if (cal.pokeEvent(eventBody(d, id))) "Updated \"${d.name}\"." else "The calendar did not take it."
+            // The lists are read back behind, as for an add.
+            if (cal.writeEvent(eventBody(d, id)).ok) "Updated \"${d.name}\"." else "The calendar did not take it."
         })
         add(Tool(
             spec = ToolSpec(
@@ -462,9 +473,9 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             if (occText != null && d?.repeats == true) {
                 val occ = parseDate(occText) ?: return@Tool "Error: occurrence must be YYYY-MM-DD."
                 val row = findOccurrence(cal, id, occ, a.zone()) ?: return@Tool "Error: \"$name\" has no occurrence on $occ."
-                return@Tool if (cal.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })) "Skipped \"$name\" on $occ." else "The calendar did not take it."
+                return@Tool if (cal.writeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) }).ok) "Skipped \"$name\" on $occ." else "The calendar did not take it."
             }
-            if (cal.pokeEvent(buildJsonObject { put("action", "del-event"); put("id", id) })) {
+            if (cal.writeEvent(buildJsonObject { put("action", "del-event"); put("id", id) }).ok) {
                 "Deleted \"$name\"${if (d?.repeats == true) " and every occurrence" else ""}."
             } else {
                 "The calendar did not take it."
@@ -498,7 +509,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 cat = EventCat.TODO, date = due ?: today, due = due,
                 tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
             )
-            if (cal.pokeEvent(eventBody(draft))) "Added task \"$name\"${if (due != null) " due $due" else ""}." else "The calendar did not take it."
+            if (cal.writeEvent(eventBody(draft)).ok) "Added task \"$name\"${if (due != null) " due $due" else ""}." else "The calendar did not take it."
         })
         add(Tool(
             spec = ToolSpec(
@@ -802,3 +813,13 @@ private suspend fun eventFrom(args: JsonObject, a: AssistantActions, zone: TimeZ
     }
     return CalendarRow(id = "", meta = meta, cat = if (time == null) "allday" else "timed", all = time == null, l = start, r = end) to null
 }
+
+/**
+ * The writes "Allow all" lets through for the rest of an answer: adding
+ * and changing calendar entries, and orrery entries, the batches the
+ * owner asks for (an information dump is many facts in one turn: the
+ * owner confirms the first write and Allow all covers the rest). A
+ * delete, a message, mail, a call or a share still asks each time.
+ */
+internal val ALLOW_ALL_TOOLS = setOf("create_event", "update_event", "create_task", "complete_task", "orrery_observe")
+

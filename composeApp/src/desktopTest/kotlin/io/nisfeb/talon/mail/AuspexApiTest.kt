@@ -195,4 +195,38 @@ class AuspexApiTest {
         val a = api { throw java.io.IOException("connection refused") }
         assertFailsWith<AuspexError.Unreachable> { a.whoami() }
     }
+
+    // "a giant red banner with raw html saying 502 bad gateway"
+    @Test
+    fun `the web server answering for a ship that is down is no answer, said plainly`() = runBlocking<Unit> {
+        for (code in listOf(HttpStatusCode.BadGateway, HttpStatusCode.ServiceUnavailable)) {
+            val a = api { respond(NGINX_502, code, headersOf("Content-Type", "text/html")) }
+            val e = assertFailsWith<AuspexError.Unreachable> { a.inbox(MailView.INBOX) }
+            assertTrue(e.down, "$code")
+            assertEquals("Your ship isn't answering. It may be restarting.", e.said())
+        }
+        // A 504 is a ship that is there and slow: no answer, not down.
+        val slow = api { respond(NGINX_502, HttpStatusCode.GatewayTimeout, headersOf("Content-Type", "text/html")) }
+        val e = assertFailsWith<AuspexError.Unreachable> { slow.inbox(MailView.INBOX) }
+        assertTrue(!e.down)
+        assertEquals("No answer from the ship.", e.said())
+    }
+
+    @Test
+    fun `an error page is never read out as the ship's reason`() = runBlocking<Unit> {
+        val a = api { respond("<html><body><h1>500 Internal Server Error</h1></body></html>", HttpStatusCode.InternalServerError, headersOf("Content-Type", "text/html")) }
+        val e = assertFailsWith<AuspexError.Refused> { a.inbox(MailView.INBOX) }
+        assertEquals("the ship answered with an error page", e.said())
+        // Armillary and Orrery read a refusal the same way, behind the same web server.
+        assertEquals("the ship answered with an error page", io.nisfeb.talon.armillary.armillaryReason(NGINX_502))
+    }
 }
+
+/** What nginx in front of a ship answers while the ship is down. */
+internal const val NGINX_502 = """<html>
+<head><title>502 Bad Gateway</title></head>
+<body>
+<center><h1>502 Bad Gateway</h1></center>
+<hr><center>nginx/1.24.0 (Ubuntu)</center>
+</body>
+</html>"""

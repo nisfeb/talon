@@ -20,7 +20,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -44,8 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -150,20 +147,22 @@ class ComposerState(initialDraftText: String) {
     var sendErrorCalm by mutableStateOf(false)
         private set
 
-    /**
-     * [what] did not go through. A ship that was only slow or out of reach
-     * is said calmly, as something to try again when it is back; a refusal
-     * is said as one. Either way the error whole is behind Copy error
-     * details, not in the line: "Request timeout has expired [url=…]" was
-     * the line.
-     */
+    /** [problem] over the composer, its error whole behind Copy error details. */
+    fun show(problem: io.nisfeb.talon.util.Problem) {
+        shownError = problem.line
+        sendErrorDetails = problem.details
+        sendErrorCalm = problem.calm
+    }
+
     fun failed(what: String, err: Throwable) {
         val slow = io.nisfeb.talon.util.isShipSlow(err)
         sendError = if (slow) {
             "Your ship is slow, so the ${noun(what)} didn't go through. Try again when it's back."
+        } else if (err is io.nisfeb.talon.urbit.UploadFailed) {
+            err.message
         } else {
             "$what failed: " + ((err as? io.nisfeb.talon.urbit.PokeNacked)?.let { "the ship refused it" }
-                ?: (err.message ?: err::class.simpleName).orEmpty().lineSequence().first().take(120))
+                ?: io.nisfeb.talon.util.readableReason(err.message) ?: "something went wrong")
         }
         sendErrorDetails = io.nisfeb.talon.util.errorDetailsOf(err)
         sendErrorCalm = slow
@@ -173,7 +172,6 @@ class ComposerState(initialDraftText: String) {
         "send" -> "message"
         "react" -> "reaction"
         "notify" -> "notification setting"
-        "watchword toggle" -> "watchword change"
         "voice send" -> "voice message"
         else -> what
     }
@@ -267,6 +265,10 @@ interface ChatSendStrategy {
 
     /** Only invoked when [supportsQuote] is true. */
     suspend fun sendQuote(body: String, quoteWhom: String, quoteId: String)
+
+    /** [sendImage] with a quote leading it, in one message. Only invoked when [supportsQuote] is true. */
+    suspend fun sendImageQuote(src: String, width: Int, height: Int, alt: String, caption: String, quoteWhom: String, quoteId: String): Unit =
+        throw UnsupportedOperationException("this surface does not carry a quote")
 }
 
 @Composable
@@ -390,7 +392,7 @@ fun ChatComposer(
             picking = true
             val picked = runCatching { pickImage() }
                 .also { picking = false }
-                .onFailure { state.sendError = "couldn't read image: ${it.message ?: it::class.simpleName}" }
+                .onFailure { state.show(io.nisfeb.talon.util.problemOf("Couldn't read the image", it)) }
                 .getOrNull() ?: return@launch
             stage(picked.bytes, picked.mimeType, picked.displayName, true)
         }
@@ -402,7 +404,7 @@ fun ChatComposer(
             picking = true
             val picked = runCatching { pickAnyFile() }
                 .also { picking = false }
-                .onFailure { state.sendError = "couldn't read file: ${it.message ?: it::class.simpleName}" }
+                .onFailure { state.show(io.nisfeb.talon.util.problemOf("Couldn't read the file", it)) }
                 .getOrNull() ?: return@launch
             stage(
                 picked.bytes, picked.mimeType, picked.displayName,
@@ -423,26 +425,40 @@ fun ChatComposer(
             state.uploading = true
             state.sendError = null
             val caption = state.draft.text.trim()
+            // A staged quote goes with them, as it does with text: left
+            // staged, the next Enter sent the quoted post again on its own.
+            val quote = state.pendingQuote
+            val quoted = quote?.takeIf { strategy.supportsQuote }
             scope.launch {
-                runCatching {
-                    val hostedUrl = repo.uploadImage(pending.bytes, pending.mimeType, pending.displayName)
-                    if (pending.isImage) {
-                        val dims = decodeImageDimensions(pending.bytes)
-                        strategy.sendImage(
-                            src = hostedUrl,
-                            width = dims?.first ?: 0,
-                            height = dims?.second ?: 0,
-                            alt = pending.displayName,
-                            caption = caption,
-                        )
-                    } else {
-                        strategy.sendText(if (caption.isEmpty()) hostedUrl else "$caption\n\n$hostedUrl")
+                // Uploaded and sent on the repo's scope: leaving the chat
+                // mid-upload cancelled both, and the photo never went. Only
+                // the bookkeeping below belongs to the screen.
+                val sent = repo.carry {
+                    io.nisfeb.talon.util.runSuspendCatching {
+                        val hostedUrl = repo.uploadImage(pending.bytes, pending.mimeType, pending.displayName)
+                        if (pending.isImage) {
+                            val dims = decodeImageDimensions(pending.bytes)
+                            val w = dims?.first ?: 0
+                            val h = dims?.second ?: 0
+                            if (quoted != null) strategy.sendImageQuote(hostedUrl, w, h, pending.displayName, caption, quoted.whom, quoted.id)
+                            else strategy.sendImage(src = hostedUrl, width = w, height = h, alt = pending.displayName, caption = caption)
+                        } else {
+                            val text = if (caption.isEmpty()) hostedUrl else "$caption\n\n$hostedUrl"
+                            if (quoted != null) strategy.sendQuote(text, quoted.whom, quoted.id) else strategy.sendText(text)
+                        }
+                        // Sent with the screen gone: its saved draft was what went.
+                        if (store.load(whom).trim() == caption) store.clear(whom)
                     }
+                }
+                sent.onSuccess {
                     // Sent, the text with it: clear the stage and the draft
                     // so the conversation list stops advertising "Draft:".
                     // Only if the box still says what went: the box stays
                     // open during the upload, and a line typed meanwhile is
-                    // not the one that was sent.
+                    // not the one that was sent. The quote likewise, unless
+                    // another was picked meanwhile; one a surface cannot
+                    // carry is dropped, as a text send drops it.
+                    if (quote != null && state.pendingQuote?.id == quote.id) state.pendingQuote = null
                     state.pendingAttachment = null
                     if (state.draft.text.trim() == caption) {
                         state.draft = TextFieldValue("")
@@ -511,7 +527,30 @@ fun ChatComposer(
         stage(file.bytes, file.mimeType, file.name, file.isImage)
     }
 
-    val updateDraft: (TextFieldValue) -> Unit = { next ->
+    // The clipboard's image staged, or said to be too large. True when
+    // there was one either way, so the field does not paste the
+    // clipboard's text in its place.
+    val pasteClipboardImage: () -> Boolean = {
+        when (val found = clipboardPaste()) {
+            is ClipboardPaste.Image -> { stageDropped(found.file); true }
+            is ClipboardPaste.Problem -> { state.sendError = found.message; true }
+            ClipboardPaste.None -> false
+        }
+    }
+
+    // A mention reads in the box as it will once sent, by this device's
+    // naming settings; a draft with no @p keeps the plain look (on iOS a
+    // transformation can cost the field its paste menu).
+    val namesVersion by ShipNames.generation.collectAsState()
+    val hasShip = io.nisfeb.talon.urbit.PATP_REGEX.containsMatchIn(state.draft.text)
+    val composerLook = remember(namesVersion, hasShip) {
+        if (hasShip) mentionTransformation { ShipNames.resolve(it) } else EmojiVisualTransformation
+    }
+
+    val updateDraft: (TextFieldValue) -> Unit = { typed ->
+        // A mention shows as a name over its @p: it goes, and is stepped
+        // over, as one piece.
+        val next = keepMentionsWhole(state.draft, typed)
         state.draft = next
         // An edit is not a draft: saving it would bring it back as a new
         // message. The draft it displaced stays saved underneath.
@@ -666,20 +705,18 @@ fun ChatComposer(
                 }
             },
     ) {
-        val clipboard = LocalClipboardManager.current
         // Writes waiting for a slow ship: said once, quietly, with what
         // the last try said behind the button.
         val slow = repo.shipSlow.collectAsState(initial = null).value
         if (slow != null) {
             NoteLine(
-                "Your ship is slow. ${slow.queued} queued for when it's back.",
+                io.nisfeb.talon.util.shipSlowLine(slow.queued, slow.health),
                 calm = true,
                 details = slow.details,
-                onCopy = { clipboard.setText(AnnotatedString(it)) },
             )
         }
         state.sendError?.let { err ->
-            NoteLine(err, calm = state.sendErrorCalm, details = state.sendErrorDetails, onCopy = { clipboard.setText(AnnotatedString(it)) })
+            NoteLine(err, calm = state.sendErrorCalm, details = state.sendErrorDetails)
         }
         if (slashSuggestions.isNotEmpty() && slashTrigger != null) {
             SlashPicker(
@@ -738,7 +775,7 @@ fun ChatComposer(
                 return@doSend true
             }
             // A staged attachment goes with whatever is written, as one
-            // message, text or none. A staged quote waits for the next.
+            // message, text or none, and with a staged quote.
             if (state.pendingAttachment != null) {
                 if (!canSend || state.uploading) return@doSend false
                 sendAttachment()
@@ -805,7 +842,7 @@ fun ChatComposer(
                         onSlashMic()
                     } else {
                         state.sendError =
-                            "/mic: tap the mic button instead — slash trigger isn't wired here"
+                            "/mic: ${io.nisfeb.talon.ui.tapWord.lowercase()} the mic button instead."
                     }
                     true
                 }
@@ -997,9 +1034,8 @@ fun ChatComposer(
                     }
                 }
                 if (hasImage) {
-                    IconButton(
-                        onClick = {
-                            readClipboardImageOrNull()?.let(stageDropped)
+                    io.nisfeb.talon.ui.IconButton(tip = "Paste image", onClick = {
+                            pasteClipboardImage()
                         },
                         modifier = Modifier.size(36.dp),
                     ) {
@@ -1012,8 +1048,7 @@ fun ChatComposer(
                 }
             }
             if (!hideComposerButtons) {
-                IconButton(
-                    onClick = onPickImage,
+                io.nisfeb.talon.ui.IconButton(tip = "Attach image", onClick = onPickImage,
                     enabled = canSend && !state.uploading,
                     modifier = Modifier.size(36.dp),
                 ) {
@@ -1030,8 +1065,7 @@ fun ChatComposer(
                         )
                     }
                 }
-                IconButton(
-                    onClick = onPickFile,
+                io.nisfeb.talon.ui.IconButton(tip = "Attach file", onClick = onPickFile,
                     enabled = canSend && !state.uploading,
                     modifier = Modifier.size(36.dp),
                 ) {
@@ -1056,7 +1090,7 @@ fun ChatComposer(
                 placeholder = { Text(placeholder) },
                 enabled = canSend,
                 textStyle = MaterialTheme.typography.bodyMedium,
-                visualTransformation = EmojiVisualTransformation,
+                visualTransformation = composerLook,
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(fieldFocus)
@@ -1071,6 +1105,11 @@ fun ChatComposer(
                         if (e.type != KeyEventType.KeyDown) {
                             return@onPreviewKeyEvent false
                         }
+                        // While an input method composes (pinyin, kana,
+                        // hangul), the keys are its own: Enter confirms a
+                        // candidate, arrows and Tab move through them.
+                        // Taken here, Enter sent the half-typed message.
+                        if (state.draft.composition != null) return@onPreviewKeyEvent false
                         // Escape drops a staged attachment, as its cross does.
                         if (e.key == Key.Escape && state.pendingAttachment != null && !state.uploading) {
                             state.pendingAttachment = null
@@ -1151,12 +1190,8 @@ fun ChatComposer(
                         // paste falls through normally.
                         val pasteCombo = e.key == Key.V &&
                             (e.isCtrlPressed || e.isMetaPressed)
-                        if (pasteCombo && canSend && !state.uploading) {
-                            val img = readClipboardImageOrNull()
-                            if (img != null) {
-                                stageDropped(img)
-                                return@onPreviewKeyEvent true
-                            }
+                        if (pasteCombo && canSend && !state.uploading && pasteClipboardImage()) {
+                            return@onPreviewKeyEvent true
                         }
                         if (e.key != Key.Enter) return@onPreviewKeyEvent false
                         if (e.isShiftPressed) {
@@ -1224,8 +1259,7 @@ fun ChatComposer(
             val sendable = canSend &&
                 (state.draft.text.isNotBlank() || state.pendingQuote != null ||
                     (state.pendingAttachment != null && !state.uploading))
-            IconButton(
-                onClick = { doSend() },
+            io.nisfeb.talon.ui.IconButton(tip = if (isEditing) "Save edit" else "Send", onClick = { doSend() },
                 enabled = sendable,
                 modifier = Modifier.size(36.dp),
             ) {
@@ -1284,7 +1318,7 @@ private fun QuotePreviewRow(
                 maxLines = 2,
             )
         }
-        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+        io.nisfeb.talon.ui.IconButton(tip = "Cancel quote", onClick = onDismiss, modifier = if (isTouchPrimary) Modifier else Modifier.size(28.dp)) {
             Icon(
                 imageVector = Icons.Filled.Close,
                 contentDescription = "Cancel quote",
@@ -1352,7 +1386,7 @@ internal fun AttachmentStrip(
         if (sending) {
             CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
         } else {
-            IconButton(onClick = onCancel, modifier = Modifier.size(36.dp)) {
+            io.nisfeb.talon.ui.IconButton(tip = "Discard attachment", onClick = onCancel, modifier = Modifier.size(36.dp)) {
                 Icon(
                     Icons.Filled.Close,
                     contentDescription = "Discard attachment",
@@ -1384,7 +1418,7 @@ private fun VoicePreviewRow(
             voicePlayer(pending.path, sending)
         }
         val label = if (voicePlayer != null) "🎙 ${seconds}s"
-        else "🎙 ${seconds}s recorded — preview not available, tap send when ready"
+        else "🎙 ${seconds}s recorded — preview not available, ${io.nisfeb.talon.ui.tapWord.lowercase()} send when ready"
         Text(
             label,
             style = MaterialTheme.typography.bodySmall,
@@ -1393,8 +1427,7 @@ private fun VoicePreviewRow(
                 .weight(1f)
                 .padding(horizontal = 8.dp),
         )
-        IconButton(
-            onClick = onCancel,
+        io.nisfeb.talon.ui.IconButton(tip = "Discard recording", onClick = onCancel,
             enabled = !sending,
             modifier = Modifier.size(36.dp),
         ) {
@@ -1404,8 +1437,7 @@ private fun VoicePreviewRow(
                 modifier = Modifier.size(22.dp),
             )
         }
-        IconButton(
-            onClick = onSend,
+        io.nisfeb.talon.ui.IconButton(tip = "Send recording", onClick = onSend,
             enabled = !sending,
             modifier = Modifier.size(36.dp),
         ) {
@@ -1426,23 +1458,3 @@ private fun VoicePreviewRow(
     }
 }
 
-/** A line over the composer, with the error whole behind "Copy error details" where there is one. */
-@Composable
-private fun NoteLine(text: String, calm: Boolean, details: String?, onCopy: (String) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (calm) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
-            modifier = Modifier.weight(1f).padding(vertical = 4.dp),
-        )
-        if (details != null) {
-            TextButton(onClick = { onCopy(details) }) {
-                Text("Copy error details", style = MaterialTheme.typography.labelSmall)
-            }
-        }
-    }
-}

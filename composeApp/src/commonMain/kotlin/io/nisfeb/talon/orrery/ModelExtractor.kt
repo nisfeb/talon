@@ -193,7 +193,7 @@ object ModelExtractor {
 
     /** When, as the model needs it to work a date out: local, with its offset, and the weekday. */
     fun whenLine(atMs: Long, zone: kotlinx.datetime.TimeZone): String {
-        val at = kotlinx.datetime.Instant.fromEpochMilliseconds(atMs)
+        val at = kotlin.time.Instant.fromEpochMilliseconds(atMs)
         val local = at.toLocalDateTime(zone)
         val day = local.dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }
         return "${local.date}T${local.time}${zone.offsetAt(at)}, a $day"

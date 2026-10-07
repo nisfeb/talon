@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.data.latestPerConversation
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -63,19 +64,23 @@ fun PartyLinesList(
         callController?.onLine ?: MutableStateFlow(emptyMap())
     }.collectAsState()
     val live = partyLine?.state?.collectAsState()?.value as? PartyState.Live
-    val latest by remember(db) { db.messages().conversationLatest() }
+    val latest by remember(db) { db.latestPerConversation() }
         .collectAsState(initial = emptyList())
     val groups = contacts.allGroups()
     val rows = remember(rooms, invites, groups) { partyLineRows(rooms, invites, groups) }
 
     // Refresh counts and names while the list is on screen. Old hosts
-    // answer the count only; older own-ships answer neither.
+    // answer the count only; older own-ships answer neither. A host seen
+    // announcing its roster is asked once; only one too old to keeps the poll.
     LaunchedEffect(rows.map { it.key }) {
+        var first = true
         while (true) {
             for (r in rows) {
+                if (!first && callController?.announces(r.host) == true) continue
                 callController?.occupancyOf(r.host, r.name)
                 callController?.whoIsOn(r.host, r.name)
             }
+            first = false
             delay(20_000)
         }
     }

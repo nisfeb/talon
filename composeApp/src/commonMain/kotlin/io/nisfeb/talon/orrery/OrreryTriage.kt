@@ -1,5 +1,6 @@
 package io.nisfeb.talon.orrery
 
+import io.nisfeb.talon.urbit.isDirect
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject

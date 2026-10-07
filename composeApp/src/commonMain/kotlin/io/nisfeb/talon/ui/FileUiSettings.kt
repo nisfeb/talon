@@ -78,9 +78,13 @@ class FileUiSettings(
         val nonCometNames: Boolean = false,
         /** [io.nisfeb.talon.ui.theme.ThemeSettings] as JSON text. */
         val customThemes: String = "",
+        /** [FontSettings] as JSON text. */
+        val fonts: String = "",
         val micNoiseSuppression: Boolean = true,
         val micEchoCancellation: Boolean = true,
         val micAutoGainControl: Boolean = true,
+        /** [UiSettings.keybinds]. */
+        val keybinds: Map<String, KeyCombo?> = emptyMap(),
     )
 
     private val initial = loadInitial()
@@ -114,6 +118,20 @@ class FileUiSettings(
     override fun setThemeSettings(settings: io.nisfeb.talon.ui.theme.ThemeSettings) {
         if (_themeSettings.value == settings) return
         _themeSettings.value = settings
+        persistCurrent()
+    }
+    private val _fontSettings = MutableStateFlow(FontSettings.fromJson(initial.fonts) ?: FontSettings())
+    override val fontSettings: StateFlow<FontSettings> = _fontSettings.asStateFlow()
+    override fun setFontSettings(settings: FontSettings) {
+        if (_fontSettings.value == settings) return
+        _fontSettings.value = settings
+        persistCurrent()
+    }
+    private val _keybinds = MutableStateFlow(initial.keybinds)
+    override val keybinds: StateFlow<Map<String, KeyCombo?>> = _keybinds.asStateFlow()
+    override fun setKeybinds(binds: Map<String, KeyCombo?>) {
+        if (_keybinds.value == binds) return
+        _keybinds.value = binds
         persistCurrent()
     }
     private val _micProcessing = MutableStateFlow(
@@ -221,10 +239,12 @@ class FileUiSettings(
     }
 
     private val _homeTwentyFourHour = MutableStateFlow(initial.homeTwentyFourHour)
+        .also { io.nisfeb.talon.util.ClockStyle.twentyFourHour.value = it.value }
     override val homeTwentyFourHour: StateFlow<Boolean> = _homeTwentyFourHour.asStateFlow()
     override fun setHomeTwentyFourHour(on: Boolean) {
         if (_homeTwentyFourHour.value == on) return
         _homeTwentyFourHour.value = on
+        io.nisfeb.talon.util.ClockStyle.twentyFourHour.value = on
         persistCurrent()
     }
 
@@ -387,9 +407,11 @@ class FileUiSettings(
                 alwaysPatp = ShipNames.alwaysPatp.value,
                 nonCometNames = AzimuthNames.enabled.value,
                 customThemes = _themeSettings.value.toJson(),
+                fonts = _fontSettings.value.toJson(),
                 micNoiseSuppression = _micProcessing.value.noiseSuppression,
                 micEchoCancellation = _micProcessing.value.echoCancellation,
                 micAutoGainControl = _micProcessing.value.autoGainControl,
+                keybinds = _keybinds.value,
             ),
         )
     }

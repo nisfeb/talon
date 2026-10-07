@@ -246,12 +246,12 @@ object S3Uploader {
     private val HEX_UPPER = "0123456789ABCDEF".toCharArray()
 
     private val AMZ_DATE_FMT = LocalDateTime.Format {
-        year(); monthNumber(); dayOfMonth()
+        year(); monthNumber(); day()
         char('T')
         hour(); minute(); second()
         char('Z')
     }
     private val DATE_STAMP_FMT = LocalDateTime.Format {
-        year(); monthNumber(); dayOfMonth()
+        year(); monthNumber(); day()
     }
 }

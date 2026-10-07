@@ -30,7 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.filled.Refresh
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import io.nisfeb.talon.orrery.OrreryText
 import kotlinx.datetime.TimeZone
 
@@ -68,6 +68,8 @@ fun OrreryActionsScreen(
     told: String? = null,
     /** The page is left: [told] has been seen. */
     onLeave: () -> Unit = {},
+    /** Off under the Orrery section's tabs, which carry back and refresh, and read on entering and see [told] on leaving. */
+    header: Boolean = true,
     onOpen: (OrreryAction) -> Unit,
 ) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -77,10 +79,14 @@ fun OrreryActionsScreen(
         refreshing = true
         scope.launch { runCatching { onShown() }; refreshing = false }
     }
-    androidx.compose.runtime.LaunchedEffect(Unit) { refresh() }
-    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { onLeave() } }
-    Column(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-        Row(
+    // Under the section's tabs the section reads and is left, once: this
+    // body comes and goes with every tab switch.
+    if (header) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { refresh() }
+        androidx.compose.runtime.DisposableEffect(Unit) { onDispose { onLeave() } }
+    }
+    Column(modifier.fillMaxSize().then(if (header) Modifier.windowInsetsPadding(WindowInsets.safeDrawing) else Modifier)) {
+        if (header) Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -96,7 +102,7 @@ fun OrreryActionsScreen(
                     modifier = Modifier.padding(12.dp).size(20.dp),
                 )
             } else {
-                androidx.compose.material3.IconButton(onClick = ::refresh) {
+                io.nisfeb.talon.ui.IconButton(tip = "Refresh", onClick = ::refresh) {
                     androidx.compose.material3.Icon(
                         androidx.compose.material.icons.Icons.Filled.Refresh,
                         contentDescription = "Refresh",
@@ -109,7 +115,7 @@ fun OrreryActionsScreen(
                 it,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
         }
         told?.let {
@@ -185,11 +191,12 @@ private fun Body(
                     )
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { onDecide(a, "approved", "") }) { Text("Approve") }
-                        // Dismiss asks why, in a tap: a reason teaches the
-                        // generator, and none is ever made up.
+                        // Reject asks why, in a tap: a reason teaches the
+                        // generator, and none is ever made up. The same word
+                        // as the action's own window.
                         var asking by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
                         androidx.compose.foundation.layout.Box {
-                            OutlinedButton(onClick = { asking = true }) { Text("Dismiss") }
+                            OutlinedButton(onClick = { asking = true }) { Text("Reject") }
                             androidx.compose.material3.DropdownMenu(expanded = asking, onDismissRequest = { asking = false }) {
                                 androidx.compose.material3.DropdownMenuItem(text = { Text("No reason") }, onClick = { asking = false; onDecide(a, "dismissed", "") })
                                 io.nisfeb.talon.ui.DISMISS_REASONS.forEach { r ->

@@ -2,7 +2,7 @@ package io.nisfeb.talon.orrery
 
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.data.ContactEntity
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.toLocalDateTime
@@ -203,5 +203,3 @@ fun batches(facts: Facts): List<JsonObject> {
     return out
 }
 
-/** A conversation of one or a few, a DM or a club, rather than a group's channel. */
-fun isDirect(whom: String): Boolean = whom.startsWith("~") || whom.startsWith("0v")

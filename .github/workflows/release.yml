@@ -64,12 +64,12 @@ jobs:
             echo "have_keystore=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set up JDK 17
+      - name: Set up JDK 25
         if: steps.chk.outputs.have_keystore == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '25'
 
       # core-ktx 1.19.0 / lifecycle 2.11.0 need compileSdk 37, which the
       # runner image may not preinstall. Try the plain id first, fall back
@@ -233,8 +233,8 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
-      # macOS-only: generate icon.icns from icon.png so the .app
+          java-version: '25'
+      # macOS-only: generate icon.icns from icon-macos.png so the .app
       # bundle / .dmg / Dock-after-install all get the Talon logo
       # instead of jpackage's default. The .icns isn't committed; the
       # script no-ops on non-mac runners.
@@ -272,7 +272,12 @@ jobs:
           TALON_DEFAULT_SFU_BASE: ${{ secrets.TALON_DEFAULT_SFU_BASE }}
           TALON_DEFAULT_SFU_GROUP: ${{ secrets.TALON_DEFAULT_SFU_GROUP }}
           TALON_DEFAULT_SFU_KEY: ${{ secrets.TALON_DEFAULT_SFU_KEY }}
-        run: ./scripts/build-appimage.sh
+        # The AppImage's startup cache is trained by launching the app,
+        # which needs a display: xvfb-run gives it one. Training failing
+        # only means an AppImage without the cache.
+        run: |
+          command -v xvfb-run >/dev/null || sudo apt-get install -y xvfb
+          xvfb-run -a ./scripts/build-appimage.sh
       - name: Upload AppImage (Linux only)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4

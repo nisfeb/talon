@@ -12,7 +12,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -74,7 +73,7 @@ fun UrbViewerSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    IconButton(onClick = onDismiss) {
+                    io.nisfeb.talon.ui.IconButton(tip = "Close", onClick = onDismiss) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close")
                     }
                     Text(
@@ -85,7 +84,7 @@ fun UrbViewerSheet(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    IconButton(onClick = { runCatching { uriHandler.openUri(pageUrl) } }) {
+                    io.nisfeb.talon.ui.IconButton(tip = "Open in browser", onClick = { runCatching { uriHandler.openUri(pageUrl) } }) {
                         Icon(TalonIcons.Public, contentDescription = "Open in browser")
                     }
                 }

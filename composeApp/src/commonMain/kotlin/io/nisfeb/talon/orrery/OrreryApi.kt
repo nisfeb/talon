@@ -3,6 +3,7 @@ package io.nisfeb.talon.orrery
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.plugins.timeout
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
@@ -43,7 +44,12 @@ class OrreryApi(
     private val bare: HttpClient,
     baseUrl: String,
 ) {
-    private val root = baseUrl.trimEnd('/') + APP_PATH
+    private val base = baseUrl.trimEnd('/')
+    private val root = base + APP_PATH
+
+    /** Off after a scry answered 404 or 500: this ship cannot scry orrery's files, so this login stops asking. */
+    @kotlin.concurrent.Volatile
+    private var scryable = true
 
     /** Whether orrery answers on this ship, by the cheapest owner read. */
     suspend fun probe(): OrreryAvailability {
@@ -92,9 +98,16 @@ class OrreryApi(
         request(owner, HttpMethod.Delete, "/api/clients/$id")
     }
 
-    /** The state view as the key sees it, whole, for readers that need attribute values. */
-    suspend fun stateJson(token: String): JsonObject {
-        val text = request(bare, HttpMethod.Get, "/api/state") { header(HttpHeaders.Authorization, "Bearer $token") }
+    /**
+     * The state view as the key sees it: whole, for readers that need
+     * attribute values, or [brief] (orrery 67+): each body's id, kind,
+     * name, aliases, current values and situations, the open situations
+     * and actions, and each kind's attribute names — about a tenth of the
+     * whole. An older ship ignores the flag and answers whole.
+     */
+    suspend fun stateJson(token: String, brief: Boolean = false): JsonObject {
+        val path = if (brief) "/api/state?brief=1" else "/api/state"
+        val text = request(bare, HttpMethod.Get, path) { header(HttpHeaders.Authorization, "Bearer $token") }
         return reading { Json.parseToJsonElement(text).jsonObject }
     }
 
@@ -350,7 +363,7 @@ class OrreryApi(
                 id = o["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
                 attr = o["attr"]?.jsonPrimitive?.content ?: "",
                 atMs = o["at"]?.jsonPrimitive?.content
-                    ?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+                    ?.let { runCatching { kotlin.time.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
                     ?: return@mapNotNull null,
                 sourceId = o["source"]?.jsonObject?.get("id")?.jsonPrimitive?.content ?: "",
                 status = o["status"]?.jsonPrimitive?.content ?: "",
@@ -374,7 +387,7 @@ class OrreryApi(
             ClientKey(
                 id = c["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
                 by = c["by"]?.jsonPrimitive?.content ?: "",
-                usedMs = c["used"]?.jsonPrimitive?.content?.takeIf { it != "null" }?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
+                usedMs = c["used"]?.jsonPrimitive?.content?.takeIf { it != "null" }?.let { runCatching { kotlin.time.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
             )
         }
     }
@@ -408,7 +421,7 @@ class OrreryApi(
         note = a["note"]?.jsonPrimitive?.contentOrNull.orEmpty(),
         movedMs = ((a["history"] as? kotlinx.serialization.json.JsonArray)?.lastOrNull() as? JsonObject)
             ?.get("at")?.jsonPrimitive?.contentOrNull
-            ?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
+            ?.let { runCatching { kotlin.time.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
     )
 
     /**
@@ -493,6 +506,71 @@ class OrreryApi(
     }
 
     /** One observe batch under the key. Per-item answers, in order. */
+    /** The time-to-leave settings as a key sees them (orrery 69): `enabled` and `lead_min`, never the token. */
+    suspend fun travel(token: String): JsonObject {
+        val text = request(bare, HttpMethod.Get, "/api/travel") { header(HttpHeaders.Authorization, "Bearer $token") }
+        return reading { Json.parseToJsonElement(text).jsonObject }
+    }
+
+    /** What the leave pass did last, with its plan for the next appointment: the owner's only. */
+    suspend fun travelLast(): JsonObject {
+        val text = request(owner, HttpMethod.Get, "/api/travel/last")
+        return reading { Json.parseToJsonElement(text).jsonObject }
+    }
+
+    /** [travelLast] read by scry: the same document, or null where it cannot be scried. */
+    suspend fun travelLastByScry(): JsonObject? =
+        scryFile("/leave-last.json.json")?.let { text -> reading { Json.parseToJsonElement(text).jsonObject } }
+
+    /** Orrery's change beacon (the time of its last write), or null where it cannot be scried. */
+    suspend fun beacon(): Long? = scryFile("/beacon/rev.json")?.let { text -> reading { text.trim().toLong() } }
+
+    /**
+     * One of orrery's own files, read by eyre scry on the owner's cookie.
+     * Nothing runs on the ship for it: no event, no request grub, no
+     * history left behind. On ricsul 0.15 s, against 2.6 s for the same
+     * read through orrery, which also adds to every later request's cost.
+     * The path is where grubbery's shell installs a desk app; an install
+     * elsewhere, or a ship that cannot scry it, answers 404 or 500, and
+     * then this login stops asking and callers read through orrery.
+     */
+    private suspend fun scryFile(path: String): String? {
+        if (!scryable) return null
+        val resp = try {
+            owner.get(base + SCRY_ROOT + path)
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            throw OrreryError.Unreachable(t)
+        }
+        if (resp.status.value == NOT_FOUND || resp.status.value == SCRY_FAILED) {
+            scryable = false
+            return null
+        }
+        val text = reading { resp.bodyAsText() }
+        if (!resp.status.isSuccess()) throw OrreryError.Refused(resp.status.value, reasonOf(text))
+        return text
+    }
+
+    /**
+     * Where the owner is, to the metre, for the ship's leave alerts
+     * (orrery 69): one record the ship overwrites, never an observation.
+     * See [positionBody] for the wire.
+     */
+    suspend fun postPosition(token: String, fix: LocationFix) {
+        request(bare, HttpMethod.Post, "/api/position", positionBody(fix)) {
+            header(HttpHeaders.Authorization, "Bearer $token")
+        }
+    }
+
+    /**
+     * One local day of health from the phone (orrery 74), under the key;
+     * a later post of the same day replaces it. See [healthBody].
+     */
+    suspend fun postHealth(token: String, body: String) {
+        request(bare, HttpMethod.Post, "/api/health", body) { header(HttpHeaders.Authorization, "Bearer $token") }
+    }
+
     suspend fun observe(batch: JsonObject, token: String): ObserveAnswer {
         val text = request(bare, HttpMethod.Post, "/api/observe", batch.toString()) {
             header(HttpHeaders.Authorization, "Bearer $token")
@@ -564,7 +642,7 @@ class OrreryApi(
             o["note"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
                 ?: o["error"]?.jsonPrimitive?.contentOrNull
         }.getOrNull()
-            ?: text.take(160).ifBlank { "no reason given" }
+            ?: io.nisfeb.talon.mail.bodyAsReason(text, 160)
 
     companion object {
         /**
@@ -601,6 +679,9 @@ class OrreryApi(
         val REGISTRATIONS = mapOf("telegram" to "/api/telegram/webhook")
 
         const val APP_PATH = "/apps/orrery"
+        /** Orrery's data directory as grubbery's shell installs it, under eyre's scry of grubbery's files. */
+        const val SCRY_ROOT = "/~/scry/grubbery/peek/file/apps/shell.shell/desks/orrery.desk/desk/data/orrery.orrery_app"
+        private const val SCRY_FAILED = 500
         private const val NOT_FOUND = 404
         private const val FORBIDDEN = 403
         // activity is in this list because a recurring event is one:
@@ -621,6 +702,15 @@ enum class OrreryAvailability {
     /** The ship refused the cookie. */
     SIGNED_OUT,
 }
+
+/**
+ * Whether the menu offers the Orrery section: switched on, and not known
+ * to be missing. Still being looked for counts as there: the menu hid it
+ * until the ship first answered, which on a busy ship was a while after
+ * launch.
+ */
+fun orreryOffered(switchedOn: Boolean, availability: OrreryAvailability): Boolean =
+    switchedOn && availability != OrreryAvailability.MISSING && availability != OrreryAvailability.SIGNED_OUT
 
 data class MintedKey(val id: String, val token: String)
 
@@ -726,7 +816,7 @@ fun chatOptionsOf(o: JsonObject): List<ChatOption> = (o["items"] as? kotlinx.ser
 data class ChatReaderRun(val atMs: Long?, val read: Int, val filed: Int, val notes: List<String>, val modelDown: Boolean)
 
 fun chatReaderRunOf(o: JsonObject) = ChatReaderRun(
-    atMs = o["at"]?.jsonPrimitive?.contentOrNull?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
+    atMs = o["at"]?.jsonPrimitive?.contentOrNull?.let { runCatching { kotlin.time.Instant.parse(it).toEpochMilliseconds() }.getOrNull() },
     read = o["read"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0,
     filed = o["filed"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0,
     notes = names(o["notes"]),
@@ -777,7 +867,7 @@ fun checkPayload(payload: JsonObject, shape: JsonObject, known: Set<String>): Pa
             out[k] = kotlinx.serialization.json.JsonPrimitive(said.lowercase())
         }
         if ("ISO 8601" in line) {
-            val utc = runCatching { kotlinx.datetime.Instant.parse(said).toString() }.getOrNull()
+            val utc = runCatching { kotlin.time.Instant.parse(said).toString() }.getOrNull()
                 ?: said.takeIf { runCatching { kotlinx.datetime.LocalDate.parse(it) }.isSuccess }
                 ?: return null to "$k is not a time"
             out[k] = kotlinx.serialization.json.JsonPrimitive(utc)
@@ -920,7 +1010,7 @@ data class GeneratorRun(
 fun generatorRunOf(o: JsonObject): GeneratorRun {
     fun str(k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() && it != "null" }
     fun int(k: String) = str(k)?.toDoubleOrNull()?.toInt()
-    val at = (str("at") ?: str("called"))?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+    val at = (str("at") ?: str("called"))?.let { runCatching { kotlin.time.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
     val usage = o["usage"] as? JsonObject
     return GeneratorRun(
         atMs = at,
@@ -938,17 +1028,17 @@ fun generatorRunOf(o: JsonObject): GeneratorRun {
 fun generatorLine(r: GeneratorRun, nowMs: Long, zone: kotlinx.datetime.TimeZone): String {
     val parts = mutableListOf<String>()
     r.atMs?.let { at ->
-        val day = kotlinx.datetime.Instant.fromEpochMilliseconds(at).toLocalDateTime(zone).date
-        val today = kotlinx.datetime.Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
+        val day = kotlin.time.Instant.fromEpochMilliseconds(at).toLocalDateTime(zone).date
+        val today = kotlin.time.Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
         val clock = OrreryText.clock(at, zone)
-        parts += if (day == today) "ran $clock" else "ran ${day.dayOfMonth} ${day.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)} $clock"
+        parts += if (day == today) "ran $clock" else "ran ${day.day} ${day.month.name.lowercase().replaceFirstChar { it.uppercase() }.take(3)} $clock"
     }
     when {
         r.error != null -> parts += "failed: ${r.error.take(80)}"
         r.skipped -> {
             val held = r.notes.firstOrNull { "held by the limits" in it }
             val until = held?.substringAfter(" until ", "")?.trim()
-                ?.let { runCatching { kotlinx.datetime.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
+                ?.let { runCatching { kotlin.time.Instant.parse(it).toEpochMilliseconds() }.getOrNull() }
             parts += when {
                 until != null -> "held by the limits until ${OrreryText.clock(until, zone)}"
                 held != null -> "held by the limits"

@@ -15,6 +15,7 @@ import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.urbit.UrbitSession
+import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,6 +26,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.util.createAppHttpClient
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
+import coil3.memoryCacheMaxSizePercentWhileInBackground
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -105,31 +110,6 @@ class TalonApplication : Application() {
     lateinit var searchEmbedderClient: io.nisfeb.talon.ai.AndroidSearchEmbedderClient
         private set
 
-    // Both lazy so neither touches Context until after attachBaseContext()
-    // / onCreate() — eager property initializers run during the
-    // Application constructor, before Context is wired up, and
-    // getSharedPreferences would NPE.
-    private val watchwordsPrefs by lazy {
-        getSharedPreferences("talon_watchwords", MODE_PRIVATE)
-    }
-
-    // Default true: new installs and existing users who never touched
-    // the toggle should mirror watchwords across devices out of the
-    // box. Users who explicitly turned it off keep the off setting
-    // because SharedPreferences only returns the default when the key
-    // is absent.
-    private val _watchwordsSyncEnabled by lazy {
-        MutableStateFlow(watchwordsPrefs.getBoolean(KEY_WATCHWORDS_SYNC, true))
-    }
-    val watchwordsSyncEnabled: StateFlow<Boolean>
-        get() = _watchwordsSyncEnabled.asStateFlow()
-
-    fun setWatchwordsSyncEnabled(enabled: Boolean) {
-        if (_watchwordsSyncEnabled.value == enabled) return
-        watchwordsPrefs.edit().putBoolean(KEY_WATCHWORDS_SYNC, enabled).apply()
-        _watchwordsSyncEnabled.value = enabled
-    }
-
     private val _activeShip = MutableStateFlow<String?>(null)
     /** Active ship patp, or null if none logged in. Changes on switch
      *  so UI can re-key its tree and pick up the new ship's data. */
@@ -144,21 +124,60 @@ class TalonApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Images off screen leave the memory cache while Talon is in the
+        // background (those still drawn stay, held weakly), so a hidden
+        // Talon holds less. ponytail: half is a guess; Coil names none.
+        // Images get ECH where Android does it, like ship traffic.
+        coil3.SingletonImageLoader.setSafe { ctx ->
+            coil3.ImageLoader.Builder(ctx)
+                .memoryCacheMaxSizePercentWhileInBackground(0.5)
+                .apply {
+                    io.nisfeb.talon.util.echDnsOrNull()?.let { dns ->
+                        components { add(coil3.network.okhttp.OkHttpNetworkFetcherFactory(callFactory = { OkHttpClient.Builder().dns(dns).build() })) }
+                    }
+                }
+                .build()
+        }
         // Module-visible app context for the few leaf helpers that have
         // no Context of their own (e.g. saveWavFile's MediaStore write).
         talonAppContext = applicationContext
+        // The encrypted AI settings: the Keystore unwrap and the decrypt
+        // of every value ran on the main thread before the first frame.
+        // Begun here on another thread, while the rest is set up, and
+        // waited for only where they are first wanted below.
+        val aiSettingsOpening = appScope.async { io.nisfeb.talon.ai.AndroidAiSettings(this@TalonApplication) }
         // Live calls and party lines rejoin the moment the default
         // network changes (wifi to cellular), rather than when ICE
-        // gives up half a minute later.
+        // gives up half a minute later; the ship's stream reconnects
+        // with them, where its socket died silently in the hand-off.
+        // Here, not in TalonSyncService, which runs only without push.
         runCatching {
             val cm = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
             var last: android.net.Network? = null
             cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: android.net.Network) {
-                    if (last != null && last != network) io.nisfeb.talon.util.NetworkChanges.bump()
+                    if (last != null && last != network) {
+                        io.nisfeb.talon.util.NetworkChanges.bump()
+                        if (::repo.isInitialized) repo.forceReconnect()
+                    }
                     last = network
                 }
             })
+        }
+        // Waking the screen catches up what doze held back (one activity
+        // re-scry; forceReconnect's debounce caps the cost).
+        runCatching {
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+                    if (intent?.action == android.content.Intent.ACTION_SCREEN_ON && ::repo.isInitialized) repo.catchUp()
+                }
+            }
+            val filter = android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_ON)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                registerReceiver(receiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(receiver, filter)
+            }
         }
         // Cookie-jar-bearing client used by UrbitSession + S3Uploader.
         // Coil does NOT use this — coil-network-okhttp registers its
@@ -168,11 +187,7 @@ class TalonApplication : Application() {
         // required. If anyone ever adds a Coil callsite for a
         // resource behind the ship's cookie wall, that callsite will
         // need its own ImageLoader configured with this client.
-        http = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.SECONDS) // long-lived SSE
-            .writeTimeout(15, TimeUnit.SECONDS)
-            .build()
+        http = io.nisfeb.talon.util.sharedOkHttp
         ktorHttp = createAppHttpClient()
         shipDataEraser = io.nisfeb.talon.data.AndroidShipDataEraser(this)
         sessionStore = io.nisfeb.talon.urbit.AndroidSessionStore(this)
@@ -192,7 +207,7 @@ class TalonApplication : Application() {
                 }
             }
         }
-        aiSettings = io.nisfeb.talon.ai.AndroidAiSettings(this)
+        aiSettings = kotlinx.coroutines.runBlocking { aiSettingsOpening.await() }
         // uiSettings is constructed below once buildShipScoped has set
         // up the per-ship `db` field — AndroidUiSettings derives its
         // railVisibility flow from the rail_item_prefs Room table.
@@ -220,11 +235,11 @@ class TalonApplication : Application() {
             now = { System.currentTimeMillis() },
             lastCheckedAtMs = { updatePrefs.getLong("last_http_check_ms", 0L) },
             recordCheckedAt = { updatePrefs.edit().putLong("last_http_check_ms", it).apply() },
-            minIntervalMs = 12L * 60L * 60L * 1000L,
+            minIntervalMs = io.nisfeb.talon.update.UPDATE_MIN_INTERVAL_MS,
         )
         // Re-check on every app-foreground (cold launch AND warm
         // resume), not just process onCreate. HttpUpdateChecker has
-        // its own 12-hour minInterval throttle, so daily users hit
+        // its own six-hour minInterval throttle, so daily users hit
         // the network at most once per day; the lifecycle observer
         // just ensures users who keep the Talon process alive for
         // days (warm-resume only) still get the prompt eventually.
@@ -283,6 +298,12 @@ class TalonApplication : Application() {
         // update ended is made again here. A no-op while the switch is off.
         // And only with Orrery on: off, where the owner is goes nowhere.
         if (aiSettings.state.value.orreryOn()) runCatching { io.nisfeb.talon.orrery.LocationWatch.resume(this) }
+        if (aiSettings.state.value.orreryOn()) runCatching { io.nisfeb.talon.orrery.HealthWatch.resume(this) }
+        // The ship's own pushes here, and the time-to-leave alarm that
+        // stands behind its leave push. A no-op with no ship, no UnifiedPush
+        // distributor, or no grubbery push on the ship.
+        runCatching { io.nisfeb.talon.notify.ShipPushes.ensure(this) }
+        if (aiSettings.state.value.orreryOn()) runCatching { io.nisfeb.talon.orrery.LeaveAlarm.schedule(this) }
 
 
         // User loops — headless scheduled agent runs. Ship-scoped deps
@@ -342,7 +363,80 @@ class TalonApplication : Application() {
      * the `SQLiteConnectionPool: connection was leaked` warning that
      * fired on every ship-switch.
      */
+    private var shipPushMove: kotlinx.coroutines.Job? = null
+
+    /**
+     * Notifications from the ship itself, where its %trunk can (wire 11):
+     * once a test push from the ship reaches this phone, the phone leaves
+     * the public relay ([io.nisfeb.talon.notify.moveToShipPush]). Tried each
+     * time the ship's stream comes up, until it has an answer; one that
+     * could not be tried (no connection) waits for the next.
+     */
+    /**
+     * Signing out of or forgetting [ship]: nothing pushes here for it any
+     * more, from grubbery, the relay or the ship's own %trunk. A
+     * notification for a ship no longer signed in has nowhere right to
+     * land, and the trunk's went on with no way to stop it. Best effort,
+     * with the saved cookie, since the session itself goes next; the
+     * device's own records go either way.
+     */
+    private fun stopPushesFor(ship: String) {
+        runCatching { io.nisfeb.talon.notify.ShipPushes.forget(this, ship) }
+        val saved = sessionStore.all().firstOrNull { it.ship == ship }
+        val deviceId = relaySettings.deviceIdFor(ship)
+        appScope.launch {
+            if (deviceId.isNotBlank()) {
+                runCatching {
+                    io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value }).unregister(deviceId)
+                }
+                relaySettings.clearDeviceIdFor(ship)
+            }
+            io.nisfeb.talon.notify.forgetShipPush(ship, relaySettings) { body ->
+                saved?.let { io.nisfeb.talon.notify.pokeTrunkSignedOut(it, body, ktorHttp) }
+            }
+        }
+    }
+
+    private fun startShipPushMove(ship: String, shipRepo: TlonChatRepo) {
+        shipPushMove?.cancel()
+        val tokens = io.nisfeb.talon.notify.UnifiedPushTokenProvider(this)
+        val ports = io.nisfeb.talon.notify.ShipPushPorts(
+            trunkWire = { shipRepo.trunkWire() },
+            poke = { body -> shipRepo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body) },
+            register = { id -> tokens.token()?.let { io.nisfeb.talon.notify.TrunkPush.register(id, it, tokens.caps) } },
+            relayUnregister = { id ->
+                io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value }).unregister(id)
+            },
+            newId = { java.util.UUID.randomUUID().toString() },
+        )
+        shipPushMove = appScope.launch {
+            io.nisfeb.talon.notify.keepMovingToShipPush(
+                ship, relaySettings, ports, shipRepo.bootstrapping,
+                trunkArrived = io.nisfeb.talon.call.TrunkArrivals.arrived.filter { it == ship }.map { },
+            ) {
+                android.util.Log.i("Talon", "ship push for $ship: $it")
+            }
+        }
+    }
+
     private fun buildShipScoped(ship: String, afterPriorClose: (() -> Unit)? = null) {
+        // A device registered with the relay before it asked what the app
+        // understands has said nothing, and gets no read pushes: say it,
+        // once a launch. Registering needs the +code; this does not.
+        relaySettings.deviceIdFor(ship).takeIf { it.isNotBlank() }?.let { deviceId ->
+            // Only when it changed: this ran on every process start, workers'
+            // and alarms' too, one request each time to say the same thing.
+            val caps = io.nisfeb.talon.notify.UnifiedPushTokenProvider(this@TalonApplication).caps
+            val said = getSharedPreferences("talon.relay.caps", MODE_PRIVATE)
+            val key = "declared::$deviceId"
+            if (said.getString(key, null) != caps.joinToString(",")) {
+                appScope.launch {
+                    val ok = io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value })
+                        .declareCaps(deviceId, caps)
+                    if (ok) said.edit().putString(key, caps.joinToString(",")).apply()
+                }
+            }
+        }
         val priorDb = if (::db.isInitialized) db else null
         val priorIndexer = if (::embeddingIndexer.isInitialized) embeddingIndexer else null
         val priorRepo = if (::repo.isInitialized) repo else null
@@ -374,8 +468,12 @@ class TalonApplication : Application() {
             db = db,
             settingsSync = settingsSync,
             notificationHealth = notificationHealth,
-            watchwordsSyncEnabled = watchwordsSyncEnabled,
-        )
+        ).also { r ->
+            // Here, for the app's lifetime: the screens come and go, and a
+            // chat read elsewhere should leave no notification behind.
+            r.readListener = { whom -> Notifications.cancelAllForChat(this, whom, forShip = ship) }
+        }
+        startShipPushMove(ship, repo)
         drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
         menuSeen = io.nisfeb.talon.ui.AndroidMenuSeenStore(this, ship)
         shortcuts = ShortcutsPublisher(this, db)
@@ -460,6 +558,7 @@ class TalonApplication : Application() {
      * show the login screen.
      */
     fun signOutActive() {
+        _activeShip.value?.let { stopPushesFor(it) }
         runCatching { repo.stop() }
         runCatching { shortcuts.stop() }
         session.logout()
@@ -493,22 +592,7 @@ class TalonApplication : Application() {
      */
     fun forgetShip(ship: String, alsoData: Boolean) {
         val wasActive = ship == _activeShip.value
-        // The relay keeps pushing a ship's activity until told to stop,
-        // and a notification for a ship no longer signed in has nowhere
-        // right to land. Best effort; the device id is dropped either
-        // way so nothing tries to use it again.
-        val deviceId = relaySettings.deviceIdFor(ship)
-        if (deviceId.isNotBlank()) {
-            appScope.launch {
-                runCatching {
-                    io.nisfeb.talon.notify.RelayClient(
-                        http = ktorHttp,
-                        endpoint = { relaySettings.endpoint.value },
-                    ).unregister(deviceId)
-                }
-                relaySettings.clearDeviceIdFor(ship)
-            }
-        }
+        stopPushesFor(ship)
         val erase: () -> Unit = {
             if (alsoData) {
                 shipDataEraser.erase(ship)
@@ -581,7 +665,4 @@ class TalonApplication : Application() {
         _allShips.value = sessionStore.all().map { it.ship }
     }
 
-    private companion object {
-        private const val KEY_WATCHWORDS_SYNC = "sync_enabled"
-    }
 }

@@ -30,7 +30,7 @@ import androidx.sqlite.execSQL
 @Entity(
     tableName = "messages",
     primaryKeys = ["whom", "id"],
-    indices = [Index(value = ["whom", "parentId", "sentMs"])],
+    indices = [Index(value = ["whom", "parentId", "sentMs"]), Index(value = ["status"])],
 )
 data class MessageEntity(
     val whom: String,
@@ -62,7 +62,7 @@ data class MessageEntity(
      */
     val status: String? = null,
     /**
-     * What search and watchword scans match: the title and the words as
+     * What search matches: the title and the words as
      * shown. [MessageDao]'s writes fill it; null only on rows from before
      * it existed, until [TlonChatRepo] start fills those in.
      */
@@ -75,4 +75,17 @@ internal const val MESSAGE_SEARCH_TEXT_SQL = "ALTER TABLE messages ADD COLUMN se
 /** See [MESSAGE_SEARCH_TEXT_SQL]. Android runs the same statement its own way. */
 val MESSAGE_SEARCH_TEXT_MIGRATION = object : Migration(48, 49) {
     override fun migrate(connection: SQLiteConnection) = connection.execSQL(MESSAGE_SEARCH_TEXT_SQL)
+}
+
+/**
+ * 50 to 51: an index on [MessageEntity.status]. The count of queued
+ * messages a chat's slow-ship line watches is asked again on every write
+ * to messages, and with no index each asking read the whole table: a
+ * bootstrap's thousands of writes each paid a full scan.
+ */
+internal const val MESSAGE_STATUS_INDEX_SQL = "CREATE INDEX IF NOT EXISTS `index_messages_status` ON `messages` (`status`)"
+
+/** See [MESSAGE_STATUS_INDEX_SQL]. Android runs the same statement its own way. */
+val MESSAGE_STATUS_INDEX_MIGRATION = object : Migration(50, 51) {
+    override fun migrate(connection: SQLiteConnection) = connection.execSQL(MESSAGE_STATUS_INDEX_SQL)
 }

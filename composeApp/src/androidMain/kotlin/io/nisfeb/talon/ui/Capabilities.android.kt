@@ -30,6 +30,8 @@ actual val isBackgroundCallRingSupported: Boolean = true
 // The system back gesture already owns the left edge here.
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = true
+// Android: port pending (MediaProjection behind a foreground service).
+actual val isScreenShareSupported: Boolean = false
 actual val isCameraSwitchSupported: Boolean = true
 
 actual val isEdgeSwipeBackSupported: Boolean = false
@@ -47,6 +49,11 @@ actual val isDrawerNavigation: Boolean = true
 actual val isTouchPrimary: Boolean = true
 
 actual val isLocationSharingSupported: Boolean = true
+actual val isHealthSharingSupported: Boolean = true
 
 /** Nothing here forbids an outside checkout. */
 actual val isArmillaryPurchaseSupported: Boolean = true
+
+actual val isRelayNotificationSetupNeeded: Boolean = false
+
+actual val isAppIconBadgeSupported: Boolean = false

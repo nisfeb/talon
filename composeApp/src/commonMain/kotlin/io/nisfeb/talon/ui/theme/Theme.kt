@@ -125,6 +125,8 @@ fun TalonTheme(
     accentOverride: Color? = null,
     /** A user-made theme; it brings its own light or dark mode. */
     customTheme: CustomTheme? = null,
+    /** The font the owner chose for the app; null for the system's. Code keeps its own monospace. */
+    fontFamily: androidx.compose.ui.text.font.FontFamily? = null,
     content: @Composable () -> Unit,
 ) {
     val dark = customTheme?.dark ?: darkTheme
@@ -137,7 +139,7 @@ fun TalonTheme(
     )
     MaterialTheme(
         colorScheme = effective,
-        typography = TalonTypography,
+        typography = if (fontFamily == null) TalonTypography else TalonTypography.inFamily(fontFamily),
         shapes = TalonShapes,
     ) {
         // The two extras a theme may set that Material has no role for.

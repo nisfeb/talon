@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MailOutline
 import io.nisfeb.talon.ui.Button
@@ -27,6 +28,8 @@ import io.nisfeb.talon.ui.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,8 +44,9 @@ import io.nisfeb.talon.data.ContactEntity
 
 /**
  * Bottom sheet showing a peer's profile, or our own. For peers, offers
- * a "Message" action that routes into the 1:1 DM. For self, offers
- * "Edit profile" — the caller decides which screen to push.
+ * a "Message" action that routes into the 1:1 DM, and "Call" where our
+ * ship has %trunk. For self, offers "Edit profile" — the caller decides
+ * which screen to push.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,6 +72,11 @@ fun ContactProfileSheet(
     // Where the viewer's ship has no mail app this is null and the
     // button is simply not drawn, rather than drawn and dead.
     val mailTo = io.nisfeb.talon.mail.LocalMailTo.current
+    // The same for calls: null where our ship has no %trunk.
+    val callTo = LocalCallTo.current
+    // Opening someone's profile asks the ship for it, where it has none.
+    val fetchProfile = LocalFetchProfile.current
+    LaunchedEffect(ship, self) { if (!self) fetchProfile?.invoke(ship) }
     // Open all the way: half open left Message, Mail and Close below
     // the fold on a short window, behind a drag nobody knows to make.
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -138,6 +147,14 @@ fun ContactProfileSheet(
             }
             // Asked of the ship once per comet, ever: see [CometDomes].
             GroundwireLine(ship)
+            // A bot's ship says whether its gateway is up (Tlon 12.3.0, bot-liveness).
+            io.nisfeb.talon.urbit.BotLiveness.online.collectAsState().value[ship]?.let { up ->
+                Text(
+                    if (up) "Bot · Online" else "Bot · Offline",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (up) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             copied?.let {
                 Text(
                     "Copied $it",
@@ -224,6 +241,16 @@ fun ContactProfileSheet(
                         // Shrinks rather than wrapping beside Mail and Close.
                         FitText("Message")
                     }
+                    if (callTo != null) {
+                        OutlinedButton(
+                            onClick = { onDismiss(); callTo(ship) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Filled.Call, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            FitText("Call")
+                        }
+                    }
                     if (mailTo != null) {
                         OutlinedButton(
                             onClick = { onDismiss(); mailTo(ship) },
@@ -248,3 +275,13 @@ fun ContactProfileSheet(
  * none, and the tap does nothing.
  */
 val LocalOpenProfile = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
+
+/**
+ * Rings a ship, where our ship has %trunk: the profile sheet's Call.
+ * Null without it, and the button is not drawn. Whether the other ship
+ * has %trunk nobody can ask; a ship without it is a call nobody answers.
+ */
+val LocalCallTo = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
+
+/** Asks our ship for a ship's profile when it holds none ([io.nisfeb.talon.urbit.TlonChatRepo.meetIfUnknown]). */
+val LocalFetchProfile = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }

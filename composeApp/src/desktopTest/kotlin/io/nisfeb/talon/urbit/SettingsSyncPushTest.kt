@@ -189,7 +189,8 @@ class SettingsSyncPushTest {
     // ─── the lease on a loop's fire ────────────────────────────────
 
     private fun leaseHeld(by: String, at: Long) {
-        ship.scries["settings/desk/talon"] = """{"desk":{"automation-claims":{"l1":{"holder":"$by","claimedAt":$at}}}}"""
+        // The one entry, as %settings' /x/entry answers it; the desk is not read.
+        ship.scries["settings/entry/talon/automation-claims/l1"] = """{"entry":{"holder":"$by","claimedAt":$at}}"""
     }
 
     /** Whoever stakes a claim, [winner] is holding it once the settle is over. */

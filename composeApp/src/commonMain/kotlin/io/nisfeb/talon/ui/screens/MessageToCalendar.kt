@@ -22,7 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.calendar.EventCat
 import io.nisfeb.talon.calendar.EventDraft
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atTime
@@ -93,16 +93,20 @@ fun MessageToCalendarDialog(
     var note by remember { mutableStateOf(initialNote) }
     // The next hour, which is nearly always what somebody means when
     // they make an event out of what was just said.
-    var date by remember { mutableStateOf(if (kind == FromMessage.Event && here.hour >= 23) here.date.plusDay() else here.date) }
+    val firstDate = if (kind == FromMessage.Event && here.hour >= 23) here.date.plusDay() else here.date
+    var date by remember { mutableStateOf(firstDate) }
     // And a time the owner can change: the label used to promise one
     // that no picker offered, so every event landed on the next hour.
     val startMinute = if (here.hour >= 23) 9 * 60 else (here.hour + 1) * 60
     val time = rememberTimePickerState(initialHour = startMinute / 60, initialMinute = startMinute % 60, is24Hour = twentyFourHour)
     var dated by remember { mutableStateOf(kind == FromMessage.Event) }
     var picking by remember { mutableStateOf(false) }
+    // A tap outside closes it only while nothing has changed; Cancel always does.
+    val untouched = title == initialTitle && note == initialNote && date == firstDate &&
+        dated == (kind == FromMessage.Event) && time.hour * 60 + time.minute == startMinute
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (untouched) onDismiss() },
         title = { Text(if (kind == FromMessage.Event) "New event" else "New task") },
         text = {
             Column {

@@ -1,0 +1,140 @@
+package io.nisfeb.talon.orrery
+
+import io.nisfeb.talon.ui.parseIsoUtc
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+
+/**
+ * One thing orrery knows, as the Orrery section shows it. [values] holds
+ * each attribute's current values: one for most, several for a list such
+ * as participants. A value is text, or `{"ref": "kind/slug"}` for another
+ * thing it knows.
+ */
+data class OrreryItem(
+    val id: String,
+    val kind: String,
+    val name: String,
+    val aliases: List<String>,
+    val values: Map<String, List<JsonElement>>,
+) {
+    fun text(attr: String): String? = (values[attr]?.firstOrNull() as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+    fun refs(attr: String): List<String> =
+        values[attr].orEmpty().mapNotNull { ((it as? JsonObject)?.get("ref") as? JsonPrimitive)?.contentOrNull }
+    fun ms(attr: String): Long? = text(attr)?.let(::parseIsoUtc)
+    /** Where it is: an activity's or a situation's location, a place's address. */
+    val where: String? get() = text("location") ?: text("address")
+}
+
+/**
+ * Every thing in orrery's state, as it stands: the brief form (GET
+ * /api/state?brief=1, orrery 67+), where an attribute is its value, or the
+ * full one, where it is `{value, source, conf, at, ...}`. A copy kept from
+ * before the switch to brief is the full form.
+ */
+fun orreryItems(state: JsonObject): List<OrreryItem> = (state["bodies"] as? JsonArray).orEmpty().mapNotNull { b ->
+    val o = b as? JsonObject ?: return@mapNotNull null
+    fun str(k: String) = (o[k] as? JsonPrimitive)?.contentOrNull
+    val id = str("id") ?: return@mapNotNull null
+    fun current(v: JsonElement): JsonElement? =
+        (if (v is JsonObject && "value" in v) v["value"] else v)?.takeUnless { it is JsonNull }
+    OrreryItem(
+        id = id,
+        kind = str("kind") ?: id.substringBefore('/'),
+        name = str("name")?.takeIf { it.isNotBlank() } ?: id.substringAfter('/'),
+        aliases = (o["aliases"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull },
+        values = (o["attrs"] as? JsonObject).orEmpty()
+            .mapValues { (_, v) -> if (v is JsonArray) v.mapNotNull(::current) else listOfNotNull(current(v)) }
+            .filterValues { it.isNotEmpty() },
+    )
+}
+
+/** One entry of Coming up: [item] from [startMs], to [endMs] where it says. */
+data class Upcoming(val item: OrreryItem, val startMs: Long, val endMs: Long?)
+
+/** A situation or activity so marked is over, whatever its times say. */
+private val FINISHED = setOf("closed", "ended", "done", "resolved", "cancelled", "canceled")
+
+/** An activity's next time stays on Coming up this long after it starts: it says no end. */
+private const val UNDER_WAY_MS = 60 * 60_000L
+
+/**
+ * What is ahead, soonest first: situations by their start, activities by
+ * their next time. One under way stays (a situation until it ends, an
+ * activity for an hour); one finished or already over does not.
+ */
+fun comingUp(items: List<OrreryItem>, nowMs: Long): List<Upcoming> = items.mapNotNull { i ->
+    if (i.text("status") in FINISHED) return@mapNotNull null
+    when (i.kind) {
+        "situation" -> {
+            val start = i.ms("starts") ?: return@mapNotNull null
+            val end = i.ms("ends")
+            Upcoming(i, start, end).takeIf { (end ?: start) >= nowMs }
+        }
+        "activity" -> {
+            val next = i.ms("next") ?: return@mapNotNull null
+            Upcoming(i, next, null).takeIf { next + UNDER_WAY_MS >= nowMs }
+        }
+        else -> null
+    }
+}.sortedBy { it.startMs }
+
+/** The kinds in the order Browse lists them, with their headings. Others follow, as named. */
+val ORRERY_KINDS = listOf(
+    "situation" to "Situations", "activity" to "Activities", "person" to "People", "place" to "Places",
+    "org" to "Organizations", "thing" to "Things", "note" to "Notes",
+)
+
+/** Every thing whose name or an alias holds [query], under its kind's heading, each kind by name. */
+fun browse(items: List<OrreryItem>, query: String): List<Pair<String, List<OrreryItem>>> {
+    val q = query.trim()
+    val hits = items.filter { q.isEmpty() || it.name.contains(q, ignoreCase = true) || it.aliases.any { a -> a.contains(q, ignoreCase = true) } }
+    val known = ORRERY_KINDS.map { it.first }.toSet()
+    val headed = ORRERY_KINDS + hits.map { it.kind }.filter { it !in known }.distinct().sorted().map { it to it.replaceFirstChar(Char::uppercase) }
+    return headed.mapNotNull { (kind, heading) ->
+        hits.filter { it.kind == kind }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { heading to it }
+    }
+}
+
+/** The ship's "running late" push (orrery 73): [LATE_TAG_PREFIX] + the same key a leave push has. */
+const val LATE_TAG_PREFIX = "orrery-late-"
+
+/**
+ * The thing a leave or running-late alert is about: its tag's key without
+ * the occurrence ("activity/x@123" and "activity/x@123/pick" are "activity/x").
+ */
+fun alertItemOf(tag: String?): String? =
+    (leaveKeyOfTag(tag) ?: tag?.takeIf { it.startsWith(LATE_TAG_PREFIX) }?.removePrefix(LATE_TAG_PREFIX))
+        ?.substringBefore('@')?.takeIf { it.isNotBlank() }
+
+/** The ship's next time to leave (GET /api/travel/last's `next`): for which thing, when, and how long the drive. */
+data class LeaveBy(val itemId: String, val leaveByMs: Long, val minutes: Int)
+
+fun leaveByOf(last: JsonObject?): LeaveBy? {
+    val next = last?.get("next") as? JsonObject ?: return null
+    fun str(k: String) = (next[k] as? JsonPrimitive)?.contentOrNull
+    return LeaveBy(
+        itemId = str("key")?.substringBefore('@')?.takeIf { it.isNotBlank() } ?: return null,
+        leaveByMs = str("leave_by")?.let(::parseIsoUtc) ?: return null,
+        minutes = (next["minutes"] as? JsonPrimitive)?.intOrNull ?: 0,
+    )
+}
+
+/**
+ * The action a ship push is about, from its tag: orrery tags a proposed
+ * or filed action `orrery-<id>`, beside its leave, late and nudge tags
+ * and the review. Talon shows that action under its own slot, so the
+ * pushed copy and the app's own replace each other, and answering it
+ * anywhere takes back both. Null for anything else.
+ */
+fun actionIdOfTag(tag: String?): String? {
+    val rest = tag?.takeIf { it.startsWith("orrery-") }?.removePrefix("orrery-") ?: return null
+    if (rest.isBlank() || rest == "review") return null
+    if (listOf("leave-", "late-", "nudge-").any { rest.startsWith(it) }) return null
+    return rest
+}
+

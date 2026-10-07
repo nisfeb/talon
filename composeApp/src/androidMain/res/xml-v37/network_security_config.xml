@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  As res/xml, plus Encrypted Client Hello (Android 17). An app targeting
+  37 gets it by default; Talon targets 36, so it opts in here. A host's
+  ECH keys come from its HTTPS record, fetched by AndroidDns (echDnsOrNull).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <domainEncryption mode="enabled" />
+    </base-config>
+</network-security-config>

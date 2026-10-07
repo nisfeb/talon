@@ -1,6 +1,8 @@
 package io.nisfeb.talon.urbit
 
+import kotlinx.datetime.number
 import com.ionspin.kotlin.bignum.integer.BigInteger
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * Conversions between JS-style unix millis and Urbit's @da atom, plus
@@ -49,6 +51,18 @@ object UrbitTime {
             i = start
         }
         return out.toString()
+    }
+
+    /**
+     * [ms] as an @da in Urbit's text form, to the second, as a scry path
+     * takes it: `~2026.10.4..13.05.09`. Month and day unpadded (the
+     * parser refuses `01`), the time two digits each, UTC.
+     */
+    fun unixMsToDaText(ms: Long): String {
+        val t = kotlin.time.Instant.fromEpochMilliseconds(ms)
+            .toLocalDateTime(kotlinx.datetime.TimeZone.UTC)
+        fun two(n: Int) = n.toString().padStart(2, '0')
+        return "~${t.year}.${t.month.number}.${t.day}..${two(t.hour)}.${two(t.minute)}.${two(t.second)}"
     }
 
     /** Tlon post id: "~author/<dotted-@da>". `author` must include the leading ~. */
