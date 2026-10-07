@@ -52,9 +52,29 @@ Before you write:
   makes it place a second copy on the calendar. Facts about the
   people in it, such as who they are and what they do, are still
   orrery_observe.
+- Orrery's calendar reader counts as taking part everyone it knows who
+  is named in an event's title or note. So an event's note is about
+  the event alone: "before you leave for Magnus's gymnastics" put
+  Magnus at Linus's woodwork. When the owner takes part (supervises,
+  drives, attends), the title names them by the name orrery holds for
+  person/me, such as "Jackson supervises Linus nailing wood": "me" and
+  "I" count for nobody, and a title naming only someone else leaves
+  the owner out.
+- Who drops off and who picks up for an activity are facts on the
+  activity, written with orrery_observe, not told as an instruction:
+  attributes drop-off and pick-up, one row per leg, each value
+  {"ref": "person/…", "days": ["wednesday"]}. A row without days covers
+  the activity's other days. The owner is person/me.
 - Someone or something orrery_find does not find is created in the
   same orrery_observe as the facts about it, in `bodies`. A value that
   names a body is {"ref": "person/alice"}, not the id as text.
+- Two bodies for one name (activity/ballet and an old
+  activity/rose-ballet): take the one with a current `next` or an open
+  situation. When neither or both have one, ask the owner which.
+- After a write, read the body back with orrery_read and check that
+  `now` holds what the owner said. A refused row, or an instruction
+  orrery filed as a preference, means it did not land: tell the owner
+  so, never that it is done.
 - A fact is one subject, one attribute, one value. `at` is when the
   thing happened or will happen, not when you are writing it.
 - A schedule is not a fact about the past. An activity's `next` and a
@@ -154,7 +174,7 @@ interface OrreryTap {
     val shipUrl: String? get() = null
     suspend fun find(q: String): Result<List<Pair<String, String>>>
     suspend fun state(): Result<String>
-    suspend fun body(id: String): Result<List<String>>
+    suspend fun body(id: String): Result<String>
     suspend fun observe(batch: JsonObject): Result<List<String>>
     suspend fun settings(name: String): Result<String>
     suspend fun configure(name: String, body: JsonObject): Result<String>
@@ -183,9 +203,7 @@ fun OrreryRepo.asTap(): OrreryTap = object : OrreryTap {
     // model reads it whole instead of a view cut mid-string.
     override suspend fun state() = readState(brief = true).map { it.toString() }
 
-    override suspend fun body(id: String) = bodyTimeline(id).map { rows ->
-        rows.map { "obs=${it.id} attr=${it.attr} at=${it.atMs} source=${it.sourceId} ${if (it.stands) "stands" else it.status}" }
-    }
+    override suspend fun body(id: String) = bodyView(id).map(::bodyForModel)
 
     override suspend fun observe(batch: JsonObject) = observeNow(batch).map { answer ->
         answer.bodies.map {
@@ -270,7 +288,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
     add(Tool(
         spec = ToolSpec(
             "orrery_read",
-            "Read orrery. With no argument, the brief view: every body the key may see as id, kind, name, aliases, current values and the situations it is in; the open situations with what each needs and whose move it is; the open actions; and the attribute names each kind takes. Read it once at the start of a task, then orrery_find and orrery_read with body for the few things you need more of. With body: that body's timeline, what was said about it and whether each row still stands.",
+            "Read orrery. With no argument, the brief view: every body the key may see as id, kind, name, aliases, current values and the situations it is in; the open situations with what each needs and whose move it is; the open actions; and the attribute names each kind takes. Read it once at the start of a task, then orrery_find and orrery_read with body for the few things you need more of. With body: what orrery now holds for it (under now, each attribute's current value), its situations and actions, and its timeline with values. Read a body back after writing to it, to check the owner's words landed as facts.",
             toolSchema("body" to ("string" to "A body id, e.g. person/alice. Omit for the whole view."), required = emptyList()),
         ),
         write = false,
@@ -283,9 +301,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
             )
         } else {
             orrery.body(id).fold(
-                onSuccess = { rows ->
-                    if (rows.isEmpty()) "orrery holds nothing about $id." else rows.take(60).joinToString("\n")
-                },
+                onSuccess = { it },
                 onFailure = { "Could not read $id: ${it.message}" },
             )
         }
@@ -316,7 +332,10 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
             put("observations", JsonArray(arr.map(::refBodyIds)))
         }
         orrery.observe(batch).fold(
-            onSuccess = { said -> if (said.isEmpty()) "The ship answered nothing." else said.joinToString("\n") },
+            onSuccess = { said ->
+                if (said.isEmpty()) "The ship answered nothing."
+                else said.joinToString("\n") + if (said.any { "refused" in it }) "\n$NOT_LANDED" else ""
+            },
             onFailure = { "Could not write to orrery: ${it.message}" },
         )
     })
@@ -458,6 +477,10 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
                     a.reply.takeIf { it.isNotBlank() }?.let { "Orrery says: $it" },
                     a.actions.takeIf { it.isNotEmpty() }?.let { filed -> "Filed:\n" + filed.joinToString("\n") { "- ${it.kind}: ${it.title} (${it.status})" } },
                     a.note.takeIf { it.isNotBlank() },
+                    // A preference is free text a prompt reads, not a fact a
+                    // plan reads: "Andrea drops off, I pick up" filed as one
+                    // changed nothing (orrery-0c, 2026-10-07).
+                    PREFERENCE_ONLY.takeIf { a.actions.any { it.kind == "preference" } && a.actions.none { it.kind in FACT_KINDS } },
                 ).joinToString("\n").ifEmpty { "Orrery answered nothing." }
             },
             onFailure = { "Could not tell orrery: ${it.message}" },
@@ -617,3 +640,39 @@ internal fun refBodyIds(observation: JsonElement): JsonElement {
 // orrery's own rule (lib/orrery.hoon +parse-bid): a slug is lowercase
 // letters, digits and hyphens, at most 64, not led by a hyphen.
 private val BODY_ID = Regex("""(person|place|activity|situation|thing|org|note)/[a-z0-9][a-z0-9-]{0,63}""")
+
+/** What an observe answer adds when a row was refused. */
+internal const val NOT_LANDED = "Not all of it landed. Tell the owner what was refused and why; do not say it is done."
+
+/** What an instruct answer adds when orrery filed only a preference. */
+internal const val PREFERENCE_ONLY = "Orrery filed this as a preference, not as facts, so nothing it plans from changed. If the owner stated facts, write them with orrery_observe and read the body back."
+
+/** The action kinds that change what orrery holds as fact. */
+private val FACT_KINDS = setOf("fact", "correct", "merge", "resolve")
+
+/**
+ * A body for the model to check a write against: its record, what it now
+ * holds (each attribute's winning value, under now), its situations and
+ * actions, and its newest observations with their values. Reading a body
+ * used to give each row's attribute and status but no value, so nothing
+ * could be checked against what the owner said.
+ */
+internal fun bodyForModel(b: JsonObject): String = clipJson(
+    buildJsonObject {
+        for (k in listOf("id", "kind", "name", "aliases", "ship")) b[k]?.let { put(k, it) }
+        (b["attrs"] as? JsonObject)?.let { attrs ->
+            put("now", JsonObject(attrs.mapValues { (_, v) -> (v as? JsonObject)?.get("value") ?: v }))
+        }
+        b["involved"]?.let { put("involved", it) }
+        b["actions"]?.let { put("actions", it) }
+        (b["observations"] as? JsonArray)?.let { obs ->
+            put("timeline", JsonArray(obs.take(40).map { o ->
+                (o as? JsonObject)?.let { JsonObject(it.filterKeys { k -> k in TIMELINE_KEYS }) } ?: o
+            }))
+        }
+    }.toString(),
+    BODY_CHARS,
+)
+
+private val TIMELINE_KEYS = setOf("id", "attr", "value", "at", "status")
+private const val BODY_CHARS = 12_000

@@ -33,7 +33,7 @@ class OrreryToolsTest {
         override suspend fun find(q: String) = Result.success(hits)
         var stateText = """{"bodies":[]}"""
         override suspend fun state() = Result.success(stateText)
-        override suspend fun body(id: String) = Result.success(listOf("obs=1 attr=status"))
+        override suspend fun body(id: String) = Result.success("""{"id":"$id","now":{"status":"away"}}""")
         override suspend fun observe(batch: JsonObject): Result<List<String>> {
             observed = batch
             return Result.success(answer)
@@ -96,6 +96,14 @@ class OrreryToolsTest {
         assertEquals("Orrery says: Sam and Samuel look like one person.\nFiled:\n- merge: Fold Samuel into Sam (proposed)", said)
         run(t, "orrery_instruct", buildJsonObject { put("text", "never propose calls"); put("apply", true) })
         assertEquals("never propose calls" to true, t.told)
+        // orrery-0c, 2026-10-07: "Andrea drops off Wednesday ballet, I pick
+        // up" was filed as a preference, which changes no plan, and the
+        // assistant said it was done.
+        t.instructed = io.nisfeb.talon.orrery.Instructed(
+            actions = listOf(io.nisfeb.talon.orrery.OrreryAction("p1", "preference", "Andrea drops off Wednesday ballet", JsonObject(emptyMap()), emptyList(), null, "approved", "owner")),
+        )
+        assertTrue(PREFERENCE_ONLY in run(t, "orrery_instruct", buildJsonObject { put("text", "Andrea drops off Wednesday ballet, I pick up"); put("apply", true) }))
+        assertTrue(PREFERENCE_ONLY !in said, "a merge changes what orrery holds")
         t.instructed = io.nisfeb.talon.orrery.Instructed(note = "Orrery has made all of today's model calls. Try again tomorrow.")
         assertTrue("today's model calls" in run(t, "orrery_instruct", buildJsonObject { put("text", "x") }), "a refusal is said")
     }
@@ -211,6 +219,8 @@ class OrreryToolsTest {
             t.observed.toString(),
         )
         assertTrue("2: refused, unknown attr" in said, "the ship's own answer, per item")
+        assertTrue(NOT_LANDED in said, "a refusal is not done")
+        assertTrue(NOT_LANDED !in run(Tap(), "orrery_observe", buildJsonObject { put("observations", "[]"); put("bodies", "[{\"id\":\"person/x\",\"name\":\"X\"}]") }))
 
         assertTrue("must be a JSON array" in run(t, "orrery_observe", buildJsonObject {
             put("observations", """{"subject":"person/alice"}""")
@@ -257,6 +267,27 @@ class OrreryToolsTest {
         assertTrue("Not for adding an event" in specs.getValue("orrery_instruct"))
         assertTrue("calendar placements included" in orreryTools(Tap()).first { it.spec.name == "orrery_instruct" }.spec.parameters.toString())
         assertTrue("create_event, and only there" in run(Tap(), "orrery_guide"))
+        // orrery-0c, 2026-10-07: Magnus counted at Linus's woodwork from
+        // the note's aside, and the owner not counted at all.
+        val guide = run(Tap(), "orrery_guide")
+        assertTrue("an event's note is about\n  the event alone" in guide, guide)
+        assertTrue("person/me" in guide && "\"me\" and\n  \"I\" count for nobody" in guide)
+        // orrery 85: who drives is facts with days, not an instruction.
+        assertTrue("{\"ref\": \"person/…\", \"days\": [\"wednesday\"]}" in guide)
+    }
+
+    // A body read back must show values, or a write cannot be checked
+    // against what the owner said (orrery-0c, 2026-10-07).
+    @Test
+    fun `a body reads back with what it now holds and its timeline's values`() {
+        val view = Json.parseToJsonElement("""{"id":"activity/ballet","kind":"activity","name":"Ballet","aliases":[],
+            "attrs":{"pick-up":{"value":{"ref":"person/me"},"at":"2026-10-07T12:00:00Z","conf":100,"source":{"kind":"user","id":"talon"},"by":"talon/android-17","obs":"o2"}},
+            "involved":[],"actions":[],
+            "observations":[{"id":"o2","attr":"pick-up","value":{"ref":"person/me"},"at":"2026-10-07T12:00:00Z","status":"live","source":{"kind":"user","id":"talon"}}]}""") as JsonObject
+        val out = bodyForModel(view)
+        assertTrue(""""now":{"pick-up":{"ref":"person/me"}}""" in out, out)
+        assertTrue(""""timeline":[{"id":"o2","attr":"pick-up","value":{"ref":"person/me"},"at":"2026-10-07T12:00:00Z","status":"live"}]""" in out, out)
+        assertTrue("source" !in out, "provenance is the ship's, not the check's")
     }
 
     @Test

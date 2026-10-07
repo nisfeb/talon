@@ -346,6 +346,12 @@ class OrreryApi(
         }
     }
 
+    /** One body as the ship shows it: its record, each attribute's current winner, its situations, actions and timeline. */
+    suspend fun bodyView(id: String, token: String): JsonObject {
+        val text = request(bare, HttpMethod.Get, "/api/body/$id") { header(HttpHeaders.Authorization, "Bearer $token") }
+        return reading { Json.parseToJsonElement(text).jsonObject }
+    }
+
     /**
      * One body's timeline as the ship keeps it: what was said about it,
      * when, from where, and whether the row still stands. Read before
