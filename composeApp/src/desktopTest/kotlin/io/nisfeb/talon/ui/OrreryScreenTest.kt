@@ -32,6 +32,8 @@ import kotlin.test.assertTrue
 class OrreryScreenTest {
     private val opened: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    /** The section on screen; false is the owner leaving it. */
+    private val here = mutableStateOf(true)
     private val hour = 3_600_000L
     private val soon = System.currentTimeMillis() + 2 * hour
     private fun iso(ms: Long) = kotlin.time.Instant.fromEpochMilliseconds(ms).toString()
@@ -55,6 +57,7 @@ class OrreryScreenTest {
         view: io.nisfeb.talon.orrery.OrreryView? = io.nisfeb.talon.orrery.OrreryView(state, plan, System.currentTimeMillis()),
         problem: String? = null,
         turnOn: (suspend () -> Result<Unit>)? = null,
+        actionsTab: @androidx.compose.runtime.Composable () -> Unit = { Text("The actions list") },
         block: ComposeUiTest.() -> Unit,
     ) = runComposeUiTest {
         val item = mutableStateOf(openItem)
@@ -62,17 +65,19 @@ class OrreryScreenTest {
         setContent {
             TalonTheme(darkTheme = false) {
                 CompositionLocalProvider(LocalUriHandler provides uris) {
-                    OrreryScreen(
+                    if (here.value) OrreryScreen(
                         onBack = { did += "back" },
                         view = view,
                         refreshing = false,
                         problem = problem,
                         onOpen = { force -> did += if (force) "refresh" else "open" },
                         onRefreshActions = { did += "actions" },
+                        onLeave = { did += "left" },
                         openItem = item.value,
                         onOpenedItem = { did += "opened"; item.value = null },
                         turnOn = turnOn,
-                    ) { Text("The actions list") }
+                        actionsTab = actionsTab,
+                    )
                 }
             }
         }
@@ -119,6 +124,28 @@ class OrreryScreenTest {
         assertTrue(shows("Coming up"))
         onNodeWithContentDescription("Back").performClick()
         assertEquals(listOf("opened", "back"), did.filter { it == "opened" || it == "back" })
+    }
+
+    // The Actions tab's body comes and goes with the tabs. Its own read
+    // and its leaving ran each time: a read per tab switch, and what
+    // Orrery said to the last Tell counted seen at the first tap away.
+    @Test
+    fun `the actions are read on entering and seen on leaving, not at each tab`() = orrery(actionsTab = {
+        io.nisfeb.talon.ui.screens.OrreryActionsScreen(
+            actions = emptyList(), onBack = {}, onOpen = {}, header = false,
+            onShown = { did += "tab read" }, onLeave = { did += "tab left" },
+        )
+    }) {
+        waitUntil(timeoutMillis = 5_000) { "actions" in did }
+        for (t in listOf("Coming up", "Actions", "Browse", "Actions")) {
+            onNodeWithText(t).performClick()
+            waitForIdle()
+        }
+        assertEquals(1, did.count { it == "actions" }, "$did")
+        assertTrue(did.none { it == "left" || it.startsWith("tab") }, "a tab switch neither reads nor leaves: $did")
+        here.value = false
+        waitForIdle()
+        assertEquals(1, did.count { it == "left" }, "$did")
     }
 
     @Test

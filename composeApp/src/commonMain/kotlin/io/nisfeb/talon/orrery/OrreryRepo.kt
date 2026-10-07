@@ -870,8 +870,12 @@ class OrreryRepo(
             .onFailure { _availability.value = OrreryAvailability.UNKNOWN; probeSaid = it.message; _error.value = it.message }
     }
 
-    /** Mint this install's key and start the walk. */
-    suspend fun enable(): Result<Unit> = runCatching {
+    /**
+     * Mint this install's key and start the walk. On this repo's scope:
+     * left midway, a key minted on the ship and never kept here was a key
+     * nobody held.
+     */
+    suspend fun enable(): Result<Unit> = scope.async { runCatching {
         val a = attached()
         val s = ship ?: error("Not attached to a ship.")
         // Everything the ship has; the lists are only a fallback.
@@ -893,10 +897,10 @@ class OrreryRepo(
         location.pause(false)
         _error.value = null
         startLoop()
-    }
+    } }.await()
 
-    /** Revoke the key on the ship and forget it here. */
-    suspend fun disable(): Result<Unit> = runCatching {
+    /** Revoke the key on the ship and forget it here, on this repo's scope as [enable] is. */
+    suspend fun disable(): Result<Unit> = scope.async { runCatching {
         val s = ship ?: return@runCatching
         // All under the lock a pass writes back under and replaces the
         // key under: one still running cannot put back the row this
@@ -920,7 +924,7 @@ class OrreryRepo(
             db.orreryAccounts().delete(s)
         }
         _error.value = null
-    }
+    } }.await()
 
     private fun startLoop() {
         loop?.cancel()

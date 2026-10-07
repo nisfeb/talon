@@ -255,8 +255,9 @@ fun App(
     // and repo.start crashes on session.ourPatp ("not logged in").
     var loggedInShip by remember { mutableStateOf(sessionStore.active()?.ship) }
     // Notifications through the relay, where that is the only way
-    // (iOS): the +code just signed in with, held until the owner answers.
-    var notifyCode by remember { mutableStateOf<String?>(null) }
+    // (iOS): the +code just signed in with and the ship it is for, held
+    // until the owner answers. Another ship's code the relay refuses.
+    var notifyCode by remember { mutableStateOf<Pair<String, String>?>(null) }
     var notifyAsk by remember { mutableStateOf(false) }
     val relayClient = remember(http) {
         io.nisfeb.talon.notify.RelayClient(http = http, endpoint = { relaySettings.endpoint.value })
@@ -268,8 +269,11 @@ fun App(
     }
     LaunchedEffect(loggedInShip) {
         notifyAsk = io.nisfeb.talon.notify.shouldOfferNotificationSetup(
-            io.nisfeb.talon.ui.isRelayNotificationSetupNeeded, loggedInShip, relaySettings, justSignedIn = notifyCode != null,
+            io.nisfeb.talon.ui.isRelayNotificationSetupNeeded, loggedInShip, relaySettings,
+            justSignedIn = io.nisfeb.talon.notify.heldCodeFor(notifyCode, loggedInShip) != null,
         )
+        // Not asked: the code has nothing left to do here.
+        if (!notifyAsk) notifyCode = null
     }
     // A token that changed since registering (an iPhone's alert token
     // comes with the owner's yes, which can come later) goes to the relay.
@@ -435,7 +439,7 @@ fun App(
     // from settings, the admin screens, the image viewer… every one of
     // which outranks openChat in the right-pane `when`. Close them all
     // first, or the tap sets openChat and shows nothing.
-    val jumpToChat: (String) -> Unit = { who ->
+    val jumpToChat: (String) -> Unit = { who -> sections.leave {
         sections.closeAll()
         openGroupAdminFlag = null
         openGroupHomeFlag = null
@@ -446,7 +450,7 @@ fun App(
         openThreadParent = null
         openThreadReplyAnchor = null
         openChat = who
-    }
+    } }
     // Hoisted at App level (not inside the key block) so it survives
     // the re-key triggered by tryRestore-failure recovery. Cleared
     // automatically once the user successfully signs back in.
@@ -476,8 +480,13 @@ fun App(
         }
     }
 
+    // A tapped notice (iOS) from another app on the ship: a calendar
+    // reminder opens its event; anything else just opens the app.
+    var noticeCalendarTag by remember { mutableStateOf<String?>(null) }
     /** Put down the ship on screen before the active one changes. */
     val leaveShip: () -> Unit = {
+        // A reminder is the old ship's: its event is not on the new one.
+        noticeCalendarTag = null
         // Two ships can name the same conversation; a quote is the one
         // ship's own and does not follow us to the other.
         io.nisfeb.talon.ui.PendingQuotes.clear()
@@ -501,17 +510,20 @@ fun App(
     // does -- on the ship it was for, first, when that is another of
     // ours. The state this writes is hoisted above the re-key a switch
     // causes, so the chat opens once the new ship's tree is up.
-    // A tapped notice (iOS) from another app on the ship: a calendar
-    // reminder opens its event; anything else just opens the app.
-    var noticeCalendarTag by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         io.nisfeb.talon.notify.OpenNoticeRequests.requests.collect { tag ->
             if (tag.startsWith(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX)) {
+                // Over whatever section is open: the render shows the
+                // first flag that is true, and a section left open hid
+                // the calendar and took the back that should leave it.
+                sections.closeAll()
                 noticeCalendarTag = tag
                 showCalendar = true
             }
         }
     }
+    // Left before its event was found, it is not opened later.
+    LaunchedEffect(showCalendar) { if (!showCalendar) noticeCalendarTag = null }
     LaunchedEffect(Unit) {
         io.nisfeb.talon.notify.OpenChatRequests.requests.collect { r ->
             val forShip = r.forShip
@@ -1828,7 +1840,13 @@ fun App(
             fun runShortcut(action: io.nisfeb.talon.ui.ShortcutAction) {
                 when (action) {
                     io.nisfeb.talon.ui.ShortcutAction.Back -> Unit
-                    is io.nisfeb.talon.ui.ShortcutAction.Open -> railRequest = action.item
+                    // Its handler is in the list view, which is not drawn
+                    // while a section is: put the section down first, or the
+                    // shortcut waited there and fired once the section left.
+                    is io.nisfeb.talon.ui.ShortcutAction.Open -> sections.leave {
+                        sections.closeAll()
+                        railRequest = action.item
+                    }
                     io.nisfeb.talon.ui.ShortcutAction.NewDm -> showNewDmRequest = true
                     io.nisfeb.talon.ui.ShortcutAction.FocusSearch -> focusSearchRequest = true
                     io.nisfeb.talon.ui.ShortcutAction.IncreaseFontSize ->
@@ -1868,7 +1886,7 @@ fun App(
                             io.nisfeb.talon.ui.ShortcutAction.Back
                         ) return@onKeyEvent false
                         when {
-                            sections.anyOpen -> sections.closeLast()
+                            sections.anyOpen -> sections.leave { sections.closeLast() }
                             // In the order they are drawn: an image is over
                             // the chat. It closes itself when it has focus,
                             // but the shell can take focus back from it.
@@ -1932,7 +1950,7 @@ fun App(
                     val notifyShipUrl = notifyShip?.let { s -> sessionStore.all().firstOrNull { it.ship == s }?.shipUrl }
                     if (notifyAsk && notifyShip != null && notifyShipUrl != null) {
                         io.nisfeb.talon.ui.NotificationSetupDialog(
-                            code = notifyCode,
+                            code = io.nisfeb.talon.notify.heldCodeFor(notifyCode, notifyShip),
                             enroll = { c ->
                                 io.nisfeb.talon.notify.enrollDevice(relayClient, relaySettings, pushTokenProvider, notifyShip, notifyShipUrl, c)
                             },
@@ -2258,7 +2276,9 @@ fun App(
                     ship == null -> LoginScreen(
                         session = session,
                         onLoggedIn = { addingFrom = null; loggedInShip = it },
-                        onLoginCode = { notifyCode = it },
+                        onLoginCode = { who, code ->
+                            if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) notifyCode = who to code
+                        },
                         onCancel = addingFrom?.let { from -> { addingFrom = null; switchShip(from) } },
                         notice = loginNotice,
                         onRunLocalShip = if (io.nisfeb.talon.ui.isLocalCometSupported) {
@@ -2414,6 +2434,7 @@ fun App(
                         repo = repo,
                         ourPatp = ship,
                         onBack = { showSelfProfile = false },
+                        sections = sections,
                         keys = remember(session) {
                             session.baseUrl?.takeIf { it.isNotBlank() }
                                 ?.let { io.nisfeb.talon.ui.EyreAzimuthRpc(session.http, it) }
@@ -3188,7 +3209,7 @@ fun App(
                                     railInvitesSnapshot != menuSeenState.lastSeenInvitesSnapshot,
                             )
                         }
-                        val onRailItemClicked: (RailItem) -> Unit = { item ->
+                        val onRailItemClicked: (RailItem) -> Unit = { item -> sections.leave {
                             // Leaving the assistant: it renders in the shell
                             // content with the rail still visible, so clicking
                             // ANY rail item must close it (the Assistant case
@@ -3264,7 +3285,7 @@ fun App(
                                 RailItem.Home, RailItem.Chats, RailItem.Mail, RailItem.Calendar,
                                 RailItem.Statuses, RailItem.Bookmarks, RailItem.Activity -> Unit
                             }
-                        }
+                        } }
                         // An area a shortcut asked for, opened as its rail item
                         // is; one that is gated off (no assistant model, no
                         // Orrery) is not. A hidden one still opens, as the

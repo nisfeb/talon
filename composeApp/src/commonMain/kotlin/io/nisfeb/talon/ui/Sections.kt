@@ -60,6 +60,21 @@ class Sections {
         all.forEach { it.value = false }
     }
 
+    /**
+     * Asked before a section is put down by back, Escape, the rail, the
+     * drawer or a shortcut: a screen holding unsaved work sets it, asks
+     * the owner, and runs the leave itself once they agree. The profile
+     * editor's own back prompt was all it had, and desktop has no back:
+     * Escape or a rail click dropped the edits without a word.
+     */
+    var guard: ((leave: () -> Unit) -> Unit)? = null
+
+    /** Run [leave], which puts the open section down, once [guard] lets it. */
+    fun leave(leave: () -> Unit) {
+        val g = guard
+        if (g == null) leave() else g(leave)
+    }
+
     /** Close the section opened most recently. False when none is open. */
     fun closeLast(): Boolean {
         val newest = open.lastOrNull() ?: return false

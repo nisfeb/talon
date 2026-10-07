@@ -144,6 +144,18 @@ class HomeScreenTest {
         assertTrue(!shows("Done"))
     }
 
+    // On desktop the remove button sat top left: its tip's own box took
+    // the corner it was aligned to.
+    @Test
+    fun `a widget's remove button sits in its top right corner`() = home {
+        arranging()
+        val remove = onNodeWithContentDescription("Take Mail off the home page").fetchSemanticsNode().boundsInRoot
+        val height = onNodeWithContentDescription("Height of Mail").fetchSemanticsNode().boundsInRoot
+        val width = onNodeWithContentDescription("Width of Mail").fetchSemanticsNode().boundsInRoot
+        assertTrue(remove.left > height.right, "right of the middle: $remove, height grip $height")
+        assertTrue(remove.bottom <= width.top, "above the width grip: $remove, width grip $width")
+    }
+
     // ─── arranging by hand ─────────────────────────────────────────
 
     private fun ComposeUiTest.arranging() {

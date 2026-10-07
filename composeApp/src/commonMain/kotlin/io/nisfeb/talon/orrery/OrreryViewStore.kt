@@ -60,10 +60,27 @@ class OrreryViewStore(
     val problem: StateFlow<String?> = _problem.asStateFlow()
     private var asking: Job? = null
     private var restored = false
+    /** A Refresh waiting for the read in flight to end. */
+    @kotlin.concurrent.Volatile private var again = false
 
     /** The section opened, or [force] (Refresh): show what is kept, ask the ship if it is due. */
     fun open(force: Boolean = false) {
-        if (asking?.isActive == true) return
+        val current = asking
+        if (current?.isActive == true) {
+            // A Refresh during a read is one more read after it: dropped,
+            // the owner was shown the read begun before whatever they knew
+            // had changed. Several taps are one; "again" is cleared before
+            // that read starts, so a tap that sees it set is covered.
+            if (force && !again) {
+                again = true
+                asking = scope.launch {
+                    current.join()
+                    again = false
+                    ask(force = true)
+                }
+            }
+            return
+        }
         asking = scope.launch {
             restore()
             val last = _view.value?.atMs

@@ -529,10 +529,22 @@ class CalendarRepo(
             )
             else -> return {}
         }
-        val assumed = if (new == null) list - old else list.map { if (it.id == id) new else it }
-        _tasks.value = assumed
-        // Unless a read has put the ship's own copy in since.
-        return { _tasks.compareAndSet(assumed, list) }
+        val at = list.indexOf(old)
+        _tasks.update { now -> now?.let { l -> if (new == null) l - old else l.map { if (it.id == id) new else it } } }
+        // That task only, unless a read has put the ship's own copy in
+        // since: undone as a whole list, any other task changed meanwhile
+        // (another edit, a tick) left the list unequal and the refused
+        // edit stayed on show.
+        return {
+            _tasks.update { now ->
+                when {
+                    now == null -> null
+                    new != null -> now.map { if (it === new) old else it }
+                    now.any { it.id == id } -> now
+                    else -> now.toMutableList().apply { add(at.coerceAtMost(size), old) }
+                }
+            }
+        }
     }
 
     /**
@@ -544,14 +556,17 @@ class CalendarRepo(
     private fun dropDeleted(body: JsonObject): () -> Unit {
         val id = (body["id"] as? kotlinx.serialization.json.JsonPrimitive)?.content
         if ((body["action"] as? kotlinx.serialization.json.JsonPrimitive)?.content != "del-event" || id == null) return {}
-        val window = _rows.value
-        val month = _rangeRows.value
-        val droppedWindow = window?.filterNot { it.id == id }
-        val droppedMonth = month?.filterNot { it.id == id }
-        _rows.value = droppedWindow
-        _rangeRows.value = droppedMonth
-        // Unless a read has put the ship's own copy in since.
-        return { _rows.compareAndSet(droppedWindow, window); _rangeRows.compareAndSet(droppedMonth, month) }
+        val fromWindow = _rows.value?.filter { it.id == id }.orEmpty()
+        val fromMonth = _rangeRows.value?.filter { it.id == id }.orEmpty()
+        _rows.update { it?.filterNot { r -> r.id == id } }
+        _rangeRows.update { it?.filterNot { r -> r.id == id } }
+        // Its rows back, and only where no read has put the ship's own copy
+        // in since: undone as whole lists, any other change meanwhile left
+        // the refused delete gone from the page.
+        fun putBack(rows: List<CalendarRow>?, had: List<CalendarRow>) =
+            if (rows == null || had.isEmpty() || rows.any { it.id == id }) rows
+            else (rows + had).sortedWith(compareBy({ it.l }, { it.r }))
+        return { _rows.update { putBack(it, fromWindow) }; _rangeRows.update { putBack(it, fromMonth) } }
     }
 
     /**

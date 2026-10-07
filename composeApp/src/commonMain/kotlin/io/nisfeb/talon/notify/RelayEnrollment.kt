@@ -85,6 +85,12 @@ fun shouldOfferNotificationSetup(
     needed && ship != null && settings.deviceIdFor(ship).isBlank() && !settings.viaShipPush(ship) &&
         (justSignedIn || !settings.declinedFor(ship))
 
+/**
+ * The +code held from a sign-in, for [ship] only: held as (ship, code),
+ * and another ship's code the relay would refuse.
+ */
+fun heldCodeFor(held: Pair<String, String>?, ship: String?): String? = held?.takeIf { it.first == ship }?.second
+
 /** Where an iPhone's notifications for a ship come from, as Settings says it. */
 enum class PhoneNotifications { Ship, Relay, Off }
 

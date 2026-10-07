@@ -28,6 +28,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -91,6 +92,7 @@ fun OrreryRepoScreen(
         problem = store.problem.collectAsState().value,
         onOpen = store::open,
         onRefreshActions = { orreryRepo.opened() },
+        onLeave = { orreryRepo.toldSeen() },
         modifier = modifier,
         openItem = openItem,
         onOpenedItem = onOpenedItem,
@@ -99,9 +101,7 @@ fun OrreryRepoScreen(
         OrreryActionsScreen(
             actions = actions,
             onBack = onBack,
-            onShown = { orreryRepo.opened() },
             told = told,
-            onLeave = { orreryRepo.toldSeen() },
             failed = failed,
             onDecide = { a, status, why -> orreryRepo.answer(a.id, status, why) },
             problem = answerProblem ?: error,
@@ -132,7 +132,10 @@ fun OrreryScreen(
     problem: String?,
     /** Opened (false) or Refresh (true): ask the ship if it is due. */
     onOpen: (Boolean) -> Unit,
+    /** Read on entering the section, and on Refresh. */
     onRefreshActions: suspend () -> Unit,
+    /** The section is left: what Orrery said to the last Tell has been seen. */
+    onLeave: () -> Unit = {},
     modifier: Modifier = Modifier,
     openItem: String? = null,
     onOpenedItem: () -> Unit = {},
@@ -148,7 +151,14 @@ fun OrreryScreen(
     val plan = remember(view?.plan) { leaveByOf(view?.plan) }
     // Things opened one from another; back goes to the one before.
     var stack by remember { mutableStateOf(listOf<String>()) }
-    LaunchedEffect(Unit) { onOpen(false) }
+    // Once for the section, not each time the Actions tab comes back:
+    // its body re-read on every tab switch, and leaving it for Coming up
+    // counted what Orrery said as seen.
+    LaunchedEffect(Unit) {
+        onOpen(false)
+        runCatching { onRefreshActions() }
+    }
+    DisposableEffect(Unit) { onDispose { onLeave() } }
     LaunchedEffect(openItem) {
         if (openItem != null) {
             tab = OrreryTab.COMING_UP

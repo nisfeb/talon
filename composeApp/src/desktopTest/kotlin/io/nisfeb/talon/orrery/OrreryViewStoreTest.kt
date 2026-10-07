@@ -60,6 +60,31 @@ class OrreryViewStoreTest {
         scope.cancel()
     }
 
+    // A Refresh during a read did nothing: what showed was the read begun
+    // before whatever the owner knew had changed.
+    @Test
+    fun `a Refresh during a read reads again once it ends, however many taps`() = runBlocking {
+        val asked = AtomicInteger()
+        val release = CompletableDeferred<Unit>()
+        val scope = CoroutineScope(SupervisorJob())
+        val s = OrreryViewStore(
+            Kept(), scope,
+            readState = { if (asked.incrementAndGet() == 1) release.await(); fresh },
+            readPlan = { plan },
+            now = { clock },
+        )
+        s.open()
+        until { asked.get() == 1 }
+        repeat(3) { s.open(force = true) }
+        assertEquals(1, asked.get(), "not while the first is out")
+        release.complete(Unit)
+        until { asked.get() == 2 }
+        until { !s.refreshing.value }
+        delay(200)
+        assertEquals(2, asked.get(), "one more read, not one per tap")
+        scope.cancel()
+    }
+
     @Test
     fun `the two reads go out together, and many opens make one ask`() = runBlocking {
         val asked = AtomicInteger()

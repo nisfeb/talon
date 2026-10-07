@@ -144,13 +144,13 @@ class Loops(
      * A runner with the mail, calendar, task and event tools, over
      * connections made for this run and closed after it. A loop fires from
      * an alarm, where the app's own mail and calendar, built by the UI, may
-     * not exist.
+     * not exist. On a scope of the run's own, ended with it.
      */
-    private suspend fun <T> withRunner(block: suspend (LoopRunner) -> T): T {
+    private suspend fun <T> withRunner(block: suspend (LoopRunner) -> T): T = withRunScope(scope) { run ->
         val url = sessionStore.active()?.shipUrl
         val http = runCatching { getSession().http }.getOrNull()
-        val mail = if (url != null && http != null) io.nisfeb.talon.mail.MailRepo(http, scope).also { it.attach(url) } else null
-        val calendar = if (url != null && http != null) io.nisfeb.talon.calendar.CalendarRepo(http, scope).also { it.attach(url) } else null
+        val mail = if (url != null && http != null) io.nisfeb.talon.mail.MailRepo(http, run).also { it.attach(url) } else null
+        val calendar = if (url != null && http != null) io.nisfeb.talon.calendar.CalendarRepo(http, run).also { it.attach(url) } else null
         try {
             // The calendar tools read its calendars, tasks and window; have them first.
             calendar?.refresh()
@@ -168,7 +168,7 @@ class Loops(
                 zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
                 send = { whom, text -> getRepo().send(whom, text) },
             )
-            return block(runner(actions))
+            block(runner(actions))
         } finally {
             mail?.detach()
             calendar?.detach()

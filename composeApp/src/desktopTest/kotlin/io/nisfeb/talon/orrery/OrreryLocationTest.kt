@@ -120,6 +120,24 @@ class OrreryLocationTest {
         assertEquals("""{"lat":40.679000,"lon":-73.944200,"acc":12,"at":"2026-09-10T00:26:40Z"}""", (req.body as TextContent).text)
     }
 
+    // On a trip a fix comes each minute, and each read the whole state,
+    // 3.5 s of a busy ship's time, for the whole drive.
+    @Test
+    fun `the places are read at most every ten minutes, and arriving is still said at once`() = withDb { db ->
+        val ship = Ship()
+        val bare = shipClient(ship, state)
+        val owner = HttpClient(MockEngine { respond("{}") })
+        val home = fix(40.6790, -73.9442)
+        sendLocation(owner, db, "https://ship", "~zod", home, null, bare).getOrThrow()
+        val office = home.copy(lat = 40.7536, lon = -73.9832, atMs = home.atMs + 60_000)
+        sendLocation(owner, db, "https://ship", "~zod", office, null, bare).getOrThrow()
+        assertEquals(1, ship.order.count { it.startsWith("state") }, "one state read: ${ship.order}")
+        assertEquals(2, ship.observed, "home, then the office from the places kept")
+        assertEquals(2, ship.positions.size, "the position at every fix")
+        sendLocation(owner, db, "https://ship", "~zod", office.copy(atMs = home.atMs + PLACES_EVERY_MS + 60_000), null, bare).getOrThrow()
+        assertEquals(2, ship.order.count { it.startsWith("state") }, "read again ten minutes on: ${ship.order}")
+    }
+
     @Test
     fun `a busy ship still gets the position, and the send fails so it is tried again`() = withDb { db ->
         val ship = Ship(stateOk = false)

@@ -30,6 +30,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +63,8 @@ fun ProfileEditScreen(
     keys: io.nisfeb.talon.ui.AzimuthRpc = io.nisfeb.talon.ui.AzimuthRpc.None,
     /** Signs and checks through this ship's Lattice. Null where there is none. */
     signer: io.nisfeb.talon.urbit.LatticeSign? = null,
+    /** The shell's sections, whose every way out asks here first while edits are unsaved. */
+    sections: io.nisfeb.talon.ui.Sections? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -130,12 +133,23 @@ fun ProfileEditScreen(
     // Back left with whatever was typed and said nothing; it asks now.
     val dirty = listOf(nickname, status, bio, avatarUrl, color) != loaded
     var confirmDiscard by remember { mutableStateOf(false) }
-    io.nisfeb.talon.ui.PlatformBackHandler(enabled = dirty && !saving) { confirmDiscard = true }
+    // What Discard does: back, or the leave the shell asked for (Escape,
+    // the rail, the drawer), which goes where the owner was going.
+    var pendingLeave by remember { mutableStateOf<(() -> Unit)?>(null) }
+    fun askDiscard(leave: (() -> Unit)?) { pendingLeave = leave; confirmDiscard = true }
+    io.nisfeb.talon.ui.PlatformBackHandler(enabled = dirty && !saving) { askDiscard(null) }
+    DisposableEffect(sections, dirty && !saving) {
+        val s = sections
+        if (s == null || !dirty || saving) return@DisposableEffect onDispose { }
+        val guard: (() -> Unit) -> Unit = { leave -> askDiscard(leave) }
+        s.guard = guard
+        onDispose { if (s.guard === guard) s.guard = null }
+    }
     if (confirmDiscard) io.nisfeb.talon.ui.ConfirmDestructive(
         title = "Discard your changes?",
         text = "What you changed here is not saved.",
         confirm = "Discard",
-        onConfirm = onBack,
+        onConfirm = { (pendingLeave ?: onBack)() },
         onDismiss = { confirmDiscard = false },
     )
 
@@ -177,7 +191,7 @@ fun ProfileEditScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            io.nisfeb.talon.ui.IconButton(tip = "Back", onClick = { if (dirty && !saving) confirmDiscard = true else onBack() }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Back", onClick = { if (dirty && !saving) askDiscard(null) else onBack() }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(

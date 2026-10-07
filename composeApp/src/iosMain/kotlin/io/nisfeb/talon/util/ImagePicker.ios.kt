@@ -36,7 +36,6 @@ import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_global_queue
 import platform.darwin.dispatch_get_main_queue
 import platform.darwin.dispatch_time
-import kotlin.coroutines.resume
 
 // Delegates are retained here for the lifetime of the presentation —
 // UIKit holds picker.delegate weakly, so without a strong reference the
@@ -98,18 +97,20 @@ private fun topViewController(): UIViewController? {
  * And a presentation is counted as dropped only once it has had time
  * to show ([PRESENT_CONFIRM_MS]); counted after one turn of the main
  * queue, a picker that opened a moment later took the photo picked in
- * it nowhere: "selecting an image doesn't attach it".
+ * it nowhere: "selecting an image doesn't attach it". A caller that
+ * stopped waiting ([wanted] false) is neither retried for nor shown one.
  */
-private fun present(picker: UIViewController, attempt: Int = 0, onDropped: () -> Unit) {
+private fun present(picker: UIViewController, wanted: () -> Boolean, attempt: Int = 0, onDropped: () -> Unit) {
     if (attempt == 0) activeWindow()?.endEditing(true)
     dispatch_async(dispatch_get_main_queue()) {
+        if (!wanted()) return@dispatch_async
         val root = topViewController()
         // A controller whose child is still leaving cannot present either:
         // a tap right after a pick or a cancel was dropped without a word.
         val busy = root == null || root.isBeingDismissed() || root.isBeingPresented() ||
             root.presentedViewController != null
         when (presentStep(busy, attempt)) {
-            PresentStep.RETRY -> after(PRESENT_RETRY_MS) { present(picker, attempt + 1, onDropped) }
+            PresentStep.RETRY -> after(PRESENT_RETRY_MS) { if (wanted()) present(picker, wanted, attempt + 1, onDropped) }
             PresentStep.GIVE_UP -> onDropped()
             PresentStep.PRESENT -> {
                 var shown = false
@@ -127,9 +128,13 @@ private fun after(ms: Long, block: () -> Unit) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, ms * 1_000_000L), dispatch_get_main_queue(), block)
 }
 
+/** A picker that never opened: said in the composer, where a null read as a cancel and said nothing. */
+private fun notOpened() = Result.failure<PickedImage?>(IllegalStateException("The picker did not open. Try again."))
+
 private suspend fun pickPhoto(): PickedImage? = suspendCancellableCoroutine { cont ->
     val picker = UIImagePickerController()
     var done = false
+    var cancelled = false
     val delegate = PhotoPickerDelegate { result ->
         if (!done) { done = true; cont.resumeWith(result) }
     }
@@ -138,10 +143,10 @@ private suspend fun pickPhoto(): PickedImage? = suspendCancellableCoroutine { co
         UIImagePickerControllerSourceType.UIImagePickerControllerSourceTypePhotoLibrary
     picker.delegate = delegate
     fullScreen(picker)
-    cont.invokeOnCancellation { gone(picker, delegate) }
-    present(picker) {
+    cont.invokeOnCancellation { cancelled = true; gone(picker, delegate) }
+    present(picker, wanted = { !cancelled }) {
         activeDelegates.remove(delegate)
-        if (!done) { done = true; cont.resume(null) }
+        if (!done) { done = true; cont.resumeWith(notOpened()) }
     }
 }
 
@@ -166,6 +171,7 @@ private fun gone(picker: UIViewController, delegate: NSObject) {
 
 private suspend fun pickDocument(): PickedImage? = suspendCancellableCoroutine { cont ->
     var done = false
+    var cancelled = false
     val delegate = DocumentPickerDelegate { result ->
         if (!done) { done = true; cont.resumeWith(result) }
     }
@@ -176,10 +182,10 @@ private suspend fun pickDocument(): PickedImage? = suspendCancellableCoroutine {
     val picker = UIDocumentPickerViewController(forOpeningContentTypes = listOf(UTTypeItem), asCopy = true)
     picker.delegate = delegate
     fullScreen(picker)
-    cont.invokeOnCancellation { gone(picker, delegate) }
-    present(picker) {
+    cont.invokeOnCancellation { cancelled = true; gone(picker, delegate) }
+    present(picker, wanted = { !cancelled }) {
         activeDelegates.remove(delegate)
-        if (!done) { done = true; cont.resume(null) }
+        if (!done) { done = true; cont.resumeWith(notOpened()) }
     }
 }
 
