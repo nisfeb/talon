@@ -179,6 +179,7 @@ class TalonMessagingReceiver : MessagingReceiver() {
         // another is another conversation. A forged one clears a
         // notification and nothing else.
         if (event == "read") {
+            io.nisfeb.talon.notify.ReadPushes.read(patp, whom, System.currentTimeMillis())
             io.nisfeb.talon.Notifications.cancelAllForChat(context, whom, forShip = patp)
             return
         }
@@ -204,11 +205,14 @@ class TalonMessagingReceiver : MessagingReceiver() {
         // Named as the app names it, from the database: off this thread,
         // and kept alive with goAsync until the notification is up.
         val pending = goAsync()
+        val arrivedMs = System.currentTimeMillis()
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val names = app?.let { a -> runCatching { withTimeoutOrNull(5_000) { a.db.contactMapNow() } }.getOrNull() }
                     ?: io.nisfeb.talon.ui.ContactMap(alwaysPatp = io.nisfeb.talon.ui.ShipNames.alwaysPatp.value)
                 val n = pushHintNotification(whom, patp, currentShip, names)
+                // Read on another client while this waited: nothing to tell.
+                if (io.nisfeb.talon.notify.ReadPushes.readSince(patp, whom, arrivedMs)) return@launch
                 io.nisfeb.talon.Notifications.showMessage(
                     context = context,
                     whom = whom,
@@ -223,6 +227,11 @@ class TalonMessagingReceiver : MessagingReceiver() {
                     body = n.body,
                     sentMs = System.currentTimeMillis(),
                 )
+                // A read that came while this waited, or as it posted: the
+                // chat is read, so its notification goes.
+                if (io.nisfeb.talon.notify.ReadPushes.readSince(patp, whom, arrivedMs)) {
+                    io.nisfeb.talon.Notifications.cancelAllForChat(context, whom, forShip = patp)
+                }
             } finally {
                 pending.finish()
             }
