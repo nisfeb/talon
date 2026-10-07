@@ -10,6 +10,7 @@ import io.nisfeb.talon.data.FolderEntity
 import io.nisfeb.talon.data.FolderMemberEntity
 import io.nisfeb.talon.data.GroupOrderEntity
 import io.nisfeb.talon.data.NotifyLevel
+import io.nisfeb.talon.data.notifyLevelOf
 import io.nisfeb.talon.data.NotifyPreferenceEntity
 import io.nisfeb.talon.data.RailItemPrefEntity
 import io.nisfeb.talon.ui.InMemoryUiSettings
@@ -146,6 +147,19 @@ class SettingsSyncBootstrapTest {
         assertEquals(null, db.notifyPrefs().levelFor("~nec"))
         fact("""{"put-bucket":{"desk":"talon","bucket-key":"folders","bucket":{"7":"{\"name\":\"Replaced\",\"sortOrder\":0}"}}}""")
         assertEquals(listOf("Replaced"), folders())
+    }
+
+    // A group's level set on another device lands here, and a channel set
+    // back to the group's there loses its own here: what this device then
+    // applies to the channel is the group's (sneagan, 2026-10-07).
+    @Test
+    fun `a group level and a channel cleared to it arrive from another device`() = live {
+        db.groups().upsertChannelGroups(listOf(io.nisfeb.talon.data.ChannelGroupEntity("chat/~bus/general", "~bus/crew")))
+        fact("""{"put-entry":{"desk":"talon","bucket-key":"notify-prefs","entry-key":"chat/~bus/general","value":"{\"level\":\"all\"}"}}""")
+        fact("""{"put-entry":{"desk":"talon","bucket-key":"notify-prefs","entry-key":"group/~bus/crew","value":"{\"level\":\"none\"}"}}""")
+        assertEquals(NotifyLevel.ALL, db.notifyLevelOf("chat/~bus/general"), "its own wins")
+        fact("""{"del-entry":{"desk":"talon","bucket-key":"notify-prefs","entry-key":"chat/~bus/general"}}""")
+        assertEquals(NotifyLevel.NONE, db.notifyLevelOf("chat/~bus/general"), "then the group's")
     }
 
     @Test

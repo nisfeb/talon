@@ -285,4 +285,27 @@ class NewMessageDiffTest {
         assertEquals(0, fire(listOf(mention), mapOf(plain.whom to "none")))
     }
 
+    // A group set to Off silences the channels that follow it, through
+    // the same levels map the desktop and iOS notifier build (App.kt).
+    @Test
+    fun `a channel following a muted group does not notify, one with its own level does`() {
+        val now = 1_000_000_000L
+        val levels = io.nisfeb.talon.data.withGroupLevels(
+            mapOf(io.nisfeb.talon.data.groupLevelKey("~bus/crew") to "none", "chat/~bus/loud" to "all"),
+            mapOf("chat/~bus/general" to "~bus/crew", "chat/~bus/loud" to "~bus/crew"),
+        )
+        val diff = diffNewMessageNotifications(
+            rows = listOf(
+                msg("chat/~bus/general", "a", author = "~bus", sentMs = now),
+                msg("chat/~bus/loud", "b", author = "~bus", sentMs = now),
+            ),
+            lastSeen = emptyMap(),
+            ourPatp = "~zod",
+            openChat = null,
+            levels = levels,
+            storyText = storyText,
+        )
+        assertEquals(listOf("chat/~bus/loud"), diff.notifications.map { it.whom })
+    }
 }
+

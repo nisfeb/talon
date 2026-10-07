@@ -130,6 +130,9 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
 
     suspend fun setNotifyLevel(whom: String, level: String) {}
 
+    /** [whom] has no level of its own any more: a channel then follows its group's. */
+    suspend fun clearNotifyLevel(whom: String) {}
+
     // ───────── rail visibility ─────────
     // Toggles whether a RailItem is visible on the desktop sidebar.
     // Default no-op for tests / hosts that don't sync.
