@@ -40,6 +40,12 @@ internal class TrunkHarness(ship: String = "~nec") {
     /** Every channel PUT body, in arrival order. Guarded by [puts]. */
     private val puts = mutableListOf<String>()
 
+    /** The channel each PUT went to, in step with [puts]. */
+    private val putPaths = mutableListOf<String>()
+
+    /** Every PUT as (channel path, body), in arrival order. */
+    fun putsWithPaths(): List<Pair<String, String>> = synchronized(puts) { putPaths.zip(puts) }
+
     /** Called with each PUT body as it arrives, before the poke ack.
      *  Runs on the engine's thread — keep it tiny. */
     var onPut: ((String) -> Unit)? = null
@@ -82,7 +88,7 @@ internal class TrunkHarness(ship: String = "~nec") {
         when {
             req.method.value == "PUT" -> {
                 val body = (req.body as TextContent).text
-                synchronized(puts) { puts += body }
+                synchronized(puts) { puts += body; putPaths += req.url.encodedPath }
                 onPut?.invoke(body)
                 // Ack every poke in the batch so poke() returns promptly.
                 val pokeIds = runCatching {

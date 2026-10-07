@@ -103,6 +103,10 @@ class TlonChatRepoStartupTest {
         until("the stream") { streams() >= 1 }
     }
     private fun channelsStreamed() = ship.streamsOpened.map { it.first }.distinct()
+    private fun channelsPut() = ship.requests.filter { it.startsWith("PUT /~/channel/") }.map { it.removePrefix("PUT /~/channel/") }.distinct()
+    private val RECIPES = "notes/v0/notes/~bus/recipes/stream"
+    private val NOTEBOOKS = """[{"flagName":"recipes","host":"~bus","notebook":{"title":"Recipes","id":7,"rootFolderId":8,
+            "createdBy":"~bus","createdAt":1784592399,"updatedAt":1784592399,"updatedBy":"~bus"},"visibility":"private"}]"""
 
     private fun dmFact(id: String, text: String, sent: Long) =
         """{"id":1,"response":"diff","json":{"whom":"~bus","id":"$id","response":{"add":{"essay":${essay("~bus", text, sent)},"time":null}}}}"""
@@ -429,6 +433,46 @@ class TlonChatRepoStartupTest {
         until("its unreads read") { ship.scried.count { "activity/full" in it } > unreadReads }
         ship.quit("activity/v6")
         until("a new channel") { channelsStreamed().size == 2 }
+    }
+
+    // A watch lost on the way, not refused: a resumed channel watches
+    // nothing again, so kept, it went without that watch (live posts,
+    // unreads) on every later resume until the app restarted.
+    @Test
+    fun `a dropped subscription whose watch again is lost brings a new channel that has it`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        until("the progress bar clears") { !repo.bootstrapping.value }
+        until("the stream") { streams() >= 1 }
+        val once = java.util.concurrent.atomic.AtomicBoolean(true)
+        ship.loseWatch = { w -> if (w == "channels/v4" && once.getAndSet(false)) java.io.IOException("lost") else null }
+        ship.quit("channels/v4")
+        until("a new channel") { channelsStreamed().size == 2 }
+        until("watched on it") { ship.subscribed.count { it == "channels/v4" } == 2 }
+        assertTrue(!once.get(), "the watch again was tried, and lost")
+    }
+
+    @Test
+    fun `a notebook watch lost on a new channel gives that channel up for one with it`() = started(prepare = {
+        scries[init] = initPosts
+        scries["notes/v0/notebooks"] = NOTEBOOKS
+        val once = java.util.concurrent.atomic.AtomicBoolean(true)
+        loseWatch = { w -> if (w == RECIPES && once.getAndSet(false)) java.io.IOException("lost") else null }
+    }) { _ ->
+        until("the notebook watched") { RECIPES in ship.subscribed }
+        until("a stream on the new channel") { channelsStreamed().isNotEmpty() }
+        assertEquals(2, channelsPut().size, "a second channel: ${channelsPut()}")
+        assertEquals(channelsPut().last(), channelsStreamed().single(), "the stream is the one with every watch")
+    }
+
+    // Its watch goes out before the stream opens, so a channel given up
+    // here is replaced at once, as the notebook's above.
+    @Test
+    fun `a settings watch lost gives the channel up`() = runBlocking {
+        val sync = SettingsSyncImpl(db = db, aiSettings = FakeAiSettings()).apply { attach(ship.channel) }
+        ship.loseWatch = { java.io.IOException("lost") }
+        sync.resubscribe()
+        assertTrue(ship.channel.gone, "resumed, this channel would never watch settings again")
     }
 
     // A watch that is not the session's own (settings) still brings a new channel.

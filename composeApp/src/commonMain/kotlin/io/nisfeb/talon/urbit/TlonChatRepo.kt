@@ -792,6 +792,13 @@ class TlonChatRepo(
             notes.attach(ch)
             runCatching { if (watchOnly) notes.resubscribe() else notes.bootstrap() }
                 .onFailure { Log.w(TAG, "notes bootstrap failed", it) }
+            // A watch above was lost and the channel given up with it: the
+            // next pass makes a new one with every watch. Returned, not
+            // streamed, so the deep read launched above still finishes.
+            if (ch.gone) {
+                lastBootstrapMs = 0L
+                return@coroutineScope
+            }
         }
 
         // Watchdog: if nothing at all arrives on the stream for 90s the
@@ -3657,6 +3664,20 @@ class TlonChatRepo(
             }
     }
 
+    /**
+     * Give [ch] up for a new channel, every watch and the whole read: a
+     * resumed channel watches nothing again, so one that lost a watch
+     * would go without it until the app restarts. Nothing if [ch] is no
+     * longer the session's channel.
+     */
+    private fun abandonChannel(ch: UrbitChannel?, why: String) {
+        if (ch == null || channel !== ch) return
+        Log.w(TAG, "$why; opening a new channel")
+        ch.deleteSoon(kotlinx.coroutines.CoroutineScope(io.nisfeb.talon.util.ioDispatcher))
+        lastBootstrapMs = 0L
+        sessionJob?.cancel()
+    }
+
     // internal, not private: repo tests feed it eyre-shaped facts directly.
     internal suspend fun applyEvent(event: JsonElement) {
         val outer = event as? JsonObject ?: return
@@ -3682,13 +3703,16 @@ class TlonChatRepo(
                         // Remembered by the family's newest path, for the next connect.
                         subFamilyOf(app, path)?.let { (family, index) -> subServed[family] = index }
                         Log.w(TAG, "$app subscribe rejected; falling back to $path")
+                        val ch = channel
                         scope.launch {
-                            runCatching { channel?.subscribe(app, path) }
+                            io.nisfeb.talon.util.runSuspendCatching { ch?.subscribe(app, path) }
                                 .onSuccess { id ->
                                     if (id != null) subPaths[id] = app to path
                                     if (id != null && paths.size > 1) subFallbacks[id] = app to paths.drop(1)
                                 }
-                                .onFailure { Log.e(TAG, "$app fallback subscribe failed", it) }
+                                // The PUT failed, not a refusal: one with no
+                                // fallback left is an older ship, and stays.
+                                .onFailure { abandonChannel(ch, "$app fallback subscribe failed: ${it.message}") }
                         }
                     }
                 }
@@ -3709,21 +3733,20 @@ class TlonChatRepo(
             if (sub != null && live != null && resubscribeAfterQuit(before, now)) {
                 Log.w(TAG, "${sub.first}${sub.second} dropped by the ship; watching it again")
                 scope.launch {
-                    runCatching {
-                        subPaths[live.subscribe(sub.first, sub.second)] = sub
-                        catchUpAfterQuit(live, sub.first, sub.second)
-                    }.onFailure { Log.w(TAG, "${sub.first}${sub.second} not watched again", it) }
+                    val id = io.nisfeb.talon.util.runSuspendCatching { live.subscribe(sub.first, sub.second) }
+                        .getOrElse {
+                            abandonChannel(live, "${sub.first}${sub.second} not watched again: ${it.message}")
+                            return@launch
+                        }
+                    subPaths[id] = sub
+                    runCatching { catchUpAfterQuit(live, sub.first, sub.second) }
+                        .onFailure { Log.w(TAG, "${sub.first}${sub.second} not caught up", it) }
                 }
                 return
             }
             // Not one of ours (a settings watch), or dropped again at once:
             // the next pass is a new channel, every watch and the whole read.
-            channel?.let { old ->
-                Log.w(TAG, "subscription ${outer["id"]} dropped by the ship; opening a new channel")
-                old.deleteSoon(kotlinx.coroutines.CoroutineScope(io.nisfeb.talon.util.ioDispatcher))
-                lastBootstrapMs = 0L
-                sessionJob?.cancel()
-            }
+            abandonChannel(channel, "subscription ${outer["id"]} dropped by the ship")
             return
         }
         if (response != "diff") return

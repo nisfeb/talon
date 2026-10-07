@@ -456,9 +456,12 @@ class CallController(
                             "quit" -> {
                                 Log.w(TAG, "calls subscription was kicked; resubscribing")
                                 _connected.value = false
+                                // Lost, the watch is not asked for again: a kept
+                                // channel resumes without subscribing. Given up,
+                                // the next pass is a new one that watches.
                                 runCatching { ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH) }
                                     .onSuccess { _connected.value = true }
-                                    .onFailure { Log.e(TAG, "resubscribe failed", it) }
+                                    .onFailure { Log.e(TAG, "resubscribe failed", it); drop(ch); throw it }
                                 return@collect
                             }
                             "subscribe" -> {

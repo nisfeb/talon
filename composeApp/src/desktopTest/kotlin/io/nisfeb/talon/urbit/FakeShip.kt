@@ -94,6 +94,8 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
     @Volatile var refuseStream: Boolean = false
     /** A subscription refused, by `app/path` (e.g. "activity/v6"): an older ship without it. */
     @Volatile var refuseWatch: (String) -> String? = { null }
+    /** A subscription whose PUT is lost on the way, by `app/path`: what the request fails with, or null to deliver it. */
+    @Volatile var loseWatch: (String) -> Throwable? = { null }
     /** Every request, "METHOD path", whatever it was for: what an app that must say nothing did say. */
     val requests: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     /** Each event stream asked for: its channel, and the Last-Event-ID it carried. */
@@ -241,6 +243,7 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
                         "ack" -> { o["event-id"]?.jsonPrimitive?.content?.toLongOrNull()?.let { acked += it } }
                         "subscribe" -> {
                             val watch = "${o["app"]?.jsonPrimitive?.content}${o["path"]?.jsonPrimitive?.content}"
+                            loseWatch(watch)?.let { throw it }
                             subscribed += watch
                             subIds[watch] = id
                             val err = refuseWatch(watch)
