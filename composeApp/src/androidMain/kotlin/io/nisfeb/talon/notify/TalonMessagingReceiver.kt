@@ -129,7 +129,18 @@ class TalonMessagingReceiver : MessagingReceiver() {
         // the caller had already given up. Id-matched so a late
         // cancel for a previous call leaves a newer ring alone.
         if (event == "ring-cancel") {
-            if (!eventId.isNullOrBlank()) {
+            // Only for a call this device rang or is in: the ship's trunk
+            // cancels on every device it has, one that never rang too.
+            val ours = !eventId.isNullOrBlank() && io.nisfeb.talon.notify.ringCancelIsOurs(
+                eventId,
+                io.nisfeb.talon.Notifications.shownCall,
+                io.nisfeb.talon.Notifications.liveCallId(),
+                eventId.takeIf {
+                    io.nisfeb.talon.call.TalonTelecom.connection(it) != null || io.nisfeb.talon.call.ModernTelecom.call(it) != null
+                },
+            )
+            if (!ours) Log.i(TAG, "ring-cancel for a call this device never rang: $eventId")
+            if (ours && eventId != null) {
                 val reason = parsed?.get("reason")?.jsonPrimitive?.content
                 io.nisfeb.talon.Notifications.ringCancelled(context, eventId, reason)
                 io.nisfeb.talon.call.TalonTelecom.connection(eventId)

@@ -173,4 +173,38 @@ class GatewayTest {
         assertEquals(null, db.nextBadge(Db.DEVICES, "dev-1"))
         assertEquals(false, db.setBadge(Db.DEVICES, "never-was", 1))
     }
+
+    // Trunk cancels on every device it has; an iPhone must report a call
+    // for every VoIP push, so a cancel for a ring it never got filed a
+    // missed call in its Recents (trunk review nit 11, 2026-10-07).
+    @Test
+    fun `a cancel goes only to a phone this gateway rang`() {
+        val a = enrolled()
+        val b = enrolled()
+        fun voip(d: GatewayDevice, event: String, id: String) = gateway.push(
+            GatewayPush(d.handle, d.secret, "voip", payload = Json.parseToJsonElement("""{"event":"$event","patp":"~zod","id":"$id"}""").jsonObject),
+        )
+        assertEquals(200, voip(a, "ring", "c1"))
+        assertEquals(200, voip(b, "ring-cancel", "c1"), "answered, but not sent")
+        assertEquals(200, voip(a, "ring-cancel", "c1"))
+        assertEquals(200, voip(a, "ring-cancel", "c9"))
+        assertEquals(listOf("ring c1", "ring-cancel c1"), rings.map {
+            val p = Json.parseToJsonElement(it.second).jsonObject
+            "${p["event"]!!.jsonPrimitive.content} ${p["id"]!!.jsonPrimitive.content}"
+        })
+    }
+
+    @Test
+    fun `a ring is remembered for the hours an answered call can last`() {
+        var t = 0L
+        val r = GatewayRings(keepMs = 1_000, now = { t })
+        val ring = Json.parseToJsonElement("""{"event":"ring","id":"c1"}""").jsonObject
+        val cancel = Json.parseToJsonElement("""{"event":"ring-cancel","id":"c1"}""").jsonObject
+        assertTrue(r.shouldSend("h", ring))
+        t = 900
+        assertTrue(r.shouldSend("h", cancel))
+        t = 2_000
+        assertEquals(false, r.shouldSend("h", cancel), "forgotten after keepMs")
+    }
 }
+

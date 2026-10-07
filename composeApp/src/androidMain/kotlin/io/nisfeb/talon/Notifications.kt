@@ -392,6 +392,14 @@ object Notifications {
     @Volatile
     var callControllerLive: Boolean = false
 
+    /** The ring this device is showing, if any. */
+    val shownCall: String? get() = shownCallId
+
+    /** The call the app is in, if any. Set by TalonApp while a controller
+     *  lives; a push ending a call checks it is this one. */
+    @Volatile
+    var liveCallId: () -> String? = { null }
+
     /** True while the in-app ringer is actually sounding. Set by
      *  AndroidCallSoundPlayer, not inferred from window state. */
     @Volatile
