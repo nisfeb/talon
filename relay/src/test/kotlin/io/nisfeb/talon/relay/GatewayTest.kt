@@ -110,7 +110,7 @@ class GatewayTest {
     @Test
     fun `an oversized alert or ring is refused before APNs`() {
         val d = enrolled()
-        assertEquals(400, gateway.push(alert(d).copy(body = "x".repeat(1001))))
+        assertEquals(400, gateway.push(alert(d).copy(body = "x".repeat(4097))))
         val big = Json.parseToJsonElement("""{"x":"${"y".repeat(3000)}"}""").jsonObject
         assertEquals(400, gateway.push(GatewayPush(d.handle, d.secret, "voip", payload = big)))
         assertEquals(400, gateway.push(GatewayPush(d.handle, d.secret, "sms")))
@@ -257,6 +257,25 @@ class GatewayTest {
         val d = enrolled()
         assertEquals(200, gateway.push(alert(d).copy(event = "notice", open = Json.parseToJsonElement("""{"x":1}"""))))
         assertEquals("notice", alerts.single().second.event)
+    }
+
+    // Review of 1.8.1: trunk allows a 4 KiB notice; APNs an alert of 4 KiB.
+    @Test
+    fun `a long notice is taken, and its body cut to fit APNs`() {
+        val d = enrolled()
+        assertEquals(200, gateway.push(alert(d).copy(body = "x".repeat(3000))))
+        val long = alertPayload("t", "ü".repeat(3000), "~zod", "cal-abc", "", event = "notice")
+        assertTrue(long.encodeToByteArray().size <= MAX_ALERT_BYTES, "${long.encodeToByteArray().size}")
+        val body = Json.parseToJsonElement(long).jsonObject["aps"]!!.jsonObject["alert"]!!.jsonObject["body"]!!.jsonPrimitive.content
+        assertTrue(body.endsWith("…") && body.startsWith("üü"), body.take(10))
+        assertEquals("short", Json.parseToJsonElement(alertPayload("t", "short", "~zod", "w", "p")).jsonObject["aps"]!!.jsonObject["alert"]!!.jsonObject["body"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `the request log masks device ids`() {
+        assertEquals("/devices/<id>/endpoint", maskedPath("/devices/abc-123/endpoint"))
+        assertEquals("/health/<id>", maskedPath("/health/abc-123"))
+        assertEquals("/gateway/push", maskedPath("/gateway/push"))
     }
 }
 

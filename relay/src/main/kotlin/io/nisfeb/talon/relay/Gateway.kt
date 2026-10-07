@@ -145,7 +145,10 @@ class Gateway(
         val TOKENS = Regex("[0-9a-fA-F]{0,200}\\|[0-9a-fA-F]{0,200}")
         /** APNs refusals that mean the token will never work. */
         val DEAD = setOf("BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic")
-        const val MAX_FIELD = 1000
+        /** As trunk caps a notice: tag, title, body and open together in
+         *  4 KiB. A tighter cap here refused long notices with a 400 that
+         *  trunk neither retries nor reports, so iPhones missed them. */
+        const val MAX_FIELD = 4096
         const val MAX_VOIP = 3000
         const val MAX_BADGE = 99_999
         val rng = SecureRandom()
