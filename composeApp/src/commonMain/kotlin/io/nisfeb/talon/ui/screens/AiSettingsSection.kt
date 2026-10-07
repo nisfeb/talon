@@ -58,6 +58,7 @@ import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.AiSpend
 import io.nisfeb.talon.ai.FeatureSetting
 import io.nisfeb.talon.ai.ModelCatalog
+import io.nisfeb.talon.util.runSuspendCatching
 import io.nisfeb.talon.ai.ModelInfo
 import io.nisfeb.talon.ai.ModelRef
 import io.nisfeb.talon.ai.ProfileInputs
@@ -116,10 +117,10 @@ fun AiSettingsSection(
     armillary: ArmillaryRepo? = null,
     /** Opens Settings > Orrery, where Orrery's switch and settings are. */
     onOpenOrrery: (() -> Unit)? = null,
+    catalog: ModelCatalog = remember { ModelCatalog() },
 ) {
     val scope = rememberCoroutineScope()
     val cfg by aiSettings.state.collectAsState()
-    val catalog = remember { ModelCatalog() }
     // One collection each whether or not there is a ship, so nothing moves about.
     val noFlag = remember { MutableStateFlow(false) }
     val noGen = remember { MutableStateFlow<io.nisfeb.talon.orrery.GeneratorSettings?>(null) }
@@ -149,6 +150,22 @@ fun AiSettingsSection(
     fun setFeature(f: AiFeature, change: (FeatureSetting) -> FeatureSetting) =
         edit { p -> p.copy(features = p.features + (f to change(p.features[f] ?: FeatureSetting()))) }
     val chat = profile.providers.filter { it.kind != ProviderKind.ThisDevice }
+    // Each provider's models, fetched again on opening. They were fetched
+    // only when a key was saved here and do not travel with the profile,
+    // so a device given its key by sync had nothing to search, and a list
+    // from before a model came out could not find it ("opus 5.5", sneagan,
+    // 2026-10-07). Saved only where the list changed; a profile not yet
+    // saved is left as it is, since looking saves nothing.
+    LaunchedEffect(Unit) {
+        val saved = cfg.savedProfile ?: return@LaunchedEffect
+        saved.providers.filter { it.canFetchModels() }.forEach { p ->
+            runSuspendCatching { catalog.fetch(p) }.onSuccess { c ->
+                if (c.models != p.models || c.jev != p.offersJev) {
+                    edit { it.copy(providers = it.providers.map { q -> if (q.id == p.id) q.withCatalog(c) else q }) }
+                }
+            }
+        }
+    }
 
     // ── Providers ──────────────────────────────────────────────
     Heading("Providers")
@@ -1945,4 +1962,12 @@ private fun JevAdvanced(orrery: OrreryRepo, dc: DecideControl, models: List<Mode
         },
         onFailure = { Quiet(it.message ?: "The check failed.", error = true) },
     )
+}
+
+/** Whether a list can be asked for without the owner: OpenRouter's is public, the rest need a key or an address. */
+internal fun AiProvider.canFetchModels(): Boolean = when (kind) {
+    ProviderKind.OpenRouter -> true
+    ProviderKind.Anthropic, ProviderKind.OpenAi -> apiKey.isNotBlank()
+    ProviderKind.OpenAiCompatible -> !baseUrl.isNullOrBlank()
+    ProviderKind.Armillary, ProviderKind.ThisDevice -> false
 }

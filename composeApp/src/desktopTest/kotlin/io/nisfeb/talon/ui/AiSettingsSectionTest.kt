@@ -59,7 +59,7 @@ class AiSettingsSectionTest {
         val ai = FakeAiSettings().apply { applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "sk-ant", model = "claude-opus-5")) }
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, catalog = quietCatalog()) }
             }
         }
         onNodeWithText("Providers").assertExists()
@@ -115,7 +115,7 @@ class AiSettingsSectionTest {
         val bought = repo(ai) { HttpStatusCode.NotFound to "" }
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
             }
         }
         onNodeWithText("Not on this ship. Install it from the Grubbery shell on your ship.").assertExists()
@@ -132,7 +132,7 @@ class AiSettingsSectionTest {
         val bought = repo(ai) { HttpStatusCode.Forbidden to "" }
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
             }
         }
         onNodeWithText("Signed out of the ship.").assertExists()
@@ -157,7 +157,7 @@ class AiSettingsSectionTest {
         }
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
             }
         }
         onNodeWithText("Answering on this ship.").assertExists()
@@ -201,7 +201,7 @@ class AiSettingsSectionTest {
         val bought = selling(ai, threeSizes, funded)
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
             }
         }
         onNodeWithText("Top up").performClick()
@@ -230,7 +230,7 @@ class AiSettingsSectionTest {
         )
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
             }
         }
         onNodeWithText("Top up").performClick()
@@ -249,7 +249,7 @@ class AiSettingsSectionTest {
         val bought = selling(ai, threeSizes, funded)
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
             }
         }
         onNodeWithText("Subscribe: Talon Pro, $10.00 a month for $12.00 of credit").performClick()
@@ -275,7 +275,7 @@ class AiSettingsSectionTest {
         )
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
             }
         }
         onNodeWithText("2026-09-21 12:35  Charge  under a cent").assertDoesNotExist()
@@ -402,7 +402,7 @@ class AiSettingsSectionTest {
         )
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
             }
         }
         waitForIdle()
@@ -429,7 +429,7 @@ class AiSettingsSectionTest {
         val ai = FakeAiSettings()
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, catalog = quietCatalog()) }
             }
         }
         waitForIdle()
@@ -446,7 +446,7 @@ class AiSettingsSectionTest {
         val ai = FakeAiSettings()
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, catalog = quietCatalog()) }
             }
         }
         onNodeWithText("Set up Armillary").performClick()
@@ -463,7 +463,7 @@ class AiSettingsSectionTest {
         val ai = FakeAiSettings().withProfile(withArmillary())
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, catalog = quietCatalog()) }
             }
         }
         waitForIdle()

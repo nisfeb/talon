@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import io.ktor.client.engine.mock.respond
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -43,6 +44,11 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class AiProviderCardsTest {
     @Volatile private var status = 200
+    // False where a test gives the server's provider its own list: opening
+    // the section fetches every list again, and would replace it.
+    @Volatile private var listing = true
+    // OpenRouter's list, where a test wants one; refused otherwise.
+    @Volatile private var openRouterList: String? = null
 
     private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
         createContext("/v1/models") { ex ->
@@ -55,11 +61,32 @@ class AiProviderCardsTest {
     }
     private val address = "http://127.0.0.1:${server.address.port}/v1"
 
+    // The models are asked of the server above, by the catalog the section
+    // uses; any other provider's list (OpenRouter's, when settings open) is
+    // refused rather than asked of the internet.
+    private val catalog = io.nisfeb.talon.ai.ModelCatalog(io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
+        val url = req.url.toString()
+        if (req.url.host == "127.0.0.1" && req.url.port == server.address.port && listing) {
+            val st = status
+            respond(
+                if (st == 200) """{"data":[{"id":"qwen3"},{"id":"whisper-large"},{"id":"text-embedding-3"}]}""" else "busy",
+                io.ktor.http.HttpStatusCode.fromValue(st),
+            )
+        } else if ("openrouter.ai" in url && openRouterList != null) {
+            respond(
+                if (url.endsWith("/endpoints/zdr")) """{"data":[]}""" else openRouterList!!,
+                io.ktor.http.HttpStatusCode.OK,
+                io.ktor.http.headersOf("Content-Type", "application/json"),
+            )
+        } else respond("", io.ktor.http.HttpStatusCode.NotFound)
+    }))
+
     @AfterTest fun stop() = server.stop(0)
 
     private val home = AiProvider("srv", ProviderKind.OpenAiCompatible, "Home box")
 
-    private fun section(vararg providers: AiProvider, default: ModelRef? = null, jev: Boolean? = null, orreryPage: Boolean = false, block: ComposeUiTest.(FakeAiSettings) -> Unit) {
+    private fun section(vararg providers: AiProvider, default: ModelRef? = null, jev: Boolean? = null, orreryPage: Boolean = false, fetches: Boolean = true, block: ComposeUiTest.(FakeAiSettings) -> Unit) {
+        listing = fetches
         val ai = FakeAiSettings().apply {
             applyRemote(AiSettings.Config(
                 provider = AiSettings.Provider.Anthropic, apiKey = "", model = null,
@@ -72,7 +99,7 @@ class AiProviderCardsTest {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         // Jev is Orrery's, on Orrery's page, with Orrery on.
                         if (orreryPage) io.nisfeb.talon.ui.screens.OrrerySettingsSection(ai, orrery = null)
-                        else AiSettingsSection(ai, orrery = null)
+                        else AiSettingsSection(ai, orrery = null, catalog = catalog)
                     }
                 }
             }
@@ -98,8 +125,12 @@ class AiProviderCardsTest {
     }
 
     @Test
-    fun `a server that will not list its models says why, and the address stays`() = section(home.copy(baseUrl = address)) { ai ->
+    fun `a server that will not list its models says why, and the address stays`() {
         status = 503
+        section(home.copy(baseUrl = address)) { ai -> refusedFetch(ai) }
+    }
+
+    private fun ComposeUiTest.refusedFetch(ai: FakeAiSettings) {
         onNodeWithText("Fetch models").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Answered 503: busy") }
         assertEquals(address, ai.saved("srv")!!.baseUrl)
@@ -149,7 +180,7 @@ class AiProviderCardsTest {
 
     @Test
     fun `the default model is picked, searched for, or typed`() =
-        section(home.copy(baseUrl = address, models = listOf(ModelInfo("qwen3"), ModelInfo("llama3")))) { ai ->
+        section(home.copy(baseUrl = address, models = listOf(ModelInfo("qwen3"), ModelInfo("llama3"))), fetches = false) { ai ->
             onNodeWithText("None chosen").performClick()
             onNodeWithText("llama3").performClick()
             waitForIdle()
@@ -212,7 +243,7 @@ class AiProviderCardsTest {
             ModelInfo("anthropic/claude-3-haiku", "Claude 3 Haiku"),
             ModelInfo("anthropic/claude-sonnet-4", "Claude Sonnet 4"),
             ModelInfo("openai/gpt-4o", "GPT-4o"),
-        ))) { ai ->
+        )), fetches = false) { ai ->
             onNodeWithText("None chosen").performClick()
             onNode(hasSetTextAction() and hasText("Search, or type a model's id")).performTextInput("cl son")
             waitForIdle()
@@ -222,4 +253,26 @@ class AiProviderCardsTest {
             waitForIdle()
             assertEquals(ModelRef("srv", "anthropic/claude-sonnet-4"), ai.state.value.savedProfile!!.defaultModel)
         }
+
+    // sneagan, 2026-10-07: "opus 5.5" found nothing. A provider's list was
+    // fetched only when its key was saved on this device, and did not
+    // travel with the profile: empty on a device given the key by sync,
+    // older than the model where it was saved before the model came out.
+    @Test
+    fun `opening settings fetches the lists again, so a new model is found by its words`() {
+        openRouterList = """{"data":[
+            {"id":"anthropic/claude-opus-5.5","name":"Anthropic: Claude Opus 5.5","context_length":1000000,"supported_parameters":["tools","max_tokens"]},
+            {"id":"openai/gpt-5","name":"OpenAI: GPT-5","context_length":400000,"supported_parameters":["tools","max_tokens"]}]}"""
+        section(AiProvider("or", ProviderKind.OpenRouter, "OpenRouter", apiKey = "k", models = listOf(ModelInfo("openai/gpt-5", "OpenAI: GPT-5")))) { ai ->
+            waitUntil(timeoutMillis = 10_000) { ai.saved("or")!!.models.any { it.id == "anthropic/claude-opus-5.5" } }
+            onNodeWithText("None chosen").performClick()
+            onNode(hasSetTextAction() and hasText("Search, or type a model's id")).performTextInput("opus 5.5")
+            waitForIdle()
+            assertTrue(onAllNodesWithText("OpenAI: GPT-5").fetchSemanticsNodes().isEmpty(), "the search narrows")
+            onNodeWithText("Anthropic: Claude Opus 5.5").performClick()
+            waitForIdle()
+            assertEquals(ModelRef("or", "anthropic/claude-opus-5.5"), ai.state.value.savedProfile!!.defaultModel)
+        }
+        openRouterList = null
+    }
 }
