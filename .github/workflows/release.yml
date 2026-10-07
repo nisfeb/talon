@@ -234,7 +234,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '25'
-      # macOS-only: generate icon.icns from icon.png so the .app
+      # macOS-only: generate icon.icns from icon-macos.png so the .app
       # bundle / .dmg / Dock-after-install all get the Talon logo
       # instead of jpackage's default. The .icns isn't committed; the
       # script no-ops on non-mac runners.

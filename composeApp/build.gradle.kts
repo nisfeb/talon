@@ -500,7 +500,7 @@ compose.desktop {
                 dirChooser = true
             }
             macOS {
-                // .icns is generated on the macOS CI runner from icon.png
+                // .icns is generated on the macOS CI runner from icon-macos.png
                 // (see .github/workflows/release.yml's "Generate macOS
                 // icon" step) since iconutil is macOS-only. The file
                 // doesn't live in the repo because it's a build artifact.

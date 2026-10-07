@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Generate composeApp/src/desktopMain/resources/icon.icns from icon.png.
+# Generate composeApp/src/desktopMain/resources/icon.icns from icon-macos.png.
 # Runs only on macOS — uses sips (built-in) to produce the iconset
 # bitmaps and iconutil (built-in) to pack them into a single .icns.
 #
@@ -21,7 +21,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SRC="$ROOT/composeApp/src/desktopMain/resources/icon.png"
+SRC="$ROOT/composeApp/src/desktopMain/resources/icon-macos.png"
 OUT="$ROOT/composeApp/src/desktopMain/resources/icon.icns"
 
 if [[ ! -f "$SRC" ]]; then
@@ -37,8 +37,8 @@ mkdir -p "$ICONSET"
 
 # Apple's iconset spec — each (size, scale) pair gets a file.
 # Sizes 16, 32, 128, 256, 512 with a @1x and @2x for each. The 1024
-# slot is the @2x of 512. Source is 512px, so we upscale for 1024;
-# softer than a native 1024 source but produces a valid icns.
+# slot is the @2x of 512. The source is 1024 px, on Apple's 824 px grid
+# (scripts/make-icons.py).
 declare -a SIZES=(
     "16 icon_16x16.png"
     "32 icon_16x16@2x.png"
