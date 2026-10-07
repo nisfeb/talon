@@ -68,7 +68,7 @@ fun OrreryActionsScreen(
     told: String? = null,
     /** The page is left: [told] has been seen. */
     onLeave: () -> Unit = {},
-    /** Off under the Orrery section's tabs, which carry back and refresh. */
+    /** Off under the Orrery section's tabs, which carry back and refresh, and read on entering and see [told] on leaving. */
     header: Boolean = true,
     onOpen: (OrreryAction) -> Unit,
 ) {
@@ -79,8 +79,12 @@ fun OrreryActionsScreen(
         refreshing = true
         scope.launch { runCatching { onShown() }; refreshing = false }
     }
-    androidx.compose.runtime.LaunchedEffect(Unit) { refresh() }
-    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { onLeave() } }
+    // Under the section's tabs the section reads and is left, once: this
+    // body comes and goes with every tab switch.
+    if (header) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { refresh() }
+        androidx.compose.runtime.DisposableEffect(Unit) { onDispose { onLeave() } }
+    }
     Column(modifier.fillMaxSize().then(if (header) Modifier.windowInsetsPadding(WindowInsets.safeDrawing) else Modifier)) {
         if (header) Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),

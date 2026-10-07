@@ -14,6 +14,10 @@ import io.nisfeb.talon.data.AppDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
@@ -35,6 +39,8 @@ class OrreryKeysTest {
     @Volatile private var schemaAnswers = true
     @Volatile private var revokeStatus = 200
     @Volatile private var healthStops = 0
+    /** Holds the ship's answer to a mint until completed: a slow ship. */
+    @Volatile private var holdMint: kotlinx.coroutines.CompletableDeferred<Unit>? = null
 
     private val schema = """{"kinds":{"person":{"attrs":["name"]},"garden":{"attrs":["plot"]}},"actions":["task","message"]}"""
 
@@ -50,7 +56,10 @@ class OrreryKeysTest {
             when {
                 "/api/schema" in url ->
                     if (schemaAnswers) respond(schema, headers = json) else respond("down", HttpStatusCode.InternalServerError)
-                "/api/clients" in url && req.method == HttpMethod.Post -> respond("""{"id":"c1","token":"k1.secret"}""", headers = json)
+                "/api/clients" in url && req.method == HttpMethod.Post -> {
+                    holdMint?.await()
+                    respond("""{"id":"c1","token":"k1.secret"}""", headers = json)
+                }
                 "/api/clients/" in url && req.method == HttpMethod.Delete -> respond("", HttpStatusCode.fromValue(revokeStatus))
                 "/api/state" in url -> respond("""{"me":"person/me","rev":1,"bodies":[],"schema":$schema}""", headers = json)
                 else -> respond("[]", headers = json)
@@ -74,6 +83,23 @@ class OrreryKeysTest {
         assertTrue(repo.enable().isSuccess)
         val mint = minted()
         for (part in listOf("\"garden\"", "\"person\"", "\"task\"", "\"message\"", "\"sensitive\":\"write\"")) assertTrue(part in mint, "$part in $mint")
+        assertEquals("k1.secret", db.orreryAccounts().get("~zod")?.token)
+        assertTrue(repo.enabled.value)
+    }
+
+    // Turned on from the Orrery page or Settings, which the owner left
+    // while the ship was slow: the key was minted on the ship and never
+    // kept here, a key nobody held.
+    @Test
+    fun `turning it on finishes though the page that asked is left`() = keys { repo, db ->
+        val hold = kotlinx.coroutines.CompletableDeferred<Unit>()
+        holdMint = hold
+        val page = CoroutineScope(Job())
+        page.launch { repo.enable() }
+        withTimeout(5_000) { while (asked.none { it.startsWith("POST") && "/api/clients" in it }) delay(10) }
+        page.cancel()
+        hold.complete(Unit)
+        withTimeout(5_000) { while (db.orreryAccounts().get("~zod") == null) delay(20) }
         assertEquals("k1.secret", db.orreryAccounts().get("~zod")?.token)
         assertTrue(repo.enabled.value)
     }

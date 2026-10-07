@@ -119,10 +119,13 @@ class TripService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) { stop(); return START_NOT_STICKY }
         val trip = Trips.stored(this)?.takeIf { it.live(System.currentTimeMillis()) }
-        if (trip == null) { stop(); return START_NOT_STICKY }
+        // In the foreground first, even to stop at once: a service started
+        // with startForegroundService that stops without it takes the app
+        // down ("did not then call Service.startForeground()"), and a
+        // disarm can clear the trip between the start and here.
         try {
             ServiceCompat.startForeground(
-                this, NOTIFICATION_ID, notification(trip),
+                this, NOTIFICATION_ID, notification(trip ?: Trip("", "", 0, 0)),
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0,
             )
         } catch (e: RuntimeException) {
@@ -131,6 +134,7 @@ class TripService : Service() {
             stop()
             return START_NOT_STICKY
         }
+        if (trip == null) { stop(); return START_NOT_STICKY }
         LocationWatch.resume(this)
         handler.removeCallbacks(finish)
         handler.postDelayed(finish, (trip.untilMs - System.currentTimeMillis()).coerceAtLeast(0))

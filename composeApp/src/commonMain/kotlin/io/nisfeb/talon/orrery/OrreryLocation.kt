@@ -7,6 +7,7 @@ import io.nisfeb.talon.data.OrrerySentDao
 import io.nisfeb.talon.data.OrrerySentEntity
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.createAppHttpClient
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -99,11 +100,11 @@ suspend fun sendLocation(
     val token = db.orreryAccounts().get(ship)?.token ?: return Result.success(Unit)
     val api = OrreryApi(http, bare, url)
     val sent = db.orrerySent()
-    // First and on every fix, before the state read below, which is the
+    // First and on every fix, before the places below, whose read is the
     // whole view and the slow part on a busy ship: the leave alert needs
     // where the owner is now, not only when the place changed.
     sendPosition(api, sent, ship, token, fix)
-    val state = api.stateJson(token)
+    val state = knownPlaces(api, sent, ship, token, fix.atMs)
     val last = sent.get(ship, LAST_KEY)?.value?.let { runCatching { kotlinx.serialization.json.Json.parseToJsonElement(it) }.getOrNull() }
     val value = locationValue(fix, geoPlaces(state), name, last) ?: return Result.success(Unit)
     if (value == last) return Result.success(Unit)
@@ -116,6 +117,32 @@ suspend fun sendLocation(
 }
 
 private const val LAST_KEY = "location:last"
+
+/**
+ * The owner and the places, from a state read whole at most every
+ * [PLACES_EVERY_MS]. On a trip a fix comes each minute, and a whole
+ * state read with each was 3.5 s of a busy ship's time a minute for the
+ * whole drive; places hardly change in ten. Kept as a state of just
+ * those, so [geoPlaces] and [OrreryText.me] read it as they read the
+ * whole one, and arriving somewhere known is still said at that fix.
+ */
+private suspend fun knownPlaces(api: OrreryApi, sent: OrrerySentDao, ship: String, token: String, atMs: Long): JsonObject {
+    sent.get(ship, PLACES_KEY)?.takeIf { atMs - it.atMs in 0 until PLACES_EVERY_MS }
+        ?.let { row -> runCatching { kotlinx.serialization.json.Json.parseToJsonElement(row.value) as? JsonObject }.getOrNull() }
+        ?.let { return it }
+    val state = api.stateJson(token)
+    val kept = buildJsonObject {
+        state["me"]?.let { put("me", it) }
+        put("bodies", JsonArray(OrreryText.bodies(state).filter { it["id"].asText()?.startsWith("place/") == true }))
+    }
+    sent.put(OrrerySentEntity(ship, PLACES_KEY, kept.toString(), atMs))
+    return kept
+}
+
+private const val PLACES_KEY = "location:places"
+
+/** How long the places read for a fix serve the fixes after it. */
+const val PLACES_EVERY_MS = 10 * 60_000L
 
 /**
  * The fix to the metre, for the ship's leave alerts. An orrery without
