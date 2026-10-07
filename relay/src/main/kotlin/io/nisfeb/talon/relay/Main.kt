@@ -41,9 +41,14 @@ fun main() {
         Gateway(
             db,
             alert = { token, p, badge ->
-                a.sendAlert(token, p.title, p.body, p.patp, p.whom, p.postId, parent = p.parent, nonce = p.nonce, badge = badge)
+                a.sendAlert(
+                    token, p.title, p.body, p.patp, p.whom, p.postId,
+                    parent = p.parent, nonce = p.nonce, badge = badge, event = p.event, open = p.open?.toString(),
+                )
             },
             voip = { token, payload -> a.sendVoip(token, payload) },
+            badgeOnly = { token, n -> a.sendBadge(token, n) },
+            background = { token, payload -> a.sendBackground(token, payload) },
         )
     }
     val httpClient = OkHttpClient.Builder()

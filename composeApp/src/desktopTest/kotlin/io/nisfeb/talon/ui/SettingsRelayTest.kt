@@ -54,13 +54,14 @@ class SettingsRelayTest {
         client: RelayClient = relay(),
         tokens: PushTokenProvider = Tokens("https://push.test/abc"),
         shipPoke: (suspend (kotlinx.serialization.json.JsonElement) -> Unit)? = null,
+        shipPushStatus: (suspend () -> kotlinx.serialization.json.JsonElement?)? = null,
         block: ComposeUiTest.() -> Unit,
     ) = runComposeUiTest {
         setContent {
             TalonTheme(darkTheme = false) {
                 SettingsScreen(
                     aiSettings = FakeAiSettings(), themePreference = InMemoryThemePreference(), uiSettings = InMemoryUiSettings(), onBack = {},
-                    relayConfig = RelayPanelConfig(client, relaySettings, tokens, activePatp = "~zod", activeShipUrl = "https://zod.test", shipPoke = shipPoke),
+                    relayConfig = RelayPanelConfig(client, relaySettings, tokens, activePatp = "~zod", activeShipUrl = "https://zod.test", shipPoke = shipPoke, shipPushStatus = shipPushStatus),
                 )
             }
         }
@@ -163,6 +164,19 @@ class SettingsRelayTest {
     @Test
     fun `a device never on its ship's notifications shows no such row`() = panel(shipPoke = {}) {
         assertTrue(!shows("Notifications come from"))
+    }
+
+    // Trunk wire 12's status: when the ship last pushed to this device.
+    @Test
+    fun `the ship row says when the ship last pushed here`() {
+        relaySettings.setViaShipPush("~zod", true)
+        relaySettings.setTrunkDeviceIdFor("~zod", "t-1")
+        val status = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"wire":12,"now":1000000,"devices":[{"id":"t-1","sent":{"at":880000,"kind":"message"},"last":{"at":880000,"code":200}}],"drops":[]}""",
+        )
+        panel(shipPoke = {}, shipPushStatus = { status }) {
+            waitUntil(timeoutMillis = 5_000) { shows("Last notification 2 min ago.") }
+        }
     }
 }
 

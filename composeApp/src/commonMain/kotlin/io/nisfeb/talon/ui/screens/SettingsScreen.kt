@@ -56,6 +56,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -1669,6 +1670,8 @@ data class RelayPanelConfig(
     /** A trunk-action poke to the signed-in ship, where this device can take
      *  pushes from it (Android); null hides the choice between ship and relay. */
     val shipPoke: (suspend (kotlinx.serialization.json.JsonElement) -> Unit)? = null,
+    /** The ship's %trunk status (wire 12), for how its pushes are going. */
+    val shipPushStatus: (suspend () -> kotlinx.serialization.json.JsonElement?)? = null,
 )
 
 @Composable
@@ -2516,6 +2519,11 @@ internal fun ShipNotificationsRow(config: RelayPanelConfig) {
             "Talon moves $device the next time it starts, once a test notification from $ship arrives."
         else -> return
     }
+    val status by produceState<String?>(null, ship, via) {
+        if (via) value = config.shipPushStatus?.invoke()?.let {
+            io.nisfeb.talon.notify.shipPushStatusLine(it, config.settings.trunkDeviceIdFor(ship))
+        }
+    }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
         Icon(
             Icons.Filled.Notifications,
@@ -2526,6 +2534,7 @@ internal fun ShipNotificationsRow(config: RelayPanelConfig) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
             Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            status?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         when {
             via -> TextButton(onClick = {

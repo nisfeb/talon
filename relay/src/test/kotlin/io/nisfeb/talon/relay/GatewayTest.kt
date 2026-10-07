@@ -28,7 +28,10 @@ class GatewayTest {
         db,
         alert = { t, p, badge -> alerts += t to p; badges += badge; apns },
         voip = { t, p -> rings += t to p; apns },
+        badgeOnly = { t, n -> quiet += "badge $t $n"; apns },
+        background = { t, p -> quiet += "background $t $p"; apns },
     )
+    private val quiet = mutableListOf<String>()
 
     @AfterTest fun drop() { java.io.File(path).delete() }
 
@@ -205,6 +208,55 @@ class GatewayTest {
         assertTrue(r.shouldSend("h", cancel))
         t = 2_000
         assertEquals(false, r.shouldSend("h", cancel), "forgotten after keepMs")
+    }
+
+    // Trunk wire 12 counts the badge itself, from %activity (sneagan,
+    // 2026-10-07: "I want trunk to do as much as possible").
+    @Test
+    fun `the ship's own count wins over this gateway's`() {
+        val d = enrolled()
+        gateway.badge(GatewayBadge(d.handle, d.secret, 3))
+        gateway.push(alert(d).copy(badge = 7))
+        gateway.push(alert(d))
+        assertEquals(listOf<Int?>(7, 4), badges, "the ship's 7 passed through; the gateway's own count was not moved by it")
+        assertEquals(400, gateway.push(alert(d).copy(badge = -1)))
+    }
+
+    @Test
+    fun `a badge push carries only the number`() {
+        val d = enrolled()
+        assertEquals(200, gateway.push(GatewayPush(d.handle, d.secret, "badge", badge = 5)))
+        assertEquals(listOf("badge bb22 5"), quiet)
+        assertEquals(400, gateway.push(GatewayPush(d.handle, d.secret, "badge")))
+        val noAlert = enrolled("aa11|")
+        assertEquals(409, gateway.push(GatewayPush(noAlert.handle, noAlert.secret, "badge", badge = 1)))
+    }
+
+    @Test
+    fun `a clear wakes the app to drop a chat's notifications`() {
+        val d = enrolled()
+        assertEquals(200, gateway.push(GatewayPush(d.handle, d.secret, "clear", patp = "~zod", whom = "~bus")))
+        val (kind, token, payload) = quiet.single().split(" ", limit = 3)
+        assertEquals("background" to "bb22", kind to token)
+        val p = Json.parseToJsonElement(payload).jsonObject
+        assertEquals("1", p["aps"]!!.jsonObject["content-available"]!!.jsonPrimitive.content)
+        assertEquals(listOf("read", "~zod", "~bus"), listOf("event", "patp", "whom").map { p[it]!!.jsonPrimitive.content })
+        assertEquals(null, p["aps"]!!.jsonObject["alert"], "nothing shown")
+        assertEquals(400, gateway.push(GatewayPush(d.handle, d.secret, "clear", patp = "~zod")))
+    }
+
+    @Test
+    fun `a notice says so, and carries where it opens`() {
+        val p = Json.parseToJsonElement(
+            alertPayload("Leave now", "Opti sail", "~zod", "cal-abc", "", badge = 2, event = "notice", open = """{"calendar":"abc"}"""),
+        ).jsonObject
+        assertEquals("notice", p["event"]!!.jsonPrimitive.content)
+        assertEquals("abc", p["open"]!!.jsonObject["calendar"]!!.jsonPrimitive.content)
+        assertEquals("cal-abc", p["aps"]!!.jsonObject["thread-id"]!!.jsonPrimitive.content)
+        assertEquals(null, Json.parseToJsonElement(alertPayload("t", "b", "~zod", "w", "p", open = "null")).jsonObject["open"])
+        val d = enrolled()
+        assertEquals(200, gateway.push(alert(d).copy(event = "notice", open = Json.parseToJsonElement("""{"x":1}"""))))
+        assertEquals("notice", alerts.single().second.event)
     }
 }
 

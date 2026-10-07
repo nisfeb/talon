@@ -494,3 +494,12 @@ internal fun dmStatusOf(p: JsonObject): Pair<String, String?>? {
     return if (s in setOf("inviting", "invited", "archive", "done")) ship to s else null
 }
 
+/**
+ * %activity's "base" summary: everything that notified, on the whole
+ * ship. The ship's own %trunk sends this as an iPhone's app-icon badge
+ * (wire 12), so the app shows the same number while it is open. Null in
+ * a summary map without it.
+ */
+internal fun baseNotifyCount(summaries: JsonObject): Int? =
+    ((summaries["base"] as? JsonObject)?.get("notify-count") as? JsonPrimitive)?.content?.toIntOrNull()
+

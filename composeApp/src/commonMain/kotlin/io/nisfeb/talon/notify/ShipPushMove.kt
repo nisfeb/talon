@@ -32,16 +32,21 @@ object TrunkPush {
 
     /** An iPhone: the ship pushes through the APNs gateway on the relay at
      *  [gateway], which holds the phone's tokens behind [handle]. */
-    fun registerGateway(id: String, gateway: String, handle: String, secret: String): JsonElement = buildJsonObject {
-        put("push-register", buildJsonObject {
-            put("id", id)
-            put("platform", "ios-gateway")
-            put("gateway", gateway)
-            put("handle", handle)
-            put("secret", secret)
-            put("caps", buildJsonArray {})
-        })
-    }
+    fun registerGateway(id: String, gateway: String, handle: String, secret: String, caps: List<String> = emptyList()): JsonElement =
+        buildJsonObject {
+            put("push-register", buildJsonObject {
+                put("id", id)
+                put("platform", "ios-gateway")
+                put("gateway", gateway)
+                put("handle", handle)
+                put("secret", secret)
+                put("caps", buildJsonArray { caps.forEach { add(JsonPrimitive(it)) } })
+            })
+        }
+
+    /** What an iPhone tells its ship it understands (wire 12): notices,
+     *  reads (its background clear), and the badge while the owner has it on. */
+    fun iosCaps(badges: Boolean): List<String> = listOfNotNull("notice", "read", "badge".takeIf { badges })
 
     fun unregister(id: String): JsonElement = buildJsonObject { put("push-unregister", id) }
 
@@ -187,11 +192,12 @@ suspend fun gatewayRegistration(
     settings: RelaySettings,
     relay: RelayClient,
     tokens: PushTokenProvider,
+    caps: List<String> = emptyList(),
 ): JsonElement? {
     val token = tokens.token()?.takeIf { tokens.alertsIn(it) } ?: return null
     val dev = settings.gatewayFor(ship)?.let { relay.gatewayEnroll(token, it) }
         ?: checkNotNull(relay.gatewayEnroll(token)) { "the gateway gave no device" }
     settings.setGatewayFor(ship, dev)
-    return TrunkPush.registerGateway(id, settings.endpoint.value.trimEnd('/'), dev.handle, dev.secret)
+    return TrunkPush.registerGateway(id, settings.endpoint.value.trimEnd('/'), dev.handle, dev.secret, caps)
 }
 
