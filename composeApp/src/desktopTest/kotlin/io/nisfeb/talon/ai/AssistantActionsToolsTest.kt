@@ -381,4 +381,15 @@ class AssistantActionsToolsTest {
         assertEquals("text/calendar" to "0vblob", file["mime"]!!.jsonPrimitive.content to file["hash"]!!.jsonPrimitive.content)
         assertTrue(h.run("send_mail", argsOf("to" to "~bus", "body" to "x", "event" to "nope")).startsWith("Error: no event nope"))
     }
+
+    // orrery-0c, 2026-10-07: an aside in an event's note ("before you leave
+    // for Magnus's gymnastics") made orrery count Magnus as taking part, and
+    // "Supervise Linus…" left the owner out. The tool says how to name.
+    @Test
+    fun `the event tool says who an event names is who orrery counts`() = withHarness(calendars = family) { h ->
+        val d = h.tools.first { it.spec.name == "create_event" }.spec.description
+        assertTrue("keep the note to this event alone" in d, d)
+        assertTrue("Jackson supervises Linus nailing wood" in d, d)
+    }
 }
+

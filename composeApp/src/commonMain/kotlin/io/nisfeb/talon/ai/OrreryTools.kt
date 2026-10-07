@@ -52,6 +52,19 @@ Before you write:
   makes it place a second copy on the calendar. Facts about the
   people in it, such as who they are and what they do, are still
   orrery_observe.
+- Orrery's calendar reader counts as taking part everyone it knows who
+  is named in an event's title or note. So an event's note is about
+  the event alone: "before you leave for Magnus's gymnastics" put
+  Magnus at Linus's woodwork. When the owner takes part (supervises,
+  drives, attends), the title names them by the name orrery holds for
+  person/me, such as "Jackson supervises Linus nailing wood": "me" and
+  "I" count for nobody, and a title naming only someone else leaves
+  the owner out.
+- Who drops off and who picks up for an activity are facts on the
+  activity, written with orrery_observe, not told as an instruction:
+  attributes drop-off and pick-up, one row per leg, each value
+  {"ref": "person/…", "days": ["wednesday"]}. A row without days covers
+  the activity's other days. The owner is person/me.
 - Someone or something orrery_find does not find is created in the
   same orrery_observe as the facts about it, in `bodies`. A value that
   names a body is {"ref": "person/alice"}, not the id as text.

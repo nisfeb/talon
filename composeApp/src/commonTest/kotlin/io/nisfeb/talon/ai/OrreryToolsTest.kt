@@ -267,6 +267,13 @@ class OrreryToolsTest {
         assertTrue("Not for adding an event" in specs.getValue("orrery_instruct"))
         assertTrue("calendar placements included" in orreryTools(Tap()).first { it.spec.name == "orrery_instruct" }.spec.parameters.toString())
         assertTrue("create_event, and only there" in run(Tap(), "orrery_guide"))
+        // orrery-0c, 2026-10-07: Magnus counted at Linus's woodwork from
+        // the note's aside, and the owner not counted at all.
+        val guide = run(Tap(), "orrery_guide")
+        assertTrue("an event's note is about\n  the event alone" in guide, guide)
+        assertTrue("person/me" in guide && "\"me\" and\n  \"I\" count for nobody" in guide)
+        // orrery 85: who drives is facts with days, not an instruction.
+        assertTrue("{\"ref\": \"person/…\", \"days\": [\"wednesday\"]}" in guide)
     }
 
     // A body read back must show values, or a write cannot be checked
