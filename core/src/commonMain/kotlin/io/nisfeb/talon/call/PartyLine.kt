@@ -1238,9 +1238,16 @@ class PartyLine(
             upId = "up-$connectionId-${Uuid.random()}"
             val old = upLink
             val up = links.create(sfuIce, sendAudio = true)
+            // A share moves to the new link before the old one lets it go,
+            // so its capture is handed over, not opened again: on Wayland
+            // that asked the system's dialog again in the middle of a share.
+            // A share that will not restart is dropped below.
+            val shared = _shared.value
+            val reshared = shared != null && up.setScreenShare(shared)
             old?.close()
             upLink = up
             _upLink.value = up
+            if (reshared) sharedOn = up
             // A share the link ended itself (its dialog cancelled, nothing
             // sent) ends here too, so the room and the button follow it.
             upShareWatch?.cancel()
@@ -1273,16 +1280,12 @@ class PartyLine(
                     broadcastVideo()
                 }
             }
-            // A share is restored the same way, and dropped the same way
-            // when its screen or window is gone.
-            val shared = _shared.value
-            if (shared != null) scope.launch {
-                if (up.setScreenShare(shared)) sharedOn = up
-                else {
-                    stopSharingState()
-                    refreshVideoOn()
-                    broadcastVideo()
-                }
+            // The share, moved above, is dropped the same way when its
+            // screen or window is gone.
+            if (shared != null && !reshared) {
+                stopSharingState()
+                refreshVideoOn()
+                broadcastVideo()
             }
             // Say our mute state before anyone renders us as live.
             broadcastMuted()

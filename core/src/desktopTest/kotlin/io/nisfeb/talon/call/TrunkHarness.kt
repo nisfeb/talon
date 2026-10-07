@@ -50,6 +50,9 @@ internal class TrunkHarness(ship: String = "~nec") {
      *  Runs on the engine's thread — keep it tiny. */
     var onPut: ((String) -> Unit)? = null
 
+    /** The answer to a scry, by its path (e.g. "/~/scry/trunk/version.json"). */
+    @Volatile var scryBody: (String) -> String = { "{}" }
+
     /** How long each scry takes to answer: a slow ship. */
     @Volatile var scryDelayMs = 0L
 
@@ -104,7 +107,7 @@ internal class TrunkHarness(ship: String = "~nec") {
             req.url.encodedPath.startsWith("/~/scry") -> {
                 scries.incrementAndGet()
                 if (scryDelayMs > 0) kotlinx.coroutines.delay(scryDelayMs)
-                respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+                respond(scryBody(req.url.encodedPath), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
             }
             req.url.encodedPath.also { opened += it to req.headers["Last-Event-ID"] } in reaped ->
                 respond("", HttpStatusCode.NotFound)

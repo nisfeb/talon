@@ -44,7 +44,7 @@ fun interface ScreenCapture {
     fun open(source: ScreenSource): OpenedCapture
 }
 
-val DesktopScreenCapture = ScreenCapture { src ->
+val DesktopScreenCapture: ScreenCapture = SharedScreenCapture { src ->
     if (isWayland) GLibLoop.ensureRunning()
     val capture = VideoDesktopSource()
     capture.setSourceId(src.id, src.isWindow)
@@ -56,6 +56,32 @@ val DesktopScreenCapture = ScreenCapture { src ->
     OpenedCapture(capture) {
         runCatching { capture.stop() }
         runCatching { capture.dispose() }
+    }
+}
+
+/**
+ * One capture per source however many links send it, ended with the last.
+ * A republished up link takes the share before the old link lets it go
+ * (PartyLine.publishUp), so it gets this one: opened again, Wayland's
+ * system dialog asked again in the middle of the share.
+ */
+internal class SharedScreenCapture(private val open: ScreenCapture) : ScreenCapture {
+    private class Held(val capture: OpenedCapture) { var users = 0 }
+    private val held = HashMap<ScreenSource, Held>()
+
+    @Synchronized
+    override fun open(source: ScreenSource): OpenedCapture {
+        val h = held.getOrPut(source) { Held(open.open(source)) }
+        h.users++
+        val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+        return OpenedCapture(h.capture.source) {
+            if (closed.compareAndSet(false, true)) synchronized(this) {
+                if (--h.users == 0) {
+                    held.remove(source)
+                    h.capture.close()
+                }
+            }
+        }
     }
 }
 
@@ -93,20 +119,23 @@ internal class ScreenShareSlot(
         val nextTrack = runCatching { factory.createVideoTrack("talon-screen", next.source) }
             .onFailure { next.close() }
             .getOrThrow()
-        runCatching { sender.replaceTrack(nextTrack) }.onFailure { next.close() }.getOrThrow()
+        runCatching { sender.replaceTrack(nextTrack) }
+            .onFailure { runCatching { nextTrack.dispose() }; next.close() }
+            .getOrThrow()
         lastFrameMs = 0L
         nextTrack.addSink(frameSeen)
         val previous = opened
+        val previousTrack = track
         opened = next
         track = nextTrack
-        previous?.close()
+        if (previous != null) release(previous, previousTrack)
     }
 
     /**
-     * Share [src] on [sender], or stop with null, with the camera
-     * stopped first ([stopCamera]): the two take turns on the sender.
-     * False when the capture would not start; the camera's track is
-     * then back on the sender.
+     * Share [src] on [sender], or stop with null, and stop the camera
+     * ([stopCamera]): the two take turns on the sender. False when the
+     * capture would not start; the camera is then as it was, still on
+     * the sender and still running.
      */
     fun set(sender: RTCRtpSender, src: ScreenSource?, camera: VideoTrack?, stopCamera: () -> Unit): Boolean {
         if (src == null) {
@@ -114,9 +143,11 @@ internal class ScreenShareSlot(
             return true
         }
         return runCatching {
+            // The share first: stopped before a share that then would not
+            // start, the camera stayed off while the line said it was on.
+            start(sender, src)
             runCatching { camera?.isEnabled = false }
             runCatching(stopCamera)
-            start(sender, src)
             Log.i(TAG, "sharing ${if (src.isWindow) "window" else "screen"} ${src.title}")
             watchFrames(sender, camera)
             true
@@ -156,21 +187,28 @@ internal class ScreenShareSlot(
     fun stop(sender: RTCRtpSender?, camera: VideoTrack?) {
         val current = opened ?: return
         runCatching { sender?.replaceTrack(camera) }
-        release(current)
+        val shared = track
+        opened = null
+        track = null
+        release(current, shared)
     }
 
     /** End the capture without touching a sender, for a link being closed. */
     @Synchronized
     fun release() {
         watchScope.cancel()
-        opened?.let(::release)
-    }
-
-    private fun release(current: OpenedCapture) {
-        runCatching { track?.removeSink(frameSeen) }
+        val current = opened ?: return
+        val shared = track
         opened = null
         track = null
-        current.close()
+        release(current, shared)
+    }
+
+    /** End one capture and free its track, once nothing here hands it out: one made per share, it leaked once each. */
+    private fun release(capture: OpenedCapture, shared: VideoTrack?) {
+        runCatching { shared?.removeSink(frameSeen) }
+        runCatching { shared?.dispose() }
+        capture.close()
     }
 }
 
