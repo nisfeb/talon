@@ -1106,11 +1106,28 @@ fun TalonApp(
     // activeShipFlow — our collector above syncs that into
     // loggedInShip, so no extra restore pass is needed here.
 
+    // Talon stays running in the background only while no push reaches
+    // this phone for the ship (keepAliveNeeded), and only then asks to run
+    // unrestricted. Again whenever the relay settings change: the move to
+    // the ship finishing turns it off, "Use the relay" before registering
+    // turns it back on.
+    var keepAlive by remember { mutableStateOf(true) }
+    LaunchedEffect(loggedInShip) {
+        val ship = loggedInShip ?: return@LaunchedEffect
+        kotlinx.coroutines.flow.merge(kotlinx.coroutines.flow.flowOf(Unit), app.relaySettings.changes).collect {
+            val endpoint = io.nisfeb.talon.notify.TalonMessagingReceiver.cachedEndpoint(context)
+            keepAlive = io.nisfeb.talon.notify.keepAliveNeeded(app.relaySettings, ship, endpoint)
+            if (keepAlive) {
+                runCatching { TalonSyncService.start(context) }
+            } else {
+                TalonSyncService.stop(context)
+            }
+        }
+    }
     LaunchedEffect(loggedInShip) {
         if (loggedInShip != null) {
             app.repo.start(app.session)
             app.shortcuts.start()
-            TalonSyncService.start(context)
             // Backfill semantic-search embeddings only when the user
             // has opted in. Indexer is idempotent so it's safe to call
             // every launch — but if the feature is off we skip the
@@ -2961,7 +2978,7 @@ fun TalonApp(
                 },
                 // Android-only OEM-killer nudge banner. Desktop hosts
                 // pass null and the slot is hidden.
-                batteryBanner = { BatteryExemptionBanner() },
+                batteryBanner = if (keepAlive) ({ BatteryExemptionBanner() }) else null,
                 groupChannelOrder = app.uiSettings.groupChannelOrder
                     .collectAsState().value,
                 folderItemOrder = app.uiSettings.folderItemOrder
