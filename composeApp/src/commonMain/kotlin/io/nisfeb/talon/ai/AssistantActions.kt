@@ -271,7 +271,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         add(Tool(
             spec = ToolSpec(
                 "create_event",
-                "Put an event on the user's calendar. Dates are YYYY-MM-DD and times HH:MM in the user's zone unless zone is given; work them out from NOW in the system prompt.",
+                "Put an event on the user's calendar. Dates are YYYY-MM-DD and times HH:MM in the user's zone unless zone is given; work them out from NOW in the system prompt. This is the only way to add an event: orrery reads the calendar itself, so never also tell orrery about it, or it places a second copy.",
                 toolSchema(
                     "name" to ("string" to "What the event is."),
                     "date" to ("string" to "YYYY-MM-DD."),
