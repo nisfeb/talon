@@ -30,6 +30,13 @@ data class GatewayPush(
     val nonce: String? = null,
     /** A voip push's body: Push.kt's ring or ring-cancel object. */
     val payload: JsonObject? = null,
+    /** The app-icon count the ship counted (trunk wire 12, the "badge"
+     *  cap): on an alert, and the whole of a "badge" push. */
+    val badge: Int? = null,
+    /** "notice" for a push from another app on the ship (wire 12). */
+    val event: String? = null,
+    /** A notice's target in the app, as the sending agent gave it. */
+    val open: kotlinx.serialization.json.JsonElement? = null,
 )
 
 /**
@@ -51,6 +58,10 @@ class Gateway(
     private val db: Db,
     private val alert: (token: String, push: GatewayPush, badge: Int?) -> ApnsResult,
     private val voip: (token: String, payload: String) -> ApnsResult,
+    /** Only the icon's number: nothing shown (wire 12 "badge"). */
+    private val badgeOnly: (token: String, badge: Int) -> ApnsResult = { _, _ -> ApnsResult(0, "unsupported") },
+    /** A background push the app wakes for (wire 12 "clear"). */
+    private val background: (token: String, payload: String) -> ApnsResult = { _, _ -> ApnsResult(0, "unsupported") },
 ) {
     private val log = LoggerFactory.getLogger("Gateway")
     private val rings = GatewayRings()
@@ -76,12 +87,28 @@ class Gateway(
         if (!matches(row, req.secret)) return 401
         val result = when (req.kind) {
             "alert" -> {
-                val fields = listOf(req.patp, req.whom, req.postId, req.title, req.body, req.parent.orEmpty(), req.nonce.orEmpty())
-                if (fields.any { it.length > MAX_FIELD }) return 400
+                val fields = listOf(req.patp, req.whom, req.postId, req.title, req.body, req.parent.orEmpty(), req.nonce.orEmpty(), req.event.orEmpty())
+                if (fields.any { it.length > MAX_FIELD } || (req.open?.toString()?.length ?: 0) > MAX_VOIP) return 400
+                if (req.badge != null && req.badge !in 0..MAX_BADGE) return 400
                 val token = Push.iosAlertToken(row.endpoint)
                     ?: return 409.also { log.warn("gateway ${req.handle.take(6)}…: an alert, and the phone gave no alert token") }
-                // A test alert proves the path; it is nothing to count.
-                alert(token, req, if (req.nonce == null) db.nextBadge(Db.GATEWAY, req.handle) else null)
+                // The ship's own count when it sends one (wire 12); else this
+                // gateway's (a wire 11 ship). A test alert is nothing to count.
+                val badge = req.badge ?: if (req.nonce == null) db.nextBadge(Db.GATEWAY, req.handle) else null
+                alert(token, req, badge)
+            }
+            "badge" -> {
+                val n = req.badge ?: return 400
+                if (n !in 0..MAX_BADGE) return 400
+                val token = Push.iosAlertToken(row.endpoint)
+                    ?: return 409.also { log.warn("gateway ${req.handle.take(6)}…: a badge, and the phone gave no alert token") }
+                badgeOnly(token, n)
+            }
+            "clear" -> {
+                if (req.whom.isBlank() || listOf(req.patp, req.whom).any { it.length > MAX_FIELD }) return 400
+                val token = Push.iosAlertToken(row.endpoint)
+                    ?: return 409.also { log.warn("gateway ${req.handle.take(6)}…: a clear, and the phone gave no alert token") }
+                background(token, clearPayload(req.patp, req.whom))
             }
             "voip" -> {
                 val payload = req.payload?.toString() ?: return 400
@@ -162,4 +189,10 @@ internal class GatewayRings(
         }
     }
 }
+
+/** A read, as a background push: the app wakes and removes the chat's
+ *  delivered notifications. Background pushes carry no alert, sound or
+ *  badge; the count comes in its own "badge" push. */
+internal fun clearPayload(patp: String, whom: String): String =
+    "{\"aps\":{\"content-available\":1},\"event\":\"read\",\"patp\":\"${jsonEscape(patp)}\",\"whom\":\"${jsonEscape(whom)}\"}"
 

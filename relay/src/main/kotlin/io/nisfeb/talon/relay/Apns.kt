@@ -112,8 +112,12 @@ class Apns(
         nonce: String? = null,
         /** The app-icon count, when its owner has badges on. */
         badge: Int? = null,
+        /** "notice" for a push from another app on the ship. */
+        event: String? = null,
+        /** A notice's target in the app, as JSON. */
+        open: String? = null,
     ): ApnsResult {
-        val payload = alertPayload(title, body, patp, whom, postId, parent, nonce, badge)
+        val payload = alertPayload(title, body, patp, whom, postId, parent, nonce, badge, event, open)
         val req = Request.Builder()
             .url("$host/3/device/$token")
             .header("authorization", "bearer ${jwt()}")
@@ -129,6 +133,31 @@ class Apns(
             .build()
         return execute(req, "alert", token)
     }
+
+    /** Only the app-icon number: an alert push with nothing to show, at
+     *  low priority, so the count changes without a sound or a banner. */
+    fun sendBadge(token: String, badge: Int): ApnsResult = execute(
+        quiet(token, "alert", "{\"aps\":{\"badge\":$badge}}", expirationSecs = 24 * 3600),
+        "badge", token,
+    )
+
+    /** A background push: the app wakes briefly with [payload]. iOS
+     *  throttles these, so what they carry is best effort. */
+    fun sendBackground(token: String, payload: String): ApnsResult =
+        execute(quiet(token, "background", payload, expirationSecs = 3600), "background", token)
+
+    private fun quiet(token: String, pushType: String, payload: String, expirationSecs: Int): Request =
+        Request.Builder()
+            .url("$host/3/device/$token")
+            .header("authorization", "bearer ${jwt()}")
+            .header("apns-topic", bundleId)
+            .header("apns-push-type", pushType)
+            // 5: delivered when the phone is awake anyway. Apple requires it
+            // for background pushes; a count can wait the same.
+            .header("apns-priority", "5")
+            .header("apns-expiration", (System.currentTimeMillis() / 1000 + expirationSecs).toString())
+            .post(payload.toRequestBody(JSON_MEDIA))
+            .build()
 
     private fun execute(req: Request, kind: String, token: String): ApnsResult = try {
         http.newCall(req).execute().use { resp ->
@@ -222,17 +251,22 @@ internal fun alertPayload(
     parent: String? = null,
     nonce: String? = null,
     badge: Int? = null,
+    /** "notice" for a push from another app on the ship. */
+    event: String? = null,
+    /** A notice's target in the app, as JSON, passed through. */
+    open: String? = null,
 ): String = buildString {
     append("{\"aps\":{\"alert\":{\"title\":\"").append(jsonEscape(title))
     append("\",\"body\":\"").append(jsonEscape(body))
     append("\"},\"sound\":\"default\",\"thread-id\":\"").append(jsonEscape(whom)).append('"')
     if (badge != null) append(",\"badge\":").append(badge)
-    append("},\"event\":\"").append(if (nonce != null) "push-test" else "new-message")
+    append("},\"event\":\"").append(jsonEscape(if (nonce != null) "push-test" else event ?: "new-message"))
     append("\",\"patp\":\"").append(jsonEscape(patp))
     append("\",\"whom\":\"").append(jsonEscape(whom))
     append("\",\"id\":\"").append(jsonEscape(postId)).append('"')
     if (parent != null) append(",\"parent\":\"").append(jsonEscape(parent)).append('"')
     if (nonce != null) append(",\"nonce\":\"").append(jsonEscape(nonce)).append('"')
+    if (open != null && open != "null") append(",\"open\":").append(open)
     append('}')
 }
 
