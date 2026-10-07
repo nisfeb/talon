@@ -100,8 +100,11 @@ class AppShellTest {
             scope.cancel()
             // The app closes its databases itself, two seconds after it
             // goes, so work still in flight can finish. Closing them here
-            // too pulled SQLite out from under a running query.
-            tmp.deleteRecursively()
+            // too pulled SQLite out from under a running query, and deleting
+            // the files at once did the same: a read in those two seconds
+            // could not open them (SQLite 14), failing the NEXT test with
+            // "uncaught exceptions before the test started" (CI, 2026-10-07).
+            Thread { Thread.sleep(5_000); tmp.deleteRecursively() }.apply { isDaemon = true }.start()
         }
     }
 
