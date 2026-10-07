@@ -102,6 +102,7 @@ fun PartyLineBar(
     val w = rememberPartyWiring(party, videoDevices)
     PartyLineBarContent(
         state = state,
+        nameFor = withLineNames(nameFor, state),
         modifier = modifier,
         onToggleMute = { party.setMuted(it) },
         onLeave = { party.leave() },
@@ -119,7 +120,6 @@ fun PartyLineBar(
         onSelectCamera = w.onSelectCamera,
         onSwitchCamera = w.onSwitchCamera,
         onOpenMeeting = onOpenMeeting,
-        nameFor = nameFor,
         audioDevices = audioDevices,
         videoDevices = videoDevices,
         onDismiss = onDismiss ?: { party.dismissFailure() },
@@ -882,6 +882,18 @@ fun rememberPartyWiring(party: PartyLine, videoDevices: io.nisfeb.talon.call.Vid
 }
 
 /**
+ * [nameFor], falling back for a ship it has no name for (it hands back the
+ * @p) to the name that member gave the line on joining. Not while names
+ * are set aside for the bare @p.
+ */
+internal fun withLineNames(nameFor: (String) -> String, state: PartyState): (String) -> String {
+    val given = (state as? PartyState.Live)?.members.orEmpty()
+        .mapNotNull { m -> m.name?.let { m.ship to it } }.toMap()
+    if (given.isEmpty() || ShipNames.alwaysPatp.value) return nameFor
+    return { ship -> nameFor(ship).takeIf { it != ship } ?: given[ship] ?: ship }
+}
+
+/**
  * The meeting view for desktop: the full-screen call view hosted in
  * the main window over everything, with its own Full screen control
  * for the OS window. Phones get the same view as an immersive dialog
@@ -911,7 +923,7 @@ fun PartyLineMeeting(
         PartyLineFullScreen(
             state = live,
             roomName = live.room,
-            nameFor = nameFor,
+            nameFor = withLineNames(nameFor, live),
             selfShip = selfShip,
             onToggleMute = { party.setMuted(it) },
             onLeave = { party.leave(); onClose() },

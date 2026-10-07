@@ -176,6 +176,10 @@ fun shipHandle(ship: String, nonCometNames: Boolean = AzimuthNames.enabled.value
         ?: (if (nonCometNames) AzimuthNames.nameFor(ship) else null)
         ?: ship
 
+/** What a party line calls [ship] for those with no name of their own for it: its nickname, a comet's mnemonym, else the @p. */
+fun partyName(contacts: ContactMap, ship: String): String =
+    contacts.nickname(ship)?.takeIf { it.isNotBlank() } ?: Mnemonym.forShip(ship) ?: ship
+
 /**
  * The unabridged word name, for telling apart two ships whose short
  * names came out the same.

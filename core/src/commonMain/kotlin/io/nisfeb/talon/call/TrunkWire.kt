@@ -775,17 +775,22 @@ object TrunkWire {
      * before wire 5.
      */
     fun jwtPermissions(token: String): Set<String> = runCatching {
-        val payload = token.split('.')[1]
+        (jwtClaims(token)["permissions"] as JsonArray)
+            .map { it.jsonPrimitive.content }
+            .toSet()
+    }.getOrDefault(setOf("present", "message"))
+
+    /** Who a trunk-jwt [token] names: Galène's username for us. Null for an opaque token. */
+    fun jwtSubject(token: String): String? = runCatching { jwtClaims(token)["sub"]!!.jsonPrimitive.content }.getOrNull()
+
+    private fun jwtClaims(token: String): JsonObject {
         // JWTs are base64url ('-'/'_') and minted unpadded; tolerate
         // padding anyway rather than fail a token that carries it.
         val bytes = Base64.UrlSafe
             .withPadding(Base64.PaddingOption.ABSENT_OPTIONAL)
-            .decode(payload)
-        val claims = json.parseToJsonElement(bytes.decodeToString()) as JsonObject
-        (claims["permissions"] as JsonArray)
-            .map { it.jsonPrimitive.content }
-            .toSet()
-    }.getOrDefault(setOf("present", "message"))
+            .decode(token.split('.')[1])
+        return json.parseToJsonElement(bytes.decodeToString()) as JsonObject
+    }
 
     val json = Json { ignoreUnknownKeys = true }
 }
