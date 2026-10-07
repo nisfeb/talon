@@ -53,6 +53,7 @@ class Gateway(
     private val voip: (token: String, payload: String) -> ApnsResult,
 ) {
     private val log = LoggerFactory.getLogger("Gateway")
+    private val rings = GatewayRings()
 
     /** Mint a handle for [GatewayEnroll.token], or replace the tokens
      *  behind a known one. The status, and the device on success. */
@@ -85,6 +86,7 @@ class Gateway(
             "voip" -> {
                 val payload = req.payload?.toString() ?: return 400
                 if (payload.length > MAX_VOIP) return 400
+                if (!rings.shouldSend(req.handle, req.payload)) return 200
                 val token = Push.iosVoipToken(row.endpoint)
                     ?: return 409.also { log.warn("gateway ${req.handle.take(6)}…: a ring, and the phone gave no VoIP token") }
                 voip(token, payload)
@@ -128,3 +130,36 @@ class Gateway(
             MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
     }
 }
+
+/**
+ * The calls each phone was rung for, so a cancel goes only to a phone that
+ * rang. The ship's %trunk cancels on every device it has (gwbtc/trunk#1),
+ * and on an iPhone a VoIP push must report a call: a cancel for a ring it
+ * never got showed as a missed call in its Recents. A cancel for a ring
+ * this gateway never sent to that handle is answered 200 and not sent.
+ *
+ * ponytail: in memory, for [keepMs] (an answered call's hangup can come
+ * hours later). After a relay restart a cancel for an earlier ring is not
+ * sent: a ringing phone then stops on its own 45 s timeout, and a live
+ * call's hangup still reaches the app over its own stream. Persist it if
+ * that bites.
+ */
+internal class GatewayRings(
+    private val keepMs: Long = 4 * 60 * 60 * 1000L,
+    private val now: () -> Long = System::currentTimeMillis,
+) {
+    private val rung = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    fun shouldSend(handle: String, payload: JsonObject): Boolean {
+        val event = (payload["event"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        val id = (payload["id"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return true
+        val t = now()
+        rung.entries.removeIf { t - it.value > keepMs }
+        return when (event) {
+            "ring" -> { rung["$handle $id"] = t; true }
+            "ring-cancel" -> rung.containsKey("$handle $id")
+            else -> true
+        }
+    }
+}
+

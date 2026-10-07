@@ -257,8 +257,10 @@ fun TalonApp(
         // in-app ring will sound; that is only true while a controller
         // is actually composed (not on the login screen).
         io.nisfeb.talon.Notifications.callControllerLive = callController != null
+        io.nisfeb.talon.Notifications.liveCallId = { callController?.currentCallId }
         onDispose {
             io.nisfeb.talon.Notifications.callControllerLive = false
+            io.nisfeb.talon.Notifications.liveCallId = { null }
             partyLine?.leave()
             callController?.stop()
         }
