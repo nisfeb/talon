@@ -34,18 +34,19 @@ internal object ExitPolicy {
     }
 
     /**
-     * For what nothing caught. A VM error (out of memory, a stack
-     * overflow) leaves nothing in the process to trust, a window closed
-     * on it among them, so it halts at once after a line in the log, and
-     * the next launch starts clean. Anything else goes to [previous], as
-     * before, or to the log.
+     * For what nothing caught. Out of memory leaves nothing in the
+     * process to trust, a window closed on it among them, so it halts at
+     * once after a line in the log, and the next launch starts clean.
+     * Anything else goes to [previous], as before, or to the log: a stack
+     * overflow has unwound by the time it is here, and is one thread's bug,
+     * not the app's end.
      */
     fun fatalHandler(
         previous: Thread.UncaughtExceptionHandler?,
         log: (String, Throwable) -> Unit,
         halt: (Int) -> Unit = { Runtime.getRuntime().halt(it) },
     ): Thread.UncaughtExceptionHandler = Thread.UncaughtExceptionHandler { thread, e ->
-        if (e is VirtualMachineError) {
+        if (e is OutOfMemoryError) {
             runCatching { log("fatal on ${thread.name}; halting so the next launch can start", e) }
             halt(1)
         } else if (previous != null) {

@@ -61,6 +61,9 @@ class DesktopFilePicker : FilePicker {
         java.awt.Frame.getFrames().firstOrNull { it.title == "Talon" }
 
     private companion object {
-        val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp")
+        // Both cases: the Linux portal matches its globs case-sensitively,
+        // and a camera's IMG_0412.JPG was not offered.
+        val IMAGE_EXTENSIONS = listOf("jpg", "jpeg", "png", "gif", "webp", "bmp")
+            .flatMap { listOf(it, it.uppercase()) }.toSet()
     }
 }

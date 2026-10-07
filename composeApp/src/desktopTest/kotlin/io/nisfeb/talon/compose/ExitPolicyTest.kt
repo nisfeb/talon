@@ -49,8 +49,17 @@ class ExitPolicyTest {
         handler.uncaughtException(Thread.currentThread(), OutOfMemoryError("Java heap space"))
         assertEquals(listOf("halt 1"), did.toList())
         assertTrue(logged.single().startsWith("fatal on "), "$logged")
-        handler.uncaughtException(Thread.currentThread(), StackOverflowError())
-        assertEquals(listOf("halt 1", "halt 1"), did.toList())
+    }
+
+    // A deep recursion in one screen is that thread's bug: halting on it
+    // ended the app for what the log alone should have said.
+    @Test
+    fun `a stack overflow is logged, not the end of the app`() {
+        val logged = CopyOnWriteArrayList<String>()
+        ExitPolicy.fatalHandler(previous = null, log = { m, _ -> logged += m }, halt = { did += "halt $it" })
+            .uncaughtException(Thread.currentThread(), StackOverflowError())
+        assertTrue(did.isEmpty(), "$did")
+        assertTrue(logged.single().startsWith("uncaught on "), "$logged")
     }
 
     @Test
