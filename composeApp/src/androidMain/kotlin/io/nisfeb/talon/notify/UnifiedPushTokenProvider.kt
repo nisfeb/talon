@@ -35,7 +35,8 @@ class UnifiedPushTokenProvider(private val context: Context) : PushTokenProvider
     override val platform: String = "unifiedpush"
 
     /** TalonMessagingReceiver clears a chat's notifications on "read". */
-    override val caps: List<String> = listOf("read")
+    // "notice": pushes from other apps on the ship through its %trunk (wire 12).
+    override val caps: List<String> = listOf("read", "notice")
 
     override suspend fun token(): String? {
         val cached = TalonMessagingReceiver.cachedEndpoint(context)

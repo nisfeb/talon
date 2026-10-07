@@ -977,6 +977,13 @@ class TlonChatRepo(
      * say. Throws when not connected, so a caller can tell "not now" from
      * "no trunk".
      */
+    /** The ship's %trunk status (wire 12, owner-only): its devices and when
+     *  each was last pushed to, and what it dropped. Null before wire 12. */
+    suspend fun trunkDebug(): kotlinx.serialization.json.JsonElement? {
+        val ch = channel ?: return null
+        return runCatching { ch.scry(io.nisfeb.talon.call.TrunkWire.AGENT, "/debug") }.getOrNull()
+    }
+
     suspend fun trunkWire(): Int {
         val ch = channel ?: error("not connected")
         return runCatching {
@@ -4108,6 +4115,7 @@ class TlonChatRepo(
         activityKnown = false
         val body = scryNewest(channel, "activity", "/v6/activity/full", "/v4/activity/full", timeoutSecs = BOOTSTRAP_TIMEOUT_SECS)
         val obj = body as? JsonObject
+        obj?.let { baseNotifyCount(it) }?.let { _notifiedTotal.value = it }
         if (obj == null) {
             Log.w(
                 TAG,
@@ -4154,8 +4162,15 @@ class TlonChatRepo(
         activityKnown = true
     }
 
+    /** %activity's base notify-count: what the app-icon badge shows, the
+     *  number the ship's %trunk sends with an iPhone's alerts. Null until a
+     *  summary carries it. */
+    private val _notifiedTotal = MutableStateFlow<Int?>(null)
+    val notifiedTotal: StateFlow<Int?> = _notifiedTotal.asStateFlow()
+
     internal suspend fun applyActivityUpdate(obj: JsonObject) {
         val focused = focusedWhom()
+        (obj["activity"] as? JsonObject)?.let { map -> baseNotifyCount(map)?.let { _notifiedTotal.value = it } }
         (obj["activity"] as? JsonObject)?.let { map ->
             val rows = map.entries.mapNotNull { (key, summary) ->
                 toUnread(key, summary as? JsonObject ?: return@mapNotNull null)

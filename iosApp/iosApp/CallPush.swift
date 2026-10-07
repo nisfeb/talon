@@ -112,6 +112,37 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         CallTrace.log("apns alert token failed: \(error.localizedDescription)")
     }
 
+    // MARK: - Background pushes
+
+    /// A chat read to the end on another client, from the ship's own
+    /// %trunk through the relay's gateway (wire 12 "clear"): its delivered
+    /// notifications go, as Android's do. Only that ship's: the same whom
+    /// on another ship is another conversation. iOS throttles background
+    /// pushes, so this is best effort; the badge comes in its own push.
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        guard (userInfo["event"] as? String) == "read",
+              let whom = userInfo["whom"] as? String, !whom.isEmpty else {
+            completionHandler(.noData)
+            return
+        }
+        let patp = userInfo["patp"] as? String
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            let ids = delivered.filter { note in
+                let info = note.request.content.userInfo
+                guard (info["whom"] as? String) == whom else { return false }
+                guard let p = patp, let forShip = info["patp"] as? String else { return true }
+                return p == forShip
+            }.map { $0.request.identifier }
+            center.removeDeliveredNotifications(withIdentifiers: ids)
+            completionHandler(ids.isEmpty ? .noData : .newData)
+        }
+    }
+
     // MARK: - UNUserNotificationCenterDelegate
 
     func userNotificationCenter(
@@ -143,6 +174,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         let info = response.notification.request.content.userInfo
         if let nonce = info["nonce"] as? String {
             IosVoipBridge.shared.pushTestReceived(nonce: nonce)
+        }
+        // A notice from another app on the ship (calendar, orrery): its
+        // "whom" is its tag, not a chat.
+        if (info["event"] as? String) == "notice" {
+            if let tag = info["whom"] as? String, !tag.isEmpty {
+                IosVoipBridge.shared.openNotice(tag: tag)
+            }
+            completionHandler()
+            return
         }
         if let whom = info["whom"] as? String, !whom.isEmpty {
             // The relay names the ship the alert was for; a tap goes

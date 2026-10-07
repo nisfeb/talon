@@ -72,6 +72,9 @@ object IosVoipBridge {
      *  reach this phone, so the move to them can finish. */
     fun pushTestReceived(nonce: String) = PushTestNonces.received(nonce)
 
+    /** A tapped notice from another app on the ship: open what it is about. */
+    fun openNotice(tag: String) = OpenNoticeRequests.request(tag)
+
     /** A tapped alert: open its chat, on the ship it was for. */
     fun openChat(whom: String, postId: String?, forShip: String?) =
         OpenChatRequests.request(whom, postId, forShip)

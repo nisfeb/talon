@@ -3,6 +3,7 @@
 package io.nisfeb.talon.compose
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import io.nisfeb.talon.data.latestPerConversation
 import io.nisfeb.talon.ai.forFeature
@@ -493,6 +494,17 @@ fun App(
     // does -- on the ship it was for, first, when that is another of
     // ours. The state this writes is hoisted above the re-key a switch
     // causes, so the chat opens once the new ship's tree is up.
+    // A tapped notice (iOS) from another app on the ship: a calendar
+    // reminder opens its event; anything else just opens the app.
+    var noticeCalendarTag by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        io.nisfeb.talon.notify.OpenNoticeRequests.requests.collect { tag ->
+            if (tag.startsWith(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX)) {
+                noticeCalendarTag = tag
+                showCalendar = true
+            }
+        }
+    }
     LaunchedEffect(Unit) {
         io.nisfeb.talon.notify.OpenChatRequests.requests.collect { r ->
             val forShip = r.forShip
@@ -757,11 +769,22 @@ fun App(
                 val ports = io.nisfeb.talon.notify.ShipPushPorts(
                     trunkWire = { repo.trunkWire() },
                     poke = { body -> repo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body) },
-                    register = { id -> io.nisfeb.talon.notify.gatewayRegistration(ship, id, relaySettings, relayClient, pushTokenProvider) },
+                    register = { id ->
+                        io.nisfeb.talon.notify.gatewayRegistration(
+                            ship, id, relaySettings, relayClient, pushTokenProvider,
+                            caps = io.nisfeb.talon.notify.TrunkPush.iosCaps(badges = relaySettings.badges.value),
+                        )
+                    },
                     relayUnregister = { id -> relayClient.unregister(id) },
                     newId = { io.nisfeb.talon.data.newGid() },
                 )
-                kotlinx.coroutines.flow.merge(kotlinx.coroutines.flow.flowOf(Unit), pushTokenProvider.changes).collect {
+                // Again when the badge switch moves: the ship counts the badge
+                // only for a device that says so ("badge" cap, wire 12).
+                kotlinx.coroutines.flow.merge(
+                    kotlinx.coroutines.flow.flowOf(Unit),
+                    pushTokenProvider.changes,
+                    relaySettings.badges.drop(1).map { },
+                ).collect {
                     io.nisfeb.talon.notify.keepMovingToShipPush(ship, relaySettings, ports, repo.bootstrapping) {
                         io.nisfeb.talon.util.Log.i("ShipPush", "$ship: $it")
                     }
@@ -783,7 +806,12 @@ fun App(
                 kotlinx.coroutines.flow.combine(
                     db.unreads().streamWithMentions(),
                     db.threadUnreads().streamNotified(),
-                ) { chats, threads -> io.nisfeb.talon.notify.badgeCount(chats, threads) }
+                    repo.notifiedTotal,
+                ) { chats, threads, base ->
+                    // The ship's own total when it has said one: the number
+                    // its %trunk puts on the alerts (wire 12).
+                    base ?: io.nisfeb.talon.notify.badgeCount(chats, threads)
+                }
                     .distinctUntilChanged()
                     .collectLatest { n: Int ->
                         appIconBadge.set(n)
@@ -2315,6 +2343,7 @@ fun App(
                                 } else {
                                     null
                                 },
+                                shipPushStatus = { repo.trunkDebug() },
                             ),
                             onBack = {
                                 showSettings = false
@@ -2369,6 +2398,8 @@ fun App(
                         onBack = { showInvites = false },
                     )
                     showCalendar -> io.nisfeb.talon.ui.screens.CalendarScreen(
+                        openPushTag = noticeCalendarTag,
+                        onOpenedPush = { noticeCalendarTag = null },
                         repo = calendarRepo,
                         twentyFourHour = homeTwentyFourHour,
                         onBack = { showCalendar = false },
