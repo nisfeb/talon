@@ -11,6 +11,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.captureToImage
