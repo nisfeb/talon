@@ -50,12 +50,17 @@ class SettingsRelayTest {
         override suspend fun token() = endpoint
     }
 
-    private fun panel(client: RelayClient = relay(), tokens: PushTokenProvider = Tokens("https://push.test/abc"), block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+    private fun panel(
+        client: RelayClient = relay(),
+        tokens: PushTokenProvider = Tokens("https://push.test/abc"),
+        shipPoke: (suspend (kotlinx.serialization.json.JsonElement) -> Unit)? = null,
+        block: ComposeUiTest.() -> Unit,
+    ) = runComposeUiTest {
         setContent {
             TalonTheme(darkTheme = false) {
                 SettingsScreen(
                     aiSettings = FakeAiSettings(), themePreference = InMemoryThemePreference(), uiSettings = InMemoryUiSettings(), onBack = {},
-                    relayConfig = RelayPanelConfig(client, relaySettings, tokens, activePatp = "~zod", activeShipUrl = "https://zod.test"),
+                    relayConfig = RelayPanelConfig(client, relaySettings, tokens, activePatp = "~zod", activeShipUrl = "https://zod.test", shipPoke = shipPoke),
                 )
             }
         }
@@ -134,4 +139,30 @@ class SettingsRelayTest {
         onNodeWithText("Save endpoint").performClick()
         assertEquals("https://relay.example/v2", relaySettings.endpoint.value)
     }
+
+    // sneagan, on rc42: "I don't see the ricsul relay anywhere in settings",
+    // then "make it more obvious and also name the ship". The line sat
+    // inside the relay panel and said only "your own ship".
+    @Test
+    fun `a device on its ship's notifications says so first, naming the ship`() {
+        val pokes = java.util.concurrent.CopyOnWriteArrayList<String>()
+        relaySettings.setViaShipPush("~zod", true)
+        relaySettings.setTrunkDeviceIdFor("~zod", "t-1")
+        panel(shipPoke = { pokes += it.toString() }) {
+            assertTrue(shows("Notifications come from ~zod"))
+            val row = onNodeWithText("Notifications come from ~zod").fetchSemanticsNode().boundsInRoot.top
+            val relay = onNodeWithText("Push relay").fetchSemanticsNode().boundsInRoot.top
+            assertTrue(row < relay, "above the relay panel, not inside it")
+            onNodeWithText("Use the relay").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Notifications come from the Talon relay") }
+            assertEquals(listOf("""{"push-unregister":"t-1"}"""), pokes.toList())
+            assertTrue(shows("Use my ship"))
+        }
+    }
+
+    @Test
+    fun `a device never on its ship's notifications shows no such row`() = panel(shipPoke = {}) {
+        assertTrue(!shows("Notifications come from"))
+    }
 }
+

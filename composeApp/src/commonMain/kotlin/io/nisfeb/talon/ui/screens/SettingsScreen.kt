@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.DropdownMenu
@@ -713,6 +714,7 @@ fun SettingsScreen(
             }
             }
             if (safeTab == SettingsTab.Notifications) {
+            if (relayConfig != null) ShipNotificationsRow(relayConfig)
             if (relayConfig != null && io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
                 PhoneNotificationsRow(relayConfig)
                 Spacer(Modifier.height(8.dp))
@@ -1690,7 +1692,6 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
         "Push relay",
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
     )
-    ShipPushChoice(config)
     Text(
         if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
             "With the app closed, this iPhone hears from your ship only " +
@@ -2435,6 +2436,8 @@ private fun PhoneNotificationsRow(config: RelayPanelConfig) {
     val ship = config.activePatp ?: return
     val shipUrl = config.activeShipUrl ?: return
     var from by remember(ship) { mutableStateOf(io.nisfeb.talon.notify.phoneNotifications(config.settings, ship)) }
+    // Said, with the ship's name, by ShipNotificationsRow above.
+    if (from == io.nisfeb.talon.notify.PhoneNotifications.Ship) return
     var asking by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -2482,50 +2485,62 @@ internal fun AppIconBadgeRow(settings: io.nisfeb.talon.notify.RelaySettings) {
 }
 
 /**
- * Where this device's pushes come from, and the owner's way to change it
- * (sneagan: manual only). Moved to the ship, it can go back to the relay;
- * back on the relay by choice, it can go to the ship again, which Talon
- * does the next time it connects.
+ * Where this device's notifications come from, first in Notifications and
+ * naming the ship (sneagan: "make it more obvious and also name the ship";
+ * the line sat inside the relay panel and said only "your own ship"), and
+ * the owner's way to change it (manual only). Moved to the ship, it can go
+ * back to the relay; back on the relay by choice, it can go to the ship
+ * again, which Talon does the next time it connects. Nothing while the
+ * device has never been on its ship's notifications.
  */
 @Composable
-private fun ShipPushChoice(config: RelayPanelConfig) {
+internal fun ShipNotificationsRow(config: RelayPanelConfig) {
     val ship = config.activePatp ?: return
     val poke = config.shipPoke ?: return
     val scope = rememberCoroutineScope()
     var via by remember(ship) { mutableStateOf(config.settings.viaShipPush(ship)) }
     var declined by remember(ship) { mutableStateOf(config.settings.shipPushDeclined(ship)) }
     var backToShip by remember(ship) { mutableStateOf(false) }
-    when {
-        via -> Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Notifications on this device come from your own ship (its %trunk), not this relay.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.weight(1f),
+    val device = if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) "this iPhone" else "this device"
+    val (title, body) = when {
+        via -> "Notifications come from $ship" to (
+            if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
+                "Your ship sends them to $device itself, through its %trunk. The Talon relay only hands them to Apple."
+            } else {
+                "Your ship sends them to $device itself, through its %trunk. The Talon relay is not used."
+            }
             )
-            TextButton(onClick = {
+        declined -> "Notifications come from the Talon relay" to
+            "You chose the relay over $ship's own notifications. Register $device with the relay below to get them from it."
+        backToShip -> "Moving to $ship's notifications" to
+            "Talon moves $device the next time it starts, once a test notification from $ship arrives."
+        else -> return
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+        Icon(
+            Icons.Filled.Notifications,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(end = 12.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
+            Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        when {
+            via -> TextButton(onClick = {
                 scope.launch {
                     io.nisfeb.talon.notify.leaveShipPush(ship, config.settings, poke)
                     via = false
                     declined = true
                 }
             }) { Text("Use the relay") }
-        }
-        declined -> Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "You chose this relay over your ship's own notifications. Register this device with the relay to get them from it.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = {
+            declined -> TextButton(onClick = {
                 config.settings.setShipPushDeclined(ship, false)
                 declined = false
                 backToShip = true
             }) { Text("Use my ship") }
         }
-        backToShip -> Text(
-            "Talon moves this device to your ship the next time it starts, once a test notification from the ship arrives.",
-            style = MaterialTheme.typography.bodySmall,
-        )
     }
 }
 
