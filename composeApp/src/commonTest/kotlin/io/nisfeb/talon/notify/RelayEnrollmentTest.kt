@@ -13,6 +13,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -126,5 +127,22 @@ class RelayEnrollmentTest {
         assertTrue(shouldOfferNotificationSetup(true, "~zod", s, justSignedIn = true), "signing in again asks again")
         s.setDeviceIdFor("~zod", "dev-1")
         assertFalse(shouldOfferNotificationSetup(true, "~zod", s, justSignedIn = true), "already on the relay")
+    }
+
+    // Signed in to ~zod, then on ~bus before answering: ~bus was offered
+    // the setup with ~zod's code, which the relay refuses.
+    @Test
+    fun a_held_code_is_its_own_ships_only() {
+        val held = "~zod" to "lidlut-tabwed"
+        assertEquals("lidlut-tabwed", heldCodeFor(held, "~zod"))
+        assertNull(heldCodeFor(held, "~bus"), "not another ship's")
+        assertNull(heldCodeFor(held, null))
+        assertNull(heldCodeFor(null, "~zod"))
+        val s = InMemoryRelaySettings()
+        s.setDeclinedFor("~bus", true)
+        assertFalse(
+            shouldOfferNotificationSetup(true, "~bus", s, justSignedIn = heldCodeFor(held, "~bus") != null),
+            "another ship's sign-in does not count as this one's",
+        )
     }
 }

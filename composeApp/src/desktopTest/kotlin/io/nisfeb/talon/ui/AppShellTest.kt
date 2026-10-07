@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.withKeyDown
@@ -268,6 +269,59 @@ class AppShellTest {
         // The parent, in the chat and again at the head of its thread.
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("shall we meet").fetchSemanticsNodes().size >= 2 }
         assertTrue(onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size >= 2, "the chat's composer and the thread's, side by side")
+    }
+
+    private fun ComposeUiTest.press(key: Key, ctrl: Boolean = false) =
+        onAllNodes(isRoot()).onFirst().performKeyInput { if (ctrl) withKeyDown(Key.CtrlLeft) { pressKey(key) } else pressKey(key) }
+
+    // A shortcut's handler was in the list view, which is not drawn while a
+    // section is: Ctrl+, in the profile did nothing, then opened Settings
+    // as soon as Escape had left the profile.
+    @Test
+    fun `a shortcut works from inside a section, and Escape then leaves for good`() = app {
+        onNodeWithContentDescription("My profile").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Edit profile") }
+        press(Key.Comma, ctrl = true)
+        waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
+        assertTrue(!showing("Edit profile"), "the profile is put down")
+        press(Key.Escape)
+        home()
+        Thread.sleep(500)
+        waitForIdle()
+        assertTrue(!showing("Appearance"), "Settings does not come back")
+    }
+
+    // The profile asked before dropping edits only on Android's back:
+    // on desktop Escape, and a shortcut, dropped them without a word.
+    @Test
+    fun `edits in the profile ask before Escape or a shortcut leave them`() = app {
+        onNodeWithContentDescription("My profile").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+        onAllNodes(hasSetTextAction())[0].performTextInput("Zod")
+        press(Key.Escape)
+        waitUntil(timeoutMillis = 5_000) { showing("Discard your changes?") }
+        onNodeWithText("Cancel").performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("Discard your changes?") }
+        assertTrue(showing("Edit profile") && showing("Zod"), "still editing, the edit kept")
+        press(Key.Comma, ctrl = true)
+        waitUntil(timeoutMillis = 5_000) { showing("Discard your changes?") }
+        assertTrue(!showing("Appearance"))
+        onNodeWithText("Discard").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
+        assertTrue(!showing("Edit profile"), "where the shortcut was going")
+    }
+
+    // A tapped calendar reminder (iOS) set the calendar's flag under the
+    // section open at the time: nothing showed, and back seemed dead.
+    @Test
+    fun `a tapped calendar reminder opens the calendar over an open section`() = app {
+        onNodeWithContentDescription("My profile").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Edit profile") }
+        io.nisfeb.talon.notify.OpenNoticeRequests.request(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX + "nowhere")
+        waitUntil(timeoutMillis = 5_000) { showing("The Today widget on the home page can install it.") }
+        assertTrue(!showing("Edit profile"))
+        press(Key.Escape)
+        home()
     }
 
     // Areas of the app get shortcuts the owner sets: pressed anywhere, the

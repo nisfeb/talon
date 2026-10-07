@@ -1717,34 +1717,39 @@ fun TalonApp(
                     },
                     onSection = { item ->
                         close()
-                        // Put the current section down before picking
-                        // the next one up. Without this they accumulate
-                        // and the render's `when` keeps showing
-                        // whichever was opened earliest.
-                        closeSections()
-                        when (item) {
-                            io.nisfeb.talon.ui.RailItem.Home -> homeOpen = true
-                            // Already where it goes.
-                            io.nisfeb.talon.ui.RailItem.Chats -> Unit
-                            io.nisfeb.talon.ui.RailItem.Mail -> mailOpen = true
-                            io.nisfeb.talon.ui.RailItem.Statuses -> statusFeedOpen = true
-                            io.nisfeb.talon.ui.RailItem.Bookmarks -> bookmarksOpen = true
-                            io.nisfeb.talon.ui.RailItem.Calendar -> calendarOpen = true
-                            io.nisfeb.talon.ui.RailItem.Activity -> activityOpen = true
-                            io.nisfeb.talon.ui.RailItem.Assistant -> assistantOpen = true
-                            io.nisfeb.talon.ui.RailItem.Profile -> editingProfile = true
-                            io.nisfeb.talon.ui.RailItem.Administration -> adminListOpen = true
-                            io.nisfeb.talon.ui.RailItem.Invites -> invitesOpen = true
-                            io.nisfeb.talon.ui.RailItem.Actions -> actionsOpen = true
-                            io.nisfeb.talon.ui.RailItem.Settings -> settingsOpen = true
+                        // Unsaved edits in the open section ask first.
+                        sections.leave {
+                            // Put the current section down before picking
+                            // the next one up. Without this they accumulate
+                            // and the render's `when` keeps showing
+                            // whichever was opened earliest.
+                            closeSections()
+                            when (item) {
+                                io.nisfeb.talon.ui.RailItem.Home -> homeOpen = true
+                                // Already where it goes.
+                                io.nisfeb.talon.ui.RailItem.Chats -> Unit
+                                io.nisfeb.talon.ui.RailItem.Mail -> mailOpen = true
+                                io.nisfeb.talon.ui.RailItem.Statuses -> statusFeedOpen = true
+                                io.nisfeb.talon.ui.RailItem.Bookmarks -> bookmarksOpen = true
+                                io.nisfeb.talon.ui.RailItem.Calendar -> calendarOpen = true
+                                io.nisfeb.talon.ui.RailItem.Activity -> activityOpen = true
+                                io.nisfeb.talon.ui.RailItem.Assistant -> assistantOpen = true
+                                io.nisfeb.talon.ui.RailItem.Profile -> editingProfile = true
+                                io.nisfeb.talon.ui.RailItem.Administration -> adminListOpen = true
+                                io.nisfeb.talon.ui.RailItem.Invites -> invitesOpen = true
+                                io.nisfeb.talon.ui.RailItem.Actions -> actionsOpen = true
+                                io.nisfeb.talon.ui.RailItem.Settings -> settingsOpen = true
+                            }
                         }
                     },
                     onEditMenu = {
                         close()
-                        closeSections()
-                        // Settings underneath, so Back lands there.
-                        settingsOpen = true
-                        sidebarSettingsOpen = true
+                        sections.leave {
+                            closeSections()
+                            // Settings underneath, so Back lands there.
+                            settingsOpen = true
+                            sidebarSettingsOpen = true
+                        }
                     },
                 )
             },
@@ -1944,6 +1949,7 @@ fun TalonApp(
                 repo = app.repo,
                 ourPatp = loggedInShip ?: "",
                 onBack = { editingProfile = false },
+                sections = sections,
                 keys = remember(app.session) {
                     app.session.baseUrl?.takeIf { it.isNotBlank() }
                         ?.let { io.nisfeb.talon.ui.EyreAzimuthRpc(app.session.http, it) }
