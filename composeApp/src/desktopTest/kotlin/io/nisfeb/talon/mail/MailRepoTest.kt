@@ -69,6 +69,25 @@ class MailRepoTest {
         }
     }
 
+    // A loop's run builds its own mail and calendar, then detaches them.
+    // Detached, they still ran: the mail's relister and its listing's
+    // flows, on the process scope, one more set for every scheduled run.
+    @Test
+    fun `a run's own mail and calendar end with the run, detached or not`() = runBlocking {
+        val process = CoroutineScope(SupervisorJob())
+        fun live() = process.coroutineContext[kotlinx.coroutines.Job]!!.children.count { it.isActive }
+        val shipNot = { HttpClient(MockEngine { respondError(HttpStatusCode.NotFound, "") }) }
+        MailRepo(shipNot(), process).apply { attach("https://ship.test"); detach() }
+        assertTrue(live() > 0, "the leak this guards against: a detached repo on the process scope runs on")
+        process.coroutineContext[kotlinx.coroutines.Job]!!.children.forEach { it.cancel() }
+        io.nisfeb.talon.ai.withRunScope(process) { run ->
+            MailRepo(shipNot(), run).apply { attach("https://ship.test") }.detach()
+            io.nisfeb.talon.calendar.CalendarRepo(shipNot(), run).apply { attach("https://ship.test") }.detach()
+        }
+        kotlinx.coroutines.withTimeout(5_000) { while (live() > 0) kotlinx.coroutines.delay(10) }
+        process.cancel()
+    }
+
     @Test
     fun `a ship with no grubbery is told apart from one whose shell has not fetched mail`() {
         // The nexus is absent, and so is the shell: no grubbery.

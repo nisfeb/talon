@@ -3,6 +3,7 @@ package io.nisfeb.talon.calendar
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
@@ -44,6 +45,8 @@ class CalendarWriteTest {
         @Volatile var holdReadsMs = 0L
         /** The ship refuses writes. */
         @Volatile var refuse = false
+        /** The ship refuses writes whose body holds this, and takes the rest. */
+        @Volatile var refuseIf: String? = null
         fun clear() = reads.clear()
     }
 
@@ -62,7 +65,10 @@ class CalendarWriteTest {
                     if (path.startsWith("/grubbery/api/poke/")) {
                         // A request cancelled while held never gets here: the write is lost.
                         if (ship.holdWriteMs > 0) kotlinx.coroutines.delay(ship.holdWriteMs)
-                        if (ship.refuse) return@MockEngine respond("", HttpStatusCode.BadRequest, json)
+                        val refuseIf = ship.refuseIf
+                        if (ship.refuse || (refuseIf != null && refuseIf in req.body.toByteArray().decodeToString())) {
+                            return@MockEngine respond("", HttpStatusCode.BadRequest, json)
+                        }
                         ship.writtenAt.set(System.currentTimeMillis())
                         return@MockEngine respond("", HttpStatusCode.OK, json)
                     }
@@ -214,6 +220,26 @@ class CalendarWriteTest {
         assertEquals(emptyMap(), repo.ticking.value)
         assertEquals(false, repo.tasks.value?.first { it.id == "t1" }?.done)
     }
+
+    // Undone as a whole list, so any other task changed in between (an
+    // edit to another one, a tick) left the refused edit on show.
+    @Test
+    fun `a refused edit goes back alone, and another task changed meanwhile stays changed`() = calendar { repo, ship -> kotlinx.coroutines.coroutineScope {
+        ship.holdWriteMs = 800
+        ship.refuseIf = "\"t2\""
+        val rent = EventDraft(name = "Pay rent", cat = EventCat.TODO, date = LocalDate(2026, 10, 1), due = LocalDate(2026, 10, 1), cal = "default")
+        val milk = EventDraft(name = "Buy oat milk", cat = EventCat.TODO, date = LocalDate(2026, 10, 1), cal = "default")
+        val refused = async { repo.writeEvent(eventBody(rent, "t2"), readBack = false) }
+        kotlinx.coroutines.delay(200)
+        val taken = async { repo.writeEvent(eventBody(milk, "t1"), readBack = false) }
+        kotlinx.coroutines.delay(100)
+        assertEquals(1790812800000L, repo.tasks.value?.first { it.id == "t2" }?.dueMs, "both edits on show while the ship thinks")
+        assertTrue(!refused.await().ok)
+        assertEquals(1790640000000L, repo.tasks.value?.first { it.id == "t2" }?.dueMs, "the refused edit is undone")
+        assertEquals("Buy oat milk", repo.tasks.value?.first { it.id == "t1" }?.name, "the other edit is not")
+        assertTrue(taken.await().ok)
+        assertEquals("Buy oat milk", repo.tasks.value?.first { it.id == "t1" }?.name)
+    } }
 
     @Test
     fun `a save is said once the ship takes it, and the task moves at once`() = calendar(tasks = { ship ->
