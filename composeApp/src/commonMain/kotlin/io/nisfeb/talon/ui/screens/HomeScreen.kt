@@ -649,15 +649,19 @@ private fun BoxScope.ResizeHandles(
         }
     }
 
-    io.nisfeb.talon.ui.IconButton(tip = "Take ${title(widget.kind)} off the home page", onClick = onRemove,
-        modifier = Modifier.align(Alignment.TopEnd).size(HANDLE),
-    ) {
-        Icon(
-            Icons.Filled.Close,
-            contentDescription = "Take ${title(widget.kind)} off the home page",
-            modifier = Modifier.size(16.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    // The corner on a Box of its own: on desktop the tip wraps the button
+    // in a box of its own too, which took the align and left it top left.
+    Box(Modifier.align(Alignment.TopEnd)) {
+        io.nisfeb.talon.ui.IconButton(tip = "Take ${title(widget.kind)} off the home page", onClick = onRemove,
+            modifier = Modifier.size(HANDLE),
+        ) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = "Take ${title(widget.kind)} off the home page",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
