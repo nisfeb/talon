@@ -1222,7 +1222,10 @@ class TlonChatRepo(
         if (db.messages().queuedIn(whom) > 0) {
             neverSent.add("$whom|$id")
             db.messages().setStatus(whom, id, "queued")
-            scheduleDrain(0)
+            // Somebody wrote: that is worth asking the ship now. A drain
+            // asleep in its backoff otherwise kept this one waiting up to
+            // a minute after the ship was back.
+            scheduleDrain(0, wake = true)
             return@async
         }
         val ch = channel ?: return@async queueMessage(whom, id, IllegalStateException("not connected to the ship"))
