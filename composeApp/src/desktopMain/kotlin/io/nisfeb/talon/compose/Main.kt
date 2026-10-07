@@ -316,8 +316,11 @@ fun main() {
     // gets packaged onto the classpath at /icon.png. Skia decodes
     // and we hand a Painter to Window. Best-effort: if loading
     // fails for any reason the window just gets the JVM default.
+    // macOS draws the Dock and menu bar icon as given: its own file is on
+    // Apple's grid, the size of the icons beside it.
+    val iconName = if ("mac" in System.getProperty("os.name", "").lowercase()) "icon-macos.png" else "icon.png"
     val iconBytes = runCatching {
-        ClassLoader.getSystemResourceAsStream("icon.png")?.use { it.readBytes() }
+        ClassLoader.getSystemResourceAsStream(iconName)?.use { it.readBytes() }
     }.getOrNull()
     val iconPainter = iconBytes?.let {
         runCatching {

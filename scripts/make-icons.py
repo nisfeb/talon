@@ -53,6 +53,15 @@ desk.alpha_composite(placed(colour, 1024, 0.62))
 desk.save(out("composeApp/src/desktopMain/resources/icon.png"), optimize=True)
 desk.save(out("composeApp/src/desktopMain/resources/icon.ico"), sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
 
+# macOS (Dock, menu bar, .app/.dmg): Apple's grid, an 824 px tile 100 px
+# in, so Talon is the size of the icons beside it. The 920 px tile above
+# stood 12% taller in the Dock (users' screenshots, 2026-10-07).
+body, margin = 824, 100
+mac = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+ImageDraw.Draw(mac).rounded_rectangle((margin, margin, margin + body - 1, margin + body - 1), radius=185, fill=NAVY + (255,))
+mac.alpha_composite(placed(colour, 1024, 0.62 * 824 / 920))
+mac.save(out("composeApp/src/desktopMain/resources/icon-macos.png"), optimize=True)
+
 # iOS: full bleed and opaque; iOS rounds the corners itself.
 placed(colour, 1024, 0.64, bg=NAVY).convert("RGB").save(out("iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"), optimize=True)
 
