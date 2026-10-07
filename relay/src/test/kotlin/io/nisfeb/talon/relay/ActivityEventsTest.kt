@@ -98,4 +98,14 @@ class ActivityEventsTest {
         assertEquals(mapOf("chat/~darduc-mitfen/chat" to "mentions", "~martyr-sanryg" to "all", "~bus" to "mute"), notifyLevels(settings))
         assertEquals(emptyMap(), notifyLevels(obj("""{"desk":{}}""")))
     }
+
+    // The group a channel post or reply is in, for a group's level: the
+    // event carries it, and so does its source.
+    @Test
+    fun `a post's and a reply's group come from the event, else the source`() {
+        assertEquals("~zod/crew", activityGroup(obj("""{"channel":{"nest":"chat/~zod/general"}}"""), obj("""{"notified":true,"post":{"key":{"id":"~bus/1","time":"1"},"channel":"chat/~zod/general","group":"~zod/crew"}}""")))
+        assertEquals("~zod/crew", activityGroup(obj("""{"thread":{"channel":"chat/~zod/general","group":"~zod/crew"}}"""), obj("""{"notified":true,"reply":{"key":{"id":"~bus/2","time":"2"}}}""")))
+        assertNull(activityGroup(obj("""{"dm":{"ship":"~bus"}}"""), obj("""{"notified":true,"dm-post":{"key":{"id":"~bus/3","time":"3"}}}""")))
+    }
 }
+

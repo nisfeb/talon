@@ -318,9 +318,11 @@ class ShipConnection(
             return
         }
 
-        val level = notifyLevelFor(whom)
-        if (!NotifyPolicy.allows(whom, level, isMention(event))) {
-            log.info("muted ($level) whom=$whom post=$postId")
+        val (level, from) = NotifyPolicy.resolve(notifyLevels(), whom, activityGroup(sourceObj, event))
+        // Said on each line: which level decided, and whose it was.
+        val said = "$from ${level ?: NotifyPolicy.MENTIONS}"
+        if (!NotifyPolicy.allows(whom, level, isMention(event), reply = activityParentId(event) != null)) {
+            log.info("muted ($said) whom=$whom post=$postId")
             db.setLastEventId(shipRowId, deviceId, postId)
             return
         }
@@ -329,7 +331,7 @@ class ShipConnection(
             log.warn("device $deviceId has no push endpoint; skipping")
             return
         }
-        log.info("push whom=$whom post=$postId")
+        log.info("push ($said) whom=$whom post=$postId")
         push.send(
             endpoint = dev.pushEndpoint,
             patp = patp,
@@ -405,7 +407,7 @@ class ShipConnection(
     @Volatile private var notifyPrefs: Map<String, String> = emptyMap()
     @Volatile private var notifyPrefsAtMs = 0L
 
-    private fun notifyLevelFor(whom: String): String? {
+    private fun notifyLevels(): Map<String, String> {
         val now = System.currentTimeMillis()
         if (now - notifyPrefsAtMs > NOTIFY_PREFS_TTL_MS) {
             notifyPrefsAtMs = now
@@ -413,7 +415,7 @@ class ShipConnection(
                 .onSuccess { notifyPrefs = it }
                 .onFailure { log.warn("notify-prefs scry failed: ${it.message}") }
         }
-        return notifyPrefs[whom]
+        return notifyPrefs
     }
 
     private fun fetchNotifyPrefs(): Map<String, String> {
@@ -525,6 +527,17 @@ internal fun activityParentId(event: JsonObject): String? {
             ?.contentOrNull?.let { return it }
     }
     return null
+}
+
+/**
+ * The group a channel post or reply belongs to: the event's own "group"
+ * (on every v4 post and reply), else its source's. Null for a DM.
+ */
+internal fun activityGroup(source: JsonObject, event: JsonObject): String? {
+    fun JsonElement?.text() = (this as? JsonPrimitive)?.contentOrNull
+    for (kind in arrayOf("post", "reply", "chan-post")) (event[kind] as? JsonObject)?.get("group").text()?.let { return it }
+    (source["channel"] as? JsonObject)?.get("group").text()?.let { return it }
+    return (source["thread"] as? JsonObject)?.get("group").text()
 }
 
 /**
