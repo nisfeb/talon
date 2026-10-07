@@ -187,6 +187,18 @@ sealed interface TrunkUpdate {
     ) : TrunkUpdate
 }
 
+/**
+ * %trunk arriving on a ship, by the ship: an install Talon started has
+ * landed. The move to the ship's own pushes waits for this rather than
+ * the next app start (it found no %trunk at sign-in, before the desk had
+ * come over ames).
+ */
+object TrunkArrivals {
+    private val _arrived = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val arrived: kotlinx.coroutines.flow.SharedFlow<String> = _arrived
+    fun arrived(ship: String) { _arrived.tryEmit(ship) }
+}
+
 object TrunkWire {
     const val AGENT = "trunk"
     const val ACTION_MARK = "trunk-action"

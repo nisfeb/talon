@@ -255,6 +255,31 @@ internal fun alertPayload(
     event: String? = null,
     /** A notice's target in the app, as JSON, passed through. */
     open: String? = null,
+): String {
+    val full = buildAlert(title, body, patp, whom, postId, parent, nonce, badge, event, open)
+    val over = full.encodeToByteArray().size - MAX_ALERT_BYTES
+    if (over <= 0) return full
+    // APNs refuses an alert over 4 KiB (413). Shorten the body to fit,
+    // rather than lose the alert: what is cut is the end of a long text.
+    val keep = (body.encodeToByteArray().size - over - 8).coerceAtLeast(0)
+    val cut = body.encodeToByteArray().copyOf(keep).decodeToString().trimEnd('\uFFFD') + "…"
+    return buildAlert(title, cut, patp, whom, postId, parent, nonce, badge, event, open)
+}
+
+/** APNs' limit for an alert's payload, less a little for safety. */
+internal const val MAX_ALERT_BYTES = 4000
+
+private fun buildAlert(
+    title: String,
+    body: String,
+    patp: String,
+    whom: String,
+    postId: String,
+    parent: String?,
+    nonce: String?,
+    badge: Int?,
+    event: String?,
+    open: String?,
 ): String = buildString {
     append("{\"aps\":{\"alert\":{\"title\":\"").append(jsonEscape(title))
     append("\",\"body\":\"").append(jsonEscape(body))

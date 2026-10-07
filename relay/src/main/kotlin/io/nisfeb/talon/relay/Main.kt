@@ -4,6 +4,8 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.application.install
 import io.ktor.server.plugins.calllogging.CallLogging
+import io.ktor.server.request.httpMethod
+import io.ktor.server.request.path
 import okhttp3.OkHttpClient
 import org.slf4j.LoggerFactory
 import java.util.concurrent.TimeUnit
@@ -62,7 +64,11 @@ fun main() {
     pool.startAll()
 
     val server = embeddedServer(Netty, port = port) {
-        install(CallLogging)
+        // Paths name device ids and gateway handles, each a bearer secret
+        // for its device: logged with them masked.
+        install(CallLogging) {
+            format { call -> "${call.response.status()}: ${call.request.httpMethod.value} - ${maskedPath(call.request.path())}" }
+        }
         installRoutes(db = db, pool = pool, masterSecret = masterSecret, httpClient = httpClient, gateway = gateway)
     }
     Runtime.getRuntime().addShutdownHook(Thread {
@@ -99,3 +105,8 @@ private fun buildApns(log: org.slf4j.Logger): Apns? {
         log.info("APNs VoIP enabled (team=$teamId key=$keyId bundle=$bundleId prod=$production)")
     }
 }
+
+/** A request path with its device ids masked, for the log. */
+internal fun maskedPath(path: String): String =
+    path.replace(Regex("^/(devices|health)/[^/]+"), "/$1/<id>")
+

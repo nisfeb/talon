@@ -48,6 +48,8 @@ object ShipPushes {
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private fun subKey(ship: String) = "sub:$ship"
+    private fun noPushKey(ship: String) = "nopush:$ship"
+    private const val NO_PUSH_RETRY_MS = 24 * 60 * 60 * 1000L
 
     /** The endpoint and the ship's id for it, as subscribed: "<endpoint>\n<sub id>". */
     internal fun subscription(ctx: Context, ship: String): Pair<String, String>? =
@@ -67,9 +69,16 @@ object ShipPushes {
             if (subscription(app, session.ship)?.first != endpoint) subscribeLater(app)
             return
         }
+        val noPushUntil = prefs(app).getLong(noPushKey(session.ship), 0L)
+        if (System.currentTimeMillis() < noPushUntil) return
         scope.launch {
             runCatching {
-                val vapid = ShipPushApi(app.session.http, session.shipUrl).vapidKey()
+                val vapid = runCatching { ShipPushApi(app.session.http, session.shipUrl).vapidKey() }
+                    .onFailure {
+                        // Every process start (workers', alarms', pushes') asked
+                        // a ship with no web push for its key, a 404 each time.
+                        prefs(app).edit().putLong(noPushKey(session.ship), System.currentTimeMillis() + NO_PUSH_RETRY_MS).apply()
+                    }.getOrThrow()
                 val saved = UnifiedPush.getSavedDistributor(app)
                 if (saved == null || saved !in distributors) UnifiedPush.saveDistributor(app, distributors.first())
                 UnifiedPush.register(app, INSTANCE, null, vapid)
@@ -87,6 +96,11 @@ object ShipPushes {
 
     fun onUnregistered(ctx: Context) {
         val p = prefs(ctx)
+        // Each ship subscribed to the endpoint now gone is told so: cleared
+        // without it, the ship kept pushing to a dead endpoint, and the next
+        // subscribe found nothing to replace.
+        val app = ctx.applicationContext as? TalonApplication
+        if (app != null) p.all.keys.filter { it.startsWith("sub:") }.forEach { key -> forget(app, key.removePrefix("sub:")) }
         p.edit().clear().apply()
     }
 
@@ -95,6 +109,16 @@ object ShipPushes {
         val push = parseShipPush(message.content.decodeToString())
             ?: return Log.w(TAG, "a ship push with no title was dropped")
         Log.i(TAG, "ship push tag=${push.tag}")
+        shown(ctx, push)
+    }
+
+    /**
+     * A push from the ship, by grubbery's web push or as a notice through
+     * its %trunk (the same tags either way): shown, and a leave push stands
+     * its backup alarm down and begins the trip, which the trunk copy did
+     * not, so the alarm alerted a second time.
+     */
+    fun shown(ctx: Context, push: io.nisfeb.talon.notify.ShipPushMessage) {
         Notifications.showShipPush(ctx, push)
         // The push came: the alarm kept in case it did not stands down, and
         // the trip begins where Android lets a push start it (Talon in

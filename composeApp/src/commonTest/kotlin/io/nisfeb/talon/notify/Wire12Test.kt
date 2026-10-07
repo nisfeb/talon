@@ -77,4 +77,15 @@ class Wire12Test {
         assertNull(shipPushStatusLine(null, "me"), "an older trunk has no status")
         assertNull(shipPushStatusLine(Json.parseToJsonElement("""{"wire":12}"""), "me"))
     }
+
+    // Orrery tags an action's push orrery-<id>; the app's own copy is
+    // action:<id>. Shown in one slot, they replace each other.
+    @Test
+    fun an_orrery_action_push_is_known_by_its_action() {
+        assertEquals("a1b2", io.nisfeb.talon.orrery.actionIdOfTag("orrery-a1b2"))
+        listOf("orrery-leave-x@1", "orrery-late-x", "orrery-nudge-3", "orrery-review", "cal-x-0", null, "orrery-").forEach {
+            assertNull(io.nisfeb.talon.orrery.actionIdOfTag(it), "$it")
+        }
+    }
 }
+

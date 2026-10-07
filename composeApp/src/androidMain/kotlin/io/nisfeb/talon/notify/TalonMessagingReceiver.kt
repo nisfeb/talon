@@ -169,7 +169,7 @@ class TalonMessagingReceiver : MessagingReceiver() {
         // From another app on the ship (calendar, orrery), through its %trunk:
         // shown by its tag, as grubbery's web push is.
         if (event == "notice") {
-            parsed?.let { io.nisfeb.talon.notify.noticeOf(it) }?.let { io.nisfeb.talon.Notifications.showShipPush(context, it) }
+            parsed?.let { io.nisfeb.talon.notify.noticeOf(it) }?.let { ShipPushes.shown(context, it) }
             return
         }
 
