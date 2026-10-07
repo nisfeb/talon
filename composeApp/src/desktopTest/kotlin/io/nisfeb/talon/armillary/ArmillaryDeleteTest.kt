@@ -1,5 +1,6 @@
 package io.nisfeb.talon.armillary
 
+import io.nisfeb.talon.ui.quietCatalog
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -187,7 +188,7 @@ class ArmillaryDeleteTest {
         val r = repo(ai)
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r, catalog = quietCatalog()) }
             }
         }
         onNodeWithText("Delete account").performScrollTo().performClick()
@@ -214,7 +215,7 @@ class ArmillaryDeleteTest {
         val r = repo(ai)
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r, catalog = quietCatalog()) }
             }
         }
         onNodeWithText("Delete account").performScrollTo().performClick()
@@ -233,7 +234,7 @@ class ArmillaryDeleteTest {
         val r = repo(ai)
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r, catalog = quietCatalog()) }
             }
         }
         onNodeWithText("Delete account").performScrollTo().performClick()

@@ -1,5 +1,6 @@
 package io.nisfeb.talon.armillary
 
+import io.nisfeb.talon.ui.quietCatalog
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -73,7 +74,7 @@ class ArmillaryRemoveTest {
         }
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = repo) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = repo, catalog = quietCatalog()) }
             }
         }
         waitForIdle()

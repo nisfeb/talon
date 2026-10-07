@@ -1,5 +1,6 @@
 package io.nisfeb.talon.armillary
 
+import io.nisfeb.talon.ui.quietCatalog
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.ktor.client.HttpClient
@@ -211,7 +212,7 @@ class ArmillaryPaymentTest {
         runComposeUiTest {
             setContent {
                 TalonTheme(darkTheme = false) {
-                    Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(r.ai, orrery = null, armillary = r.repo) }
+                    Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(r.ai, orrery = null, armillary = r.repo, catalog = quietCatalog()) }
                 }
             }
             onNodeWithText("Catch-up and the assistant are set up on big/tools. Turn them on?", substring = true).assertExists()
@@ -234,7 +235,7 @@ class ArmillaryPaymentTest {
         runComposeUiTest {
             setContent {
                 TalonTheme(darkTheme = false) {
-                    Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(r.ai, orrery = null, armillary = r.repo) }
+                    Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(r.ai, orrery = null, armillary = r.repo, catalog = quietCatalog()) }
                 }
             }
             onNodeWithText("Not now").performScrollTo().performClick()
