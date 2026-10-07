@@ -681,6 +681,9 @@ class OrreryRepo(
     /** One body's timeline: what was said about it, when, and by whom. */
     suspend fun bodyTimeline(id: String): Result<List<KnownObs>> = runCatching { attached().observationsOf(id, key()) }
 
+    /** One body as the ship shows it, current values and all. */
+    suspend fun bodyView(id: String): Result<JsonObject> = runCatching { attached().bodyView(id, key()) }
+
     /** One observe batch under this install's key. */
     suspend fun observeNow(batch: JsonObject): Result<ObserveAnswer> = runCatching { attached().observe(batch, key()) }
 
