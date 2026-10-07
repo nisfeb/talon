@@ -54,6 +54,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.update
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ui.parseHexColor
+import io.nisfeb.talon.ui.contactMap
 import io.nisfeb.talon.notify.NoopNotifier
 import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.data.AppDatabase
@@ -918,6 +919,7 @@ fun App(
                     peerLinkFactory,
                     callSounds,
                     videoSupported = io.nisfeb.talon.ui.isPartyVideoSupported,
+                    displayName = { io.nisfeb.talon.ui.partyName(db.contactMap().value, shipKey) },
                 )
                     .also { line ->
                         callController.onTicket = { host, ticket ->

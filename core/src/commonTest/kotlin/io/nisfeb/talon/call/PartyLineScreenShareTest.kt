@@ -19,7 +19,7 @@ import kotlin.test.assertTrue
  * and survives the up link being republished.
  */
 class PartyLineScreenShareTest {
-    private class ScriptedLink(private val shareOk: Boolean = true) : PeerLink {
+    private class ScriptedLink(private val shareOk: Boolean = true, private val log: MutableList<String> = mutableListOf()) : PeerLink {
         override val state: StateFlow<MediaState> = MutableStateFlow(MediaState.Idle)
         val videoFlow = MutableStateFlow(VideoState())
         override val video: StateFlow<VideoState> get() = videoFlow
@@ -31,11 +31,12 @@ class PartyLineScreenShareTest {
         override suspend fun applyAnswer(remoteSdp: String) = Unit
         override fun addRemoteCandidate(candidate: IceCandidate) = Unit
         override fun setMuted(muted: Boolean) = Unit
-        override fun close() = Unit
+        override fun close() { log += "close ${hashCode()}" }
         override suspend fun setCameraEnabled(enabled: Boolean): Boolean = true.also { cameras += enabled }
         override suspend fun screenSources(): List<ScreenSource> = listOf(SCREEN)
         override suspend fun setScreenShare(source: ScreenSource?): Boolean = (shareOk || source == null).also { ok ->
             shares += source
+            log += "share ${hashCode()}"
             if (ok) videoFlow.value = VideoState(localOn = source != null, sharing = source != null)
         }
     }
@@ -46,9 +47,9 @@ class PartyLineScreenShareTest {
     )
     private fun abort(id: String) = json.decodeFromString<JsonObject>("""{"type":"abort","id":"$id"}""")
 
-    private fun line(ups: MutableList<ScriptedLink>, shareOk: (Int) -> Boolean = { true }) = PartyLine(
+    private fun line(ups: MutableList<ScriptedLink>, log: MutableList<String> = mutableListOf(), shareOk: (Int) -> Boolean = { true }) = PartyLine(
         HttpClient(),
-        links = { _, sendAudio -> ScriptedLink(shareOk(ups.size)).also { if (sendAudio) ups += it } },
+        links = { _, sendAudio -> ScriptedLink(shareOk(ups.size), log).also { if (sendAudio) ups += it } },
     )
 
     @Test
@@ -108,6 +109,21 @@ class PartyLineScreenShareTest {
         withTimeout(5_000) { while (ups[1].shares.isEmpty()) delay(10) }
         assertEquals(listOf<ScreenSource?>(SCREEN), ups[1].shares)
         assertTrue((l.shared.value != null))
+    }
+
+    // Opened again, the capture asked Wayland's system dialog again in the
+    // middle of the share. Taken before the old link lets it go, the
+    // capture is handed over (desktop: SharedScreenCapture).
+    @Test
+    fun `a republished up link takes the share before the old one lets it go`() = runBlocking {
+        val ups = mutableListOf<ScriptedLink>()
+        val log = mutableListOf<String>()
+        val l = line(ups, log)
+        l.handle(joined())
+        assertTrue(l.setScreenShare(SCREEN))
+        log.clear()
+        l.handle(abort(l.upId))
+        assertEquals(listOf("share ${ups[1].hashCode()}", "close ${ups[0].hashCode()}"), log.take(2))
     }
 
     @Test

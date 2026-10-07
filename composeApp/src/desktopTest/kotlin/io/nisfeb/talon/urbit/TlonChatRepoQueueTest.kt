@@ -167,6 +167,8 @@ class TlonChatRepoQueueTest {
         // A conversation with nothing waiting hears the refusal at once.
         assertFailsWith<PokeNacked> { repo.send("~nec", "refused") }
         // One behind the queued message waits with it, and hears it there.
+        // Held, so the drain it wakes has not yet heard back.
+        ship.holdPoke = 300
         val behind = repo.send("~bus", "behind")
         assertEquals("queued", db.messages().getOne("~bus", stored(behind))?.status)
         repo.drainQueue()
@@ -230,10 +232,11 @@ class TlonChatRepoQueueTest {
     fun `one sent while another of its conversation waits is queued behind it, counted, and goes after it`() = live {
         ship.lose = { lost }
         val first = repo.send("~bus", "first")
-        ship.lose = { null }
+        // Still out of reach: the drain the second wakes does not empty the queue.
         val second = repo.send("~bus", "second")
         assertEquals("queued", db.messages().getOne("~bus", stored(second))?.status)
         assertEquals(2, repo.shipSlow.first { (it?.queued ?: 0) == 2 }!!.queued)
+        ship.lose = { null }
         repo.drainQueue()
         assertEquals(listOf(null, null), listOf(first, second).map { db.messages().getOne("~bus", stored(it))?.status })
         val sent = ship.pokesTo("chat").map { it.json.toString() }
@@ -276,11 +279,30 @@ class TlonChatRepoQueueTest {
         ship.lose = { lost }
         repo.send(nest, "first")
         ship.lose = { null }
-        repo.send(nest, "second")
         ship.scries["channels/v4/$nest/posts/newest/30/post"] = """{"posts":{}}"""
+        repo.send(nest, "second")
         repo.drainQueue()
         assertEquals(2, ship.pokesTo("channels").size)
         assertEquals(1, ship.scried.count { it == "channels/v4/$nest/posts/newest/30/post" }, "asked for the first only: ${ship.scried}")
+    }
+
+    // Queued behind the first, it never tried the ship, and the drain
+    // asleep in its backoff did not wake for it: back, the ship sat
+    // unasked for the rest of a backoff of up to ninety seconds.
+    @Test
+    fun `one written behind a queued one asks the ship at once`() = live {
+        ship.lose = { lost }
+        val first = repo.send("~bus", "first")
+        ship.lose = { null }
+        val wroteAt = System.currentTimeMillis()
+        val second = repo.send("~bus", "second")
+        kotlinx.coroutines.withTimeout(5_000) {
+            while (listOf(first, second).any { db.messages().getOne("~bus", stored(it))?.status != null }) delay(10)
+        }
+        val tookMs = System.currentTimeMillis() - wroteAt
+        assertTrue(tookMs < 800, "went in $tookMs ms, not after the backoff (1 to 3 s)")
+        val sent = ship.pokesTo("chat").map { it.json.toString() }
+        assertTrue("first" in sent[0] && "second" in sent[1], "in the order written: $sent")
     }
 
     @Test

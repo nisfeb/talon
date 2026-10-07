@@ -544,7 +544,13 @@ class SettingsSyncImpl(
     override suspend fun resubscribe() {
         val ch = channel ?: return
         runCatching { ch.subscribe("settings", "/desk/$DESK") }
-            .onFailure { Log.w(TAG, "subscribe failed", it) }
+            .onFailure {
+                // A resumed channel watches nothing again: kept, it would go
+                // without this watch for good. Given up, the next connect
+                // makes a new one with every watch.
+                Log.w(TAG, "subscribe failed; giving the channel up", it)
+                ch.deleteSoon(kotlinx.coroutines.CoroutineScope(io.nisfeb.talon.util.ioDispatcher))
+            }
     }
 
     private fun JsonObject?.isNullOrEmpty(): Boolean = bucketIsMissingOrEmpty(this)

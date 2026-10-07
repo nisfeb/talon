@@ -222,7 +222,11 @@ class NotesRepo(
         runCatching { ch.subscribeAll(fresh.map { NotesPaths.APP to NotesPaths.stream(it) }) }
             .onFailure {
                 subLock.withLock { fresh.forEach { f -> subscribed.remove(f.flagString) } }
-                Log.w(TAG, "notes subscribe failed for ${fresh.size} notebook(s)", it)
+                // A resumed channel watches nothing again: kept, it would go
+                // without these for good. Given up, the next connect makes a
+                // new one with every watch.
+                Log.w(TAG, "notes subscribe failed for ${fresh.size} notebook(s); giving the channel up", it)
+                ch.deleteSoon(scope)
             }
     }
 

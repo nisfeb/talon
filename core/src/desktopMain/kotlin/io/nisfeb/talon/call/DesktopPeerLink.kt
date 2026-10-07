@@ -242,7 +242,8 @@ class DesktopPeerLink(
         if (closed.value) return false
         val sender = cameraSender ?: return false
         val ok = share.set(sender, source, localVideo) { cameraSource?.stop() }
-        _video.value = _video.value.copy(localOn = share.active, sharing = share.active)
+        // A share that would not start leaves a running camera on.
+        _video.value = _video.value.copy(localOn = share.active || localVideo?.isEnabled == true, sharing = share.active)
         return ok
     }
 

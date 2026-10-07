@@ -319,6 +319,8 @@ class CallController(
                 val ch = kept ?: session.openChannel()
                 channel = ch
                 if (kept == null) lookedFor.clear()
+                // Asks made on a channel given up are answered on it, never here.
+                if (kept == null) unanswered.clear()
                 val read = kept == null && shouldBootstrap(readsAtMs == 0L, readsAtMs, nowMs(), heardMs)
                 // The six reads at once: one after another they held the
                 // subscription, and with it every call, six round trips back.
@@ -456,9 +458,12 @@ class CallController(
                             "quit" -> {
                                 Log.w(TAG, "calls subscription was kicked; resubscribing")
                                 _connected.value = false
+                                // Lost, the watch is not asked for again: a kept
+                                // channel resumes without subscribing. Given up,
+                                // the next pass is a new one that watches.
                                 runCatching { ch.subscribe(TrunkWire.AGENT, TrunkWire.CALLS_PATH) }
                                     .onSuccess { _connected.value = true }
-                                    .onFailure { Log.e(TAG, "resubscribe failed", it) }
+                                    .onFailure { Log.e(TAG, "resubscribe failed", it); drop(ch); throw it }
                                 return@collect
                             }
                             "subscribe" -> {
@@ -562,11 +567,13 @@ class CallController(
                                 // the host, so the set's size is the
                                 // count, not a guess at it.
                                 _presence.value = _presence.value + (key to up.who.size)
-                                // Long after any ask of ours: the host pushed it, so it
-                                // tells of every roster change and needs no polling.
-                                if (nowMs() - (askedAt[up.from] ?: 0L) > ANSWER_WINDOW_MS) {
-                                    announcers.add(up.from)
-                                }
+                                // Not an answer to an ask of ours: the host pushed it,
+                                // so it tells of every roster change and needs no
+                                // polling. Counted, not timed: a slow host's answer,
+                                // or one replayed on a resumed channel, still answers.
+                                var answered = false
+                                unanswered.update(key) { n -> answered = n != null; n?.minus(1)?.takeIf { it > 0 } }
+                                if (!answered) announcers.add(up.from)
                             }
                             is TrunkUpdate.Recorders ->
                                 _recording.value = _recording.value +
@@ -888,7 +895,6 @@ class CallController(
      *  The answer lands in [presence]. Fire-and-forget; a wire-5 host
      *  just nacks and presence stays absent. */
     suspend fun occupancyOf(host: String, name: String) {
-        askedAt[host] = nowMs()
         val ch = channel ?: return
         runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.occupancyOfAction(host, name)) }
             .onFailure { Log.i(TAG, "occupancy-of declined (older host?): ${it.message}") }
@@ -897,11 +903,16 @@ class CallController(
     /** Ask [host] who is on its line [name]; the answer lands in
      *  [onLine]. Wire 8 on our ship; an older host simply never answers. */
     suspend fun whoIsOn(host: String, name: String) {
-        askedAt[host] = nowMs()
         if (_wire.value < TrunkWire.WIRE_VERSION_WHO) return
         val ch = channel ?: return
+        val key = "$host/$name"
+        // Counted before the poke: the answer can come down the stream first.
+        unanswered.update(key) { (it ?: 0) + 1 }
         runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.whoIsOnAction(host, name)) }
-            .onFailure { Log.i(TAG, "who-is-on declined (older host?): ${it.message}") }
+            .onFailure {
+                unanswered.update(key) { n -> n?.minus(1)?.takeIf { it > 0 } }
+                Log.i(TAG, "who-is-on declined (older host?): ${it.message}")
+            }
     }
 
     /** Tell [host] we connected to / left its line [name]. enterRoom
@@ -1432,8 +1443,8 @@ class CallController(
     private val _onLine = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
     val onLine: StateFlow<Map<String, Set<String>>> = _onLine.asStateFlow()
 
-    /** When we last asked each host who is on: an %on-line long after is a push. */
-    private val askedAt = io.nisfeb.talon.util.ConcurrentMap<String, Long>()
+    /** Who-is-on asks not yet answered, per "host/name": an %on-line with none waiting is a push. */
+    private val unanswered = io.nisfeb.talon.util.ConcurrentMap<String, Int>()
     private val announcers = io.nisfeb.talon.util.ConcurrentSet<String>()
 
     /** Hosts seen pushing a roster nobody asked for (wire 9): asked once, then heard. */
@@ -1916,8 +1927,6 @@ class CallController(
          *  briefly asleep, few enough not to hammer one that is gone. */
         const val PEEK_ATTEMPTS = 3
 
-        /** An %on-line this long after our ask was not its answer. */
-        const val ANSWER_WINDOW_MS = 10_000L
         private const val TAG = "Trunk"
 
         /** Default life of a listen link. Short on purpose: the link

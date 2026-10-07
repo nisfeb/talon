@@ -70,6 +70,10 @@ data class PartyMember(
      * only the muted person about their own permission change.
      */
     val mutedByAdmin: Boolean = false,
+    /** The name this person gave Galène on joining (its join `data.name`),
+     *  for a ship this app has no name of its own for. Self-chosen, like a
+     *  nickname; the ship is still [ship]. */
+    val name: String? = null,
 )
 
 sealed interface PartyState {
@@ -139,6 +143,10 @@ class PartyLine(
      *  (isPartyVideoSupported). Off keeps the SFU request audio-only so
      *  a client with no video path (iOS) never gets video m-lines. */
     private val videoSupported: Boolean = false,
+    /** What the room calls us: our nickname, a comet's mnemonym, else the
+     *  @p. Asked at each join, since a nickname can arrive or change after
+     *  the line is made. Sent as the join's `data.name`. */
+    private val displayName: () -> String = { "" },
 ) {
     private val scope =
         CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
@@ -286,7 +294,14 @@ class PartyLine(
         _videoOn.value = ships + (if (_cameraOn.value || (_shared.value != null)) setOf(ourId) else emptySet())
     }
     private var room = ""
+    // Our @p, for everything compared here: the roster, video, mutes.
     private var ourId = ""
+    // Who Galène knows us as: the token's subject, which since trunk wire
+    // 10 is a comet's mnemonym, not its @p. Galène refuses any message
+    // whose `username` is not this one ("spoofed username") and drops the
+    // socket, so every frame says this, never [ourId]. Seeded from the
+    // token, then taken from the server's own "joined".
+    private var galeneName = ""
     // Galène's client id must be unique per *connection*, not per
     // user: reusing the @p means a rejoin (or a stale socket the
     // server hasn't reaped) is refused with "duplicate client id".
@@ -324,6 +339,7 @@ class PartyLine(
         if (_state.value !is PartyState.Idle) return
         room = ticket.name
         ourId = ourShip
+        galeneName = TrunkWire.jwtSubject(ticket.token) ?: ourShip
         // Join muted. Stepping onto a line should never start
         // broadcasting someone's room before they've decided to
         // speak — the mic button is one tap away, an accidental hot
@@ -638,7 +654,7 @@ class PartyLine(
                     put("type", "usermessage")
                     put("source", connectionId)
                     put("dest", "")
-                    put("username", ourId)
+                    put("username", galeneName)
                     put("kind", VIDEO_KIND)
                     // A shared screen is video too: the tile shows it.
                     put("value", _cameraOn.value || (_shared.value != null))
@@ -727,7 +743,7 @@ class PartyLine(
                 put("type", "usermessage")
                 put("source", connectionId)
                 put("dest", "")
-                put("username", ourId)
+                put("username", galeneName)
                 put("kind", MUTE_KIND)
                 put("value", muted)
             },
@@ -747,6 +763,17 @@ class PartyLine(
     private var lastNotice: String? = null
     private var lastNoticeAtMs = 0L
 
+    /**
+     * Our join. The token is who we are, and Galène holds us to it; the
+     * name in `data` is only what the room shows for us (a listen page has
+     * no contacts to ask).
+     */
+    internal fun joinFrame(group: String, token: String): JsonObject = buildJsonObject {
+        put("type", "join"); put("kind", "join")
+        put("group", group); put("token", token)
+        putJsonObject("data") { put("name", displayName().ifBlank { ourId }) }
+    }
+
     /** One session on the SFU. Returns true when it ended in a way worth retrying. */
     private suspend fun run(ticket: TrunkTicket, ourShip: String): Boolean {
         try {
@@ -764,10 +791,7 @@ class PartyLine(
                 put("type", "handshake"); put("id", connectionId)
                 putJsonArray("version") { add(kotlinx.serialization.json.JsonPrimitive("2")) }
             })
-            send(buildJsonObject {
-                put("type", "join"); put("kind", "join")
-                put("group", galeneGroup); put("token", ticket.token)
-            })
+            send(joinFrame(galeneGroup, ticket.token))
 
             for (frame in ws.incoming) {
                 val text = (frame as? Frame.Text)?.readText() ?: continue
@@ -912,7 +936,9 @@ class PartyLine(
                         if (firstSeen && joined && !replaying && name != ourId) {
                             sounds.play(CallSounds.joined())
                         }
-                        roster[id] = PartyMember(id, name)
+                        val given = ((msg["data"] as? JsonObject)?.get("name") as? JsonPrimitive)
+                            ?.takeUnless { it is JsonNull }?.content?.takeIf { it.isNotBlank() }
+                        roster[id] = PartyMember(id, ship = name, name = given)
                         // Someone who just arrived missed every mute
                         // broadcast so far. Say ours again rather than
                         // making them show us wrong until we next touch
@@ -977,7 +1003,9 @@ class PartyLine(
                     return
                 }
                 if (kind == MUTE_KIND) {
-                    val who = msg["username"]?.jsonPrimitive?.content ?: return
+                    // A comet sends as its mnemonym (trunk wire 10); the
+                    // roster holds its @p.
+                    val who = msg["username"]?.jsonPrimitive?.content?.let(::shipOfGaleneName) ?: return
                     // Keyed by ship, not connection: the roster dedupes
                     // by ship too, so a person on two devices reads as
                     // one row and one mute state.
@@ -1047,6 +1075,9 @@ class PartyLine(
                 )
             }
         sfuIce = ice
+        // The server's word on who we are beats the token's.
+        (msg["username"] as? JsonPrimitive)?.takeUnless { it is JsonNull }?.content
+            ?.takeIf { it.isNotEmpty() }?.let { galeneName = it }
         // Anyone reported from here on is genuinely arriving — once the
         // replayed roster has gone past. clientCount includes us, and a
         // missing/!0 count simply means nothing to skip.
@@ -1207,9 +1238,16 @@ class PartyLine(
             upId = "up-$connectionId-${Uuid.random()}"
             val old = upLink
             val up = links.create(sfuIce, sendAudio = true)
+            // A share moves to the new link before the old one lets it go,
+            // so its capture is handed over, not opened again: on Wayland
+            // that asked the system's dialog again in the middle of a share.
+            // A share that will not restart is dropped below.
+            val shared = _shared.value
+            val reshared = shared != null && up.setScreenShare(shared)
             old?.close()
             upLink = up
             _upLink.value = up
+            if (reshared) sharedOn = up
             // A share the link ended itself (its dialog cancelled, nothing
             // sent) ends here too, so the room and the button follow it.
             upShareWatch?.cancel()
@@ -1242,16 +1280,12 @@ class PartyLine(
                     broadcastVideo()
                 }
             }
-            // A share is restored the same way, and dropped the same way
-            // when its screen or window is gone.
-            val shared = _shared.value
-            if (shared != null) scope.launch {
-                if (up.setScreenShare(shared)) sharedOn = up
-                else {
-                    stopSharingState()
-                    refreshVideoOn()
-                    broadcastVideo()
-                }
+            // The share, moved above, is dropped the same way when its
+            // screen or window is gone.
+            if (shared != null && !reshared) {
+                stopSharingState()
+                refreshVideoOn()
+                broadcastVideo()
             }
             // Say our mute state before anyone renders us as live.
             broadcastMuted()
@@ -1284,7 +1318,7 @@ class PartyLine(
             upOffered = true
             send(buildJsonObject {
                 put("type", "offer"); put("id", upId); put("label", "")
-                put("username", ourId); put("sdp", sdp)
+                put("username", galeneName); put("sdp", sdp)
                 // Tells Galène to delUpConn the corpse rather than keep it.
                 if (previousUpId.isNotEmpty()) put("replace", previousUpId)
             })
@@ -1399,7 +1433,7 @@ class PartyLine(
                 // else — a server that validates it drops the operator's
                 // socket, and one that rewrites it silently retargets the
                 // mute at the operator. The target rides its own field.
-                put("username", ourId)
+                put("username", galeneName)
                 put("kind", ADMIN_MUTE_KIND)
                 // See the handler: the subject has to travel inside
                 // `value`, the one free-form field the SFU relays.
@@ -1418,7 +1452,7 @@ class PartyLine(
                         put("type", "useraction")
                         put("source", connectionId)
                         put("dest", dest)
-                        put("username", ourId)
+                        put("username", galeneName)
                         put("kind", kind)
                     },
                 )

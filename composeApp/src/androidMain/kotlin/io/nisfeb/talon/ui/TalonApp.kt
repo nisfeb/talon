@@ -223,6 +223,7 @@ fun TalonApp(
                 },
                 callSounds,
                 videoSupported = io.nisfeb.talon.ui.isPartyVideoSupported,
+                displayName = { partyName(app.db.contactMap().value, loggedInShip.orEmpty()) },
             ).also { line ->
                 callController.onTicket = { host, ticket ->
                             // The topic lives on the host's room, not
