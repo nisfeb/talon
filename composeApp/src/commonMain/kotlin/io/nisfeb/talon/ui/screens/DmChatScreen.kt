@@ -88,6 +88,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -386,7 +387,12 @@ fun DmChatScreen(
 
     val notifyPref by remember(whom) { db.notifyPrefs().stream(whom) }
         .collectAsState(initial = null)
-    val notifyLevel = notifyPref?.level ?: NotifyLevel.DEFAULT
+    // A group's channel with no level of its own follows the group's.
+    val chatGroupFlag by produceState<String?>(null, whom) { value = db.groups().channelGroupFor(whom)?.groupFlag }
+    val groupNotifyPref by remember(chatGroupFlag) {
+        chatGroupFlag?.let { db.notifyPrefs().stream(io.nisfeb.talon.data.groupLevelKey(it)) } ?: kotlinx.coroutines.flow.flowOf(null)
+    }.collectAsState(initial = null)
+    val notifyLevel = io.nisfeb.talon.data.effectiveLevel(notifyPref?.level, groupNotifyPref?.level)
 
     // Fall back to locally-owned state when the caller doesn't hoist it.
     // Both are always created (no conditional composable calls) so the
@@ -897,10 +903,14 @@ fun DmChatScreen(
             if (!hasInfoPane) {
                 NotifyLevelDropdown(
                     level = notifyLevel,
+                    own = notifyPref?.level,
+                    groupLevel = chatGroupFlag?.let { groupNotifyPref?.level ?: NotifyLevel.DEFAULT },
                     enabled = repo.settingsSync != null,
                     onSelect = { level ->
-                        scope.launch {
-                            runCatching { repo.settingsSync?.setNotifyLevel(whom, level) }
+                        val sync = repo.settingsSync
+                        // On the repo's scope: leaving the chat mid-write keeps it.
+                        if (sync != null) scope.launch {
+                            runCatching { repo.carry { if (level == null) sync.clearNotifyLevel(whom) else sync.setNotifyLevel(whom, level) } }
                                 .onFailure { composerState.failed("notify", it) }
                         }
                     },
@@ -2261,9 +2271,15 @@ private fun CatchMeUpBanner(
 // bridge is wired.
 @Composable
 private fun NotifyLevelDropdown(
+    /** The level that applies, for the icon. */
     level: String,
+    /** The chat's own level, or null where it has none. */
+    own: String?,
+    /** The group's level, for a group's channel; null for a DM or club. */
+    groupLevel: String?,
     enabled: Boolean,
-    onSelect: (String) -> Unit,
+    /** A level, or null for the group's. */
+    onSelect: (String?) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -2276,16 +2292,26 @@ private fun NotifyLevelDropdown(
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            // What is ticked is the chat's own choice; with none, the group's
+            // or (outside a group) the default.
+            val ticked = own ?: if (groupLevel != null) null else level
+            if (groupLevel != null) DropdownMenuItem(
+                text = {
+                    val name = when (groupLevel) { NotifyLevel.ALL -> "all messages"; NotifyLevel.NONE -> "muted"; else -> "mentions only" }
+                    Text((if (own == null) "✓ " else "") + "Same as the group ($name)")
+                },
+                onClick = { open = false; onSelect(null) },
+            )
             DropdownMenuItem(
-                text = { Text(if (level == NotifyLevel.ALL) "✓ All messages" else "All messages") },
+                text = { Text(if (ticked == NotifyLevel.ALL) "✓ All messages" else "All messages") },
                 onClick = { open = false; onSelect(NotifyLevel.ALL) },
             )
             DropdownMenuItem(
-                text = { Text(if (level == NotifyLevel.MENTIONS) "✓ Mentions only" else "Mentions only") },
+                text = { Text(if (ticked == NotifyLevel.MENTIONS) "✓ Mentions only" else "Mentions only") },
                 onClick = { open = false; onSelect(NotifyLevel.MENTIONS) },
             )
             DropdownMenuItem(
-                text = { Text(if (level == NotifyLevel.NONE) "✓ Mute" else "Mute") },
+                text = { Text(if (ticked == NotifyLevel.NONE) "✓ Mute" else "Mute") },
                 onClick = { open = false; onSelect(NotifyLevel.NONE) },
             )
         }

@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import io.nisfeb.talon.data.notifyLevelOf
 import io.nisfeb.talon.ai.triagePrivateSlot
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.lazy.LazyListState
@@ -1190,7 +1191,7 @@ fun TalonApp(
                 // check + fire in a coroutine rather than blocking the
                 // repo's event pump.
                 appScope.launch {
-                    val level = app.db.notifyPrefs().levelFor(m.whom) ?: NotifyLevel.DEFAULT
+                    val level = app.db.notifyLevelOf(m.whom)
                     val muted = level == NotifyLevel.NONE
 
                     // ── existing notification path ─────────────────────

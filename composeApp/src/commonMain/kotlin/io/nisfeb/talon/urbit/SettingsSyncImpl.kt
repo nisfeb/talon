@@ -1399,6 +1399,14 @@ class SettingsSyncImpl(
         )
     }
 
+    // A deletion, not a "group" value: a del-entry removes the row on
+    // every device, and an older Talon or trunk reading no entry falls
+    // back to "mentions", where a value it did not know meant "all".
+    override suspend fun clearNotifyLevel(whom: String) {
+        db.notifyPrefs().clear(whom)
+        pokeDelEntry(BUCKET_NOTIFY_PREFS, whom)
+    }
+
     override suspend fun setRailItemVisibility(item: RailItem, visible: Boolean) {
         if (visible) {
             // Default-visible items are absent from the table + bucket;

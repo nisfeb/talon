@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
+import io.nisfeb.talon.data.notifyLevelOf
 import io.nisfeb.talon.data.latestPerConversation
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.ai.triagePrivateSlot
@@ -1509,9 +1510,15 @@ fun App(
                 kotlinx.coroutines.flow.combine(
                     db.latestPerConversation(),
                     db.notifyPrefs().streamAll(),
+                    db.groups().streamChannelGroups(),
                     repo.bootstrapping,
-                ) { rows, prefs, bootstrapping ->
-                    Triple(rows, prefs.associate { it.whom to it.level }, bootstrapping)
+                ) { rows, prefs, channels, bootstrapping ->
+                    // A channel with no level of its own follows its group's.
+                    val levels = io.nisfeb.talon.data.withGroupLevels(
+                        prefs.associate { it.whom to it.level },
+                        channels.associate { it.nest to it.groupFlag },
+                    )
+                    Triple(rows, levels, bootstrapping)
                 }
                     .collect { (rows, levels, bootstrapping) ->
                         if (bootstrapping || !seeded) {
@@ -1562,7 +1569,7 @@ fun App(
             DisposableEffect(repo, notifier, loggedInShip) {
                 repo.messageListener = { m, _ ->
                     if (m.parentId != null) replyScope.launch {
-                        val level = db.notifyPrefs().levelFor(m.whom)
+                        val level = db.notifyLevelOf(m.whom)
                         io.nisfeb.talon.notify.replyNotification(
                             reply = m,
                             level = level,

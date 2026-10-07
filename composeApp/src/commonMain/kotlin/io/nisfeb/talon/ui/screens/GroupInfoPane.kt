@@ -38,6 +38,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.NotifyLevel
+import io.nisfeb.talon.data.effectiveLevel
+import io.nisfeb.talon.data.groupLevelKey
 import io.nisfeb.talon.urbit.MediaCategory
 import io.nisfeb.talon.urbit.TlonChatRepo
 import io.nisfeb.talon.urbit.mediaCategoryOrLink
@@ -169,10 +171,10 @@ fun GroupInfoPane(
     LaunchedEffect(whom) {
         val mapping = runCatching { db.groups().channelGroupFor(whom) }.getOrNull()
         val flag = mapping?.groupFlag ?: return@LaunchedEffect
-        group = PaneGroup(flag)
+        group = PaneGroup(flag, channelTitle = mapping.title)
         runCatching { repo.fetchGroupAdmin(flag) }
             .getOrNull()
-            ?.let { group = PaneGroup(flag, it.members.size, it.privacy == "public") }
+            ?.let { group = group.copy(members = it.members.size, public = it.privacy == "public") }
     }
 
     val groupRowFlow: Flow<io.nisfeb.talon.data.GroupEntity?> =
@@ -184,6 +186,10 @@ fun GroupInfoPane(
 
     val notifyPref by remember(whom) { db.notifyPrefs().stream(whom) }
         .collectAsState(initial = null)
+    // The group's own level, which a channel with none of its own follows.
+    val groupPref by remember(groupFlag) {
+        groupFlag?.let { db.notifyPrefs().stream(groupLevelKey(it)) } ?: flowOf(null)
+    }.collectAsState(initial = null)
     val countsList by remember(whom) {
         db.messageMedia().streamCounts(whom)
     }.collectAsState(initial = emptyList())
@@ -195,26 +201,38 @@ fun GroupInfoPane(
     // Read here, not inside the items: the title and the level land in
     // the same moments the group's rows are added, and a row reading
     // them missed the change (as memberCount did, see PaneGroup).
-    val title = groupRow?.title ?: whom
-    val levelNow = notifyPref?.level ?: NotifyLevel.DEFAULT
+    val groupTitle = groupRow?.title ?: groupFlag
+    val channelTitle = group.channelTitle?.takeIf { it.isNotBlank() } ?: whom.substringAfterLast('/')
+    val ownLevel = notifyPref?.level
+    val groupLevel = groupPref?.level ?: NotifyLevel.DEFAULT
+    val canMutate = repo.settingsSync != null
+    var saveProblem by remember(whom) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
+    // On the repo's scope: leaving the pane while the ship is asked does
+    // not take the write with it.
+    fun save(write: suspend (io.nisfeb.talon.urbit.SettingsSync) -> Unit) {
+        val sync = repo.settingsSync ?: return
+        saveProblem = null
+        scope.launch {
+            runCatching { repo.carry { write(sync) } }
+                .onFailure { saveProblem = io.nisfeb.talon.util.problemOf("Couldn't save the notification setting", it) }
+        }
+    }
+    // The pane used to head everything with the group's name and count,
+    // then set the channel's level under it, beside the group's members,
+    // invite and leave: what was the group's and what the channel's was
+    // anyone's guess (sneagan, 2026-10-07). The channel comes first, by
+    // its own name; the group follows under its own.
     LazyColumn(modifier = modifier.fillMaxWidth()) {
         item {
-            // Header: title + member count. Avatar is intentionally
-            // omitted in v1; can be added later by reading
-            // groupRow.image (URL or hex tint) once we settle on the
-            // shared avatar component.
             Column(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleLarge,
-                )
-                memberCount?.let {
+                Text(channelTitle, style = MaterialTheme.typography.titleLarge)
+                groupTitle?.let {
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "$it members",
+                        "in $it",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -223,70 +241,77 @@ fun GroupInfoPane(
             HorizontalDivider()
         }
 
+        item { PaneHeading(if (groupFlag != null) "This channel" else "This chat") }
         item {
-            // Notification level — full set, since the chat header's
-            // dropdown is hidden whenever this pane is available
-            // (rc26). Three levels:
-            //   ALL       — every message in the channel
-            //   MENTIONS  — only when our patp is referenced (default)
-            //   NONE      — muted; nothing surfaces
-            val level = levelNow
-            val canMutate = repo.settingsSync != null
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        if (level == NotifyLevel.NONE) TalonIcons.NotificationsOff
-                        else Icons.Filled.Notifications,
-                        contentDescription = null,
-                    )
-                    Spacer(Modifier.size(12.dp))
-                    Text(
-                        "Notifications",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                NotifyLevelOption(
-                    label = "All messages",
-                    selected = level == NotifyLevel.ALL,
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                NotifyHeading(off = effectiveLevel(ownLevel, groupPref?.level) == NotifyLevel.NONE, text = "Notifications")
+                if (groupFlag != null) NotifyLevelOption(
+                    label = "Same as the group (${levelLabel(groupLevel)})",
+                    selected = ownLevel == null,
                     enabled = canMutate,
-                    onClick = {
-                        scope.launch {
-                            runCatching { repo.settingsSync?.setNotifyLevel(whom, NotifyLevel.ALL) }
-                        }
-                    },
+                    onClick = { save { it.clearNotifyLevel(whom) } },
                 )
-                NotifyLevelOption(
-                    label = "Mentions only",
-                    selected = level == NotifyLevel.MENTIONS || level == NotifyLevel.DEFAULT,
+                // With no group there is nothing to follow: no level is the default.
+                val shown = if (groupFlag != null) ownLevel else ownLevel ?: NotifyLevel.DEFAULT
+                for (l in LEVELS) NotifyLevelOption(
+                    label = levelLabel(l),
+                    selected = shown == l,
                     enabled = canMutate,
-                    onClick = {
-                        scope.launch {
-                            runCatching {
-                                repo.settingsSync?.setNotifyLevel(whom, NotifyLevel.MENTIONS)
-                            }
-                        }
-                    },
+                    onClick = { save { it.setNotifyLevel(whom, l) } },
                 )
-                NotifyLevelOption(
-                    label = "Off",
-                    selected = level == NotifyLevel.NONE,
-                    enabled = canMutate,
-                    onClick = {
-                        scope.launch {
-                            runCatching { repo.settingsSync?.setNotifyLevel(whom, NotifyLevel.NONE) }
-                        }
-                    },
-                )
+                saveProblem?.let { io.nisfeb.talon.ui.ProblemLine(it) }
             }
-            HorizontalDivider()
+        }
+        item {
+            Text(
+                "Shared media",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+        }
+        item {
+            MediaStatsGrid(
+                counts = countsByCategory,
+                onSelect = onOpenCategory,
+            )
         }
 
-        // Members link → opens existing GroupAdminScreen via the
-        // caller-supplied onOpenMembers handler. Hidden when no group
-        // flag resolved (DM/unmapped channel) — the handler would
-        // silently no-op, same as the leave row below.
-        if (groupFlag != null) {
+        // The group's own: hidden when no group flag resolved (a DM, a
+        // club, a channel not mapped yet), whose handlers would no-op.
+        groupFlag?.let { flag ->
+            item {
+                HorizontalDivider(Modifier.padding(top = 12.dp))
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text(
+                        groupTitle ?: flag,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                    Text(
+                        "Group" + (memberCount?.let { " · $it members" } ?: ""),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            item {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                    NotifyHeading(off = groupLevel == NotifyLevel.NONE, text = "Notifications for the whole group")
+                    Text(
+                        "Every channel set to Same as the group follows this.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    for (l in LEVELS) NotifyLevelOption(
+                        label = levelLabel(l),
+                        selected = groupLevel == l,
+                        enabled = canMutate,
+                        onClick = { save { it.setNotifyLevel(groupLevelKey(flag), l) } },
+                    )
+                }
+                HorizontalDivider(Modifier.padding(top = 8.dp))
+            }
+            // Members link → opens existing GroupAdminScreen via the
+            // caller-supplied onOpenMembers handler.
             item {
                 Row(
                     modifier = Modifier
@@ -298,7 +323,7 @@ fun GroupInfoPane(
                     Icon(TalonIcons.People, contentDescription = null)
                     Spacer(Modifier.size(12.dp))
                     Text(
-                        memberCount?.let { "View members ($it)" } ?: "View members",
+                        memberCount?.let { "Group members ($it)" } ?: "Group members",
                         modifier = Modifier.weight(1f).padding(end = 8.dp),
                     )
                     Icon(
@@ -321,46 +346,22 @@ fun GroupInfoPane(
                 ) {
                     Icon(TalonIcons.PersonAdd, contentDescription = null)
                     Spacer(Modifier.size(12.dp))
-                    Text("Invite someone", modifier = Modifier.weight(1f).padding(end = 8.dp))
+                    Text("Invite someone to the group", modifier = Modifier.weight(1f).padding(end = 8.dp))
                 }
                 HorizontalDivider()
             }
-        }
-
-        // A public group's code: another phone scans it from the + screen and joins.
-        if (isPublic) groupFlag?.let { flag ->
-            item {
+            // A public group's code: another phone scans it from the + screen and joins.
+            if (isPublic) item {
                 io.nisfeb.talon.ui.ShareQr(
                     link = io.nisfeb.talon.urbit.TalonLink.forGroup(flag),
-                    title = "Join by code",
+                    title = "Join the group by code",
                     caption = "Anyone can scan this from Talon's + screen to join.",
                     fileName = "group-" + flag.removePrefix("~").replace('/', '-'),
                     modifier = Modifier.padding(16.dp),
                 )
                 HorizontalDivider()
             }
-        }
-
-        item {
-            Text(
-                "Shared media",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            )
-        }
-
-        item {
-            MediaStatsGrid(
-                counts = countsByCategory,
-                onSelect = onOpenCategory,
-            )
-        }
-
-        // Leave group only makes sense if we actually resolved a group
-        // flag. Hides for DMs and pre-bootstrap channels.
-        groupFlag?.let { flag ->
             item {
-                HorizontalDivider()
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -507,5 +508,36 @@ private fun NotifyLevelOption(
     }
 }
 
-/** The group behind a channel as the info pane knows it: none yet, then its flag, then its count and privacy. */
-private data class PaneGroup(val flag: String? = null, val members: Int? = null, val public: Boolean = false)
+/** The group behind a channel as the info pane knows it: none yet, then its flag and the channel's title, then its count and privacy. */
+private data class PaneGroup(
+    val flag: String? = null,
+    val members: Int? = null,
+    val public: Boolean = false,
+    val channelTitle: String? = null,
+)
+
+private val LEVELS = listOf(NotifyLevel.ALL, NotifyLevel.MENTIONS, NotifyLevel.NONE)
+
+private fun levelLabel(level: String) = when (level) {
+    NotifyLevel.ALL -> "All messages"
+    NotifyLevel.NONE -> "Off"
+    else -> "Mentions only"
+}
+
+@Composable
+private fun PaneHeading(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+    )
+}
+
+@Composable
+private fun NotifyHeading(off: Boolean, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+        Icon(if (off) TalonIcons.NotificationsOff else Icons.Filled.Notifications, contentDescription = null)
+        Spacer(Modifier.size(12.dp))
+        Text(text, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+    }
+}
