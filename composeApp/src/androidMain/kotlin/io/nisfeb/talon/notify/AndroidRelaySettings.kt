@@ -1,6 +1,7 @@
 package io.nisfeb.talon.notify
 
 import android.content.Context
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,6 +14,13 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class AndroidRelaySettings(context: Context) : RelaySettings {
     private val prefs = context.getSharedPreferences("talon.relay", Context.MODE_PRIVATE)
+
+    override val changes: kotlinx.coroutines.flow.Flow<Unit> = kotlinx.coroutines.flow.callbackFlow {
+        // Held here: SharedPreferences keeps its listeners weakly.
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> trySend(Unit) }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
 
     private val _endpoint = MutableStateFlow(
         prefs.getString(KEY_ENDPOINT, null) ?: RelaySettings.DEFAULT_ENDPOINT,

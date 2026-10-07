@@ -95,3 +95,18 @@ fun phoneNotifications(settings: RelaySettings, ship: String): PhoneNotification
     else -> PhoneNotifications.Off
 }
 
+/**
+ * Whether Talon must keep itself running in the background to hear
+ * [ship]: no push reaches this device for it (sneagan, 2026-10-07:
+ * "talon's always on background service should turn off if there is an
+ * appropriate push service enabled"). A push needs the device's push
+ * endpoint ([pushEndpoint], null without a distributor) and someone
+ * pushing to it: the ship's own %trunk, or the relay.
+ *
+ * ponytail: trusts the registrations; a relay that lost its session, or a
+ * trunk that dropped the device, still reads as covered. Ask the ship's
+ * push status (trunk wire 12) when that lands.
+ */
+fun keepAliveNeeded(settings: RelaySettings, ship: String, pushEndpoint: String?): Boolean =
+    pushEndpoint.isNullOrBlank() || !(settings.viaShipPush(ship) || settings.deviceIdFor(ship).isNotBlank())
+

@@ -147,16 +147,36 @@ class TalonApplication : Application() {
         val aiSettingsOpening = appScope.async { io.nisfeb.talon.ai.AndroidAiSettings(this@TalonApplication) }
         // Live calls and party lines rejoin the moment the default
         // network changes (wifi to cellular), rather than when ICE
-        // gives up half a minute later.
+        // gives up half a minute later; the ship's stream reconnects
+        // with them, where its socket died silently in the hand-off.
+        // Here, not in TalonSyncService, which runs only without push.
         runCatching {
             val cm = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
             var last: android.net.Network? = null
             cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: android.net.Network) {
-                    if (last != null && last != network) io.nisfeb.talon.util.NetworkChanges.bump()
+                    if (last != null && last != network) {
+                        io.nisfeb.talon.util.NetworkChanges.bump()
+                        if (::repo.isInitialized) repo.forceReconnect()
+                    }
                     last = network
                 }
             })
+        }
+        // Waking the screen catches up what doze held back (one activity
+        // re-scry; forceReconnect's debounce caps the cost).
+        runCatching {
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+                    if (intent?.action == android.content.Intent.ACTION_SCREEN_ON && ::repo.isInitialized) repo.catchUp()
+                }
+            }
+            val filter = android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_ON)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                registerReceiver(receiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(receiver, filter)
+            }
         }
         // Cookie-jar-bearing client used by UrbitSession + S3Uploader.
         // Coil does NOT use this — coil-network-okhttp registers its

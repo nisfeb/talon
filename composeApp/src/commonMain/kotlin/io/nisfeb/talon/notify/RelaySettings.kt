@@ -63,6 +63,9 @@ interface RelaySettings {
     fun gatewayFor(patp: String): GatewayDevice? = null
     fun setGatewayFor(patp: String, device: GatewayDevice) {}
 
+    /** Fires on any change: a registration, the move to the ship, its undoing. */
+    val changes: kotlinx.coroutines.flow.Flow<Unit> get() = kotlinx.coroutines.flow.emptyFlow()
+
     /** The unread count on the app icon, on this device ([AppIconBadge]). */
     val badges: StateFlow<Boolean> get() = BADGES_OFF
     fun setBadges(on: Boolean) {}
