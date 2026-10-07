@@ -57,3 +57,6 @@ actual val isArmillaryPurchaseSupported: Boolean = true
 actual val isRelayNotificationSetupNeeded: Boolean = false
 
 actual val isAppIconBadgeSupported: Boolean = false
+
+/** Brave for Android has no Bring your own model form (brave-browser#59722). */
+actual val isBraveLeoSupported: Boolean = false

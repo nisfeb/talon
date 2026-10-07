@@ -215,6 +215,20 @@ class ArmillaryRepo(
         error("Your ship has asked the vendor for a key and is still waiting. Try Refresh in a moment.")
     }
 
+    /**
+     * The inference config read again, for Brave Leo's setup. A read and
+     * nothing more: unlike [ensureKey] it never asks for a key, and a
+     * failure says what failed instead of leaving the last answer.
+     */
+    suspend fun readInference(): Result<Inference> = runSuspendCatching {
+        val a = api ?: error("Not attached to a ship.")
+        when (val got = a.inference()) {
+            is InferenceAnswer.Have -> took(got.inference)
+            InferenceAnswer.NoKey -> error("it holds no Armillary key yet")
+            InferenceAnswer.Missing -> error("Armillary is not on it")
+        }
+    }
+
     /** The vendor as the ship has it, set to [DEFAULT_VENDOR] where it had none. */
     private suspend fun ensureVendor(a: ArmillaryApi) {
         val acct = a.account()

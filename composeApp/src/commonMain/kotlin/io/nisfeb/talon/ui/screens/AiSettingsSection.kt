@@ -73,6 +73,10 @@ import io.nisfeb.talon.armillary.Checkout
 import io.nisfeb.talon.armillary.DeleteAnswer
 import io.nisfeb.talon.armillary.Deletion
 import io.nisfeb.talon.armillary.Inference
+import io.nisfeb.talon.armillary.LEO_KEY_NOTE
+import io.nisfeb.talon.armillary.LEO_STEPS
+import io.nisfeb.talon.armillary.LeoSetup
+import io.nisfeb.talon.armillary.leoSetup
 import io.nisfeb.talon.armillary.LedgerRow
 import io.nisfeb.talon.armillary.Payment
 import io.nisfeb.talon.armillary.Plan
@@ -613,6 +617,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     var confirmDelete by remember { mutableStateOf(false) }
     var changingVendor by remember { mutableStateOf(false) }
     var history by remember { mutableStateOf(false) }
+    var leo by remember { mutableStateOf(false) }
     var vendorTyped by remember { mutableStateOf("") }
     val here = repo != null && where == ArmillaryAvailability.PRESENT
     // An error surface sent the person here to top up: open the sheet
@@ -724,6 +729,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             scope.launch { repo?.refresh(fresh = true)?.onFailure { note = (it.message ?: "The ship did not answer.") to true } }
         }) { Text("Refresh") }
         if (account?.hasView == true) TextButton(onClick = { history = !history }) { Text("History") }
+        if (io.nisfeb.talon.ui.isBraveLeoSupported && here) TextButton(onClick = { leo = !leo }) { Text("Use in Brave Leo") }
         // Not gated on buying: the account is deletable wherever it is
         // held (App Review guideline 5.1.1(v)).
         if (here && account?.vendor?.isNotBlank() == true) {
@@ -742,6 +748,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             }
         }
     }
+    if (leo && repo != null) BraveLeoLines(p, repo, account?.leaseDisabled == true)
 
     if (buying && io.nisfeb.talon.ui.isArmillaryPurchaseSupported) TopUpSheet(
         plans = plans,
@@ -786,6 +793,61 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Keep it") } },
         )
+    }
+}
+
+/**
+ * What Brave Leo's "Bring your own model" form asks for, each with a
+ * copy button, read fresh from the ship on opening: the mode may have
+ * moved since the card last read it, and a failed read says so.
+ */
+@Composable
+private fun BraveLeoLines(p: AiProvider, repo: ArmillaryRepo, leaseDisabled: Boolean) {
+    var read by remember { mutableStateOf<Result<Inference>?>(null) }
+    var model by remember { mutableStateOf<String?>(null) }
+    var picking by remember { mutableStateOf(false) }
+    LaunchedEffect(repo) { read = repo.readInference() }
+    Heading("Brave Leo")
+    val got = read
+    if (got == null) {
+        Quiet("Asking your ship for the key.")
+        return
+    }
+    val inf = got.getOrElse {
+        Quiet("Your ship did not answer for Leo: " + (it.message ?: "no answer from the ship"), error = true)
+        return
+    }
+    when (val s = leoSetup(inf, leaseDisabled, model, p.models)) {
+        is LeoSetup.Cannot -> Quiet(s.why)
+        is LeoSetup.Ready -> {
+            Quiet(LEO_STEPS)
+            LeoField("Label", s.label)
+            LeoField("Model request name", s.model) {
+                if (inf.models.size > 1) androidx.compose.foundation.layout.Box {
+                    TextButton(onClick = { picking = true }) { Text("Another model") }
+                    DropdownMenu(expanded = picking, onDismissRequest = { picking = false }) {
+                        inf.models.forEach { m -> DropdownMenuItem(text = { Text(m) }, onClick = { model = m; picking = false }) }
+                    }
+                }
+            }
+            LeoField("Server endpoint", s.endpoint)
+            s.contextSize?.let { LeoField("Context size", it.toString()) }
+            LeoField("API Key", s.apiKey, shown = "\u2022".repeat(8) + s.apiKey.takeLast(4))
+            Quiet(LEO_KEY_NOTE)
+        }
+    }
+}
+
+/** One of Leo's fields: its name as Leo's form has it, the value, and a copy button. */
+@Composable
+private fun LeoField(name: String, value: String, shown: String = value, extra: @Composable () -> Unit = {}) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Quiet(name)
+            Text(shown, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+        }
+        extra()
+        io.nisfeb.talon.ui.CopyButton(text = { value })
     }
 }
 
