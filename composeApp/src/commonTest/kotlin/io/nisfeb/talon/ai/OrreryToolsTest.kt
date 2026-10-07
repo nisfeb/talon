@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
@@ -214,6 +215,48 @@ class OrreryToolsTest {
         assertTrue("must be a JSON array" in run(t, "orrery_observe", buildJsonObject {
             put("observations", """{"subject":"person/alice"}""")
         }))
+    }
+
+    // orrery-0c, 2026-10-07: the assistant could not create Mark Beale,
+    // since the tool sent only observations, and it wrote him into a
+    // situation's participants as text as well as a ref.
+    @Test
+    fun `someone new goes with the facts about them, and is named by ref`() = runTest {
+        val t = Tap()
+        run(t, "orrery_observe", buildJsonObject {
+            put("bodies", """[{"id":"person/mark-beale","name":"Mark Beale"}]""")
+            put("observations", """[{"subject":"situation/pantry-quote","attr":"participants","value":["person/mark-beale",{"ref":"person/owner"}]},{"subject":"person/mark-beale","attr":"job","value":"carpenter"}]""")
+        })
+        assertEquals(
+            """{"bodies":[{"id":"person/mark-beale","name":"Mark Beale"}],"observations":[{"subject":"situation/pantry-quote","attr":"participants","value":[{"ref":"person/mark-beale"},{"ref":"person/owner"}]},{"subject":"person/mark-beale","attr":"job","value":"carpenter"}]}""",
+            t.observed.toString(),
+        )
+        assertTrue("bodies must be a JSON array" in run(t, "orrery_observe", buildJsonObject {
+            put("bodies", """{"id":"person/x"}""")
+            put("observations", "[]")
+        }))
+    }
+
+    @Test
+    fun `only a whole body id becomes a ref`() {
+        fun sent(v: String) = refBodyIds(Json.parseToJsonElement("""{"subject":"person/a","attr":"x","value":$v}""")).toString()
+        assertTrue(""""value":{"ref":"place/home"}""" in sent("\"place/home\""))
+        // Text that only contains one, or a kind orrery has not, or a slug it would refuse, stays text.
+        assertTrue(""""value":"meet at place/home"""" in sent("\"meet at place/home\""))
+        assertTrue(""""value":"event/x"""" in sent("\"event/x\""))
+        assertTrue(""""value":"person/Mark"""" in sent("\"person/Mark\""))
+        assertTrue(""""value":3""" in sent("3"))
+    }
+
+    // orrery-0c, 2026-10-07: the assistant put an appointment on the
+    // calendar, then told orrery the same with apply, and orrery placed
+    // a second copy. Every tool a model reads names the one path.
+    @Test
+    fun `an event has one path, and the tools that could double it say so`() = runTest {
+        val specs = orreryTools(Tap()).associate { it.spec.name to it.spec.description }
+        assertTrue("Not for adding an event" in specs.getValue("orrery_instruct"))
+        assertTrue("calendar placements included" in orreryTools(Tap()).first { it.spec.name == "orrery_instruct" }.spec.parameters.toString())
+        assertTrue("create_event, and only there" in run(Tap(), "orrery_guide"))
     }
 
     @Test

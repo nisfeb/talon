@@ -45,6 +45,16 @@ Before you write:
   and 200 observations), not one call per fact: each call costs the
   ship seconds before any work. When the owner asked for the entries,
   write them in this turn; one confirmation covers the turn.
+- An event, appointment or visit goes on the calendar with
+  create_event, and only there. Orrery reads the calendar itself and
+  makes the situation from it. Telling orrery the same event as well
+  (orrery_instruct, orrery_file_text, or a situation with `starts`)
+  makes it place a second copy on the calendar. Facts about the
+  people in it, such as who they are and what they do, are still
+  orrery_observe.
+- Someone or something orrery_find does not find is created in the
+  same orrery_observe as the facts about it, in `bodies`. A value that
+  names a body is {"ref": "person/alice"}, not the id as text.
 - A fact is one subject, one attribute, one value. `at` is when the
   thing happened or will happen, not when you are writing it.
 - A schedule is not a fact about the past. An activity's `next` and a
@@ -178,7 +188,13 @@ fun OrreryRepo.asTap(): OrreryTap = object : OrreryTap {
     }
 
     override suspend fun observe(batch: JsonObject) = observeNow(batch).map { answer ->
-        answer.observations.mapIndexed { i, it ->
+        answer.bodies.map {
+            when {
+                it.ok && it.existing -> "body ${it.id}: already there"
+                it.ok -> "body ${it.id}: created"
+                else -> "body ${it.id}: refused, ${it.error ?: "no reason given"}"
+            }
+        } + answer.observations.mapIndexed { i, it ->
             when {
                 it.ok && it.existing -> "${i + 1}: already known"
                 it.ok -> "${i + 1}: written"
@@ -278,9 +294,10 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
     add(Tool(
         spec = ToolSpec(
             "orrery_observe",
-            "Write facts to orrery under this install's key. Give a JSON array of observations, each {\"subject\": body id, \"attr\": attribute, \"value\": the value, \"at\": ISO 8601 UTC when it happened}. Put every fact of the task in ONE call: the ship takes up to 50 bodies and 200 observations at once, and each call costs it seconds before any work, so twenty calls is a minute of waiting. Resolve names with orrery_find first; the ship answers per item and may refuse one. When the owner's message asked for the entries, write them in this turn rather than describing what you would write; the owner confirms once for the turn.",
+            "Write facts to orrery under this install's key. Give a JSON array of observations, each {\"subject\": body id, \"attr\": attribute, \"value\": the value, \"at\": ISO 8601 UTC when it happened}. A value that names a body is {\"ref\": \"person/alice\"}, never the id as text. Put every fact of the task in ONE call: the ship takes up to 50 bodies and 200 observations at once, and each call costs it seconds before any work, so twenty calls is a minute of waiting. Resolve names with orrery_find first. Anyone or anything orrery_find did not find is created in this same call, in bodies, or the ship refuses every fact about it. The ship answers per item and may refuse one. When the owner's message asked for the entries, write them in this turn rather than describing what you would write; the owner confirms once for the turn.",
             toolSchema(
                 "observations" to ("string" to "A JSON array of observation objects."),
+                "bodies" to ("string" to "A JSON array of the new bodies these facts are about, each {\"id\": \"person/mark-beale\", \"name\": \"Mark Beale\"}, with \"aliases\" if the owner gave any. Only for a body orrery_find did not find."),
                 required = listOf("observations"),
             ),
         ),
@@ -289,8 +306,15 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
         val raw = args.str("observations") ?: return@Tool "Error: observations is required."
         val arr = runCatching { Json.parseToJsonElement(raw) as? JsonArray }.getOrNull()
             ?: return@Tool "Error: observations must be a JSON array."
-        if (arr.isEmpty()) return@Tool "Error: nothing to write."
-        val batch = buildJsonObject { put("observations", arr) }
+        val bodies = args.str("bodies")?.takeIf { it.isNotBlank() }?.let { b ->
+            runCatching { Json.parseToJsonElement(b) as? JsonArray }.getOrNull()
+                ?: return@Tool "Error: bodies must be a JSON array."
+        }
+        if (arr.isEmpty() && bodies.isNullOrEmpty()) return@Tool "Error: nothing to write."
+        val batch = buildJsonObject {
+            if (!bodies.isNullOrEmpty()) put("bodies", bodies)
+            put("observations", JsonArray(arr.map(::refBodyIds)))
+        }
         orrery.observe(batch).fold(
             onSuccess = { said -> if (said.isEmpty()) "The ship answered nothing." else said.joinToString("\n") },
             onFailure = { "Could not write to orrery: ${it.message}" },
@@ -418,10 +442,10 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
     add(Tool(
         spec = ToolSpec(
             "orrery_instruct",
-            "Tell orrery something in the owner's words for its model to act on: that a fact is wrong, that two bodies are one person, a fact to state, a standing preference, or something to do. The ship answers in words and files what it takes from them as proposals for the owner to approve under Actions. One model call on the ship, counted against its daily limit.",
+            "Tell orrery something in the owner's words for its model to act on: that a fact is wrong, that two bodies are one person, a fact to state, a standing preference, or something to do. Not for adding an event or appointment: that is create_event alone, since orrery reads the calendar itself and would place a second copy. The ship answers in words and files what it takes from them as proposals for the owner to approve under Actions. One model call on the ship, counted against its daily limit.",
             toolSchema(
                 "text" to ("string" to "The owner's words, up to 2000 bytes."),
-                "apply" to ("boolean" to "true only when the owner said to make the change now: what is filed is approved at once."),
+                "apply" to ("boolean" to "true only when the owner said to make the change now: everything filed is approved at once, calendar placements included, with no look under Actions."),
                 required = listOf("text"),
             ),
         ),
@@ -571,3 +595,25 @@ internal fun shipUrlHint(url: String): String {
     }
 }
 
+/**
+ * An observation with each value that is a bare body id sent as a
+ * reference. A model wrote a situation's participants as the text
+ * "person/mark-beale" beside the same as a ref, and the ship kept the
+ * text as a name (orrery-0c, 2026-10-07).
+ */
+// ponytail: any string shaped <kind>/<slug> of orrery's kinds is a ref;
+// a text value that happens to look like one would be sent as a ref too.
+internal fun refBodyIds(observation: JsonElement): JsonElement {
+    val o = observation as? JsonObject ?: return observation
+    val value = o["value"] ?: return observation
+    fun ref(v: JsonElement): JsonElement {
+        val id = (v as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return v
+        return if (BODY_ID.matches(id)) buildJsonObject { put("ref", id) } else v
+    }
+    val sent = if (value is JsonArray) JsonArray(value.map(::ref)) else ref(value)
+    return if (sent == value) o else JsonObject(o + ("value" to sent))
+}
+
+// orrery's own rule (lib/orrery.hoon +parse-bid): a slug is lowercase
+// letters, digits and hyphens, at most 64, not led by a hyphen.
+private val BODY_ID = Regex("""(person|place|activity|situation|thing|org|note)/[a-z0-9][a-z0-9-]{0,63}""")
