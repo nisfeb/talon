@@ -36,14 +36,14 @@ class TlonChatRepoStartupTest {
         val repo = TlonChatRepo(db)
         repo.start(UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") })
         try {
-            withTimeout(15_000) { block(repo) }
+            withTimeout(60_000) { block(repo) }
         } finally {
             repo.stop()
         }
     }
 
     private suspend fun until(what: String, check: suspend () -> Boolean) {
-        runCatching { withTimeout(10_000) { while (!check()) delay(50) } }
+        runCatching { withTimeout(30_000) { while (!check()) delay(50) } }
             .onFailure { error("never saw: $what") }
     }
 

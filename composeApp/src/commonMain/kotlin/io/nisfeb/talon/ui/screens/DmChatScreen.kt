@@ -604,6 +604,8 @@ fun DmChatScreen(
     }
 
     var paginating by remember(whom) { mutableStateOf(false) }
+
+    var olderFailedAtMs by remember(whom) { mutableStateOf(0L) }
     var paginationExhausted by remember(whom) { mutableStateOf(false) }
     LaunchedEffect(whom) {
         snapshotFlow {
@@ -624,12 +626,18 @@ fun DmChatScreen(
                 val nextWindow = db.messages().sentMsAfterNewest(whom, shown + CHAT_WINDOW - 1)
                 if (nextWindow != null || db.messages().sentMsAfterNewest(whom, shown) != null) {
                     widenTo(nextWindow ?: Long.MIN_VALUE)
-                } else {
+                } else if (nowMs() - olderFailedAtMs >= OLDER_RETRY_MS) {
                     widenTo(Long.MIN_VALUE)
-                    // A failed page is not the bottom: the next scroll asks again.
+                    // A failed page is not the bottom: the next scroll asks
+                    // again, but not at once. A short chat keeps its top in
+                    // view, so every layout change asked again: eight failed
+                    // pages, sixty-four scries, in the first tenth of a second.
                     runSuspendCatching { repo.loadOlder(whom) }
                         .onSuccess { if (!it) paginationExhausted = true }
-                        .onFailure { Log.w("DmChatScreen", "older $whom failed: ${it.message}") }
+                        .onFailure {
+                            olderFailedAtMs = nowMs()
+                            Log.w("DmChatScreen", "older $whom failed: ${it.message}")
+                        }
                 }
                 paginating = false
             }
@@ -2922,3 +2930,6 @@ internal fun DeleteMessageDialog(mine: Boolean, onDelete: () -> Unit, onDismiss:
     onConfirm = onDelete,
     onDismiss = onDismiss,
 )
+
+/** How long after a failed older page before the list asks again. */
+private const val OLDER_RETRY_MS = 15_000L
