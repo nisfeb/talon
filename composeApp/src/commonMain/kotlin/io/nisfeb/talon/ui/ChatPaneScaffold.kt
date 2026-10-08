@@ -16,14 +16,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * List/detail layout host. Below [ExpandedThreshold] it renders the
+ * List/detail layout host. Below `splitFrom` it renders the
  * stack-style "show whichever has content" behaviour Talon used
- * pre-0.9 (mobile + narrow desktop windows). At/above the threshold
- * it places [list] on the left and [detail] (or [EmptyChatPane])
- * on the right.
+ * pre-0.9 (mobile + narrow desktop windows). At/above it it places
+ * [list] on the left and [detail] (or [EmptyChatPane]) on the right,
+ * the list as wide as [listPaneWidth] allows.
  *
  * Owns no navigation state — callers (today: `App.kt`) decide what
  * `detail` is by inspecting their existing flags (`openChat`,
@@ -40,17 +41,20 @@ fun ChatPaneScaffold(
     detail: (@Composable () -> Unit)?,
     listFraction: Float = DEFAULT_LIST_FRACTION,
     onListFractionChange: (Float) -> Unit = {},
+    /** The narrowest width that still splits. The desktop shell, which
+     *  has its own window breakpoint, splits down to [SPLIT_WIDTH]. */
+    splitFrom: Dp = ExpandedThreshold,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val expanded = maxWidth >= ExpandedThreshold
+        val expanded = maxWidth >= splitFrom
         if (!expanded) {
             // Stack: detail wins when present, list otherwise.
             if (detail != null) detail() else list()
             return@BoxWithConstraints
         }
         val totalWidthPx = with(LocalDensity.current) { maxWidth.toPx() }
-        val listWidth = maxWidth * listFraction.coerceIn(MIN_LIST_FRACTION, MAX_LIST_FRACTION)
+        val listWidth = listPaneWidth(maxWidth, listFraction)
         Row(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.width(listWidth).fillMaxHeight()) { list() }
             PaneDragHandle(onDragDelta = { deltaPx ->
@@ -72,7 +76,7 @@ internal fun PaneDragHandle(
     Box(
         modifier = modifier
             .fillMaxHeight()
-            .width(6.dp)
+            .width(HANDLE_WIDTH)
             .pointerHoverIcon(ResizeLeftRightIcon)
             .draggable(
                 orientation = Orientation.Horizontal,
@@ -92,3 +96,27 @@ val ExpandedThreshold = 840.dp
 const val DEFAULT_LIST_FRACTION = 0.30f
 const val MIN_LIST_FRACTION = 0.20f
 const val MAX_LIST_FRACTION = 0.50f
+
+/** The narrowest the chat column gets beside other panes, and the
+ *  narrowest a desktop window gets (Main.kt): what a phone's chat has. */
+val MIN_CHAT_WIDTH = 360.dp
+
+/** The narrowest the list pane gets: its header's buttons and a name. */
+val MIN_LIST_WIDTH = 240.dp
+
+/** A drag handle between two panes. */
+val HANDLE_WIDTH = 6.dp
+
+/** The narrowest list/chat split: both at their minimums. */
+val SPLIT_WIDTH = MIN_LIST_WIDTH + HANDLE_WIDTH + MIN_CHAT_WIDTH
+
+/**
+ * The list pane's width in a split [total] wide: the owner's [fraction],
+ * but never under the list's minimum, nor so wide that the chat drops
+ * under its own. The chat's minimum wins below [SPLIT_WIDTH], where
+ * nothing splits.
+ */
+fun listPaneWidth(total: Dp, fraction: Float): Dp =
+    (total * fraction.coerceIn(MIN_LIST_FRACTION, MAX_LIST_FRACTION))
+        .coerceAtLeast(MIN_LIST_WIDTH)
+        .coerceAtMost(total - HANDLE_WIDTH - MIN_CHAT_WIDTH)

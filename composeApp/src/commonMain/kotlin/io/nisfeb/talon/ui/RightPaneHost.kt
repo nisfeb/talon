@@ -69,6 +69,8 @@ fun RightPaneHost(
             Text(
                 title,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(start = 4.dp),
             )
             io.nisfeb.talon.ui.IconButton(tip = "Close", onClick = if (content is RightPaneContent.GroupInfoDrilldown) onLeaveCategoryDrilldown

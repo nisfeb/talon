@@ -478,6 +478,15 @@ fun main() {
                     kotlin.system.exitProcess(0)
                 }
             }
+            // No narrower than the chat column's minimum: below it a
+            // chat's text ran into ever more rows. AWT sizes are in the
+            // same unscaled units as dp.
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                window.minimumSize = java.awt.Dimension(
+                    io.nisfeb.talon.ui.MIN_CHAT_WIDTH.value.toInt(),
+                    window.minimumSize.height,
+                )
+            }
             // Override Compose's default desktop UriHandler. The
             // default delegates to java.awt.Desktop.browse, which
             // throws on Wayland-only Linux setups (Hyprland, Sway,

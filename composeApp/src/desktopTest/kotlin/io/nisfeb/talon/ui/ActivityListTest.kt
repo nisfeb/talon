@@ -6,6 +6,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
@@ -38,7 +40,11 @@ class ActivityListTest {
         {"time":"100","event":{"dm-react":{"key":{"id":"~dev/2.000"},"parent":{"id":"~dev/1.000"},"author":"~dev","react":"👍"}}}
     ]}]}"""
 
-    private fun activity(prepare: FakeShip.() -> Unit = { scries["activity/v6/feed/init/30"] = feed }, block: ComposeUiTest.(FakeShip) -> Unit) {
+    private fun activity(
+        prepare: FakeShip.() -> Unit = { scries["activity/v6/feed/init/30"] = feed },
+        width: androidx.compose.ui.unit.Dp? = null,
+        block: ComposeUiTest.(FakeShip) -> Unit,
+    ) {
         val tmp = createTempDirectory(prefix = "talon-activity-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
@@ -53,6 +59,7 @@ class ActivityListTest {
                             onOpenConversation = { went += "chat $it" },
                             onOpenReply = { w, p, r -> went += "reply $w $p $r" },
                             onOpenPost = { w, p -> went += "post $w $p" },
+                            modifier = width?.let { androidx.compose.ui.Modifier.width(it) } ?: androidx.compose.ui.Modifier,
                         )
                     }
                 }
@@ -85,6 +92,17 @@ class ActivityListTest {
         waitUntil(timeoutMillis = 5_000) { shows("No replies to your posts yet.") }
         onNodeWithText("Mentions").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Nobody has mentioned you yet.") }
+    }
+
+    // A list pane narrower than its four tabs: they fold into a dropdown,
+    // and picking from it switches the tab as a tab would.
+    @Test
+    fun `in a narrow pane the tabs are a dropdown that still switches`() = activity(width = 160.dp) {
+        waitUntil(timeoutMillis = 5_000) { shows("~bus · Mentioned you") }
+        assertTrue(onAllNodesWithText("Replies").fetchSemanticsNodes().isEmpty(), "folded into the dropdown")
+        onNodeWithText("All").performClick()
+        onNodeWithText("Replies").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("No replies to your posts yet.") }
     }
 
     @Test

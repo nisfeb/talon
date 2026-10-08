@@ -34,10 +34,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
 import androidx.compose.material3.TopAppBar
@@ -936,6 +934,10 @@ fun AssistantScreen(
             detail = if (!expanded && mobileShowSidebar) null else rightPane,
             listFraction = listFraction,
             onListFractionChange = { listFraction = it },
+            // Beside the rail the window is wide already: split as the
+            // chat list does, or 840-904dp showed the transcript alone
+            // with no way to the conversations.
+            splitFrom = if (forceExpanded) io.nisfeb.talon.ui.SPLIT_WIDTH else ExpandedThreshold,
         )
     }
 }
@@ -988,6 +990,8 @@ private fun AssistantSidebar(
                 Text(
                     "Assistant",
                     style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f).padding(start = 8.dp),
                 )
             }
@@ -997,11 +1001,11 @@ private fun AssistantSidebar(
             // switch between, so skip the tab strip entirely.
             val effectiveTab = if (jobsEnabled) tab else SidebarTab.Conversations
             if (jobsEnabled) {
-                PrimaryTabRow(selectedTabIndex = effectiveTab.ordinal) {
-                    SidebarTab.values().forEach { t ->
-                        Tab(selected = effectiveTab == t, onClick = { onTabChange(t) }, text = { Text(t.label) })
-                    }
-                }
+                io.nisfeb.talon.ui.AdaptiveTabRow(
+                    labels = SidebarTab.entries.map { it.label },
+                    selected = effectiveTab.ordinal,
+                    onSelect = { onTabChange(SidebarTab.entries[it]) },
+                )
             }
 
             when (effectiveTab) {

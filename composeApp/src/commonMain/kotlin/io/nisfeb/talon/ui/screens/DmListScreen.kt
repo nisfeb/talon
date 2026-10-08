@@ -814,10 +814,14 @@ fun DmListScreen(
                     label,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 6.dp),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    // Gives way to the buttons in a narrow list pane.
+                    modifier = Modifier.weight(1f).padding(start = 6.dp),
                 )
+            } else {
+                Spacer(Modifier.weight(1f))
             }
-            Spacer(Modifier.weight(1f))
             io.nisfeb.talon.ui.IconButton(tip = "Search", onClick = onOpenSearch) {
                 Icon(Icons.Filled.Search, contentDescription = "Search")
             }
@@ -1084,35 +1088,21 @@ fun DmListScreen(
             onCreateNew = { creatingFolder = true },
         )
         if (selectedFolderId == null && selectedSpecial == SpecialTab.All) {
-            androidx.compose.material3.TabRow(
-                selectedTabIndex = selectedHomeTab.ordinal,
-            ) {
-                androidx.compose.material3.Tab(
-                    selected = selectedHomeTab == HomeTab.Groups,
-                    onClick = { switchHomeTab(HomeTab.Groups) },
-                    text = { Text(if (groupsUnread > 0) "Groups · $groupsUnread" else "Groups") },
-                )
-                androidx.compose.material3.Tab(
-                    selected = selectedHomeTab == HomeTab.Dms,
-                    onClick = { switchHomeTab(HomeTab.Dms) },
-                    text = { Text(if (dmsUnread > 0) "DMs · $dmsUnread" else "DMs") },
-                )
-                if (partyLinesTab != null) {
-                    androidx.compose.material3.Tab(
-                        selected = selectedHomeTab == HomeTab.PartyLines,
-                        onClick = { switchHomeTab(HomeTab.PartyLines) },
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Party lines")
-                                // Someone is on one of the lines right now.
-                                if (partyLinesOccupied) {
-                                    MenuBadgeDot(Modifier.padding(start = 6.dp))
-                                }
-                            }
-                        },
-                    )
-                }
-            }
+            // Groups and DMs always, then Party lines where a caller has them.
+            val homeTabs = HomeTab.entries.take(if (partyLinesTab != null) 3 else 2)
+            io.nisfeb.talon.ui.AdaptiveTabRow(
+                labels = homeTabs.map { t ->
+                    when (t) {
+                        HomeTab.Groups -> if (groupsUnread > 0) "Groups · $groupsUnread" else "Groups"
+                        HomeTab.Dms -> if (dmsUnread > 0) "DMs · $dmsUnread" else "DMs"
+                        HomeTab.PartyLines -> "Party lines"
+                    }
+                },
+                selected = homeTabs.indexOf(selectedHomeTab),
+                onSelect = { switchHomeTab(homeTabs[it]) },
+                // Someone is on one of the lines right now.
+                dots = if (partyLinesOccupied && partyLinesTab != null) setOf(2) else emptySet(),
+            )
         }
         HorizontalDivider()
         UpdateBanner(

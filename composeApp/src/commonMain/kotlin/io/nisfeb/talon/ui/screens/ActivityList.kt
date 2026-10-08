@@ -15,8 +15,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
 import kotlinx.coroutines.flow.map
@@ -98,20 +96,13 @@ fun ActivityList(
         // all three views back in the one feed/init scry — switching
         // tabs is free, no refetch.
         // Shown before the feed loads too: Threads needs no feed.
-        TabRow(selectedTabIndex = tab.ordinal) {
-            TlonChatRepo.ActivityTab.entries.forEach { t ->
-                Tab(
-                    selected = t == tab,
-                    onClick = { tab = t },
-                    text = {
-                        Text(
-                            if (t == TlonChatRepo.ActivityTab.THREADS && unreadThreads > 0) "${t.label} · $unreadThreads" else t.label,
-                            style = MaterialTheme.typography.labelLarge,
-                        )
-                    },
-                )
-            }
-        }
+        io.nisfeb.talon.ui.AdaptiveTabRow(
+            labels = TlonChatRepo.ActivityTab.entries.map { t ->
+                if (t == TlonChatRepo.ActivityTab.THREADS && unreadThreads > 0) "${t.label} · $unreadThreads" else t.label
+            },
+            selected = tab.ordinal,
+            onSelect = { tab = TlonChatRepo.ActivityTab.entries[it] },
+        )
         if (tab == TlonChatRepo.ActivityTab.THREADS) {
             if (unreadThreads > 0) {
                 TextButton(

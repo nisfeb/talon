@@ -56,6 +56,7 @@ class AppShellTest {
         seed: suspend AppDatabase.() -> Unit = {},
         ai: FakeAiSettings = FakeAiSettings(),
         ui: UiSettings = InMemoryUiSettings(),
+        width: androidx.compose.ui.unit.Dp = 1200.dp,
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -75,7 +76,7 @@ class AppShellTest {
         try {
             runComposeUiTest {
                 setContent {
-                    Box(Modifier.size(width = 1200.dp, height = 800.dp)) {
+                    Box(Modifier.size(width = width, height = 800.dp)) {
                         App(
                             http = ship.http,
                             sessionStore = ship.session,
@@ -272,6 +273,35 @@ class AppShellTest {
         // The parent, in the chat and again at the head of its thread.
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("shall we meet").fetchSemanticsNodes().size >= 2 }
         assertTrue(onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size >= 2, "the chat's composer and the thread's, side by side")
+    }
+
+    // "Dropdown instead of panes": in a window too narrow for list, chat
+    // and thread side by side, the thread opens over the chat, the list
+    // stays, and closing the thread brings the chat back.
+    @Test
+    fun `in a narrower window a thread opens over the chat, beside the list`() = app(width = 900.dp, seed = {
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["shall we meet"]}]""", "/chat"))
+    }) {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("shall we meet") }
+        onNodeWithText("~bus").performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
+        // 900dp used to fold the list away as soon as a chat opened.
+        assertTrue(showing("DMs"), "the list is still beside the chat")
+        val opened = { onAllNodesWithText("Reply in thread").fetchSemanticsNodes().isNotEmpty() }
+        for (attempt in 1..3) {
+            onAllNodesWithContentDescription("Message actions").onFirst().performClick()
+            if (runCatching { waitUntil(timeoutMillis = 1_500) { opened() } }.isSuccess) break
+        }
+        onNodeWithText("Reply in thread").performClick()
+        val threadOpen = { onAllNodesWithText("Thread").fetchSemanticsNodes().isNotEmpty() }
+        waitUntil(timeoutMillis = 5_000) { threadOpen() }
+        assertTrue(showing("DMs"), "the list stays")
+        kotlin.test.assertEquals(1, onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size, "the thread's composer alone, over the chat")
+        onNodeWithContentDescription("Close").performClick()
+        waitUntil(timeoutMillis = 5_000) { !threadOpen() }
+        kotlin.test.assertEquals(1, onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size, "the chat's composer is back")
+        assertTrue(present("Message actions"), "the chat is back")
     }
 
     private fun ComposeUiTest.press(key: Key, ctrl: Boolean = false) =
