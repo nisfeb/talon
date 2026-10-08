@@ -37,6 +37,7 @@ package io.nisfeb.talon.ui
  *  - isRelayNotificationSetupNeeded — i: the app is suspended in the background, so the relay's push is its only notification. A: a foreground service keeps the ship's stream. D: notifies while it runs.
  *  - isAppIconBadgeSupported — i: the unread count on the app icon, a switch in Settings (off until turned on). A: launchers draw their own dot from the notifications. D: no icon to badge.
  *  - isArmillaryPurchaseSupported — A, D; i on the US App Store storefront only. Apple allows a button to an outside checkout there and nowhere else (guideline 3.1.1(a)), so elsewhere buying, its pitch and every "top up" go. The card, the balance and the history do not depend on it.
+ *  - isBraveLeoSupported: D, i, where Brave takes a model of your own (Settings > Leo > Bring your own model; iOS since Brave 1.88). A: Brave for Android has no such form yet (brave-browser#59722).
  *
  * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
  * below too — a display name and a per-feature predicate, not flags.
@@ -385,3 +386,10 @@ expect val isRelayNotificationSetupNeeded: Boolean
 /** The unread count on the app icon, by the owner's choice (iOS). */
 expect val isAppIconBadgeSupported: Boolean
 
+/**
+ * Whether Brave on this platform takes a model of the owner's own, so
+ * the Armillary card can hand Leo its endpoint, model and key. Desktop
+ * and iOS: Leo's "Bring your own model" form. Android: Brave has no such
+ * form, so the card shows nothing to copy into it.
+ */
+expect val isBraveLeoSupported: Boolean
