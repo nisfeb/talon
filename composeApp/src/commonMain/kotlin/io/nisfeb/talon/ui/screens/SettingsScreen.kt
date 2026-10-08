@@ -831,6 +831,16 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // The same key, handed to orrery for its place lookups
+                // (orrery 87), where Orrery is on: a deliberate button.
+                if (orrery != null) {
+                    val orreryOn by orrery.enabled.collectAsState()
+                    if (orreryOn) OrrerySearchKeyRow(
+                        key = aiState.braveApiKey,
+                        read = { orrery.searchSettings() },
+                        set = { on, k -> orrery.setSearch(on, k) },
+                    )
+                }
 
                 Spacer(Modifier.height(8.dp))
                 Text(

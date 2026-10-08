@@ -434,7 +434,7 @@ private fun Heading(text: String) {
 }
 
 @Composable
-private fun Quiet(text: String, error: Boolean = false) {
+internal fun Quiet(text: String, error: Boolean = false) {
     if (text.isBlank()) return
     Text(
         text,
