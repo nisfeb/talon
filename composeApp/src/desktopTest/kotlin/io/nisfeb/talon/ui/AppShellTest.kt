@@ -56,6 +56,8 @@ class AppShellTest {
         seed: suspend AppDatabase.() -> Unit = {},
         ai: FakeAiSettings = FakeAiSettings(),
         ui: UiSettings = InMemoryUiSettings(),
+        // The test window is 1024dp wide: Modifier.size clamps anything
+        // wider to that, so 1200 here is really 1024.
         width: androidx.compose.ui.unit.Dp = 1200.dp,
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
