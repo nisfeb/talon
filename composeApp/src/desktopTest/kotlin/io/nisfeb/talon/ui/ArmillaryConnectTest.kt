@@ -184,4 +184,15 @@ class ArmillaryConnectTest {
         assertEquals("k.s", ai.rowKey())
         assertEquals(1, keyAsks())
     }
+
+    @Test
+    fun `a second tap while it waits asks for no second key`() {
+        mintHoldMs = 1_000
+        val ai = settings()
+        val r = repo(ai)
+        r.setUpDevice("desktop")
+        r.setUpDevice("desktop")
+        runBlocking { withTimeout(10_000) { r.inference.first { it != null } } }
+        assertEquals(1, keyAsks())
+    }
 }
