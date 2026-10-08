@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.test.onAllNodesWithTag
+import io.nisfeb.talon.ai.DEVICE_PROVIDER
+import io.nisfeb.talon.ai.FeatureSetting
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.foundation.layout.Column
@@ -203,6 +206,40 @@ class AiSettingsSectionTest {
 
     private val funded = """{"ship":"~feb","balance":12345000,"plan":"","subscription":{"active":false},
         "lease":{},"checkouts":{},"vendor":"~wex","self":"~feb","stale":3}"""
+
+    @Test
+    fun `what works is listed first, the device model says what it is, and a keyless model is named where it is picked`() = runComposeUiTest {
+        // sneagan's screen, 2026-10-08: a keyless OpenRouter on top, "On this
+        // device" saying "OpenRouter has no key", the working Armillary last.
+        val ai = FakeAiSettings().withProfile(
+            AiProfile(
+                providers = listOf(
+                    AiProvider("or", ProviderKind.OpenRouter, "OpenRouter"),
+                    AiProvider(DEVICE_PROVIDER, ProviderKind.ThisDevice, "On this device"),
+                    AiProvider(ARMILLARY_PROVIDER, ProviderKind.Armillary, "Armillary"),
+                ),
+                defaultModel = ModelRef(ARMILLARY_PROVIDER, ""),
+                features = mapOf(AiFeature.CatchUp to FeatureSetting(on = true, model = ModelRef("or", "openai/gpt-4o"))),
+            ),
+        )
+        val bought = selling(ai, "[]", funded)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
+            }
+        }
+        fun top(text: String) = onAllNodesWithText(text).fetchSemanticsNodes().first().boundsInRoot.top
+        assertTrue(top("Armillary") < top("OpenRouter"), "the working default above the keyless one")
+        assertTrue(top("OpenRouter") < top("This device's own model"), "the device's own model last")
+        onNodeWithText("On this device").assertDoesNotExist()
+        onNodeWithText("Runs here, so a feature set to it reads your messages without sending them anywhere.").assertExists()
+        // Said under the feature that would fail, not on the device's card.
+        onNodeWithText("OpenRouter has no key.").assertExists()
+        assertTrue(
+            onAllNodesWithTag(ARMILLARY_LOGO, useUnmergedTree = true).fetchSemanticsNodes().size >= 2,
+            "the logo beside the card's name and the default model's",
+        )
+    }
 
     @Test
     fun `the sheet shows the sizes cheapest first, then another amount`() = runComposeUiTest {
