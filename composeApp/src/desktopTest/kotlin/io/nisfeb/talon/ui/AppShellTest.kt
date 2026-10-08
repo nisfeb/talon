@@ -359,6 +359,27 @@ class AppShellTest {
         home()
     }
 
+    // "When adding a new contact and pressing Message, it should exit you
+    // out of that view to the newly created DM conversation" (sneagan,
+    // 2026-10-08). The sheet set the chat and left Contacts on top of it.
+    @Test
+    fun `Message on a contact just added leaves Contacts for the conversation`() = app { ship ->
+        onNodeWithContentDescription("More").performClick()
+        onNodeWithText("Contacts").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("~patp, or a word name") }
+        onNodeWithText("~patp, or a word name").performTextInput("~bus")
+        waitForIdle()
+        onNodeWithText("Add").performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("contacts").isNotEmpty() && onAllNodesWithText("~bus").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("~bus")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Message") }
+        onNodeWithText("Message").performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("~patp, or a word name") }
+        assertTrue(!showing("Search contacts"), "Contacts is put down")
+        // The sheet is gone, so the one "Message" left is the conversation's composer.
+        waitUntil(timeoutMillis = 5_000) { showing("Message") }
+    }
+
     // Areas of the app get shortcuts the owner sets: pressed anywhere, the
     // area opens as its rail item would open it.
     @Test

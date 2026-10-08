@@ -695,9 +695,11 @@ fun TalonApp(
             onDismiss = { inviteShipFromCode = null },
             onMessage = {
                 inviteShipFromCode = null
-                calendarOpen = false; homeOpen = false; assistantOpen = false; assistantListen = false; mailOpen = false
-                newDmOpen = false; openGroupFlag = null
-                openWhom = ship
+                // Every section, not a list of them: one left out stays on top.
+                sections.leave {
+                    sections.closeAll(); assistantListen = false; openGroupFlag = null
+                    openWhom = ship
+                }
             },
         )
     }
@@ -3039,10 +3041,12 @@ fun TalonApp(
                 ship = ship,
                 self = ship == (loggedInShip ?: ""),
                 contact = freshContact,
+                // Out of whatever the profile was opened over (Contacts, the
+                // status feed, any section) and into the conversation:
+                // setting the chat alone left Contacts on top of it.
                 onMessage = {
                     profileSheetShip = null
-                    statusFeedOpen = false
-                    openWhom = ship
+                    sections.leave { closeSections(); openWhom = ship }
                 },
                 onEditSelf = {
                     profileSheetShip = null

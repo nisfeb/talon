@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -66,13 +67,23 @@ fun Avatar(
                 mono,
                 style = MaterialTheme.typography.labelMedium.copy(
                     fontWeight = FontWeight.Bold,
-                    fontSize = (size.value * 0.4f).sp,
+                    fontSize = monogramSp(size, LocalDensity.current.fontScale).sp,
                     color = Color.White,
                 ),
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }
 }
+
+/**
+ * The monogram's size in sp: 40% of the tile, shrinking with a small
+ * text size but never growing past that. The tile is in dp and sp grows
+ * with the text size, so at a large one the letters spilled out of the
+ * circle (sneagan, 2026-10-08).
+ */
+internal fun monogramSp(size: Dp, fontScale: Float): Float = size.value * 0.4f * minOf(1f, 1f / fontScale)
 
 private fun monogramFor(label: String): String {
     // trimStart('.') — mnemonym fallback names are dot-joined words
