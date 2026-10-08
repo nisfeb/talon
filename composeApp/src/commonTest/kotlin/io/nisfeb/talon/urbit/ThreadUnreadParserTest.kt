@@ -89,6 +89,28 @@ class ThreadUnreadParserTest {
         assertNull(activityThreadReadSource("chat/~zod/general", "170141184505682734808612287823886221312", null, "~zod/g"))
     }
 
+    // A user's report, 2026-10-08: DM threads came back unread about once
+    // a day and the badge would not clear. Chat files a DM thread under its
+    // parent's stored time (seal.time), not the send time in its id.
+    @Test
+    fun `a DM thread is keyed by when the ship stored its parent`() {
+        val dm = activityThreadReadSource("~bud", "~bud/170141184505682734808612287823886221312", null, null, dmStoredDa = "170141184505682734900000000000000000000")!!
+        assertEquals(
+            Json.parseToJsonElement(
+                """{"dm-thread":{"key":{"id":"~bud/170.141.184.505.682.734.808.612.287.823.886.221.312","time":"170.141.184.505.682.734.900.000.000.000.000.000.000"},"whom":{"ship":"~bud"}}}""",
+            ),
+            dm,
+        )
+        val club = activityThreadReadSource("0v4.abcde", "~bud/170141184505", null, null, dmStoredDa = "170141184999")!!
+        assertEquals("170.141.184.999", ((club["dm-thread"] as JsonObject)["key"] as JsonObject)["time"]!!.jsonPrimitive.content)
+        // A channel's key time is its id's: the stored time is not used there.
+        val chan = activityThreadReadSource("chat/~zod/general", "170141184505", "~bud", "~zod/g", dmStoredDa = "170141184999")!!
+        assertEquals("170.141.184.505", ((chan["thread"] as JsonObject)["key"] as JsonObject)["time"]!!.jsonPrimitive.content)
+        // A time that is not a number falls back to the id's.
+        val bad = activityThreadReadSource("~bud", "~bud/170141184505", null, null, dmStoredDa = "soon")!!
+        assertEquals("170.141.184.505", ((bad["dm-thread"] as JsonObject)["key"] as JsonObject)["time"]!!.jsonPrimitive.content)
+    }
+
     @Test
     fun `read and delete facts for a thread resolve to the local thread row`() {
         val src = Json.parseToJsonElement(

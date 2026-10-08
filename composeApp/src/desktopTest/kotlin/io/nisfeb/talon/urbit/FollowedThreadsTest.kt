@@ -113,6 +113,26 @@ class FollowedThreadsTest {
         )
     }
 
+    // The ship stored the parent later than its sender sent it, as every
+    // real DM: the thread's key carries the stored time (seal.time), read
+    // off the writ, or the ship files the follow and the read under a
+    // thread that does not exist (a user's report, 2026-10-08).
+    @Test
+    fun `a DM thread is followed and read under its parent's stored time`() = live {
+        db.messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["q"]}]""", "/chat"))
+        ship.scries["chat/v4/dm/~bus/writs/writ/id/~bus/170.141.184.506"] =
+            """{"seal":{"id":"~bus/170.141.184.506","time":"170141184999","seq":4,"reacts":{},"replies":{},"meta":{}},"essay":{"content":[{"inline":["q"]}],"author":"~bus","sent":1000,"kind":"/chat","meta":null,"blob":null}}"""
+        repo.setFollow("~bus", "~bus/170141184506", false)
+        val key = """{"dm-thread":{"key":{"id":"~bus/170.141.184.506","time":"170.141.184.999"},"whom":{"ship":"~bus"}}}"""
+        assertEquals(
+            """{"adjust":{"source":$key,"volume":{"dm-reply":{"unreads":false,"notify":false}}}}""",
+            ship.pokesTo("activity").first().json.toString(),
+        )
+        repo.markThreadRead("~bus", "~bus/170141184506", force = true)
+        assertTrue(ship.pokesTo("activity").any { "\"read\"" in it.json.toString() && key in it.json.toString() }, "${ship.pokesTo("activity")}")
+        assertEquals(1, ship.scried.count { "/writs/writ/id/" in it }, "the stored time is asked once a session")
+    }
+
     // ─── from the ship ───────────────────────────────────────────
 
     @Test
