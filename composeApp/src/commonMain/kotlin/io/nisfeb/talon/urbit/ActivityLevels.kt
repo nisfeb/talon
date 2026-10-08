@@ -27,7 +27,7 @@ import kotlinx.serialization.json.put
 internal object ActivityLevels {
 
     /** Every event a map names, as Tlon's client writes them. */
-    val EVENTS = listOf(
+    private val EVENTS = listOf(
         "post", "post-mention", "reply", "reply-mention", "react", "dm-react", "dm-invite", "dm-post",
         "dm-post-mention", "dm-reply", "dm-reply-mention", "group-ask", "group-join", "group-kick",
         "group-invite", "group-role", "flag-post", "flag-reply", "note-create", "note-edit",

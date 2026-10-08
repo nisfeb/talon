@@ -129,4 +129,45 @@ class ActivityLevelsMirrorTest {
         repo.bootstrapFollowedThreadsForTest()
         assertTrue(activity().isEmpty(), "told once: not again")
     }
+
+    @Test
+    fun `a refused base write does not stop the levels`() = live {
+        db.notifyPrefs().upsert(NotifyPreferenceEntity(nest, NotifyLevel.ALL))
+        ship.refuse = { if (it.app == "activity" && "\"base\"" in it.json.toString()) "no" else null }
+        ship.scries["activity/v6/volume-settings"] = """{"base":$stock}"""
+        repo.bootstrapFollowedThreadsForTest()
+        assertEquals(adjust("""{"channel":{"nest":"$nest","group":"~bus/club"}}""", map(NotifyLevel.ALL)), activity().last().json)
+    }
+
+    @Test
+    fun `a back-to-the-group that did not go is sent at the next connect`() = live {
+        ship.refuse = { if (it.app == "activity") "no" else null }
+        sync.clearNotifyLevel(nest)
+        ship.refuse = { null }
+        ship.pokes.clear()
+        // the ship still holds the channel's old map
+        ship.scries["activity/v6/volume-settings"] = """{"base":${ActivityLevels.volumeMap("soft")},"channel/$nest":${ActivityLevels.volumeMap("loud")}}"""
+        repo.bootstrapFollowedThreadsForTest()
+        assertEquals(listOf(adjust("""{"channel":{"nest":"$nest","group":"~bus/club"}}""", null)), activity().map { it.json })
+        ship.pokes.clear()
+        repo.bootstrapFollowedThreadsForTest()
+        assertTrue(activity().isEmpty(), "told once: not again")
+    }
+
+    @Test
+    fun `a level set while not connected goes at connect`() = live {
+        // a repo with no channel yet takes over the settings hook
+        val offline = TlonChatRepo(db, settingsSync = sync)
+        try {
+            sync.setNotifyLevel(nest, NotifyLevel.NONE)
+            assertTrue(activity().isEmpty(), "${activity()}")
+            offline.attachForTest(ship.channel, "~zod")
+            // the ship has an entry, but this level never reached it
+            ship.scries["activity/v6/volume-settings"] = """{"base":${ActivityLevels.volumeMap("soft")},"channel/$nest":${ActivityLevels.volumeMap("soft")}}"""
+            offline.bootstrapFollowedThreadsForTest()
+            assertEquals(listOf(adjust("""{"channel":{"nest":"$nest","group":"~bus/club"}}""", ActivityLevels.volumeMap("hush"))), activity().map { it.json })
+        } finally {
+            offline.stopAndJoinForTest()
+        }
+    }
 }
