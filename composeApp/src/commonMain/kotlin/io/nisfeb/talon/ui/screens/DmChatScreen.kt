@@ -826,9 +826,12 @@ fun DmChatScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             io.nisfeb.talon.ui.NavIcon(onBack = onBack)
+            // One line however narrow: the buttons keep their room.
             Text(
                 contactMap.conversationLabel(whom),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(start = 4.dp),
             )
             // Group/channel chats only for v1 — clubs (`0v...`) don't

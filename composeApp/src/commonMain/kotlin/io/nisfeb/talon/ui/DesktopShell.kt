@@ -56,9 +56,14 @@ import io.nisfeb.talon.ui.icons.TalonIcons
  *
  * At/above the threshold we add a 64dp vertical icon rail on the far
  * left, then defer to [ChatPaneScaffold] for the list / detail split
- * with its drag handle. A reserved [rightSidebar] slot is null in
- * Phase 2; Phase 3 will fill it with thread / files / links / pinned-
- * post panels.
+ * with its drag handle, and put [rightSidebar] (thread, group info) on
+ * the right.
+ *
+ * As the window narrows, in order: the list and the right pane give up
+ * width down to their minimums; then, below [RIGHT_BESIDE_WIDTH], the
+ * right pane opens over the chat instead of beside it; then, below
+ * [ExpandedThreshold], everything is full-screen. The chat column never
+ * gets narrower than [MIN_CHAT_WIDTH], nor does a desktop window.
  *
  * The rail is rendered ONLY inside the expanded branch — never as a
  * sibling of [ChatPaneScaffold] — so a compact-mode resize doesn't
@@ -100,6 +105,12 @@ fun DesktopShell(
             }
             return@BoxWithConstraints
         }
+        // The right pane sits beside the chat only while list and chat
+        // keep their minimums; narrower, it opens over the chat, as it
+        // does full-screen in the compact layout. Its close button is
+        // the way back to the chat.
+        val rightWidth = rightSidebar?.let { rightPaneBesideWidth(maxWidth, rightPaneWidth) }
+        val overChat = rightSidebar != null && rightWidth == null
         Row(modifier = Modifier.fillMaxSize()) {
             DesktopRail(
                 activeTab = activeRailTab,
@@ -122,36 +133,27 @@ fun DesktopShell(
                 } else {
                     ChatPaneScaffold(
                         list = list,
-                        detail = detail,
+                        detail = if (overChat) rightSidebar else detail,
                         listFraction = listFraction,
                         onListFractionChange = onListFractionChange,
+                        // Every width this branch sees splits: the list
+                        // narrows to its minimum rather than folding away.
+                        splitFrom = SPLIT_WIDTH,
                     )
                 }
             }
-            // Right sidebar — Phase 3's thread / group-info / media-
-            // drilldown surface. Fixed 360dp width when present; when
-            // null we don't render an empty fourth column. The caller
-            // (App.kt) only supplies a non-null lambda when there's
-            // active content to show, so a no-content right pane never
-            // wastes screen real estate. Phase 2 reserved this slot in
-            // the API but didn't render it — Phase 3's App.kt wiring
-            // sent content here that was silently dropped on the floor
-            // until 0.10.0-rc4.
-            if (rightSidebar != null) {
-                // Never wider than leaves the chat its minimum, and
-                // never past MAX_RIGHT_PANE_WIDTH — UiSettings clamps
-                // the stored width to the same ceiling, and this keeps
-                // the pane honest even for a caller that didn't.
-                val cap = (this@BoxWithConstraints.maxWidth - RAIL_WIDTH - MIN_MAIN_WIDTH)
-                    .coerceAtLeast(MIN_RIGHT_PANE_WIDTH)
-                    .coerceAtMost(MAX_RIGHT_PANE_WIDTH)
-                val width = rightPaneWidth.coerceIn(MIN_RIGHT_PANE_WIDTH, cap)
+            // Right sidebar: thread, group info or a media drilldown.
+            // The caller (App.kt) only supplies a non-null lambda when
+            // there's active content to show, so a no-content right pane
+            // never wastes screen real estate.
+            if (rightSidebar != null && rightWidth != null) {
                 val density = LocalDensity.current
                 PaneDragHandle(onDragDelta = { deltaPx ->
                     val delta = with(density) { deltaPx.toDp() }
-                    onRightPaneWidthChange((width - delta).coerceIn(MIN_RIGHT_PANE_WIDTH, cap))
+                    rightPaneBesideWidth(this@BoxWithConstraints.maxWidth, rightWidth - delta)
+                        ?.let(onRightPaneWidthChange)
                 })
-                Box(modifier = Modifier.width(width).fillMaxHeight()) {
+                Box(modifier = Modifier.width(rightWidth).fillMaxHeight()) {
                     rightSidebar()
                 }
             }
@@ -294,9 +296,23 @@ internal fun railLabel(item: RailItem): String = when (item) {
     RailItem.Settings -> "Settings"
 }
 
-private val RAIL_WIDTH = 64.dp
+val RAIL_WIDTH = 64.dp
 val DEFAULT_RIGHT_PANE_WIDTH = 360.dp
 val MIN_RIGHT_PANE_WIDTH = 280.dp
 val MAX_RIGHT_PANE_WIDTH = 900.dp
-/** What the list and chat keep between them however wide the right pane gets. */
-private val MIN_MAIN_WIDTH = 520.dp
+
+/**
+ * The right pane's width beside the list and chat of a [window]-wide
+ * shell: the [wanted] width, held between the pane's own bounds and
+ * what leaves the list and chat their minimums ([SPLIT_WIDTH]). Null
+ * where even the pane's minimum does not fit beside them: the pane then
+ * opens over the chat. With the minimums as they are, that is below
+ * [RIGHT_BESIDE_WIDTH].
+ */
+fun rightPaneBesideWidth(window: Dp, wanted: Dp): Dp? {
+    val room = (window - RAIL_WIDTH - SPLIT_WIDTH - HANDLE_WIDTH).coerceAtMost(MAX_RIGHT_PANE_WIDTH)
+    return if (room < MIN_RIGHT_PANE_WIDTH) null else wanted.coerceIn(MIN_RIGHT_PANE_WIDTH, room)
+}
+
+/** The narrowest window with the right pane beside the chat. */
+val RIGHT_BESIDE_WIDTH = RAIL_WIDTH + SPLIT_WIDTH + HANDLE_WIDTH + MIN_RIGHT_PANE_WIDTH

@@ -1,7 +1,19 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.ComposeUiTest
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -11,8 +23,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.width
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class DesktopShellTest {
 
@@ -146,6 +160,136 @@ class DesktopShellTest {
         // Ascending top → ascending list position.
         val sortedByTop = orderedTops.sortedBy { it.second }.map { it.first }
         assertEquals(order, sortedByTop, "rail icons should render top-down in enabledItems order")
+    }
+
+    /** The shell with tagged panes, in a window [width] wide. */
+    @OptIn(ExperimentalTestApi::class)
+    private fun ComposeUiTest.shell(
+        width: () -> androidx.compose.ui.unit.Dp,
+        fraction: Float = 0.30f,
+        right: Boolean = true,
+        rightWidth: androidx.compose.ui.unit.Dp = DEFAULT_RIGHT_PANE_WIDTH,
+    ) = setContent {
+        // required: the test window is only 1024dp wide.
+        Box(Modifier.requiredSize(width = width(), height = 800.dp)) {
+            DesktopShell(
+                activeRailTab = RailTab.Chats,
+                enabledItems = RailItem.entries.toList(),
+                onItemClicked = {},
+                list = { Box(Modifier.fillMaxSize().testTag("list")) { Text("LIST") } },
+                detail = { Box(Modifier.fillMaxSize().testTag("chat")) { Text("DETAIL") } },
+                listFraction = fraction,
+                onListFractionChange = {},
+                rightSidebar = if (right) ({ Box(Modifier.fillMaxSize().testTag("right")) { Text("RIGHT") } }) else null,
+                rightPaneWidth = rightWidth,
+            )
+        }
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    private fun ComposeUiTest.bounds(tag: String) = onNodeWithTag(tag).getBoundsInRoot()
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a wide window has the right pane beside the chat, and the list beside both`() = runComposeUiTest {
+        shell({ 1400.dp })
+        val list = bounds("list")
+        val chat = bounds("chat")
+        val right = bounds("right")
+        assertTrue(chat.left >= list.right, "chat after list")
+        assertTrue(right.left >= chat.right, "right pane after chat")
+        assertEquals(DEFAULT_RIGHT_PANE_WIDTH, right.width)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `narrower, the right pane opens over the chat and the list stays`() = runComposeUiTest {
+        shell({ 900.dp })
+        onNodeWithTag("chat").assertDoesNotExist()
+        val list = bounds("list")
+        val right = bounds("right")
+        assertTrue(right.left >= list.right, "in the chat's column, beside the list")
+        // The chat's whole column: the window less the rail, list and handle.
+        val column = 900.dp - RAIL_WIDTH - list.width - HANDLE_WIDTH
+        assertTrue(kotlin.math.abs((column - right.width).value) <= 1f, "$column vs ${right.width}")
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `just above the compact breakpoint the list stays beside the chat`() = runComposeUiTest {
+        // 840 to 904 used to show the chat alone beside the rail.
+        shell({ 860.dp }, right = false)
+        val list = bounds("list")
+        val chat = bounds("chat")
+        assertEquals(MIN_LIST_WIDTH, list.width)
+        assertTrue(chat.left >= list.right)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `dragging the right pane's edge stops where list and chat keep their minimums`() = runComposeUiTest {
+        var stored by mutableStateOf(DEFAULT_RIGHT_PANE_WIDTH)
+        setContent {
+            Box(Modifier.requiredSize(width = 1400.dp, height = 800.dp)) {
+                DesktopShell(
+                    activeRailTab = RailTab.Chats,
+                    enabledItems = RailItem.entries.toList(),
+                    onItemClicked = {},
+                    list = { Text("LIST") },
+                    detail = { Text("DETAIL") },
+                    listFraction = 0.30f,
+                    onListFractionChange = {},
+                    rightSidebar = { Box(Modifier.fillMaxSize().testTag("right")) { Text("RIGHT") } },
+                    rightPaneWidth = stored,
+                    onRightPaneWidthChange = { stored = it },
+                )
+            }
+        }
+        // The handle is the 6dp just left of the pane.
+        fun dragHandle(byPx: Float) {
+            val x = with(density) { (bounds("right").left - 3.dp).toPx() }
+            val y = with(density) { 400.dp.toPx() }
+            onRoot().performTouchInput { down(Offset(x, y)); moveBy(Offset(byPx, 0f)); up() }
+            waitForIdle()
+        }
+        dragHandle(-2000f)
+        // 1400 less the rail, list and chat minimums and two handles.
+        assertEquals(724.dp, stored)
+        dragHandle(2000f)
+        assertEquals(MIN_RIGHT_PANE_WIDTH, stored)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `the chat column is never narrower than its minimum`() = runComposeUiTest {
+        var window by mutableStateOf(2400.dp)
+        var right by mutableStateOf(true)
+        var fraction by mutableStateOf(0.5f)
+        setContent {
+            Box(Modifier.requiredSize(width = window, height = 800.dp)) {
+                DesktopShell(
+                    activeRailTab = RailTab.Chats,
+                    enabledItems = RailItem.entries.toList(),
+                    onItemClicked = {},
+                    list = { Box(Modifier.fillMaxSize().testTag("list")) { Text("LIST") } },
+                    detail = { Box(Modifier.fillMaxSize().testTag("chat")) { Text("DETAIL") } },
+                    listFraction = fraction,
+                    onListFractionChange = {},
+                    rightSidebar = if (right) ({ Box(Modifier.fillMaxSize().testTag("right")) { Text("RIGHT") } }) else null,
+                    rightPaneWidth = MAX_RIGHT_PANE_WIDTH,
+                )
+            }
+        }
+        for (w in listOf(2400, 1600, 1200, 1000, 956, 955, 904, 870, 840, 839, 600, 360)) {
+            for (r in listOf(true, false)) for (f in listOf(0.2f, 0.5f)) {
+                window = w.dp; right = r; fraction = f
+                waitForIdle()
+                // The chat's column holds the chat, or the right pane over it.
+                val column = if (onAllNodesWithTag("chat").fetchSemanticsNodes().isNotEmpty()) "chat" else "right"
+                val width = bounds(column).width
+                assertTrue(width >= MIN_CHAT_WIDTH, "window ${w}dp, right $r, fraction $f: $column is $width")
+            }
+        }
     }
 }
 

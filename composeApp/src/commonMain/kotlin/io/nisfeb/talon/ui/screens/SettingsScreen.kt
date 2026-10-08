@@ -36,8 +36,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.Tab
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.window.Dialog
@@ -2051,25 +2049,20 @@ private fun SettingsRail(
     }
 }
 
-/** Horizontal scrollable tabs — narrow layouts (phone portrait). */
+/** Horizontal tabs for narrow layouts (phone portrait): they scroll
+ *  while two fit side by side, and are a dropdown below that. */
 @Composable
 private fun SettingsTabRow(
     tabs: List<SettingsTab>,
     selected: SettingsTab,
     onSelect: (SettingsTab) -> Unit,
 ) {
-    ScrollableTabRow(
-        selectedTabIndex = tabs.indexOf(selected).coerceAtLeast(0),
-        edgePadding = 12.dp,
-    ) {
-        tabs.forEach { t ->
-            Tab(
-                selected = t == selected,
-                onClick = { onSelect(t) },
-                text = { Text(t.label) },
-            )
-        }
-    }
+    io.nisfeb.talon.ui.AdaptiveTabRow(
+        labels = tabs.map { it.label },
+        selected = tabs.indexOf(selected).coerceAtLeast(0),
+        onSelect = { onSelect(tabs[it]) },
+        scrollable = true,
+    )
 }
 
 /** A hex field with a swatch; tapping the swatch opens a colour wheel under the row. */

@@ -84,6 +84,23 @@ class ChatPaneScaffoldTest {
 
     @OptIn(ExperimentalTestApi::class)
     @Test
+    fun `it splits from exactly the width that holds both minimums`() = runComposeUiTest {
+        val width = androidx.compose.runtime.mutableStateOf(SPLIT_WIDTH)
+        setContent {
+            androidx.compose.foundation.layout.Box(Modifier.size(width = width.value, height = 600.dp)) {
+                ChatPaneScaffold(list = { Text("LIST") }, detail = { Text("DETAIL") }, splitFrom = SPLIT_WIDTH)
+            }
+        }
+        onNodeWithText("LIST").assertExists()
+        onNodeWithText("DETAIL").assertExists()
+        width.value = SPLIT_WIDTH - 1.dp
+        waitForIdle()
+        onNodeWithText("LIST").assertDoesNotExist()
+        onNodeWithText("DETAIL").assertExists()
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
     fun `wide window with null detail renders empty pane copy`() = runComposeUiTest {
         setContent {
             androidx.compose.foundation.layout.Box(

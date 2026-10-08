@@ -24,8 +24,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Tab
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
 import io.nisfeb.talon.ui.TextButton
@@ -217,15 +215,11 @@ fun GalleryComposeScreen(
         }
         HorizontalDivider()
 
-        PrimaryTabRow(selectedTabIndex = tab.ordinal) {
-            GalleryTab.values().forEach { t ->
-                Tab(
-                    selected = tab == t,
-                    onClick = { tab = t },
-                    text = { Text(t.label) },
-                )
-            }
-        }
+        io.nisfeb.talon.ui.AdaptiveTabRow(
+            labels = GalleryTab.entries.map { it.label },
+            selected = tab.ordinal,
+            onSelect = { tab = GalleryTab.entries[it] },
+        )
 
         Column(
             modifier = Modifier

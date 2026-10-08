@@ -24,8 +24,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -186,6 +184,8 @@ fun OrreryScreen(
             Text(
                 "Orrery",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 4.dp).weight(1f),
             )
             if (refreshing) {
@@ -196,11 +196,11 @@ fun OrreryScreen(
                 }
             }
         }
-        TabRow(selectedTabIndex = tab.ordinal) {
-            OrreryTab.entries.forEach { t ->
-                Tab(selected = tab == t, onClick = { tab = t; stack = emptyList() }, text = { Text(t.label) })
-            }
-        }
+        io.nisfeb.talon.ui.AdaptiveTabRow(
+            labels = OrreryTab.entries.map { it.label },
+            selected = tab.ordinal,
+            onSelect = { tab = OrreryTab.entries[it]; stack = emptyList() },
+        )
         // Kept data on show and the ship not answering: say how old it is.
         if (problem != null && view != null && tab != OrreryTab.ACTIONS) {
             Text(
