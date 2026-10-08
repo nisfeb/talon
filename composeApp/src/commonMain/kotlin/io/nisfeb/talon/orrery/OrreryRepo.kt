@@ -585,6 +585,14 @@ class OrreryRepo(
      * asked for it. On this repo's scope: the model call takes up to two
      * minutes, and closing the dialog meanwhile does not stop it.
      */
+    /** Orrery's place lookups as the ship holds them. */
+    suspend fun searchSettings(): Result<SearchSettings> = runCatching { attached().searchSettings() }
+
+    /** Turn orrery's place lookups on (with [apiKey]) or off, on the repo's scope: leaving Settings does not take it along. */
+    suspend fun setSearch(enabled: Boolean, apiKey: String? = null): Result<SearchSettings> = scope.async {
+        runCatching { attached().setSearch(enabled, apiKey) }
+    }.await()
+
     suspend fun instruct(text: String, action: String? = null, apply: Boolean = false): Result<Instructed> = scope.async {
         runCatching {
             val answer = attached().instruct(text, action, apply)

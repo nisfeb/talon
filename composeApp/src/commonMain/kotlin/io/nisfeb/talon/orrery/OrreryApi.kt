@@ -25,6 +25,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -225,6 +226,31 @@ class OrreryApi(
      * A refusal (no model key, the day's calls spent, the model failing)
      * is an answer the owner reads, as a refine's is.
      */
+    /** Orrery's place lookups through Brave Search (orrery 87), as the ship holds them. Owner only. */
+    suspend fun searchSettings(): SearchSettings = searchOf(request(owner, HttpMethod.Get, "/api/search"))
+
+    /**
+     * Turn orrery's place lookups on or off. Owner only: the install's
+     * key is refused (403 "owner only"). A blank or absent key keeps the
+     * stored one, so turning off keeps it for turning on again.
+     */
+    suspend fun setSearch(enabled: Boolean, apiKey: String? = null): SearchSettings {
+        val body = buildJsonObject {
+            put("enabled", enabled)
+            apiKey?.trim()?.takeIf { it.isNotEmpty() }?.let { put("api_key", it) }
+        }
+        return searchOf(request(owner, HttpMethod.Put, "/api/search", body.toString()))
+    }
+
+    private fun searchOf(text: String): SearchSettings = reading {
+        val o = Json.parseToJsonElement(text).jsonObject
+        SearchSettings(
+            enabled = o["enabled"]?.jsonPrimitive?.booleanOrNull == true,
+            keySet = o["api_key_set"]?.jsonPrimitive?.booleanOrNull == true,
+            monthlyCap = o["monthly_cap"]?.jsonPrimitive?.intOrNull,
+        )
+    }
+
     suspend fun instruct(text: String, action: String? = null, apply: Boolean = false): Instructed {
         val body = buildJsonObject {
             put("text", clipBytes(text.trim(), 2000))
@@ -761,6 +787,9 @@ data class Refined(
 )
 
 /** What an instruction answered: the ship's reply, what it filed, and what it would not do. */
+/** Orrery's place lookups: on or off, whether it holds a key (never the key), its monthly cap. */
+data class SearchSettings(val enabled: Boolean, val keySet: Boolean, val monthlyCap: Int?)
+
 data class Instructed(
     val reply: String = "",
     val actions: List<OrreryAction> = emptyList(),
