@@ -137,12 +137,14 @@ fun AdaptiveTabRow(
 @Composable
 private fun TabLabel(label: String, dot: Boolean, style: TextStyle, modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        // No weight: a scrollable row measures its tabs with unbounded
+        // width, and Row gives a weighted child of unbounded width none at
+        // all, so Settings' tab titles drew at zero width (2026-10-08).
         Text(
             label,
             style = style,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
         )
         if (dot) MenuBadgeDot(Modifier.padding(start = 6.dp))
     }
