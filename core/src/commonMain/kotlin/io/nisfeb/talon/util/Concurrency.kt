@@ -50,4 +50,5 @@ class ConcurrentSet<E> {
     fun contains(element: E): Boolean = synchronized(lock) { set.contains(element) }
     fun remove(element: E): Boolean = synchronized(lock) { set.remove(element) }
     fun clear() { synchronized(lock) { set.clear() } }
+    fun toList(): List<E> = synchronized(lock) { set.toList() }
 }

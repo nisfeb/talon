@@ -1843,7 +1843,7 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
                     working = true
                     status = "Unregistering…"
                     scope.launch {
-                        val ok = config.client.unregister(deviceId)
+                        val ok = config.client.unregister(deviceId, io.nisfeb.talon.notify.RelayClient.REASON_OFF)
                         if (ok) {
                             config.settings.clearDeviceIdFor(ship)
                             status = "Unregistered."

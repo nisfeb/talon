@@ -185,12 +185,15 @@ class RelayClient(
 
     /**
      * Tell the relay to forget this device entirely. Idempotent —
-     * a 404 is fine because "already gone" is the goal.
+     * a 404 is fine because "already gone" is the goal. [reason] is one
+     * of the REASON_ words, for the relay's log: a device that moved to
+     * its ship's own push looked, from the relay, like a lost
+     * registration (a user's report, 2026-10-08).
      */
-    suspend fun unregister(deviceId: String): Boolean = withContext(ioDispatcher) {
+    suspend fun unregister(deviceId: String, reason: String? = null): Boolean = withContext(ioDispatcher) {
         if (deviceId.isBlank()) return@withContext true
         runCatching {
-            val resp = http.delete("${endpoint().trimEnd('/')}/devices/$deviceId")
+            val resp = http.delete("${endpoint().trimEnd('/')}/devices/$deviceId" + (reason?.let { "?reason=$it" } ?: ""))
             resp.status.isSuccess() || resp.status.value == 404
         }.getOrDefault(false)
     }
@@ -208,8 +211,15 @@ class RelayClient(
         }.getOrNull()
     }
 
-    private companion object {
+    companion object {
         private val JSON = Json { ignoreUnknownKeys = true }
+
+        /** Moved to the ship's own push (%trunk). */
+        const val REASON_SHIP_PUSH = "ship-push"
+        /** The owner turned the relay off for this ship. */
+        const val REASON_OFF = "off"
+        /** The ship was forgotten on this device. */
+        const val REASON_FORGOTTEN = "forgotten"
     }
 }
 

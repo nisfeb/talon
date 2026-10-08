@@ -30,6 +30,9 @@ interface NotifyPreferenceDao {
     @Query("SELECT * FROM notify_preferences")
     fun streamAll(): Flow<List<NotifyPreferenceEntity>>
 
+    @Query("SELECT * FROM notify_preferences")
+    suspend fun all(): List<NotifyPreferenceEntity>
+
     @Query("DELETE FROM notify_preferences")
     suspend fun clearAll()
 

@@ -168,6 +168,10 @@ fun Application.installRoutes(
             val id = call.parameters["deviceId"] ?: return@delete call.respond(HttpStatusCode.BadRequest)
             for (row in db.shipsForDevice(id)) pool.stopRow(row.rowId)
             db.deleteDevice(id)
+            // Said, so a phone that moved to its ship's own push does not
+            // read as a lost registration (a user's report, 2026-10-08).
+            // The id is the app's secret: only its start is logged.
+            log.info("device ${id.take(6)}… removed: ${removalReason(call.request.queryParameters["reason"])}")
             call.respond(HttpStatusCode.NoContent)
         }
 
@@ -221,4 +225,12 @@ private fun loginToShip(http: OkHttpClient, shipUrl: String, code: String): Stri
             raw.substringBefore(';').trim()
         }
     }.getOrNull()
+}
+
+/** Why the app removed a device, from the words it sends; anything else is said as unknown. */
+internal fun removalReason(reason: String?): String = when (reason) {
+    "ship-push" -> "the app moved it to its ship's own push (%trunk), which pushes to it now"
+    "off" -> "the owner turned the relay off for this ship"
+    "forgotten" -> "the ship was forgotten on that device"
+    else -> "the app asked, giving no reason (an older Talon)"
 }

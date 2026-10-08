@@ -795,7 +795,7 @@ fun App(
                             caps = io.nisfeb.talon.notify.TrunkPush.iosCaps(badges = relaySettings.badges.value),
                         )
                     },
-                    relayUnregister = { id -> relayClient.unregister(id) },
+                    relayUnregister = { id -> relayClient.unregister(id, io.nisfeb.talon.notify.RelayClient.REASON_SHIP_PUSH) },
                     newId = { io.nisfeb.talon.data.newGid() },
                 )
                 // Only in front: the test push counts only when Talon is open
@@ -2076,7 +2076,7 @@ fun App(
                     val goneRelayId = relaySettings.deviceIdFor(gone)
                     pushCleanupScope.launch {
                         if (goneRelayId.isNotBlank()) {
-                            runCatching { relayClient.unregister(goneRelayId) }
+                            runCatching { relayClient.unregister(goneRelayId, io.nisfeb.talon.notify.RelayClient.REASON_FORGOTTEN) }
                             relaySettings.clearDeviceIdFor(gone)
                         }
                         io.nisfeb.talon.notify.forgetShipPush(gone, relaySettings) { body ->

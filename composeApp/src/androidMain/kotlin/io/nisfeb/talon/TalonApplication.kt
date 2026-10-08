@@ -387,7 +387,8 @@ class TalonApplication : Application() {
         appScope.launch {
             if (deviceId.isNotBlank()) {
                 runCatching {
-                    io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value }).unregister(deviceId)
+                    io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value })
+                        .unregister(deviceId, io.nisfeb.talon.notify.RelayClient.REASON_FORGOTTEN)
                 }
                 relaySettings.clearDeviceIdFor(ship)
             }
@@ -405,7 +406,8 @@ class TalonApplication : Application() {
             poke = { body -> shipRepo.pokeRaw(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.notify.TrunkPush.MARK, body) },
             register = { id -> tokens.token()?.let { io.nisfeb.talon.notify.TrunkPush.register(id, it, tokens.caps) } },
             relayUnregister = { id ->
-                io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value }).unregister(id)
+                io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value })
+                    .unregister(id, io.nisfeb.talon.notify.RelayClient.REASON_SHIP_PUSH)
             },
             newId = { java.util.UUID.randomUUID().toString() },
         )
