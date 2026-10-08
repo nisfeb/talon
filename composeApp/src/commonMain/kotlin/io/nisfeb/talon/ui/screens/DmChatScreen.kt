@@ -1639,7 +1639,8 @@ private fun MessageRow(
     onReactionTap: (MessageEntity, List<ReactionEntity>, String) -> Unit,
     /** Long-press / right-click on any reaction chip — surfaces the
      *  per-reactor breakdown so the user can see who reacted with
-     *  what without long-pressing the message itself. */
+     *  what without long-pressing the message itself. Where a pointer
+     *  hovers, the chip also names them in a tip. */
     onReactionLongPress: (List<ReactionEntity>) -> Unit,
     onMentionTap: (String) -> Unit,
     onLinkTap: (String) -> Unit,
@@ -1833,6 +1834,10 @@ private fun MessageRow(
                             emoji = emoji,
                             count = count,
                             mine = mine,
+                            reactors = io.nisfeb.talon.ui.reactorsLine(
+                                row.reactions.filter { ReactionPalette.normalize(it.emoji) == emoji }.map { it.author },
+                                ourPatp,
+                            ) { contactMap.displayName(it) },
                             onClick = { onReactionTap(m, row.reactions, emoji) },
                             onLongClick = { onReactionLongPress(row.reactions) },
                         )
@@ -1893,10 +1898,12 @@ private fun MessageRow(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ReactionChip(
+internal fun ReactionChip(
     emoji: String,
     count: Int,
     mine: Boolean,
+    /** Who reacted, for the hover tip ("You, Alice and Bob"). */
+    reactors: String,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
 ) {
@@ -1904,7 +1911,8 @@ private fun ReactionChip(
         MaterialTheme.colorScheme.primaryContainer
     else
         MaterialTheme.colorScheme.surfaceVariant
-    Row(
+    // Names on hover where there is a pointer; a phone keeps the long press.
+    io.nisfeb.talon.ui.HoverTip(reactors) { Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
@@ -1927,7 +1935,7 @@ private fun ReactionChip(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
+    } }
 }
 
 /**
