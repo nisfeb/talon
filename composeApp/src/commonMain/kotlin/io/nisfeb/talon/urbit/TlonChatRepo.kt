@@ -4483,7 +4483,32 @@ class TlonChatRepo(
         val author = if (isChannel) {
             db.messages().getOne(whom, parentPostId)?.author ?: return null
         } else null
-        return activityThreadReadSource(whom, parentPostId, author, groupFlag)
+        val stored = if (isChannel) null else dmStoredDa(whom, parentPostId)
+        return activityThreadReadSource(whom, parentPostId, author, groupFlag, stored)
+    }
+
+    /** DM parents' stored times (`seal.time`, undotted), by `whom#id`, as the ship gave them. */
+    private val dmStoredDas = io.nisfeb.talon.util.ConcurrentMap<String, String>()
+
+    /**
+     * When the ship stored a DM thread's parent: the key %activity files
+     * the thread under (see [activityThreadReadSource]). Read off the
+     * writ, once a session per thread; null where the ship does not
+     * answer, and the id's time stands in.
+     */
+    private suspend fun dmStoredDa(whom: String, parentPostId: String): String? {
+        val key = "$whom#$parentPostId"
+        dmStoredDas[key]?.let { return it }
+        val ch = channel ?: return null
+        val kind = if (whom.startsWith("~")) "dm" else "club"
+        val id = redotWritId(parentPostId)
+        val body = io.nisfeb.talon.util.runSuspendCatching {
+            scryNewest(ch, "chat", "/v4/$kind/$whom/writs/writ/id/$id", "/v3/$kind/$whom/writs/writ/id/$id")
+        }.getOrNull() as? JsonObject ?: return null
+        val time = (body["seal"] as? JsonObject)?.get("time").asStr()?.replace(".", "")
+            ?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) } ?: return null
+        dmStoredDas[key] = time
+        return time
     }
 
     // ───────── followed threads ─────────

@@ -199,12 +199,21 @@ internal fun sourceToThreadSource(source: JsonObject): ThreadSource? {
  * Channel parents are stored by bare da, so the author comes from the
  * parent row; DM parents already carry it in the id. Null when the
  * key cannot be built.
+ *
+ * A DM thread's key `time` is when the ship STORED the parent, its
+ * writ's `seal.time`, not the send time in its id: chat files the
+ * thread as `top-con [id time]:op` (tlon-apps chat.hoon). The two
+ * differ, so a read keyed by the id's time named no thread and the
+ * ship dropped it; the thread came back unread and kept the badge up
+ * (a user's report, 2026-10-08). [dmStoredDa] is that time, undotted;
+ * without it the id's time stands in, as before.
  */
 internal fun activityThreadReadSource(
     whom: String,
     parentPostId: String,
     parentAuthor: String?,
     groupFlag: String?,
+    dmStoredDa: String? = null,
 ): JsonObject? {
     val (author, da) = if (parentPostId.startsWith("~")) {
         parentPostId.substringBefore('/') to parentPostId.substringAfter('/')
@@ -213,9 +222,11 @@ internal fun activityThreadReadSource(
     }
     if (da.isEmpty() || !da.all { it.isDigit() }) return null
     val dotted = dotAtom(da)
+    val isDm = whom.startsWith("~") || whom.startsWith("0v")
+    val stored = dmStoredDa?.takeIf { isDm && it.isNotEmpty() && it.all(Char::isDigit) }
     val key = buildJsonObject {
         put("id", "$author/$dotted")
-        put("time", dotted)
+        put("time", stored?.let(::dotAtom) ?: dotted)
     }
     return when {
         whom.startsWith("~") -> buildJsonObject {
