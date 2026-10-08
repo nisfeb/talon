@@ -11,6 +11,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -44,8 +48,8 @@ class AdaptiveTabRowTest {
     }
 
     /** Every label on screen, each on one line and whole. */
-    private fun ComposeUiTest.allWhole(style: TextStyle) {
-        for (label in labels) {
+    private fun ComposeUiTest.allWhole(style: TextStyle, of: List<String> = labels) {
+        for (label in of) {
             val layout = layoutOf(label)
             assertEquals(1, layout.lineCount, "$label wrapped")
             assertFalse(layout.multiParagraph.didExceedMaxLines, "$label wanted a second line")
@@ -88,12 +92,16 @@ class AdaptiveTabRowTest {
         width = needFull * n + 6.dp
         waitForIdle()
         allWhole(full)
+        onNodeWithText("Conversations").assertIsSelected()
+        onNodeWithText("Mentions").assertIsNotSelected()
 
         // Material's own tab would cut these labels short here.
         width = needTight * n + 6.dp
         assertTrue(width < needFull * n)
         waitForIdle()
         allWhole(full)
+        onNodeWithText("Conversations").assertIsSelected()
+        onNodeWithText("Mentions").assertIsNotSelected()
 
         width = needSmall * n + 3.dp
         assertTrue(width < needTight * n)
@@ -107,6 +115,9 @@ class AdaptiveTabRowTest {
         assertTrue(onAllNodesWithText("Party lines").fetchSemanticsNodes().isEmpty())
         assertEquals(1, layoutOf("Conversations").lineCount)
         onNodeWithText("Conversations").performClick()
+        // The menu marks the current tab.
+        onNode(hasText("Conversations") and hasContentDescription("Current")).assertExists()
+        onNode(hasText("Mentions") and hasContentDescription("Current")).assertDoesNotExist()
         onNodeWithText("Party lines").performClick()
         waitForIdle()
         assertEquals(2, selected)
@@ -162,5 +173,48 @@ class AdaptiveTabRowTest {
         // Folded into the dropdown, the dot shows on it so it is not lost.
         assertTrue(onAllNodesWithText("Party lines").fetchSemanticsNodes().isEmpty())
         assertEquals(1, onAllNodes(androidx.compose.ui.test.hasContentDescription("Unread"), useUnmergedTree = true).fetchSemanticsNodes().size)
+        // And in the menu, on its own tab only.
+        onNodeWithText("Groups").performClick()
+        assertEquals(2, onAllNodes(androidx.compose.ui.test.hasContentDescription("Unread"), useUnmergedTree = true).fetchSemanticsNodes().size)
+        onNode(hasText("Party lines") and hasContentDescription("Unread")).assertExists()
+    }
+
+    @Test
+    fun `a dot takes room, so a label that fits only without it gets the next form`() = runComposeUiTest {
+        // The widest label last, and dotted.
+        val tabs = listOf("DMs", "Groups", "Party lines")
+        var width by mutableStateOf(2000.dp)
+        var label = 0.dp
+        var full = TextStyle.Default
+        setContent {
+            val measurer = rememberTextMeasurer()
+            val density = LocalDensity.current
+            full = MaterialTheme.typography.titleSmall
+            label = with(density) { measurer.measure("Party lines", full).size.width.toDp() }
+            Box(Modifier.width(width)) {
+                AdaptiveTabRow(tabs, 0, onSelect = {}, dots = setOf(2))
+            }
+        }
+        waitForIdle()
+        // Room for the label and its dot in a full tab.
+        width = (label + 14.dp + 33.dp) * 3 + 3.dp
+        waitForIdle()
+        allWhole(full, tabs)
+        // Room for the label alone: the dot would push it short, so tighter.
+        width = (label + 33.dp) * 3 + 3.dp
+        waitForIdle()
+        allWhole(full, tabs)
+    }
+
+    @Test
+    fun `a selection past either end shows the nearest tab`() = runComposeUiTest {
+        var selected by mutableStateOf(7)
+        setContent {
+            Box(Modifier.width(600.dp)) { AdaptiveTabRow(labels, selected, onSelect = {}) }
+        }
+        onNodeWithText("Party lines").assertIsSelected()
+        selected = -1
+        waitForIdle()
+        onNodeWithText("Conversations").assertIsSelected()
     }
 }

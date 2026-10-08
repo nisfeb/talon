@@ -9,7 +9,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ComposeUiTest
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
@@ -220,6 +223,40 @@ class DesktopShellTest {
         val chat = bounds("chat")
         assertEquals(MIN_LIST_WIDTH, list.width)
         assertTrue(chat.left >= list.right)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `dragging the right pane's edge stops where list and chat keep their minimums`() = runComposeUiTest {
+        var stored by mutableStateOf(DEFAULT_RIGHT_PANE_WIDTH)
+        setContent {
+            Box(Modifier.requiredSize(width = 1400.dp, height = 800.dp)) {
+                DesktopShell(
+                    activeRailTab = RailTab.Chats,
+                    enabledItems = RailItem.entries.toList(),
+                    onItemClicked = {},
+                    list = { Text("LIST") },
+                    detail = { Text("DETAIL") },
+                    listFraction = 0.30f,
+                    onListFractionChange = {},
+                    rightSidebar = { Box(Modifier.fillMaxSize().testTag("right")) { Text("RIGHT") } },
+                    rightPaneWidth = stored,
+                    onRightPaneWidthChange = { stored = it },
+                )
+            }
+        }
+        // The handle is the 6dp just left of the pane.
+        fun dragHandle(byPx: Float) {
+            val x = with(density) { (bounds("right").left - 3.dp).toPx() }
+            val y = with(density) { 400.dp.toPx() }
+            onRoot().performTouchInput { down(Offset(x, y)); moveBy(Offset(byPx, 0f)); up() }
+            waitForIdle()
+        }
+        dragHandle(-2000f)
+        // 1400 less the rail, list and chat minimums and two handles.
+        assertEquals(724.dp, stored)
+        dragHandle(2000f)
+        assertEquals(MIN_RIGHT_PANE_WIDTH, stored)
     }
 
     @OptIn(ExperimentalTestApi::class)
