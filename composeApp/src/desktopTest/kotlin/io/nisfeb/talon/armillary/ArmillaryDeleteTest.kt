@@ -1,5 +1,6 @@
 package io.nisfeb.talon.armillary
 
+import androidx.compose.ui.test.ComposeUiTest
 import io.nisfeb.talon.ui.quietCatalog
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
@@ -99,6 +100,13 @@ class ArmillaryDeleteTest {
 
     private val deletes get() = seen.filter { "delete-account" in it }
 
+
+    /** One of the card's rarer actions, behind its More button. */
+    private fun ComposeUiTest.more(item: String) {
+        onNodeWithText("More").performScrollTo().performClick()
+        onNodeWithText(item).performClick()
+    }
+
     @Test
     fun `the request is a bare POST to the ship's own armillary`() {
         val r = repo(settings())
@@ -191,15 +199,15 @@ class ArmillaryDeleteTest {
                 Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r, catalog = quietCatalog()) }
             }
         }
-        onNodeWithText("Delete account").performScrollTo().performClick()
+        more("Delete account")
         onNodeWithText("Delete your Armillary account?").assertExists()
         onNodeWithText("The $12.35 left on it is lost", substring = true).assertExists()
         // Keep it asks nothing.
         onNodeWithText("Keep it").performClick()
         assertTrue(deletes.isEmpty())
 
-        onNodeWithText("Delete account").performScrollTo().performClick()
-        onAllNodesWithText("Delete account")[1].performClick()
+        more("Delete account")
+        onNodeWithText("Delete account").performClick()
         waitUntil(timeoutMillis = 5_000) {
             onAllNodesWithText("Your Armillary account at ~wex is deleted", substring = true).fetchSemanticsNodes().isNotEmpty()
         }
@@ -218,12 +226,13 @@ class ArmillaryDeleteTest {
                 Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r, catalog = quietCatalog()) }
             }
         }
-        onNodeWithText("Delete account").performScrollTo().performClick()
-        onAllNodesWithText("Delete account")[1].performClick()
+        more("Delete account")
+        onNodeWithText("Delete account").performClick()
         waitUntil(timeoutMillis = 5_000) {
             onAllNodesWithText("cannot delete accounts yet", substring = true).fetchSemanticsNodes().isNotEmpty()
         }
         onNodeWithText("message ~wex to ask", substring = true).assertExists()
+        onNodeWithText("More").performScrollTo().performClick()
         onNodeWithText("Delete account").assertExists()
     }
 
@@ -237,8 +246,8 @@ class ArmillaryDeleteTest {
                 Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r, catalog = quietCatalog()) }
             }
         }
-        onNodeWithText("Delete account").performScrollTo().performClick()
-        onAllNodesWithText("Delete account")[1].performClick()
+        more("Delete account")
+        onNodeWithText("Delete account").performClick()
         waitUntil(timeoutMillis = 5_000) {
             onAllNodesWithText("keeps asking until it answers", substring = true).fetchSemanticsNodes().isNotEmpty()
         }

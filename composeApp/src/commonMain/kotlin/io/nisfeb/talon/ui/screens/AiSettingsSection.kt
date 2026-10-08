@@ -193,7 +193,7 @@ fun AiSettingsSection(
             // nothing resolves and no feature runs. A blank model is the
             // ship's first, which is what resolve reads it as.
             edit { it.copy(providers = it.providers + AiProvider(ARMILLARY_PROVIDER, ProviderKind.Armillary, ProviderKind.Armillary.label), defaultModel = it.defaultModel ?: ModelRef(ARMILLARY_PROVIDER, "")) }
-            armillary?.let { a -> scope.launch { a.ensureKey(io.nisfeb.talon.ui.platformLabel) } }
+            armillary?.setUpDevice(io.nisfeb.talon.ui.platformLabel)
         },
     )
     profile.providers.forEach { p ->
@@ -220,9 +220,7 @@ fun AiSettingsSection(
         // resolves, and the features that need a model stayed hidden
         // with nothing saying why. A blank model is the provider's own.
         edit { it.copy(providers = it.providers + p, defaultModel = it.defaultModel ?: ModelRef(p.id, "")) }
-        if (kind == ProviderKind.Armillary && armillary != null) {
-            scope.launch { armillary.ensureKey(io.nisfeb.talon.ui.platformLabel) }
-        }
+        if (kind == ProviderKind.Armillary) armillary?.setUpDevice(io.nisfeb.talon.ui.platformLabel)
     }
 
     // ── Default model ──────────────────────────────────────────
@@ -546,12 +544,8 @@ private fun providerSummary(p: AiProvider): String {
     val retention = when (p.kind) {
         ProviderKind.Anthropic, ProviderKind.OpenAi -> " Retention is as your account's agreement says."
         ProviderKind.OpenAiCompatible -> if (p.isPrivate) " Private: on your own machine or network." else " Not on your own network, so treat it as a cloud service."
-        ProviderKind.Armillary -> " Paid through your ship."
         else -> ""
     }
-    // Armillary's models come from the ship, not from a fetch here, so
-    // an empty list means the ship has not answered yet.
-    if (p.models.isEmpty() && p.kind == ProviderKind.Armillary) return "No models yet." + retention
     if (p.models.isEmpty()) return "Models not fetched yet." + retention
     val zdr = p.models.count { it.zdr }
     return "${p.models.size} models" +
@@ -610,6 +604,9 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     val payment by (repo?.payment ?: noPayment).collectAsState()
     val noOffer = remember { MutableStateFlow<String?>(null) }
     val offer by (repo?.offer ?: noOffer).collectAsState()
+    val settingUp by (repo?.settingUp ?: noBusy).collectAsState()
+    val keyProblem by (repo?.keyProblem ?: noOffer).collectAsState()
+    var more by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var buying by remember { mutableStateOf(false) }
     var subscribing by remember { mutableStateOf<Plan?>(null) }
@@ -642,19 +639,26 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         }
     }
 
-    Quiet(
-        when (where) {
-            ArmillaryAvailability.PRESENT -> "Answering on this ship."
-            ArmillaryAvailability.MISSING -> "Not on this ship. Install it from the Grubbery shell on your ship."
-            ArmillaryAvailability.SIGNED_OUT -> "Signed out of the ship."
-            ArmillaryAvailability.UNKNOWN -> "Not asked yet whether this ship has Armillary."
-        },
-    )
+    // Said only when something is wrong: an app that answers needs no line.
+    when (where) {
+        ArmillaryAvailability.PRESENT -> Unit
+        ArmillaryAvailability.MISSING -> Quiet("Not on this ship. Install it from the Grubbery shell on your ship.")
+        ArmillaryAvailability.SIGNED_OUT -> Quiet("Signed out of the ship.")
+        ArmillaryAvailability.UNKNOWN -> Quiet("Not asked yet whether this ship has Armillary.")
+    }
     if (where == ArmillaryAvailability.MISSING) Quiet("Armillary is published by ~ricsul-bilwyt, the same as Orrery and the Calendar.")
     account?.let { a ->
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Quiet("Vendor " + a.vendor.ifBlank { "not set yet" })
-            TextButton(enabled = here, onClick = { changingVendor = !changingVendor; vendorTyped = "" }) { Text("Change") }
+            val vendor = a.vendor.ifBlank { "no vendor yet" }
+            Text(
+                when {
+                    !a.hasView -> "Buying from $vendor"
+                    a.balanceMicro <= 0 -> "No credit with $vendor"
+                    else -> money(a.balanceMicro) + " credit with " + vendor
+                },
+                style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f, fill = false),
+            )
+            TextButton(enabled = here, onClick = { changingVendor = !changingVendor; vendorTyped = "" }) { Text("Change vendor") }
         }
         if (changingVendor) {
             OutlinedTextField(
@@ -678,7 +682,6 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             }
         }
         if (a.hasView) {
-            Text(money(a.balanceMicro) + " on your account.", style = MaterialTheme.typography.bodyMedium)
             balanceWarning(a, io.nisfeb.talon.ui.isArmillaryPurchaseSupported)?.let { Quiet(it, error = true) }
             Quiet(planLine(a))
             paymentLine(payment, a.checkouts.firstOrNull { it.nonce == payment?.nonce })?.let { line ->
@@ -703,8 +706,18 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             TextButton(onClick = { repo?.declineOffer() }) { Text("Not now") }
         }
     }
-    Quiet(armillaryModeLine(inference?.mode, account))
-    Quiet(providerSummary(p))
+    // Whether this device can use it: a key from the ship, or why not.
+    if (here) inference.let { inf ->
+        if (inf != null) Quiet(connectionLine(inf.mode, account, inf.models.size))
+        else if (settingUp || !refreshing) {
+            Text("This device isn't connected yet.", style = MaterialTheme.typography.bodyMedium)
+            keyProblem?.let { Quiet(it, error = true) }
+            if (settingUp) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Quiet("Asking your ship for a key. This can take half a minute.")
+            } else Button(onClick = { repo?.setUpDevice(io.nisfeb.talon.ui.platformLabel) }) { Text("Set up this device") }
+        }
+    }
     note?.let { (text, bad) -> Quiet(text, error = bad) }
 
     val subscription = plans.firstOrNull { it.kind == "subscription" }
@@ -720,20 +733,36 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
                 TextButton(enabled = here, onClick = { subscribing = subscription; buying = true }) { Text(subscribeLabel(subscription)) }
             }
         }
-        if (account?.subscriptionActive == true) {
-            TextButton(onClick = { confirmCancel = true }) { Text("Cancel subscription") }
-        }
         if (refreshing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
         else TextButton(enabled = repo != null, onClick = {
             note = null
-            scope.launch { repo?.refresh(fresh = true)?.onFailure { note = (it.message ?: "The ship did not answer.") to true } }
+            scope.launch {
+                val r = repo ?: return@launch
+                r.refresh(fresh = true).onFailure { note = (it.message ?: "The ship did not answer.") to true }
+                // A device with no key asks again: nothing else on the card did.
+                if (r.inference.value == null && r.availability.value == ArmillaryAvailability.PRESENT) {
+                    r.setUpDevice(io.nisfeb.talon.ui.platformLabel)
+                }
+            }
         }) { Text("Refresh") }
-        if (account?.hasView == true) TextButton(onClick = { history = !history }) { Text("History") }
-        if (io.nisfeb.talon.ui.isBraveLeoSupported && here) TextButton(onClick = { leo = !leo }) { Text("Use in Brave Leo") }
+        // The rarely used ones, behind one button.
+        val showHistory = account?.hasView == true
+        val showLeo = io.nisfeb.talon.ui.isBraveLeoSupported && here
+        val showCancel = account?.subscriptionActive == true
         // Not gated on buying: the account is deletable wherever it is
         // held (App Review guideline 5.1.1(v)).
-        if (here && account?.vendor?.isNotBlank() == true) {
-            TextButton(onClick = { confirmDelete = true }) { Text("Delete account", color = MaterialTheme.colorScheme.error) }
+        val showDelete = here && account?.vendor?.isNotBlank() == true
+        if (showHistory || showLeo || showCancel || showDelete) androidx.compose.foundation.layout.Box {
+            TextButton(onClick = { more = true }) { Text("More") }
+            DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                if (showHistory) DropdownMenuItem(text = { Text(if (history) "Hide history" else "History") }, onClick = { history = !history; more = false })
+                if (showLeo) DropdownMenuItem(text = { Text("Use in Brave Leo") }, onClick = { leo = !leo; more = false })
+                if (showCancel) DropdownMenuItem(text = { Text("Cancel subscription") }, onClick = { confirmCancel = true; more = false })
+                if (showDelete) DropdownMenuItem(
+                    text = { Text("Delete account", color = MaterialTheme.colorScheme.error) },
+                    onClick = { confirmDelete = true; more = false },
+                )
+            }
         }
     }
     // The only receipt inside the app: Stripe and BTCPay send their
@@ -1015,7 +1044,7 @@ internal fun dollarsToMicro(typed: String): Long? {
 internal fun planLine(a: Account): String = when {
     a.subscriptionActive -> a.plan.ifBlank { "Subscribed" } + (a.renews?.let { ", renews $it" } ?: "") + "."
     a.plan.isNotBlank() -> a.plan + "."
-    else -> "No plan: you pay as you go."
+    else -> "Pay as you go."
 }
 
 /**
@@ -1091,12 +1120,16 @@ internal fun balanceWarning(a: Account, canBuy: Boolean = true): String? = when 
     else -> null
 }
 
-/** How Talon reaches the model, in the owner's terms. */
-internal fun armillaryModeLine(mode: String?, account: Account?): String = when {
-    account?.leaseDisabled == true -> "Balance is empty: requests go through the vendor's ship until there is credit again."
-    mode == "lease" -> "Talon talks to the model provider directly with a key your ship holds."
-    mode == "proxy" -> "Requests go through the vendor's ship."
-    else -> "Your ship has not said yet how it reaches the model."
+/** This device's connection, once it has a key: how Talon reaches the model, and how many it may use. */
+internal fun connectionLine(mode: String?, account: Account?, models: Int): String {
+    val vendor = account?.vendor?.ifBlank { null } ?: "the vendor"
+    val how = when {
+        account?.leaseDisabled == true -> "Out of credit: requests go through $vendor's ship until you top up."
+        mode == "lease" -> "Connected. Talon reaches the model provider directly, with a key your ship holds."
+        mode == "proxy" -> "Connected through $vendor's ship."
+        else -> "Connected."
+    }
+    return "$how ${plural(models, "model")}."
 }
 
 /**

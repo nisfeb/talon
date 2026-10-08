@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -102,13 +103,19 @@ class BraveLeoCardTest {
 
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
 
+    /** One of the card's rarer actions, behind its More button. */
+    private fun ComposeUiTest.more(item: String) {
+        onNodeWithText("More").performScrollTo().performClick()
+        onNodeWithText(item).performClick()
+    }
+
     @Test
     fun `a lease gives Leo the endpoint, the model, the context size and the key, each copied as it is`() = runComposeUiTest {
         val ai = settings()
         val bought = repo(ai, { HttpStatusCode.OK to lease })
         show(ai, bought)
         val readsBefore = seen.count { it == "GET /apps/armillary/api/inference" }
-        onNodeWithText("Use in Brave Leo").performClick()
+        more("Use in Brave Leo")
         waitUntil(timeoutMillis = 5_000) { shows("Server endpoint") }
 
         // Leo's own field names, so each value is pasted into the right box.
@@ -140,7 +147,7 @@ class BraveLeoCardTest {
     fun `another of the ship's models changes the request name and the label, not the endpoint`() = runComposeUiTest {
         val ai = settings()
         show(ai, repo(ai, { HttpStatusCode.OK to lease }))
-        onNodeWithText("Use in Brave Leo").performClick()
+        more("Use in Brave Leo")
         waitUntil(timeoutMillis = 5_000) { shows("Server endpoint") }
         onNodeWithText("Another model").performClick()
         onNodeWithText("vendor/beta").performClick()
@@ -155,7 +162,7 @@ class BraveLeoCardTest {
     fun `the proxy shows no endpoint and says why Leo cannot use it`() = runComposeUiTest {
         val ai = settings()
         show(ai, repo(ai, { HttpStatusCode.OK to proxy }))
-        onNodeWithText("Use in Brave Leo").performClick()
+        more("Use in Brave Leo")
         waitUntil(timeoutMillis = 5_000) { shows("Leo streams its answers") }
         assertTrue(onAllNodesWithText("Server endpoint").fetchSemanticsNodes().isEmpty())
         assertTrue(onAllNodesWithText("Copy").fetchSemanticsNodes().isEmpty())
@@ -165,7 +172,7 @@ class BraveLeoCardTest {
     fun `a lease out of credit says the balance is why`() = runComposeUiTest {
         val ai = settings()
         show(ai, repo(ai, { HttpStatusCode.OK to proxy }, acct = account(leaseDisabled = true)))
-        onNodeWithText("Use in Brave Leo").performClick()
+        more("Use in Brave Leo")
         waitUntil(timeoutMillis = 5_000) { shows("Your balance is empty") }
         assertTrue(onAllNodesWithText("Server endpoint").fetchSemanticsNodes().isEmpty())
     }
@@ -177,24 +184,24 @@ class BraveLeoCardTest {
         show(ai, repo(ai, { answer() }))
 
         answer = { HttpStatusCode.InternalServerError to """{"error":"boom"}""" }
-        onNodeWithText("Use in Brave Leo").performClick()
+        more("Use in Brave Leo")
         waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer for Leo: HTTP 500: boom") }
         assertTrue(onAllNodesWithText("Server endpoint").fetchSemanticsNodes().isEmpty(), "no answer is not the old one")
 
         // Closing and opening again asks again.
         answer = { HttpStatusCode.NotFound to """{"error":"no key yet"}""" }
-        onNodeWithText("Use in Brave Leo").performClick()
-        onNodeWithText("Use in Brave Leo").performClick()
+        more("Use in Brave Leo")
+        more("Use in Brave Leo")
         waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer for Leo: it holds no Armillary key yet") }
 
         answer = { HttpStatusCode.NotFound to "" }
-        onNodeWithText("Use in Brave Leo").performClick()
-        onNodeWithText("Use in Brave Leo").performClick()
+        more("Use in Brave Leo")
+        more("Use in Brave Leo")
         waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer for Leo: Armillary is not on it") }
 
         answer = { throw java.io.IOException("connection reset") }
-        onNodeWithText("Use in Brave Leo").performClick()
-        onNodeWithText("Use in Brave Leo").performClick()
+        more("Use in Brave Leo")
+        more("Use in Brave Leo")
         waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer for Leo: no answer from the ship") }
         assertTrue(seen.all { it.startsWith("GET ") }, seen.toString())
     }
@@ -209,6 +216,6 @@ class BraveLeoCardTest {
         }
         show(ai, missing)
         onNodeWithText("Not on this ship. Install it from the Grubbery shell on your ship.").assertExists()
-        assertTrue(onAllNodesWithText("Use in Brave Leo").fetchSemanticsNodes().isEmpty())
+        assertTrue(onAllNodesWithText("More").fetchSemanticsNodes().isEmpty(), "nothing behind More either")
     }
 }

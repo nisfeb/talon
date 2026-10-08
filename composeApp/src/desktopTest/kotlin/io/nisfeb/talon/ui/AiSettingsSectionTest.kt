@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -30,7 +32,7 @@ import io.nisfeb.talon.armillary.Checkout
 import io.nisfeb.talon.armillary.LedgerRow
 import io.nisfeb.talon.armillary.Payment
 import io.nisfeb.talon.armillary.Plan
-import io.nisfeb.talon.ui.screens.armillaryModeLine
+import io.nisfeb.talon.ui.screens.connectionLine
 import io.nisfeb.talon.ui.screens.balanceWarning
 import io.nisfeb.talon.ui.screens.dollarsToMicro
 import io.nisfeb.talon.ui.screens.historyLines
@@ -78,6 +80,12 @@ class AiSettingsSectionTest {
         assertFalse(ai.state.value.catchMeUpEnabled, "the old switch follows, for older installs")
         assertEquals("sk-ant", saved.provider(saved.defaultModel!!.provider)!!.apiKey)
         assertTrue(onAllNodesWithText("Anthropic", substring = true).fetchSemanticsNodes().isNotEmpty())
+    }
+
+    /** One of the card's rarer actions, behind its More button. */
+    private fun ComposeUiTest.more(item: String) {
+        onNodeWithText("More").performScrollTo().performClick()
+        onNodeWithText(item).performClick()
     }
 
     // ── the Armillary card ─────────────────────────────────────────
@@ -160,12 +168,13 @@ class AiSettingsSectionTest {
                 Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
             }
         }
-        onNodeWithText("Answering on this ship.").assertExists()
-        onNodeWithText("Vendor ~wex").assertExists()
-        onNodeWithText("$12.35 on your account.").assertExists()
-        onNodeWithText("No plan: you pay as you go.").assertExists()
-        onNodeWithText("Requests go through the vendor's ship.").assertExists()
-        onNodeWithText("1 models. Paid through your ship.").assertExists()
+        // An app that answers needs no line saying so.
+        onNodeWithText("Answering on this ship.").assertDoesNotExist()
+        onNodeWithText("$12.35 credit with ~wex").assertExists()
+        onNodeWithText("Change vendor").assertExists()
+        onNodeWithText("Pay as you go.").assertExists()
+        onNodeWithText("Connected through ~wex's ship. 1 model.").assertExists()
+        onNodeWithText("This device isn't connected yet.").assertDoesNotExist()
         onNodeWithText("Subscribe: Starter, $10.00 a month for $12.00 of credit").assertExists()
         onNodeWithText("Top up").performClick()
         waitForIdle()
@@ -279,7 +288,7 @@ class AiSettingsSectionTest {
             }
         }
         onNodeWithText("2026-09-21 12:35  Charge  under a cent").assertDoesNotExist()
-        onNodeWithText("History").performClick()
+        more("History")
         waitForIdle()
         val charge = onNodeWithText("2026-09-21 12:35  Charge  under a cent").fetchSemanticsNode().boundsInRoot
         val credit = onNodeWithText("2026-09-21 12:34  Credit  $5.00, by bitcoin").fetchSemanticsNode().boundsInRoot
@@ -361,19 +370,19 @@ class AiSettingsSectionTest {
     }
 
     @Test
-    fun `the mode line says where a request actually goes`() {
+    fun `the connection line says where a request actually goes, and to how many models`() {
         val empty = Account(true, 0, "", false, null, "~wex", 0, leaseHeld = true, leaseDisabled = true, checkouts = emptyList())
-        assertEquals("Balance is empty: requests go through the vendor's ship until there is credit again.", armillaryModeLine("lease", empty))
-        assertEquals("Talon talks to the model provider directly with a key your ship holds.", armillaryModeLine("lease", null))
-        assertEquals("Requests go through the vendor's ship.", armillaryModeLine("proxy", null))
-        assertEquals("Your ship has not said yet how it reaches the model.", armillaryModeLine(null, null))
+        assertEquals("Out of credit: requests go through ~wex's ship until you top up. 2 models.", connectionLine("lease", empty, 2))
+        assertEquals("Connected. Talon reaches the model provider directly, with a key your ship holds. 1 model.", connectionLine("lease", null, 1))
+        assertEquals("Connected through the vendor's ship. 3 models.", connectionLine("proxy", null, 3))
+        assertEquals("Connected. 0 models.", connectionLine(null, null, 0))
     }
 
     @Test
     fun `the plan line names the subscription and when it renews`() {
         val on = Account(true, 0, "Starter", true, "2026-10-20T00:00:00Z", "~wex", 0, false, false, emptyList())
         assertEquals("Starter, renews 2026-10-20T00:00:00Z.", planLine(on))
-        assertEquals("No plan: you pay as you go.", planLine(on.copy(plan = "", subscriptionActive = false, renews = null)))
+        assertEquals("Pay as you go.", planLine(on.copy(plan = "", subscriptionActive = false, renews = null)))
     }
 
     @Test
@@ -407,7 +416,7 @@ class AiSettingsSectionTest {
         }
         waitForIdle()
         // The half that does not depend on the flag stands either way.
-        onNodeWithText("~wex", substring = true).assertExists()
+        onNodeWithText("No credit with ~wex").assertExists()
         if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) {
             onNodeWithText("Top up").assertExists()
             onNodeWithText("Empty: requests fail until you top up.").assertExists()
