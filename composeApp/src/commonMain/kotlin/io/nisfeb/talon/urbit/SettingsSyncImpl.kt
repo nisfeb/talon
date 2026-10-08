@@ -1391,12 +1391,20 @@ class SettingsSyncImpl(
         )
     }
 
+    /**
+     * Told each level set here, to tell %activity too (TlonChatRepo.
+     * mirrorLevel). Set by the repo; a level that arrives from another
+     * device was told by that device.
+     */
+    var levelMirror: (suspend (whom: String, level: String?) -> Unit)? = null
+
     override suspend fun setNotifyLevel(whom: String, level: String) {
         db.notifyPrefs().upsert(NotifyPreferenceEntity(whom, level))
         pokePutEntry(
             BUCKET_NOTIFY_PREFS, whom,
             buildJsonObject { put("level", level) },
         )
+        levelMirror?.invoke(whom, level)
     }
 
     // A deletion, not a "group" value: a del-entry removes the row on
@@ -1405,6 +1413,7 @@ class SettingsSyncImpl(
     override suspend fun clearNotifyLevel(whom: String) {
         db.notifyPrefs().clear(whom)
         pokeDelEntry(BUCKET_NOTIFY_PREFS, whom)
+        levelMirror?.invoke(whom, null)
     }
 
     override suspend fun setRailItemVisibility(item: RailItem, visible: Boolean) {

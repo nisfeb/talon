@@ -4537,6 +4537,8 @@ class TlonChatRepo(
             },
         )
         dao.deleteAll(have.values.filter { it.sent && it.atMs < start && ThreadSource(it.whom, it.parentPostId) !in named })
+        // the same settings say whether the ship has Talon's levels
+        reconcileLevels(ch, body)
     }
 
     /** An adjust fact: one thread's follow changed, here or on another client. */
@@ -4610,6 +4612,63 @@ class TlonChatRepo(
         pokeNewest(ch, "activity", ACTIVITY_MARKS, action)
         db.followedThreads().get(whom, parentPostId)?.takeIf { it.follow == follow }
             ?.let { db.followedThreads().upsert(it.copy(sent = true)) }
+    }
+
+    // ───────── notification levels on the ship ─────────
+
+    /** Levels whose word did not reach the ship this session, sent again at the next connect. */
+    private val levelsOwed = io.nisfeb.talon.util.ConcurrentSet<String>()
+
+    // Every level set here is told to %activity as well as kept.
+    init {
+        (settingsSync as? SettingsSyncImpl)?.levelMirror = { whom, level -> mirrorLevel(whom, level) }
+    }
+
+    /**
+     * A Talon level, told to %activity as Tlon's client tells it
+     * ([ActivityLevels]): a channel's or a group's, or null where the
+     * channel goes back to its group's. Without it a ship at Tlon's stock
+     * base counted every post as a mention. The level itself is already
+     * kept (notify-prefs); a failure here is remembered and retried, and
+     * never undoes it.
+     */
+    suspend fun mirrorLevel(whom: String, level: String?) {
+        val groupFlag = if (whom.startsWith("group/")) null else db.groups().channelGroupFor(whom)?.groupFlag
+        val source = ActivityLevels.source(whom, groupFlag) ?: return
+        val ch = channel ?: run { levelsOwed.add(whom); return }
+        try {
+            pokeNewest(ch, "activity", ACTIVITY_MARKS, ActivityLevels.adjust(source, level?.let { ActivityLevels.volumeMap(ActivityLevels.tlonLevel(it)) }))
+            levelsOwed.remove(whom)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            levelsOwed.add(whom)
+            throw e
+        } catch (e: Exception) {
+            levelsOwed.add(whom)
+            Log.w(TAG, "level not told to the ship: $whom", e)
+        }
+    }
+
+    /**
+     * At connect, with the ship's volume settings in hand: a base still at
+     * Tlon's stock map gets Talon's default (Mentions only, Tlon's soft)
+     * once; a Talon level the ship has no entry for is told once (levels
+     * set before Talon wrote them, or on a device that could not reach
+     * the ship); and what did not go this session goes again. An entry
+     * the ship has, which Tlon's client may have written, is left alone.
+     */
+    private suspend fun reconcileLevels(ch: UrbitChannel, settings: JsonObject) {
+        if (ActivityLevels.isStock(settings["base"] as? JsonObject)) {
+            io.nisfeb.talon.util.runSuspendCatching {
+                pokeNewest(ch, "activity", ACTIVITY_MARKS, ActivityLevels.adjust(ActivityLevels.BASE, ActivityLevels.volumeMap(ActivityLevels.tlonLevel(io.nisfeb.talon.data.NotifyLevel.DEFAULT))))
+            }.onFailure { Log.w(TAG, "the ship's base volume not set", it) }
+        }
+        val prefs = db.notifyPrefs().all().associate { it.whom to it.level }
+        for ((whom, level) in prefs) {
+            val key = ActivityLevels.settingsKey(whom) ?: continue
+            if (settings[key] == null || levelsOwed.contains(whom)) mirrorLevel(whom, level)
+        }
+        // a channel set back to its group's where the drop did not go
+        for (whom in levelsOwed.toList()) if (whom !in prefs) mirrorLevel(whom, null)
     }
 
     /**
