@@ -1981,10 +1981,13 @@ class OrreryRepo(
         return cloudModel ?: runCatching { c.rung.open() }.getOrNull()?.also { cloudModel = it }
     }
 
-    /** Where the ladder stands on this device, for Settings. */
+    /**
+     * Where this device's own model stands, for its card in Settings. The
+     * local ladder only: with cloud triage on, the cloud rung's problem
+     * ("OpenRouter has no key") showed under "On this device" and read as
+     * no provider at all (sneagan, 2026-10-08). The triage row says that.
+     */
     suspend fun refreshModel() {
-        val c = cloud
-        if (c != null && c.on.value) { _model.value = c.rung.name to c.rung.status(); return }
         if (!isLocalTriageSupported) { _model.value = null; return }
         val all = LocalModels.statuses()
         val pick = all.firstOrNull { it.second == RungStatus.Ready }

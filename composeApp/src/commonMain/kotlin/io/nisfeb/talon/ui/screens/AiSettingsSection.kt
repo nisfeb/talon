@@ -196,7 +196,7 @@ fun AiSettingsSection(
             armillary?.setUpDevice(io.nisfeb.talon.ui.platformLabel)
         },
     )
-    profile.providers.forEach { p ->
+    showOrder(profile.providers, profile.defaultModel).forEach { p ->
         ProviderCard(
             p = p,
             catalog = catalog,
@@ -479,7 +479,11 @@ private fun ProviderCard(
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(p.label, style = MaterialTheme.typography.bodyLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (p.kind == ProviderKind.Armillary) io.nisfeb.talon.ui.ArmillaryLogo()
+                        // "On this device" read as a status line, as if no provider were set.
+                        Text(if (p.kind == ProviderKind.ThisDevice) DEVICE_MODEL else p.label, style = MaterialTheme.typography.bodyLarge)
+                    }
                     if (p.label != p.kind.label) Quiet(p.kind.label)
                 }
                 if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -540,6 +544,26 @@ private fun ProviderCard(
     }
 }
 
+/**
+ * Providers as Settings lists them: the default model's first, then the
+ * ones set up, then those still waiting on a key or an address, and this
+ * device's own model last. Profile order within each. Profile order put
+ * a keyless OpenRouter above a working Armillary (sneagan, 2026-10-08).
+ */
+internal fun showOrder(providers: List<AiProvider>, default: ModelRef?): List<AiProvider> =
+    providers.sortedBy { p ->
+        when {
+            p.id == default?.provider -> 0
+            p.kind == ProviderKind.ThisDevice -> 3
+            p.isSetUp() -> 1
+            else -> 2
+        }
+    }
+
+/** Has what a call needs: a key, or a server's address. Armillary's key is the one its ship gave this device. */
+private fun AiProvider.isSetUp(): Boolean =
+    if (kind == ProviderKind.OpenAiCompatible) !baseUrl.isNullOrBlank() else apiKey.isNotBlank()
+
 private fun providerSummary(p: AiProvider): String {
     val retention = when (p.kind) {
         ProviderKind.Anthropic, ProviderKind.OpenAi -> " Retention is as your account's agreement says."
@@ -562,10 +586,11 @@ private fun DeviceModelLine(orrery: OrreryRepo?) {
     val model by (orrery?.model ?: noModel).collectAsState()
     val download by (orrery?.download ?: noProgress).collectAsState()
     var note by remember { mutableStateOf<String?>(null) }
-    Quiet(
+    // What it is for, since the card has no key or address to explain it.
+    Quiet("Runs here, so a feature set to it reads your messages without sending them anywhere.")
+    if (orrery != null || !isLocalTriageSupported) Quiet(
         when {
             !isLocalTriageSupported -> "No model runs on this platform yet."
-            orrery == null -> "The model this device runs, for reading messages."
             model == null -> "Looking."
             model!!.second == RungStatus.Ready -> "Reads with ${model!!.first}."
             model!!.second is RungStatus.NeedsDownload ->
@@ -1182,7 +1207,11 @@ private fun AddProvider(hasArmillary: Boolean, onAdd: (ProviderKind) -> Unit) {
                 add(ProviderKind.OpenAiCompatible)
             }
             kinds.forEach { k ->
-                DropdownMenuItem(text = { Text(k.label) }, onClick = { open = false; onAdd(k) })
+                DropdownMenuItem(
+                    text = { Text(k.label) },
+                    leadingIcon = if (k == ProviderKind.Armillary) ({ io.nisfeb.talon.ui.ArmillaryLogo() }) else null,
+                    onClick = { open = false; onAdd(k) },
+                )
             }
         }
     }
@@ -1227,6 +1256,10 @@ private fun ModelPicker(
     var query by remember { mutableStateOf("") }
     androidx.compose.foundation.layout.Box {
         OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
+            val shown = if (selected == null && allowDefault) profile.defaultModel else selected
+            if (shown?.let { profile.provider(it.provider) }?.kind == ProviderKind.Armillary) {
+                io.nisfeb.talon.ui.ArmillaryLogo(modifier = Modifier.padding(end = 8.dp))
+            }
             Text(
                 if (selected == null && allowDefault) "Default: " + refLabel(profile, profile.defaultModel) else refLabel(profile, selected),
                 modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -1244,10 +1277,16 @@ private fun ModelPicker(
                 onClick = { open = false; query = ""; onPick(null) },
             )
             val q = query.trim()
-            providers.forEach { p ->
+            showOrder(providers, profile.defaultModel).forEach { p ->
                 val all = p.offered().filter(only)
                 val shown = rankModels(q, all).take(80)
-                Text(p.label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    if (p.kind == ProviderKind.Armillary) io.nisfeb.talon.ui.ArmillaryLogo(size = 14.dp)
+                    Text(p.label, style = MaterialTheme.typography.labelMedium)
+                }
                 shown.forEach { m ->
                     DropdownMenuItem(
                         text = {
@@ -1347,6 +1386,10 @@ private fun FeatureModel(
     onPick: (ModelRef?) -> Unit,
 ) {
     ModelPicker(profile, profile.features[f]?.model, allowDefault = true, providers = providers, flag = flag, onPick = onPick)
+    // Said where the model is picked. It used to surface, for triage
+    // only, on the device model's card, where "OpenRouter has no key"
+    // read as no provider at all (sneagan, 2026-10-08).
+    profile.resolve(f)?.takeIf { it.provider.kind != ProviderKind.ThisDevice }?.problem()?.let { Quiet(it, error = true) }
     if (reads) readingWarning(profile, f, armillaryMode)?.let { Quiet(it, error = true) }
 }
 
