@@ -90,6 +90,21 @@ class ArmillaryRepo(
      */
     val offer: StateFlow<String?> = _offer.asStateFlow()
 
+    private val _settingUp = MutableStateFlow(false)
+
+    /** [setUpDevice] is waiting for this device's key. */
+    val settingUp: StateFlow<Boolean> = _settingUp.asStateFlow()
+
+    private val _keyProblem = MutableStateFlow<String?>(null)
+
+    /**
+     * Why this device still has no key, in the owner's terms: the last
+     * ask failed, or the ship did not answer whether it holds one. Null
+     * once a key is read. The first ask used to run on the screen and
+     * drop its failure, and the card said only "No models yet".
+     */
+    val keyProblem: StateFlow<String?> = _keyProblem.asStateFlow()
+
     private val _deletion = MutableStateFlow<Deletion?>(null)
 
     /**
@@ -147,6 +162,8 @@ class ArmillaryRepo(
         _refreshing.value = false
         _payment.value = null
         _deletion.value = null
+        _settingUp.value = false
+        _keyProblem.value = null
     }
 
     /**
@@ -166,8 +183,11 @@ class ArmillaryRepo(
                 return Result.failure(IllegalStateException(_error.value ?: "Armillary does not answer on this ship."))
             }
             runSuspendCatching { a.inference() }
-                .onSuccess { if (it is InferenceAnswer.Have) _inference.value = it.inference }
-                .onFailure { Log.i(TAG, "inference skipped: ${it.message}") }
+                .onSuccess { if (it is InferenceAnswer.Have) { _inference.value = it.inference; _keyProblem.value = null } }
+                .onFailure {
+                    Log.i(TAG, "inference skipped: ${it.message}")
+                    if (_inference.value == null) _keyProblem.value = keyProblemLine(it)
+                }
             runSuspendCatching { a.account(fresh) }
                 .onSuccess { _account.value = it; settle(it) }
                 .onFailure { Log.i(TAG, "account skipped: ${it.message}") }
@@ -193,7 +213,22 @@ class ArmillaryRepo(
      * for first, so a vendor that offers one is taken up on it; a
      * vendor without leases says so and the proxy key is minted instead.
      */
-    suspend fun ensureKey(deviceName: String): Result<Inference> = runSuspendCatching {
+    suspend fun ensureKey(deviceName: String): Result<Inference> = askForKey(deviceName)
+        .onFailure { _keyProblem.value = keyProblemLine(it) }
+
+    /**
+     * [ensureKey] on the repo's scope, for the card: leaving the screen
+     * does not drop the wait, and a failure stays on [keyProblem]. A
+     * second tap while one waits does nothing.
+     */
+    fun setUpDevice(deviceName: String) {
+        if (!_settingUp.compareAndSet(false, true)) return
+        scope.launch {
+            try { ensureKey(deviceName) } finally { _settingUp.value = false }
+        }
+    }
+
+    private suspend fun askForKey(deviceName: String): Result<Inference> = runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
         _deletion.value = null
         when (val first = a.inference()) {
@@ -466,6 +501,7 @@ class ArmillaryRepo(
     /** An inference config just read: kept, and written onto the provider row. */
     private fun took(inf: Inference): Inference {
         _inference.value = inf
+        _keyProblem.value = null
         publish(inf)
         return inf
     }
@@ -579,3 +615,11 @@ data class Payment(
 
 /** An account deletion the ship took: from which vendor, and how it answered. */
 data class Deletion(val vendor: String, val answer: DeleteAnswer)
+
+/** A failed key ask, said plainly: no HTTP codes or exception names on the card. */
+internal fun keyProblemLine(e: Throwable): String = when (e) {
+    is ArmillaryError.Refused -> "Your ship refused: ${e.reason.ifBlank { "it gave no reason" }}."
+    is ArmillaryError.Unreachable -> "Your ship did not answer. Try Refresh in a moment."
+    is ArmillaryError.Garbled -> "Your ship's answer could not be read."
+    else -> e.message ?: "Your ship did not answer. Try Refresh in a moment."
+}
