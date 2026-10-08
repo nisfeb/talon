@@ -19,6 +19,9 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -140,6 +143,28 @@ class AdaptiveTabRowTest {
         }
         val layout = layoutOf("Notifications")
         assertEquals(1, layout.lineCount)
+    }
+
+    // sneagan, 2026-10-08: "settings tab titles are missing or invisible".
+    // Settings is the one scrollable row; its labels must take room and draw.
+    @Test
+    fun `a scrollable row's labels take room and draw`() = runComposeUiTest {
+        val labels = listOf("Appearance", "Home", "Chats", "Notifications", "AI")
+        setContent {
+            io.nisfeb.talon.ui.theme.TalonTheme(darkTheme = false) {
+                Box(Modifier.width(900.dp)) {
+                    AdaptiveTabRow(labels, 0, onSelect = {}, scrollable = true)
+                }
+            }
+        }
+        for (label in labels) {
+            val node = onAllNodesWithText(label, useUnmergedTree = true).fetchSemanticsNodes().single()
+            assertTrue(node.size.width > 4, "$label has room: ${node.size}")
+            val px = onAllNodesWithText(label, useUnmergedTree = true).onFirst().captureToImage().toPixelMap()
+            val colours = HashSet<androidx.compose.ui.graphics.Color>()
+            for (x in 0 until px.width step 2) for (y in 0 until px.height step 2) colours += px[x, y]
+            assertTrue(colours.size > 1, "$label draws something")
+        }
     }
 
     @Test
