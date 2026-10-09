@@ -179,8 +179,14 @@ data class AiProfile(
         // Armillary and a server of your own have no default model: the
         // list is all there is, so a blank ref takes the first of it
         // rather than reaching the OpenAI-shaped client with no model.
+        // Armillary's is the vendor's default where it names one
+        // (armillary 19), so a blank Armillary default runs what Settings
+        // calls "Default".
         val listOnly = p.kind == ProviderKind.Armillary || p.kind == ProviderKind.OpenAiCompatible
-        val model = if (ref.model.isBlank() && listOnly) p.firstChatModel().orEmpty() else ref.model
+        val model = when {
+            ref.model.isNotBlank() || !listOnly -> ref.model
+            else -> p.suggested["default"]?.takeIf { it.isNotBlank() } ?: p.firstChatModel().orEmpty()
+        }
         return Resolved(p, model)
     }
 

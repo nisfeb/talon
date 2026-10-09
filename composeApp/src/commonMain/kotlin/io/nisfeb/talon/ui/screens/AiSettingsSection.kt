@@ -1247,9 +1247,20 @@ private const val DEVICE_MODEL = "This device's own model"
 private fun AiProvider.offered(): List<ModelInfo> =
     if (kind == ProviderKind.ThisDevice) listOf(ModelInfo("", DEVICE_MODEL)) else models
 
-private fun refLabel(profile: AiProfile, ref: ModelRef?): String {
+/**
+ * What a model picker shows for [ref]. An Armillary model goes by its
+ * short name beside Armillary's logo, and Armillary's default (a blank
+ * model, or the vendor's pick for a feature, [vendorPick]) is "Default ·
+ * Opus 5.5". It read "Default: its default, Armillary" (sneagan, 2026-10-09).
+ */
+internal fun refLabel(profile: AiProfile, ref: ModelRef?, vendorPick: Boolean = false): String {
     val r = ref ?: return "None chosen"
     val p = profile.provider(r.provider) ?: return "${r.model}, on a provider no longer here"
+    if (p.kind == ProviderKind.Armillary) {
+        val model = profile.resolve(r)?.model.orEmpty()
+        val name = if (model.isBlank()) "no models yet" else shortModelName(model)
+        return if (vendorPick || r.model.isBlank()) "Default · $name" else name
+    }
     val m = p.offered().firstOrNull { it.id == r.model }
     val name = m?.name ?: r.model.ifBlank { "its default" }
     val badge = when {
@@ -1258,6 +1269,36 @@ private fun refLabel(profile: AiProfile, ref: ModelRef?): String {
         else -> ""
     }
     return "$name, ${p.label}$badge"
+}
+
+/** A feature row following the default model: "Default: " and the model, or Armillary's own "Default · Opus 5.5". */
+internal fun defaultLabel(profile: AiProfile): String {
+    val d = refLabel(profile, profile.defaultModel)
+    return if (d.startsWith("Default")) d else "Default: $d"
+}
+
+/**
+ * A model id as a person says it: "anthropic/claude-opus-5.5" is "Opus
+ * 5.5", "openai/gpt-5" is "GPT-5", "google/gemini-2.5-pro" is "Gemini
+ * 2.5 Pro". Dashed version numbers join with a dot, and a date stamp
+ * goes.
+ */
+internal fun shortModelName(id: String): String {
+    val base = id.substringAfterLast('/').substringBefore(':').removePrefix("claude-")
+    val words = mutableListOf<String>()
+    for (w in base.split('-').filter { it.isNotEmpty() }) {
+        if (w.length == 8 && w.all { it.isDigit() }) continue
+        val last = words.lastOrNull()
+        if (last != null && w.all { it.isDigit() } && last.last().isDigit() && last.all { it.isDigit() || it == '.' }) words[words.size - 1] = "$last.$w"
+        else words += w
+    }
+    if (words.isEmpty()) return id
+    val cap = words.map { w -> if (w.first().isLetter()) w.replaceFirstChar { it.uppercase() } else w }
+    // OpenAI writes its own as one word: GPT-5, GPT-4o Mini.
+    if (words[0].equals("gpt", ignoreCase = true)) {
+        return if (cap.size == 1) "GPT" else (listOf("GPT-" + cap[1]) + cap.drop(2)).joinToString(" ")
+    }
+    return cap.joinToString(" ")
 }
 
 /**
@@ -1273,6 +1314,8 @@ private fun ModelPicker(
     providers: List<AiProvider>,
     only: (ModelInfo) -> Boolean = { true },
     flag: (ModelInfo) -> String? = { null },
+    /** [selected] is the Armillary vendor's pick, shown as its default. */
+    vendorPick: Boolean = false,
     onPick: (ModelRef?) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -1284,7 +1327,7 @@ private fun ModelPicker(
                 io.nisfeb.talon.ui.ArmillaryLogo(modifier = Modifier.padding(end = 8.dp))
             }
             Text(
-                if (selected == null && allowDefault) "Default: " + refLabel(profile, profile.defaultModel) else refLabel(profile, selected),
+                if (selected == null && allowDefault) defaultLabel(profile) else refLabel(profile, selected, vendorPick),
                 modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Icon(TalonIcons.ExpandMore, contentDescription = null)
@@ -1296,7 +1339,10 @@ private fun ModelPicker(
                 modifier = Modifier.padding(horizontal = 8.dp).fillMaxWidth(),
             )
             if (allowDefault) DropdownMenuItem(
-                text = { Text("Default: " + refLabel(profile, profile.defaultModel)) },
+                text = { Text(defaultLabel(profile)) },
+                leadingIcon = if (profile.defaultModel?.let { profile.provider(it.provider) }?.kind == ProviderKind.Armillary) {
+                    { io.nisfeb.talon.ui.ArmillaryLogo() }
+                } else null,
                 onClick = { open = false; query = ""; onPick(null) },
             )
             val q = query.trim()
@@ -1414,10 +1460,10 @@ private fun FeatureModel(
     val follows = profile.followsVendor(f)
     ModelPicker(
         profile, if (follows && vendor != null) ModelRef(vendor.provider.id, vendor.model) else profile.features[f]?.model,
-        allowDefault = !follows, providers = providers, flag = flag, onPick = onPick,
+        allowDefault = !follows, providers = providers, flag = flag, vendorPick = follows, onPick = onPick,
     )
     if (follows) Quiet("Your Armillary vendor's pick.")
-    else if (vendor != null && onFollow != null) TextButton(onClick = onFollow) { Text("Use your vendor's model, ${vendor.model}") }
+    else if (vendor != null && onFollow != null) TextButton(onClick = onFollow) { Text("Use your vendor's model, ${shortModelName(vendor.model)}") }
     // Said where the model is picked. It used to surface, for triage
     // only, on the device model's card, where "OpenRouter has no key"
     // read as no provider at all (sneagan, 2026-10-08).
