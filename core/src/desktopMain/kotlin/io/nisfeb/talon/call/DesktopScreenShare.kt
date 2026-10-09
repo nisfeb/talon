@@ -104,7 +104,7 @@ internal class ScreenShareSlot(
     private val watchScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
     private var watch: kotlinx.coroutines.Job? = null
     @kotlin.concurrent.Volatile private var lastFrameMs = 0L
-    private val frameSeen = dev.onvoid.webrtc.media.video.VideoTrackSink { lastFrameMs = System.currentTimeMillis() }
+    internal val frameSeen = releasingSink { lastFrameMs = System.currentTimeMillis() }
 
     /** The shared track while a share runs, for the self-preview. */
     var track: VideoTrack? = null
