@@ -43,10 +43,10 @@ import kotlinx.serialization.json.putJsonArray
 class AgentClient(
     /** The feature whose month spend a call adds to, or none. */
     private val feature: AiFeature? = null,
+    /** Its own by default; a test hands in one that answers for the providers. */
+    private val http: io.ktor.client.HttpClient = createAppHttpClient(),
     private val settingsProvider: () -> AiSettings.Config,
 ) {
-
-    private val http = createAppHttpClient()
 
     suspend fun completeWithTools(
         system: String,
@@ -111,6 +111,9 @@ class AgentClient(
         if (cfg.provider == AiSettings.Provider.OpenRouter || cfg.usageInclude) {
             payload = JsonObject(payload + ("usage" to buildJsonObject { put("include", true) }))
         }
+        // The vendor's ZDR tier: OpenRouter routes only to endpoints that
+        // keep nothing, or refuses.
+        if (cfg.zdrOnly) payload = JsonObject(payload + ("provider" to buildJsonObject { put("zdr", true) }))
         return execute(
             cfg, model,
             url = endpoint,

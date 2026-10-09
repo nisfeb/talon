@@ -155,6 +155,9 @@ class AiClient(
             if (cfg.provider == AiSettings.Provider.OpenRouter || cfg.usageInclude) {
                 put("usage", buildJsonObject { put("include", true) })
             }
+            // The vendor's ZDR tier: OpenRouter routes only to endpoints
+            // that keep nothing, or refuses.
+            if (cfg.zdrOnly) put("provider", buildJsonObject { put("zdr", true) })
             putJsonArray("messages") {
                 systemPrompt?.let {
                     add(buildJsonObject {

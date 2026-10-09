@@ -3704,9 +3704,12 @@ fun App(
                         ship = peer,
                         self = peer == loggedInShip,
                         contact = contact,
+                        // Out of whatever the profile was opened over (Contacts,
+                        // Home, a section) and into the conversation: setting
+                        // the chat alone left Contacts on top of it.
                         onMessage = {
-                            profileSheetShip = null
-                            openChat = peer
+                            uiSettings.setActiveRailTab(RailTab.Chats)
+                            jumpToChat(peer)
                         },
                         onEditSelf = {
                             profileSheetShip = null

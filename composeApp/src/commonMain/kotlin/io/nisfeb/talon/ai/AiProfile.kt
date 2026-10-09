@@ -57,6 +57,8 @@ data class AiProvider(
      * `default` for a feature it names none for. Empty until it says.
      */
     val suggested: Map<String, String> = emptyMap(),
+    /** Armillary only: the tier the vendor put each feature on (`zdr`, `frontier`, ...), by its name for the feature. */
+    val suggestedTiers: Map<String, String> = emptyMap(),
     /** Armillary only: the vendor's Brave search, its base and the key this ship searches with. */
     val searchUrl: String? = null,
     val searchKey: String = "",
@@ -160,6 +162,12 @@ data class AiProfile(
         return resolve(s?.model ?: defaultModel)?.private != true
     }
 
+    /** Whether [f] follows the vendor onto its ZDR tier, so its calls must go to ZDR endpoints only. */
+    fun vendorZdr(f: AiFeature): Boolean {
+        val name = VENDOR_FEATURES[f] ?: return false
+        return followsVendor(f) && armillary()?.suggestedTiers?.get(name) == "zdr"
+    }
+
     /**
      * The vendor's decision model and the key it runs on: the lease's
      * own OpenRouter key, so only under a lease, where the decisions
@@ -179,8 +187,14 @@ data class AiProfile(
         // Armillary and a server of your own have no default model: the
         // list is all there is, so a blank ref takes the first of it
         // rather than reaching the OpenAI-shaped client with no model.
+        // Armillary's is the vendor's default where it names one
+        // (armillary 19), so a blank Armillary default runs what Settings
+        // calls "Default".
         val listOnly = p.kind == ProviderKind.Armillary || p.kind == ProviderKind.OpenAiCompatible
-        val model = if (ref.model.isBlank() && listOnly) p.firstChatModel().orEmpty() else ref.model
+        val model = when {
+            ref.model.isNotBlank() || !listOnly -> ref.model
+            else -> p.suggested["default"]?.takeIf { it.isNotBlank() } ?: p.firstChatModel().orEmpty()
+        }
         return Resolved(p, model)
     }
 
@@ -408,6 +422,7 @@ fun AiSettings.Config.forFeature(f: AiFeature): AiSettings.Config {
         // an Armillary base, which is OpenRouter under a lease and the
         // vendor's own proxy otherwise.
         usageInclude = r.provider.kind == ProviderKind.OpenRouter || r.provider.kind == ProviderKind.Armillary,
+        zdrOnly = profile().vendorZdr(f),
     )
 }
 

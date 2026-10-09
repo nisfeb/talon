@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import io.nisfeb.talon.ai.ModelInfo
 import androidx.compose.ui.test.onAllNodesWithTag
 import io.nisfeb.talon.ai.DEVICE_PROVIDER
 import io.nisfeb.talon.ai.FeatureSetting
@@ -216,7 +217,8 @@ class AiSettingsSectionTest {
         })
         waitForIdle()
         assertEquals("claude-opus-5", catchUp()!!.model)
-        onNodeWithText("Use your vendor's model, z/1").assertExists()
+        // The vendor's model by its short name, as the pickers name it.
+        onNodeWithText("Use your vendor's model, 1").assertExists()
         onNodeWithText("Use Armillary AI defaults").performClick()
         waitForIdle()
         assertEquals("z/1", catchUp()!!.model)
@@ -275,6 +277,38 @@ class AiSettingsSectionTest {
         assertTrue(
             onAllNodesWithTag(ARMILLARY_LOGO, useUnmergedTree = true).fetchSemanticsNodes().size >= 2,
             "the logo beside the card's name and the default model's",
+        )
+    }
+
+    @Test
+    fun `Armillary's default models read Default and their short name, beside the logo`() = runComposeUiTest {
+        // "it should have the armillary logo, say default, and then the short
+        // model name like opus 5.5. not its default armillary default" (sneagan, 2026-10-09)
+        val ai = FakeAiSettings().withProfile(
+            AiProfile(
+                providers = listOf(
+                    AiProvider(
+                        ARMILLARY_PROVIDER, ProviderKind.Armillary, "Armillary", apiKey = "k.s",
+                        models = listOf(ModelInfo("anthropic/claude-haiku-4.5"), ModelInfo("anthropic/claude-opus-5.5")),
+                        suggested = mapOf("default" to "anthropic/claude-opus-5.5", "catch_up" to "anthropic/claude-haiku-4.5"),
+                    ),
+                ),
+                defaultModel = ModelRef(ARMILLARY_PROVIDER, ""),
+                features = mapOf(AiFeature.CatchUp to FeatureSetting(on = true)),
+            ),
+        )
+        setContent {
+            TalonTheme(darkTheme = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, catalog = quietCatalog()) }
+            }
+        }
+        onNodeWithText("Default · Opus 5.5").assertExists()
+        onNodeWithText("Default · Haiku 4.5").assertExists()
+        assertTrue(onAllNodesWithText("its default", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(onAllNodesWithText("Default: ", substring = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(
+            onAllNodesWithTag(ARMILLARY_LOGO, useUnmergedTree = true).fetchSemanticsNodes().size >= 3,
+            "the card, the default model and catch-up each carry the logo",
         )
     }
 
