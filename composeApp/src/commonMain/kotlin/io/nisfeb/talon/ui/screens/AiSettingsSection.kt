@@ -404,6 +404,7 @@ fun OrrerySettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?)
     HorizontalDivider()
     Heading("Settings")
     if (orrery == null) Quiet("Sign in to a ship to set Orrery up.")
+    if (orrery != null && orreryHere) GeneratorOffer(orrery, profile) { ref -> setFeature(AiFeature.OrreryGenerator) { it.copy(model = ref) } }
     if (orrery != null && orreryHere) SchemaStepRow(orrery)
     if (orrery != null) TriageRow(orrery, profile, orreryHere, spend[AiFeature.OrreryTriage.name]) { ref -> setFeature(AiFeature.OrreryTriage) { it.copy(model = ref) } }
     if (orrery != null && orreryHere) GeneratorRow(orrery, profile) { ref -> setFeature(AiFeature.OrreryGenerator) { it.copy(model = ref) } }
@@ -1974,6 +1975,74 @@ private fun HealthRow() {
     note?.let { Quiet(it, error = true) }
 }
 
+/** The provider and model the ship's generator would run for [ref], else the default model; null where none is set. */
+private fun generatorTarget(profile: AiProfile, ref: ModelRef?): Pair<AiProvider, String>? =
+    (ref ?: profile.defaultModel)?.let { rr -> profile.provider(rr.provider)?.let { it to rr.model } }
+
+/** Point the ship's generator at [ref], else the default model, with that provider's key; one the ship cannot reach is said so. */
+private suspend fun pointGenerator(orrery: OrreryRepo, profile: AiProfile, enabled: Boolean, ref: ModelRef?): Result<Unit> {
+    val r = generatorTarget(profile, ref)
+    val base = r?.first?.shipBase()
+    return when {
+        r == null -> orrery.setGenerator(enabled)
+        base == null -> Result.failure(IllegalStateException("The ship cannot reach ${r.first.label}. Pick a model on OpenRouter, OpenAI, or a server on your network."))
+        else -> orrery.setGenerator(enabled, base, r.second.ifBlank { null }, r.first.apiKey)
+    }
+}
+
+/**
+ * Orrery on, and the ship's generator with no model or no key: nothing
+ * writes the brief or proposes anything, and nothing said so. The AI set
+ * up in Talon stays in Talon, so a first-time owner expected it to carry
+ * over and it did not (a user's report, 2026-10-09). The one step that
+ * gives the ship a model is offered here, first on the page, with the
+ * model Orrery would use when the ship can reach it.
+ */
+@Composable
+private fun GeneratorOffer(orrery: OrreryRepo, profile: AiProfile, onPick: (ModelRef?) -> Unit) {
+    val gen by orrery.generatorSettings.collectAsState()
+    var hidden by remember { mutableStateOf(false) }
+    val g = gen ?: return
+    if (hidden || (g.model != null && g.keySet)) return
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+    // Orrery's own pick when the ship can reach it, else the default model.
+    val own = profile.features[AiFeature.OrreryGenerator]?.model
+    val ref = own?.takeIf { generatorTarget(profile, it)?.first?.shipBase() != null }
+    val target = generatorTarget(profile, ref)?.takeIf { it.first.shipBase() != null }
+    OutlinedCard(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Orrery has no model on your ship yet", style = MaterialTheme.typography.titleSmall)
+            Quiet("Until it has one, it cannot write your brief or suggest anything. The AI you set up in Talon stays in Talon; your ship needs its own.")
+            if (target != null) {
+                val label = refLabel(profile, ModelRef(target.first.id, target.second))
+                Quiet("Using $label sends your ${target.first.label} key to your ship, which keeps it.")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(enabled = !busy, onClick = {
+                        note = null
+                        busy = true
+                        scope.launch {
+                            pointGenerator(orrery, profile, true, ref)
+                                .onSuccess { onPick(ref) }
+                                .onFailure { note = it.message ?: "The ship did not answer." }
+                            busy = false
+                        }
+                    }) { Text("Use $label") }
+                    TextButton(enabled = !busy, onClick = { hidden = true }) { Text("Not now") }
+                }
+            } else {
+                Quiet(
+                    if (profile.providers.any { it.shipBase() != null }) "Your default model is on a provider your ship cannot reach. Pick one it can under Orrery analysis below."
+                    else "Your ship cannot reach any AI provider set up here. Add one in Settings, AI (OpenRouter, OpenAI, Armillary, or a server on your network), then pick it under Orrery analysis below.",
+                )
+                TextButton(onClick = { hidden = true }) { Text("Not now") }
+            }
+            note?.let { Quiet(it, error = true) }
+        }
+    }
+}
+
 /**
  * The generator runs on the ship. Its switch and model are the ship's
  * settings, written with the owner's session; choosing a model sends
@@ -1993,14 +2062,7 @@ private fun GeneratorRow(orrery: OrreryRepo, profile: AiProfile, onPick: (ModelR
     fun point(enabled: Boolean, ref: ModelRef?) = scope.launch {
         busy = true
         note = null
-        val r = (ref ?: profile.defaultModel)?.let { rr -> profile.provider(rr.provider)?.let { it to rr.model } }
-        val base = r?.first?.shipBase()
-        val result = when {
-            r == null -> orrery.setGenerator(enabled)
-            base == null -> Result.failure(IllegalStateException("The ship cannot reach ${r.first.label}. Pick a model on OpenRouter, OpenAI, or a server on your network."))
-            else -> orrery.setGenerator(enabled, base, r.second.ifBlank { null }, r.first.apiKey)
-        }
-        result.onSuccess { onPick(ref) }.onFailure { note = it.message ?: "The ship did not answer." }
+        pointGenerator(orrery, profile, enabled, ref).onSuccess { onPick(ref) }.onFailure { note = it.message ?: "The ship did not answer." }
         busy = false
     }
 
