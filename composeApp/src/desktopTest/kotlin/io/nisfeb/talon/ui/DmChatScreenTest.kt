@@ -583,7 +583,9 @@ class DmChatScreenTest {
 
     @Test
     fun `a jump to a post older than the window lands on it`() = chat(seed = long(260), jumpTo = "~bus/1701411845005") { _, _ ->
-        waitUntil(timeoutMillis = 10_000) { onAllNodesWithText("post 005").fetchSemanticsNodes().isNotEmpty() }
+        // Paging 260 rows in: 20 s, as the pinned-post test below waits. At
+        // 10 s it timed out under the full suite's load (2026-10-09).
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("post 005").fetchSemanticsNodes().isNotEmpty() }
         onNodeWithText("post 005").assertIsDisplayed()
     }
 
