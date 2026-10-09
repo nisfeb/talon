@@ -756,7 +756,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     }
     // Whether this device can use it: a key from the ship, or why not.
     if (here) inference.let { inf ->
-        if (inf != null) Quiet(connectionLine(inf.mode, account, inf.models.size))
+        if (inf != null) Quiet(connectionLine(inf.mode, account, inf.models.size, io.nisfeb.talon.ui.isArmillaryPurchaseSupported))
         else if (settingUp || !refreshing) {
             Text("This device isn't connected yet.", style = MaterialTheme.typography.bodyMedium)
             keyProblem?.let { Quiet(it, error = true) }
@@ -1168,11 +1168,18 @@ internal fun balanceWarning(a: Account, canBuy: Boolean = true): String? = when 
     else -> null
 }
 
-/** This device's connection, once it has a key: how Talon reaches the model, and how many it may use. */
-internal fun connectionLine(mode: String?, account: Account?, models: Int): String {
+/**
+ * This device's connection, once it has a key: how Talon reaches the
+ * model, and how many it may use. [canBuy] false is a storefront that
+ * may not be told to pay outside the App Store (isArmillaryPurchaseSupported),
+ * so the line names no top up there, as [balanceWarning] does.
+ */
+internal fun connectionLine(mode: String?, account: Account?, models: Int, canBuy: Boolean = true): String {
     val vendor = account?.vendor?.ifBlank { null } ?: "the vendor"
     val how = when {
-        account?.leaseDisabled == true -> "Out of credit: requests go through $vendor's ship until you top up."
+        account?.leaseDisabled == true ->
+            if (canBuy) "Out of credit: requests go through $vendor's ship until you top up."
+            else "Out of credit: requests go through $vendor's ship until there is credit again."
         mode == "lease" -> "Connected. Talon reaches the model provider directly, with a key your ship holds."
         mode == "proxy" -> "Connected through $vendor's ship."
         else -> "Connected."

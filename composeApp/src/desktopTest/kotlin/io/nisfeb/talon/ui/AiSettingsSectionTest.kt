@@ -481,6 +481,8 @@ class AiSettingsSectionTest {
     fun `the connection line says where a request actually goes, and to how many models`() {
         val empty = Account(true, 0, "", false, null, "~wex", 0, leaseHeld = true, leaseDisabled = true, checkouts = emptyList())
         assertEquals("Out of credit: requests go through ~wex's ship until you top up. 2 models.", connectionLine("lease", empty, 2))
+        // Outside the US App Store no line says to pay (guideline 3.1.1(a)).
+        assertEquals("Out of credit: requests go through ~wex's ship until there is credit again. 2 models.", connectionLine("lease", empty, 2, canBuy = false))
         assertEquals("Connected. Talon reaches the model provider directly, with a key your ship holds. 1 model.", connectionLine("lease", null, 1))
         assertEquals("Connected through the vendor's ship. 3 models.", connectionLine("proxy", null, 3))
         assertEquals("Connected. 0 models.", connectionLine(null, null, 0))
