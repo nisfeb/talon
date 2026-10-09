@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import io.nisfeb.talon.data.notifyLevelOf
 import io.nisfeb.talon.data.latestPerConversation
+import io.nisfeb.talon.ai.braveSearch
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.ai.triagePrivateSlot
 import io.nisfeb.talon.util.ioDispatcher
@@ -1215,7 +1216,7 @@ fun App(
         // hard-refuse, so gate their PRESENCE (as AssistantScreen does)
         // rather than hand a scheduled run a tool it can only fail with.
         val loopWebOn = aiState.assistantOn()
-        val loopBraveOn = loopWebOn && aiState.braveApiKey.isNotBlank()
+        val loopBraveOn = loopWebOn && aiState.braveSearch() != null
         val loopRunner = remember(db, repo, searchEmbedderClient, loopWebOn, loopBraveOn, mailRepo, calendarRepo) {
             val agentClient = io.nisfeb.talon.ai.AgentClient(io.nisfeb.talon.ai.AiFeature.Assistant) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Assistant) }
             io.nisfeb.talon.ai.LoopRunner(

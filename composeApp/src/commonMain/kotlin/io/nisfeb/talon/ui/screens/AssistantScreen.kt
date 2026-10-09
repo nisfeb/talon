@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ai.braveSearch
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.util.nowMs
 
@@ -326,7 +327,7 @@ fun AssistantScreen(
     // rebuilds the loop with web_search.
     val braveSearch = remember(aiSettings) { BraveSearchClient { aiSettings.state.value } }
     val urlFetcher = remember(aiSettings) { UrlFetcher { aiSettings.state.value } }
-    val braveKeyPresent = aiState.braveApiKey.isNotBlank()
+    val braveKeyPresent = aiState.braveSearch() != null
 
     // Shared Urbit knowledge + assistant specifics, each falling back to
     // its built-in default when the user hasn't customized it (set in

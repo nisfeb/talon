@@ -26,6 +26,21 @@ import kotlinx.serialization.json.jsonPrimitive
  * relay. Response parsing is the pure top-level [parseBraveResults] so it's
  * unit-tested without a live API, mirroring AgentClient's build/parse split.
  */
+/**
+ * Where web search goes and the key it sends: the owner's own Brave key
+ * to Brave, else the Armillary vendor's search, which forwards to Brave
+ * on the vendor's key and takes this ship's Armillary key in Brave's own
+ * header. Null for neither.
+ */
+fun AiSettings.Config.braveSearch(): Pair<String, String>? {
+    braveApiKey.trim().takeIf { it.isNotEmpty() }?.let { return BRAVE_API to it }
+    val row = profile().armillary() ?: return null
+    val url = row.searchUrl?.takeIf { it.isNotBlank() } ?: return null
+    return row.searchKey.takeIf { it.isNotBlank() }?.let { url to it }
+}
+
+const val BRAVE_API = "https://api.search.brave.com"
+
 class BraveSearchClient(private val settings: () -> AiSettings.Config) {
 
     private val http = createAppHttpClient()
@@ -33,15 +48,14 @@ class BraveSearchClient(private val settings: () -> AiSettings.Config) {
     suspend fun search(query: String, count: Int): String {
         val cfg = settings()
         if (!cfg.assistantOn()) return "Web search is part of the assistant, which is off in Settings."
-        val key = cfg.braveApiKey.trim()
-        if (key.isBlank()) return "No Brave Search API key is set in Settings."
+        val (base, key) = cfg.braveSearch() ?: return "No Brave Search API key is set in Settings."
         val q = query.trim()
         if (q.isBlank()) return "Error: query is required."
         val n = count.coerceIn(1, 20)
 
         return withContext(ioDispatcher) {
             runCatching {
-                val resp = http.get("https://api.search.brave.com/res/v1/web/search") {
+                val resp = http.get("$base/res/v1/web/search") {
                     parameter("q", q)
                     parameter("count", n.toString())
                     header("X-Subscription-Token", key)

@@ -51,6 +51,15 @@ data class AiProvider(
     val models: List<ModelInfo> = emptyList(),
     /** Jev is on this provider's ZDR list, as of the last fetch. */
     val offersJev: Boolean = false,
+    /**
+     * Armillary only: the model the vendor runs each feature on, by the
+     * vendor's feature name (`catch_up`, `assistant`, `decision`), with
+     * `default` for a feature it names none for. Empty until it says.
+     */
+    val suggested: Map<String, String> = emptyMap(),
+    /** Armillary only: the vendor's Brave search, its base and the key this ship searches with. */
+    val searchUrl: String? = null,
+    val searchKey: String = "",
 ) {
     fun withCatalog(c: Catalog): AiProvider = copy(models = c.models, offersJev = c.jev)
 
@@ -68,9 +77,24 @@ data class ModelRef(val provider: String, val model: String)
 // so a profile saved with it, here or by an older install, still reads.
 enum class AiFeature { CatchUp, Assistant, OrreryTriage, OrreryGenerator, OrreryBrief, Transcription }
 
-/** A feature's switch and model; a null [model] follows the default model. */
+/**
+ * A feature's switch and model; a null [model] follows the default model.
+ * [own] is a model the owner picked by hand, which an Armillary vendor's
+ * pick does not replace; until then a feature the vendor names a model
+ * for runs on it ([AiProfile.resolve]).
+ */
 @Serializable
-data class FeatureSetting(val on: Boolean = false, val model: ModelRef? = null)
+data class FeatureSetting(val on: Boolean = false, val model: ModelRef? = null, val own: Boolean = false)
+
+/** The features an Armillary vendor picks the model for, by the vendor's names for them. */
+val VENDOR_FEATURES = mapOf(AiFeature.CatchUp to "catch_up", AiFeature.Assistant to "assistant")
+
+/**
+ * This setting back on the Armillary vendor's pick: no longer the
+ * owner's own, and on the Armillary row, so a private model chosen
+ * before it does not hold it ([AiProfile.followsVendor]).
+ */
+fun FeatureSetting.followingVendor(): FeatureSetting = copy(own = false, model = ModelRef(ARMILLARY_PROVIDER, ""))
 
 @Serializable
 data class AiProfile(
@@ -102,8 +126,51 @@ data class AiProfile(
 ) {
     fun provider(id: String): AiProvider? = providers.firstOrNull { it.id == id }
 
-    /** What [f] runs on, whether or not it is on: its own model, else the default. */
-    fun resolve(f: AiFeature): Resolved? = resolve(features[f]?.model ?: defaultModel)
+    /**
+     * What [f] runs on, whether or not it is on: the Armillary vendor's
+     * model while the feature follows it ([followsVendor]), else its own
+     * model, else the default.
+     */
+    fun resolve(f: AiFeature): Resolved? {
+        if (followsVendor(f)) return vendorModel(f)
+        return resolve(features[f]?.model ?: defaultModel)
+    }
+
+    /** The Armillary row, where this device buys from its ship. */
+    fun armillary(): AiProvider? = providers.firstOrNull { it.kind == ProviderKind.Armillary }
+
+    /** The vendor's model for [f] on the Armillary row, or null where the vendor names none. */
+    fun vendorModel(f: AiFeature): Resolved? {
+        val name = VENDOR_FEATURES[f] ?: return null
+        val row = armillary() ?: return null
+        val model = row.suggested[name]?.takeIf { it.isNotBlank() } ?: row.suggested["default"]?.takeIf { it.isNotBlank() } ?: return null
+        return Resolved(row, model)
+    }
+
+    /**
+     * Whether [f] runs on the vendor's model: the vendor names one, and
+     * the owner has not picked their own. A private model the owner
+     * chose before this build counts as their own: it is where they
+     * decided their messages are read, and the vendor's is a cloud one.
+     */
+    fun followsVendor(f: AiFeature): Boolean {
+        vendorModel(f) ?: return false
+        val s = features[f]
+        if (s?.own == true) return false
+        return resolve(s?.model ?: defaultModel)?.private != true
+    }
+
+    /**
+     * The vendor's decision model and the key it runs on: the lease's
+     * own OpenRouter key, so only under a lease, where the decisions
+     * route is OpenRouter's. Null where the vendor names none.
+     */
+    fun vendorDecision(): Pair<String, String>? {
+        val row = armillary() ?: return null
+        val model = row.suggested["decision"]?.takeIf { it.isNotBlank() } ?: return null
+        if (row.apiKey.isBlank() || "openrouter.ai" !in row.baseUrl.orEmpty()) return null
+        return row.apiKey to model
+    }
 
     /** What [ref] runs on, or null where it names no provider this profile has. */
     fun resolve(ref: ModelRef?): Resolved? {

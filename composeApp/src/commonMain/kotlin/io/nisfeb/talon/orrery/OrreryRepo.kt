@@ -588,6 +588,34 @@ class OrreryRepo(
     /** Orrery's place lookups as the ship holds them. */
     suspend fun searchSettings(): Result<SearchSettings> = runCatching { attached().searchSettings() }
 
+    private val _armillaryFollows = MutableStateFlow<Boolean?>(null)
+    private val _armillaryWhy = MutableStateFlow<String?>(null)
+
+    /** Whether orrery follows the ship's Armillary for every setting (orrery 96); null where it cannot. */
+    val armillaryFollows: StateFlow<Boolean?> = _armillaryFollows.asStateFlow()
+
+    /** Why the last "follow Armillary" failed, or null. */
+    val armillaryWhy: StateFlow<String?> = _armillaryWhy.asStateFlow()
+
+    suspend fun loadArmillaryFollows() {
+        _armillaryFollows.value = runCatching { attached().armillaryFollowing() }.getOrNull()
+    }
+
+    /**
+     * Orrery follows the ship's Armillary again for every setting; orrery
+     * reads Armillary itself. On the repo's scope, so leaving the screen
+     * midway does not drop it.
+     */
+    fun followArmillary() {
+        _armillaryWhy.value = null
+        _armillaryFollows.value = true
+        scope.launch {
+            runCatching { attached().followArmillary() }
+                .onFailure { _armillaryWhy.value = "Orrery could not follow Armillary: ${it.message ?: it::class.simpleName}" }
+            loadArmillaryFollows()
+        }
+    }
+
     /** Turn orrery's place lookups on (with [apiKey]) or off, on the repo's scope: leaving Settings does not take it along. */
     suspend fun setSearch(enabled: Boolean, apiKey: String? = null): Result<SearchSettings> = scope.async {
         runCatching { attached().setSearch(enabled, apiKey) }
@@ -1427,7 +1455,7 @@ class OrreryRepo(
 
     /** The decision model, when the owner has turned it on and an OpenRouter key is set. */
     private fun decider(): Pair<Decider, DecideSettings>? {
-        val d = decide?.settings?.value?.under(cloud?.config?.invoke())?.takeIf { it.on } ?: return null
+        val d = decide?.settings?.value?.under(cloud?.config?.invoke())?.onVendor(cloud?.config?.invoke())?.takeIf { it.on } ?: return null
         val key = cloud?.config?.invoke()?.let(::openRouterKey) ?: return null
         // The bare client: the ship's cookie has no business at OpenRouter.
         return OpenRouterDecider(bare, key, d) to d
