@@ -224,4 +224,25 @@ class ChatScrollHeuristicTest {
         )
         assertTrue(d.scrollToBottom)
     }
+
+    @Test
+    fun `a reader at the newest message is one who can see it, by position and by layout`() {
+        // At the bottom: before the new row is laid out, and after (the
+        // list keeps the row the reader was on, one up now).
+        assertTrue(readerAtNewest("m40", firstVisibleItemIndex = 0, inserted = 1, visibleKeys = listOf("m40", "m39")))
+        assertTrue(readerAtNewest("m40", firstVisibleItemIndex = 1, inserted = 1, visibleKeys = listOf("m40", "m39")))
+        // A few rows up: the previous newest is off screen.
+        assertFalse(readerAtNewest("m40", firstVisibleItemIndex = 6, inserted = 1, visibleKeys = listOf("m34", "m33")))
+        assertFalse(readerAtNewest("m40", firstVisibleItemIndex = 1, inserted = 1, visibleKeys = listOf("m39", "m38")))
+    }
+
+    // 1.8.13: a jump to an old post placed the reader, then the chat's first
+    // load counted as an arrival "at the bottom" and pulled them back down.
+    @Test
+    fun `a first load is never an arrival, and a jump the layout has not caught up with holds`() {
+        assertFalse(readerAtNewest(null, firstVisibleItemIndex = 0, inserted = 256, visibleKeys = emptyList()))
+        assertFalse(readerAtNewest(null, firstVisibleItemIndex = 254, inserted = 256, visibleKeys = listOf("m259")))
+        // Scrolled to an old post, with the last frame still showing the bottom.
+        assertFalse(readerAtNewest("m259", firstVisibleItemIndex = 238, inserted = 5, visibleKeys = listOf("m259", "m258")))
+    }
 }
