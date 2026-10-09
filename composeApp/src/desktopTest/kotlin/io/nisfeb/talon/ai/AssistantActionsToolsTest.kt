@@ -192,6 +192,47 @@ class AssistantActionsToolsTest {
         assertEquals("edit-event", h.pokes.single()["action"]!!.jsonPrimitive.content)
     }
 
+    // An all-day "the electrician comes back" day reached the owner with no
+    // reminder: the event tools sent no alarms (orrery-0c's review, 2026-10-09).
+    // The bodies are the calendar's own alarm shapes (docs/using.md).
+    @Test
+    fun `a reminder goes to the calendar as its alarms, and none goes without one`() = withHarness { h ->
+        h.run("create_event", argsOf("name" to "Inspector visits", "date" to "2026-10-14", "reminder" to "morning"))
+        assertEquals(
+            Json.parseToJsonElement("""[{"kind":"offset","from":"start","after":true,"s":32400,"desc":""}]"""),
+            h.pokes.last()["alarms"],
+        )
+        h.run("create_event", argsOf("name" to "Dentist", "date" to "2026-10-14", "time" to "10:00", "reminder" to "1h"))
+        assertEquals(Json.parseToJsonElement("""[{"kind":"before","s":3600,"desc":""}]"""), h.pokes.last()["alarms"])
+        h.run("create_event", argsOf("name" to "Lunch", "date" to "2026-10-14", "time" to "12:00"))
+        assertTrue("alarms" !in h.pokes.last(), "no reminder asked for: the calendar's own heads-up stands")
+        val sent = h.pokes.size
+        val out = h.run("create_event", argsOf("name" to "Dentist", "date" to "2026-10-14", "time" to "10:00", "reminder" to "morning"))
+        assertTrue(out.startsWith("Error:") && "how long before" in out, out)
+        assertEquals(sent, h.pokes.size, "a reminder that does not read sends nothing")
+    }
+
+    @Test
+    fun `a change replaces the reminders only when it names them`() = withHarness(
+        window = """{"rows":[{"id":"e1","cal":"default","cat":"timed","kind":"once","all":false,"l":1790848800000,"r":1790852400000,"meta":{"name":"Dentist"}}]}""",
+        event = """{"cat":"timed","kind":"once","start_ms":1790848800000,"dur_min":60,"cal":"default","meta":{"name":"Dentist"},"args":{},"alarms":[{"kind":"before","s":900,"desc":""}]}""",
+    ) { h ->
+        h.run("update_event", argsOf("event" to "e1", "name" to "Dentist (moved)"))
+        assertTrue("alarms" !in h.pokes.last(), "a rename keeps them: ${h.pokes.last()}")
+        h.run("update_event", argsOf("event" to "e1", "reminder" to "2h"))
+        assertEquals(Json.parseToJsonElement("""[{"kind":"before","s":7200,"desc":""}]"""), h.pokes.last()["alarms"])
+        h.run("update_event", argsOf("event" to "e1", "reminder" to "none"))
+        assertEquals(Json.parseToJsonElement("[]"), h.pokes.last()["alarms"], "none clears them")
+    }
+
+    @Test
+    fun `the events listed say their reminders`() = withHarness(
+        window = """{"rows":[{"id":"e1","cal":"default","cat":"timed","kind":"once","all":false,"l":1790848800000,"r":1790852400000,"meta":{"name":"Dentist"},"alarms":[{"kind":"before","s":900,"desc":""}]}]}""",
+    ) { h ->
+        val out = h.run("list_events", argsOf("from" to "2026-10-01", "to" to "2026-10-02"))
+        assertTrue("reminders: 15 min before" in out, out)
+    }
+
     @Test
     fun `a bad @p is rejected before anything is sent`() = withHarness { h ->
         val out = h.run("send_mail", argsOf("to" to "~zod, alice", "body" to "hi"))

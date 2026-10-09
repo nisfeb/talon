@@ -139,7 +139,7 @@ class DesktopCallEngine(
     )
 
     init {
-        val source = factory.createAudioSource(micAudioOptions())
+        val source = DesktopWebRtcFactory.micSource()
         val track = factory.createAudioTrack("talon-mic", source)
         pc.addTrack(track, listOf("talon-call"))
         micTrack = track
@@ -303,7 +303,7 @@ class DesktopCallEngine(
      * again when they close it.
      */
     private fun watchRemoteVideo(track: VideoTrack) {
-        val sink = dev.onvoid.webrtc.media.video.VideoTrackSink { lastRemoteFrameMs.value = nowMs() }
+        val sink = releasingSink { lastRemoteFrameMs.value = nowMs() }
         remoteSink = sink
         runCatching { track.addSink(sink) }
         remoteWatch?.cancel()
@@ -361,9 +361,9 @@ class DesktopCallEngine(
         _video.value = VideoState()
         runCatching { pc.close() }
         // The pc never owned the track: without an explicit dispose its
-        // native object leaks per call. Its AudioTrackSource can't be
-        // freed at all — webrtc-java 0.14.0 exposes no dispose on it —
-        // so dropping the track's ref is the whole fix available.
+        // native object leaks per call. Its source is the shared one
+        // (DesktopWebRtcFactory.micSource), which webrtc-java 0.17
+        // cannot free, so it is made once rather than per call.
         runCatching { micTrack?.dispose() }
         micTrack = null
         _state.value = MediaState.Closed
@@ -509,6 +509,21 @@ object DesktopWebRtcFactory {
         synchronized(lock) { ensure().second }
 
     fun get(): PeerConnectionFactory = synchronized(lock) { ensure().first }
+
+    private val micSources = HashMap<List<Boolean>, dev.onvoid.webrtc.media.audio.AudioTrackSource>()
+
+    /**
+     * The microphone's source for [micAudioOptions], one per setting and
+     * shared by every call and link that sends it. webrtc-java 0.17 cannot
+     * free a source, so one made per call leaked one per call and per
+     * party-line republish. The settings are four switches: at most
+     * sixteen sources, made once each.
+     */
+    fun micSource(): dev.onvoid.webrtc.media.audio.AudioTrackSource {
+        val options = micAudioOptions()
+        val key = listOf(options.echoCancellation, options.autoGainControl, options.noiseSuppression, options.highpassFilter)
+        return synchronized(lock) { micSources.getOrPut(key) { ensure().first.createAudioSource(options) } }
+    }
 
     private fun ensure(): Pair<PeerConnectionFactory, dev.onvoid.webrtc.media.audio.AudioDeviceModuleBase> {
         val f = factory

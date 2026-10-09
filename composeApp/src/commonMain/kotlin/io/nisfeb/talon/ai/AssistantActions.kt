@@ -289,6 +289,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                     "every_min" to ("integer" to "For every: the period in minutes."),
                     "count" to ("integer" to "For a repeat: how many times, optional."),
                     "tags" to ("string" to "Comma-separated tags, optional (the calendar's categories)."),
+                    "reminder" to ("string" to "When to remind the owner: 30m, 2h or 1d before the start; for an all-day event also morning (9:00 that day) or a time of day HH:MM; none for none. Several, comma-separated. A timed event already gets the calendar's own heads-up (30 minutes before unless the owner changed it), so give a timed event one only when the owner asks. An all-day event gets none unless you set it: for an all-day appointment someone comes to the house for or the owner must be ready for (a tradesperson's visit, an inspection, a delivery), set morning unless the owner says otherwise, and ask only when it is unclear."),
                     required = listOf("name", "date"),
                 ),
             ),
@@ -313,6 +314,9 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             val calId = resolveCalendar(calArg)
             if (calArg != null && calId == null) return@Tool "Error: no calendar called \"$calArg\"; see list_calendars."
             if (calId != null && calId in cal.readOnly) return@Tool "Error: calendar $calId is shared with the user read-only; its host makes the changes."
+            val alarms = args.text("reminder")?.let { r ->
+                runCatching { io.nisfeb.talon.calendar.reminderAlarms(r, allDay = minute == null) }.getOrElse { return@Tool "Error: ${it.message}" }
+            }
             val draft = EventDraft(
                 name = name, note = args.text("note").orEmpty(), location = args.text("location").orEmpty(),
                 cal = calId,
@@ -323,6 +327,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 ordinal = ordinal ?: "first", nthDay = nthDay, periodMin = (args.int("every_min") ?: 60).coerceAtLeast(1),
                 zone = if (minute != null) zoneArg else null,
                 tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
+                alarms = alarms,
             )
             // Not waiting for the lists to be read back: that went on until
             // they moved, fifteen seconds and more for an event off screen,
@@ -390,6 +395,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                     "note" to ("string" to "A new note; empty to clear it."),
                     "calendar" to ("string" to "Move it to this calendar, by id or name."),
                     "tags" to ("string" to "Comma-separated; replaces the tags."),
+                    "reminder" to ("string" to "Replaces the reminders, in create_event's words (30m, 2h, 1d, morning, HH:MM); none clears them. list_events shows the ones it has."),
                     required = listOf("event"),
                 ),
             ),
@@ -425,6 +431,11 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             } else {
                 if (newDate != null) d = d.copy(date = newDate)
                 if (newMinute != null && d.cat != EventCat.DATE) d = d.copy(cat = EventCat.TIMED, minuteOfDay = newMinute)
+            }
+            args.text("reminder")?.let { r ->
+                val alarms = runCatching { io.nisfeb.talon.calendar.reminderAlarms(r, allDay = d.cat == EventCat.ALLDAY || d.cat == EventCat.DATE) }
+                    .getOrElse { return@Tool "Error: ${it.message}" }
+                d = d.copy(alarms = alarms, alarmsChanged = true)
             }
             val occText = args.text("occurrence")?.trim()?.takeIf { it.isNotEmpty() }
             val oneOnly = occText != null && d0.repeats
@@ -765,6 +776,9 @@ internal fun describeRow(r: CalendarRow, zone: TimeZone, calNames: Map<String, S
         if (r.location.isNotBlank()) append(" @ ").append(r.location)
         if (r.tags.isNotEmpty()) append(' ').append(r.tags.joinToString(" ") { "#$it" })
         if (r.note.isNotBlank()) append(" note: ").append(r.note.replace('\n', ' ').take(160))
+        io.nisfeb.talon.calendar.alarmsOf(r.alarms)?.takeIf { it.isNotEmpty() }?.let { a ->
+            append(" reminders: ").append(a.joinToString(", ") { io.nisfeb.talon.calendar.alarmLabel(it, zone, twentyFourHour = true) })
+        }
         append(" (calendar ").append(calNames[r.cal] ?: r.cal).append(')')
     }
 }

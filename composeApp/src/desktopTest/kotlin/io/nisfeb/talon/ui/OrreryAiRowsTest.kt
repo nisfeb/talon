@@ -221,4 +221,49 @@ class OrreryAiRowsTest {
         assertEquals("typesafe/jev-1.14", decided.value.model)
         assertFalse(shows("TypeSafe: Jev 1.14"), "picked: the list closes")
     }
+
+    // A user setting up Talon and Orrery for the first time found the AI he
+    // set up in Talon did not carry over: the ship's generator had no model,
+    // and nothing said so (2026-10-09).
+    private val openRouterDefault = AiProfile(listOf(openRouter, anthropic), defaultModel = ModelRef("or", "m1"))
+
+    @Test
+    fun `a ship with no model for Orrery is offered the default, sent with its key in one tap`() = rows(openRouterDefault) { ai, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("Orrery has no model on your ship yet") }
+        assertTrue(shows("sends your OpenRouter key to your ship"), "it says what the tap sends")
+        onNodeWithText("Use m1, OpenRouter").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { sent.isNotEmpty() }
+        assertEquals(
+            Json.parseToJsonElement("""{"enabled":true,"url":"${io.nisfeb.talon.ai.ModelCatalog.OPENROUTER}","model":"m1","api_key":"sk-or"}"""),
+            sent.single(),
+        )
+        waitUntil(timeoutMillis = 5_000) { !shows("Orrery has no model on your ship yet") }
+        assertEquals(null, ai.state.value.savedProfile!!.features[AiFeature.OrreryGenerator]?.model, "Orrery follows the default model")
+    }
+
+    @Test
+    fun `a default the ship cannot reach is said so, and nothing is sent`() = rows { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("Orrery has no model on your ship yet") }
+        assertTrue(shows("Your default model is on a provider your ship cannot reach"))
+        assertFalse(shows("Use claude"), "no one-tap for a model the ship cannot run")
+        assertTrue(sent.isEmpty(), sent.toString())
+    }
+
+    @Test
+    fun `a ship that has a model and key for Orrery is offered nothing`() {
+        generator = """{"enabled":false,"model":"m1","api_key_set":true}"""
+        rows(openRouterDefault) { _, _ ->
+            waitForIdle()
+            assertFalse(shows("Orrery has no model on your ship yet"))
+        }
+    }
+
+    @Test
+    fun `not now puts the offer away and sends nothing`() = rows(openRouterDefault) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("Orrery has no model on your ship yet") }
+        onNodeWithText("Not now").performScrollTo().performClick()
+        waitForIdle()
+        assertFalse(shows("Orrery has no model on your ship yet"))
+        assertTrue(sent.isEmpty(), sent.toString())
+    }
 }

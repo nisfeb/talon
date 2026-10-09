@@ -151,7 +151,7 @@ class DesktopPeerLink(
 
     init {
         if (sendAudio) {
-            val source = micPcm ?: factory.createAudioSource(micAudioOptions())
+            val source = micPcm ?: DesktopWebRtcFactory.micSource()
             val track = factory.createAudioTrack("talon-mic", source)
             // Galène requires every stream to be one-directional: the
             // offerer is always the sender.
@@ -565,9 +565,9 @@ class DesktopPeerLink(
         runCatching { pc.close() }
         // Ours to free even when the source is a caller-owned
         // CustomAudioSource — and up links republish on flaky
-        // networks, so this leaked per republish, not per call. The
-        // factory-made AudioTrackSource can't be freed: webrtc-java
-        // 0.14.0 exposes no dispose on it.
+        // networks, so this leaked per republish, not per call. A
+        // factory-made source is the shared one (DesktopWebRtcFactory.
+        // micSource): webrtc-java 0.17 cannot free it, so it is made once.
         runCatching { micTrack?.dispose() }
         micTrack = null
         _state.value = MediaState.Closed
