@@ -1,6 +1,6 @@
 # Talon Privacy Policy
 
-_Last updated: September 29, 2026_
+_Last updated: October 9, 2026_
 
 Talon is a chat client for [Urbit](https://urbit.org). It connects your
 device directly to an Urbit ship that you control. There are no Talon
@@ -34,7 +34,7 @@ Armillary vendor we run, that vendor keeps the account it sells to. See
   an image, Talon fetches it from that host to display it, like a web
   browser would.
 - **Optional AI features (off by default)**: catch-up summaries and similar features need a model, and there are two ways to give them one. The first is your own API key for an AI provider. When you use a feature, the relevant chat content is sent to the provider you configured, under that provider's privacy policy. No key, no traffic.
-- **The optional Armillary provider (off until you add it)**: instead of your own key, you can buy model inference through your own Urbit ship, from a vendor ship you choose. Your ship holds the account and the balance. You pay that vendor by card through Stripe or by bitcoin through BTCPay Server, both set up by the vendor. The default vendor is ~nisfeb, which we run; any other vendor is run by whoever owns that ship. In lease mode the vendor mints a capped key at the model provider and Talon calls that provider directly. In proxy mode your requests pass through the vendor's ship on the way to the model provider. The vendor sees your ship's name, your balance and your ledger, and in proxy mode it passes your requests on without storing them. Nothing else about you leaves the device.
+- **The optional Armillary provider (off until you add it)**: instead of your own key, you can buy model inference through your own Urbit ship, from a vendor ship you choose. Your ship holds the account and the balance. You pay that vendor by card through Stripe or by bitcoin through BTCPay Server, both set up by the vendor. The default vendor is ~nisfeb, which we run; any other vendor is run by whoever owns that ship. In lease mode the vendor mints a capped key at the model provider and Talon calls that provider directly. In proxy mode your requests pass through the vendor's ship on the way to the model provider. The vendor sees your ship's name, your balance and your ledger, and in proxy mode it passes your requests on without storing them. If the assistant searches the web and you have no Brave Search key of your own, the search goes through the vendor's ship to Brave Search under the vendor's key; the vendor passes the query on without storing it and counts the search. Nothing else about you leaves the device.
 
 ## If you buy AI credit from ~nisfeb
 
@@ -48,9 +48,10 @@ For your ship, ~nisfeb keeps:
 - every checkout you open: amount, payment method, status, and the
   Stripe or BTCPay Server reference;
 - the keys your devices use, by name (such as "Talon on iOS 26.0") and
-  by hash, never the key itself once your ship has fetched it.
+  by hash, never the key itself once your ship has fetched it;
+- how many web searches your ship made through its Brave Search key each month, never the queries.
 
-It does not keep your prompts or the model's answers: in proxy mode it
+It does not keep your prompts, the model's answers or your searches: in proxy mode it
 passes them on without writing them down. It never sees your card
 number, email or billing address; Stripe or BTCPay Server collect those
 on their own pages, under their own privacy policies. It shares your
