@@ -1,5 +1,14 @@
 package io.nisfeb.talon.ui
 
+import kotlin.math.abs
+import androidx.compose.ui.test.pinch
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.doubleClick
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.TouchInjectionScope
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ComposeUiTest
@@ -90,5 +99,56 @@ class ImageViewerScreenTest {
     @Test
     fun `nothing to show closes at once`() = viewer(urls = emptyList()) {
         waitUntil(timeoutMillis = 5_000) { did == listOf("closed") }
+    }
+
+    // Zoom and pan, by touch (2026-10-09: "unusable" on a phone). The
+    // pictures do not load here, so the picture is the whole viewer.
+    private fun ComposeUiTest.picture() = onNodeWithTag("viewer-image", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+    private fun ComposeUiTest.touch(block: TouchInjectionScope.() -> Unit) = onAllNodes(isRoot()).onFirst().performTouchInput(block)
+    private fun near(expected: Float, actual: Float, what: String) = assertTrue(abs(expected - actual) < 2f, "$what: expected $expected, was $actual")
+
+    @Test
+    fun `a double tap zooms in about the tapped point, and a drag carries the picture with the finger`() = viewer(urls = urls.take(1)) {
+        val whole = picture()
+        touch { doubleClick(Offset(200f, 150f)) }
+        waitForIdle()
+        near(whole.width * 2.5f, picture().width, "zoomed in 2.5x")
+        near(200f - 200f * 2.5f, picture().left, "the tapped point stays put")
+        near(150f - 150f * 2.5f, picture().top, "the tapped point stays put")
+
+        touch { swipe(Offset(500f, 400f), Offset(400f, 350f), durationMillis = 300) }
+        waitForIdle()
+        near(-400f, picture().left, "moved as far as the finger")
+        near(-275f, picture().top, "moved as far as the finger")
+
+        touch { swipe(Offset(100f, 400f), Offset(900f, 400f), durationMillis = 300) }
+        waitForIdle()
+        near(0f, picture().left, "a flick stops at the picture's edge")
+
+        touch { doubleClick(Offset(300f, 300f)) }
+        waitForIdle()
+        assertEquals(whole, picture(), "back where it started")
+    }
+
+    @Test
+    fun `a pinch zooms about the fingers`() = viewer(urls = urls.take(1)) {
+        val whole = picture()
+        touch { pinch(Offset(250f, 300f), Offset(150f, 300f), Offset(350f, 300f), Offset(450f, 300f), durationMillis = 400) }
+        waitForIdle()
+        near(whole.width * 3f, picture().width, "zoomed 3x")
+        near(300f - 300f * 3f, picture().left, "the point between the fingers stays put")
+        near(300f - 300f * 3f, picture().top, "the point between the fingers stays put")
+    }
+
+    @Test
+    fun `a swipe steps to the next picture, but not once zoomed`() = viewer {
+        waitUntil(timeoutMillis = 5_000) { shows("1 / 3") }
+        touch { swipeLeft(startX = 800f, endX = 200f, durationMillis = 300) }
+        waitUntil(timeoutMillis = 5_000) { shows("2 / 3") }
+        touch { doubleClick(Offset(400f, 300f)) }
+        waitForIdle()
+        touch { swipeLeft(startX = 800f, endX = 200f, durationMillis = 300) }
+        waitForIdle()
+        assertTrue(shows("2 / 3"), "a drag on a zoomed picture pans it")
     }
 }
