@@ -63,6 +63,8 @@ import io.nisfeb.talon.ai.ModelInfo
 import io.nisfeb.talon.ai.ModelRef
 import io.nisfeb.talon.ai.ProfileInputs
 import io.nisfeb.talon.ai.ProviderKind
+import io.nisfeb.talon.ai.VENDOR_FEATURES
+import io.nisfeb.talon.ai.followingVendor
 import io.nisfeb.talon.ai.migrateProfile
 import io.nisfeb.talon.ai.shipBase
 import io.nisfeb.talon.ai.without
@@ -237,21 +239,42 @@ fun AiSettingsSection(
     Spacer(Modifier.height(12.dp))
     HorizontalDivider()
     Heading("Features")
+    // The models an Armillary vendor picks (armillary 19). A feature the
+    // owner picked by hand, here or on the ship's orrery, has one button
+    // back; orrery reads Armillary itself when told to follow.
+    if (profile.armillary()?.suggested?.isNotEmpty() == true) {
+        val noFollow = remember { MutableStateFlow<Boolean?>(null) }
+        val noWhy = remember { MutableStateFlow<String?>(null) }
+        val orreryFollows by (orrery?.armillaryFollows ?: noFollow).collectAsState()
+        val orreryWhy by (orrery?.armillaryWhy ?: noWhy).collectAsState()
+        if (orrery != null) LaunchedEffect(orrery, profile.armillary()?.suggested) { orrery.loadArmillaryFollows() }
+        val ownHere = VENDOR_FEATURES.keys.filter { profile.vendorModel(it) != null && !profile.followsVendor(it) }
+        Quiet("Your Armillary vendor picks the models for the features below. Picking another makes it your own.")
+        if (ownHere.isNotEmpty() || orreryFollows == false) OutlinedButton(onClick = {
+            edit { p -> p.copy(features = p.features + ownHere.associateWith { f -> (p.features[f] ?: FeatureSetting()).followingVendor() }) }
+            if (orreryFollows == false) orrery?.followArmillary()
+        }) { Text("Use Armillary AI defaults") }
+        orreryWhy?.let { Quiet(it, error = true) }
+    }
     FeatureRow(
         "Channel catch-up", "When you open a chat with unread messages, offer a summary. Reads messages.",
         on = profile.isOn(AiFeature.CatchUp), spent = spend[AiFeature.CatchUp.name],
         onSwitch = { on -> setFeature(AiFeature.CatchUp) { it.copy(on = on) } },
     ) {
-        FeatureModel(profile, AiFeature.CatchUp, chat, reads = true, armillaryMode = armillaryMode?.mode) { ref -> setFeature(AiFeature.CatchUp) { it.copy(model = ref) } }
+        FeatureModel(
+            profile, AiFeature.CatchUp, chat, reads = true, armillaryMode = armillaryMode?.mode,
+            onFollow = { setFeature(AiFeature.CatchUp) { it.followingVendor() } },
+        ) { ref -> setFeature(AiFeature.CatchUp) { it.copy(model = ref, own = true) } }
     }
     if (isAssistantSupported) FeatureRow(
         "Assistant", "Answers from your messages and does what you ask, confirming anything that changes data. Loops run on it. Reads messages when asked.",
         on = profile.isOn(AiFeature.Assistant), spent = spend[AiFeature.Assistant.name],
         onSwitch = { on -> setFeature(AiFeature.Assistant) { it.copy(on = on) } },
     ) {
-        FeatureModel(profile, AiFeature.Assistant, chat, reads = true, flag = { if (it.tools == false) "no tool use" else null }, armillaryMode = armillaryMode?.mode) { ref ->
-            setFeature(AiFeature.Assistant) { it.copy(model = ref) }
-        }
+        FeatureModel(
+            profile, AiFeature.Assistant, chat, reads = true, flag = { if (it.tools == false) "no tool use" else null }, armillaryMode = armillaryMode?.mode,
+            onFollow = { setFeature(AiFeature.Assistant) { it.followingVendor() } },
+        ) { ref -> setFeature(AiFeature.Assistant) { it.copy(model = ref, own = true) } }
     }
     if (isCallsSupported) {
         val speech = profile.providers.filter { it.kind == ProviderKind.OpenAi || it.kind == ProviderKind.OpenAiCompatible }
@@ -1383,9 +1406,18 @@ private fun FeatureModel(
     flag: (ModelInfo) -> String? = { null },
     /** How an Armillary model is reached, where one is chosen: `lease` or `proxy`. */
     armillaryMode: String? = null,
+    /** Back to the Armillary vendor's model, for a feature the owner picked by hand. */
+    onFollow: (() -> Unit)? = null,
     onPick: (ModelRef?) -> Unit,
 ) {
-    ModelPicker(profile, profile.features[f]?.model, allowDefault = true, providers = providers, flag = flag, onPick = onPick)
+    val vendor = profile.vendorModel(f)
+    val follows = profile.followsVendor(f)
+    ModelPicker(
+        profile, if (follows && vendor != null) ModelRef(vendor.provider.id, vendor.model) else profile.features[f]?.model,
+        allowDefault = !follows, providers = providers, flag = flag, onPick = onPick,
+    )
+    if (follows) Quiet("Your Armillary vendor's pick.")
+    else if (vendor != null && onFollow != null) TextButton(onClick = onFollow) { Text("Use your vendor's model, ${vendor.model}") }
     // Said where the model is picked. It used to surface, for triage
     // only, on the device model's card, where "OpenRouter has no key"
     // read as no provider at all (sneagan, 2026-10-08).

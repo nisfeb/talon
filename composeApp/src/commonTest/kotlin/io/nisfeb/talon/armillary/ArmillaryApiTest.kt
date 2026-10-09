@@ -58,6 +58,24 @@ class ArmillaryApiTest {
     }
 
     @Test
+    fun `the inference config carries the vendor's picks and its search (armillary 19)`() {
+        val got = inferenceOf(
+            obj(
+                """{"mode":"lease","base_url":"https://openrouter.ai/api/v1","key":"sk-or-1","models":[],
+                    "suggested":{"rev":4,"tiers":{"frontier":"f/1"},"features":{"catch_up":"frontier"},
+                                 "models":{"catch_up":"f/1","default":"f/1","odd":3}},
+                    "search":{"url":"https://v.example/apps/armillary/brave","key":"id.secret"}}""",
+            ),
+        )
+        assertEquals(mapOf("catch_up" to "f/1", "default" to "f/1"), got.suggested, "a model is a string, nothing else")
+        assertEquals("https://v.example/apps/armillary/brave", got.searchUrl)
+        assertEquals("id.secret", got.searchKey)
+        // armillary 18 and earlier: no search, and no picks before any arrive
+        val old = inferenceOf(obj("""{"mode":"proxy","base_url":"u","key":"k","suggested":{"rev":0,"models":{}}}"""))
+        assertTrue(old.suggested.isEmpty() && old.searchUrl.isEmpty() && old.searchKey.isEmpty())
+    }
+
+    @Test
     fun `the account is the vendor's view plus what this ship added to it`() {
         val got = accountOf(
             obj(

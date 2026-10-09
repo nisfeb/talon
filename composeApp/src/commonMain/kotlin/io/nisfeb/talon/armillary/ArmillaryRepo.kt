@@ -507,8 +507,8 @@ class ArmillaryRepo(
     }
 
     /**
-     * The base, the key and the models onto the `armillary` provider
-     * row, and nothing else on the profile. The row is only written
+     * The base, the key, the models, the vendor's picks and its search
+     * onto the `armillary` provider row, and nothing else on the profile. The row is only written
      * where the owner has added it: a ship that sells inference to a
      * person who has not asked Talon to buy any is left alone.
      */
@@ -528,14 +528,10 @@ class ArmillaryRepo(
             ModelInfo(id = id, name = id, zdr = id in zdr, tools = had?.tools, contextLength = had?.contextLength)
         }
         val base = inf.baseUrl.trim().trimEnd('/').ifBlank { null }
-        if (row.baseUrl == base && row.apiKey == inf.key && row.models == models) return
-        ai.setProfile(
-            profile.copy(
-                providers = profile.providers.map {
-                    if (it.id == ARMILLARY_PROVIDER) it.copy(baseUrl = base, apiKey = inf.key, models = models) else it
-                },
-            ),
-        )
+        val searchUrl = inf.searchUrl.trim().trimEnd('/').ifBlank { null }
+        val next = row.copy(baseUrl = base, apiKey = inf.key, models = models, suggested = inf.suggested, searchUrl = searchUrl, searchKey = inf.searchKey)
+        if (next == row) return
+        ai.setProfile(profile.copy(providers = profile.providers.map { if (it.id == ARMILLARY_PROVIDER) next else it }))
     }
 
     companion object {
@@ -573,7 +569,7 @@ class ArmillaryRepo(
         const val PAID_SHOWN_MS = 10_000L
 
         /** A checkout row in one of these states is over, whatever the balance does. */
-        val ENDED_STATUSES = setOf("failed", "expired", "refused")
+        val ENDED_STATUSES = setOf("failed", "expired", "refused", "cancelled")
 
         /** The attached repo, for the places that hold none: the model catalog's test button. */
         @kotlin.concurrent.Volatile

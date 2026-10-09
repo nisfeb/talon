@@ -226,6 +226,24 @@ class OrreryApi(
      * A refusal (no model key, the day's calls spent, the model failing)
      * is an answer the owner reads, as a refine's is.
      */
+    /**
+     * Whether every orrery setting follows the ship's Armillary (orrery
+     * 96): null where orrery is older, the ship has no Armillary, or
+     * orrery may not read it yet. Owner only.
+     */
+    suspend fun armillaryFollowing(): Boolean? {
+        val text = runCatching { request(owner, HttpMethod.Get, "/api/armillary") }.getOrNull() ?: return null
+        val o = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
+        if (o["offered"]?.jsonPrimitive?.booleanOrNull != true) return null
+        val settings = o["settings"] as? JsonObject ?: return null
+        return settings.values.all { (it as? JsonObject)?.get("following")?.jsonPrimitive?.booleanOrNull != false }
+    }
+
+    /** Every orrery setting follows the ship's Armillary again (orrery 96). Owner only. */
+    suspend fun followArmillary() {
+        request(owner, HttpMethod.Post, "/api/armillary/follow", "{}")
+    }
+
     /** Orrery's place lookups through Brave Search (orrery 87), as the ship holds them. Owner only. */
     suspend fun searchSettings(): SearchSettings = searchOf(request(owner, HttpMethod.Get, "/api/search"))
 
