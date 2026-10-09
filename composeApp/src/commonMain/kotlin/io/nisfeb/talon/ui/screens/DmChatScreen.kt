@@ -561,11 +561,10 @@ fun DmChatScreen(
             newestId = newestIdNow,
             lastNewestId = lastNewestId,
             lastSize = lastSize,
-            // The previous newest message on screen is a reader at the
-            // bottom; anywhere further up, a new one does not move them.
-            // Before or after the list lays the new row out, it keeps the
-            // row the reader was looking at, so either reading holds.
-            sawLastNewest = lastNewestId == null || listState.layoutInfo.visibleItemsInfo.any { it.key == lastNewestId },
+            sawLastNewest = io.nisfeb.talon.ui.readerAtNewest(
+                lastNewestId, listState.firstVisibleItemIndex, rows.size - lastSize,
+                listState.layoutInfo.visibleItemsInfo.map { it.key },
+            ),
             pendingSendBaselineSize = pendingSendBaselineSize,
             pendingSelfSendNewestId = pendingSelfSendNewestId,
             // Until entry has placed the reader, the first load of rows is

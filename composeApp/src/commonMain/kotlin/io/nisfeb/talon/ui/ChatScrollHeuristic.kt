@@ -42,7 +42,8 @@ data class ScrollDecision(
  * @param lastSize `rows.size` from the previous emission.
  * @param sawLastNewest the message that was newest before this
  *   emission ([lastNewestId]) is on screen: the reader is at the
- *   bottom. True for a chat that had none.
+ *   bottom. False for a chat that had none: its first load is the
+ *   screen's to place, not an arrival.
  * @param pendingSendBaselineSize size captured at the moment doSend
  *   fired forceBottomTick. Null when no self-send is pending.
  * @param pendingSelfSendNewestId id of the optimistic row from the
@@ -101,3 +102,17 @@ fun decideAutoScroll(
         nextPendingSelfSendNewestId = pendingSelfSendNewestId,
     )
 }
+
+/**
+ * Whether the reader could see [lastNewestId], the newest message before
+ * [inserted] rows came, so a new one may follow it into view. Anywhere
+ * further up, it does not move them (sneagan, 2026-10-09).
+ *
+ * No previous newest is the chat's first load, never an arrival:
+ * counted as "at the bottom", it pulled a reader a jump had just placed
+ * at an old post back down (1.8.13). After that both readings must agree:
+ * the scroll position, which a jump moves at once (no further up than
+ * the rows that just came), and [visibleKeys], the last frame's layout.
+ */
+fun readerAtNewest(lastNewestId: String?, firstVisibleItemIndex: Int, inserted: Int, visibleKeys: List<Any>): Boolean =
+    lastNewestId != null && firstVisibleItemIndex <= inserted && lastNewestId in visibleKeys
