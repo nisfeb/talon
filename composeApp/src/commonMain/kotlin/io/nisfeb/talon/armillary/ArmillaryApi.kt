@@ -257,6 +257,11 @@ data class Inference(
     val baseUrl: String,
     val key: String,
     val models: List<String>,
+    /** The vendor's model for each feature, by its name for it, `default` among them (armillary 18). */
+    val suggested: Map<String, String> = emptyMap(),
+    /** The vendor's Brave search and the key this ship sends it (armillary 19); blank where it offers none. */
+    val searchUrl: String = "",
+    val searchKey: String = "",
 )
 
 sealed class InferenceAnswer {
@@ -409,6 +414,10 @@ internal fun inferenceOf(o: JsonObject) = Inference(
     baseUrl = o.str("base_url").orEmpty(),
     key = o.str("key").orEmpty(),
     models = texts(o["models"]),
+    suggested = ((o["suggested"] as? JsonObject)?.get("models") as? JsonObject).orEmpty()
+        .mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.let { k to it } }.toMap(),
+    searchUrl = (o["search"] as? JsonObject)?.str("url").orEmpty(),
+    searchKey = (o["search"] as? JsonObject)?.str("key").orEmpty(),
 )
 
 internal fun checkoutOf(o: JsonObject) = Checkout(

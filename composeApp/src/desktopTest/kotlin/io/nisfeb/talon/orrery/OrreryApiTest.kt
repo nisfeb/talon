@@ -51,6 +51,24 @@ class OrreryApiTest {
         assertEquals("true", scope["write"]!!.jsonPrimitive.content)
     }
 
+    // Checked against orrery's serve-armillary and armillary-state
+    // (version 96): {offered, mode, rev, settings: {name: {following,
+    // applied, model}}}; the follow route takes {} for every setting.
+    @Test
+    fun `orrery says whether it follows Armillary, and is told to follow it, on the owner's session`() = runTest {
+        val all = """{"offered":true,"mode":"lease","rev":3,"settings":{"generator":{"following":true,"applied":true,"model":"g/1"},
+            "mail":{"following":true,"applied":true,"model":"z/1"}}}"""
+        assertEquals(true, api(body = all).armillaryFollowing())
+        assertEquals("https://ship/apps/orrery/api/armillary", seen!!.url.toString())
+        assertEquals(false, api(body = all.replace("\"mail\":{\"following\":true", "\"mail\":{\"following\":false")).armillaryFollowing())
+        assertNull(api(body = """{"offered":false,"mode":"","rev":0,"settings":{}}""").armillaryFollowing(), "nothing to follow is not following")
+        assertNull(api(HttpStatusCode.NotFound, "{}").armillaryFollowing(), "an orrery before 96 cannot say")
+        api(body = all).followArmillary()
+        assertEquals("https://ship/apps/orrery/api/armillary/follow", seen!!.url.toString())
+        assertEquals("POST", seen!!.method.value)
+        assertEquals("{}", (seen!!.body as TextContent).text)
+    }
+
     // Checked against orrery's serve-read (version 59): text required,
     // title and source optional, answered at once with the item's id.
     @Test

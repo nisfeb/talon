@@ -187,6 +187,43 @@ class AiSettingsSectionTest {
         onNodeWithText("Continue").assertIsNotEnabled()
     }
 
+    @Test
+    fun `the vendor's picks drive the features until one is picked by hand, and one tap brings it back`() = runComposeUiTest {
+        val ai = FakeAiSettings().withProfile(withArmillary().copy(features = mapOf(AiFeature.CatchUp to FeatureSetting(on = true))))
+        val bought = repo(ai) { path ->
+            HttpStatusCode.OK to when {
+                path.endsWith("/api/inference") ->
+                    """{"mode":"lease","base_url":"https://openrouter.ai/api/v1","key":"sk-or-1","models":["f/1","z/1"],
+                        "suggested":{"rev":2,"models":{"default":"f/1","catch_up":"z/1"}}}"""
+                path.endsWith("/api/plans") -> "[]"
+                path.endsWith("/api/catalog") -> "[]"
+                else -> funded
+            }
+        }
+        setContent {
+            TalonTheme(darkTheme = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
+            }
+        }
+        val catchUp = { ai.state.value.savedProfile!!.resolve(AiFeature.CatchUp) }
+        onNodeWithText("Your Armillary vendor picks the models for the features below. Picking another makes it your own.").assertExists()
+        assertEquals(ARMILLARY_PROVIDER to "z/1", catchUp()!!.provider.id to catchUp()!!.model, "an owner who picked nothing runs on the vendor's pick")
+        assertTrue(onAllNodesWithText("Your Armillary vendor's pick.").fetchSemanticsNodes().isNotEmpty())
+        onNodeWithText("Use Armillary AI defaults").assertDoesNotExist()
+        // A model picked by hand, as the picker saves it.
+        ai.setProfile(ai.state.value.savedProfile!!.let { p ->
+            p.copy(features = p.features + (AiFeature.CatchUp to FeatureSetting(on = true, model = ModelRef("main", "claude-opus-5"), own = true)))
+        })
+        waitForIdle()
+        assertEquals("claude-opus-5", catchUp()!!.model)
+        onNodeWithText("Use your vendor's model, z/1").assertExists()
+        onNodeWithText("Use Armillary AI defaults").performClick()
+        waitForIdle()
+        assertEquals("z/1", catchUp()!!.model)
+        assertTrue(ai.state.value.savedProfile!!.isOn(AiFeature.CatchUp), "following keeps the switch")
+        onNodeWithText("Use Armillary AI defaults").assertDoesNotExist()
+    }
+
     /** A ship answering [plans] and [account], with one model on offer. */
     private fun selling(ai: FakeAiSettings, plans: String, account: String) = repo(ai) { path ->
         HttpStatusCode.OK to when {

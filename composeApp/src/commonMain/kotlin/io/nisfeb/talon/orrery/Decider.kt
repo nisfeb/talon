@@ -237,8 +237,17 @@ fun DecideSettings.under(cfg: io.nisfeb.talon.ai.AiSettings.Config?): DecideSett
     }
 }
 
-/** The OpenRouter key Talon already has: the frontier model's, or the private model's when it points there. */
-fun openRouterKey(cfg: io.nisfeb.talon.ai.AiSettings.Config): String? = cfg.profile().jevProvider()?.apiKey
+/**
+ * The OpenRouter key Talon already has: the Armillary lease's when the
+ * vendor names a decision model, else the frontier model's, or the
+ * private model's when it points there.
+ */
+fun openRouterKey(cfg: io.nisfeb.talon.ai.AiSettings.Config): String? =
+    cfg.profile().let { p -> p.vendorDecision()?.first ?: p.jevProvider()?.apiKey }
+
+/** These settings on the Armillary vendor's decision model, where it names one. */
+fun DecideSettings.onVendor(cfg: io.nisfeb.talon.ai.AiSettings.Config?): DecideSettings =
+    cfg?.profile()?.vendorDecision()?.let { copy(model = it.second) } ?: this
 
 /** Dollars to the millionth, never in exponent form: these calls cost fractions of a cent. */
 internal fun dollars(d: Double): String = "$" + d.formatDecimals(6)
