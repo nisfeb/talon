@@ -1,5 +1,9 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,8 +12,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -467,10 +469,14 @@ private fun CallVideoPane(
     modifier: Modifier = Modifier,
 ) {
     var remoteAspect by remember { mutableStateOf<Float?>(null) }
+    // The pane is sized to fit both the width it is given and its height
+    // cap, in the picture's shape. A full-width pane in that shape was
+    // taller than the cap on a wide window, the cap gave way, and the
+    // pane spilled over the call's controls and the chat (sneagan,
+    // 2026-10-09).
+    BoxWithConstraints(modifier, contentAlignment = Alignment.TopCenter) {
     Surface(
-        modifier = modifier
-            .heightIn(max = 480.dp)
-            .aspectRatio(remoteAspect ?: (16f / 9f)),
+        modifier = Modifier.size(fitVideoPane(maxWidth, remoteAspect ?: (16f / 9f))).testTag("call-video"),
         color = Color.Black,
         shape = RoundedCornerShape(12.dp),
     ) {
@@ -506,4 +512,18 @@ private fun CallVideoPane(
             }
         }
     }
+    }
+}
+
+/** The tallest a 1:1 call's picture pane gets. */
+internal val MAX_VIDEO_PANE_HEIGHT = 480.dp
+
+/**
+ * A picture pane of [aspect] (width over height) as large as fits in
+ * [maxWidth] and [maxHeight]: the whole width when that is short enough,
+ * else the whole height.
+ */
+internal fun fitVideoPane(maxWidth: Dp, aspect: Float, maxHeight: Dp = MAX_VIDEO_PANE_HEIGHT): DpSize {
+    val width = minOf(maxWidth, maxHeight * aspect)
+    return DpSize(width, width / aspect)
 }
