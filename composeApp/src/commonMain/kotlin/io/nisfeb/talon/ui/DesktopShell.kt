@@ -1,6 +1,12 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -92,6 +98,8 @@ fun DesktopShell(
     // panes (e.g. the assistant: its own conversations/jobs sidebar + a
     // transcript). Keeps the rail visible for navigation.
     content: (@Composable () -> Unit)? = null,
+    /** The screen's left and right safe areas; a test hands in its own. */
+    sideInsets: WindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -109,9 +117,16 @@ fun DesktopShell(
         // keep their minimums; narrower, it opens over the chat, as it
         // does full-screen in the compact layout. Its close button is
         // the way back to the chat.
-        val rightWidth = rightSidebar?.let { rightPaneBesideWidth(maxWidth, rightPaneWidth) }
+        // The left and right safe areas (an iPhone on its side), taken
+        // once around the rail and the panes, and so consumed: each pane
+        // padded for both itself, and a list beside a chat kept about
+        // half its width (sneagan, 2026-10-09). Widths are what is left.
+        val density = LocalDensity.current
+        val direction = LocalLayoutDirection.current
+        val safeWidth = maxWidth - with(density) { (sideInsets.getLeft(this, direction) + sideInsets.getRight(this, direction)).toDp() }
+        val rightWidth = rightSidebar?.let { rightPaneBesideWidth(safeWidth, rightPaneWidth) }
         val overChat = rightSidebar != null && rightWidth == null
-        Row(modifier = Modifier.fillMaxSize()) {
+        Row(modifier = Modifier.fillMaxSize().windowInsetsPadding(sideInsets)) {
             DesktopRail(
                 activeTab = activeRailTab,
                 activeModalItem = activeModalItem,
@@ -147,10 +162,9 @@ fun DesktopShell(
             // there's active content to show, so a no-content right pane
             // never wastes screen real estate.
             if (rightSidebar != null && rightWidth != null) {
-                val density = LocalDensity.current
                 PaneDragHandle(onDragDelta = { deltaPx ->
                     val delta = with(density) { deltaPx.toDp() }
-                    rightPaneBesideWidth(this@BoxWithConstraints.maxWidth, rightWidth - delta)
+                    rightPaneBesideWidth(safeWidth, rightWidth - delta)
                         ?.let(onRightPaneWidthChange)
                 })
                 Box(modifier = Modifier.width(rightWidth).fillMaxHeight()) {

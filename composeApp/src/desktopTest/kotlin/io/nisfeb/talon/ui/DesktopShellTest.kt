@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
@@ -290,6 +291,38 @@ class DesktopShellTest {
                 assertTrue(width >= MIN_CHAT_WIDTH, "window ${w}dp, right $r, fraction $f: $column is $width")
             }
         }
+    }
+
+    // An iPhone on its side, 852 by 393 with 59-point safe areas left and
+    // right: every pane padded for both itself, so the list kept about half
+    // its 240 points and the chat lost 59 on the side by the list
+    // (sneagan, 2026-10-09). The panes stand in for the real screens, which
+    // pad for the safe areas the same way.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `the side safe areas are taken once, around the rail and the panes`() = runComposeUiTest {
+        val sides = androidx.compose.foundation.layout.WindowInsets(left = 59.dp, right = 59.dp)
+        fun pane(tag: String) = Modifier.fillMaxSize().windowInsetsPadding(sides).testTag(tag)
+        setContent {
+            Box(Modifier.size(width = 852.dp, height = 393.dp)) {
+                DesktopShell(
+                    activeRailTab = RailTab.Chats,
+                    enabledItems = RailItem.entries.toList(),
+                    onItemClicked = {},
+                    list = { Box(pane("list")) },
+                    detail = { Box(pane("chat")) },
+                    listFraction = 0.30f,
+                    onListFractionChange = {},
+                    sideInsets = sides,
+                )
+            }
+        }
+        val list = onNodeWithTag("list").getBoundsInRoot()
+        val chat = onNodeWithTag("chat").getBoundsInRoot()
+        assertEquals(59.dp + RAIL_WIDTH, list.left, "the rail sits inside the left safe area, the list beside it")
+        assertEquals(MIN_LIST_WIDTH, list.width, "the list keeps its whole width: no safe area inside it")
+        assertEquals(852.dp - 59.dp, chat.right, "the chat stops at the right safe area")
+        assertEquals(list.right + HANDLE_WIDTH, chat.left, "and starts right after the list's handle, with no safe area of its own")
     }
 }
 
