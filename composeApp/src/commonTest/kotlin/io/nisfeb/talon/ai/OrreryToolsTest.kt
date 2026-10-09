@@ -281,8 +281,11 @@ class OrreryToolsTest {
     @Test
     fun `what the owner says about a person goes on the person`() = runTest {
         val guide = run(Tap(), "orrery_guide").replace("\n  ", " ")
-        assertTrue("attributes phone, email, occupation, employer, address" in guide, guide)
-        assertTrue("in the same orrery_observe that creates or finds them" in guide, guide)
+        // orrery's schema has no occupation or address on a person; its
+        // readers drop what a kind does not list (orrery-0c, 2026-10-09).
+        assertTrue("own attributes only: phone, email, employer, and relationship" in guide, guide)
+        assertTrue("An address is no person's" in guide, guide)
+        assertTrue("occupation" !in guide, "no attribute orrery would drop")
     }
 
     // A body read back must show values, or a write cannot be checked
