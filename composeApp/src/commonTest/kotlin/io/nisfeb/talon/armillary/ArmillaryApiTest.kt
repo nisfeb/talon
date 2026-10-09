@@ -68,6 +68,7 @@ class ArmillaryApiTest {
             ),
         )
         assertEquals(mapOf("catch_up" to "f/1", "default" to "f/1"), got.suggested, "a model is a string, nothing else")
+        assertEquals(mapOf("catch_up" to "frontier"), got.suggestedTiers)
         assertEquals("https://v.example/apps/armillary/brave", got.searchUrl)
         assertEquals("id.secret", got.searchKey)
         // armillary 18 and earlier: no search, and no picks before any arrive

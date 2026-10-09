@@ -57,6 +57,8 @@ data class AiProvider(
      * `default` for a feature it names none for. Empty until it says.
      */
     val suggested: Map<String, String> = emptyMap(),
+    /** Armillary only: the tier the vendor put each feature on (`zdr`, `frontier`, ...), by its name for the feature. */
+    val suggestedTiers: Map<String, String> = emptyMap(),
     /** Armillary only: the vendor's Brave search, its base and the key this ship searches with. */
     val searchUrl: String? = null,
     val searchKey: String = "",
@@ -158,6 +160,12 @@ data class AiProfile(
         val s = features[f]
         if (s?.own == true) return false
         return resolve(s?.model ?: defaultModel)?.private != true
+    }
+
+    /** Whether [f] follows the vendor onto its ZDR tier, so its calls must go to ZDR endpoints only. */
+    fun vendorZdr(f: AiFeature): Boolean {
+        val name = VENDOR_FEATURES[f] ?: return false
+        return followsVendor(f) && armillary()?.suggestedTiers?.get(name) == "zdr"
     }
 
     /**
@@ -414,6 +422,7 @@ fun AiSettings.Config.forFeature(f: AiFeature): AiSettings.Config {
         // an Armillary base, which is OpenRouter under a lease and the
         // vendor's own proxy otherwise.
         usageInclude = r.provider.kind == ProviderKind.OpenRouter || r.provider.kind == ProviderKind.Armillary,
+        zdrOnly = profile().vendorZdr(f),
     )
 }
 

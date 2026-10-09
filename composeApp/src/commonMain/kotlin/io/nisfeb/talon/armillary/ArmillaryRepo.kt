@@ -529,7 +529,7 @@ class ArmillaryRepo(
         }
         val base = inf.baseUrl.trim().trimEnd('/').ifBlank { null }
         val searchUrl = inf.searchUrl.trim().trimEnd('/').ifBlank { null }
-        val next = row.copy(baseUrl = base, apiKey = inf.key, models = models, suggested = inf.suggested, searchUrl = searchUrl, searchKey = inf.searchKey)
+        val next = row.copy(baseUrl = base, apiKey = inf.key, models = models, suggested = inf.suggested, suggestedTiers = inf.suggestedTiers, searchUrl = searchUrl, searchKey = inf.searchKey)
         if (next == row) return
         ai.setProfile(profile.copy(providers = profile.providers.map { if (it.id == ARMILLARY_PROVIDER) next else it }))
     }

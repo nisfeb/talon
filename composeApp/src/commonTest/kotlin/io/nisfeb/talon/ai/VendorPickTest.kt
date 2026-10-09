@@ -21,9 +21,10 @@ class VendorPickTest {
     private fun row(
         suggested: Map<String, String> = mapOf("default" to "f/1", "catch_up" to "z/1", "decision" to "typesafe/jev-2"),
         base: String = "https://openrouter.ai/api/v1",
+        tiers: Map<String, String> = mapOf("catch_up" to "zdr", "assistant" to "frontier"),
     ) = AiProvider(
         ARMILLARY_PROVIDER, ProviderKind.Armillary, "Armillary", baseUrl = base, apiKey = "sk-or-lease",
-        suggested = suggested, searchUrl = "https://v.example/apps/armillary/brave", searchKey = "id.secret",
+        suggested = suggested, suggestedTiers = tiers, searchUrl = "https://v.example/apps/armillary/brave", searchKey = "id.secret",
     )
 
     private fun profile(vararg features: Pair<AiFeature, FeatureSetting>, armillary: AiProvider? = row()) = AiProfile(
@@ -103,6 +104,16 @@ class VendorPickTest {
         assertEquals("https://v.example/apps/armillary/brave" to "id.secret", vendor.braveSearch())
         assertEquals(BRAVE_API to "brave-own", vendor.copy(braveApiKey = " brave-own ").braveSearch())
         assertNull(conf(profile(armillary = null)).braveSearch())
+    }
+
+    @Test
+    fun `a feature on the vendor's ZDR tier asks for ZDR endpoints, and only while it follows`() {
+        val c = conf(profile())
+        assertTrue(c.forFeature(AiFeature.CatchUp).zdrOnly)
+        assertFalse(c.forFeature(AiFeature.Assistant).zdrOnly, "the frontier tier asks nothing")
+        val own = conf(profile(AiFeature.CatchUp to FeatureSetting(on = true, model = ModelRef("p1", "mine/1"), own = true)))
+        assertFalse(own.forFeature(AiFeature.CatchUp).zdrOnly, "the owner's own pick is theirs to route")
+        assertFalse(conf(profile(armillary = null)).forFeature(AiFeature.CatchUp).zdrOnly)
     }
 
     @Test
