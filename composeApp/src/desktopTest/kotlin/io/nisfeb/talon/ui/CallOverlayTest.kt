@@ -1,5 +1,11 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.unit.width
+import androidx.compose.ui.unit.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -18,7 +24,6 @@ import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.urbit.FakeShip
 import io.nisfeb.talon.urbit.UrbitSession
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -47,14 +52,14 @@ class CallOverlayTest {
         override suspend fun acceptOffer(remote: SessionDesc) = desc
         override suspend fun setAnswer(remote: SessionDesc) = Unit
         override fun setMuted(muted: Boolean) = Unit
-        override val video: StateFlow<VideoState> = MutableStateFlow(VideoState())
+        override val video = MutableStateFlow(VideoState())
         override suspend fun setCameraEnabled(enabled: Boolean) = false
         override fun close() = Unit
     }
 
     private val engine = Engine()
 
-    private fun overlay(block: ComposeUiTest.(CallController) -> Unit) = runComposeUiTest {
+    private fun overlay(width: androidx.compose.ui.unit.Dp? = null, block: ComposeUiTest.(CallController) -> Unit) = runComposeUiTest {
         val calls = CallController(
             UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") },
             CallEngineProvider { engine },
@@ -64,7 +69,9 @@ class CallOverlayTest {
             waitUntil(timeoutMillis = 10_000) { ship.subscribed.any { it.startsWith("trunk") } }
             setContent {
                 TalonTheme(darkTheme = false) {
-                    CallOverlay(calls, nameFor = { mapOf("~bus" to "Bus")[it] ?: it })
+                    androidx.compose.foundation.layout.Box(if (width == null) androidx.compose.ui.Modifier else androidx.compose.ui.Modifier.size(width, 900.dp)) {
+                        CallOverlay(calls, nameFor = { mapOf("~bus" to "Bus")[it] ?: it })
+                    }
                 }
             }
             block(calls)
@@ -112,6 +119,27 @@ class CallOverlayTest {
         onAllNodesWithContentDescription("Hang up")[0].performClick() // a call, not a party line
         assertEquals("c2", sent("hangup"))
         waitUntil(timeoutMillis = 10_000) { !shows("Bus · 00:0") }
+    }
+
+    // On a wide window the picture pane was taller than its cap in the
+    // picture's shape, the cap gave way, and it spilled over the call's
+    // controls and down over the chat (sneagan, 2026-10-09).
+    @Test
+    fun `a call's pictures fit above its controls on a wide window`() = overlay(width = 1000.dp) {
+        ring("c3")
+        showing("Incoming call")
+        onNodeWithContentDescription("Answer").performClick()
+        fact("""{"recv":{"from":"~bus","sig":{"offer":{"id":"c3","sdp":"v=0\na=fingerprint:sha-256 AA:BB\n","fpr":"sha-256 AA:BB"}}}}""")
+        assertEquals("c3", sent("accept"))
+        engine.state.value = MediaState.Live
+        engine.video.value = VideoState(localOn = true, remoteOn = true)
+        showing("Bus · 00:0")
+        waitForIdle()
+        val pane = onNodeWithTag("call-video").getBoundsInRoot()
+        val hangUp = onAllNodesWithContentDescription("Hang up")[0].getBoundsInRoot()
+        assertTrue(pane.height <= MAX_VIDEO_PANE_HEIGHT, "the pane keeps its cap: $pane")
+        assertTrue(pane.top >= 0.dp && pane.bottom <= hangUp.top, "the pane sits above the controls: $pane, hang up at $hangUp")
+        assertEquals((pane.height * (16f / 9f)).value, pane.width.value, 1f, "in the picture's shape, 16:9 until a frame says otherwise")
     }
 
     @Test
