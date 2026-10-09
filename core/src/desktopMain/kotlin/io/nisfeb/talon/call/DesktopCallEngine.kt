@@ -303,7 +303,7 @@ class DesktopCallEngine(
      * again when they close it.
      */
     private fun watchRemoteVideo(track: VideoTrack) {
-        val sink = dev.onvoid.webrtc.media.video.VideoTrackSink { lastRemoteFrameMs.value = nowMs() }
+        val sink = releasingSink { lastRemoteFrameMs.value = nowMs() }
         remoteSink = sink
         runCatching { track.addSink(sink) }
         remoteWatch?.cancel()

@@ -16,7 +16,6 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import dev.onvoid.webrtc.media.video.VideoFrame
-import dev.onvoid.webrtc.media.video.VideoTrackSink
 import io.nisfeb.talon.call.CallEngine
 import io.nisfeb.talon.call.DesktopCallEngine
 import java.awt.image.BufferedImage
@@ -91,7 +90,7 @@ private fun VideoTrackCanvas(
     DisposableEffect(track) {
         val converter = FrameConverter()
         var lastAspect = 0f
-        val sink = VideoTrackSink { frame: VideoFrame ->
+        val sink = io.nisfeb.talon.call.releasingSink { frame: VideoFrame ->
             // The frame is reference-counted and recycled the moment
             // this returns, so it must be converted here rather than
             // stashed for the composition to read later.
@@ -197,10 +196,11 @@ private class FrameConverter {
         try {
             convert(i420)
         } finally {
-            // toI420() hands back a NEW reference-counted buffer. Not
-            // releasing it leaked a native I420 copy every frame — at
-            // 30fps that is the whole video pane's memory, per call.
-            runCatching { i420.release() }
+            // The frame itself is released by its sink (releasingSink).
+            // On the native buffers a sink gets, toI420() is that same
+            // buffer, and releasing it here as well would free it twice;
+            // only a buffer converted into a copy is this one's to free.
+            if (i420 !== frame.buffer) runCatching { i420.release() }
         }
     }
 
