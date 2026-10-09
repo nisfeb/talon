@@ -68,6 +68,12 @@ Before you write:
 - Someone or something orrery_find does not find is created in the
   same orrery_observe as the facts about it, in `bodies`. A value that
   names a body is {"ref": "person/alice"}, not the id as text.
+- What the owner says about a person, such as their phone number,
+  email, occupation or trade, employer or address, is facts on that
+  person, in the same orrery_observe that creates or finds them:
+  attributes phone, email, occupation, employer, address. An event's
+  note may keep its copy, but held only there, orrery cannot answer
+  "what is the carpenter's number" or find him next time.
 - Two bodies for one name (activity/ballet and an old
   activity/rose-ballet): take the one with a current `next` or an open
   situation. When neither or both have one, ask the owner which.

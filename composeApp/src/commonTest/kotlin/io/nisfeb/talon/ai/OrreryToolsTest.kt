@@ -276,6 +276,15 @@ class OrreryToolsTest {
         assertTrue("{\"ref\": \"person/…\", \"days\": [\"wednesday\"]}" in guide)
     }
 
+    // orrery-0c, 2026-10-09: a tradesperson's phone number went only into
+    // an event's note, and the person orrery made for them held nothing.
+    @Test
+    fun `what the owner says about a person goes on the person`() = runTest {
+        val guide = run(Tap(), "orrery_guide").replace("\n  ", " ")
+        assertTrue("attributes phone, email, occupation, employer, address" in guide, guide)
+        assertTrue("in the same orrery_observe that creates or finds them" in guide, guide)
+    }
+
     // A body read back must show values, or a write cannot be checked
     // against what the owner said (orrery-0c, 2026-10-07).
     @Test

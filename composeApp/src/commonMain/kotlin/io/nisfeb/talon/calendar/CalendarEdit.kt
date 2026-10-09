@@ -416,6 +416,41 @@ data class CalAlarm(val raw: JsonObject) {
     companion object {
         /** [s] seconds before the start: what the editor adds. */
         fun before(s: Long) = CalAlarm(buildJsonObject { put("kind", "before"); put("s", s); put("desc", "") })
+
+        /**
+         * At [minuteOfDay] on an all-day event's day: an offset after its
+         * start, the calendar form's "the morning of (9:00)".
+         */
+        fun onTheDay(minuteOfDay: Int) = CalAlarm(buildJsonObject {
+            put("kind", "offset"); put("from", "start"); put("after", true); put("s", minuteOfDay * 60L); put("desc", "")
+        })
+    }
+}
+
+/**
+ * The assistant's reminder words as the calendar's alarms (calendar
+ * docs/using.md, lib/calendar-core parse-alarm): "30m", "2h", "1d" before
+ * the start; "morning" (9:00) or "HH:MM" on the day of an all-day
+ * event; "none" for none. Several, comma-separated. A word that does not
+ * read throws, saying what does.
+ */
+fun reminderAlarms(text: String, allDay: Boolean): List<CalAlarm> {
+    val words = text.split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+    if (words.isEmpty() || words == listOf("none")) return emptyList()
+    return words.map { w ->
+        val span = Regex("""(\d+)\s*(m|min|mins|minutes?|h|hours?|d|days?)""").matchEntire(w)
+        val clock = if (w == "morning") 9 * 60 else io.nisfeb.talon.ai.parseClock(w)
+        when {
+            span != null -> {
+                val unit = when (span.groupValues[2].first()) { 'd' -> 86_400L; 'h' -> 3_600L; else -> 60L }
+                CalAlarm.before(span.groupValues[1].toLong() * unit)
+            }
+            clock != null -> {
+                require(allDay) { "\"$w\" is a time of day, for an all-day event; for a timed one say how long before, such as 30m" }
+                CalAlarm.onTheDay(clock)
+            }
+            else -> throw IllegalArgumentException("\"$w\" is not a reminder: give 30m, 2h, 1d, morning, a time HH:MM, or none")
+        }
     }
 }
 
