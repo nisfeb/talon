@@ -10,9 +10,9 @@ import kotlin.test.assertTrue
  * Pin the chat-list auto-scroll decision. Two paths matter:
  *
  *  - **Inbound** (peer's message arrived): scroll only when the
- *    user is near the bottom (firstVisibleItemIndex <= 12). The
- *    size + newestId guards prevent pagination prepends from being
- *    misread as new heads.
+ *    reader could see the newest message before it came. Scrolled up
+ *    at all, they stay put. The size + newestId guards prevent
+ *    pagination prepends from being misread as new heads.
  *
  *  - **Self-send** (user hit send): scroll unconditionally as soon
  *    as `rows.size` grows past the baseline captured at send time.
@@ -20,35 +20,37 @@ import kotlin.test.assertTrue
  *
  * Regression risk this guards against:
  *   - rc10 bug: send → user's own message lands below the fold
- *     because the inbound `firstVisibleItemIndex <= 12` check failed
- *     mid-tick.
+ *     because the inbound near-bottom check failed mid-tick.
  *   - "yank user from history" bug: any inbound scroll without the
  *     near-bottom guard.
  */
 class ChatScrollHeuristicTest {
 
     @Test
-    fun `inbound right at the threshold edge still scrolls`() {
+    fun `inbound follows a reader who could see the newest message`() {
         val d = decideAutoScroll(
             rowsSize = 100,
             newestId = "new",
             lastNewestId = "old",
             lastSize = 99,
-            firstVisibleItemIndex = 12,  // exactly at threshold
+            sawLastNewest = true,
             pendingSendBaselineSize = null,
             pendingSelfSendNewestId = null,
         )
         assertTrue(d.scrollToBottom)
     }
 
+    // "when a new message comes in and the user is scrolled up from the
+    // bottom and can't see it the app should NOT pop back to the bottom"
+    // (sneagan, 2026-10-09). Twelve items up used to count as the bottom.
     @Test
-    fun `inbound one past threshold does NOT scroll`() {
+    fun `inbound leaves a reader who has scrolled up where they are`() {
         val d = decideAutoScroll(
             rowsSize = 100,
             newestId = "new",
             lastNewestId = "old",
             lastSize = 99,
-            firstVisibleItemIndex = 13,
+            sawLastNewest = false,
             pendingSendBaselineSize = null,
             pendingSelfSendNewestId = null,
         )
@@ -65,7 +67,7 @@ class ChatScrollHeuristicTest {
             newestId = "stable-newest",
             lastNewestId = "stable-newest",
             lastSize = 100,
-            firstVisibleItemIndex = 0,
+            sawLastNewest = true,
             pendingSendBaselineSize = null,
             pendingSelfSendNewestId = null,
         )
@@ -85,7 +87,7 @@ class ChatScrollHeuristicTest {
             newestId = "their-message",
             lastNewestId = "their-message",  // even with no apparent newer head
             lastSize = 101,
-            firstVisibleItemIndex = 50,  // reading history — doesn't matter
+            sawLastNewest = false,  // reading history — doesn't matter
             pendingSendBaselineSize = 100,
             pendingSelfSendNewestId = null,
         )
@@ -104,7 +106,7 @@ class ChatScrollHeuristicTest {
             newestId = "head",
             lastNewestId = "head",
             lastSize = 100,
-            firstVisibleItemIndex = 0,
+            sawLastNewest = true,
             pendingSendBaselineSize = 100,
             pendingSelfSendNewestId = null,  // captured pre-send
         )
@@ -124,7 +126,7 @@ class ChatScrollHeuristicTest {
             newestId = "optimistic-id",
             lastNewestId = "previous-newest",
             lastSize = 100,
-            firstVisibleItemIndex = 0,
+            sawLastNewest = true,
             pendingSendBaselineSize = 100,
             pendingSelfSendNewestId = null,
         )
@@ -146,7 +148,7 @@ class ChatScrollHeuristicTest {
             newestId = "verified-id",
             lastNewestId = "optimistic-id",
             lastSize = 101,                      // unchanged size
-            firstVisibleItemIndex = 0,
+            sawLastNewest = true,
             pendingSendBaselineSize = null,      // catch-up already cleared it
             pendingSelfSendNewestId = "optimistic-id",
         )
@@ -168,7 +170,7 @@ class ChatScrollHeuristicTest {
             newestId = "optimistic-id",
             lastNewestId = "optimistic-id",
             lastSize = 101,
-            firstVisibleItemIndex = 0,
+            sawLastNewest = true,
             pendingSendBaselineSize = null,
             pendingSelfSendNewestId = "optimistic-id",
         )
@@ -186,7 +188,7 @@ class ChatScrollHeuristicTest {
             newestId = null,
             lastNewestId = "optimistic-id",
             lastSize = 1,
-            firstVisibleItemIndex = 0,
+            sawLastNewest = true,
             pendingSendBaselineSize = null,
             pendingSelfSendNewestId = "optimistic-id",
         )
@@ -201,13 +203,13 @@ class ChatScrollHeuristicTest {
     fun `the first load does not move a reader the screen is still placing`() {
         val held = decideAutoScroll(
             rowsSize = 41, newestId = "m41", lastNewestId = "m40", lastSize = 40,
-            firstVisibleItemIndex = 7, pendingSendBaselineSize = null, pendingSelfSendNewestId = null,
+            sawLastNewest = true, pendingSendBaselineSize = null, pendingSelfSendNewestId = null,
             holdInbound = true,
         )
         assertFalse(held.scrollToBottom)
         val free = decideAutoScroll(
             rowsSize = 41, newestId = "m41", lastNewestId = "m40", lastSize = 40,
-            firstVisibleItemIndex = 7, pendingSendBaselineSize = null, pendingSelfSendNewestId = null,
+            sawLastNewest = true, pendingSendBaselineSize = null, pendingSelfSendNewestId = null,
             holdInbound = false,
         )
         assertTrue(free.scrollToBottom, "the same rows once placed still go to the bottom")
@@ -217,7 +219,7 @@ class ChatScrollHeuristicTest {
     fun `a send still goes to the bottom while the screen is placing`() {
         val d = decideAutoScroll(
             rowsSize = 41, newestId = "local_1", lastNewestId = "m40", lastSize = 40,
-            firstVisibleItemIndex = 7, pendingSendBaselineSize = 40, pendingSelfSendNewestId = null,
+            sawLastNewest = true, pendingSendBaselineSize = 40, pendingSelfSendNewestId = null,
             holdInbound = true,
         )
         assertTrue(d.scrollToBottom)

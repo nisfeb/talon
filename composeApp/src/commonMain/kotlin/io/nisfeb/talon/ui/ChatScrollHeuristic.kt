@@ -6,8 +6,10 @@ package io.nisfeb.talon.ui
  * "I think this works" UI smoke. Three scroll paths:
  *
  *  - **Inbound**: a peer sent us a message; we scroll to the bottom
- *    only if the user was already near it (`firstVisibleItemIndex
- *    <= 12`). Reading older history isn't yanked away.
+ *    only if the reader could see the newest message before it came.
+ *    Scrolled up at all, they stay where they are and read at their
+ *    own pace. "Near the bottom" (12 items) yanked a reader a few
+ *    messages up (sneagan, 2026-10-09).
  *  - **Self-send catch-up**: the user hit send; their optimistic
  *    upsert lands and `rows.size` grows past the baseline. We scroll
  *    unconditionally — their message belongs in view regardless of
@@ -38,8 +40,9 @@ data class ScrollDecision(
  * @param lastNewestId same id from the previous emission. Used to
  *   detect "a new head landed" vs "pagination prepended older rows".
  * @param lastSize `rows.size` from the previous emission.
- * @param firstVisibleItemIndex caller's `listState.firstVisibleItemIndex`.
- *   Under reverseLayout, 0 means "newest is fully visible".
+ * @param sawLastNewest the message that was newest before this
+ *   emission ([lastNewestId]) is on screen: the reader is at the
+ *   bottom. True for a chat that had none.
  * @param pendingSendBaselineSize size captured at the moment doSend
  *   fired forceBottomTick. Null when no self-send is pending.
  * @param pendingSelfSendNewestId id of the optimistic row from the
@@ -51,7 +54,7 @@ fun decideAutoScroll(
     newestId: String?,
     lastNewestId: String?,
     lastSize: Int,
-    firstVisibleItemIndex: Int,
+    sawLastNewest: Boolean,
     pendingSendBaselineSize: Int?,
     pendingSelfSendNewestId: String?,
     /** The screen is still placing the reader (at the "New" divider, or
@@ -85,20 +88,16 @@ fun decideAutoScroll(
             nextPendingSelfSendNewestId = null,
         )
     }
-    // Inbound: only when a NEW newest landed AND user is near the
-    // bottom. The size guard catches pagination prepends (newer
+    // Inbound: only when a NEW newest landed AND the reader was at
+    // the bottom. The size guard catches pagination prepends (newer
     // existing message at the same position with more rows behind it).
     val gotNewerHead = newestId != null &&
         newestId != lastNewestId &&
         rowsSize > lastSize
-    val shouldScroll = gotNewerHead && firstVisibleItemIndex <= NEAR_BOTTOM_THRESHOLD && !holdInbound
+    val shouldScroll = gotNewerHead && sawLastNewest && !holdInbound
     return ScrollDecision(
         scrollToBottom = shouldScroll,
         nextBaseline = pendingSendBaselineSize,
         nextPendingSelfSendNewestId = pendingSelfSendNewestId,
     )
 }
-
-/** Items-from-bottom threshold for the inbound auto-scroll. Past
- *  this, the user is reading history and shouldn't be yanked. */
-private const val NEAR_BOTTOM_THRESHOLD = 12

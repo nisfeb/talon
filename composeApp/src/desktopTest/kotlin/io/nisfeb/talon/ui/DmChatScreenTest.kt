@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -104,6 +105,42 @@ class DmChatScreenTest {
     private fun ComposeUiTest.send(text: String) {
         onNode(hasSetTextAction()).performTextInput(text)
         onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+    }
+
+    private val sixty: suspend AppDatabase.() -> Unit = {
+        for (n in 1..60) messages().upsert(msg("~bus/1701411845%02d".format(n), "~bus", "message $n", n * 60_000L))
+    }
+
+    // "when a new message comes in and the user is scrolled up from the
+    // bottom and can't see it the app should NOT pop back to the bottom.
+    // let people read at their own pace" (sneagan, 2026-10-09)
+    @Test
+    fun `a message arriving while the reader is scrolled up does not move them`() = chat(seed = sixty) { _, db ->
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("message 60").fetchSemanticsNodes().isNotEmpty() }
+        // A few messages up: within the twelve that used to count as the bottom.
+        onNode(hasScrollAction()).performScrollToIndex(6)
+        waitForIdle()
+        onNodeWithText("message 54").assertIsDisplayed()
+        runBlocking { db.messages().upsert(msg("~bus/170141184561", "~bus", "message 61", 61 * 60_000L)) }
+        waitForIdle()
+        mainClock.advanceTimeBy(1_000)
+        waitForIdle()
+        onNodeWithText("message 54").assertIsDisplayed()
+        onAllNodesWithText("message 61").assertCountEquals(0)
+        // The way back is the reader's to take.
+        onNodeWithContentDescription("Jump to latest").performClick()
+        waitForIdle()
+        onNodeWithText("message 61").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a message arriving while the reader is at the bottom comes into view`() = chat(seed = sixty) { _, db ->
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("message 60").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("message 60").assertIsDisplayed()
+        runBlocking { db.messages().upsert(msg("~bus/170141184561", "~bus", "message 61", 61 * 60_000L)) }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("message 61").fetchSemanticsNodes().isNotEmpty() }
+        waitForIdle()
+        onNodeWithText("message 61").assertIsDisplayed()
     }
 
     @Test
@@ -546,7 +583,9 @@ class DmChatScreenTest {
 
     @Test
     fun `a jump to a post older than the window lands on it`() = chat(seed = long(260), jumpTo = "~bus/1701411845005") { _, _ ->
-        waitUntil(timeoutMillis = 10_000) { onAllNodesWithText("post 005").fetchSemanticsNodes().isNotEmpty() }
+        // Paging 260 rows in: 20 s, as the pinned-post test below waits. At
+        // 10 s it timed out under the full suite's load (2026-10-09).
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("post 005").fetchSemanticsNodes().isNotEmpty() }
         onNodeWithText("post 005").assertIsDisplayed()
     }
 
