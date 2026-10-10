@@ -169,4 +169,31 @@ class ChatStoryTest {
         assertNull(codeBlock(story[0].jsonObject))
         assertTrue("still writing" in story.toString(), "the body must not be dropped: $story")
     }
+
+    // ─── a pasted group reference ───────────────────────────────
+
+    private fun groupCite(flag: String) = kotlinx.serialization.json.Json.parseToJsonElement("""{"block":{"cite":{"group":"$flag"}}}""")
+
+    @Test
+    fun `a pasted group reference goes out as the group's cite, as Tlon sends it`() {
+        assertEquals(JsonArray(listOf(groupCite("~bus/club"))), chatTextToStory("/1/group/~bus/club"))
+        // In a chat Tlon puts the cite ahead of the words (toPostData).
+        val story = chatTextToStory("come join /1/group/~bus/club tonight")
+        assertEquals(groupCite("~bus/club"), story[0])
+        assertEquals(chatTextToStory("come join  tonight")[0], story[1])
+        assertEquals(2, story.size)
+    }
+
+    @Test
+    fun `the same reference twice is one cite, and two groups are two`() {
+        val story = chatTextToStory("/1/group/~bus/club\n/1/group/~bus/club /1/group/~zod/other")
+        assertEquals(JsonArray(listOf(groupCite("~bus/club"), groupCite("~zod/other"))), story)
+    }
+
+    @Test
+    fun `a reference inside a link or a word stays text`() {
+        for (text in listOf("https://x.test/1/group/~bus/club", "see:/1/group/~bus/club", "/1/group/~bus")) {
+            assertTrue(chatTextToStory(text).none { "cite" in it.toString() }, text)
+        }
+    }
 }

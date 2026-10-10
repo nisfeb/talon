@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -347,6 +348,27 @@ fun GroupInfoPane(
                     Icon(TalonIcons.PersonAdd, contentDescription = null)
                     Spacer(Modifier.size(12.dp))
                     Text("Invite someone to the group", modifier = Modifier.weight(1f).padding(end = 8.dp))
+                }
+                HorizontalDivider()
+            }
+            // Tlon's own reference: its join box and Talon's + screen take
+            // it, and pasted in a chat it shows the group.
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Share, contentDescription = null)
+                    Spacer(Modifier.size(12.dp))
+                    Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text("Group reference")
+                        Text(
+                            "Paste it to join in Talon or Tlon, or in a chat to show the group.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    io.nisfeb.talon.ui.CopyButton(text = { io.nisfeb.talon.urbit.TalonLink.groupReference(flag) })
                 }
                 HorizontalDivider()
             }

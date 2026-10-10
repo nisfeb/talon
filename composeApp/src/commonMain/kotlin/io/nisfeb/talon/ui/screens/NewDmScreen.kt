@@ -96,7 +96,9 @@ fun NewDmScreen(
     val asPatp = (resolved as? io.nisfeb.talon.ui.NameToShip.Result.One)?.ship
         ?: if (trimmedInput.startsWith("~")) trimmedInput else "~$trimmedInput"
     val isValidPatp = resolved is io.nisfeb.talon.ui.NameToShip.Result.One
-    val resolveHint = io.nisfeb.talon.ui.NameToShip.hint(resolved, trimmedInput)
+    // A group reference or ~host/name, pasted to join: Tlon's join box takes the same.
+    val typedGroup = remember(trimmedInput) { io.nisfeb.talon.urbit.TalonLink.groupFlag(trimmedInput) }?.takeIf { onJoinGroup != null }
+    val resolveHint = if (typedGroup != null) null else io.nisfeb.talon.ui.NameToShip.hint(resolved, trimmedInput)
     val alreadyContact = remember(asPatp, bookContacts) { asPatp in bookContacts }
     var scanProblem by remember { mutableStateOf<String?>(null) }
     // A scanned group code parks here before any poke: joining is a
@@ -165,7 +167,7 @@ fun NewDmScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("~ship, or a word name") },
+                placeholder = { Text("~ship, a word name, or a group reference") },
                 // Not single-line: a comet's @p is fifty-six characters
                 // and its full name is twelve words, and either one
                 // scrolled off the end of a single line with no way to
@@ -190,6 +192,16 @@ fun NewDmScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
             )
+        }
+        typedGroup?.let { flag ->
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { pendingJoinFlag = flag }.padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(TalonIcons.People, contentDescription = null)
+                Text("Join group $flag", modifier = Modifier.weight(1f))
+            }
         }
         // Add-to-contacts row — only when a valid ~patp that isn't
         // already a contact is entered. Optional nickname; tracks the

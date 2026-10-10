@@ -61,4 +61,16 @@ class TalonLinkTest {
         // does not make the ship part greedier than Patp's.
         assertEquals(TalonLink.Message("~mister-botter", "1", null), TalonLink.parse("talon://chat/~mister-botter?id=1"))
     }
+
+    // A group's reference, copied from its info pane (2026-10-09).
+    @Test fun `a group reference is Tlon's path, and the join box takes it, the flag, or Talon's link`() {
+        assertEquals("/1/group/~bus/the-club", TalonLink.groupReference("~bus/the-club"))
+        for (code in listOf("/1/group/~bus/the-club", "~bus/the-club", " /1/group/~bus/the-club\n", TalonLink.forGroup("~bus/the-club"))) {
+            assertEquals("~bus/the-club", TalonLink.groupFlag(code), code)
+        }
+        assertEquals("~dister-dozzod-nisfeb/crew", TalonLink.groupFlag("/1/group/~dister-dozzod-nisfeb/crew"), "a moon's group")
+        for (code in listOf("~bus", "bus/the-club", "/1/chan/chat/~bus/general", "/1/group/~bus", "/1/group/~bus/club/extra", "hello")) {
+            assertEquals(null, TalonLink.groupFlag(code), code)
+        }
+    }
 }
