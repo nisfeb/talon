@@ -63,6 +63,7 @@ import io.nisfeb.talon.ai.ModelInfo
 import io.nisfeb.talon.ai.ModelRef
 import io.nisfeb.talon.ai.ProfileInputs
 import io.nisfeb.talon.ai.ProviderKind
+import io.nisfeb.talon.ai.defaultModel
 import io.nisfeb.talon.ai.VENDOR_FEATURES
 import io.nisfeb.talon.ai.followingVendor
 import io.nisfeb.talon.ai.migrateProfile
@@ -1975,19 +1976,32 @@ private fun HealthRow() {
     note?.let { Quiet(it, error = true) }
 }
 
-/** The provider and model the ship's generator would run for [ref], else the default model; null where none is set. */
+/**
+ * The provider and model the ship's generator would run for [ref], else
+ * the default model, resolved as Talon's own features resolve it; null
+ * where none is set. A blank model was sent as none, and Orrery filled
+ * in a model of its own (kimi-k3) under the name the button showed.
+ */
 private fun generatorTarget(profile: AiProfile, ref: ModelRef?): Pair<AiProvider, String>? =
-    (ref ?: profile.defaultModel)?.let { rr -> profile.provider(rr.provider)?.let { it to rr.model } }
+    profile.resolve(ref ?: profile.defaultModel)?.let { r -> r.provider to r.model.ifBlank { r.provider.kind.defaultModel().orEmpty() } }
 
-/** Point the ship's generator at [ref], else the default model, with that provider's key; one the ship cannot reach is said so. */
+/** Why the ship's generator cannot run [target], as a sentence, or null when it can. */
+private fun generatorProblem(target: Pair<AiProvider, String>?): String? = when {
+    target == null -> "There is no AI set up in Talon yet. Add a provider in Settings, AI, then pick a model under Orrery analysis below."
+    target.first.shipBase() == null -> "The ship cannot reach ${target.first.label}. Pick a model on OpenRouter, OpenAI, Armillary, or a server on your network."
+    // Orrery runs no generator without a key ("the generator has no key").
+    target.first.apiKey.isBlank() -> "${target.first.label} has no key in Talon, and Orrery on your ship needs one. Add it in Settings, AI; a server that takes none accepts any word."
+    target.second.isBlank() -> "Pick a model on ${target.first.label} under Orrery analysis below."
+    else -> null
+}
+
+/** Point the ship's generator at [ref], else the default model, with that provider's key; one it cannot run is said so. */
 private suspend fun pointGenerator(orrery: OrreryRepo, profile: AiProfile, enabled: Boolean, ref: ModelRef?): Result<Unit> {
-    val r = generatorTarget(profile, ref)
-    val base = r?.first?.shipBase()
-    return when {
-        r == null -> orrery.setGenerator(enabled)
-        base == null -> Result.failure(IllegalStateException("The ship cannot reach ${r.first.label}. Pick a model on OpenRouter, OpenAI, or a server on your network."))
-        else -> orrery.setGenerator(enabled, base, r.second.ifBlank { null }, r.first.apiKey)
-    }
+    val t = generatorTarget(profile, ref)
+    // Turning it off, or on with nothing set up, names no model.
+    if (!enabled || t == null) return orrery.setGenerator(enabled)
+    generatorProblem(t)?.let { return Result.failure(IllegalStateException(it)) }
+    return orrery.setGenerator(true, t.first.shipBase()!!, t.second, t.first.apiKey)
 }
 
 /**
@@ -2007,15 +2021,18 @@ private fun GeneratorOffer(orrery: OrreryRepo, profile: AiProfile, onPick: (Mode
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
-    // Orrery's own pick when the ship can reach it, else the default model.
+    // Orrery's own pick when the ship can run it, else the default model.
     val own = profile.features[AiFeature.OrreryGenerator]?.model
-    val ref = own?.takeIf { generatorTarget(profile, it)?.first?.shipBase() != null }
-    val target = generatorTarget(profile, ref)?.takeIf { it.first.shipBase() != null }
+    val ref = own?.takeIf { generatorProblem(generatorTarget(profile, it)) == null }
+    val target = generatorTarget(profile, ref)
+    val problem = generatorProblem(target)
     OutlinedCard(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Orrery has no model on your ship yet", style = MaterialTheme.typography.titleSmall)
+            // Orrery names a model of its own when none was given, so on a
+            // current ship it is the key that is missing.
+            Text(if (g.model == null) "Orrery has no model on your ship yet" else "Orrery on your ship has no key for its AI yet", style = MaterialTheme.typography.titleSmall)
             Quiet("Until it has one, it cannot write your brief or suggest anything. The AI you set up in Talon stays in Talon; your ship needs its own.")
-            if (target != null) {
+            if (target != null && problem == null) {
                 val label = refLabel(profile, ModelRef(target.first.id, target.second))
                 Quiet("Using $label sends your ${target.first.label} key to your ship, which keeps it.")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -2032,10 +2049,7 @@ private fun GeneratorOffer(orrery: OrreryRepo, profile: AiProfile, onPick: (Mode
                     TextButton(enabled = !busy, onClick = { hidden = true }) { Text("Not now") }
                 }
             } else {
-                Quiet(
-                    if (profile.providers.any { it.shipBase() != null }) "Your default model is on a provider your ship cannot reach. Pick one it can under Orrery analysis below."
-                    else "Your ship cannot reach any AI provider set up here. Add one in Settings, AI (OpenRouter, OpenAI, Armillary, or a server on your network), then pick it under Orrery analysis below.",
-                )
+                Quiet(problem ?: "")
                 TextButton(onClick = { hidden = true }) { Text("Not now") }
             }
             note?.let { Quiet(it, error = true) }

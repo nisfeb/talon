@@ -384,4 +384,12 @@ class CalendarEditTest {
         assertEquals(listOf("High", "High", "Medium", "Low", "Low", null, null),
             listOf(1, 4, 5, 6, 9, 0, null).map { priorityBand(it) })
     }
+
+    @Test
+    fun `a reminder on an all-day event's day reads as its time, as the calendar's page says`() {
+        val z = TimeZone.UTC
+        assertEquals("09:00 on the day", alarmLabel(CalAlarm.onTheDay(9 * 60), z, twentyFourHour = true, untimed = true))
+        assertEquals("9 hours after the start", alarmLabel(CalAlarm.onTheDay(9 * 60), z, twentyFourHour = true), "a timed event keeps the plain words")
+        assertEquals(null, CalAlarm.before(900).onTheDayMinute)
+    }
 }

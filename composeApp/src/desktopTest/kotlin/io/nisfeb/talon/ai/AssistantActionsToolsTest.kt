@@ -432,5 +432,39 @@ class AssistantActionsToolsTest {
         assertTrue("keep the note to this event alone" in d, d)
         assertTrue("Jackson supervises Linus nailing wood" in d, d)
     }
-}
 
+    // From the 2026-10-10 review.
+    private val plumber = """{"cat":"allday","kind":"once","start_ms":1791936000000,"span_days":1,"cal":"default","meta":{"name":"Plumber"},"args":{},"alarms":[{"kind":"offset","from":"start","after":true,"s":32400,"desc":""}]}"""
+    private val plumberRow = """{"rows":[{"id":"e2","cal":"default","cat":"allday","kind":"once","all":true,"l":1791936000000,"r":1792022400000,"meta":{"name":"Plumber"},"alarms":[{"kind":"offset","from":"start","after":true,"s":32400,"desc":""}]}]}"""
+
+    @Test
+    fun `an all-day event given a time loses its morning reminder, and says so`() = withHarness(window = plumberRow, event = plumber) { h ->
+        val out = h.run("update_event", argsOf("event" to "e2", "time" to "14:00"))
+        assertEquals(Json.parseToJsonElement("[]"), h.pokes.last()["alarms"], "a morning reminder would fire at 23:00 after a 14:00 start")
+        assertTrue("reminder on the day" in out, out)
+        h.run("update_event", argsOf("event" to "e2", "time" to "14:00", "reminder" to "30m"))
+        assertEquals(Json.parseToJsonElement("""[{"kind":"before","s":1800,"desc":""}]"""), h.pokes.last()["alarms"], "one named in the call stands")
+    }
+
+    @Test
+    fun `a blank reminder is no reminder given, not none`() = withHarness(window = plumberRow, event = plumber) { h ->
+        h.run("update_event", argsOf("event" to "e2", "name" to "Plumber visit", "reminder" to ""))
+        assertTrue("alarms" !in h.pokes.last(), "kept: ${h.pokes.last()}")
+    }
+
+    @Test
+    fun `the events listed say a reminder on the day as the time it fires`() = withHarness(window = plumberRow) { h ->
+        val out = h.run("list_events", argsOf("from" to "2026-10-14", "to" to "2026-10-15"))
+        assertTrue("reminders: 09:00 on the day" in out, out)
+    }
+
+    @Test
+    fun `a task takes a reminder on its due day, as the calendar offers one`() = withHarness(
+        window = """{"rows":[{"id":"t1","cal":"default","cat":"todo","kind":"once","all":true,"l":1791936000000,"r":1792022400000,"meta":{"name":"Taxes"}}]}""",
+        event = """{"cat":"todo","kind":"once","due_ms":1791936000000,"cal":"default","meta":{"name":"Taxes"},"args":{}}""",
+    ) { h ->
+        val out = h.run("update_event", argsOf("event" to "t1", "reminder" to "morning"))
+        assertTrue(!out.startsWith("Error"), out)
+        assertEquals(Json.parseToJsonElement("""[{"kind":"offset","from":"start","after":true,"s":32400,"desc":""}]"""), h.pokes.last()["alarms"])
+    }
+}
