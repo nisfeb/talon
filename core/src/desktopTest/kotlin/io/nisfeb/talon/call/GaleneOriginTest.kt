@@ -38,7 +38,8 @@ class GaleneOriginTest {
             assertTrue(sent.any { it.startsWith("Upgrade:", ignoreCase = true) }, "it is the websocket upgrade: $sent")
             assertTrue(sent.none { it.startsWith("Origin:", ignoreCase = true) }, "no Origin: $sent")
         } finally {
-            http.close()
+            // Not http.close(): every app client shares one OkHttp, and
+            // closing one stops it for every test after this one.
             server.close()
         }
     }
