@@ -141,4 +141,16 @@ class PartyLineCometTest {
         withTimeout(5_000) { while ((line.state.value as PartyState.Live).listeners != 1) delay(10) }
         assertTrue((line.state.value as PartyState.Live).members.none { it.id == "l1" })
     }
+
+    // Guest video (trunk's guest page): a browser guest says its camera or
+    // share is on with the same talon-video message Talon's clients send.
+    @Test
+    fun aGuestsVideoIsOnWhenItsPageSaysSo() = onLine("~nec", "~nec") { line, _ ->
+        line.handle(json.decodeFromString("""{"type":"joined","kind":"join","username":"~nec","rtcConfiguration":{"iceServers":[]}}"""))
+        line.handle(json.decodeFromString("""{"type":"user","kind":"add","id":"g1","username":"guest-3fa9c07b12de","data":{"name":"Grandma"}}"""))
+        line.handle(json.decodeFromString("""{"type":"usermessage","source":"g1","dest":"","username":"guest-3fa9c07b12de","kind":"talon-video","value":true}"""))
+        withTimeout(5_000) { while ("guest-3fa9c07b12de" !in line.videoOn.value) delay(10) }
+        line.handle(json.decodeFromString("""{"type":"usermessage","source":"g1","dest":"","username":"guest-3fa9c07b12de","kind":"talon-video","value":false}"""))
+        withTimeout(5_000) { while ("guest-3fa9c07b12de" in line.videoOn.value) delay(10) }
+    }
 }
