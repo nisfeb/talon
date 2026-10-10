@@ -1,5 +1,11 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -439,5 +445,87 @@ class PartyLineScreensTest {
             }
         }
         waitUntil(timeoutMillis = 5_000) { "close" in did }
+    }
+
+    // ─── a picture filling the window (2026-10-09) ───────────────
+
+    private val onCamera = androidx.compose.runtime.mutableStateOf(setOf("~bus"))
+
+    private fun fill(canFill: Boolean = true, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+        mainClock.autoAdvance = false
+        setContent {
+            TalonTheme(darkTheme = false) {
+                PartyLineFullScreen(
+                    state = live(), roomName = "Garden chat", nameFor = { names[it] ?: it }, selfShip = "~zod",
+                    onToggleMute = { did += "mute:$it" }, onLeave = { did += "leave" }, onMinimize = { did += "minimize" },
+                    partyVideoSupported = true, videoOnShips = onCamera.value,
+                    onFocusVideo = { did += "focus:$it" }, canFillWindow = canFill,
+                )
+            }
+        }
+        mainClock.advanceTimeBy(100)
+        block()
+    }
+
+    private fun ComposeUiTest.filled() = onAllNodesWithTag("filled-video").fetchSemanticsNodes().isNotEmpty()
+    private fun ComposeUiTest.controlsShown() = onAllNodesWithContentDescription("Mute").fetchSemanticsNodes().isNotEmpty()
+
+    @Test
+    fun `a camera or shared screen fills the window, pinned, and Escape or the X goes back`() = fill {
+        onNodeWithContentDescription("Fill the window").performClick()
+        mainClock.advanceTimeBy(100)
+        assertTrue(filled())
+        assertTrue(!shows("Planting season"), "nothing of the meeting around it")
+        assertTrue(shows("Bus"), "whose picture it is")
+        assertEquals(listOf("focus:~bus"), did, "pinned, for the full-resolution picture")
+        onNodeWithTag("filled-video").performKeyInput { pressKey(Key.Escape) }
+        mainClock.advanceTimeBy(100)
+        assertTrue(!filled() && shows("Planting season"), "Escape is back to the meeting")
+
+        onNodeWithContentDescription("Fill the window").performClick()
+        mainClock.advanceTimeBy(100)
+        onNodeWithContentDescription("Back to the meeting").performClick()
+        mainClock.advanceTimeBy(100)
+        assertTrue(!filled() && shows("Planting season"), "so is the X")
+    }
+
+    @Test
+    fun `the controls fade once the mouse stops, come back when it moves, and stay while it rests on them`() = fill {
+        onNodeWithContentDescription("Fill the window").performClick()
+        mainClock.advanceTimeBy(1_000)
+        assertTrue(controlsShown(), "up at first")
+        onNodeWithContentDescription("Mute").performClick()
+        mainClock.advanceTimeBy(100)
+        assertEquals("mute:true", did.last(), "and they work")
+        onNodeWithTag("filled-video").performMouseInput { moveTo(androidx.compose.ui.geometry.Offset(50f, 200f)) }
+        mainClock.advanceTimeBy(CONTROLS_FADE_MS + 1_000)
+        assertTrue(!controlsShown(), "gone once the mouse stops")
+        assertTrue(onAllNodesWithContentDescription("Back to the meeting").fetchSemanticsNodes().isEmpty(), "the X with them")
+
+        onNodeWithTag("filled-video").performMouseInput { moveTo(androidx.compose.ui.geometry.Offset(60f, 210f)) }
+        mainClock.advanceTimeBy(100)
+        assertTrue(controlsShown(), "back on a move")
+        val mute = onNodeWithContentDescription("Mute").fetchSemanticsNode().boundsInRoot.center
+        onNodeWithTag("filled-video").performMouseInput { moveTo(mute) }
+        mainClock.advanceTimeBy(CONTROLS_FADE_MS * 3)
+        assertTrue(controlsShown(), "kept while the mouse is on them")
+        onNodeWithTag("filled-video").performMouseInput { moveTo(androidx.compose.ui.geometry.Offset(50f, 200f)) }
+        mainClock.advanceTimeBy(CONTROLS_FADE_MS + 1_000)
+        assertTrue(!controlsShown(), "and fade once it leaves them")
+    }
+
+    @Test
+    fun `a picture that goes away gives back the meeting`() = fill {
+        onNodeWithContentDescription("Fill the window").performClick()
+        mainClock.advanceTimeBy(100)
+        assertTrue(filled())
+        onCamera.value = emptySet()
+        mainClock.advanceTimeBy(100)
+        assertTrue(!filled() && shows("Planting season"))
+    }
+
+    @Test
+    fun `only the meeting view offers to fill the window`() = fill(canFill = false) {
+        assertTrue(onAllNodesWithContentDescription("Fill the window").fetchSemanticsNodes().isEmpty())
     }
 }

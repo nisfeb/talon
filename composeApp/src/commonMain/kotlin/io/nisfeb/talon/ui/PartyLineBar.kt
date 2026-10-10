@@ -948,6 +948,7 @@ fun PartyLineMeeting(
             focusedShip = w.focused,
             onFocusVideo = w.onFocusVideo,
             onSwitchCamera = w.onSwitchCamera,
+            canFillWindow = true,
         )
     }
 }

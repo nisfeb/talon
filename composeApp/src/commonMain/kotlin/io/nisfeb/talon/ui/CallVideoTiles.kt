@@ -1,5 +1,30 @@
 package io.nisfeb.talon.ui
 
+import kotlinx.coroutines.delay
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.material3.Surface
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.focusable
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,6 +80,8 @@ internal fun PartyVideoGrid(
     videoOnShips: Set<String>,
     focusedShip: String?,
     onFocusVideo: (String?) -> Unit,
+    /** The meeting view's Fill the window, on the big picture; null hides it. */
+    onFill: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // Who spoke last, kept until somebody else does: the level flag
@@ -81,6 +108,7 @@ internal fun PartyVideoGrid(
                 onTap = if (isSelf) null else {
                     { onFocusVideo(if (m.ship == focusedShip) null else m.ship) }
                 },
+                onFill = onFill?.let { fill -> { fill(m.ship) } },
                 modifier = Modifier.fillMaxWidth().weight(1f),
             )
         }
@@ -134,6 +162,7 @@ internal fun VideoTile(
     videoOn: Boolean = false,
     focused: Boolean = false,
     onTap: (() -> Unit)? = null,
+    onFill: (() -> Unit)? = null,
     /** The caller's shape; the renderers fit the picture into it. */
     modifier: Modifier = Modifier.fillMaxWidth().aspectRatio(1f),
 ) {
@@ -174,6 +203,15 @@ internal fun VideoTile(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        if (onFill != null) {
+            IconButton(
+                tip = "Fill the window",
+                onClick = onFill,
+                modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
+            ) {
+                Icon(TalonIcons.Fullscreen, contentDescription = "Fill the window", tint = Color.White)
+            }
+        }
         val ring = when {
             focused -> MaterialTheme.colorScheme.tertiary
             member.speaking -> MaterialTheme.colorScheme.primary
@@ -184,6 +222,101 @@ internal fun VideoTile(
                 Modifier.matchParentSize()
                     .border(if (focused) 3.dp else 2.dp, ring, RoundedCornerShape(10.dp)),
             )
+        }
+    }
+}
+
+/** How long the call's controls stay over a filled picture once the mouse stops. */
+internal const val CONTROLS_FADE_MS = 2_500L
+
+/**
+ * One camera or shared screen over the whole window: the meeting view's
+ * Fill the window. The call's [controls] and an X show while the mouse
+ * moves and fade [CONTROLS_FADE_MS] after it stops, but not while it
+ * rests on the controls, so a menu opened from them stays open. Escape
+ * or the X goes back to the meeting.
+ */
+@Composable
+internal fun FilledVideo(
+    member: PartyMember,
+    isSelf: Boolean,
+    nameFor: (String) -> String,
+    link: PeerLink?,
+    onExit: () -> Unit,
+    controls: @Composable (Modifier) -> Unit,
+) {
+    var moves by remember { mutableStateOf(0) }
+    var onBar by remember { mutableStateOf(false) }
+    var shown by remember { mutableStateOf(true) }
+    LaunchedEffect(moves, onBar) {
+        shown = true
+        if (!onBar) {
+            delay(CONTROLS_FADE_MS)
+            shown = false
+        }
+    }
+    // Where the bar is, to tell whether the mouse last moved over it.
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    var bar by remember { mutableStateOf(Rect.Zero) }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .testTag("filled-video")
+            .onGloballyPositioned { origin = it.positionInWindow() }
+            .focusRequester(focus)
+            .focusable()
+            .onKeyEvent { e ->
+                if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { onExit(); true } else false
+            }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val e = awaitPointerEvent(PointerEventPass.Initial)
+                        if (e.type != PointerEventType.Move && e.type != PointerEventType.Press && e.type != PointerEventType.Enter) continue
+                        onBar = shown && e.changes.any { bar.contains(origin + it.position) }
+                        moves++
+                        // A menu from the bar takes focus; a press brings Escape back here.
+                        if (e.type == PointerEventType.Press) runCatching { focus.requestFocus() }
+                    }
+                }
+            },
+    ) {
+        if (link != null) {
+            VideoSurface(link, local = isSelf, Modifier.fillMaxSize())
+        } else {
+            Box(Modifier.align(Alignment.Center)) { Avatar(label = nameFor(member.ship), url = null, size = 96.dp) }
+        }
+        AnimatedVisibility(shown, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.matchParentSize()) {
+            Box(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.align(Alignment.TopStart).fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        nameFor(member.ship) + if (isSelf) " (you)" else "",
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(tip = "Back to the meeting", onClick = onExit) {
+                        Icon(Icons.Filled.Close, contentDescription = "Back to the meeting", tint = Color.White)
+                    }
+                }
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
+                        .onGloballyPositioned { bar = it.boundsInWindow() },
+                ) {
+                    controls(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+                }
+            }
         }
     }
 }
