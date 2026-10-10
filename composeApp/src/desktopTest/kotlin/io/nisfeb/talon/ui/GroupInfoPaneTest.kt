@@ -8,7 +8,6 @@ import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
@@ -82,11 +81,16 @@ class GroupInfoPaneTest {
             runComposeUiTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
+                        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalClipboardManager provides object : androidx.compose.ui.platform.ClipboardManager {
+                            override fun getText(): androidx.compose.ui.text.AnnotatedString? = null
+                            override fun setText(annotatedString: androidx.compose.ui.text.AnnotatedString) { opened += "copied ${annotatedString.text}" }
+                        }) {
                         if (shown.value) GroupInfoPane(
                             db = db, repo = repo, whom = whom,
                             onOpenCategory = { opened += "media $it" },
                             onOpenMembers = { opened += "members" },
                         )
+                        }
                     }
                 }
                 block(ship, db)
@@ -251,5 +255,20 @@ class GroupInfoPaneTest {
             assertEquals("all", runBlocking { db.notifyPrefs().levelFor("group/$flag") })
         }
     }
-}
 
+    // Copied here, pasted in Talon's or Tlon's join box or in a chat (2026-10-09).
+    @Test
+    fun `the group's reference is copied in Tlon's form, for any group`() = pane { _, _ ->
+        showing("3 members")
+        row("Group reference")
+        onNodeWithText("Copy").performClick()
+        assertEquals(listOf("copied /1/group/$flag"), opened)
+        showing("Copied")
+    }
+
+    @Test
+    fun `a DM has no group reference`() = pane(whom = "~bus") { _, _ ->
+        waitForIdle()
+        assertTrue(!shows("Group reference"))
+    }
+}

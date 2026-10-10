@@ -41,6 +41,23 @@ sealed interface TalonLink {
 
         fun forInviteMe(ship: String): String = "${SCHEME}invite/${ship.encodeURLParameter()}"
 
+        /**
+         * Tlon's reference to a group, `/1/group/~host/name` (its
+         * citeToPath). Tlon's join box takes it, and pasted in a chat in
+         * Tlon or Talon it goes out as the group's cite.
+         */
+        fun groupReference(flag: String): String = "/1/group/$flag"
+
+        /** A group reference standing alone in a message's text; group 1 is the flag. */
+        val GROUP_REFERENCE = Regex("(?<!\\S)/1/group/(~$SHIP_BODY/[a-z0-9][a-z0-9-]*)(?!\\S)")
+
+        /** The group a typed or pasted code names: `~host/name`, Tlon's reference to it, or Talon's group link. */
+        fun groupFlag(code: String): String? {
+            val t = code.trim()
+            (parse(t) as? Group)?.let { return it.flag }
+            return t.removePrefix("/1/group/").takeIf { FLAG.matches(it) }
+        }
+
         fun isTalonUrl(s: String): Boolean = s.trim().startsWith(SCHEME)
 
         /** The thing an address names, or null for one that is not ours. */

@@ -1,5 +1,6 @@
 package io.nisfeb.talon.urbit
 
+import kotlinx.serialization.json.Json
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
@@ -243,5 +244,17 @@ class TlonChatRepoPeopleTest {
     fun `nothing given sends nothing`() = live {
         repo.updateProfile()
         assertTrue(ship.pokes.isEmpty())
+    }
+
+    // ─── a group reference, pasted and sent ─────────────────────
+
+    @Test
+    fun `a pasted group reference reaches the channel as the group's cite`() = live {
+        repo.send("chat/~bus/general", "/1/group/~bus/garden see you there")
+        val content = ship.pokesTo("channels").single().json.at("channel", "action", "post", "add", "content")
+        assertEquals(
+            Json.parseToJsonElement("""[{"block":{"cite":{"group":"~bus/garden"}}},{"inline":["see you there"]}]"""),
+            content,
+        )
     }
 }

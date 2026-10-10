@@ -50,6 +50,7 @@ class NewDmScreenTest {
                 NewDmScreen(
                     db = db, onPickPeer = { did += "start $it" }, onBack = {},
                     onAddContact = { ship, nick -> did += "add $ship $nick" }, bookContacts = book,
+                    onJoinGroup = { did += "join $it" },
                 )
             }
         }
@@ -57,7 +58,7 @@ class NewDmScreenTest {
         block()
     }
 
-    private fun ComposeUiTest.type(text: String) = onNode(hasSetTextAction() and hasText("~ship, or a word name")).performTextInput(text)
+    private fun ComposeUiTest.type(text: String) = onNode(hasSetTextAction() and hasText("~ship, a word name, or a group reference")).performTextInput(text)
 
     @Test
     fun `a ship typed with or without its sig starts a conversation`() = newDm {
@@ -93,5 +94,29 @@ class NewDmScreenTest {
         type("~mitlyn-ditrel")
         waitForIdle()
         assertTrue(onAllNodesWithText("Add contact").fetchSemanticsNodes().isEmpty())
+    }
+
+    // A group reference copied from a group's info pane, or Tlon's (2026-10-09).
+    @Test
+    fun `a pasted group reference offers to join the group, and joins once confirmed`() = newDm {
+        type("/1/group/~bus/the-club")
+        onNodeWithText("Start").assertIsNotEnabled()
+        onNodeWithText("Join group ~bus/the-club").performClick()
+        onNodeWithText("Join group?").assertExists()
+        assertEquals(emptyList(), did, "nothing before the confirm")
+        onNodeWithText("Join").performClick()
+        assertEquals(listOf("join ~bus/the-club"), did)
+    }
+
+    @Test
+    fun `a group's flag alone offers the same`() = newDm {
+        type("~bus/the-club")
+        onNodeWithText("Join group ~bus/the-club").assertExists()
+    }
+
+    @Test
+    fun `a ship offers no group to join`() = newDm {
+        type("~dopzod-bitnux")
+        assertTrue(onAllNodesWithText("Join group", substring = true).fetchSemanticsNodes().isEmpty())
     }
 }

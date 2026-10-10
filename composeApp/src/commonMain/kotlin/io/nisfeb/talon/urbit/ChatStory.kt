@@ -107,6 +107,13 @@ fun editedStory(contentJson: String, newText: String): JsonArray {
 private val STORY_JSON = Json { ignoreUnknownKeys = true }
 
 internal fun chatTextToStory(text: String): JsonArray {
+    // A pasted group reference goes out as the group's cite, ahead of
+    // the text, as Tlon's composer sends one in a chat (toPostData).
+    val groups = TalonLink.GROUP_REFERENCE.findAll(text).map { it.groupValues[1] }.distinct().toList()
+    if (groups.isNotEmpty()) return buildJsonArray {
+        for (flag in groups) add(buildJsonObject { put("block", buildJsonObject { put("cite", buildJsonObject { put("group", flag) }) }) })
+        TalonLink.GROUP_REFERENCE.replace(text, "").trim().takeIf { it.isNotEmpty() }?.let { rest -> chatTextToStory(rest).forEach { add(it) } }
+    }
     val lines = text.split('\n')
     val verses = mutableListOf<JsonObject>()
     val pending = mutableListOf<JsonElement>()
