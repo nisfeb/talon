@@ -106,13 +106,31 @@ fun editedStory(contentJson: String, newText: String): JsonArray {
 
 private val STORY_JSON = Json { ignoreUnknownKeys = true }
 
+/**
+ * The group references that go out as cites: those standing alone outside
+ * code and quotes. One in a code block or a quote is being shown, not
+ * shared, and pulling it out left an empty block or a bare ">".
+ */
+private fun groupReferences(text: String): List<MatchResult> {
+    val code = codeRanges(text)
+    return TalonLink.GROUP_REFERENCE.findAll(text).filter { m ->
+        val lineStart = text.lastIndexOf('\n', m.range.first - 1) + 1
+        code.none { m.range.first in it } && !text.substring(lineStart).trimStart().startsWith(">")
+    }.toList()
+}
+
 internal fun chatTextToStory(text: String): JsonArray {
     // A pasted group reference goes out as the group's cite, ahead of
     // the text, as Tlon's composer sends one in a chat (toPostData).
-    val groups = TalonLink.GROUP_REFERENCE.findAll(text).map { it.groupValues[1] }.distinct().toList()
-    if (groups.isNotEmpty()) return buildJsonArray {
-        for (flag in groups) add(buildJsonObject { put("block", buildJsonObject { put("cite", buildJsonObject { put("group", flag) }) }) })
-        TalonLink.GROUP_REFERENCE.replace(text, "").trim().takeIf { it.isNotEmpty() }?.let { rest -> chatTextToStory(rest).forEach { add(it) } }
+    val refs = groupReferences(text)
+    if (refs.isNotEmpty()) return buildJsonArray {
+        for (flag in refs.map { it.groupValues[1] }.distinct()) add(buildJsonObject { put("block", buildJsonObject { put("cite", buildJsonObject { put("group", flag) }) }) })
+        val rest = buildString {
+            var at = 0
+            for (m in refs) { append(text, at, m.range.first); at = m.range.last + 1 }
+            append(text, at, text.length)
+        }.trim()
+        if (rest.isNotEmpty()) chatTextToStory(rest).forEach { add(it) }
     }
     val lines = text.split('\n')
     val verses = mutableListOf<JsonObject>()
@@ -217,7 +235,8 @@ internal fun mentionRanges(text: String): List<IntRange> {
     if (!PATP_REGEX.containsMatchIn(text)) return emptyList()
     val sent = ArrayDeque(shipsIn(chatTextToStory(text)))
     if (sent.isEmpty()) return emptyList()
-    val code = codeRanges(text) + URL_IN_TEXT.findAll(text).map { it.range }
+    // A group reference's ~host is part of the reference, not a mention.
+    val code = codeRanges(text) + URL_IN_TEXT.findAll(text).map { it.range } + TalonLink.GROUP_REFERENCE.findAll(text).map { it.range }
     fun patpChar(c: Char) = c.isLetterOrDigit() || c == '-'
     val out = mutableListOf<IntRange>()
     for (m in PATP_REGEX.findAll(text)) {

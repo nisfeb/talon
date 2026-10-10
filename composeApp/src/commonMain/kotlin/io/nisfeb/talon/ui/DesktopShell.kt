@@ -126,6 +126,10 @@ fun DesktopShell(
         val safeWidth = maxWidth - with(density) { (sideInsets.getLeft(this, direction) + sideInsets.getRight(this, direction)).toDp() }
         val rightWidth = rightSidebar?.let { rightPaneBesideWidth(safeWidth, rightPaneWidth) }
         val overChat = rightSidebar != null && rightWidth == null
+        // The rail's colour under the left safe area, so the rail reaches
+        // the screen's edge instead of floating beside a bare strip.
+        val leftInset = with(density) { sideInsets.getLeft(this, direction).toDp() }
+        if (leftInset > 0.dp) Box(Modifier.fillMaxHeight().width(leftInset).background(MaterialTheme.colorScheme.surfaceVariant))
         Row(modifier = Modifier.fillMaxSize().windowInsetsPadding(sideInsets)) {
             DesktopRail(
                 activeTab = activeRailTab,

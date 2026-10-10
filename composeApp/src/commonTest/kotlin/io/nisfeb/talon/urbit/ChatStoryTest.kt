@@ -196,4 +196,22 @@ class ChatStoryTest {
             assertTrue(chatTextToStory(text).none { "cite" in it.toString() }, text)
         }
     }
+
+    @Test
+    fun `a group reference in a code block or a quote is shown, not pulled out as a cite`() {
+        for (text in listOf("```\n/1/group/~bus/club\n```", "> /1/group/~bus/club", "see `/1/group/~bus/club`")) {
+            val story = chatTextToStory(text)
+            assertTrue(story.none { "cite" in it.toString() }, "$text -> $story")
+            assertTrue("/1/group/" in story.toString() && "/club" in story.toString(), "the reference stays in the post: $story")
+        }
+        // Outside the quote it still goes out as one.
+        val mixed = chatTextToStory("> as they said\n/1/group/~bus/club")
+        assertEquals(groupCite("~bus/club"), mixed[0])
+    }
+
+    @Test
+    fun `the composer does not take a reference's host for a mention`() {
+        val text = "/1/group/~bus/club hey ~bus"
+        assertEquals(listOf(text.lastIndexOf("~bus").let { it until it + 4 }), mentionRanges(text))
+    }
 }
