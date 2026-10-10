@@ -133,18 +133,226 @@ fun PartyLineFullScreen(
      *  can't show it — 1:1 video lives on the CallEngine, not on a
      *  PeerLink — so the caller supplies the pane instead. */
     videoPane: (@Composable () -> Unit)? = null,
+    /** The meeting view: a camera or shared screen can fill the window. */
+    canFillWindow: Boolean = false,
 ) {
     val fullScreen = LocalWindowFullScreen.current
     val meeting = isWindowFullScreenSupported && fullScreen.isFullScreen()
+    // Whose picture fills the window; back to the meeting once it goes.
+    var filled by remember { mutableStateOf<String?>(null) }
+    val filledMember = filled?.let { s -> state.members.firstOrNull { it.ship == s && it.ship in videoOnShips } }
+    LaunchedEffect(filledMember == null) { if (filledMember == null) filled = null }
     // Leaving the call view by any road gives the window back.
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose { fullScreen.set(false) }
+    }
+    // The call's buttons: under the meeting, and over a filled picture.
+    val controls: @Composable (Modifier) -> Unit = { mod ->
+        // ─── Controls ───
+        // FlowRow, not Row: mute + audio + camera + flip + record +
+        // leave is too many for one phone row and squished them. This
+        // wraps to a second row when they don't fit, and stays one
+        // row where they do.
+        FlowRow(
+            modifier = mod,
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            if (state.canSpeak) {
+                ControlButton(
+                    label = if (state.muted) "Unmute" else "Mute",
+                    onClick = { onToggleMute(!state.muted) },
+                    containerColor = if (state.muted) {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.primaryContainer
+                    },
+                    contentColor = if (state.muted) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    },
+                ) {
+                    Icon(
+                        if (state.muted) TalonIcons.MicOff else TalonIcons.Mic,
+                        contentDescription = null,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+            } else {
+                // A listener or admin-muted person has no mic to
+                // toggle. Say which, big enough to read at a glance.
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        modifier = Modifier
+                            .size(58.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            TalonIcons.MicOff,
+                            contentDescription = null,
+                            tint = if (state.selfMutedByAdmin) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(26.dp),
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        if (state.selfMutedByAdmin) "Muted by an admin" else "Listening",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (audioDevices.supported) {
+                SpeakerControl(audioDevices)
+            }
+            if (isWindowFullScreenSupported) {
+                ControlButton(
+                    label = if (meeting) "Exit full screen" else "Full screen",
+                    onClick = { fullScreen.set(!meeting) },
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ) {
+                    Icon(
+                        if (meeting) TalonIcons.FullscreenExit else TalonIcons.Fullscreen,
+                        contentDescription = null,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+            }
+
+            if (onToggleCamera != null) {
+                ControlButton(
+                    label = if (cameraOn) "Camera off" else "Camera",
+                    onClick = onToggleCamera,
+                    containerColor = if (cameraOn) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    contentColor = if (cameraOn) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                ) {
+                    Icon(
+                        if (cameraOn) TalonIcons.Videocam else TalonIcons.VideocamOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+            }
+            if (screenShare != null) {
+                ScreenShareMenu(screenShare, sharing) { press ->
+                    ControlButton(
+                        label = if (sharing) "Stop sharing" else "Share",
+                        onClick = press,
+                        containerColor = if (sharing) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                        contentColor = if (sharing) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    ) {
+                        Icon(
+                            if (sharing) TalonIcons.StopScreenShare else TalonIcons.ScreenShare,
+                            contentDescription = null,
+                            modifier = Modifier.size(26.dp),
+                        )
+                    }
+                }
+            }
+            if (onToggleCamera != null && videoDevices.supported && onSelectCamera != null) {
+                CameraControl(videoDevices, onSelectCamera)
+            }
+
+            if (onSwitchCamera != null && cameraOn) {
+                ControlButton(
+                    label = "Flip",
+                    onClick = onSwitchCamera,
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ) {
+                    Icon(
+                        Icons.Filled.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+            }
+
+            if (onToggleRecord != null) {
+                ControlButton(
+                    label = if (recording) "Stop" else "Record",
+                    onClick = onToggleRecord,
+                    containerColor = if (recording) {
+                        MaterialTheme.colorScheme.errorContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    contentColor = if (recording) {
+                        MaterialTheme.colorScheme.onErrorContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                ) {
+                    if (recording) {
+                        // A stop square.
+                        Box(
+                            Modifier.size(22.dp).clip(RoundedCornerShape(4.dp))
+                                .background(MaterialTheme.colorScheme.error),
+                        )
+                    } else {
+                        // A record dot.
+                        Box(
+                            Modifier.size(26.dp).clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.error),
+                        )
+                    }
+                }
+            }
+
+            ControlButton(
+                label = if (directCall) "Hang up" else "Leave",
+                onClick = onLeave,
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            ) {
+                Icon(
+                    TalonIcons.CallEnd,
+                    contentDescription = null,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+        }
     }
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
     ) {
-        Column(
+        if (filledMember != null) {
+            val self = filledMember.ship == selfShip
+            FilledVideo(
+                member = filledMember,
+                isSelf = self,
+                nameFor = nameFor,
+                link = if (self) localVideoLink else videoLinkFor(filledMember.ship),
+                onExit = { filled = null },
+                controls = controls,
+            )
+        } else Column(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -224,6 +432,8 @@ fun PartyLineFullScreen(
                     videoOnShips = videoOnShips,
                     focusedShip = focusedShip,
                     onFocusVideo = onFocusVideo,
+                    // Filling pins it, for the full-resolution picture.
+                    onFill = if (canFillWindow) { ship -> filled = ship; if (ship != selfShip) onFocusVideo(ship) } else null,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
                 // The roster is always present under the grid: it is the
@@ -268,195 +478,7 @@ fun PartyLineFullScreen(
                 }
             }
 
-            // ─── Controls ───
-            // FlowRow, not Row: mute + audio + camera + flip + record +
-            // leave is too many for one phone row and squished them. This
-            // wraps to a second row when they don't fit, and stays one
-            // row where they do.
-            FlowRow(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                if (state.canSpeak) {
-                    ControlButton(
-                        label = if (state.muted) "Unmute" else "Mute",
-                        onClick = { onToggleMute(!state.muted) },
-                        containerColor = if (state.muted) {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.primaryContainer
-                        },
-                        contentColor = if (state.muted) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        },
-                    ) {
-                        Icon(
-                            if (state.muted) TalonIcons.MicOff else TalonIcons.Mic,
-                            contentDescription = null,
-                            modifier = Modifier.size(26.dp),
-                        )
-                    }
-                } else {
-                    // A listener or admin-muted person has no mic to
-                    // toggle. Say which, big enough to read at a glance.
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(
-                            modifier = Modifier
-                                .size(58.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                TalonIcons.MicOff,
-                                contentDescription = null,
-                                tint = if (state.selfMutedByAdmin) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier.size(26.dp),
-                            )
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            if (state.selfMutedByAdmin) "Muted by an admin" else "Listening",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-
-                if (audioDevices.supported) {
-                    SpeakerControl(audioDevices)
-                }
-                if (isWindowFullScreenSupported) {
-                    ControlButton(
-                        label = if (meeting) "Exit full screen" else "Full screen",
-                        onClick = { fullScreen.set(!meeting) },
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ) {
-                        Icon(
-                            if (meeting) TalonIcons.FullscreenExit else TalonIcons.Fullscreen,
-                            contentDescription = null,
-                            modifier = Modifier.size(26.dp),
-                        )
-                    }
-                }
-
-                if (onToggleCamera != null) {
-                    ControlButton(
-                        label = if (cameraOn) "Camera off" else "Camera",
-                        onClick = onToggleCamera,
-                        containerColor = if (cameraOn) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        },
-                        contentColor = if (cameraOn) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    ) {
-                        Icon(
-                            if (cameraOn) TalonIcons.Videocam else TalonIcons.VideocamOff,
-                            contentDescription = null,
-                            modifier = Modifier.size(26.dp),
-                        )
-                    }
-                }
-                if (screenShare != null) {
-                    ScreenShareMenu(screenShare, sharing) { press ->
-                        ControlButton(
-                            label = if (sharing) "Stop sharing" else "Share",
-                            onClick = press,
-                            containerColor = if (sharing) {
-                                MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            },
-                            contentColor = if (sharing) {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        ) {
-                            Icon(
-                                if (sharing) TalonIcons.StopScreenShare else TalonIcons.ScreenShare,
-                                contentDescription = null,
-                                modifier = Modifier.size(26.dp),
-                            )
-                        }
-                    }
-                }
-                if (onToggleCamera != null && videoDevices.supported && onSelectCamera != null) {
-                    CameraControl(videoDevices, onSelectCamera)
-                }
-
-                if (onSwitchCamera != null && cameraOn) {
-                    ControlButton(
-                        label = "Flip",
-                        onClick = onSwitchCamera,
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ) {
-                        Icon(
-                            Icons.Filled.Refresh,
-                            contentDescription = null,
-                            modifier = Modifier.size(26.dp),
-                        )
-                    }
-                }
-
-                if (onToggleRecord != null) {
-                    ControlButton(
-                        label = if (recording) "Stop" else "Record",
-                        onClick = onToggleRecord,
-                        containerColor = if (recording) {
-                            MaterialTheme.colorScheme.errorContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        },
-                        contentColor = if (recording) {
-                            MaterialTheme.colorScheme.onErrorContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    ) {
-                        if (recording) {
-                            // A stop square.
-                            Box(
-                                Modifier.size(22.dp).clip(RoundedCornerShape(4.dp))
-                                    .background(MaterialTheme.colorScheme.error),
-                            )
-                        } else {
-                            // A record dot.
-                            Box(
-                                Modifier.size(26.dp).clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.error),
-                            )
-                        }
-                    }
-                }
-
-                ControlButton(
-                    label = if (directCall) "Hang up" else "Leave",
-                    onClick = onLeave,
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                ) {
-                    Icon(
-                        TalonIcons.CallEnd,
-                        contentDescription = null,
-                        modifier = Modifier.size(26.dp),
-                    )
-                }
-            }
+            controls(Modifier.fillMaxWidth().padding(vertical = 20.dp))
         }
     }
 }
