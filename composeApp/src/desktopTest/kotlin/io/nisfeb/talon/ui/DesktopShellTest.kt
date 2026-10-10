@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
@@ -323,6 +325,30 @@ class DesktopShellTest {
         assertEquals(MIN_LIST_WIDTH, list.width, "the list keeps its whole width: no safe area inside it")
         assertEquals(852.dp - 59.dp, chat.right, "the chat stops at the right safe area")
         assertEquals(list.right + HANDLE_WIDTH, chat.left, "and starts right after the list's handle, with no safe area of its own")
+    }
+
+    // The rail's colour reaches the screen's edge, under the left safe area.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `the left safe area is the rail's colour, not a bare strip`() = runComposeUiTest {
+        val sides = androidx.compose.foundation.layout.WindowInsets(left = 59.dp, right = 59.dp)
+        setContent {
+            Box(Modifier.size(width = 852.dp, height = 393.dp).testTag("shell")) {
+                DesktopShell(
+                    activeRailTab = RailTab.Chats,
+                    enabledItems = RailItem.entries.toList(),
+                    onItemClicked = {},
+                    list = { Box(Modifier.fillMaxSize()) },
+                    detail = { Box(Modifier.fillMaxSize()) },
+                    listFraction = 0.30f,
+                    onListFractionChange = {},
+                    sideInsets = sides,
+                )
+            }
+        }
+        val img = onNodeWithTag("shell").captureToImage().toPixelMap()
+        fun px(x: androidx.compose.ui.unit.Dp) = with(density) { x.roundToPx() }
+        assertEquals(img[px(63.dp), px(388.dp)], img[px(20.dp), px(388.dp)], "the inset matches the rail beside it")
     }
 }
 

@@ -314,7 +314,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             val calId = resolveCalendar(calArg)
             if (calArg != null && calId == null) return@Tool "Error: no calendar called \"$calArg\"; see list_calendars."
             if (calId != null && calId in cal.readOnly) return@Tool "Error: calendar $calId is shared with the user read-only; its host makes the changes."
-            val alarms = args.text("reminder")?.let { r ->
+            val alarms = args.text("reminder")?.takeIf { it.isNotBlank() }?.let { r ->
                 runCatching { io.nisfeb.talon.calendar.reminderAlarms(r, allDay = minute == null) }.getOrElse { return@Tool "Error: ${it.message}" }
             }
             val draft = EventDraft(
@@ -432,8 +432,16 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 if (newDate != null) d = d.copy(date = newDate)
                 if (newMinute != null && d.cat != EventCat.DATE) d = d.copy(cat = EventCat.TIMED, minuteOfDay = newMinute)
             }
-            args.text("reminder")?.let { r ->
-                val alarms = runCatching { io.nisfeb.talon.calendar.reminderAlarms(r, allDay = d.cat == EventCat.ALLDAY || d.cat == EventCat.DATE) }
+            // An all-day event given a time: its "on the day" reminders were
+            // offsets after a midnight start, and after a timed start they
+            // fire hours late (a morning one, 9 hours after). Dropped unless
+            // the call says what the reminders are now.
+            val droppedDayReminders = d0.cat != EventCat.TIMED && d.cat == EventCat.TIMED &&
+                args.text("reminder").isNullOrBlank() && d.alarms.orEmpty().any { it.onTheDayMinute != null }
+            if (droppedDayReminders) d = d.copy(alarms = d.alarms.orEmpty().filter { it.onTheDayMinute == null }, alarmsChanged = true)
+            val droppedNote = if (droppedDayReminders) " Its reminder on the day no longer fit a timed event and was removed; give one in the call, such as 30m, to set another." else ""
+            args.text("reminder")?.takeIf { it.isNotBlank() }?.let { r ->
+                val alarms = runCatching { io.nisfeb.talon.calendar.reminderAlarms(r, allDay = d.cat != EventCat.TIMED) }
                     .getOrElse { return@Tool "Error: ${it.message}" }
                 d = d.copy(alarms = alarms, alarmsChanged = true)
             }
@@ -458,10 +466,10 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 if (!cal.writeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) }).ok) {
                     return@Tool "Half done: the changed \"${d.name}\" was added, but the original occurrence on $occ is still there too — the calendar refused the skip. Skip it by hand, or try again."
                 }
-                return@Tool "Updated \"${d.name}\" for that occurrence."
+                return@Tool "Updated \"${d.name}\" for that occurrence." + droppedNote
             }
             // The lists are read back behind, as for an add.
-            if (cal.writeEvent(eventBody(d, id)).ok) "Updated \"${d.name}\"." else "The calendar did not take it."
+            if (cal.writeEvent(eventBody(d, id)).ok) "Updated \"${d.name}\"." + droppedNote else "The calendar did not take it."
         })
         add(Tool(
             spec = ToolSpec(
@@ -777,7 +785,7 @@ internal fun describeRow(r: CalendarRow, zone: TimeZone, calNames: Map<String, S
         if (r.tags.isNotEmpty()) append(' ').append(r.tags.joinToString(" ") { "#$it" })
         if (r.note.isNotBlank()) append(" note: ").append(r.note.replace('\n', ' ').take(160))
         io.nisfeb.talon.calendar.alarmsOf(r.alarms)?.takeIf { it.isNotEmpty() }?.let { a ->
-            append(" reminders: ").append(a.joinToString(", ") { io.nisfeb.talon.calendar.alarmLabel(it, zone, twentyFourHour = true) })
+            append(" reminders: ").append(a.joinToString(", ") { io.nisfeb.talon.calendar.alarmLabel(it, zone, twentyFourHour = true, untimed = r.all) })
         }
         append(" (calendar ").append(calNames[r.cal] ?: r.cal).append(')')
     }

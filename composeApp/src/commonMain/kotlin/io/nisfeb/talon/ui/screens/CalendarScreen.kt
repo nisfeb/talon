@@ -836,7 +836,7 @@ fun CalendarScreen(
                     r.alarms?.let { io.nisfeb.talon.calendar.alarmsOf(it) }?.takeIf { it.isNotEmpty() }?.let { alarms ->
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.Filled.Notifications, contentDescription = "Reminders", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                            Text(alarms.joinToString(", ") { io.nisfeb.talon.calendar.alarmLabel(it, zone, twentyFourHour) }, style = MaterialTheme.typography.bodyMedium)
+                            Text(alarms.joinToString(", ") { io.nisfeb.talon.calendar.alarmLabel(it, zone, twentyFourHour, untimed = r.all) }, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
@@ -1394,7 +1394,7 @@ private fun EventEditor(
                     Text("Reminders", style = MaterialTheme.typography.labelMedium)
                     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                         alarms.forEachIndexed { i, a ->
-                            val label = io.nisfeb.talon.calendar.alarmLabel(a, zone, twentyFourHour)
+                            val label = io.nisfeb.talon.calendar.alarmLabel(a, zone, twentyFourHour, untimed = d.cat != EventCat.TIMED)
                             InputChip(
                                 selected = false,
                                 onClick = { d = d.copy(alarms = alarms.filterIndexed { j, _ -> j != i }, alarmsChanged = true) },

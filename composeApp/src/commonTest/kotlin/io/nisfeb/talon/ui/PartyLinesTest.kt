@@ -58,4 +58,22 @@ class PartyLinesTest {
         // stale entries for lines we no longer know about don't count
         assertFalse(anyPartyLineOccupied(rows, mapOf("~bus/gone" to 9), emptyMap()))
     }
+
+    // A guest on the line, in the /party note and the party-lines list (trunk wire 16).
+    @Test
+    fun aGuestInTheRollCallIsNamedAsAGuest() {
+        val live = io.nisfeb.talon.call.PartyState.Live(
+            room = "lounge",
+            members = listOf(
+                io.nisfeb.talon.call.PartyMember("1", "guest-9bc96e96826597bd93a19ee8", name = "Grandma"),
+                io.nisfeb.talon.call.PartyMember("2", "~nec"),
+            ),
+            muted = false,
+            media = io.nisfeb.talon.call.MediaState.Idle,
+        )
+        assertEquals(
+            "2 on the party line: Grandma (guest), Nec",
+            partyRollCall(2, live.members.map { it.ship }, withLineNames({ names[it] ?: it }, live)),
+        )
+    }
 }

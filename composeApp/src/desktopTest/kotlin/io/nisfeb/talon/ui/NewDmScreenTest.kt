@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsEnabled
@@ -118,5 +121,13 @@ class NewDmScreenTest {
     fun `a ship offers no group to join`() = newDm {
         type("~dopzod-bitnux")
         assertTrue(onAllNodesWithText("Join group", substring = true).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `enter after a pasted group code asks to join it`() = newDm {
+        type("/1/group/~bus/the-club")
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        onNodeWithText("Join group?").assertExists()
+        assertEquals(emptyList(), did)
     }
 }

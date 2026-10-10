@@ -722,3 +722,10 @@ fun profileAfterEntry(
     // device's OpenRouter provider.
     return if (keys != null && current.syncEnabled) profile.withKeys(keys, from = incoming) else profile
 }
+
+/** The model Talon runs on [this] when none is picked; null where the provider's own list is all there is. */
+fun ProviderKind.defaultModel(): String? = when (this) {
+    ProviderKind.OpenRouter -> "anthropic/claude-sonnet-4"
+    ProviderKind.OpenAi -> "gpt-4o-mini"
+    else -> null
+}

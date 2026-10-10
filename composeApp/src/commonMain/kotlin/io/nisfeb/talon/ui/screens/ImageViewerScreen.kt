@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.calculateCentroidSize
 import androidx.compose.ui.platform.testTag
@@ -114,6 +115,11 @@ fun ImageViewerScreen(
         scale = s
         offset = o
     }
+    // A rotation, a resize or the picture loading moves the bounds; a zoomed
+    // picture is put back inside them at once, not on the next touch.
+    LaunchedEffect(viewSize, pictureSize) {
+        if (scale > 1f) step(androidx.compose.ui.geometry.Offset.Zero, androidx.compose.ui.geometry.Offset.Zero, 1f)
+    }
 
     val downloader = LocalImageDownloader.current
     val snackbarHost = remember { SnackbarHostState() }
@@ -211,6 +217,31 @@ fun ImageViewerScreen(
             Modifier
                 .fillMaxSize()
                 .onSizeChanged { viewSize = androidx.compose.ui.geometry.Size(it.width.toFloat(), it.height.toFloat()) }
+                // A mouse and a trackpad, which press nothing: Ctrl+wheel and a
+                // pinch zoom about the pointer, as Compose's transformable did
+                // before 1.8.15; a plain wheel or two-finger scroll pans.
+                .pointerInput(url) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull() ?: continue
+                            when (event.type) {
+                                androidx.compose.ui.input.pointer.PointerEventType.Scroll -> {
+                                    val d = change.scrollDelta
+                                    if (event.keyboardModifiers.isCtrlPressed) step(change.position, androidx.compose.ui.geometry.Offset.Zero, kotlin.math.exp(-d.y * WHEEL_ZOOM))
+                                    else if (scale > 1f) step(change.position, -d * WHEEL_PAN_PX, 1f)
+                                    else continue
+                                }
+                                androidx.compose.ui.input.pointer.PointerEventType.ScaleChange -> {
+                                    val k = change.historical.lastOrNull()?.scaleFactor ?: continue
+                                    step(change.position, androidx.compose.ui.geometry.Offset.Zero, k)
+                                }
+                                else -> continue
+                            }
+                            change.consume()
+                        }
+                    }
+                }
                 .pointerInput(url) {
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false)
@@ -401,3 +432,7 @@ private fun LightboxIconButton(
         }
     }
 }
+
+/** How far one wheel notch zooms (e^0.2, about 22%), and how far one pans. */
+private const val WHEEL_ZOOM = 0.2f
+private const val WHEEL_PAN_PX = 48f

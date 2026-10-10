@@ -432,8 +432,7 @@ fun PartyLineFullScreen(
                     videoOnShips = videoOnShips,
                     focusedShip = focusedShip,
                     onFocusVideo = onFocusVideo,
-                    // Filling pins it, for the full-resolution picture.
-                    onFill = if (canFillWindow) { ship -> filled = ship; if (ship != selfShip) onFocusVideo(ship) } else null,
+                    onFill = if (canFillWindow) { ship -> filled = ship } else null,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
                 // The roster is always present under the grid: it is the

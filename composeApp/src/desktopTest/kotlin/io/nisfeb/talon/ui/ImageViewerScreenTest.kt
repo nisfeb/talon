@@ -1,5 +1,11 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.test.performMultiModalInput
+import androidx.compose.ui.test.performMouseInput
 import kotlin.math.abs
 import androidx.compose.ui.test.pinch
 import androidx.compose.ui.test.swipeLeft
@@ -150,5 +156,51 @@ class ImageViewerScreenTest {
         touch { swipeLeft(startX = 800f, endX = 200f, durationMillis = 300) }
         waitForIdle()
         assertTrue(shows("2 / 3"), "a drag on a zoomed picture pans it")
+    }
+
+    // Desktop: the zoom 1.8.15 lost with Compose's transformable (2026-10-10 review).
+    @Test
+    fun `ctrl and the wheel zoom about the pointer, and the wheel alone pans only when zoomed`() = viewer(urls = urls.take(1)) {
+        val whole = picture()
+        onAllNodes(isRoot()).onFirst().performMouseInput { moveTo(Offset(300f, 200f)); scroll(3f) }
+        waitForIdle()
+        assertEquals(whole, picture(), "a plain wheel at 1x does nothing")
+        onAllNodes(isRoot()).onFirst().performMultiModalInput {
+            key { keyDown(Key.CtrlLeft) }
+            mouse { moveTo(Offset(300f, 200f)); scroll(-5f) }
+            key { keyUp(Key.CtrlLeft) }
+        }
+        waitForIdle()
+        val zoom = picture().width / whole.width
+        assertTrue(zoom > 2f, "zoomed in, was ${zoom}x")
+        near(300f - 300f * zoom, picture().left, "the point under the pointer stays put")
+        near(200f - 200f * zoom, picture().top, "the point under the pointer stays put")
+        val top = picture().top
+        onAllNodes(isRoot()).onFirst().performMouseInput { scroll(2f) }
+        waitForIdle()
+        assertTrue(picture().top < top, "the wheel pans down the zoomed picture: ${picture().top} vs $top")
+    }
+
+    @Test
+    fun `a zoomed picture is put back in bounds when the window shrinks`() = runComposeUiTest {
+        var w by androidx.compose.runtime.mutableStateOf(800)
+        var h by androidx.compose.runtime.mutableStateOf(600)
+        setContent {
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(1f)) {
+                TalonTheme(darkTheme = false) {
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.size(w.dp, h.dp)) {
+                        ImageViewerScreen(urls.take(1), onClose = {})
+                    }
+                }
+            }
+        }
+        waitForIdle()
+        onAllNodes(isRoot()).onFirst().performTouchInput { doubleClick(Offset(790f, 590f)) }
+        waitForIdle()
+        near(790f - 790f * 2.5f, picture().left, "zoomed about the bottom right")
+        w = 400; h = 300
+        waitForIdle()
+        near(400f - 400f * 2.5f, picture().left, "pulled back so the picture still covers the window")
+        near(300f - 300f * 2.5f, picture().top, "and from above")
     }
 }

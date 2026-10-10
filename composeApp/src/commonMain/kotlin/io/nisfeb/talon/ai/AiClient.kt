@@ -63,13 +63,13 @@ class AiClient(
             AiSettings.Provider.OpenRouter -> openaiCompat(
                 cfg, systemPrompt, userPrompt, maxOutputTokens,
                 endpoint = "https://openrouter.ai/api/v1/chat/completions",
-                defaultModel = "anthropic/claude-sonnet-4",
+                defaultModel = ProviderKind.OpenRouter.defaultModel()!!,
                 timeoutMs = timeoutMs,
             )
             AiSettings.Provider.OpenAi -> openaiCompat(
                 cfg, systemPrompt, userPrompt, maxOutputTokens,
                 endpoint = "https://api.openai.com/v1/chat/completions",
-                defaultModel = "gpt-4o-mini",
+                defaultModel = ProviderKind.OpenAi.defaultModel()!!,
                 timeoutMs = timeoutMs,
             )
             AiSettings.Provider.Custom -> {

@@ -4,7 +4,7 @@ The text below goes in App Store Connect, App Review Information, Notes. nomac's
 
 ---
 
-Talon is a client for Urbit (urbit.org), a personal-server platform. There is no Talon account system: users sign in to an Urbit server ("ship") that they themselves own and operate, the way an email app signs in to a mail server. Talon's developer operates no backend for the app and collects no data through it. The one exception is the optional Armillary AI credit below (see our privacy policy).
+Talon is a client for Urbit (urbit.org), a personal-server platform. There is no Talon account system: users sign in to an Urbit server ("ship") that they themselves own and operate, the way an email app signs in to a mail server. Talon's developer operates no backend for chat and collects no data through the app. The exceptions are the push notification relay and the optional Armillary AI credit, both below (see our privacy policy).
 
 DEMO ACCOUNT
 A demo ship is provided for review. Its Ship URL and access code are in the Sign-In Information fields; enter both on the sign-in screen. The ship is pre-populated with direct messages and group channels demonstrating chat, threads, reactions, and media.
@@ -17,6 +17,9 @@ All content lives on users' own private servers; there is no public feed and no 
 
 ENCRYPTION
 Standard HTTPS/TLS only. ITSAppUsesNonExemptEncryption is false.
+
+PUSH NOTIFICATIONS
+iOS can only wake the app for a notification through a server, so Talon's developer runs a push relay; a user can point Talon at a relay of their own instead. Where the user's ship supports it, the ship sends its own notifications through the relay's APNs gateway, which keeps only the phone's push token and badge count. Otherwise, when the user turns notifications on, Talon sends the relay the ship's address and sign-in code once; the relay exchanges the code for a session cookie, stores only the cookie, encrypted, and watches the ship for messages that should notify. Each notification carries the sender and a one-line preview and is passed to APNs without being stored. Unregister in Settings, Notification health deletes the registration and the stored session.
 
 OPTIONAL AI FEATURES
 Off by default and inert until the user adds a provider: their own API key for a third-party AI provider (no key ships with the app), a model server of their own, or Armillary credit. A feature that reads messages runs only after the user turns it on, and its row warns when the chosen model may keep them.

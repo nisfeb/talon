@@ -10,15 +10,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
-import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.graphics.skiaCanvas
 import dev.onvoid.webrtc.media.video.VideoFrame
 import io.nisfeb.talon.call.CallEngine
 import io.nisfeb.talon.call.DesktopCallEngine
-import java.awt.image.BufferedImage
+import org.jetbrains.skia.ColorAlphaType
+import org.jetbrains.skia.Image
+import org.jetbrains.skia.ImageInfo
+import org.jetbrains.skia.SamplingMode
 import kotlin.math.roundToInt
 
 /**
@@ -72,7 +74,7 @@ actual fun VideoSurface(
 
 /** Shared renderer: converts a track's I420 frames to a Canvas. */
 @Composable
-private fun VideoTrackCanvas(
+internal fun VideoTrackCanvas(
     track: dev.onvoid.webrtc.media.video.VideoTrack?,
     on: Boolean,
     mirror: Boolean,
@@ -81,7 +83,9 @@ private fun VideoTrackCanvas(
 ) {
     if (track == null || !on) return
 
-    var bitmap by remember(track) { mutableStateOf<ImageBitmap?>(null) }
+    val holder = remember(track) { FrameHolder() }
+    // Bumped per frame so the Canvas draws again; the frame is in [holder].
+    var shown by remember(track) { mutableStateOf(0L) }
     var rotation by remember(track) { mutableStateOf(0) }
 
     val frames = remember(track) { java.util.concurrent.atomic.AtomicLong(0) }
@@ -95,14 +99,17 @@ private fun VideoTrackCanvas(
             // this returns, so it must be converted here rather than
             // stashed for the composition to read later.
             runCatching {
-                bitmap = converter.toBitmap(frame)
+                holder.put(converter.toImage(frame))
                 rotation = frame.rotation
                 val turned = frame.rotation == 90 || frame.rotation == 270
                 val w = frame.buffer.width; val h = frame.buffer.height
                 val aspect = if (turned) h.toFloat() / w else w.toFloat() / h
                 if (aspect != lastAspect) { lastAspect = aspect; onFrameAspect?.invoke(aspect) }
                 lastFrameMs.set(System.currentTimeMillis())
-                if (frames.getAndIncrement() == 0L) {
+                // Counted before it is set: 0 over 0 would not redraw, and the
+                // first frame stayed black until the second arrived.
+                shown = frames.incrementAndGet()
+                if (shown == 1L) {
                     io.nisfeb.talon.util.Log.i(
                         "VideoSurface",
                         "first frame ${frame.buffer.width}x${frame.buffer.height} rot=${frame.rotation} " +
@@ -119,7 +126,10 @@ private fun VideoTrackCanvas(
             }
         }
         track.addSink(sink)
-        onDispose { runCatching { track.removeSink(sink) } }
+        onDispose {
+            runCatching { track.removeSink(sink) }
+            holder.close()
+        }
     }
     // Say so when frames stop while the pane is still meant to be live.
     LaunchedEffect(track) {
@@ -141,13 +151,45 @@ private fun VideoTrackCanvas(
     }
 
     Canvas(modifier) {
-        val image = bitmap ?: return@Canvas
-        drawFitted(image, mirror, rotation)
+        shown
+        holder.use { drawFitted(it, mirror, rotation) }
+    }
+}
+
+/**
+ * The frame a tile shows: one Skia raster image at a time, closed as
+ * soon as the next replaces it.
+ *
+ * Each frame used to become a BufferedImage, then a Compose bitmap: 8 MB
+ * of Java garbage and an 8 MB native bitmap per 1080p frame, the bitmap
+ * freed only once a collection got round to it. At 15 fps one tile
+ * churned about 240 MB a second, and Talon on Windows swung between 2
+ * and 5 GB through a screen share (2026-10-10). Closing here frees a
+ * frame's pixels without waiting for a collection; a frame the canvas
+ * is still drawing keeps them, since Skia counts its own references.
+ */
+internal class FrameHolder {
+    private var image: Image? = null
+    private var closed = false
+
+    @Synchronized fun put(next: Image) {
+        if (closed) { next.close(); return }
+        image?.close()
+        image = next
+    }
+
+    /** [block] runs with the image held now, which cannot be closed meanwhile. */
+    @Synchronized fun <T> use(block: (Image) -> T): T? = image?.let(block)
+
+    @Synchronized fun close() {
+        closed = true
+        image?.close()
+        image = null
     }
 }
 
 /** Draw [image] centred, aspect-fitted, and turned the right way up. */
-private fun DrawScope.drawFitted(image: ImageBitmap, mirror: Boolean, rotation: Int) {
+internal fun DrawScope.drawFitted(image: Image, mirror: Boolean, rotation: Int) {
     // A phone held in portrait sends landscape frames plus a rotation
     // of 90 or 270; ignoring it drew every mobile camera on its side.
     // Fit against the post-rotation footprint, or a turned frame is
@@ -170,29 +212,26 @@ private fun DrawScope.drawFitted(image: ImageBitmap, mirror: Boolean, rotation: 
     }
 }
 
-private fun DrawScope.drawFittedRaw(image: ImageBitmap, w: Int, h: Int) {
-    drawImage(
-        image = image,
-        dstOffset = androidx.compose.ui.unit.IntOffset(
-            ((size.width - w) / 2).roundToInt(),
-            ((size.height - h) / 2).roundToInt(),
-        ),
-        dstSize = androidx.compose.ui.unit.IntSize(w, h),
+private fun DrawScope.drawFittedRaw(image: Image, w: Int, h: Int) {
+    val x = ((size.width - w) / 2).roundToInt().toFloat()
+    val y = ((size.height - h) / 2).roundToInt().toFloat()
+    // Linear, as Compose's drawImage filtered by default.
+    drawContext.canvas.skiaCanvas.drawImageRect(
+        image, 0f, 0f, image.width.toFloat(), image.height.toFloat(),
+        x, y, x + w, y + h, SamplingMode.LINEAR, null, true,
     )
 }
 
 /**
- * I420 to RGB, reusing its buffers between frames.
- *
- * Allocating a BufferedImage per frame at 30fps is 30 short-lived
- * multi-megabyte arrays a second, which is a GC problem rather than a
- * correctness one — hence the reuse.
+ * I420 to a Skia raster image, through arrays reused between frames, so
+ * a frame makes no Java garbage: the image's own native copy is all it
+ * allocates, and [FrameHolder] frees that.
  */
-private class FrameConverter {
-    private var image: BufferedImage? = null
+internal class FrameConverter {
     private var pixels: IntArray = IntArray(0)
+    private var bytes: ByteArray = ByteArray(0)
 
-    fun toBitmap(frame: VideoFrame): ImageBitmap = frame.buffer.toI420().let { i420 ->
+    fun toImage(frame: VideoFrame): Image = frame.buffer.toI420().let { i420 ->
         try {
             convert(i420)
         } finally {
@@ -204,14 +243,13 @@ private class FrameConverter {
         }
     }
 
-    private fun convert(i420: dev.onvoid.webrtc.media.video.I420Buffer): ImageBitmap {
+    private fun convert(i420: dev.onvoid.webrtc.media.video.I420Buffer): Image {
         val w = i420.width
         val h = i420.height
-        val img = image?.takeIf { it.width == w && it.height == h }
-            ?: BufferedImage(w, h, BufferedImage.TYPE_INT_RGB).also {
-                image = it
-                pixels = IntArray(w * h)
-            }
+        if (pixels.size != w * h) {
+            pixels = IntArray(w * h)
+            bytes = ByteArray(w * h * 4)
+        }
 
         val y = i420.dataY
         val u = i420.dataU
@@ -221,8 +259,14 @@ private class FrameConverter {
         val strideV = i420.strideV
 
         i420ToRgb(y, u, v, strideY, strideU, strideV, w, h, pixels)
-        img.setRGB(0, 0, w, h, pixels, 0, w)
-        return img.toComposeImageBitmap()
+        // 0xRRGGBB, made opaque, laid out little-endian: Skia's N32 order (B, G, R, A).
+        for (i in pixels.indices) pixels[i] = pixels[i] or OPAQUE
+        java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).asIntBuffer().put(pixels)
+        return Image.makeRaster(ImageInfo.makeN32(w, h, ColorAlphaType.OPAQUE), bytes, w * 4)
+    }
+
+    private companion object {
+        const val OPAQUE = 0xFF shl 24
     }
 }
 

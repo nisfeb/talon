@@ -244,7 +244,7 @@ class OrreryAiRowsTest {
     @Test
     fun `a default the ship cannot reach is said so, and nothing is sent`() = rows { _, _ ->
         waitUntil(timeoutMillis = 5_000) { shows("Orrery has no model on your ship yet") }
-        assertTrue(shows("Your default model is on a provider your ship cannot reach"))
+        assertTrue(shows("The ship cannot reach Anthropic."))
         assertFalse(shows("Use claude"), "no one-tap for a model the ship cannot run")
         assertTrue(sent.isEmpty(), sent.toString())
     }
@@ -265,5 +265,46 @@ class OrreryAiRowsTest {
         waitForIdle()
         assertFalse(shows("Orrery has no model on your ship yet"))
         assertTrue(sent.isEmpty(), sent.toString())
+    }
+
+    // From the 2026-10-10 review.
+    private val openAi = AiProvider("oa", ProviderKind.OpenAi, "OpenAI", apiKey = "sk-oa")
+
+    @Test
+    fun `a default with no model named offers and sends the model Talon runs there, not none`() = rows(AiProfile(listOf(openAi), defaultModel = ModelRef("oa", ""))) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("Use gpt-4o-mini") }
+        onNodeWithText("Use gpt-4o-mini", substring = true).performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { sent.isNotEmpty() }
+        assertEquals("gpt-4o-mini", sent.single()["model"]?.jsonPrimitive?.content, "a blank model made Orrery run its own kimi-k3 against OpenAI")
+    }
+
+    @Test
+    fun `a server with no key is not offered, and the card says why`() {
+        val local = AiProvider("lan", ProviderKind.OpenAiCompatible, "My server", baseUrl = "http://10.0.0.5:11434/v1", models = listOf(ModelInfo("llama")))
+        rows(AiProfile(listOf(local), defaultModel = ModelRef("lan", "llama"))) { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("has no key in Talon") }
+            assertFalse(shows("Use llama"), "Orrery would refuse it: the generator has no key")
+            assertTrue(sent.isEmpty(), sent.toString())
+        }
+    }
+
+    @Test
+    fun `a ship that names a model but holds no key is told it lacks the key`() {
+        generator = """{"enabled":false,"model":"moonshotai/kimi-k3","api_key_set":false}"""
+        rows(openRouterDefault) { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("Orrery on your ship has no key for its AI yet") }
+            assertFalse(shows("Orrery has no model on your ship yet"))
+        }
+    }
+
+    @Test
+    fun `the generator turns off even when the default is out of the ship's reach`() {
+        generator = """{"enabled":true,"model":"m1","api_key_set":true}"""
+        rows { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("Orrery analysis") }
+            switchBeside("Orrery analysis").performClick()
+            waitUntil(timeoutMillis = 5_000) { sent.isNotEmpty() }
+            assertEquals(Json.parseToJsonElement("""{"enabled":false}"""), sent.single())
+        }
     }
 }

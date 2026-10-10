@@ -665,6 +665,24 @@ object TalonIcons {
         }
     }
 
+    val OpenInFull: ImageVector by lazy {
+        materialIcon(name = "Filled.OpenInFull") {
+            materialPath() {
+                moveTo(21.0f, 11.0f)
+                lineToRelative(0.0f, -8.0f)
+                lineToRelative(-8.0f, 0.0f)
+                lineToRelative(3.29f, 3.29f)
+                lineToRelative(-10.0f, 10.0f)
+                lineToRelative(-3.29f, -3.29f)
+                lineToRelative(0.0f, 8.0f)
+                lineToRelative(8.0f, 0.0f)
+                lineToRelative(-3.29f, -3.29f)
+                lineToRelative(10.0f, -10.0f)
+                close()
+            }
+        }
+    }
+
     val Grain: ImageVector by lazy {
         materialIcon(name = "Filled.Grain") {
             materialPath() {
@@ -1810,6 +1828,7 @@ object TalonIcons {
         "ExpandMore" to ExpandMore,
         "Fullscreen" to Fullscreen,
         "FullscreenExit" to FullscreenExit,
+        "OpenInFull" to OpenInFull,
         "Grain" to Grain,
         "GroupAdd" to GroupAdd,
         "Groups" to Groups,

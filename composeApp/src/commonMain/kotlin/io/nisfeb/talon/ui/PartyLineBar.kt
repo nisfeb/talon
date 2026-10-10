@@ -126,11 +126,11 @@ fun PartyLineBar(
         selfShip = selfShip,
         onRevokeSpeaking = { ship ->
             party.revokeSpeaking(ship)
-            if (!io.nisfeb.talon.comet.isGuestName(ship)) onModerate?.invoke(ship, true)
+            onModerate?.invoke(ship, true)
         },
         onRestoreSpeaking = { ship ->
             party.restoreSpeaking(ship)
-            if (!io.nisfeb.talon.comet.isGuestName(ship)) onModerate?.invoke(ship, false)
+            onModerate?.invoke(ship, false)
         },
         onMessage = onMessage,
         recording = recording,
@@ -938,8 +938,8 @@ fun PartyLineMeeting(
             audioDevices = audioDevices,
             videoDevices = videoDevices,
             onSelectCamera = w.onSelectCamera,
-            onRevokeSpeaking = { ship -> party.revokeSpeaking(ship); if (!io.nisfeb.talon.comet.isGuestName(ship)) onModerate?.invoke(ship, true) },
-            onRestoreSpeaking = { ship -> party.restoreSpeaking(ship); if (!io.nisfeb.talon.comet.isGuestName(ship)) onModerate?.invoke(ship, false) },
+            onRevokeSpeaking = { ship -> party.revokeSpeaking(ship); onModerate?.invoke(ship, true) },
+            onRestoreSpeaking = { ship -> party.restoreSpeaking(ship); onModerate?.invoke(ship, false) },
             onMessage = onMessage,
             recording = recording,
             recordedBy = recordedBy,

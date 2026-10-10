@@ -413,6 +413,13 @@ data class CalAlarm(val raw: JsonObject) {
     val kind: String get() = raw["kind"]?.jsonPrimitive?.contentOrNull.orEmpty()
     val s: Long get() = raw["s"]?.jsonPrimitive?.longOrNull ?: 0L
 
+    /** The minute of the day this fires on an untimed event's day ([onTheDay]), else null. */
+    val onTheDayMinute: Int? get() =
+        (s / 60).toInt().takeIf {
+            kind == "offset" && raw["from"]?.jsonPrimitive?.contentOrNull == "start" &&
+                raw["after"]?.jsonPrimitive?.booleanOrNull == true && s % 60 == 0L && s < 86_400L
+        }
+
     companion object {
         /** [s] seconds before the start: what the editor adds. */
         fun before(s: Long) = CalAlarm(buildJsonObject { put("kind", "before"); put("s", s); put("desc", "") })
@@ -472,7 +479,15 @@ fun alarmSpan(s: Long): String {
 }
 
 /** A reminder in words: "15 min before", "At the start", "At 9:00 on 2026-10-01". */
-fun alarmLabel(a: CalAlarm, zone: TimeZone, twentyFourHour: Boolean): String = when (a.kind) {
+fun alarmLabel(a: CalAlarm, zone: TimeZone, twentyFourHour: Boolean, untimed: Boolean = false): String = when {
+    // On an untimed event, a whole-minute offset after its midnight start
+    // within the day is a time on the day, as the calendar's page says
+    // ("9:00 the day of"); "9 hours after the start" read as nonsense.
+    untimed && a.onTheDayMinute != null -> "${io.nisfeb.talon.ui.SkyClock.clockLabel(a.onTheDayMinute!!, twentyFourHour)} on the day"
+    else -> alarmLabelAsKept(a, zone, twentyFourHour)
+}
+
+private fun alarmLabelAsKept(a: CalAlarm, zone: TimeZone, twentyFourHour: Boolean): String = when (a.kind) {
     "before" -> if (a.s == 0L) "At the start" else "${alarmSpan(a.s)} before"
     "at" -> a.raw["at_ms"]?.jsonPrimitive?.longOrNull?.let {
         val t = Instant.fromEpochMilliseconds(it).toLocalDateTime(zone)

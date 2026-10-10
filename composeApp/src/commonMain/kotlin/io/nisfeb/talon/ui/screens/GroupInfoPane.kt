@@ -363,7 +363,7 @@ fun GroupInfoPane(
                     Column(Modifier.weight(1f).padding(end = 8.dp)) {
                         Text("Group reference")
                         Text(
-                            "Paste it to join in Talon or Tlon, or in a chat to show the group.",
+                            "Paste it in Talon's or Tlon's join box to find the group, or in a chat to show it.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

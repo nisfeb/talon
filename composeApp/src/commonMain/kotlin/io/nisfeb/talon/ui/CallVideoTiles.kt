@@ -209,7 +209,7 @@ internal fun VideoTile(
                 onClick = onFill,
                 modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)),
             ) {
-                Icon(TalonIcons.Fullscreen, contentDescription = "Fill the window", tint = Color.White)
+                Icon(TalonIcons.OpenInFull, contentDescription = "Fill the window", tint = Color.White)
             }
         }
         val ring = when {
@@ -258,6 +258,7 @@ internal fun FilledVideo(
     // Where the bar is, to tell whether the mouse last moved over it.
     var origin by remember { mutableStateOf(Offset.Zero) }
     var bar by remember { mutableStateOf(Rect.Zero) }
+    var top by remember { mutableStateOf(Rect.Zero) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     Box(
@@ -269,14 +270,21 @@ internal fun FilledVideo(
             .focusRequester(focus)
             .focusable()
             .onKeyEvent { e ->
-                if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { onExit(); true } else false
+                when {
+                    e.type != KeyEventType.KeyDown -> false
+                    e.key == Key.Escape -> { onExit(); true }
+                    // Any other key brings the controls back, for a keyboard.
+                    else -> { moves++; false }
+                }
             }
             .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {
                         val e = awaitPointerEvent(PointerEventPass.Initial)
                         if (e.type != PointerEventType.Move && e.type != PointerEventType.Press && e.type != PointerEventType.Enter) continue
-                        onBar = shown && e.changes.any { bar.contains(origin + it.position) }
+                        // The bar keeps its last bounds while hidden, so a pointer
+                        // that comes to rest on it keeps the controls up.
+                        onBar = e.changes.any { (origin + it.position).let { p -> bar.contains(p) || top.contains(p) } }
                         moves++
                         // A menu from the bar takes focus; a press brings Escape back here.
                         if (e.type == PointerEventType.Press) runCatching { focus.requestFocus() }
@@ -293,6 +301,7 @@ internal fun FilledVideo(
             Box(Modifier.fillMaxSize()) {
                 Row(
                     Modifier.align(Alignment.TopStart).fillMaxWidth()
+                        .onGloballyPositioned { top = it.boundsInWindow() }
                         .background(Color.Black.copy(alpha = 0.45f))
                         .padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,

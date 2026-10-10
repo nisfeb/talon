@@ -177,8 +177,11 @@ fun NewDmScreen(
                 singleLine = false,
                 maxLines = 6,
                 keyboardOptions = io.nisfeb.talon.ui.GoKeyboard,
-                keyboardActions = io.nisfeb.talon.ui.goActions { if (isValidPatp) onPickPeer(asPatp) },
-                modifier = Modifier.weight(1f).focusRequester(fieldFocus).submitOnEnter(isValidPatp) { onPickPeer(asPatp) },
+                // Enter takes a group code to its confirm, as a tap on its row does.
+                keyboardActions = io.nisfeb.talon.ui.goActions { if (typedGroup != null) pendingJoinFlag = typedGroup else if (isValidPatp) onPickPeer(asPatp) },
+                modifier = Modifier.weight(1f).focusRequester(fieldFocus).submitOnEnter(isValidPatp || typedGroup != null) {
+                    if (typedGroup != null) pendingJoinFlag = typedGroup else onPickPeer(asPatp)
+                },
             )
             TextButton(
                 onClick = { onPickPeer(asPatp) },

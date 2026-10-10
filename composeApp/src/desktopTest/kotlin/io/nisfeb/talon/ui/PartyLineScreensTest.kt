@@ -471,13 +471,13 @@ class PartyLineScreensTest {
     private fun ComposeUiTest.controlsShown() = onAllNodesWithContentDescription("Mute").fetchSemanticsNodes().isNotEmpty()
 
     @Test
-    fun `a camera or shared screen fills the window, pinned, and Escape or the X goes back`() = fill {
+    fun `a camera or shared screen fills the window, and Escape or the X goes back`() = fill {
         onNodeWithContentDescription("Fill the window").performClick()
         mainClock.advanceTimeBy(100)
         assertTrue(filled())
         assertTrue(!shows("Planting season"), "nothing of the meeting around it")
         assertTrue(shows("Bus"), "whose picture it is")
-        assertEquals(listOf("focus:~bus"), did, "pinned, for the full-resolution picture")
+        assertEquals(emptyList(), did, "nothing pinned: a pin changes nothing on the wire, and leaving kept it")
         onNodeWithTag("filled-video").performKeyInput { pressKey(Key.Escape) }
         mainClock.advanceTimeBy(100)
         assertTrue(!filled() && shows("Planting season"), "Escape is back to the meeting")
@@ -564,5 +564,20 @@ class PartyLineScreensTest {
         waitForIdle()
         assertTrue(onAllNodesWithTag("filled-video").fetchSemanticsNodes().isNotEmpty(), "the guest's picture is the one shown")
         assertTrue(shows("Grandma (guest)"))
+    }
+
+    @Test
+    fun `a key brings the controls back over a filled picture, and resting on the X keeps them`() = fill {
+        onNodeWithContentDescription("Fill the window").performClick()
+        mainClock.advanceTimeBy(CONTROLS_FADE_MS + 1_000)
+        assertTrue(!controlsShown(), "faded")
+        onNodeWithTag("filled-video").performKeyInput { pressKey(Key.Spacebar) }
+        mainClock.advanceTimeBy(100)
+        assertTrue(controlsShown(), "a keyboard brings them back")
+        assertTrue(filled(), "and does not leave")
+        val x = onNodeWithContentDescription("Back to the meeting").fetchSemanticsNode().boundsInRoot.center
+        onNodeWithTag("filled-video").performMouseInput { moveTo(x) }
+        mainClock.advanceTimeBy(CONTROLS_FADE_MS * 3)
+        assertTrue(onAllNodesWithContentDescription("Back to the meeting").fetchSemanticsNodes().isNotEmpty(), "the X stays under a resting pointer")
     }
 }

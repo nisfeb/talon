@@ -2621,12 +2621,11 @@ fun TalonApp(
                 }
                 val onLine by onLineFlow.collectAsState()
                 val partyStatus = partyRoomHere?.let { (h, n) ->
-                    val live = (partyLine?.state?.value as? io.nisfeb.talon.call.PartyState.Live)
-                        ?.takeIf { it.room == n }?.members?.map { it.ship }
+                    val line = (partyLine?.state?.value as? io.nisfeb.talon.call.PartyState.Live)?.takeIf { it.room == n }
                     io.nisfeb.talon.ui.partyRollCall(
                         count = partyShown,
-                        ships = live ?: onLine["$h/$n"].orEmpty().toList(),
-                        nameFor = { contactMap.displayName(it) },
+                        ships = line?.members?.map { it.ship } ?: onLine["$h/$n"].orEmpty().toList(),
+                        nameFor = io.nisfeb.talon.ui.withLineNames({ contactMap.displayName(it) }, line ?: io.nisfeb.talon.call.PartyState.Idle),
                     )
                 }
                 // Asked once: the host announces every roster change since wire 9.
