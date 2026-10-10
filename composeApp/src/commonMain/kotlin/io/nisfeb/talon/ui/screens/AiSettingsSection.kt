@@ -702,7 +702,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             val vendor = a.vendor.ifBlank { "no vendor yet" }
             Text(
                 when {
-                    !a.hasView -> "Buying from $vendor"
+                    !a.hasView -> "Account with $vendor"
                     a.balanceMicro <= 0 -> "No credit with $vendor"
                     else -> money(a.balanceMicro) + " credit with " + vendor
                 },
@@ -716,7 +716,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
                 label = { Text("Another vendor") }, placeholder = { Text(ArmillaryRepo.DEFAULT_VENDOR) },
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
-            Quiet("Any ship running Armillary sells inference, your own included.")
+            Quiet("Any ship running Armillary can be your vendor, your own included.")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val typed = vendorTyped.trim()
                 TextButton(enabled = here && isValidPatp(typed) && typed != a.vendor, onClick = {
@@ -724,7 +724,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
                     note = null
                     scope.launch {
                         repo?.setVendor(typed, io.nisfeb.talon.ui.platformLabel)
-                            ?.onSuccess { note = "Buying from $typed now." to false }
+                            ?.onSuccess { note = "Your account is with $typed now." to false }
                             ?.onFailure { note = (it.message ?: "The ship did not answer.") to true }
                     }
                 }) { Text("Use this vendor") }
