@@ -1487,8 +1487,12 @@ class CallController(
     )
 
     /** Mute (or unmute) [who] on [host]'s line — moderation. */
-    suspend fun moderateMember(host: String, name: String, who: String, mute: Boolean) =
+    suspend fun moderateMember(host: String, name: String, who: String, mute: Boolean) {
+        // A guest has no @p, and the host keeps mutes by @p: an op's mute
+        // of a guest stays with Galene, for as long as the guest is on.
+        if (io.nisfeb.talon.comet.isGuestName(who)) return
         pokeRoles("moderate-member", TrunkWire.moderateMemberAction(host, name, who, mute))
+    }
 
     /** Ask [host] for a room's gates; the answer lands in [roomAccess]. */
     suspend fun getRoomAccess(host: String, name: String) =

@@ -1,5 +1,10 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.ImageBitmap
@@ -95,6 +100,31 @@ class VideoFrameChurnTest {
         } finally {
             f.release()
             holder.close()
+        }
+    }
+
+    // A tile showed nothing until a second frame came: the first wrote its
+    // redraw counter 0 over 0. A sparse sender stayed black that long.
+    @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class)
+    @Test
+    fun `a tile draws its first frame without waiting for a second`() = androidx.compose.ui.test.runComposeUiTest {
+        val factory = dev.onvoid.webrtc.PeerConnectionFactory()
+        val source = dev.onvoid.webrtc.media.video.CustomVideoSource()
+        val track = factory.createVideoTrack("t", source)
+        try {
+            setContent {
+                VideoTrackCanvas(track, on = true, mirror = false, modifier = androidx.compose.ui.Modifier.size(64.dp).testTag("tile"), onFrameAspect = null)
+            }
+            waitForIdle()
+            val red = frame(64, 64, 81, 90, 240)
+            source.pushFrame(red)
+            red.release()
+            waitUntil(timeoutMillis = 5_000) {
+                val px = onNodeWithTag("tile").captureToImage().toPixelMap()[32, 32]
+                px.red > 0.8f && px.green < 0.2f
+            }
+        } finally {
+            track.dispose(); source.dispose(); factory.dispose()
         }
     }
 }

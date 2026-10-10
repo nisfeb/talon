@@ -71,4 +71,23 @@ class RoomAccessControllerTest {
             c.stop()
         }
     }
+
+    // Party Manager mutes members through here too; a guest has no @p.
+    @Test
+    fun aGuestsMuteStaysWithGaleneAndNeverReachesTheHost() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val c = controller(h)
+        try {
+            c.start()
+            h.awaitConnected()
+            c.moderateMember("~zod", "lounge", "guest-9bc96e96826597bd93a19ee8", true)
+            c.moderateMember("~zod", "lounge", "~bus", true)
+            h.awaitPut { it.contains("moderate-member") }
+            val sent = h.putsWithPaths().map { it.second }.filter { it.contains("moderate-member") }
+            assertEquals(1, sent.size, sent.toString())
+            assertTrue("~bus" in sent.single() && "guest-" !in sent.single())
+        } finally {
+            c.stop()
+        }
+    }
 }

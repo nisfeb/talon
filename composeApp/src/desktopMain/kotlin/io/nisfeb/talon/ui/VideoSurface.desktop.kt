@@ -74,7 +74,7 @@ actual fun VideoSurface(
 
 /** Shared renderer: converts a track's I420 frames to a Canvas. */
 @Composable
-private fun VideoTrackCanvas(
+internal fun VideoTrackCanvas(
     track: dev.onvoid.webrtc.media.video.VideoTrack?,
     on: Boolean,
     mirror: Boolean,
@@ -106,8 +106,10 @@ private fun VideoTrackCanvas(
                 val aspect = if (turned) h.toFloat() / w else w.toFloat() / h
                 if (aspect != lastAspect) { lastAspect = aspect; onFrameAspect?.invoke(aspect) }
                 lastFrameMs.set(System.currentTimeMillis())
-                shown = frames.get()
-                if (frames.getAndIncrement() == 0L) {
+                // Counted before it is set: 0 over 0 would not redraw, and the
+                // first frame stayed black until the second arrived.
+                shown = frames.incrementAndGet()
+                if (shown == 1L) {
                     io.nisfeb.talon.util.Log.i(
                         "VideoSurface",
                         "first frame ${frame.buffer.width}x${frame.buffer.height} rot=${frame.rotation} " +

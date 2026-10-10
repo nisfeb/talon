@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.withLineNames
 import io.nisfeb.talon.data.latestPerConversation
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -115,7 +116,7 @@ fun PartyLinesList(
             PartyLineListRow(
                 row = row,
                 count = count,
-                detail = partyRollCall(count, ships) { contacts.displayName(it) },
+                detail = partyRollCall(count, ships, withLineNames({ contacts.displayName(it) }, live ?: PartyState.Idle)),
                 onClick = whom?.let { { onOpenLine(it) } },
             )
         }

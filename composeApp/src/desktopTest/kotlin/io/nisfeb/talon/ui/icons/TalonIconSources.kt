@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Groups
@@ -84,6 +85,7 @@ object TalonIconSources {
         "ExpandMore" to Icons.Filled.ExpandMore,
         "Fullscreen" to Icons.Filled.Fullscreen,
         "FullscreenExit" to Icons.Filled.FullscreenExit,
+        "OpenInFull" to Icons.Filled.OpenInFull,
         "Grain" to Icons.Filled.Grain,
         "GroupAdd" to Icons.Filled.GroupAdd,
         "Groups" to Icons.Filled.Groups,
