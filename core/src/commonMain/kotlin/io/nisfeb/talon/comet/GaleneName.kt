@@ -50,3 +50,12 @@ fun cometPatp(bytes: ByteArray): String {
 
 private val wordIndex: Map<String, Int> =
     MNEMONYM_WORDS.withIndex().associate { (i, w) -> w to i }
+
+/**
+ * A guest seat (trunk wire 16): someone with no ship, in from an invite
+ * link, whom Galène names `guest-` and 12 hex digits. Never an @p (an @p
+ * starts with ~, a comet's Galène name with a dot), so nothing keyed on a
+ * ship (a DM, a mute kept on the host) applies to one. Trunk's own pages
+ * test the same prefix.
+ */
+fun isGuestName(name: String): Boolean = name.startsWith("guest-")

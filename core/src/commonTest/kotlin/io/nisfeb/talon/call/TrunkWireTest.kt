@@ -298,4 +298,11 @@ class TrunkWireTest {
         assertEquals(1, rooms.size)
         assertEquals(null, rooms.single().groupFlag)
     }
+
+    // Trunk wire 16 adds guest seats: the owner's invites arrive on /calls.
+    @Test
+    fun aGuestInviteFactIsNotAnUpdateAndBreaksNothing() {
+        val fact = """{"guest-invite":{"code":"0123456789abcdef0123456789abcdef","name":"lounge","path":"/apps/trunk/guest/0123456789abcdef0123456789abcdef","speak":true,"expires":1760140800,"uses":5,"guests":0}}"""
+        assertNull(TrunkWire.parseUpdate(Json.parseToJsonElement(fact)))
+    }
 }

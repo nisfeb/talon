@@ -121,4 +121,24 @@ class PartyLineCometTest {
         const val COMET = "~foppel-fitdyn-doznux-fithut--somdur-famdev-forpet-daplyd"
         const val NYM = ".renewed.erupt.prepare.ablate.outdid.demote.disburse.ensures.perfects.imbue.defames.involve"
     }
+
+    // Trunk wire 16: a guest is keyed by its Galene username, never taken for a ship.
+    @Test
+    fun aGuestJoinsTheRosterByItsUsernameWithTheNameItTyped() = onLine("~nec", "~nec") { line, _ ->
+        line.handle(json.decodeFromString("""{"type":"joined","kind":"join","username":"~nec","rtcConfiguration":{"iceServers":[]}}"""))
+        line.handle(json.decodeFromString("""{"type":"user","kind":"add","id":"g1","username":"guest-3fa9c07b12de","data":{"name":"~zod"}}"""))
+        val guest = withTimeout(5_000) {
+            var m: PartyMember? = null
+            while (m == null) { m = (line.state.value as? PartyState.Live)?.members?.firstOrNull { it.id == "g1" }; if (m == null) delay(10) }
+            m
+        }
+        assertEquals("guest-3fa9c07b12de", guest.ship)
+        assertEquals("~zod", guest.name)
+        assertTrue(io.nisfeb.talon.comet.isGuestName(guest.ship))
+        assertTrue(!io.nisfeb.talon.comet.isGuestName("~zod") && !io.nisfeb.talon.comet.isGuestName(NYM))
+        // A listen link's anonymous listener is still counted, not listed.
+        line.handle(json.decodeFromString("""{"type":"user","kind":"add","id":"l1","username":"listener"}"""))
+        withTimeout(5_000) { while ((line.state.value as PartyState.Live).listeners != 1) delay(10) }
+        assertTrue((line.state.value as PartyState.Live).members.none { it.id == "l1" })
+    }
 }
