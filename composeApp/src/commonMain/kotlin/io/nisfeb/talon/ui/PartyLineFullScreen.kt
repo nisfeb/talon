@@ -640,7 +640,9 @@ private fun ParticipantRow(
         // The menu is for everyone, not just ops: messaging someone
         // you're on a line with is the most ordinary thing to want,
         // and it used to be reachable only by leaving the call UI.
-        if (!isSelf && (onMessage != null || showOps)) {
+        // A guest has no ship to message.
+        val message = onMessage?.takeUnless { io.nisfeb.talon.comet.isGuestName(member.ship) }
+        if (!isSelf && (message != null || showOps)) {
             var menuOpen by remember(member.id) { mutableStateOf(false) }
             Box {
                 io.nisfeb.talon.ui.IconButton(tip = "Options for ${nameFor(member.ship)}", onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
@@ -651,10 +653,10 @@ private fun ParticipantRow(
                     )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    if (onMessage != null) {
+                    if (message != null) {
                         DropdownMenuItem(
                             text = { Text("Message") },
-                            onClick = { menuOpen = false; onMessage(member.ship) },
+                            onClick = { menuOpen = false; message(member.ship) },
                         )
                     }
                     if (!showOps) {

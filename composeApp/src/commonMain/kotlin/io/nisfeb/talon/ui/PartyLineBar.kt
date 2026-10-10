@@ -126,11 +126,11 @@ fun PartyLineBar(
         selfShip = selfShip,
         onRevokeSpeaking = { ship ->
             party.revokeSpeaking(ship)
-            onModerate?.invoke(ship, true)
+            if (!io.nisfeb.talon.comet.isGuestName(ship)) onModerate?.invoke(ship, true)
         },
         onRestoreSpeaking = { ship ->
             party.restoreSpeaking(ship)
-            onModerate?.invoke(ship, false)
+            if (!io.nisfeb.talon.comet.isGuestName(ship)) onModerate?.invoke(ship, false)
         },
         onMessage = onMessage,
         recording = recording,
@@ -691,7 +691,9 @@ private fun Roster(
                     val ops = s.ops && onRevokeSpeaking != null && onRestoreSpeaking != null
                     // Everyone gets the menu, for Message; ops get
                     // their mute items in the same one.
-                    if (m.ship != selfShip && (onMessage != null || ops)) {
+                    // A guest has no ship to message.
+                    val message = onMessage?.takeUnless { io.nisfeb.talon.comet.isGuestName(m.ship) }
+                    if (m.ship != selfShip && (message != null || ops)) {
                         Box {
                             var menuOpen by remember(m.id) { mutableStateOf(false) }
                             io.nisfeb.talon.ui.IconButton(tip = "Options for ${nameFor(m.ship)}", onClick = { menuOpen = true },
@@ -707,12 +709,12 @@ private fun Roster(
                                 expanded = menuOpen,
                                 onDismissRequest = { menuOpen = false },
                             ) {
-                                if (onMessage != null) {
+                                if (message != null) {
                                     DropdownMenuItem(
                                         text = { Text("Message") },
                                         onClick = {
                                             menuOpen = false
-                                            onMessage(m.ship)
+                                            message(m.ship)
                                         },
                                     )
                                 }
@@ -887,10 +889,15 @@ fun rememberPartyWiring(party: PartyLine, videoDevices: io.nisfeb.talon.call.Vid
  * are set aside for the bare @p.
  */
 internal fun withLineNames(nameFor: (String) -> String, state: PartyState): (String) -> String {
-    val given = (state as? PartyState.Live)?.members.orEmpty()
-        .mapNotNull { m -> m.name?.let { m.ship to it } }.toMap()
-    if (given.isEmpty() || ShipNames.alwaysPatp.value) return nameFor
-    return { ship -> nameFor(ship).takeIf { it != ship } ?: given[ship] ?: ship }
+    val members = (state as? PartyState.Live)?.members.orEmpty()
+    // A guest (trunk wire 16) is always marked, whatever name they typed,
+    // so nobody passes as a ship by typing "~zod". As trunk's pages do.
+    val guests = members.filter { io.nisfeb.talon.comet.isGuestName(it.ship) }
+        .associate { it.ship to "${it.name ?: it.ship} (guest)" }
+    val given = members.mapNotNull { m -> m.name?.let { m.ship to it } }.toMap()
+    val named = if (given.isEmpty() || ShipNames.alwaysPatp.value) nameFor
+    else { ship -> nameFor(ship).takeIf { it != ship } ?: given[ship] ?: ship }
+    return if (guests.isEmpty()) named else { ship -> guests[ship] ?: named(ship) }
 }
 
 /**
@@ -931,8 +938,8 @@ fun PartyLineMeeting(
             audioDevices = audioDevices,
             videoDevices = videoDevices,
             onSelectCamera = w.onSelectCamera,
-            onRevokeSpeaking = { ship -> party.revokeSpeaking(ship); onModerate?.invoke(ship, true) },
-            onRestoreSpeaking = { ship -> party.restoreSpeaking(ship); onModerate?.invoke(ship, false) },
+            onRevokeSpeaking = { ship -> party.revokeSpeaking(ship); if (!io.nisfeb.talon.comet.isGuestName(ship)) onModerate?.invoke(ship, true) },
+            onRestoreSpeaking = { ship -> party.restoreSpeaking(ship); if (!io.nisfeb.talon.comet.isGuestName(ship)) onModerate?.invoke(ship, false) },
             onMessage = onMessage,
             recording = recording,
             recordedBy = recordedBy,

@@ -1366,10 +1366,14 @@ class PartyLine(
         // holding a dead socket from a dropped join, and "~zod, ~zod"
         // helps nobody. Anonymous listeners are not ships — they all
         // authenticate as the same subject — so they are counted by
-        // connection instead, or they would collapse into one row.
+        // connection instead, or they would collapse into one row. A
+        // guest (trunk wire 16) has no ship but a username of its own, so
+        // it is a member under that name, marked as a guest wherever it
+        // shows; it used to count as a listener even while speaking.
         // Snapshot: publishRoster is reached from the UI thread via
         // setMuted / revokeSpeaking while the pump mutates the roster.
-        val (ships, anon) = roster.values.toList().partition { it.ship.startsWith("~") }
+        val (ships, anon) = roster.values.toList()
+            .partition { it.ship.startsWith("~") || io.nisfeb.talon.comet.isGuestName(it.ship) }
         _state.value = PartyState.Live(
             room = room,
             topic = topic,

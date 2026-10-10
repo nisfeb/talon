@@ -528,4 +528,41 @@ class PartyLineScreensTest {
     fun `only the meeting view offers to fill the window`() = fill(canFill = false) {
         assertTrue(onAllNodesWithContentDescription("Fill the window").fetchSemanticsNodes().isEmpty())
     }
+
+    // Trunk wire 16: a guest, in from an invite link, has no ship.
+    @Test
+    fun `a guest is marked, and has no ship to message`() = runComposeUiTest {
+        val state = live().let { it.copy(members = it.members + PartyMember(id = "4", ship = "guest-3fa9c07b12de", name = "~wes")) }
+        setContent {
+            TalonTheme(darkTheme = false) {
+                PartyLineFullScreen(
+                    state = state, roomName = "Garden chat", nameFor = withLineNames({ names[it] ?: it }, state), selfShip = "~zod",
+                    onToggleMute = {}, onLeave = {}, onMinimize = {}, onMessage = { did += "message:$it" },
+                )
+            }
+        }
+        waitForIdle()
+        assertTrue(shows("~wes (guest)"), "marked, though it typed an @p")
+        onNodeWithContentDescription("Options for Bus").assertExists()
+        assertTrue(onAllNodesWithContentDescription("Options for ~wes (guest)").fetchSemanticsNodes().isEmpty(), "no menu: nothing to offer without ops")
+    }
+
+    @Test
+    fun `a guest's camera or screen gets a tile, and fills the window under its marked name`() = runComposeUiTest {
+        val state = live().let { it.copy(members = it.members + PartyMember(id = "4", ship = "guest-3fa9c07b12de", name = "Grandma")) }
+        setContent {
+            TalonTheme(darkTheme = false) {
+                PartyLineFullScreen(
+                    state = state, roomName = "Garden chat", nameFor = withLineNames({ names[it] ?: it }, state), selfShip = "~zod",
+                    onToggleMute = {}, onLeave = {}, onMinimize = {},
+                    partyVideoSupported = true, videoOnShips = setOf("guest-3fa9c07b12de"), canFillWindow = true,
+                )
+            }
+        }
+        waitForIdle()
+        onNodeWithContentDescription("Fill the window").performClick()
+        waitForIdle()
+        assertTrue(onAllNodesWithTag("filled-video").fetchSemanticsNodes().isNotEmpty(), "the guest's picture is the one shown")
+        assertTrue(shows("Grandma (guest)"))
+    }
 }
