@@ -1,10 +1,18 @@
 package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.calculateCentroidSize
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -97,19 +105,14 @@ fun ImageViewerScreen(
     // next image starts unzoomed regardless of how the previous was
     // viewed.
     var scale by remember(url) { mutableStateOf(1f) }
-    var offsetX by remember(url) { mutableStateOf(0f) }
-    var offsetY by remember(url) { mutableStateOf(0f) }
-
-    val transform = rememberTransformableState { zoom, pan, _ ->
-        scale = (scale * zoom).coerceIn(1f, 6f)
-        if (scale > 1f) {
-            offsetX += pan.x
-            offsetY += pan.y
-        } else {
-            // Snap back to center once the user pinches below 1x.
-            offsetX = 0f
-            offsetY = 0f
-        }
+    // The picture's top-left corner on screen; it is drawn from there at [scale].
+    var offset by remember(url) { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    var viewSize by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
+    var pictureSize by remember(url) { mutableStateOf(androidx.compose.ui.geometry.Size.Unspecified) }
+    fun step(centroid: androidx.compose.ui.geometry.Offset, pan: androidx.compose.ui.geometry.Offset, zoom: Float) {
+        val (s, o) = io.nisfeb.talon.ui.zoomStep(scale, offset, centroid, pan, zoom, viewSize, io.nisfeb.talon.ui.fittedRect(pictureSize, viewSize))
+        scale = s
+        offset = o
     }
 
     val downloader = LocalImageDownloader.current
@@ -145,27 +148,22 @@ fun ImageViewerScreen(
             }
             .pointerInput(url) {
                 detectTapGestures(
-                    onDoubleTap = {
-                        if (scale > 1.5f) {
-                            scale = 1f; offsetX = 0f; offsetY = 0f
-                        } else {
-                            scale = 2.5f
-                        }
+                    onDoubleTap = { at ->
+                        // In about the tapped point, or back out.
+                        step(at, androidx.compose.ui.geometry.Offset.Zero, if (scale > 1.5f) 1f / scale else 2.5f / scale)
                     },
                 )
             }
-            // Swipe-to-navigate. Only active when un-zoomed — once
-            // scale > 1f the user's horizontal drag is panning within
-            // the image, so we hand off to the transformable state.
-            // Re-keyed on (urls.size, scale) so that zoom-in then
-            // zoom-out flips swipe back on without restarting the
-            // viewer. Threshold (60.dp converted to px) is the same
+            // Swipe-to-navigate. Only while un-zoomed: once scale > 1f
+            // the picture's own gesture handler takes a drag as a pan
+            // and consumes it, so this never starts, and
+            // decideSwipeAction refuses a zoomed one regardless.
+            // Threshold (60.dp converted to px) is the same
             // ballpark as the system's edge-back gesture, tuned by
             // feel — short enough that a quick flick goes through,
             // long enough that an accidental drag while reading
             // doesn't.
-            .pointerInput(urls.size, scale) {
-                if (scale > 1f) return@pointerInput
+            .pointerInput(urls, index) {
                 val thresholdPx = 60.dp.toPx()
                 var totalDrag = 0f
                 detectHorizontalDragGestures(
@@ -204,21 +202,63 @@ fun ImageViewerScreen(
                 .size(coil3.size.Size.ORIGINAL)
                 .build()
         }
-        AsyncImage(
-            model = request,
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
-            modifier = Modifier
+        // The gestures on the frame, which does not move, and the zoom on
+        // the picture inside it. They were on the zoomed layer itself, so
+        // a finger's travel was divided by the zoom (a 30 px drag panned
+        // 10 at 3x) and the touch area moved with the picture. One finger
+        // at 1x is left alone, for the swipe between pictures.
+        Box(
+            Modifier
                 .fillMaxSize()
-                .graphicsLayer(
-                    scaleX = scale,
-                    scaleY = scale,
-                    translationX = offsetX,
-                    translationY = offsetY,
-                )
-                .transformable(state = transform),
-        )
+                .onSizeChanged { viewSize = androidx.compose.ui.geometry.Size(it.width.toFloat(), it.height.toFloat()) }
+                .pointerInput(url) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        // Nothing moves until the fingers pass the touch slop, so a
+                        // double tap with a wobble still zooms back out; then the
+                        // travel so far is applied at once and the picture stays
+                        // under the finger.
+                        var zoomed = 1f
+                        var panned = androidx.compose.ui.geometry.Offset.Zero
+                        var moving = false
+                        do {
+                            val event = awaitPointerEvent()
+                            if (event.changes.count { it.pressed } < 2 && scale <= 1f) continue
+                            val zoom = event.calculateZoom()
+                            val pan = event.calculatePan()
+                            val centroid = event.calculateCentroid(useCurrent = false)
+                            if (!centroid.isSpecified) continue
+                            if (moving) step(centroid, pan, zoom)
+                            else {
+                                zoomed *= zoom
+                                panned += pan
+                                val slop = viewConfiguration.touchSlop
+                                moving = kotlin.math.abs(1f - zoomed) * event.calculateCentroidSize(useCurrent = false) > slop || panned.getDistance() > slop
+                                if (moving) step(centroid, panned, zoomed)
+                            }
+                            if (moving) event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        } while (event.changes.any { it.pressed })
+                    }
+                },
+        ) {
+            AsyncImage(
+                model = request,
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
+                onSuccess = { pictureSize = it.painter.intrinsicSize },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = scale,
+                        scaleY = scale,
+                        translationX = offset.x,
+                        translationY = offset.y,
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f),
+                    )
+                    .testTag("viewer-image"),
+            )
+        }
 
         // Prev / next buttons. Hidden when only a single image is
         // open. Disabled-but-visible at the ends so the user gets
