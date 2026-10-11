@@ -349,9 +349,11 @@ class CallController(
                             // stream, which is read only once this loop subscribes
                             // below, so waiting for it here held calls up for the
                             // poke's whole 15s timeout. It reads /ice again itself.
-                            if (ice is kotlinx.serialization.json.JsonArray && ice.isEmpty()) {
+                            // Or one still on servers an earlier build gave it.
+                            val retired = ice != null && defaults.retiresIce(iceServers)
+                            if (ice is kotlinx.serialization.json.JsonArray && ice.isEmpty() || retired) {
                                 scope.launch {
-                                    runCatching { adoptDefaultIce(ch) }
+                                    runCatching { adoptDefaultIce(ch, replace = retired) }
                                         .onFailure { Log.w(TAG, "adopting default ice failed", it) }
                                 }
                             }
@@ -396,11 +398,14 @@ class CallController(
                                 val sfu = ch.scry(TrunkWire.AGENT, "/sfu") as? JsonObject
                                 // Only a ship that answered it has none takes the default,
                                 // and off the connect path, like the ICE above.
-                                if (sfu != null && sfu["configured"]?.jsonPrimitive?.content != "true" && defaults.sfuBase.isNotEmpty()) {
+                                // So does one still on the sidecar an earlier build gave it.
+                                val base = sfu?.get("base")?.jsonPrimitive?.content.orEmpty()
+                                val none = sfu != null && sfu["configured"]?.jsonPrimitive?.content != "true"
+                                if ((none || defaults.retires(base)) && defaults.sfuBase.isNotEmpty()) {
                                     _shipSfuBase.value = defaults.sfuBase
-                                    scope.launch { adoptDefaultSfu(ch) }
+                                    scope.launch { adoptDefaultSfu(ch, was = base.takeUnless { none }.orEmpty()) }
                                 } else {
-                                    _shipSfuBase.value = sfu?.get("base")?.jsonPrimitive?.content.orEmpty()
+                                    _shipSfuBase.value = base
                                 }
                             }.onFailure { Log.w(TAG, "sfu scry failed", it) }
                         },
@@ -1096,8 +1101,8 @@ class CallController(
      * default. Never called for a ship that has been configured — a
      * user who set their own server keeps it.
      */
-    private suspend fun adoptDefaultSfu(ch: UrbitChannel) {
-        Log.i(TAG, "no sidecar on this ship; adopting the built-in default")
+    private suspend fun adoptDefaultSfu(ch: UrbitChannel, was: String = "") {
+        Log.i(TAG, if (was.isEmpty()) "no sidecar on this ship; adopting the built-in default" else "moving this ship off a retired sidecar")
         io.nisfeb.talon.util.runSuspendCatching {
             ch.poke(
                 TrunkWire.AGENT, TrunkWire.ACTION_MARK,
@@ -1109,7 +1114,7 @@ class CallController(
             )
         }.onFailure {
             Log.w(TAG, "set-sfu poke failed", it)
-            _shipSfuBase.compareAndSet(defaults.sfuBase, "")
+            _shipSfuBase.compareAndSet(defaults.sfuBase, was)
         }
     }
 
@@ -1123,11 +1128,11 @@ class CallController(
      * into this ship and for any other app sharing %trunk, and the
      * settings editor has one place to read and write.
      */
-    private suspend fun adoptDefaultIce(ch: UrbitChannel) {
-        if (iceServers.isNotEmpty()) return
+    private suspend fun adoptDefaultIce(ch: UrbitChannel, replace: Boolean = false) {
+        if (!replace && iceServers.isNotEmpty()) return
         val fallback = TrunkWire.defaultIce(defaults)
         if (fallback.isEmpty()) return
-        Log.i(TAG, "no ICE on this ship; adopting ${fallback.size} built-in servers")
+        Log.i(TAG, "${if (replace) "retired ICE on this ship" else "no ICE on this ship"}; adopting ${fallback.size} built-in servers")
         runCatching {
             ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.setIceAction(fallback))
         }.onFailure {

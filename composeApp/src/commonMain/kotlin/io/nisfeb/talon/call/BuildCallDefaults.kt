@@ -12,4 +12,5 @@ val buildCallDefaults: CallDefaults = CallDefaults(
     sfuBase = io.nisfeb.talon.TalonBuild.defaultSfuBase,
     sfuGroup = io.nisfeb.talon.TalonBuild.defaultSfuGroup,
     sfuKey = io.nisfeb.talon.TalonBuild.defaultSfuKey,
+    retiredSfuBase = io.nisfeb.talon.TalonBuild.retiredSfuBase,
 )

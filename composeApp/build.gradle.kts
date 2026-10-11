@@ -395,12 +395,16 @@ val generateTalonBuild = tasks.register("generateTalonBuild") {
     // "calls work out of the box" and nothing else — TURN carries
     // SRTP it cannot read.
     val defaultIce = buildConfig("TALON_DEFAULT_ICE", "talon.default.ice")
+    // A default sidecar since replaced: ships an earlier build pointed
+    // there are moved to the one above (CallDefaults.retiredSfuBase).
+    val retiredSfuBase = buildConfig("TALON_RETIRED_SFU_BASE", "talon.retired.sfu.base")
     inputs.property("versionName", capturedVersionName)
     inputs.property("versionCode", capturedVersionCode)
     inputs.property("sfuBase", sfuBase)
     inputs.property("sfuGroup", sfuGroup)
     inputs.property("sfuKey", sfuKey)
     inputs.property("defaultIce", defaultIce)
+    inputs.property("retiredSfuBase", retiredSfuBase)
     outputs.dir(outputDir)
     doLast {
         val pkgDir = outputDir.get().asFile.resolve("io/nisfeb/talon")
@@ -422,6 +426,9 @@ val generateTalonBuild = tasks.register("generateTalonBuild") {
                 /** Fallback ICE servers for 1:1, as url|user|cred
                  *  entries separated by ';'. Empty = none. */
                 const val defaultIce: String = "$defaultIce"
+
+                /** A replaced default sidecar; ships on it are moved. Empty = none. */
+                const val retiredSfuBase: String = "$retiredSfuBase"
             }
 
             """.trimIndent(),

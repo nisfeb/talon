@@ -19,8 +19,12 @@ import kotlin.test.assertTrue
 class DefaultIceTest {
     private var sfuBase = ""
 
-    private fun connect(ice: String?, sfu: String? = """{"configured":true,"base":"https://mine.test"}"""): FakeShip {
-        val ship = FakeShip("~zod").apply {
+    private fun connect(
+        ice: String?,
+        sfu: String? = """{"configured":true,"base":"https://mine.test"}""",
+        ship: FakeShip = FakeShip("~zod"),
+    ): FakeShip {
+        ship.apply {
             scries["trunk/version"] = """{"wire":9}"""
             scries["trunk/policy"] = "{}"
             if (ice != null) scries["trunk/ice"] = ice
@@ -29,7 +33,10 @@ class DefaultIceTest {
         val calls = CallController(
             UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") },
             CallEngineProvider { error("no media") },
-            defaults = CallDefaults(iceSpec = "stun:stun.talon.test:3478", sfuBase = "https://sfu.talon.test", sfuKey = "k"),
+            defaults = CallDefaults(
+                iceSpec = "stun:stun.talon.test:3478", sfuBase = "https://sfu.talon.test", sfuKey = "k",
+                retiredSfuBase = "http://old.talon.test:8444",
+            ),
         ).apply { start() }
         try {
             runBlocking {
@@ -78,5 +85,39 @@ class DefaultIceTest {
         assertTrue(connect("[]", sfu = "[]").setSfu().isEmpty(), "an answer in another shape is not either")
         assertTrue(connect("[]").setSfu().isEmpty())
         assertEquals("https://mine.test", sfuBase)
+    }
+
+    // The default sidecar moved, and ships an earlier build pointed at the
+    // old one had no party lines (2026-10-11).
+    private val retired = """{"configured":true,"base":"http://old.talon.test:8444","group":"talon"}"""
+
+    @Test
+    fun `a ship still on the retired sidecar is moved to the build's, group and key with it`() {
+        val sent = connect("[]", sfu = retired).setSfu().single().json.toString()
+        assertTrue(""""base":"https://sfu.talon.test"""" in sent && """"group":"talon"""" in sent && """"key":"k"""" in sent, sent)
+        assertEquals("https://sfu.talon.test", sfuBase)
+    }
+
+    @Test
+    fun `a sidecar of its own that looks like the old default is kept`() {
+        assertTrue(connect("[]", sfu = """{"configured":true,"base":"http://10.0.0.2:8444","group":"talon"}""").setSfu().isEmpty())
+        assertEquals("http://10.0.0.2:8444", sfuBase)
+    }
+
+    @Test
+    fun `a refused move says the ship is still on the old sidecar`() {
+        val ship = FakeShip("~zod").apply { refuse = { if ("set-sfu" in it.json.toString()) "no" else null } }
+        connect("[]", sfu = retired, ship = ship)
+        assertEquals("http://old.talon.test:8444", sfuBase)
+    }
+
+    @Test
+    fun `servers on our old or new host are replaced with the build's, and the user's own are kept`() {
+        val old = """[{"url":"stun:old.talon.test:3478","user":"","cred":""},{"url":"turn:sfu.talon.test:3478","user":"talon","cred":"p"}]"""
+        val sent = connect(old).setIce()
+        assertEquals(1, sent.size)
+        assertTrue("stun.talon.test" in sent.single().json.toString() && "old.talon.test" !in sent.single().json.toString())
+        val mixed = """[{"url":"turn:old.talon.test:3478","user":"talon","cred":"p"},{"url":"turn:mine.example:3478","user":"u","cred":"c"}]"""
+        assertTrue(connect(mixed).setIce().isEmpty())
     }
 }
