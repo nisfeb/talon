@@ -2314,6 +2314,7 @@ fun TalonApp(
                 SettingsScreen(
                     orrery = orreryRepo,
                     armillary = armillaryRepo,
+                    mailRepo = mailRepo,
                     aiSettings = app.aiSettings,
                     themePreference = app.themePreference,
                     uiSettings = app.uiSettings,

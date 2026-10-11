@@ -2379,6 +2379,7 @@ fun App(
                         SettingsScreen(
                             orrery = orreryRepo,
                             armillary = armillaryRepo,
+                            mailRepo = mailRepo,
                             // Anyone who has ever posted a status, plus
                             // whoever is already pinned so a pin can be
                             // taken off again when they go quiet.

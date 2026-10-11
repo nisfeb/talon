@@ -38,7 +38,7 @@ actual object Log {
         }
     }
 
-    actual fun i(tag: String, msg: String) = emit("INFO  [$tag] $msg", null)
-    actual fun w(tag: String, msg: String, t: Throwable?) = emit("WARN  [$tag] $msg", t)
-    actual fun e(tag: String, msg: String, t: Throwable?) = emit("ERROR [$tag] $msg", t)
+    actual fun i(tag: String, msg: String) { LogBuffer.add("INFO ", tag, msg); emit("INFO  [$tag] $msg", null) }
+    actual fun w(tag: String, msg: String, t: Throwable?) { LogBuffer.add("WARN ", tag, msg, t); emit("WARN  [$tag] $msg", t) }
+    actual fun e(tag: String, msg: String, t: Throwable?) { LogBuffer.add("ERROR", tag, msg, t); emit("ERROR [$tag] $msg", t) }
 }
