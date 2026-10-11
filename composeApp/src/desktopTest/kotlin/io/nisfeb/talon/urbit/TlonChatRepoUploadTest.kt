@@ -60,9 +60,11 @@ class TlonChatRepoUploadTest {
         hosted()
         assertEquals("https://cdn.test/zod/cat.png", repo.uploadImage(png, "image/png", "photos/cat.png"))
         val asked = ship.api.first { it.startsWith("PUT /v1/zod/upload") }
-        for (part in listOf("\"token\":\"tok-1\"", "\"contentLength\":4", "\"contentType\":\"image/png\"", "\"fileName\":\"cat.png\"")) {
+        for (part in listOf("\"token\":\"tok-1\"", "\"contentLength\":4", "\"contentType\":\"image/png\"")) {
             assertTrue(part in asked, "$part in $asked")
         }
+        // Tlon's hosting is told a name of chance, not the file's (2026-10-11).
+        assertTrue(Regex("\"fileName\":\"[0-9a-f]{32}\\.png\"").containsMatchIn(asked) && "cat" !in asked, asked)
         assertTrue(ship.api.any { it.startsWith("PUT /put-here") }, "the bytes go to the URL it gave")
     }
 
@@ -71,7 +73,24 @@ class TlonChatRepoUploadTest {
         ownBucket()
         ship.answerApi = { method, path, _ -> if (method == "PUT" && path.startsWith("/pics/talon/")) "" else null }
         val url = repo.uploadImage(png, "image/png", "cat photo.png")
-        assertTrue(url.startsWith("https://pics.test/talon/") && url.endsWith("-cat_photo.png"), url)
+        assertTrue(Regex("https://pics\\.test/talon/[0-9a-f]{32}\\.png").matches(url), url)
+    }
+
+    // The bucket is public at the URL: neither the file's name nor where
+    // the photo was taken goes there (2026-10-11).
+    @Test
+    fun `a photo reaches the bucket without its name or its location`() = live {
+        ownBucket()
+        ship.answerApi = { method, path, _ -> if (method == "PUT" && path.startsWith("/pics/talon/")) "" else null }
+        val exif = "Exif\u0000\u0000II*\u0000\u0008\u0000\u0000\u0000\u0000\u0000GPS 40.7N 74.0W".encodeToByteArray()
+        fun b(vararg x: Int) = ByteArray(x.size) { x[it].toByte() }
+        val photo = b(0xFF, 0xD8, 0xFF, 0xE1, 0, exif.size + 2) + exif + b(0xFF, 0xDA, 0, 4, 1, 2, 0x5C, 0x5D, 0xFF, 0xD9)
+        val url = repo.uploadImage(photo, "image/jpeg", "IMG_20261011_143012.jpg")
+        assertTrue("IMG" !in url && "2026" !in url, url)
+        val put = ship.api.single { it.startsWith("PUT /pics/talon/") }
+        assertTrue("GPS" !in put, put)
+        // The scan's two bytes, 0x5C 0x5D, are the picture itself.
+        assertTrue("\\]" in put, "the picture itself went: $put")
     }
 
     @Test

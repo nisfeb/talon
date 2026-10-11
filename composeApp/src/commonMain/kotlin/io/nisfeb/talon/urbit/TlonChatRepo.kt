@@ -2903,20 +2903,19 @@ class TlonChatRepo(
         val ch = channel ?: error("not connected")
         val client = http ?: error("not connected")
 
-        // Shortened here rather than in either backend, because both
-        // fail on an over-long name and neither is the safe fallback:
-        // the report that prompted this had memex 500 and then S3 500
-        // with `Filename too long (os error 36)` on the same upload.
-        val safeLengthName = truncateUploadName(fileName)
+        // Neither route learns the file's name or what the photo knows
+        // of where it was taken: the object is public at its URL.
+        val name = uploadName(fileName, contentType)
+        val clean = io.nisfeb.talon.util.stripImageMetadata(bytes)
 
         // A cancelled upload goes on up as one: wrapped in the failure
         // below, it defeated every caller's cancellation check.
         val memexErr = io.nisfeb.talon.util.runSuspendCatching {
-            uploadViaMemex(ch, client, bytes, contentType, safeLengthName)
+            uploadViaMemex(ch, client, clean, contentType, name)
         }.onSuccess { return@withContext it }.exceptionOrNull()
 
         val storageErr = io.nisfeb.talon.util.runSuspendCatching {
-            uploadViaStorage(ch, client, bytes, contentType, safeLengthName)
+            uploadViaStorage(ch, client, clean, contentType, name)
         }.onSuccess { return@withContext it }.exceptionOrNull()
 
         throw UploadFailed(
@@ -3015,8 +3014,7 @@ class TlonChatRepo(
             )
         }
 
-        val safeName = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_")
-        val key = "talon/${UrbitTime.unixMsToDa(nowMs())}-$safeName"
+        val key = "talon/$fileName"
 
         return S3Uploader.put(
             http = client,

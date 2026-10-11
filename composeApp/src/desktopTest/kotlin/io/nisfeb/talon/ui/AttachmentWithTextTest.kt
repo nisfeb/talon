@@ -120,6 +120,21 @@ class AttachmentWithTextTest {
     // Quote a post, paste a picture, Enter: the picture and the words
     // went, and the quote stayed staged, so the next Enter sent the
     // quoted post again on its own.
+    // An upload's URL no longer names the file, so the post does (2026-10-11).
+    @Test
+    fun `a file goes with its name linked, since its URL no longer says it`() {
+        val ship = hostingShip()
+        withComposer(ship = ship) { state ->
+            val events = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { ship.channel.events().collect {} }
+            try {
+                onNodeWithText("look at this").performKeyInput { pressKey(Key.Enter) }
+                waitUntil(timeoutMillis = 5_000) { texts.isNotEmpty() || state.sendError != null }
+                assertEquals(listOf("look at this\n\n[📎 notes.txt](https://cdn.test/zod/cat.png)"), texts.toList(), "${state.sendError}")
+            } finally { events.cancel() }
+        }
+        assertEquals("[📎 a (draft) v2.pdf](u)", fileLink("a [draft] v2.pdf", "u"), "brackets cannot end the link early")
+    }
+
     @Test
     fun `a staged quote goes with a pasted picture, and is gone after`() {
         val ship = hostingShip()

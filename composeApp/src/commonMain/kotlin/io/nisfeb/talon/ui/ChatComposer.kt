@@ -228,6 +228,12 @@ object PendingQuotes {
 }
 
 /**
+ * A file's post: its name, linked. The upload's URL no longer carries the
+ * name (uploadName), so a bare URL would leave nobody knowing what it is.
+ */
+internal fun fileLink(name: String, url: String) = "[📎 ${name.replace('[', '(').replace(']', ')')}]($url)"
+
+/**
  * Re-keys on [whom] so switching conversations starts the composer
  * fresh. Loads any persisted draft text from [drafts], and the quote
  * that was waiting on this composer's surface.
@@ -443,7 +449,8 @@ fun ChatComposer(
                             if (quoted != null) strategy.sendImageQuote(hostedUrl, w, h, pending.displayName, caption, quoted.whom, quoted.id)
                             else strategy.sendImage(src = hostedUrl, width = w, height = h, alt = pending.displayName, caption = caption)
                         } else {
-                            val text = if (caption.isEmpty()) hostedUrl else "$caption\n\n$hostedUrl"
+                            val link = fileLink(pending.displayName, hostedUrl)
+                            val text = if (caption.isEmpty()) link else "$caption\n\n$link"
                             if (quoted != null) strategy.sendQuote(text, quoted.whom, quoted.id) else strategy.sendText(text)
                         }
                         // Sent with the screen gone: its saved draft was what went.
@@ -504,7 +511,7 @@ fun ChatComposer(
                         alt = file.name,
                     )
                 } else {
-                    strategy.sendText(hostedUrl)
+                    strategy.sendText(fileLink(file.name, hostedUrl))
                 }
             }.onFailure { err ->
                 state.failed("upload", err)
