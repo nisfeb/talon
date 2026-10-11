@@ -108,7 +108,9 @@ class VideoFrameChurnTest {
     @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class)
     @Test
     fun `a tile draws its first frame without waiting for a second`() = androidx.compose.ui.test.runComposeUiTest {
-        val factory = dev.onvoid.webrtc.PeerConnectionFactory()
+        // The silent audio module: CI has no sound devices, and the default one threw there.
+        val audio = dev.onvoid.webrtc.media.audio.AudioDeviceModule(dev.onvoid.webrtc.media.audio.AudioLayer.kDummyAudio)
+        val factory = dev.onvoid.webrtc.PeerConnectionFactory(audio)
         val source = dev.onvoid.webrtc.media.video.CustomVideoSource()
         val track = factory.createVideoTrack("t", source)
         try {
@@ -124,7 +126,7 @@ class VideoFrameChurnTest {
                 px.red > 0.8f && px.green < 0.2f
             }
         } finally {
-            track.dispose(); source.dispose(); factory.dispose()
+            track.dispose(); source.dispose(); factory.dispose(); audio.dispose()
         }
     }
 }
