@@ -88,6 +88,8 @@ fun SettingsScreen(
     orrery: io.nisfeb.talon.orrery.OrreryRepo? = null,
     /** Armillary on the ship, for its provider card under AI; null where no ship is known. */
     armillary: io.nisfeb.talon.armillary.ArmillaryRepo? = null,
+    /** The ship's Auspex mail, which About's Report a bug sends through; null where no ship is known. */
+    mailRepo: io.nisfeb.talon.mail.MailRepo? = null,
     /** Whether the user is logged into 2+ ships. Drives the
      *  accent-color section's auto-default — multi-ship users land
      *  with the toggle on so they don't lose the per-ship pip / send
@@ -1022,7 +1024,7 @@ fun SettingsScreen(
             if (safeTab == SettingsTab.About) {
             // First section of its tab: no leading divider.
             Spacer(Modifier.height(8.dp))
-            AboutSection(callController)
+            AboutSection(callController, mailRepo)
             }
             }
         }
@@ -1047,6 +1049,7 @@ fun SettingsScreen(
 @Composable
 private fun AboutSection(
     callController: io.nisfeb.talon.call.CallController? = null,
+    mailRepo: io.nisfeb.talon.mail.MailRepo? = null,
 ) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     Text(
@@ -1121,6 +1124,20 @@ private fun AboutSection(
             )
         },
     ) { Text("Copy version info") }
+
+    var reporting by remember { mutableStateOf(false) }
+    OutlinedButton(onClick = { reporting = true }) { Text("Report a bug") }
+    if (reporting) {
+        io.nisfeb.talon.ui.ReportBugDialog(
+            mail = mailRepo,
+            about = listOfNotNull(
+                "Version" to "${io.nisfeb.talon.TalonBuild.versionName} (build ${io.nisfeb.talon.TalonBuild.versionCode})",
+                "Platform" to io.nisfeb.talon.ui.platformLabel,
+                callController?.let { "Calling" to "%trunk wire $shipWire (app speaks ${io.nisfeb.talon.call.TrunkWire.WIRE_VERSION})" },
+            ),
+            onDismiss = { reporting = false },
+        )
+    }
 }
 
 @Composable

@@ -387,6 +387,17 @@ class SettingsScreenTest {
         }
     }
 
+    // Report a bug (2026-10-11): from About, to the developer's ship.
+    @Test
+    fun `About offers to report a bug`() = settings {
+        tap("About")
+        tap("Report a bug")
+        waitUntil(timeoutMillis = 5_000) { shows("What went wrong?") }
+        assertTrue(shows(io.nisfeb.talon.ui.BUG_REPORT_TO), "it says where the report goes")
+        tap("Cancel")
+        waitUntil(timeoutMillis = 5_000) { !shows("What went wrong?") }
+    }
+
     @Test
     fun `without calling, About leaves the desk out`() = settings {
         tap("About")
