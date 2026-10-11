@@ -25,19 +25,22 @@ class WhatsNewTest {
     private fun unread(count: Int, notify: Int = 0) =
         UnreadEntity(whom = "", count = count, notifyCount = notify, recencyMs = 0)
 
+    /** Each row under its own conversation, as the database keeps it. */
+    private fun keyed(unreads: Map<String, UnreadEntity>) = unreads.mapValues { (whom, u) -> u.copy(whom = whom) }
+
     private fun run(
         latest: List<io.nisfeb.talon.data.MessageEntity>,
         unreads: Map<String, UnreadEntity>,
         mail: List<NewMail> = emptyList(),
         invites: List<String> = emptyList(),
         limit: Int = 10,
-    ) = whatsNew(latest, unreads, mail, invites, us, limit, { it }, { "said something" })
+    ) = whatsNew(latest, keyed(unreads), mail, invites, us, limit, { it }, { "said something" })
 
     @Test
     fun `an action sits with the mentions, ahead of the unread`() {
         val rows = whatsNew(
-            listOf(msg("~dalsyd", "~dalsyd", 100), msg("~nec", "~nec", 200)),
-            mapOf("~dalsyd" to unread(1), "~nec" to unread(1, notify = 1)),
+            listOf(msg("~dalsyd", "~dalsyd", 100), msg("chat/~nec/general", "~nec", 200)),
+            keyed(mapOf("~dalsyd" to unread(1), "chat/~nec/general" to unread(1, notify = 1))),
             emptyList(), emptyList(), us, 10, { it }, { "said" },
             actions = listOf(NewAction("a1", "task", "Call the shop", "claude-code", "Thu 24 Sep")),
         )
@@ -75,14 +78,14 @@ class WhatsNewTest {
         // reshuffled by the clock would bury this morning's mention
         // under a group message from a minute ago.
         val rows = run(
-            listOf(msg("~mentions", "~a", 100), msg("~chatter", "~b", 900)),
+            listOf(msg("chat/~bus/mentions", "~a", 100), msg("~chatter", "~b", 900)),
             mapOf(
-                "~mentions" to unread(1, notify = 1),
+                "chat/~bus/mentions" to unread(1, notify = 1),
                 "~chatter" to unread(9),
             ),
         )
         assertEquals(listOf(NewKind.MENTION, NewKind.UNREAD), rows.map { it.kind })
-        assertEquals("~mentions", rows.first().target)
+        assertEquals("chat/~bus/mentions", rows.first().target)
     }
 
     @Test
@@ -120,8 +123,8 @@ class WhatsNewTest {
     @Test
     fun `the limit bites, and bites the least notable`() {
         val rows = run(
-            latest = listOf(msg("~m", "~a", 100), msg("~r", "~b", 100)),
-            unreads = mapOf("~m" to unread(1, notify = 1), "~r" to unread(1)),
+            latest = listOf(msg("chat/~a/m", "~a", 100), msg("~r", "~b", 100)),
+            unreads = mapOf("chat/~a/m" to unread(1, notify = 1), "~r" to unread(1)),
             mail = listOf(NewMail("m1", "~x", "s", 10)),
             limit = 2,
         )
@@ -136,5 +139,16 @@ class WhatsNewTest {
         val new = newActions(listOf(a("p", "proposed"), a("ap", "approved"), a("c", "claimed"), a("d", "done"), a("x", "dismissed")))
         assertEquals(listOf("p"), new.map { it.id })
         assertEquals("Sun 20 Sep 13:00", newActions(listOf(a("p", "proposed")), twentyFourHour = true, zone = kotlinx.datetime.TimeZone.UTC).single().due)
+    }
+
+    // In a DM every message notifies: that is unread, not a mention (2026-10-11).
+    @Test
+    fun `a DM or a group DM is never a mention, however it notifies`() {
+        val rows = run(
+            listOf(msg("~dalsyd", "~dalsyd", 100), msg("0v4.abcde", "~nec", 200), msg("chat/~bus/general", "~bus", 300)),
+            mapOf("~dalsyd" to unread(2, notify = 2), "0v4.abcde" to unread(1, notify = 1), "chat/~bus/general" to unread(1, notify = 1)),
+        )
+        assertEquals(listOf("chat/~bus/general"), rows.filter { it.kind == NewKind.MENTION }.map { it.target })
+        assertEquals(setOf("~dalsyd", "0v4.abcde"), rows.filter { it.kind == NewKind.UNREAD }.map { it.target }.toSet())
     }
 }

@@ -290,13 +290,14 @@ fun DmListScreen(
     LaunchedEffect(notifyUnreads, activeShip) {
         val patp = activeShip?.removePrefix("~")
         if (patp.isNullOrBlank()) {
-            mentionUnreads = notifyUnreads
+            mentionUnreads = notifyUnreads.filter { it.mentions > 0 }
             return@LaunchedEffect
         }
         // Off the main thread: up to 50 posts a chat, every unread change.
         mentionUnreads = kotlinx.coroutines.withContext(Dispatchers.Default) {
             val filtered = mutableListOf<UnreadEntity>()
             for (u in notifyUnreads) {
+                if (u.mentions == 0) continue
                 // A scan the next emission replaced must stop, not read as
                 // nothing cached: plain runCatching showed the stale list.
                 val recent = io.nisfeb.talon.util.runSuspendCatching {

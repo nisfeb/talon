@@ -135,6 +135,17 @@ class HomeListTest {
         assertEquals(listOf("~bus"), opened)
     }
 
+    // In a DM every message notifies; that is unread, not a mention (2026-10-11).
+    @Test
+    fun `a DM that notifies, even naming us, is unread and not a mention`() = home(seed = {
+        messages().upsert(msg("~bus", "~bus/170141184506", "~bus", "hey ~zod", 1_000))
+        unreads().upsert(UnreadEntity("~bus", count = 1, notifyCount = 1, recencyMs = 1_000))
+    }) {
+        shows("Unread")
+        waitForIdle()
+        assertTrue(onAllNodesWithText("Mentions").fetchSemanticsNodes().isEmpty(), "no Mentions tab for a DM")
+    }
+
     @Test
     fun `an unread conversation shows how many`() = home(seed = {
         messages().upsert(msg("~bus", "~bus/170141184506", "~bus", "hello?", 1_000))
@@ -335,15 +346,19 @@ class HomeListTest {
 
     @Test
     fun `mentions of us are gathered, even where nothing is cached, and open on a tap`() = home(seed = {
-        messages().upsert(msg("~bus", "~bus/170141184506", "~bus", "hey ~zod look at this", 2_000))
-        messages().upsert(msg("~dev", "~dev/170141184507", "~dev", "nothing about you", 3_000))
-        unreads().upsert(UnreadEntity("~bus", count = 1, notifyCount = 1, recencyMs = 2_000))
-        unreads().upsert(UnreadEntity("~dev", count = 1, notifyCount = 1, recencyMs = 3_000))
+        messages().upsert(msg("chat/~bus/talk", "170141184506", "~bus", "hey ~zod look at this", 2_000))
+        messages().upsert(msg("chat/~dev/talk", "170141184507", "~dev", "nothing about you", 3_000))
+        // A DM notifies for every message, so even one naming us is not a mention.
+        messages().upsert(msg("~nec", "~nec/170141184508", "~nec", "dm for ~zod", 4_000))
+        unreads().upsert(UnreadEntity("chat/~bus/talk", count = 1, notifyCount = 1, recencyMs = 2_000))
+        unreads().upsert(UnreadEntity("chat/~dev/talk", count = 1, notifyCount = 1, recencyMs = 3_000))
+        unreads().upsert(UnreadEntity("~nec", count = 1, notifyCount = 1, recencyMs = 4_000))
         unreads().upsert(UnreadEntity("chat/~nec/general", count = 2, notifyCount = 2, recencyMs = 1_000))
     }) {
         tap("Mentions", substring = true)
         shows("hey ~zod look at this", substring = true)
         onAllNodesWithText("nothing about you", substring = true).assertCountEquals(0)
+        onAllNodesWithText("dm for ~zod", substring = true).assertCountEquals(0)
         // Nothing cached for the channel: a row made from what is known of it.
         val placeholder = onAllNodes(hasText("general", substring = true) and hasText("2")).fetchSemanticsNodes()
         assertTrue(placeholder.isNotEmpty(), "the channel's mention is listed with its count")

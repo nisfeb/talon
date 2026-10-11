@@ -275,13 +275,17 @@ class ActivityFeedParserTest {
                 add(oneBundle("ship/~zod", "post", "300"))
                 add(oneBundle("ship/~zod", "post-mention", "200"))
             })
-            put("mentions", buildJsonArray { add(oneBundle("ship/~zod", "post-mention", "200")) })
+            put("mentions", buildJsonArray {
+                add(oneBundle("channel/chat/~zod/general", "post-mention", "200"))
+                // Named in a DM: unread there, not a mention (2026-10-11).
+                add(oneBundle("ship/~bus", "post-mention", "150"))
+            })
             put("replies", buildJsonArray { add(oneBundle("ship/~zod", "reply", "100")) })
             put("summaries", buildJsonObject { })
         }
         val feed = TlonChatRepo.parseActivityFeed(body)
         assertEquals(2, feed.all.size)
-        assertEquals(1, feed.mentions.size)
+        assertEquals(listOf("chat/~zod/general"), feed.mentions.map { it.whom })
         assertEquals(1, feed.replies.size)
         assertEquals("Mentioned you", feed.mentions.single().kind)
         assertEquals("Replied", feed.replies.single().kind)
