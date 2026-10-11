@@ -126,6 +126,10 @@ class StorageUploadTest {
         assertTrue(uploadName("clip.weird-ext!", "audio/mp4").endsWith(".mp4"))
         assertTrue(uploadName("C:\\Users\\me\\notes", "application/octet-stream").let { random.matches(it) }, "no extension at all")
         assertTrue(uploadName("", "").let { random.matches(it) })
+        assertTrue(uploadName("x.abcdefgh", "text/plain").endsWith(".abcdefgh"), "eight letters is an extension")
+        assertTrue(uploadName("x.abcdefghi", "text/plain").endsWith(".plain"), "nine is not")
+        assertTrue(uploadName("x.z9", "").endsWith(".z9") && uploadName("x.a0", "").endsWith(".a0"))
+        assertTrue(uploadName("x.{}", "").let { random.matches(it) }, "nor is punctuation")
         // Nothing of a long name survives to be too long for a filesystem.
         assertEquals(32 + ".jpeg".length, uploadName("z".repeat(500) + ".jpeg", "image/jpeg").length)
     }

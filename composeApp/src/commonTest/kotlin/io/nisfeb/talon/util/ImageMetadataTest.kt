@@ -15,13 +15,13 @@ class ImageMetadataTest {
     private fun seg(marker: Int, payload: ByteArray) =
         bytes(0xFF, marker, (payload.size + 2) shr 8, (payload.size + 2) and 0xff) + payload
 
-    /** An EXIF body: orientation [o] and a GPS pointer at a block with [gps] in it. */
-    private fun exif(o: Int, gps: String, bigEndian: Boolean = false): ByteArray {
+    /** An EXIF body: orientation [o] (none when null) and a GPS pointer at a block with [gps] in it. */
+    private fun exif(o: Int?, gps: String, bigEndian: Boolean = false): ByteArray {
         fun u16(v: Int) = if (bigEndian) bytes(v shr 8, v and 0xff) else bytes(v and 0xff, v shr 8)
         fun u32(v: Int) = if (bigEndian) u16(v shr 16) + u16(v and 0xffff) else u16(v and 0xffff) + u16(v shr 16)
         val tiff = ascii(if (bigEndian) "MM" else "II") + u16(42) + u32(8) +
             u16(2) +
-            u16(0x0112) + u16(3) + u32(1) + u16(o) + u16(0) +
+            u16(if (o == null) 0x0110 else 0x0112) + u16(3) + u32(1) + u16(o ?: 0) + u16(0) +
             u16(0x8825) + u16(4) + u32(1) + u32(38) +
             u32(0) + ascii(gps)
         return ascii("Exif\u0000\u0000") + tiff
@@ -52,7 +52,7 @@ class ImageMetadataTest {
             seg(0xE1, exif(6, "GPS 40.7N 74.0W")) +
             seg(0xE1, ascii("http://ns.adobe.com/xap/1.0/\u0000<x:xmpmeta>Jane's iPhone</x:xmpmeta>")) +
             icc + seg(0xE2, ascii("MPF\u0000") + ascii("index")) + seg(0xED, ascii("Photoshop 3.0\u0000by-line")) +
-            seg(0xFE, ascii("taken at home")) + adobe +
+            seg(0xFE, ascii("taken at home")) + seg(0xEF, ascii("vendor")) + seg(0xE3, ascii("vendor")) + adobe +
             dqt + sof + dht + sos + scan1 +
             // Progressive: tables between scans stay with them.
             dht + sos + scan2 + eoi +
@@ -68,6 +68,12 @@ class ImageMetadataTest {
         assertContentEquals(soi + upright6 + dqt + sos + scan2 + eoi, stripImageMetadata(turned))
         val upright = soi + seg(0xE1, exif(1, "GPS")) + dqt + sos + scan2 + eoi
         assertContentEquals(soi + dqt + sos + scan2 + eoi, stripImageMetadata(upright))
+        // 8 is the last turn there is; 9 is none, and neither is no tag at all.
+        val eight = upright6.copyOf().also { it[29] = 8 }
+        assertContentEquals(soi + eight + dqt + sos + scan2 + eoi, stripImageMetadata(soi + seg(0xE1, exif(8, "GPS")) + dqt + sos + scan2 + eoi))
+        for (o in listOf(9, null)) {
+            assertContentEquals(soi + dqt + sos + scan2 + eoi, stripImageMetadata(soi + seg(0xE1, exif(o, "GPS")) + dqt + sos + scan2 + eoi), "$o")
+        }
     }
 
     @Test
@@ -81,7 +87,7 @@ class ImageMetadataTest {
     }
 
     private fun chunk(type: String, data: ByteArray) =
-        bytes(0, 0, data.size shr 8, data.size and 0xff) + ascii(type) + data + bytes(1, 2, 3, 4)
+        bytes(data.size shr 24, data.size shr 16 and 0xff, data.size shr 8 and 0xff, data.size and 0xff) + ascii(type) + data + bytes(1, 2, 3, 4)
 
     @Test
     fun aPngLosesItsTextExifAndTime() {
@@ -93,5 +99,8 @@ class ImageMetadataTest {
             chunk("iTXt", ascii("XML:com.adobe.xmp\u0000\u0000\u0000\u0000\u0000x")) + chunk("zTXt", ascii("c\u0000\u0000z")) +
             chunk("tIME", bytes(7, 234, 10, 11, 14, 30, 0)) + idat + iend + ascii("after the end")
         assertContentEquals(sig + ihdr + idat + iend, stripImageMetadata(png))
+        // A real picture's data runs past 64 KiB in one chunk.
+        val big = chunk("IDAT", ByteArray(70_000) { 7 })
+        assertContentEquals(sig + ihdr + big + iend, stripImageMetadata(sig + ihdr + chunk("tEXt", ascii("Author\u0000Jane")) + big + iend))
     }
 }
