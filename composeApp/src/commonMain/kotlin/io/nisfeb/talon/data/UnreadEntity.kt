@@ -30,4 +30,12 @@ data class UnreadEntity(
      * matches MessageEntity.id directly.
      */
     val firstUnreadId: String? = null,
-)
+) {
+    /**
+     * The notifications that are mentions. In a DM or a group DM every
+     * message notifies, so its [notifyCount] is its unread messages, not
+     * mentions: counted as mentions, every DM sat in the Mentions tab
+     * (sneagan, 2026-10-11). A DM still notifies and still badges.
+     */
+    val mentions: Int get() = if (io.nisfeb.talon.urbit.isDirect(whom)) 0 else notifyCount
+}

@@ -92,7 +92,7 @@ fun whatsNew(
         // Nothing is new about our own last word.
         if (m.author == ourShip) continue
         val item = NewItem(
-            kind = if (row.notifyCount > 0) NewKind.MENTION else NewKind.UNREAD,
+            kind = if (row.mentions > 0) NewKind.MENTION else NewKind.UNREAD,
             target = m.whom,
             title = label(m.whom),
             line = preview(m),

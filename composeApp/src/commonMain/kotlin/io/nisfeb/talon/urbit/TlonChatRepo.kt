@@ -5602,7 +5602,8 @@ class TlonChatRepo(
          */
         internal fun parseActivityFeed(body: JsonObject?): ActivityFeed = ActivityFeed(
             all = parseActivityFeedBody(body, "all"),
-            mentions = parseActivityFeedBody(body, "mentions"),
+            // A DM is never a mention, even one naming us: see UnreadEntity.mentions.
+            mentions = parseActivityFeedBody(body, "mentions").filterNot { it.whom?.let(::isDirect) == true },
             replies = parseActivityFeedBody(body, "replies"),
         )
 
