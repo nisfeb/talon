@@ -104,115 +104,29 @@ class StorageUploadTest {
         assertFalse(storageS3Ready(creds, config))
     }
 
-    // ── upload name length ────────────────────────────────────────
+    // ── upload names ──────────────────────────────────────────────
     //
-    // ENAMETOOLONG (os error 36) surfaced as an HTTP 500 from S3 —
-    // and from memex before it — on a file whose name was simply too
-    // long for the filesystem underneath. 255 bytes per path
-    // component is the real limit; these pin that we stay well under
-    // it, extension intact, without splitting a character.
+    // The object is public at its URL. Its name used to be the upload's
+    // millisecond and the file's own name: what it was, and a key a
+    // stranger could guess (2026-10-11).
 
-    private fun String.utf8Len() = this.encodeToByteArray().size
+    private val random = Regex("[0-9a-f]{32}")
 
     @Test
-    fun `an over-long name is cut to the budget and keeps its extension`() {
-        val name = "a".repeat(400) + ".jpeg"
-        val out = truncateUploadName(name)
-        assertTrue(out.utf8Len() <= MAX_UPLOAD_NAME_BYTES, "got ${out.utf8Len()} bytes")
-        assertTrue(out.endsWith(".jpeg"), "lost the extension: $out")
-    }
-
-    /**
-     * A name that survives an encode/decode round trip has no half-
-     * written code point in it: Kotlin maps a split sequence or a lone
-     * surrogate to U+FFFD, so the string comes back changed.
-     */
-    private fun String.survivesUtf8() = encodeToByteArray().decodeToString() == this
-
-    @Test
-    fun `truncation never splits a multi-byte character`() {
-        // The budget is chosen so it does NOT divide by the character
-        // width: 20 - 4 for ".png" leaves 16 bytes, and a 3-byte
-        // character does not fit 16 evenly. A naive cut of the encoded
-        // bytes lands inside the sixth character. With the default
-        // budget these numbers happen to divide exactly, which is how
-        // an earlier version of this test passed against a deliberately
-        // broken implementation.
-        val out = truncateUploadName("\u6f22".repeat(200) + ".png", maxBytes = 20)
-        assertTrue(out.survivesUtf8(), "cut mid-character: $out")
-        assertTrue(out.utf8Len() <= 20, "got ${out.utf8Len()} bytes")
-        assertEquals("\u6f22".repeat(5) + ".png", out)
+    fun `an upload is named by chance and its extension, never by the file`() {
+        val name = uploadName("IMG_20261011_143012 passport.JPG", "image/jpeg")
+        assertTrue(Regex("[0-9a-f]{32}\\.jpg").matches(name), name)
+        assertTrue("IMG" !in name && "passport" !in name && "2026" !in name)
+        assertTrue(uploadName("photo.jpg", "image/jpeg") != uploadName("photo.jpg", "image/jpeg"), "two photo.jpg are two names")
     }
 
     @Test
-    fun `truncation never splits a surrogate pair`() {
-        // Same trick: 22 - 4 leaves 18 bytes, and emoji are 4 bytes
-        // each, so a byte-only cut lands inside the fifth one.
-        val out = truncateUploadName("\uD83D\uDE00".repeat(100) + ".gif", maxBytes = 22)
-        assertTrue(out.survivesUtf8(), "cut a surrogate pair in half: $out")
-        assertTrue(out.utf8Len() <= 22, "got ${out.utf8Len()} bytes")
-        assertEquals("\uD83D\uDE00".repeat(4) + ".gif", out)
-    }
-
-    @Test
-    fun `a name that is only an over-long extension still gets a stem`() {
-        val out = truncateUploadName("." + "x".repeat(400))
-        assertTrue(out.isNotEmpty())
-        assertTrue(out.utf8Len() <= MAX_UPLOAD_NAME_BYTES, "got ${out.utf8Len()} bytes")
-        assertTrue(out != ".", "returned a bare dot")
-    }
-
-    @Test
-    fun `a directory part is stripped rather than sent as a path`() {
-        // A separator would split one over-long component into two
-        // segments and quietly change the object's key.
-        assertEquals("photo.jpg", truncateUploadName("/tmp/holiday/photo.jpg"))
-        assertEquals("photo.jpg", truncateUploadName("C:\\Users\\me\\photo.jpg"))
-    }
-
-    @Test
-    fun `a name exactly at the budget goes whole, and one byte over is cut`() {
-        assertEquals("a".repeat(20), truncateUploadName("a".repeat(20), maxBytes = 20))
-        assertEquals("a".repeat(20), truncateUploadName("a".repeat(21), maxBytes = 20))
-    }
-
-    @Test
-    fun `a dotfile or a trailing dot is not taken for an extension`() {
-        assertEquals(".abcdefghi", truncateUploadName(".abcdefghijkl", maxBytes = 10))
-        assertEquals("abcdefghij", truncateUploadName("abcdefghijkl.", maxBytes = 10))
-    }
-
-    @Test
-    fun `an extension of sixteen bytes is kept, and one of seventeen is not`() {
-        val sixteen = ".abcdefghijklmno"
-        assertTrue(truncateUploadName("x".repeat(200) + sixteen, maxBytes = 40).endsWith(sixteen))
-        assertEquals("x".repeat(40), truncateUploadName("x".repeat(200) + sixteen + "p", maxBytes = 40))
-    }
-
-    @Test
-    fun `each UTF-8 width is counted to its edge`() {
-        // One, two, two and three bytes: the last of each width and the
-        // first of the next. A budget of ten takes 10, 5, 5 and 3 of them.
-        for ((ch, fits) in listOf('\u007F' to 10, '\u0080' to 5, '\u07FF' to 5, '\u0800' to 3)) {
-            assertEquals(ch.toString().repeat(fits), truncateUploadName(ch.toString().repeat(20), maxBytes = 10), "U+${ch.code.toString(16)}")
-        }
-    }
-
-    @Test
-    fun `an empty name still yields something uploadable`() {
-        assertEquals("file", truncateUploadName(""))
-    }
-
-    @Test
-    fun `the S3 key built from a truncated name fits a path component`() {
-        // The real thing: talon/<@da>-<name>. Only the part after the
-        // last slash faces the 255-byte limit.
-        val da = UrbitTime.unixMsToDa(1_756_500_000_000L).toString()
-        val name = truncateUploadName("z".repeat(500) + ".jpeg")
-        val component = "$da-$name"
-        assertTrue(
-            component.utf8Len() <= 255,
-            "key component is ${component.utf8Len()} bytes: $component",
-        )
+    fun `a name with no usable extension takes one from its type, or none`() {
+        assertTrue(uploadName("scan", "application/pdf").endsWith(".pdf"))
+        assertTrue(uploadName("clip.weird-ext!", "audio/mp4").endsWith(".mp4"))
+        assertTrue(uploadName("C:\\Users\\me\\notes", "application/octet-stream").let { random.matches(it) }, "no extension at all")
+        assertTrue(uploadName("", "").let { random.matches(it) })
+        // Nothing of a long name survives to be too long for a filesystem.
+        assertEquals(32 + ".jpeg".length, uploadName("z".repeat(500) + ".jpeg", "image/jpeg").length)
     }
 }

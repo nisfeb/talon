@@ -1087,7 +1087,7 @@ fun TalonApp(
                             contentType = share.mimeType,
                             fileName = name,
                         )
-                        app.repo.send(whom, "[📎 $name]($hostedUrl)")
+                        app.repo.send(whom, fileLink(name, hostedUrl))
                     }.onFailure { shareFailedToast(it) }
                 }
             }
