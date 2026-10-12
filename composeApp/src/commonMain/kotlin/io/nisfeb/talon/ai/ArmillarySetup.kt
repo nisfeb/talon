@@ -22,8 +22,10 @@ fun armillaryBest(models: List<ModelInfo>, outPrice: (String) -> Long): String? 
  * The profile once the owner has paid for Armillary: what does not work
  * is given [best], and what works stays the owner's (their decision,
  * 2026-09-28). A gap is no default model, one on a provider with no key
- * or address, a blank Armillary pick (which ran whatever the ship listed
- * first), and an assistant on a model that cannot use tools.
+ * or address, a blank Armillary pick where the vendor names no default
+ * (it ran whatever the ship listed first), and an assistant on a model
+ * that cannot use tools. Where the vendor names a default, the default
+ * follows it rather than taking [best].
  *
  * No switch is turned: catch-up and the assistant read messages, and
  * turning them on is the owner's own tap. Triage is never moved, since
@@ -33,9 +35,11 @@ fun AiProfile.filledWithArmillary(best: String): AiProfile {
     val ours = ModelRef(ARMILLARY_PROVIDER, best)
     val p = if (provider(ARMILLARY_PROVIDER) != null) this
     else copy(providers = providers + AiProvider(ARMILLARY_PROVIDER, ProviderKind.Armillary, ProviderKind.Armillary.label))
-    fun gap(ref: ModelRef?) = ref == null || (ref.provider == ARMILLARY_PROVIDER && ref.model.isBlank()) ||
+    val follow = p.vendorDefault() != null
+    fun gap(ref: ModelRef?) = ref == null || (ref.provider == ARMILLARY_PROVIDER && ref.model.isBlank() && !follow) ||
         p.resolve(ref)?.problem() != null
-    val filled = p.copy(defaultModel = p.defaultModel.takeUnless(::gap) ?: ours)
+    val filled = p.copy(defaultModel = p.defaultModel.takeUnless(::gap) ?: if (follow) ModelRef(ARMILLARY_PROVIDER, "") else ours)
+        .followingVendorDefault()
     val features = filled.features.toMutableMap()
     for (f in listOf(AiFeature.CatchUp, AiFeature.Assistant)) {
         val s = features[f] ?: FeatureSetting()
@@ -44,6 +48,22 @@ fun AiProfile.filledWithArmillary(best: String): AiProfile {
         if ((s.model != null && gap(s.model)) || noTools) features[f] = s.copy(model = ours)
     }
     return filled.copy(features = features)
+}
+
+/** The vendor's default model, or null where it names none. */
+fun AiProfile.vendorDefault(): String? = armillary()?.suggested?.get("default")?.takeIf { it.isNotBlank() }
+
+/**
+ * The default back on the vendor's pick where the owner never picked it
+ * by hand ([AiProfile.defaultOwn]). A payment used to write the model
+ * Talon rated best, so Fable outranked the vendor's Opus on price
+ * (sneagan, 2026-10-12: the default follows Armillary unless the user
+ * explicitly changes it).
+ */
+fun AiProfile.followingVendorDefault(): AiProfile {
+    val d = defaultModel ?: return this
+    if (defaultOwn || d.provider != ARMILLARY_PROVIDER || d.model.isBlank() || vendorDefault() == null) return this
+    return copy(defaultModel = d.copy(model = ""))
 }
 
 /**

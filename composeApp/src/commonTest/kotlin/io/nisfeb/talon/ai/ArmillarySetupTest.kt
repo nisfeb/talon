@@ -107,6 +107,39 @@ class ArmillarySetupTest {
         assertNull(p.features[AiFeature.CatchUp], "catch-up needs no tools")
     }
 
+    /** The Armillary row with the vendor naming [default] as everyone's default model. */
+    private fun vendor(default: String = "mid/tools") = armillary.copy(suggested = mapOf("default" to default))
+
+    // "fix it so the default follows armillary unless the user explicitly
+    // changes it" (sneagan, 2026-10-12): a payment had put Fable there,
+    // the priciest on the list, over the vendor's Opus.
+    @Test
+    fun `a payment leaves the default on the vendor's pick where it names one`() {
+        val follow = ModelRef(ARMILLARY_PROVIDER, "")
+        val p = AiProfile(providers = listOf(device, vendor()), defaultModel = follow).filledWithArmillary("big/tools")
+        assertEquals(follow, p.defaultModel)
+        assertEquals("mid/tools", p.resolve(p.defaultModel)?.model)
+        assertEquals(follow, AiProfile(providers = listOf(device, vendor())).filledWithArmillary("big/tools").defaultModel, "no default at all follows it too")
+        val keyless = AiProfile(providers = listOf(device, openRouter.copy(apiKey = ""), vendor()), defaultModel = ModelRef("main", "anthropic/claude-opus-5"))
+        assertEquals(follow, keyless.filledWithArmillary("big/tools").defaultModel, "one that cannot run follows it")
+        assertEquals(ours, AiProfile(providers = listOf(device, vendor("")), defaultModel = follow).filledWithArmillary("big/tools").defaultModel, "a blank name is no pick")
+    }
+
+    @Test
+    fun `a default nobody picked goes back to the vendor's, and one picked by hand stays`() {
+        val written = AiProfile(providers = listOf(device, openRouter, vendor()), defaultModel = ours)
+        assertEquals(ModelRef(ARMILLARY_PROVIDER, ""), written.followingVendorDefault().defaultModel, "what a payment wrote")
+        assertEquals(ModelRef(ARMILLARY_PROVIDER, ""), written.filledWithArmillary("big/tools").defaultModel, "and a later payment does the same")
+        val picked = written.copy(defaultOwn = true)
+        assertEquals(picked, picked.followingVendorDefault())
+        assertEquals(picked, picked.filledWithArmillary("big/tools"))
+        val elsewhere = written.copy(defaultModel = ModelRef("main", "anthropic/claude-opus-5"))
+        assertEquals(elsewhere, elsewhere.followingVendorDefault(), "a default on another provider is the owner's")
+        val unnamed = written.copy(providers = listOf(device, openRouter, armillary))
+        assertEquals(unnamed, unnamed.followingVendorDefault(), "a vendor that names none leaves it")
+        assertEquals(AiProfile(providers = listOf(device, vendor())), AiProfile(providers = listOf(device, vendor())).followingVendorDefault())
+    }
+
     @Test
     fun `a profile running on armillary wants a row on a device that has none`() {
         val synced = AiProfile(providers = listOf(device), defaultModel = ours)

@@ -59,6 +59,7 @@ import io.nisfeb.talon.ai.ProfileInputs
 import io.nisfeb.talon.ai.ProviderKind
 import io.nisfeb.talon.ai.defaultModel
 import io.nisfeb.talon.ai.followingVendor
+import io.nisfeb.talon.ai.vendorDefault
 import io.nisfeb.talon.ai.migrateProfile
 import io.nisfeb.talon.ai.without
 import io.nisfeb.talon.armillary.Account
@@ -221,7 +222,10 @@ fun AiSettingsSection(
     Spacer(Modifier.height(12.dp))
     Heading("Default model")
     Quiet("Used by every feature unless you pick another below.")
-    ModelPicker(profile, profile.defaultModel, allowDefault = false, providers = chat) { ref -> edit { it.copy(defaultModel = ref) } }
+    ModelPicker(profile, profile.defaultModel, allowDefault = false, providers = chat) { ref -> edit { it.copy(defaultModel = ref, defaultOwn = true) } }
+    profile.vendorDefault()?.takeIf { profile.defaultModel != ModelRef(ARMILLARY_PROVIDER, "") }?.let { v ->
+        TextButton(onClick = { edit { it.copy(defaultModel = ModelRef(ARMILLARY_PROVIDER, ""), defaultOwn = false) } }) { Text("Use Armillary's pick, ${shortModelName(v)}") }
+    }
     Quiet(
         "Catch-up and the assistant send the messages you ask about to this model. Pick one marked Private or Not kept so they are not stored. " +
             if (profile.providers.none { it.kind == ProviderKind.OpenAiCompatible }) "LM Studio or Ollama on a computer of yours is private: add it as a server of your own above." else "",

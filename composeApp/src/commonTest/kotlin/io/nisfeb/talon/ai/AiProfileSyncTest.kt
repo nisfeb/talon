@@ -244,6 +244,17 @@ class AiProfileSyncTest {
 
     private fun profileEntry(p: AiProfile) = entry("schemaVersion" to "2", "profile" to Json.encodeToJsonElement(AiProfile.serializer(), p.forSync()) as JsonObject)
 
+    // Arriving without the mark, the next refresh of the vendor's picks
+    // there would put it back on theirs.
+    @Test
+    fun `a default picked by hand arrives as one`() {
+        val mine = migrateProfile(base)
+        val theirs = mine.copy(defaultModel = ModelRef(MAIN_PROVIDER, "anthropic/claude-fable-5.1"), defaultOwn = true)
+        val got = profileAfterEntry(profileEntry(theirs), base.copy(savedProfile = mine), base)!!
+        assertTrue(got.defaultOwn)
+        assertEquals(theirs.defaultModel, got.defaultModel)
+    }
+
     @Test
     fun `a device that saved nothing yet keeps its own keys when a profile arrives, for providers of the same kind`() {
         val desktop = migrateProfile(base) // OpenRouter main, the private server, this device, OpenAI speech

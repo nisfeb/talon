@@ -59,6 +59,8 @@ class ArmillaryPaymentTest {
     @Volatile private var balance = 0L
     @Volatile private var keyed = true
     @Volatile private var generator = """{"enabled":false}"""
+    /** The vendor's picks, as the inference document carries them, or nothing. */
+    @Volatile private var suggested = ""
     private val puts = CopyOnWriteArrayList<Pair<String, String>>()
     /** Every request that went to OpenRouter, with whatever authorised it. */
     private val toOpenRouter = CopyOnWriteArrayList<String>()
@@ -78,7 +80,7 @@ class ArmillaryPaymentTest {
             )
             url.startsWith("https://openrouter.ai/api/v1/endpoints/zdr") -> ok("""{"data":[]}""")
             path.endsWith("/apps/armillary/api/inference") ->
-                if (keyed) ok("""{"mode":"lease","base_url":"https://openrouter.ai/api/v1","key":"lease.key","models":["small/tools","big/tools","huge/notools"]}""")
+                if (keyed) ok("""{"mode":"lease","base_url":"https://openrouter.ai/api/v1","key":"lease.key","models":["small/tools","big/tools","huge/notools"]$suggested}""")
                 else respond("""{"error":"no key yet"}""", HttpStatusCode.NotFound, json)
             path.endsWith("/apps/armillary/api/keys") -> { keyed = true; ok("""{"ok":true}""") }
             path.endsWith("/apps/armillary/api/lease") -> respond("", HttpStatusCode.NotFound)
@@ -186,6 +188,37 @@ class ArmillaryPaymentTest {
             delay(500)
             assertEquals(null, repo.offer.value)
             assertTrue(puts.isEmpty(), "the owner's generator is theirs")
+        }
+    }
+
+    // sneagan, 2026-10-12: a top-up left the default on Fable, the
+    // priciest model, over the vendor's Opus. "fix it so the default
+    // follows armillary unless the user explicitly changes it".
+    @Test
+    fun `where the vendor names a default, a payment leaves the default on it and offers it`() {
+        suggested = ""","suggested":{"models":{"default":"small/tools"}}"""
+        ship(setUp) { repo, ai ->
+            pay(repo)
+            withTimeout(10_000) { while (repo.offer.value == null) delay(20) }
+            val p = ai.state.value.savedProfile!!
+            assertEquals(ModelRef(ARMILLARY_PROVIDER, ""), p.defaultModel, "not the model Talon rated best")
+            assertEquals("small/tools", p.resolve(p.defaultModel)?.model)
+            assertEquals("small/tools", repo.offer.value, "the offer names what they would run on")
+        }
+    }
+
+    @Test
+    fun `a default the payment wrote follows the vendor's again on the next refresh, and one picked by hand stays`() {
+        suggested = ""","suggested":{"models":{"default":"small/tools"}}"""
+        val written = setUp.copy(defaultModel = ModelRef(ARMILLARY_PROVIDER, "big/tools"))
+        ship(written) { _, ai ->
+            withTimeout(10_000) { while (ai.state.value.savedProfile!!.defaultModel != ModelRef(ARMILLARY_PROVIDER, "")) delay(20) }
+            assertEquals("small/tools", ai.state.value.savedProfile!!.resolve(AiFeature.Assistant)?.model)
+        }
+        ship(written.copy(defaultOwn = true)) { repo, ai ->
+            withTimeout(10_000) { while (ai.state.value.savedProfile!!.provider(ARMILLARY_PROVIDER)!!.suggested.isEmpty()) delay(20) }
+            repo.refresh()
+            assertEquals(ModelRef(ARMILLARY_PROVIDER, "big/tools"), ai.state.value.savedProfile!!.defaultModel)
         }
     }
 

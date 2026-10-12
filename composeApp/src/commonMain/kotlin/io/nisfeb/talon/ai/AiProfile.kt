@@ -102,6 +102,11 @@ fun FeatureSetting.followingVendor(): FeatureSetting = copy(own = false, model =
 data class AiProfile(
     val providers: List<AiProvider> = emptyList(),
     val defaultModel: ModelRef? = null,
+    /**
+     * The owner picked the default model by hand. Until then a default on
+     * Armillary follows the vendor's ([followingVendorDefault]).
+     */
+    val defaultOwn: Boolean = false,
     val features: Map<AiFeature, FeatureSetting> = emptyMap(),
     /**
      * The Jev gate, status check and body picks, together. Null until
