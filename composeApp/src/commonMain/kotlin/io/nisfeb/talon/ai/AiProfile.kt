@@ -135,8 +135,38 @@ data class AiProfile(
      */
     fun resolve(f: AiFeature): Resolved? {
         if (followsVendor(f)) return vendorModel(f)
-        return resolve(features[f]?.model ?: defaultModel)
+        return resolve(pick(f) ?: defaultFor(f))
     }
+
+    /**
+     * [f]'s own model, or null where it follows the default. The device
+     * model triage is started on, and the one a removed provider leaves
+     * it on, are nobody's pick: triage follows the default from there.
+     */
+    fun pick(f: AiFeature): ModelRef? {
+        val s = features[f] ?: return null
+        if (f == AiFeature.OrreryTriage && !s.own && s.model?.provider == DEVICE_PROVIDER) return null
+        return s.model
+    }
+
+    /**
+     * What "Default" is for [f]: the default model. Triage reads every
+     * message unasked, so it follows only a private default and stays on
+     * this device otherwise; a cloud model picked on its own row is the
+     * opt-in that takes it off the device.
+     */
+    fun defaultFor(f: AiFeature): ModelRef? {
+        if (f != AiFeature.OrreryTriage) return defaultModel
+        defaultModel?.takeIf { resolve(it)?.private == true }?.let { return it }
+        return features[f]?.model?.takeIf { it.provider == DEVICE_PROVIDER } ?: ModelRef(DEVICE_PROVIDER, "")
+    }
+
+    /**
+     * The ship's generator follows the default model: the owner picked
+     * "Default" on its row. A row with no model the owner never picked
+     * may be a generator set up on the ship itself, which is left alone.
+     */
+    fun generatorFollowsDefault(): Boolean = features[AiFeature.OrreryGenerator]?.let { it.own && it.model == null } == true
 
     /** The Armillary row, where this device buys from its ship. */
     fun armillary(): AiProvider? = providers.firstOrNull { it.kind == ProviderKind.Armillary }

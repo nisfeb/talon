@@ -70,6 +70,8 @@ import kotlin.test.assertTrue
 class OrreryAiRowsTest {
     @Volatile private var probe = HttpStatusCode.OK
     @Volatile private var generator = """{"enabled":false}"""
+    /** How long the ship takes to answer a generator write. */
+    @Volatile private var putDelayMs = 0L
     private val sent = CopyOnWriteArrayList<JsonObject>()
     private val decided = MutableStateFlow(DecideSettings())
 
@@ -80,6 +82,7 @@ class OrreryAiRowsTest {
             path == "/api/state" -> json(probe, "{}")
             path == "/api/clients" && req.method == HttpMethod.Post -> json(HttpStatusCode.InternalServerError, """{"error":"no keys today"}""")
             path == "/api/generator" && req.method == HttpMethod.Put -> {
+                if (putDelayMs > 0) kotlinx.coroutines.delay(putDelayMs)
                 val body = Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonObject
                 sent += body
                 generator = JsonObject(Json.parseToJsonElement(generator).jsonObject + body).toString()
@@ -99,10 +102,17 @@ class OrreryAiRowsTest {
     private val anthropic = AiProvider("an", ProviderKind.Anthropic, "Anthropic", apiKey = "sk-ant", models = listOf(ModelInfo("claude")))
     private val both = AiProfile(listOf(openRouter, anthropic), defaultModel = ModelRef("an", "claude"))
 
-    private fun rows(profile: AiProfile = both, block: ComposeUiTest.(FakeAiSettings, OrreryRepo) -> Unit) {
+    private fun rows(
+        profile: AiProfile = both,
+        /** This install already feeds orrery, so triage's row is open. */
+        fed: Boolean = false,
+        content: @androidx.compose.runtime.Composable (FakeAiSettings, OrreryRepo) -> Unit = { ai, o -> OrrerySettingsSection(ai, orrery = o) },
+        block: ComposeUiTest.(FakeAiSettings, OrreryRepo) -> Unit,
+    ) {
         val tmp = createTempDirectory(prefix = "talon-orrery-ai-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
+        if (fed) runBlocking { db.orreryAccounts().upsert(io.nisfeb.talon.data.OrreryAccountEntity("~zod", "c1", "c1.secret")) }
         val scope = CoroutineScope(SupervisorJob())
         val orrery = OrreryRepo(http, scope, db, "test", decide = DecideControl(decided) { decided.value = it }, bareClient = http)
             .apply { attach("https://ship.test", "~zod") }
@@ -114,7 +124,7 @@ class OrreryAiRowsTest {
             runComposeUiTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
-                        Column(Modifier.verticalScroll(rememberScrollState())) { OrrerySettingsSection(ai, orrery = orrery) }
+                        Column(Modifier.verticalScroll(rememberScrollState())) { content(ai, orrery) }
                     }
                 }
                 waitUntil(timeoutMillis = 5_000) { orrery.availability.value != OrreryAvailability.UNKNOWN }
@@ -305,6 +315,101 @@ class OrreryAiRowsTest {
             switchBeside("Orrery analysis").performClick()
             waitUntil(timeoutMillis = 5_000) { sent.isNotEmpty() }
             assertEquals(Json.parseToJsonElement("""{"enabled":false}"""), sent.single())
+        }
+    }
+
+    // A user set his default model to a server of his own and found triage
+    // and analysis did not follow it (2026-10-12).
+    private val lan = AiProvider("lan", ProviderKind.OpenAiCompatible, "My server", baseUrl = "http://10.0.0.5:11434/v1", models = listOf(ModelInfo("llama")))
+    private val device = AiProvider(io.nisfeb.talon.ai.DEVICE_PROVIDER, ProviderKind.ThisDevice, "On this device")
+    private val following = openRouterDefault.copy(features = mapOf(AiFeature.OrreryGenerator to io.nisfeb.talon.ai.FeatureSetting(on = true, own = true)))
+    private val onTheShip = """{"enabled":true,"url":"${io.nisfeb.talon.ai.ModelCatalog.OPENROUTER}","model":"m1","api_key_set":true}"""
+
+    @Test
+    fun `triage under a cloud default reads on this device, and says so`() = rows(both.copy(providers = both.providers + device), fed = true) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("Your default model is not private, so triage reads on this device.") }
+        assertTrue(shows("Default: This device's own model, On this device"), "Default on triage's row is this device, not the cloud default")
+    }
+
+    @Test
+    fun `triage under a private default reads with it`() = rows(AiProfile(listOf(lan, device), defaultModel = ModelRef("lan", "llama")), fed = true) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("Orrery triage") }
+        waitUntil(timeoutMillis = 5_000) { shows("Default: llama, My server") }
+        assertFalse(shows("Your default model is not private"))
+    }
+
+    @Test
+    fun `analysis on Default with a default the ship cannot run says so before anything is pressed`() {
+        generator = onTheShip
+        rows { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("The ship cannot reach Anthropic.") }
+            assertTrue(sent.isEmpty(), sent.toString())
+        }
+    }
+
+    @Test
+    fun `analysis set to Default moves with the default, with its key, and nothing else moves it`() {
+        generator = onTheShip
+        rows(following) { _, orrery ->
+            waitUntil(timeoutMillis = 5_000) { orrery.generatorSettings.value?.model == "m1" }
+            val tiny = following.copy(defaultModel = ModelRef("or", "tiny"))
+            // Nothing the ship is told changed: a model list fetched again.
+            orrery.followDefault(following, following.copy(providers = following.providers.map { it.copy(models = emptyList()) }))
+            // Never picked as Default: it may be set up on the ship itself.
+            orrery.followDefault(openRouterDefault, tiny.copy(features = emptyMap()))
+            // A model of its own.
+            orrery.followDefault(following, tiny.copy(features = mapOf(AiFeature.OrreryGenerator to io.nisfeb.talon.ai.FeatureSetting(true, ModelRef("or", "m1"), own = true))))
+            // A default the ship cannot run.
+            orrery.followDefault(following, following.copy(defaultModel = ModelRef("an", "claude")))
+            orrery.followDefault(tiny, tiny.copy(providers = listOf(openRouter, anthropic, lan), defaultModel = ModelRef("lan", "llama")))
+            orrery.followDefault(following, tiny)
+            waitUntil(timeoutMillis = 5_000) { sent.isNotEmpty() }
+            assertEquals(Json.parseToJsonElement("""{"enabled":true,"url":"${io.nisfeb.talon.ai.ModelCatalog.OPENROUTER}","model":"tiny","api_key":"sk-or"}"""), sent.single())
+            // A new key for the same model goes too.
+            orrery.followDefault(tiny, tiny.copy(providers = listOf(openRouter.copy(apiKey = "sk-or-2"), anthropic)))
+            waitUntil(timeoutMillis = 5_000) { sent.size == 2 }
+            assertEquals("sk-or-2", sent[1]["api_key"]?.jsonPrimitive?.content)
+        }
+    }
+
+    @Test
+    fun `analysis that is off, or has no key on the ship, is not moved by the default`() {
+        for (ship in listOf("""{"enabled":false,"model":"m1","api_key_set":true}""", """{"enabled":true,"model":"m1","api_key_set":false}""", """{"enabled":true}""")) {
+            generator = ship
+            rows(following) { _, orrery ->
+                waitUntil(timeoutMillis = 5_000) { orrery.generatorSettings.value != null }
+                orrery.followDefault(following, following.copy(defaultModel = ModelRef("or", "tiny")))
+                Thread.sleep(300)
+                assertTrue(sent.isEmpty(), "$ship: $sent")
+            }
+        }
+    }
+
+    @Test
+    fun `picking a new default in AI settings moves analysis, even after leaving the screen`() {
+        generator = onTheShip
+        putDelayMs = 500
+        val shown = androidx.compose.runtime.mutableStateOf(true)
+        rows(following, content = { ai, o -> if (shown.value) io.nisfeb.talon.ui.screens.AiSettingsSection(ai, orrery = o, catalog = quietCatalog()) }) { ai, orrery ->
+            waitUntil(timeoutMillis = 5_000) { orrery.generatorSettings.value?.model == "m1" }
+            onNodeWithText("m1, OpenRouter").performScrollTo().performClick()
+            onNodeWithText("tiny").performClick()
+            shown.value = false
+            waitForIdle()
+            assertEquals(ModelRef("or", "tiny"), ai.state.value.savedProfile!!.defaultModel)
+            waitUntil(timeoutMillis = 5_000) { sent.isNotEmpty() }
+            assertEquals(Json.parseToJsonElement("""{"enabled":true,"url":"${io.nisfeb.talon.ai.ModelCatalog.OPENROUTER}","model":"tiny","api_key":"sk-or"}"""), sent.single())
+        }
+    }
+
+    @Test
+    fun `picking Default for analysis is what makes it follow`() {
+        generator = onTheShip
+        rows(openRouterDefault) { ai, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("Orrery analysis") }
+            onAllNodesWithText("Default: m1, OpenRouter").let { it[it.fetchSemanticsNodes().size - 1] }.performScrollTo().performClick()
+            onAllNodesWithText("Default: m1, OpenRouter").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
+            waitUntil(timeoutMillis = 5_000) { ai.state.value.savedProfile!!.generatorFollowsDefault() }
         }
     }
 }

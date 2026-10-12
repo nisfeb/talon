@@ -92,6 +92,8 @@ import io.nisfeb.talon.orrery.OrreryPreferences
 import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.orrery.RungStatus
 import io.nisfeb.talon.orrery.generatorLine
+import io.nisfeb.talon.orrery.generatorProblem
+import io.nisfeb.talon.orrery.generatorTarget
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -153,7 +155,12 @@ fun AiSettingsSection(
     val started = remember(cfg, fed, gen) { starting() }
     val profile = cfg.savedProfile ?: started
     // Always from the settings as they are now: a fetch lands after the screen has moved on.
-    fun edit(change: (AiProfile) -> AiProfile) = aiSettings.setProfile(change(aiSettings.state.value.savedProfile ?: starting()))
+    // The ship's generator moves with the default where it follows it.
+    fun edit(change: (AiProfile) -> AiProfile) {
+        val before = aiSettings.state.value.savedProfile ?: starting()
+        aiSettings.setProfile(change(before))
+        aiSettings.state.value.savedProfile?.let { orrery?.followDefault(before, it) }
+    }
     fun setFeature(f: AiFeature, change: (FeatureSetting) -> FeatureSetting) =
         edit { p -> p.copy(features = p.features + (f to change(p.features[f] ?: FeatureSetting()))) }
     val chat = profile.providers.filter { it.kind != ProviderKind.ThisDevice }
@@ -405,10 +412,10 @@ fun OrrerySettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?)
     HorizontalDivider()
     Heading("Settings")
     if (orrery == null) Quiet("Sign in to a ship to set Orrery up.")
-    if (orrery != null && orreryHere) GeneratorOffer(orrery, profile) { ref -> setFeature(AiFeature.OrreryGenerator) { it.copy(model = ref) } }
+    if (orrery != null && orreryHere) GeneratorOffer(orrery, profile) { ref -> setFeature(AiFeature.OrreryGenerator) { it.copy(model = ref, own = true) } }
     if (orrery != null && orreryHere) SchemaStepRow(orrery)
-    if (orrery != null) TriageRow(orrery, profile, orreryHere, spend[AiFeature.OrreryTriage.name]) { ref -> setFeature(AiFeature.OrreryTriage) { it.copy(model = ref) } }
-    if (orrery != null && orreryHere) GeneratorRow(orrery, profile) { ref -> setFeature(AiFeature.OrreryGenerator) { it.copy(model = ref) } }
+    if (orrery != null) TriageRow(orrery, profile, orreryHere, spend[AiFeature.OrreryTriage.name]) { ref -> setFeature(AiFeature.OrreryTriage) { it.copy(model = ref, own = true) } }
+    if (orrery != null && orreryHere) GeneratorRow(orrery, profile) { ref -> setFeature(AiFeature.OrreryGenerator) { it.copy(model = ref, own = true) } }
     if (orrery != null && orreryHere) PreferencesRows(orrery)
     if (orrery != null && orreryHere) ExecutorRows(orrery)
     Spacer(Modifier.height(12.dp))
@@ -1281,8 +1288,8 @@ internal fun refLabel(profile: AiProfile, ref: ModelRef?, vendorPick: Boolean = 
 }
 
 /** A feature row following the default model: "Default: " and the model, or Armillary's own "Default · Opus 5.5". */
-internal fun defaultLabel(profile: AiProfile): String {
-    val d = refLabel(profile, profile.defaultModel)
+internal fun defaultLabel(profile: AiProfile, ref: ModelRef? = profile.defaultModel): String {
+    val d = refLabel(profile, ref)
     return if (d.startsWith("Default")) d else "Default: $d"
 }
 
@@ -1325,18 +1332,20 @@ private fun ModelPicker(
     flag: (ModelInfo) -> String? = { null },
     /** [selected] is the Armillary vendor's pick, shown as its default. */
     vendorPick: Boolean = false,
+    /** What "Default" runs on this row: the default model, except where a feature follows only some of it. */
+    defaultRef: ModelRef? = profile.defaultModel,
     onPick: (ModelRef?) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     androidx.compose.foundation.layout.Box {
         OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
-            val shown = if (selected == null && allowDefault) profile.defaultModel else selected
+            val shown = if (selected == null && allowDefault) defaultRef else selected
             if (shown?.let { profile.provider(it.provider) }?.kind == ProviderKind.Armillary) {
                 io.nisfeb.talon.ui.ArmillaryLogo(modifier = Modifier.padding(end = 8.dp))
             }
             Text(
-                if (selected == null && allowDefault) defaultLabel(profile) else refLabel(profile, selected, vendorPick),
+                if (selected == null && allowDefault) defaultLabel(profile, defaultRef) else refLabel(profile, selected, vendorPick),
                 modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Icon(TalonIcons.ExpandMore, contentDescription = null)
@@ -1348,8 +1357,8 @@ private fun ModelPicker(
                 modifier = Modifier.padding(horizontal = 8.dp).fillMaxWidth(),
             )
             if (allowDefault) DropdownMenuItem(
-                text = { Text(defaultLabel(profile)) },
-                leadingIcon = if (profile.defaultModel?.let { profile.provider(it.provider) }?.kind == ProviderKind.Armillary) {
+                text = { Text(defaultLabel(profile, defaultRef)) },
+                leadingIcon = if (defaultRef?.let { profile.provider(it.provider) }?.kind == ProviderKind.Armillary) {
                     { io.nisfeb.talon.ui.ArmillaryLogo() }
                 } else null,
                 onClick = { open = false; query = ""; onPick(null) },
@@ -1468,8 +1477,8 @@ private fun FeatureModel(
     val vendor = profile.vendorModel(f)
     val follows = profile.followsVendor(f)
     ModelPicker(
-        profile, if (follows && vendor != null) ModelRef(vendor.provider.id, vendor.model) else profile.features[f]?.model,
-        allowDefault = !follows, providers = providers, flag = flag, vendorPick = follows, onPick = onPick,
+        profile, if (follows && vendor != null) ModelRef(vendor.provider.id, vendor.model) else profile.pick(f),
+        allowDefault = !follows, providers = providers, flag = flag, vendorPick = follows, defaultRef = profile.defaultFor(f), onPick = onPick,
     )
     if (follows) Quiet("Your Armillary vendor's pick.")
     else if (vendor != null && onFollow != null) TextButton(onClick = onFollow) { Text("Use your vendor's model, ${shortModelName(vendor.model)}") }
@@ -1566,6 +1575,9 @@ private fun TriageRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spe
         },
     ) {
         FeatureModel(profile, AiFeature.OrreryTriage, profile.providers, reads = true, onPick = onPick)
+        if (profile.pick(AiFeature.OrreryTriage) == null && profile.defaultModel != null && profile.defaultFor(AiFeature.OrreryTriage) != profile.defaultModel) {
+            Quiet("Your default model is not private, so triage reads on this device. Pick a model here to read elsewhere.")
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Quiet(if (lastMs != null) "Pushed ${agoLabel(lastMs!!)}." else "Not pushed yet.")
             Spacer(Modifier.weight(1f))
@@ -1977,34 +1989,6 @@ private fun HealthRow() {
 }
 
 /**
- * The provider and model the ship's generator would run for [ref], else
- * the default model, resolved as Talon's own features resolve it; null
- * where none is set. A blank model was sent as none, and Orrery filled
- * in a model of its own (kimi-k3) under the name the button showed.
- */
-private fun generatorTarget(profile: AiProfile, ref: ModelRef?): Pair<AiProvider, String>? =
-    profile.resolve(ref ?: profile.defaultModel)?.let { r -> r.provider to r.model.ifBlank { r.provider.kind.defaultModel().orEmpty() } }
-
-/** Why the ship's generator cannot run [target], as a sentence, or null when it can. */
-private fun generatorProblem(target: Pair<AiProvider, String>?): String? = when {
-    target == null -> "There is no AI set up in Talon yet. Add a provider in Settings, AI, then pick a model under Orrery analysis below."
-    target.first.shipBase() == null -> "The ship cannot reach ${target.first.label}. Pick a model on OpenRouter, OpenAI, Armillary, or a server on your network."
-    // Orrery runs no generator without a key ("the generator has no key").
-    target.first.apiKey.isBlank() -> "${target.first.label} has no key in Talon, and Orrery on your ship needs one. Add it in Settings, AI; a server that takes none accepts any word."
-    target.second.isBlank() -> "Pick a model on ${target.first.label} under Orrery analysis below."
-    else -> null
-}
-
-/** Point the ship's generator at [ref], else the default model, with that provider's key; one it cannot run is said so. */
-private suspend fun pointGenerator(orrery: OrreryRepo, profile: AiProfile, enabled: Boolean, ref: ModelRef?): Result<Unit> {
-    val t = generatorTarget(profile, ref)
-    // Turning it off, or on with nothing set up, names no model.
-    if (!enabled || t == null) return orrery.setGenerator(enabled)
-    generatorProblem(t)?.let { return Result.failure(IllegalStateException(it)) }
-    return orrery.setGenerator(true, t.first.shipBase()!!, t.second, t.first.apiKey)
-}
-
-/**
  * Orrery on, and the ship's generator with no model or no key: nothing
  * writes the brief or proposes anything, and nothing said so. The AI set
  * up in Talon stays in Talon, so a first-time owner expected it to carry
@@ -2040,7 +2024,7 @@ private fun GeneratorOffer(orrery: OrreryRepo, profile: AiProfile, onPick: (Mode
                         note = null
                         busy = true
                         scope.launch {
-                            pointGenerator(orrery, profile, true, ref)
+                            orrery.pointGenerator(profile, true, ref)
                                 .onSuccess { onPick(ref) }
                                 .onFailure { note = it.message ?: "The ship did not answer." }
                             busy = false
@@ -2076,7 +2060,7 @@ private fun GeneratorRow(orrery: OrreryRepo, profile: AiProfile, onPick: (ModelR
     fun point(enabled: Boolean, ref: ModelRef?) = scope.launch {
         busy = true
         note = null
-        pointGenerator(orrery, profile, enabled, ref).onSuccess { onPick(ref) }.onFailure { note = it.message ?: "The ship did not answer." }
+        orrery.pointGenerator(profile, enabled, ref).onSuccess { onPick(ref) }.onFailure { note = it.message ?: "The ship did not answer." }
         busy = false
     }
 
@@ -2094,6 +2078,8 @@ private fun GeneratorRow(orrery: OrreryRepo, profile: AiProfile, onPick: (ModelR
             flag = { m -> m.contextLength?.takeIf { it < 100_000 }?.let { "short context" } },
         ) { ref -> point(g.enabled, ref) }
         g.model?.let { Quiet("On the ship: $it" + (g.url?.let { u -> " at $u" } ?: "") + if (g.keySet) "." else ", with no key.") }
+        // On Default, a default the ship cannot run is said here, not only once a button is pressed.
+        if (profile.features[AiFeature.OrreryGenerator]?.model == null) generatorProblem(generatorTarget(profile, null))?.let { Quiet(it, error = true) }
         last?.let { Quiet("Last run: " + generatorLine(it, nowMs(), kotlinx.datetime.TimeZone.currentSystemDefault())) }
     }
     note?.let { Quiet(it, error = true) }
