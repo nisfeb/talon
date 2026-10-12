@@ -13,6 +13,7 @@ import io.nisfeb.talon.ai.ModelRef
 import io.nisfeb.talon.ai.ProviderKind
 import io.nisfeb.talon.ai.armillaryBest
 import io.nisfeb.talon.ai.filledWithArmillary
+import io.nisfeb.talon.ai.followingVendorDefault
 import io.nisfeb.talon.ai.shipBase
 import io.nisfeb.talon.ai.wantsArmillaryRow
 import io.nisfeb.talon.ai.without
@@ -446,7 +447,8 @@ class ArmillaryRepo(
             .filledWithArmillary(best)
         if (next != profile) ai.setProfile(next)
         pointGenerator(ai, best)
-        _offer.value = best.takeIf { !next.isOn(AiFeature.CatchUp) || (isAssistantSupported && !next.isOn(AiFeature.Assistant)) }
+        // What they would run on: the vendor's pick where it names one.
+        _offer.value = (next.resolve(AiFeature.CatchUp)?.takeIf { it.provider.id == ARMILLARY_PROVIDER }?.model ?: best).takeIf { !next.isOn(AiFeature.CatchUp) || (isAssistantSupported && !next.isOn(AiFeature.Assistant)) }
     }
 
     /**
@@ -530,8 +532,10 @@ class ArmillaryRepo(
         val base = inf.baseUrl.trim().trimEnd('/').ifBlank { null }
         val searchUrl = inf.searchUrl.trim().trimEnd('/').ifBlank { null }
         val next = row.copy(baseUrl = base, apiKey = inf.key, models = models, suggested = inf.suggested, suggestedTiers = inf.suggestedTiers, searchUrl = searchUrl, searchKey = inf.searchKey)
-        if (next == row) return
-        ai.setProfile(profile.copy(providers = profile.providers.map { if (it.id == ARMILLARY_PROVIDER) next else it }))
+        // A default the owner never picked follows the vendor's, which may have just changed.
+        val updated = profile.copy(providers = profile.providers.map { if (it.id == ARMILLARY_PROVIDER) next else it }).followingVendorDefault()
+        if (updated == profile) return
+        ai.setProfile(updated)
     }
 
     companion object {

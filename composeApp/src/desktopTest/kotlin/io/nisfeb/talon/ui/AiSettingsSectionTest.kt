@@ -15,6 +15,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
@@ -218,11 +219,51 @@ class AiSettingsSectionTest {
         assertEquals("claude-opus-5", catchUp()!!.model)
         // The vendor's model by its short name, as the pickers name it.
         // One way back, on the row: the button over them all said it twice.
-        onNodeWithText("Use Armillary's pick, 1").performScrollTo().performClick()
+        // The default, on the owner's own provider, has its own: the last is catch-up's.
+        onAllNodesWithText("Use Armillary's pick, 1").onLast().performScrollTo().performClick()
         waitForIdle()
         assertEquals("z/1", catchUp()!!.model)
         assertTrue(ai.state.value.savedProfile!!.isOn(AiFeature.CatchUp), "following keeps the switch")
-        onNodeWithText("Use Armillary's pick, 1").assertDoesNotExist()
+        assertEquals(1, onAllNodesWithText("Use Armillary's pick, 1").fetchSemanticsNodes().size, "only the default's is left")
+    }
+
+    // "fix it so the default follows armillary unless the user explicitly
+    // changes it" (sneagan, 2026-10-12): a top-up had left Fable there.
+    @Test
+    fun `the default follows the vendor's until picked by hand, and one tap brings it back`() = runComposeUiTest {
+        val fable = ModelRef(ARMILLARY_PROVIDER, "anthropic/claude-fable-5.1")
+        val ai = FakeAiSettings().withProfile(withArmillary().copy(defaultModel = fable))
+        val bought = repo(ai) { path ->
+            HttpStatusCode.OK to when {
+                path.endsWith("/api/inference") ->
+                    """{"mode":"lease","base_url":"https://openrouter.ai/api/v1","key":"sk-or-1","models":["anthropic/claude-opus-5.5","anthropic/claude-fable-5.1"],
+                        "suggested":{"rev":2,"models":{"default":"anthropic/claude-opus-5.5"}}}"""
+                path.endsWith("/api/plans") -> "[]"
+                path.endsWith("/api/catalog") -> "[]"
+                else -> funded
+            }
+        }
+        val saved = { ai.state.value.savedProfile!! }
+        assertEquals(ModelRef(ARMILLARY_PROVIDER, ""), saved().defaultModel, "what a payment wrote follows the vendor's again")
+        setContent {
+            TalonTheme(darkTheme = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
+            }
+        }
+        onNodeWithText("Use Armillary's pick", substring = true).assertDoesNotExist()
+        // Picked by hand, in the picker: the first is the default's.
+        onAllNodesWithText("Default · Opus 5.5")[0].performScrollTo().performClick()
+        onNodeWithText("anthropic/claude-fable-5.1").performClick()
+        waitForIdle()
+        assertEquals(fable, saved().defaultModel)
+        assertTrue(saved().defaultOwn)
+        runBlocking { bought.refresh() }
+        assertEquals(fable, saved().defaultModel, "a refresh leaves a hand pick alone")
+        onNodeWithText("Use Armillary's pick, Opus 5.5").performScrollTo().performClick()
+        waitForIdle()
+        assertEquals(ModelRef(ARMILLARY_PROVIDER, ""), saved().defaultModel)
+        assertFalse(saved().defaultOwn)
+        onNodeWithText("Use Armillary's pick, Opus 5.5").assertDoesNotExist()
     }
 
     /** A ship answering [plans] and [account], with one model on offer. */
