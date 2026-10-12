@@ -46,9 +46,6 @@ class CloudRung(private val config: () -> AiSettings.Config) : Rung() {
     }
 }
 
-/** The phone's choice to leave reading to a computer, and the setter behind the switch. */
-class StandDown(val on: StateFlow<Boolean>, val set: (Boolean) -> Unit)
-
 /**
  * The switch that lets the frontier model read messages, as a flow.
  * It lives with the rest of the AI configuration, so it follows the

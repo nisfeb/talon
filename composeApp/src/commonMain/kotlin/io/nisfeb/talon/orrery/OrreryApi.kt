@@ -25,7 +25,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -217,58 +216,6 @@ class OrreryApi(
         return reading { Json.parseToJsonElement(said).jsonObject }
     }
 
-    /**
-     * The owner's own words for the ship to act on (orrery 60): "Andrea
-     * was not in Barcelona", "Sam and Samuel are one person", "remove
-     * her". One model call on the ship, counted like a refine. [action]
-     * is the proposal being answered, where there is one. What the words
-     * ask for is filed as proposals, or approved at once with [apply].
-     * A refusal (no model key, the day's calls spent, the model failing)
-     * is an answer the owner reads, as a refine's is.
-     */
-    /**
-     * Whether every orrery setting follows the ship's Armillary (orrery
-     * 96): null where orrery is older, the ship has no Armillary, or
-     * orrery may not read it yet. Owner only.
-     */
-    suspend fun armillaryFollowing(): Boolean? {
-        val text = runCatching { request(owner, HttpMethod.Get, "/api/armillary") }.getOrNull() ?: return null
-        val o = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
-        if (o["offered"]?.jsonPrimitive?.booleanOrNull != true) return null
-        val settings = o["settings"] as? JsonObject ?: return null
-        return settings.values.all { (it as? JsonObject)?.get("following")?.jsonPrimitive?.booleanOrNull != false }
-    }
-
-    /** Every orrery setting follows the ship's Armillary again (orrery 96). Owner only. */
-    suspend fun followArmillary() {
-        request(owner, HttpMethod.Post, "/api/armillary/follow", "{}")
-    }
-
-    /** Orrery's place lookups through Brave Search (orrery 87), as the ship holds them. Owner only. */
-    suspend fun searchSettings(): SearchSettings = searchOf(request(owner, HttpMethod.Get, "/api/search"))
-
-    /**
-     * Turn orrery's place lookups on or off. Owner only: the install's
-     * key is refused (403 "owner only"). A blank or absent key keeps the
-     * stored one, so turning off keeps it for turning on again.
-     */
-    suspend fun setSearch(enabled: Boolean, apiKey: String? = null): SearchSettings {
-        val body = buildJsonObject {
-            put("enabled", enabled)
-            apiKey?.trim()?.takeIf { it.isNotEmpty() }?.let { put("api_key", it) }
-        }
-        return searchOf(request(owner, HttpMethod.Put, "/api/search", body.toString()))
-    }
-
-    private fun searchOf(text: String): SearchSettings = reading {
-        val o = Json.parseToJsonElement(text).jsonObject
-        SearchSettings(
-            enabled = o["enabled"]?.jsonPrimitive?.booleanOrNull == true,
-            keySet = o["api_key_set"]?.jsonPrimitive?.booleanOrNull == true,
-            monthlyCap = o["monthly_cap"]?.jsonPrimitive?.intOrNull,
-        )
-    }
-
     suspend fun instruct(text: String, action: String? = null, apply: Boolean = false): Instructed {
         val body = buildJsonObject {
             put("text", clipBytes(text.trim(), 2000))
@@ -308,11 +255,6 @@ class OrreryApi(
         }
         val said = request(owner, HttpMethod.Post, "/api/correct", body.toString())
         return reading { Json.parseToJsonElement(said).jsonObject }
-    }
-
-    /** Run the ship's chat reader now; [settingsDoc] `chat/last` is its record once it is done. */
-    suspend fun wakeChat() {
-        request(owner, HttpMethod.Post, "/api/chat/wake")
     }
 
     /**
@@ -804,10 +746,6 @@ data class Refined(
     val note: String = "",
 )
 
-/** What an instruction answered: the ship's reply, what it filed, and what it would not do. */
-/** Orrery's place lookups: on or off, whether it holds a key (never the key), its monthly cap. */
-data class SearchSettings(val enabled: Boolean, val keySet: Boolean, val monthlyCap: Int?)
-
 data class Instructed(
     val reply: String = "",
     val actions: List<OrreryAction> = emptyList(),
@@ -855,15 +793,6 @@ fun preferencesOf(o: JsonObject) = OrreryPreferences(
     style = o["style"]?.jsonPrimitive?.contentOrNull.orEmpty(),
     list = names(o["preferences"]),
 )
-
-/** A DM or channel the chat reader could read: its id, and the name a person knows it by, which may be blank. */
-data class ChatOption(val id: String, val name: String)
-
-fun chatOptionsOf(o: JsonObject): List<ChatOption> = (o["items"] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { e ->
-    val item = e as? JsonObject ?: return@mapNotNull null
-    val id = item["id"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-    ChatOption(id, item["name"]?.jsonPrimitive?.contentOrNull.orEmpty())
-}
 
 /** A reader's last pass (`chat/last`, `mail/last`): when, how much it read and filed, and what it said. */
 data class ChatReaderRun(val atMs: Long?, val read: Int, val filed: Int, val notes: List<String>, val modelDown: Boolean)

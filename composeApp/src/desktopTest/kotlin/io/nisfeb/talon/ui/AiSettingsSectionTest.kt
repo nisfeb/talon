@@ -130,7 +130,7 @@ class AiSettingsSectionTest {
                 Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
             }
         }
-        onNodeWithText("Not on this ship. Install it from the Grubbery shell on your ship.").assertExists()
+        onNodeWithText("Armillary is not on your ship. Install it from the Apps page.").assertExists()
         onNodeWithText("Armillary is published by ~ricsul-bilwyt, the same as Orrery and the Calendar.").assertExists()
         onNodeWithText("Top up").assertIsNotEnabled()
         // No address and no key on this card: the ship holds both. The
@@ -177,7 +177,7 @@ class AiSettingsSectionTest {
         onNodeWithText("$12.35 credit with ~wex").assertExists()
         onNodeWithText("Change vendor").assertExists()
         onNodeWithText("Pay as you go.").assertExists()
-        onNodeWithText("Connected through ~wex's ship. 1 model.").assertExists()
+        onNodeWithText("Connected through your vendor. 1 model.").assertExists()
         onNodeWithText("This device isn't connected yet.").assertDoesNotExist()
         onNodeWithText("Subscribe: Starter, $10.00 a month for $12.00 of credit").assertExists()
         onNodeWithText("Top up").performClick()
@@ -207,10 +207,9 @@ class AiSettingsSectionTest {
             }
         }
         val catchUp = { ai.state.value.savedProfile!!.resolve(AiFeature.CatchUp) }
-        onNodeWithText("Your Armillary vendor picks the models for the features below. Picking another makes it your own.").assertExists()
+        onNodeWithText("Armillary picks a model for each feature. Choose your own to change it.").assertExists()
         assertEquals(ARMILLARY_PROVIDER to "z/1", catchUp()!!.provider.id to catchUp()!!.model, "an owner who picked nothing runs on the vendor's pick")
-        assertTrue(onAllNodesWithText("Your Armillary vendor's pick.").fetchSemanticsNodes().isNotEmpty())
-        onNodeWithText("Use Armillary AI defaults").assertDoesNotExist()
+        assertTrue(onAllNodesWithText("Armillary's pick.").fetchSemanticsNodes().isNotEmpty())
         // A model picked by hand, as the picker saves it.
         ai.setProfile(ai.state.value.savedProfile!!.let { p ->
             p.copy(features = p.features + (AiFeature.CatchUp to FeatureSetting(on = true, model = ModelRef("main", "claude-opus-5"), own = true)))
@@ -218,12 +217,12 @@ class AiSettingsSectionTest {
         waitForIdle()
         assertEquals("claude-opus-5", catchUp()!!.model)
         // The vendor's model by its short name, as the pickers name it.
-        onNodeWithText("Use your vendor's model, 1").assertExists()
-        onNodeWithText("Use Armillary AI defaults").performClick()
+        // One way back, on the row: the button over them all said it twice.
+        onNodeWithText("Use Armillary's pick, 1").performScrollTo().performClick()
         waitForIdle()
         assertEquals("z/1", catchUp()!!.model)
         assertTrue(ai.state.value.savedProfile!!.isOn(AiFeature.CatchUp), "following keeps the switch")
-        onNodeWithText("Use Armillary AI defaults").assertDoesNotExist()
+        onNodeWithText("Use Armillary's pick, 1").assertDoesNotExist()
     }
 
     /** A ship answering [plans] and [account], with one model on offer. */
@@ -247,7 +246,7 @@ class AiSettingsSectionTest {
         "lease":{},"checkouts":{},"vendor":"~wex","self":"~feb","stale":3}"""
 
     @Test
-    fun `what works is listed first, the device model says what it is, and a keyless model is named where it is picked`() = runComposeUiTest {
+    fun `what works is listed first, this device's own model is Orrery's, and a keyless model is named where it is picked`() = runComposeUiTest {
         // sneagan's screen, 2026-10-08: a keyless OpenRouter on top, "On this
         // device" saying "OpenRouter has no key", the working Armillary last.
         val ai = FakeAiSettings().withProfile(
@@ -269,9 +268,10 @@ class AiSettingsSectionTest {
         }
         fun top(text: String) = onAllNodesWithText(text).fetchSemanticsNodes().first().boundsInRoot.top
         assertTrue(top("Armillary") < top("OpenRouter"), "the working default above the keyless one")
-        assertTrue(top("OpenRouter") < top("This device's own model"), "the device's own model last")
+        // Catch-up and the assistant cannot use it: it is triage's, on the Orrery page.
         onNodeWithText("On this device").assertDoesNotExist()
-        onNodeWithText("Runs here, so a feature set to it reads your messages without sending them anywhere.").assertExists()
+        onNodeWithText("This device (private)").assertDoesNotExist()
+        onNodeWithText("Runs on this device. Nothing it reads leaves it.").assertDoesNotExist()
         // Said under the feature that would fail, not on the device's card.
         onNodeWithText("OpenRouter has no key.").assertExists()
         assertTrue(
@@ -478,13 +478,13 @@ class AiSettingsSectionTest {
     }
 
     @Test
-    fun `the connection line says where a request actually goes, and to how many models`() {
+    fun `the connection line says whether it works, and how many models`() {
         val empty = Account(true, 0, "", false, null, "~wex", 0, leaseHeld = true, leaseDisabled = true, checkouts = emptyList())
-        assertEquals("Out of credit: requests go through ~wex's ship until you top up. 2 models.", connectionLine("lease", empty, 2))
+        assertEquals("Out of credit. Top up to keep using AI. 2 models.", connectionLine("lease", empty, 2))
         // Outside the US App Store no line says to pay (guideline 3.1.1(a)).
-        assertEquals("Out of credit: requests go through ~wex's ship until there is credit again. 2 models.", connectionLine("lease", empty, 2, canBuy = false))
-        assertEquals("Connected. Talon reaches the model provider directly, with a key your ship holds. 1 model.", connectionLine("lease", null, 1))
-        assertEquals("Connected through the vendor's ship. 3 models.", connectionLine("proxy", null, 3))
+        assertEquals("Out of credit. 2 models.", connectionLine("lease", empty, 2, canBuy = false))
+        assertEquals("Connected. 1 model.", connectionLine("lease", null, 1))
+        assertEquals("Connected through your vendor. 3 models.", connectionLine("proxy", null, 3))
         assertEquals("Connected. 0 models.", connectionLine(null, null, 0))
     }
 

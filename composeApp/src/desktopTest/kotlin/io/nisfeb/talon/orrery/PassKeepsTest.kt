@@ -359,6 +359,71 @@ class PassKeepsTest {
         }
     }
 
+    // Everything runs without a decision model: none set up, turned off, or
+    // turned on with nothing to offer one. The reading model reads the line
+    // itself and nothing asks OpenRouter ("make sure everything works
+    // without a decision model as well", sneagan, 2026-10-12).
+    @Test
+    fun `with no decision model the reading model reads every line, and nothing asks OpenRouter`() = runBlocking<Unit> {
+        for (jev in listOf(null, false, true)) {
+            val dir = createTempDirectory(prefix = "talon-pass-nodecide-").toFile()
+            val db = db(dir)
+            val scope = CoroutineScope(SupervisorJob())
+            var asked = 0
+            val model = object : LocalModel {
+                override val rung = "fake"
+                override suspend fun complete(system: String, user: String, grammar: String?, maxTokens: Int): String {
+                    asked++
+                    return """{"claims":[]}"""
+                }
+                override fun close() = Unit
+            }
+            val urls = java.util.concurrent.CopyOnWriteArrayList<String>()
+            try {
+                db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
+                db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
+                db.contacts().upsert(
+                    io.nisfeb.talon.data.ContactEntity(
+                        "~sampel-palnet", "Rose", null, null,
+                        status = "At the shop now, home by eight", statusUpdatedMs = io.nisfeb.talon.util.nowMs() - 60_000,
+                    ),
+                )
+                val http = HttpClient(
+                    MockEngine { req ->
+                        val url = req.url.toString()
+                        urls += url
+                        val body = when {
+                            "/api/observe" in url -> """{"bodies":[],"observations":[]}"""
+                            "/apps/orrery/api/state" in url -> state
+                            else -> "[]"
+                        }
+                        respond(body, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                    },
+                )
+                // The switch as the owner left it, beside an OpenRouter provider with no key.
+                val cfg = io.nisfeb.talon.ai.AiSettings.Config(
+                    provider = io.nisfeb.talon.ai.AiSettings.Provider.OpenRouter, apiKey = "", model = null,
+                    savedProfile = io.nisfeb.talon.ai.AiProfile(
+                        providers = listOf(io.nisfeb.talon.ai.AiProvider("or", io.nisfeb.talon.ai.ProviderKind.OpenRouter, "OpenRouter")),
+                        jev = jev,
+                    ),
+                )
+                OrreryRepo(
+                    http, scope, db, "test", book = { setOf("~sampel-palnet") }, bareClient = http, readWith = model,
+                    decide = DecideControl(kotlinx.coroutines.flow.MutableStateFlow(DecideSettings(on = jev == true))) {},
+                    cloud = CloudTriage(kotlinx.coroutines.flow.MutableStateFlow(false)) { cfg },
+                ).pass("https://ship.test", "~zod")
+                assertEquals(1, asked, "$jev: the reading model read the status line")
+                assertNotNull(db.orrerySent().get("~zod", "status:~sampel-palnet"), "$jev: and it is recorded as read")
+                kotlin.test.assertTrue(urls.none { "openrouter.ai" in it }, "$jev: $urls")
+            } finally {
+                kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
+                db.close()
+                dir.deleteRecursively()
+            }
+        }
+    }
+
     // The ship reads the owner's chats itself (orrery 39): Talon reading
     // them too read every message twice and proposed everything twice.
     @Test

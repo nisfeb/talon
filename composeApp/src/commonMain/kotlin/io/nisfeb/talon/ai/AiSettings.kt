@@ -231,8 +231,8 @@ object AiSettings {
     ) {
         CatchMeUp(
             "feat_catch_me_up",
-            "Catch me up",
-            "When you open a chat with unread messages, offer a summary.",
+            "Catch-up",
+            "Offers a summary when you open a chat with unread messages.",
             requiresCloudKey = true,
         ),
         // One toggle for the on-device embedder suite — search by meaning,
@@ -240,8 +240,8 @@ object AiSettings {
         // the same on-device index, so they live and die together.
         SmartFeatures(
             "feat_smart_features",
-            "Smart features (on-device)",
-            "Search your chats by meaning, group a chat's messages by topic, and highlight incoming messages similar to ones you've bookmarked. Runs entirely on-device.",
+            "Search by meaning",
+            "Find messages by what they mean, group a chat by topic, and highlight messages like ones you bookmarked. Runs on this device only.",
             requiresCloudKey = false,
         ),
         // One unified assistant (was Ask + Act). It answers questions
@@ -252,7 +252,7 @@ object AiSettings {
         // assistant subsumes MCP and web access — no separate toggles.
         Agent(
             "feat_agent",
-            "Assistant (beta)",
+            "Assistant",
             "A chat assistant grounded in your real messages. Ask about your history or tell it to do things — search, send, reply, react, mark read. It can also reach your ship's MCP tools and the public web. Anything that changes data is shown for your confirmation first.",
             requiresCloudKey = true,
         ),

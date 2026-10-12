@@ -46,7 +46,6 @@ class OrreryWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 io.nisfeb.talon.orrery.frontierReadsMessages(app.aiSettings),
             ) { app.aiSettings.state.value },
             book = { app.repo.bookContacts.value },
-            standDown = io.nisfeb.talon.orrery.StandDown(app.uiSettings.orreryStandDown, app.uiSettings::setOrreryStandDown),
             decide = io.nisfeb.talon.orrery.DecideControl(app.uiSettings.orreryDecide, app.uiSettings::setOrreryDecide),
             location = io.nisfeb.talon.ui.AndroidLocationControl,
             stopHealth = { io.nisfeb.talon.orrery.HealthWatch.set(app, false) },

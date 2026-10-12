@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui.screens
 import io.nisfeb.talon.ai.braveSearch
 import io.nisfeb.talon.ai.forFeature
+import io.nisfeb.talon.ai.loopsCanRun
 import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.clickable
@@ -672,7 +673,7 @@ fun AssistantScreen(
         mobileShowSidebar = false
     }
 
-    val jobsEnabled = isLoopsSupported && aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)
+    val jobsEnabled = isLoopsSupported && aiState.loopsCanRun()
     val settingsSync = repo?.settingsSync
 
     BoxWithConstraints(modifier.fillMaxSize()) {

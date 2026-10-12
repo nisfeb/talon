@@ -418,7 +418,7 @@ class SettingsScreenTest {
         settings(ai = ai) {
             tap("AI")
             onNodeWithText("Save key").performScrollTo().assertIsNotEnabled()
-            onNode(hasSetTextAction() and hasText("Brave Search API key (optional)")).performTextInput(" brv-1 ")
+            onNode(hasSetTextAction() and hasText("Brave Search key")).performTextInput(" brv-1 ")
             onNodeWithText("Save key").performClick()
             waitForIdle()
             assertEquals("brv-1", ai.state.value.braveApiKey)
@@ -427,21 +427,56 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun `a system prompt is edited, saved as customized, and reset to the default saves nothing`() {
+    fun `a system prompt is edited under advanced, saved as changed, and reset to the default saves nothing`() {
         val ai = assistantOn()
         settings(ai = ai) {
             tap("AI")
-            tap("Edit Assistant prompt")
+            assertTrue(onAllNodesWithText("Edit Assistant instructions").fetchSemanticsNodes().isEmpty(), "under Advanced, out of the way")
+            tap("Advanced")
+            tap("Edit Assistant instructions")
             // The dialog's box, which comes last: the screen has key fields of its own.
             onAllNodes(hasSetTextAction()).onLast().performTextReplacement("Be brief.")
-            onNodeWithText("Save").performClick()
+            // The dialog's, which comes last: a provider with no list yet has a Save of its own.
+            onAllNodesWithText("Save").onLast().performClick()
             waitForIdle()
             assertEquals("Be brief.", ai.state.value.prompt(io.nisfeb.talon.ai.AiSettings.PromptKind.Assistant))
-            tap("Edit Assistant prompt (customized)")
+            tap("Edit Assistant instructions (changed)")
             onNodeWithText("Reset to default").performClick()
-            onNodeWithText("Save").performClick()
+            onAllNodesWithText("Save").onLast().performClick()
             waitForIdle()
             assertEquals("", ai.state.value.prompt(io.nisfeb.talon.ai.AiSettings.PromptKind.Assistant), "the default is kept as no override, so improvements reach it")
+        }
+    }
+
+    // The assistant row says loops run on it: they show, and run, only while it is on.
+    @Test
+    fun `loops show only while the assistant is on`() {
+        settings(ai = assistantOn()) {
+            tap("AI")
+            assertTrue(onAllNodesWithText("Loops").fetchSemanticsNodes().isNotEmpty())
+        }
+        settings(ai = FakeAiSettings(io.nisfeb.talon.ai.AiSettings.Config(provider = io.nisfeb.talon.ai.AiSettings.Provider.Anthropic, apiKey = "sk-ant", model = null))) {
+            tap("AI")
+            assertTrue(onAllNodesWithText("Loops").fetchSemanticsNodes().isEmpty(), "a key alone does not run them")
+        }
+    }
+
+    @Test
+    fun `web search that comes with Armillary asks for no key`() {
+        val armillary = io.nisfeb.talon.ai.AiProvider(
+            io.nisfeb.talon.ai.ARMILLARY_PROVIDER, io.nisfeb.talon.ai.ProviderKind.Armillary, "Armillary",
+            searchUrl = "https://wex.example/apps/armillary/search", searchKey = "k.s",
+        )
+        val ai = FakeAiSettings(
+            io.nisfeb.talon.ai.AiSettings.Config(
+                provider = io.nisfeb.talon.ai.AiSettings.Provider.Anthropic, apiKey = "sk-ant", model = null, agentEnabled = true,
+                savedProfile = io.nisfeb.talon.ai.AiProfile(providers = listOf(armillary)),
+            ),
+        )
+        settings(ai = ai) {
+            tap("AI")
+            assertTrue(onAllNodesWithText("Web search comes with Armillary.").fetchSemanticsNodes().isNotEmpty())
+            assertTrue(onAllNodes(hasSetTextAction() and hasText("Brave Search key")).fetchSemanticsNodes().isEmpty())
         }
     }
 
@@ -450,13 +485,15 @@ class SettingsScreenTest {
         val ai = assistantOn()
         settings(ai = ai) {
             tap("AI")
-            switchBeside("Sync AI settings across devices").performClick()
+            tap("Advanced")
+            switchBeside("Copy AI keys to my other devices").performClick()
             waitForIdle()
             assertFalse(ai.state.value.syncEnabled)
         }
         settings {
             tap("AI")
-            assertTrue(onAllNodesWithText("Sync AI settings across devices").fetchSemanticsNodes().isEmpty(), "nothing to sync, nothing to switch")
+            assertTrue(onAllNodesWithText("Advanced").fetchSemanticsNodes().isEmpty(), "nothing to sync and no assistant: nothing under Advanced")
+            assertTrue(onAllNodesWithText("Copy AI keys to my other devices").fetchSemanticsNodes().isEmpty(), "nothing to sync, nothing to switch")
         }
     }
 

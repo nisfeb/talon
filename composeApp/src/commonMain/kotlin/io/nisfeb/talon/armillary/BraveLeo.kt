@@ -69,8 +69,7 @@ const val LEO_STEPS =
 
 /** Said under the key, since it is not one of Leo's own. */
 const val LEO_KEY_NOTE =
-    "This is your ship's lease, the same key Talon uses here and on your other devices: a ship holds only one. " +
-        "Leo spends from the same balance. Removing Armillary here gives the lease back, and Leo stops with it."
+    "All your devices and Leo share this key and its balance. Removing Armillary here stops Leo too."
 
 private const val CHAT_PATH = "/chat/completions"
 

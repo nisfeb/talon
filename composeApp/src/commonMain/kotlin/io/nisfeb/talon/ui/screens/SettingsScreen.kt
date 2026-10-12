@@ -69,15 +69,14 @@ import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.LoopPrompt
 import io.nisfeb.talon.ui.UiSettings
-import io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported
 import io.nisfeb.talon.ui.isAssistantSupported
 import io.nisfeb.talon.ui.isBackgroundCallRingSupported
 import io.nisfeb.talon.ui.isCallsSupported
 import io.nisfeb.talon.ui.isLoopsSupported
-import io.nisfeb.talon.ui.isOnDeviceAiSupported
 import io.nisfeb.talon.ui.theme.ThemePreference
 import io.nisfeb.talon.ui.icons.TalonIcons
-import io.nisfeb.talon.ai.hasModelFor
+import io.nisfeb.talon.ai.loopsCanRun
+import io.nisfeb.talon.ai.braveSearch
 
 @Composable
 fun SettingsScreen(
@@ -790,78 +789,98 @@ fun SettingsScreen(
                 OrrerySettingsSection(aiSettings, orrery)
             }
             if (safeTab == SettingsTab.Ai) {
-            // Providers, the default model, a row per feature, and Jev.
-            AiSettingsSection(aiSettings, orrery, armillary, onOpenOrrery = { tab = SettingsTab.Orrery })
-            // The assistant subsumes MCP (ship tools) and web access —
-            // no separate toggles. When it's on, offer the optional
-            // Brave key that powers its web search (it can open URLs
-            // without one).
+            // Providers, the default model and a row per feature.
+            AiSettingsSection(aiSettings, orrery, armillary)
+            // The assistant subsumes MCP (ship tools) and web access, with
+            // no separate toggles. When it's on, offer the optional Brave
+            // key that powers its web search (it can open URLs without
+            // one), unless Armillary already searches for this ship.
             if (isAssistantSupported && aiFeatureEnabled(aiState, AiSettings.Feature.Agent)) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Assistant web search",
+                    "Web search (optional)",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 )
-                OutlinedTextField(
-                    value = braveKey,
-                    onValueChange = { braveKey = it },
-                    label = { Text("Brave Search API key (optional)") },
-                    singleLine = true,
-                    visualTransformation = if (revealBrave) VisualTransformation.None
-                    else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        io.nisfeb.talon.ui.IconButton(tip = if (revealBrave) "Hide key" else "Show key", onClick = { revealBrave = !revealBrave }) {
-                            Icon(
-                                imageVector = if (revealBrave) TalonIcons.VisibilityOff
-                                else TalonIcons.Visibility,
-                                contentDescription = if (revealBrave) "Hide key" else "Show key",
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { aiSettings.setBraveApiKey(braveKey.trim()) },
-                        enabled = braveKey.trim() != aiState.braveApiKey,
-                    ) { Text("Save key") }
-                }
-                Text(
-                    "Optional — a Brave Search API key lets the assistant search " +
-                        "the web (it can already open URLs without one). " +
-                        "Get a free key at search.brave.com/help/api.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                // The same key, handed to orrery for its place lookups
-                // (orrery 87), where Orrery is on: a deliberate button.
-                if (orrery != null) {
-                    val orreryOn by orrery.enabled.collectAsState()
-                    if (orreryOn) OrrerySearchKeyRow(
-                        key = aiState.braveApiKey,
-                        read = { orrery.searchSettings() },
-                        set = { on, k -> orrery.setSearch(on, k) },
+                if (aiState.braveApiKey.isBlank() && aiState.braveSearch() != null) {
+                    Text(
+                        "Web search comes with Armillary.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = braveKey,
+                        onValueChange = { braveKey = it },
+                        label = { Text("Brave Search key") },
+                        singleLine = true,
+                        visualTransformation = if (revealBrave) VisualTransformation.None
+                        else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            io.nisfeb.talon.ui.IconButton(tip = if (revealBrave) "Hide key" else "Show key", onClick = { revealBrave = !revealBrave }) {
+                                Icon(
+                                    imageVector = if (revealBrave) TalonIcons.VisibilityOff
+                                    else TalonIcons.Visibility,
+                                    contentDescription = if (revealBrave) "Hide key" else "Show key",
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { aiSettings.setBraveApiKey(braveKey.trim()) },
+                            enabled = braveKey.trim() != aiState.braveApiKey,
+                        ) { Text("Save key") }
+                    }
+                    Text(
+                        "Add a free Brave Search key so the assistant can search the web. " +
+                            "Get one at search.brave.com/help/api.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
 
+            // What most people never need: whether keys go to the ship for
+            // the other devices, and what the assistant is told.
+            val showPrompts = isAssistantSupported && aiFeatureEnabled(aiState, AiSettings.Feature.Agent)
+            if (aiState.hasCredentials() || showPrompts) {
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    "System prompts",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                )
-                Text(
-                    "The instructions the AI follows. Urbit knowledge is shared by " +
-                        "the assistant and scheduled jobs; each also has its own. " +
-                        "Customizing changes behavior; edits sync across your devices.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                PROMPT_PARTS.forEach { part ->
-                    OutlinedButton(onClick = { promptEditorKind = part.kind }) {
-                        Text(
-                            if (aiState.prompt(part.kind).isBlank()) "Edit ${part.label}"
-                            else "Edit ${part.label} (customized)",
-                        )
+                HorizontalDivider()
+                var advanced by remember { mutableStateOf(false) }
+                TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Hide advanced" else "Advanced") }
+                // Any stored credential is enough to want this switch: it
+                // used to live under hasKey(), so someone who set only a
+                // Whisper key had it pushed to %settings (syncEnabled
+                // defaults on) with no way to opt out short of pasting a
+                // chat key first.
+                if (advanced && aiState.hasCredentials()) {
+                    FeatureToggleRow(
+                        label = "Copy AI keys to my other devices",
+                        description = "Saves your AI providers, models and keys on your ship, so your " +
+                            "other devices can use them. Feature switches are shared either way.",
+                        enabled = aiState.syncEnabled,
+                        onChange = { aiSettings.setSyncEnabled(it) },
+                    )
+                }
+                if (advanced && showPrompts) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Instructions",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                    Text(
+                        "What the assistant and your loops are told to do. Changes apply on all your devices.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    PROMPT_PARTS.forEach { part ->
+                        OutlinedButton(onClick = { promptEditorKind = part.kind }) {
+                            Text(
+                                if (aiState.prompt(part.kind).isBlank()) "Edit ${part.label}"
+                                else "Edit ${part.label} (changed)",
+                            )
+                        }
                     }
                 }
                 promptEditorKind?.let { kind ->
@@ -877,54 +896,6 @@ fun SettingsScreen(
                         onDismiss = { promptEditorKind = null },
                     )
                 }
-            }
-
-            // Any stored credential is enough to want this switch: it
-            // used to live under hasKey(), so someone who set only a
-            // Whisper key had it pushed to %settings (syncEnabled
-            // defaults on) with no way to opt out short of pasting a
-            // chat key first.
-            if (aiState.hasCredentials()) {
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(8.dp))
-                FeatureToggleRow(
-                    label = "Sync AI settings across devices",
-                    description = "Stores your providers, models and switches, with every " +
-                        "provider's key and the Brave Search key, in %settings on the " +
-                        "ship. The keys will be on the ship, so only enable it if you " +
-                        "trust the ship.",
-                    enabled = aiState.syncEnabled,
-                    onChange = { aiSettings.setSyncEnabled(it) },
-                )
-            }
-            // On-device features — gated behind isOnDeviceAiSupported.
-            // True on Android (ML Kit + on-device embedder available);
-            // false on desktop until / unless an equivalent stack lands.
-            if (isOnDeviceAiSupported) {
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "On-device features",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                )
-                Text(
-                    "Run entirely on your device — no API key, no data sent off device.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                AiSettings.Feature.values()
-                    .filter { !it.requiresCloudKey }
-                    .filter { isOnDeviceAiFeatureSupported(it) }
-                    .forEach { feature ->
-                        FeatureToggleRow(
-                            label = feature.label,
-                            description = feature.description,
-                            enabled = aiFeatureEnabled(aiState, feature),
-                            onChange = { aiSettings.setFeature(feature, it) },
-                        )
-                    }
             }
 
             }
@@ -992,7 +963,7 @@ fun SettingsScreen(
             // the agent) and a platform that can fire it, so it's gated on
             // isLoopsSupported (Android via AlarmManager; desktop via the
             // while-open ticker — both true).
-            if (isLoopsSupported && aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)) {
+            if (isLoopsSupported && aiState.loopsCanRun()) {
                 Spacer(Modifier.height(16.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
@@ -1954,9 +1925,9 @@ private class PromptPart(
 )
 
 private val PROMPT_PARTS = listOf(
-    PromptPart(AiSettings.PromptKind.UrbitKnowledge, "Urbit knowledge (shared)", AgentPrompt.urbitKnowledge),
-    PromptPart(AiSettings.PromptKind.Assistant, "Assistant prompt", AgentPrompt.assistant),
-    PromptPart(AiSettings.PromptKind.Loop, "Scheduled-job prompt", LoopPrompt.loop),
+    PromptPart(AiSettings.PromptKind.UrbitKnowledge, "Background on Urbit", AgentPrompt.urbitKnowledge),
+    PromptPart(AiSettings.PromptKind.Assistant, "Assistant instructions", AgentPrompt.assistant),
+    PromptPart(AiSettings.PromptKind.Loop, "Loop instructions", LoopPrompt.loop),
 )
 
 /**
@@ -1997,8 +1968,8 @@ private fun SystemPromptEditorDialog(
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(
-                    "Instructions the AI follows. Tailor it to change behavior, " +
-                        "or reset to the built-in default. Edits sync across your devices.",
+                    "What the AI is told to do. Change it to change how it behaves, " +
+                        "or reset to the built-in default. Changes apply on all your devices.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

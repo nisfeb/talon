@@ -135,8 +135,38 @@ data class AiProfile(
      */
     fun resolve(f: AiFeature): Resolved? {
         if (followsVendor(f)) return vendorModel(f)
-        return resolve(features[f]?.model ?: defaultModel)
+        return resolve(pick(f) ?: defaultFor(f))
     }
+
+    /**
+     * [f]'s own model, or null where it follows the default. The device
+     * model triage is started on, and the one a removed provider leaves
+     * it on, are nobody's pick: triage follows the default from there.
+     */
+    fun pick(f: AiFeature): ModelRef? {
+        val s = features[f] ?: return null
+        if (f == AiFeature.OrreryTriage && !s.own && s.model?.provider == DEVICE_PROVIDER) return null
+        return s.model
+    }
+
+    /**
+     * What "Default" is for [f]: the default model. Triage reads every
+     * message unasked, so it follows only a private default and stays on
+     * this device otherwise; a cloud model picked on its own row is the
+     * opt-in that takes it off the device.
+     */
+    fun defaultFor(f: AiFeature): ModelRef? {
+        if (f != AiFeature.OrreryTriage) return defaultModel
+        defaultModel?.takeIf { resolve(it)?.private == true }?.let { return it }
+        return features[f]?.model?.takeIf { it.provider == DEVICE_PROVIDER } ?: ModelRef(DEVICE_PROVIDER, "")
+    }
+
+    /**
+     * The ship's generator follows the default model: the owner picked
+     * "Default" on its row. A row with no model the owner never picked
+     * may be a generator set up on the ship itself, which is left alone.
+     */
+    fun generatorFollowsDefault(): Boolean = features[AiFeature.OrreryGenerator]?.let { it.own && it.model == null } == true
 
     /** The Armillary row, where this device buys from its ship. */
     fun armillary(): AiProvider? = providers.firstOrNull { it.kind == ProviderKind.Armillary }
@@ -536,6 +566,12 @@ fun AiProfile.keepingLocal(local: AiProfile?): AiProfile {
  */
 fun AiSettings.Config.hasModelFor(f: AiFeature): Boolean = modelProblem(f) == null
 
+/**
+ * Loops run on the assistant, so only while it is on and has a model.
+ * They ran with it off, and lost its web tools without a word.
+ */
+fun AiSettings.Config.loopsCanRun(): Boolean = assistantOn() && hasModelFor(AiFeature.Assistant)
+
 /** Why [f] has no model a chat client can call, as a sentence, or null when it has one ([Resolved.problem]). */
 fun AiSettings.Config.modelProblem(f: AiFeature): String? {
     val r = profile().resolve(f) ?: return "No model is set."
@@ -667,6 +703,15 @@ fun AiProfile.withSwitches(s: kotlinx.serialization.json.JsonObject): AiProfile 
     jev = (s["jev"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: jev,
     orrery = (s["orrery"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: orrery,
 )
+
+/**
+ * What transcription runs on: its own speech model, else whisper-1 on the
+ * default provider where that one can transcribe, as
+ * [CallRecordingPublisher.sttFrom] does. The row said "None chosen" while
+ * whisper-1 ran.
+ */
+fun AiProfile.transcriptionRef(): ModelRef? = features[AiFeature.Transcription]?.model
+    ?: defaultModel?.takeIf { d -> provider(d.provider)?.kind.let { it == ProviderKind.OpenAi || it == ProviderKind.OpenAiCompatible } }?.copy(model = WHISPER)
 
 /** Orrery is on: turned on by the owner, on some device. Off by default. */
 fun AiSettings.Config.orreryOn(): Boolean = savedProfile?.orrery == true

@@ -62,7 +62,6 @@ class FileUiSettings(
         val hiddenCalendars: List<String> = emptyList(),
         val defaultCalendar: String = "",
         val calendarWeekView: Boolean = false,
-        val orreryStandDown: Boolean = true,
         val orreryDecide: io.nisfeb.talon.orrery.DecideSettings = io.nisfeb.talon.orrery.DecideSettings(),
         val orreryServerUrl: String = "",
         val orreryServerModel: String = "",
@@ -206,14 +205,6 @@ class FileUiSettings(
     override fun setCalendarWeekView(on: Boolean) {
         if (_calendarWeekView.value == on) return
         _calendarWeekView.value = on
-        persistCurrent()
-    }
-
-    private val _orreryStandDown = MutableStateFlow(initial.orreryStandDown)
-    override val orreryStandDown: StateFlow<Boolean> = _orreryStandDown.asStateFlow()
-    override fun setOrreryStandDown(on: Boolean) {
-        if (_orreryStandDown.value == on) return
-        _orreryStandDown.value = on
         persistCurrent()
     }
 
@@ -392,7 +383,6 @@ class FileUiSettings(
                 hiddenCalendars = _hiddenCalendars.value.toList(),
                 defaultCalendar = _defaultCalendar.value,
                 calendarWeekView = _calendarWeekView.value,
-                orreryStandDown = _orreryStandDown.value,
                 orreryDecide = _orreryDecide.value,
                 orreryServerUrl = _orreryServerUrl.value,
                 orreryServerModel = _orreryServerModel.value,

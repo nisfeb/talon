@@ -53,7 +53,7 @@ class OrreryVersion60RepoTest {
             val json = { body: String -> respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
             when {
                 path == "instruct" -> { delay(holdMs); json("""{"ok":true,"reply":"They look like one person.","actions":[${proposal("p9", "Fold Samuel into Sam")}],"note":""}""") }
-                path == "read/settings" && req.method == HttpMethod.Put -> { delay(holdMs); req.body.toByteArray().decodeToString().let { put += it; json(it) } }
+                path == "mail" && req.method == HttpMethod.Put -> { delay(holdMs); req.body.toByteArray().decodeToString().let { put += it; json(it) } }
                 path == "actions" -> json(open)
                 path == "schema" && req.method == HttpMethod.Put -> req.body.toByteArray().decodeToString().let { put += it; json(it) }
                 path == "schema" -> json(schema)
@@ -116,10 +116,10 @@ class OrreryVersion60RepoTest {
     fun `leaving the page while a switch is sent still sends it`() = attached { repo, _, _ ->
         holdMs = 300
         val page = CoroutineScope(SupervisorJob())
-        page.launch { repo.setReadChannel(false) }
+        page.launch { repo.setMailReader(false) }
         delay(100)
         page.coroutineContext.job.cancelAndJoin()
-        withTimeout(10_000) { while (repo.readChannel.value != false) delay(20) }
+        withTimeout(10_000) { while (repo.mailReader.value != false) delay(20) }
         assertEquals(listOf("""{"enabled":false}"""), put.toList())
     }
 }

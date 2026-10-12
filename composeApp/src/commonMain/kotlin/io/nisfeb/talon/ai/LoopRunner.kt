@@ -51,7 +51,7 @@ class LoopRunner(
      *  later timed out / cancelled still advances the schedule — otherwise
      *  the loop stays due and re-fires every wake (token + battery drain). */
     suspend fun runLoop(loop: LoopEntity) {
-        if (!aiConfig().hasModelFor(AiFeature.Assistant)) return
+        if (!aiConfig().loopsCanRun()) return
         val ts = now()
         loops.markRan(loop.id, ts)
         // Defence in depth: drop write tools unless this loop opted in, AND
@@ -83,7 +83,7 @@ class LoopRunner(
      *  wake-up; this batches whatever has come due since. Skips entirely
      *  with no AI key set, so a keyless device records no error noise. */
     suspend fun runDue() {
-        if (!aiConfig().hasModelFor(AiFeature.Assistant)) return
+        if (!aiConfig().loopsCanRun()) return
         val t = now()
         val zone = TimeZone.currentSystemDefault()
         for (loop in loops.enabled()) {

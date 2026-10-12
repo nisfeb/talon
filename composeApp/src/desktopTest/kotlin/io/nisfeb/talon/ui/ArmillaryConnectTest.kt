@@ -123,7 +123,7 @@ class ArmillaryConnectTest {
         assertEquals(0, keyAsks(), "looking asks for nothing")
 
         onNodeWithText("Set up this device").performScrollTo().performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Connected through ~nisfeb's ship. 2 models.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Connected through your vendor. 2 models.") }
         assertEquals(1, keyAsks())
         assertFalse(shows("This device isn't connected yet."))
         assertEquals("k.s", ai.rowKey(), "the key is on the row the features read")
@@ -141,7 +141,7 @@ class ArmillaryConnectTest {
 
         mint = { null }
         onNodeWithText("Set up this device").performScrollTo().performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Connected through ~nisfeb's ship.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Connected through your vendor.") }
         assertFalse(shows("Your ship refused"), "the reason goes once there is a key")
     }
 
@@ -150,7 +150,7 @@ class ArmillaryConnectTest {
         val ai = settings()
         show(ai, repo(ai))
         onNodeWithText("Refresh").performScrollTo().performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Connected through ~nisfeb's ship.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Connected through your vendor.") }
         assertEquals(1, keyAsks())
         // With a key, Refresh only reads.
         onNodeWithText("Refresh").performScrollTo().performClick()

@@ -141,15 +141,6 @@ interface UiSettings {
     fun setCalendarWeekView(on: Boolean)
 
     /**
-     * On a phone: leave the reading of messages to a computer running
-     * Talon when one has been on the job in the last two hours, since it has the
-     * bigger model. Facts still go up from the phone. Per device, on by
-     * default, and meaningless on the computer itself.
-     */
-    val orreryStandDown: StateFlow<Boolean>
-    fun setOrreryStandDown(on: Boolean)
-
-    /**
      * The decision model in front of the orrery reader and behind it:
      * the gate and the status check. Per device, off by default, since
      * every message it reads goes to OpenRouter.
@@ -402,9 +393,6 @@ class InMemoryUiSettings(
     private val _calendarWeekView = MutableStateFlow(false)
     override val calendarWeekView: StateFlow<Boolean> = _calendarWeekView.asStateFlow()
     override fun setCalendarWeekView(on: Boolean) { _calendarWeekView.value = on }
-    private val _orreryStandDown = MutableStateFlow(true)
-    override val orreryStandDown: StateFlow<Boolean> = _orreryStandDown.asStateFlow()
-    override fun setOrreryStandDown(on: Boolean) { _orreryStandDown.value = on }
     private val _orreryDecide = MutableStateFlow(io.nisfeb.talon.orrery.DecideSettings())
     override val orreryDecide: StateFlow<io.nisfeb.talon.orrery.DecideSettings> = _orreryDecide.asStateFlow()
     override fun setOrreryDecide(d: io.nisfeb.talon.orrery.DecideSettings) { _orreryDecide.value = d }

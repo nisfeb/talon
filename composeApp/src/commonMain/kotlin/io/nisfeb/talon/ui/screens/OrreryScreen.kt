@@ -94,7 +94,7 @@ fun OrreryRepoScreen(
         modifier = modifier,
         openItem = openItem,
         onOpenedItem = onOpenedItem,
-        turnOn = if (on) null else orreryRepo::enable,
+        turnOn = if (on) null else orreryRepo::ensureEnabled,
     ) {
         OrreryActionsScreen(
             actions = actions,
@@ -368,9 +368,10 @@ private fun leaveLine(p: LeaveBy): String =
     "Leave by ${formatClock(p.leaveByMs)}" + (if (p.minutes > 0) " · ${p.minutes} min with traffic" else "")
 
 /**
- * Orrery is on the ship but not on for this install: reading it needs a
- * key of this install's own, which is what turning it on makes. Said as
- * that, with the switch's own words, not as a failure to read.
+ * Orrery is on, but this install has no key of its own yet to read it
+ * with. Each device makes its key by itself when Orrery is on
+ * ([io.nisfeb.talon.orrery.settleOrreryGate]); this is for when it did
+ * not, said as that, not as a failure to read.
  */
 @Composable
 private fun NotOnHere(turnOn: suspend () -> Result<Unit>, onOn: () -> Unit) {
@@ -378,9 +379,9 @@ private fun NotOnHere(turnOn: suspend () -> Result<Unit>, onOn: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var why by remember { mutableStateOf<String?>(null) }
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Orrery isn't turned on for this device.", style = MaterialTheme.typography.bodyMedium)
+        Text("Orrery isn't set up on this device yet.", style = MaterialTheme.typography.bodyMedium)
         Text(
-            "Turning it on gives this device a key of its own: it reads Orrery here, and sends Orrery the facts from your calls and contacts' status lines. Your ship reads your chats, calendar and mail itself. The same switch is in Settings, under AI.",
+            "Talon sets each device up by itself when Orrery is on: the device gets a key of its own, reads Orrery here, and sends Orrery the facts from your calls and contacts' status lines. If that did not happen, try again.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -391,7 +392,7 @@ private fun NotOnHere(turnOn: suspend () -> Result<Unit>, onOn: () -> Unit) {
                 turnOn().onSuccess { onOn() }.onFailure { why = it.message ?: "Orrery did not answer." }
                 busy = false
             }
-        }) { Text(if (busy) "Turning on…" else "Turn on") }
+        }) { Text(if (busy) "Setting up…" else "Try again") }
         why?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
     }
 }

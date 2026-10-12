@@ -31,8 +31,9 @@ class LoopRunnerTest {
         intervalMinutes = 60, createdAt = 0, updatedAt = 0, lastRunAt = 0,
     )
 
-    private fun config(key: String) =
-        AiSettings.Config(AiSettings.Provider.Anthropic, key, model = null)
+    /** A key, and the assistant on: loops run on it, and only while it is on. */
+    private fun config(key: String, assistant: Boolean = true) =
+        AiSettings.Config(AiSettings.Provider.Anthropic, key, model = null, agentEnabled = assistant)
 
     private fun tool(name: String, write: Boolean) = Tool(
         spec = ToolSpec(name, "", JsonObject(emptyMap())),
@@ -56,6 +57,28 @@ class LoopRunnerTest {
         // ...but lastRunAt was stamped first, so the loop is no longer due.
         assertEquals(7L to 5_000L, loops.lastMarkRan)
         assertTrue(runs.inserted.isEmpty(), "no run row for a cancelled run")
+    }
+
+    // The Assistant row says loops run on it, and they ran with it off,
+    // without its web tools (2026-10-12).
+    @Test
+    fun `with the assistant off no loop runs, by hand or on schedule`() = runBlocking {
+        // Due: never run, an hour apart, and it is well past the hour.
+        val loops = FakeLoopDao(listOf(loop))
+        val runs = FakeLoopRunDao()
+        var asked = false
+        val runner = LoopRunner(
+            loops = loops, runs = runs, tools = emptyList(),
+            completer = { _, _, _ -> asked = true; AgentTurn.Final("done") },
+            aiConfig = { config("k", assistant = false) },
+            notify = { _, _, _ -> },
+            now = { 10_000_000 },
+        )
+        runner.runLoop(loop)
+        runner.runDue()
+        assertNull(loops.lastMarkRan)
+        assertTrue(runs.inserted.isEmpty())
+        assertTrue(!asked, "the model was never asked")
     }
 
     @Test
@@ -140,11 +163,11 @@ class LoopRunnerTest {
     }
 }
 
-private class FakeLoopDao : LoopDao {
+private class FakeLoopDao(private val due: List<LoopEntity> = emptyList()) : LoopDao {
     var lastMarkRan: Pair<Long, Long>? = null
     override suspend fun upsert(loop: LoopEntity): Long = loop.id
     override fun stream(): Flow<List<LoopEntity>> = flowOf(emptyList())
-    override suspend fun enabled(): List<LoopEntity> = emptyList()
+    override suspend fun enabled(): List<LoopEntity> = due
     override suspend fun get(id: Long): LoopEntity? = null
     override suspend fun getByGid(gid: String): LoopEntity? = null
     override suspend fun setEnabled(id: Long, enabled: Boolean, now: Long) {}
