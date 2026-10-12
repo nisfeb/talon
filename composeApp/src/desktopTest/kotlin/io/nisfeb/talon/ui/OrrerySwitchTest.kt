@@ -7,6 +7,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
@@ -40,6 +42,7 @@ import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.urbit.FakeAiSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
@@ -53,6 +56,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -60,9 +64,10 @@ import kotlin.test.assertTrue
  * Orrery's page. Its one switch: off until the owner turns it on, with
  * what it is said in words for anyone; on, its settings; off again, the
  * ship's own reading and writing stop and this install's key goes back.
- * The switch and an install that disagree are settled the switch's way.
- * And the owner's style and standing preferences, which every orrery
- * prompt reads, kept on the ship.
+ * The switch and an install that disagree are settled the switch's way,
+ * a device seeing it on making its own key. What is the ship's is one
+ * link to Orrery's own page. The owner's preferences, which the assistant
+ * writes, are kept on the ship.
  */
 @OptIn(ExperimentalTestApi::class)
 class OrrerySwitchTest {
@@ -86,17 +91,28 @@ class OrrerySwitchTest {
     @Volatile private var missing = false
     /** How long the ship takes over anything: a busy one. */
     @Volatile private var holdMs = 0L
+    /** Keys the ship made for this device. */
+    private val mints: MutableList<String> = CopyOnWriteArrayList()
+    /** Every ask for a key, made or not. */
+    @Volatile private var asks = 0
 
     private val http = HttpClient(MockEngine { req ->
         val doc = req.url.encodedPath.substringAfter("/apps/orrery/api/", "")
         val json = { body: String -> respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
         if (holdMs > 0) kotlinx.coroutines.delay(holdMs)
+        if (doc == "clients" && req.method == HttpMethod.Post) asks++
         when {
             missing -> respond("", HttpStatusCode.NotFound)
             doc.startsWith("clients/") && req.method == HttpMethod.Delete -> {
                 if (revoke != HttpStatusCode.OK) return@MockEngine respond("", revoke)
                 revoked += doc.substringAfter("clients/")
                 json("{}")
+            }
+            doc == "clients" && req.method == HttpMethod.Post -> {
+                // A ship slow to mint, so a second ask lands while the first waits.
+                kotlinx.coroutines.delay(200)
+                mints += "c${mints.size + 9}"
+                json("""{"id":"${mints.last()}","token":"${mints.last()}.secret"}""")
             }
             doc == "preferences" && noPreferences -> respond("", HttpStatusCode.NotFound)
             doc in refused && req.method == HttpMethod.Put -> respond("""{"error":"$doc: refused"}""", HttpStatusCode.BadRequest)
@@ -117,6 +133,12 @@ class OrrerySwitchTest {
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build() to dir
     }
 
+    /** What the page opened in the browser. */
+    private val opened: MutableList<String> = CopyOnWriteArrayList()
+    private val uris = object : androidx.compose.ui.platform.UriHandler {
+        override fun openUri(uri: String) { opened += uri }
+    }
+
     private fun page(orrery: Boolean?, block: ComposeUiTest.(FakeAiSettings, OrreryRepo, AppDatabase) -> Unit) {
         val (db, dir) = db()
         runBlocking { db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "c1.secret")) }
@@ -129,10 +151,12 @@ class OrrerySwitchTest {
             runComposeUiTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
-                        Column(Modifier.verticalScroll(rememberScrollState())) { OrrerySettingsSection(ai, repo) }
+                        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides uris) {
+                            Column(Modifier.verticalScroll(rememberScrollState())) { OrrerySettingsSection(ai, repo) }
+                        }
                     }
                 }
-                waitUntil(timeoutMillis = 5_000) { repo.availability.value == OrreryAvailability.PRESENT }
+                waitUntil(timeoutMillis = 5_000) { repo.availability.value != OrreryAvailability.UNKNOWN }
                 waitForIdle()
                 block(ai, repo, db)
             }
@@ -152,14 +176,14 @@ class OrrerySwitchTest {
         assertTrue(shows("every direct message unless you pick which ones"))
         assertTrue(shows("Turning it off stops all of it"))
         onAllNodes(isToggleable())[0].assertIsOff()
-        assertTrue(!shows("Orrery triage"), "no settings while it is off")
+        assertTrue(!shows("Read calls and status lines"), "no settings while it is off")
         assertTrue("preferences" !in reads, "nor are the owner's preferences asked for")
     }
 
     @Test
     fun `turned on, its settings show, and the switch goes to every device`() = page(orrery = null) { ai, _, _ ->
         onAllNodes(isToggleable())[0].performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Orrery triage") }
+        waitUntil(timeoutMillis = 5_000) { shows("Read calls and status lines on this device") }
         assertEquals(true, ai.state.value.savedProfile?.orrery)
         assertEquals("true", ai.state.value.savedProfile!!.switches()["orrery"].toString(), "it travels with the switches")
     }
@@ -184,7 +208,7 @@ class OrrerySwitchTest {
         )
         assertEquals(listOf("c1"), revoked.toList())
         assertNull(runBlocking { db.orreryAccounts().get("~zod") }, "this install holds no key")
-        waitUntil(timeoutMillis = 5_000) { !shows("Orrery triage") }
+        waitUntil(timeoutMillis = 5_000) { !shows("Read calls and status lines") }
     }
 
     @Test
@@ -201,62 +225,26 @@ class OrrerySwitchTest {
 
     private fun sent(doc: String) = writes.filter { it.first == doc }.map { it.second.toString() }
 
-    private fun ComposeUiTest.field(label: String) = onNode(hasSetTextAction() and hasText(label))
-    private fun ComposeUiTest.hasField(label: String) = onAllNodes(hasSetTextAction() and hasText(label)).fetchSemanticsNodes().isNotEmpty()
-
-    private fun ComposeUiTest.add(text: String) {
-        field("Add a preference").performTextInput(text)
-        onNodeWithText("Add").performClick()
-    }
-
+    // The rest is the ship's, set on Orrery's own page; one row opens it
+    // (2026-10-12: "keep the fine controls in orrery, simplify in talon").
     @Test
-    fun `on, the owner's style and preferences show, and each change sends only itself`() = page(orrery = true) { _, _, _ ->
-        waitUntil(timeoutMillis = 5_000) { shows("No calls before 9am") && shows("Plain words") }
-        add("Never book Mondays")
-        waitUntil(timeoutMillis = 5_000) { shows("Never book Mondays") }
-        onNodeWithContentDescription("Remove \"Plain words\"").performClick()
-        waitUntil(timeoutMillis = 5_000) { !shows("Plain words") }
-        field("How you like things written").performTextClearance()
-        field("How you like things written").performTextInput("Warm, and brief.")
-        onNodeWithText("Save").performClick()
-        waitUntil(timeoutMillis = 5_000) { sent("preferences").size == 3 }
-        // What orrery's parser takes: the list whole, the style alone.
-        assertEquals(
-            listOf(
-                """{"preferences":["No calls before 9am","Plain words","Never book Mondays"]}""",
-                """{"preferences":["No calls before 9am","Never book Mondays"]}""",
-                """{"style":"Warm, and brief."}""",
-            ),
-            sent("preferences"),
-        )
-    }
-
-    @Test
-    fun `a change is made to the list the ship holds now, not the one the page first read`() = page(orrery = true) { _, _, _ ->
-        waitUntil(timeoutMillis = 5_000) { shows("Plain words") }
-        // Another device takes one out meanwhile.
-        docs["preferences"] = """{"style":"Short and plain.","preferences":["No calls before 9am"]}"""
-        add("Never book Mondays")
-        waitUntil(timeoutMillis = 5_000) { sent("preferences").isNotEmpty() }
-        assertEquals(listOf("""{"preferences":["No calls before 9am","Never book Mondays"]}"""), sent("preferences"), "not put back")
-    }
-
-    @Test
-    fun `an Orrery that does not keep preferences says so and offers nothing to write over them`() {
-        noPreferences = true
-        page(orrery = true) { _, _, _ ->
-            waitUntil(timeoutMillis = 5_000) { shows("An older Orrery does not keep them") }
-            assertTrue(!hasField("Add a preference") && !hasField("How you like things written"), "no box to write an empty list back from")
+    fun `on, what is the ship's is one link to Orrery's own page`() = page(orrery = true) { _, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("More Orrery settings") }
+        for (moved in listOf("Orrery analysis", "The ship reads my chats", "The ship reads my mail", "What Orrery should know", "Where approved things go", "Leave reading to my computer")) {
+            assertTrue(!shows(moved), "$moved is on Orrery's page")
         }
+        assertTrue("preferences" !in reads, "nor is the page asked for what it no longer shows")
+        onNodeWithText("Open").performScrollTo().performClick()
+        assertEquals(listOf("https://ship.test/apps/orrery#settings"), opened.toList())
     }
 
     @Test
-    fun `a preference the ship refuses is said, and not shown as kept`() = page(orrery = true) { _, _, _ ->
-        waitUntil(timeoutMillis = 5_000) { shows("Plain words") }
-        refused = setOf("preferences")
-        add("Never book Mondays")
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship refused it: preferences: refused") }
-        assertEquals(1, onAllNodesWithText("Never book Mondays").fetchSemanticsNodes().size, "only in the box, still to send")
+    fun `a ship without Orrery has no switch to turn on`() {
+        missing = true
+        page(orrery = null) { _, _, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("Orrery is not on your ship. Install it from the Apps page.") }
+            onAllNodes(isToggleable())[0].assertIsNotEnabled()
+        }
     }
 
     @Test
@@ -376,6 +364,68 @@ class OrrerySwitchTest {
             settleOrreryGate(null, db, fresh, repo, "https://ship.test", "~zod")
             assertNull(fresh.state.value.savedProfile?.orrery)
             assertTrue(writes.isEmpty(), "a switch off by default stops nothing on the ship")
+        } finally {
+            scope.coroutineContext.job.cancelAndJoin()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
+
+    // One switch for every device: a device that sees it on makes its own
+    // key and reads, where it had a second switch of its own (2026-10-12).
+    @Test
+    fun `turned on anywhere, this device makes its own key, once`() = runBlocking {
+        val (db, dir) = db()
+        val scope = CoroutineScope(SupervisorJob())
+        val repo = OrreryRepo(http, scope, db, "test", bareClient = http)
+        try {
+            repo.attach("https://ship.test", "~zod")
+            val ai = FakeAiSettings()
+            // The switch seen on, by itself: the key is made once the ship is known to have Orrery.
+            settleOrreryGate(true, db, ai, repo, "https://ship.test", "~zod")
+            assertEquals(listOf("c9"), mints.toList())
+            assertEquals("c9", db.orreryAccounts().get("~zod")?.clientId)
+            assertTrue(repo.enabled.value)
+            // Held already: nothing more is made.
+            settleOrreryGate(true, db, ai, repo, "https://ship.test", "~zod")
+            assertEquals(listOf("c9"), mints.toList())
+        } finally {
+            scope.coroutineContext.job.cancelAndJoin()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `the switch seen on and Try again pressed together make one key`() = runBlocking {
+        val (db, dir) = db()
+        val scope = CoroutineScope(SupervisorJob())
+        val repo = OrreryRepo(http, scope, db, "test", bareClient = http)
+        try {
+            repo.attach("https://ship.test", "~zod")
+            val settled = async { settleOrreryGate(true, db, FakeAiSettings(), repo, "https://ship.test", "~zod") }
+            val pressed = async { repo.ensureEnabled() }
+            settled.await()
+            assertTrue(pressed.await().isSuccess)
+            assertEquals(listOf("c9"), mints.toList())
+        } finally {
+            scope.coroutineContext.job.cancelAndJoin()
+            db.close()
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a ship without Orrery is never asked for a key`() = runBlocking {
+        missing = true
+        val (db, dir) = db()
+        val scope = CoroutineScope(SupervisorJob())
+        val repo = OrreryRepo(http, scope, db, "test", bareClient = http)
+        try {
+            repo.attach("https://ship.test", "~zod")
+            kotlinx.coroutines.withTimeout(5_000) { settleOrreryGate(true, db, FakeAiSettings(), repo, "https://ship.test", "~zod") }
+            assertEquals(0, asks, "not even asked")
+            assertFalse(repo.enabled.value)
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
             db.close()

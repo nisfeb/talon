@@ -183,21 +183,21 @@ class OrreryScreenTest {
     // yet' when it absolutely does": the ship held a key for this desktop,
     // and the desktop had lost its copy weeks before.
     @Test
-    fun `not on for this device, it says so and offers to turn it on`() =
+    fun `not set up on this device, it says so and offers to try again`() =
         orrery(view = null, problem = "This install has no orrery key yet.", turnOn = { did += "turned on"; Result.success(Unit) }) {
             onNodeWithText("Coming up").performClick()
-            waitUntil(timeoutMillis = 5_000) { shows("isn't turned on for this device") }
+            waitUntil(timeoutMillis = 5_000) { shows("isn't set up on this device yet") }
             assertTrue(!shows("could not be read"), "not a failure to read")
-            onNodeWithText("Turn on").performClick()
+            onNodeWithText("Try again").performClick()
             waitUntil(timeoutMillis = 5_000) { "refresh" in did }
             assertTrue("turned on" in did, did.toString())
         }
 
     @Test
-    fun `turning on that fails says why`() =
+    fun `setting up that fails says why`() =
         orrery(view = null, turnOn = { Result.failure(IllegalStateException("Orrery is not on this ship.")) }) {
             onNodeWithText("Coming up").performClick()
-            onNodeWithText("Turn on").performClick()
+            onNodeWithText("Try again").performClick()
             waitUntil(timeoutMillis = 5_000) { shows("Orrery is not on this ship.") }
             assertTrue("refresh" !in did)
         }
@@ -206,6 +206,6 @@ class OrreryScreenTest {
     fun `on for this device, a read that failed still says so`() = orrery(view = null, problem = "502") {
         onNodeWithText("Coming up").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Orrery could not be read") }
-        assertTrue(!shows("Turn on"))
+        assertTrue(!shows("Try again"))
     }
 }

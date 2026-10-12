@@ -11,7 +11,6 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.OrreryAccountEntity
 import io.nisfeb.talon.data.OrreryNoticedEntity
 import io.nisfeb.talon.ui.isLocalTriageSupported
-import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.ui.shipHandle
 import io.nisfeb.talon.ui.shipHandleLong
 import io.nisfeb.talon.util.Log
@@ -24,6 +23,7 @@ import io.nisfeb.talon.ai.defaultModel
 import io.nisfeb.talon.ai.shipBase
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.updateAndGet
@@ -39,9 +39,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
 import kotlin.time.Instant
 import io.nisfeb.talon.util.nowMs
 import kotlinx.datetime.toLocalDateTime
@@ -79,8 +77,6 @@ class OrreryRepo(
      * contacts table holds every peer ever seen, which is thousands.
      */
     private val book: () -> Set<String> = { emptySet() },
-    /** On a phone, whether to leave the reading to a computer that has read lately. */
-    val standDown: StandDown? = null,
     /** The decision model's switches: the gate before the reader and the status check after it. */
     val decide: DecideControl? = null,
     /** The key's client, which carries no cookie. A test hands in its own ship. */
@@ -143,7 +139,6 @@ class OrreryRepo(
     /** When the page's one answer was last asked for, whether the ship gave it, and its chat lists. */
     private var settingsAt = 0L
     private var settingsOk = false
-    private var chatLists: JsonObject? = null
     private val settingsGate = Mutex()
 
     /**
@@ -175,9 +170,6 @@ class OrreryRepo(
         // The preferences live in the schema, and came with this route.
         doc("schema")?.let { _preferences.value = preferencesOf(it); _schema.value = it }
         doc("policy")?.let { _policy.value = it }
-        doc("read")?.let { _readChannel.value = mailReaderOn(it) }
-        doc("read_last")?.let { _readChannelRun.value = chatReaderRunOf(it) }
-        chatLists = doc("chat_lists")
     }
 
     private val _policy = MutableStateFlow<JsonObject?>(null)
@@ -221,23 +213,6 @@ class OrreryRepo(
             scopeChecked = false
         }
     }.await()
-
-    private val _readChannel = MutableStateFlow<Boolean?>(null)
-    /** Whether the ship reads text handed to it (orrery 59): the assistant's, and anything else's. Null until it says. */
-    val readChannel: StateFlow<Boolean?> = _readChannel.asStateFlow()
-    private val _readChannelRun = MutableStateFlow<ChatReaderRun?>(null)
-    val readChannelRun: StateFlow<ChatReaderRun?> = _readChannelRun.asStateFlow()
-
-    /** Ask the ship whether it reads what it is handed; false where it did not say, an orrery older than it among it. */
-    suspend fun loadReadChannel(): Boolean {
-        if (loadSettings()) return _readChannel.value != null
-        val a = api ?: return false
-        runCatching { chatReaderRunOf(Json.parseToJsonElement(a.settingsDoc("read/last")).jsonObject) }.onSuccess { _readChannelRun.value = it }
-        return runCatching { mailReaderOn(Json.parseToJsonElement(a.settingsDoc("read/settings")).jsonObject) }
-            .onSuccess { _readChannel.value = it }.isSuccess
-    }
-
-    suspend fun setReadChannel(on: Boolean): Result<Unit> = writeSettings("read/settings", buildJsonObject { put("enabled", on) }).map { }
 
     /** Ask the ship for its chat reader's settings and last pass; false where it did not say. */
     suspend fun loadChatReader(): Boolean {
@@ -302,34 +277,6 @@ class OrreryRepo(
             Unit
         }
     }.await()
-
-    /** What the chat reader may pick from: the ship's DMs, then its channels, each with a name. */
-    suspend fun chatOptions(): Result<Pair<List<ChatOption>, List<ChatOption>>> = runCatching {
-        val a = attached()
-        val lists = if (loadSettings()) chatLists else null
-        // An empty list comes with the ship's reason (no groups desk, a
-        // road refused), which is what the picker then says.
-        suspend fun list(name: String): List<ChatOption> {
-            val o = lists?.get(name.substringAfter('/')) as? JsonObject ?: Json.parseToJsonElement(a.settingsDoc(name)).jsonObject
-            val items = chatOptionsOf(o)
-            val note = o["note"]?.jsonPrimitive?.contentOrNull
-            if (items.isEmpty() && !note.isNullOrBlank()) error(note)
-            return items
-        }
-        list("chat/dms") to list("chat/channels")
-    }
-
-    /**
-     * Run the chat reader now, and wait a few seconds for its record to
-     * say it is done: true when it did. A pass the model takes longer
-     * over shows on the next [loadChatReader].
-     */
-    suspend fun wakeChatReader(): Result<Boolean> = runCatching {
-        val a = attached()
-        val before = _chatReaderRun.value?.atMs
-        a.wakeChat()
-        a.settle { lastChatRun(a).also { _chatReaderRun.value = it }.atMs != before }
-    }
 
     /** True while this phone is leaving the reading to a computer. */
     private val _yielding = MutableStateFlow(false)
@@ -400,32 +347,23 @@ class OrreryRepo(
 
     /**
      * The ship's generator moved with the default model, from [before] to
-     * [after], where its row follows the default and the ship already runs
-     * a model with a key: the key was agreed to go when it was first
-     * pointed. A default the ship cannot run leaves it where it is; the
-     * row says why. On this repo's scope, so leaving the screen does not
-     * stop it.
+     * [after], where the owner chose the default for it and the ship still
+     * runs that default with a key: the key was agreed to go when it was
+     * first pointed, and a model picked on Orrery's own page since is left
+     * alone. A default the ship cannot run leaves it where it is. On this
+     * repo's scope, so leaving the screen does not stop it.
      */
     fun followDefault(before: io.nisfeb.talon.ai.AiProfile, after: io.nisfeb.talon.ai.AiProfile) {
         if (!after.generatorFollowsDefault()) return
         val g = _generatorSettings.value ?: return
         if (!g.enabled || g.model == null || !g.keySet) return
         val now = generatorTarget(after, null) ?: return
-        if (generatorProblem(now) != null || wire(now) == generatorTarget(before, null)?.let(::wire)) return
+        val was = generatorTarget(before, null)?.let(::wire) ?: return
+        if (g.url?.trimEnd('/') != was.first || g.model != was.second) return
+        if (generatorProblem(now) != null || wire(now) == was) return
         scope.launch {
             pointGenerator(after, true, null).onFailure { Log.i(TAG, "generator did not follow the default: ${it.message}") }
         }
-    }
-
-    private val _decideToday = MutableStateFlow<Pair<String, DecideDay>?>(null)
-    /** Today's tally of the decision model on this install, as the log has it. */
-    val decideToday: StateFlow<Pair<String, DecideDay>?> = _decideToday.asStateFlow()
-
-    /** Today's tally as kept, for the settings screen before a pass has added to it. */
-    suspend fun loadDecideToday() {
-        val s = ship ?: return
-        val day = localDay(now())
-        _decideToday.value = day to keptDay(s, day)
     }
 
     /** The owner's calendar day at [ms], which is what a day's tally is kept under. */
@@ -604,52 +542,9 @@ class OrreryRepo(
             if (name == "generator") _generatorSettings.value = generatorSettingsOf(doc)
             if (name == "chat") _chatReader.value = chatReaderOf(doc)
             if (name == "mail") _mailReader.value = mailReaderOn(doc)
-            if (name == "read/settings") _readChannel.value = mailReaderOn(doc)
         }
         said
     } }.await()
-
-    /**
-     * The owner's words for the ship to act on ([OrreryApi.instruct]).
-     * What it filed joins the list at once, and is not news: the owner
-     * asked for it. On this repo's scope: the model call takes up to two
-     * minutes, and closing the dialog meanwhile does not stop it.
-     */
-    /** Orrery's place lookups as the ship holds them. */
-    suspend fun searchSettings(): Result<SearchSettings> = runCatching { attached().searchSettings() }
-
-    private val _armillaryFollows = MutableStateFlow<Boolean?>(null)
-    private val _armillaryWhy = MutableStateFlow<String?>(null)
-
-    /** Whether orrery follows the ship's Armillary for every setting (orrery 96); null where it cannot. */
-    val armillaryFollows: StateFlow<Boolean?> = _armillaryFollows.asStateFlow()
-
-    /** Why the last "follow Armillary" failed, or null. */
-    val armillaryWhy: StateFlow<String?> = _armillaryWhy.asStateFlow()
-
-    suspend fun loadArmillaryFollows() {
-        _armillaryFollows.value = runCatching { attached().armillaryFollowing() }.getOrNull()
-    }
-
-    /**
-     * Orrery follows the ship's Armillary again for every setting; orrery
-     * reads Armillary itself. On the repo's scope, so leaving the screen
-     * midway does not drop it.
-     */
-    fun followArmillary() {
-        _armillaryWhy.value = null
-        _armillaryFollows.value = true
-        scope.launch {
-            runCatching { attached().followArmillary() }
-                .onFailure { _armillaryWhy.value = "Orrery could not follow Armillary: ${it.message ?: it::class.simpleName}" }
-            loadArmillaryFollows()
-        }
-    }
-
-    /** Turn orrery's place lookups on (with [apiKey]) or off, on the repo's scope: leaving Settings does not take it along. */
-    suspend fun setSearch(enabled: Boolean, apiKey: String? = null): Result<SearchSettings> = scope.async {
-        runCatching { attached().setSearch(enabled, apiKey) }
-    }.await()
 
     suspend fun instruct(text: String, action: String? = null, apply: Boolean = false): Result<Instructed> = scope.async {
         runCatching {
@@ -808,12 +703,9 @@ class OrreryRepo(
         _chatReaderRun.value = null
         _preferences.value = null
         settingsAt = 0L
-        chatLists = null
         _failed.value = emptyList()
         _policy.value = null
         _schema.value = null
-        _readChannel.value = null
-        _readChannelRun.value = null
         scopeChecked = false
         // Nothing of the ship left is waiting on the owner: with Orrery off,
         // or another ship, its proposals and their notifications go.
@@ -944,6 +836,22 @@ class OrreryRepo(
      * left midway, a key minted on the ship and never kept here was a key
      * nobody held.
      */
+    /**
+     * This install's key, made once: [enable], unless it holds one or is
+     * already making one. Use Orrery turns reading on for every device,
+     * so each makes its own when it sees the switch on; two at once would
+     * mint two keys and keep one. A failure is said where the reading is.
+     */
+    suspend fun ensureEnabled(): Result<Unit> {
+        if (_enabled.value) return Result.success(Unit)
+        val job = enabling?.takeIf { it.isActive } ?: scope.async { enable() }.also { enabling = it }
+        return job.await().onFailure { _error.value = it.message ?: "Orrery did not answer." }
+    }
+    private var enabling: kotlinx.coroutines.Deferred<Result<Unit>>? = null
+
+    /** Orrery's own settings page on the ship, where what is the ship's is set. */
+    fun settingsPage(): String? = shipUrl?.let { it.trimEnd('/') + OrreryApi.APP_PATH + "#settings" }
+
     suspend fun enable(): Result<Unit> = scope.async { runCatching {
         val a = attached()
         val s = ship ?: error("Not attached to a ship.")
@@ -1491,9 +1399,6 @@ class OrreryRepo(
         return OpenRouterDecider(bare, key, d) to d
     }
 
-    /** Whether the decision model could run here: an OpenRouter key is set. */
-    fun decideHasKey(): Boolean = cloud?.config?.invoke()?.let(::openRouterKey) != null
-
     /** The pass reads the state once and hands it down: every read costs the ship a second of its single thread. */
     private suspend fun reading(s: String, view: StateView): Reading {
         val model = readWith ?: cloudModelIfOn() ?: (if (isLocalTriageSupported) LocalModels.best()?.second else null)
@@ -1548,7 +1453,7 @@ class OrreryRepo(
         // own, which did not. ponytail: a computer that never returns
         // leaves them unread; a second cursor would need a column, and
         // the table is already on testers' phones.
-        val yielded = io.nisfeb.talon.ui.isTouchPrimary && standDown?.on?.value == true &&
+        val yielded = io.nisfeb.talon.ui.isTouchPrimary &&
             runCatching { computerActive(a.clients(), nowMs) }.getOrDefault(false)
         _yielding.value = yielded
         // A call recorded here is this phone's alone: the computer never
@@ -1632,107 +1537,7 @@ class OrreryRepo(
         io.nisfeb.talon.ai.AiSpend.add(io.nisfeb.talon.ai.AiFeature.OrreryTriage.name, add.analystUsd, nowMs)
         io.nisfeb.talon.ai.AiSpend.add(io.nisfeb.talon.ai.AiSpend.JEV, add.gateUsd + add.checkUsd + add.pickUsd, nowMs)
         now.lines(day).forEach { Log.i(TAG, it) }
-        _decideToday.value = day to now
     }
-
-    /** What the gate would have done over messages already read, for choosing its threshold. */
-    data class GateCheck(
-        val lines: List<String>,
-        val threshold: Double,
-        /** How many of the messages each threshold in the band would have let through. */
-        val readAt: List<Pair<Double, Int>>,
-        val costUsd: Double,
-        val failed: Int,
-        /** With body picks: for each cut-off, how many bodies the reader would see on average. */
-        val keptAt: List<Pair<Double, Double>> = emptyList(),
-    ) {
-        val total: Int get() = lines.size
-    }
-
-    /**
-     * The gate over the last [limit] messages Talon already holds that the
-     * reader would read, not a new read of the chats: one line per
-     * message with the probability and read or skip, and what each
-     * threshold from 0.2 to 0.4 would have let through. Nothing is
-     * written; only the decision model is asked.
-     */
-    /** A check under way, or done: how far it has got, and the result once there is one. */
-    data class GateCheckRun(val done: Int, val total: Int, val result: Result<GateCheck>? = null)
-
-    private val _gateCheck = MutableStateFlow<GateCheckRun?>(null)
-    /** The gate check, run by the repo so that leaving Settings does not stop it. */
-    val gateCheck: StateFlow<GateCheckRun?> = _gateCheck.asStateFlow()
-    private var gateCheckJob: Job? = null
-
-    fun startGateCheck(limit: Int = 300, picks: Boolean = false) {
-        if (gateCheckJob?.isActive == true) return
-        _gateCheck.value = GateCheckRun(0, 0)
-        gateCheckJob = scope.launch {
-            val r = checkGate(limit, picks) { done, total -> _gateCheck.value = GateCheckRun(done, total) }
-            _gateCheck.value = GateCheckRun(_gateCheck.value?.total ?: 0, _gateCheck.value?.total ?: 0, r)
-        }
-    }
-
-    fun stopGateCheck() {
-        gateCheckJob?.cancel()
-        gateCheckJob = null
-        _gateCheck.value = null
-    }
-
-    suspend fun checkGate(limit: Int = 300, picks: Boolean = false, progress: (done: Int, total: Int) -> Unit = { _, _ -> }): Result<GateCheck> = runCatching {
-        val a = api ?: error("Not attached to a ship.")
-        val s = ship ?: error("Not attached to a ship.")
-        val row = db.orreryAccounts().get(s) ?: error("Turn on Feed Orrery first.")
-        val (dec, settings) = decider() ?: error(if (decideHasKey()) "Turn the decision model on first." else "Set OpenRouter as the AI provider, with its key, first.")
-        val view = a.state(row.token)
-        val index = NameIndex(view.bodies)
-        val ourNick = db.contacts().get(s)?.nickname
-        // What Talon already holds and the funnel would read: in scope,
-        // free text, not a question. Not a new read of the chats.
-        val walked = db.messages().postsBetween(0L, now(), s, limit * 6)
-        val picked = walked.asSequence()
-            .map { it to StoryCache.textFor(it.id, it.contentJson) }
-            .filter { (m, t) -> forTheGate(t) && inScope(m.whom, t, s, ourNick, _chatReader.value?.channels.orEmpty()) }
-            .take(limit).toList().reversed()
-        progress(0, picked.size)
-        // With picks, what Jev chose for each message the gate lets through.
-        val chose = arrayOfNulls<Relevance.Picked>(picked.size)
-        suspend fun ask(i: Int): Gate.Result {
-            val (m, text) = picked[i]
-            val earlier = db.messages().before(m.whom, m.sentMs, ModelExtractor.CONTEXT_MESSAGES).reversed()
-                .map { StoryCache.textFor(it.id, it.contentJson) }.filter { it.isNotBlank() }
-            val from = index.authorId(m.author, s)
-            val ranked = rankBodies(view.bodies, index, text, earlier)
-            val g = Gate.decide(dec, settings.threshold, text, from, earlier, ranked)
-            if (picks && g.read && g.p != null) chose[i] = Relevance.pick(dec, text, from, earlier, ranked)
-            return g
-        }
-        val results = Gate.askAll(picked.size, GATE_CHECK_AT_ONCE, ::ask, progress)
-        val probs = mutableListOf<Double>()
-        val lines = mutableListOf<String>()
-        var cost = 0.0
-        var failed = 0
-        picked.forEachIndexed { i, (m, text) ->
-            val g = results[i]
-            cost += g.costUsd
-            val p = g.p
-            if (p == null) failed++ else probs += p
-            val shown = p?.let { (kotlin.math.round(it * 100) / 100).toString().padEnd(4, '0') } ?: " -- "
-            lines += "$shown ${if (g.read) "read" else "skip"} | ${m.author}: ${text.take(90).replace('\n', ' ')}"
-            chose[i]?.let { c ->
-                cost += c.costUsd
-                lines += if (c.failed) "      bodies: ${c.note}"
-                else "      bodies: " + c.above(0.1).take(8).joinToString(", ") { (id, sc) -> "$id ${(kotlin.math.round(sc * 100) / 100)}" }.ifBlank { "none above 0.1" }
-            }
-        }
-        val band = listOf(0.2, 0.25, 0.3, 0.35, 0.4).map { t -> t to (probs.count { it >= t } + failed) }
-        val answered = chose.filterNotNull().filter { !it.failed }
-        val keptAt = if (answered.isEmpty()) emptyList()
-        else listOf(0.3, 0.5, 0.7).map { t -> t to answered.sumOf { it.above(t).size }.toDouble() / answered.size }
-        GateCheck(lines, settings.threshold, band, cost, failed, keptAt).also {
-            Log.i(TAG, "gate check: ${it.total} messages, ${band.joinToString { (t, n) -> "$n read at $t" }}, cost ${dollars(cost)}")
-        }
-    }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it } // Stop is not a failed check
 
     /** One text through the rules and the model; what it claims goes to the tray or up. */
     private suspend fun triageText(
@@ -2218,6 +2023,10 @@ internal fun settledActions(list: List<OrreryAction>, id: String, status: String
  * switch existed, so the switch is turned on rather than the feed silently
  * stopped. Turned off, here or on another device, with a key still held
  * here: the key goes back and what Orrery left here goes ([OrreryRepo.forget]).
+ * Turned on, here or on another device, with no key here: once the ship is
+ * known to have Orrery, this install makes its own and starts reading. It
+ * had a second switch of its own, and "on, for all your devices" left a
+ * device reading nothing (sneagan, 2026-10-12).
  * Nothing else: a switch that is off by default stops nothing on the ship.
  */
 suspend fun settleOrreryGate(
@@ -2232,6 +2041,8 @@ suspend fun settleOrreryGate(
     when {
         gate == null && holdsKey -> ai.setProfile(ai.state.value.withOrrery(true))
         gate == false && holdsKey -> repo.forget(shipUrl, ship)
+        gate == true && !holdsKey ->
+            if (repo.availability.first { it != OrreryAvailability.UNKNOWN } == OrreryAvailability.PRESENT) repo.ensureEnabled()
     }
 }
 
@@ -2257,11 +2068,11 @@ internal fun generatorTarget(profile: io.nisfeb.talon.ai.AiProfile, ref: io.nisf
 
 /** Why the ship's generator cannot run [target], as a sentence, or null when it can. */
 internal fun generatorProblem(target: Pair<io.nisfeb.talon.ai.AiProvider, String>?): String? = when {
-    target == null -> "There is no AI set up in Talon yet. Add a provider in Settings, AI, then pick a model under Orrery analysis below."
-    target.first.shipBase() == null -> "The ship cannot reach ${target.first.label}. Pick a model on OpenRouter, OpenAI, Armillary, or a server on your network."
+    target == null -> "There is no AI set up in Talon yet. Add a provider under AI first."
+    target.first.shipBase() == null -> "Your ship cannot reach ${target.first.label}. Make your default model one on OpenRouter, OpenAI, Armillary or a server on your network, or set Orrery's model on your ship."
     // Orrery runs no generator without a key ("the generator has no key").
-    target.first.apiKey.isBlank() -> "${target.first.label} has no key in Talon, and Orrery on your ship needs one. Add it in Settings, AI; a server that takes none accepts any word."
-    target.second.isBlank() -> "Pick a model on ${target.first.label} under Orrery analysis below."
+    target.first.apiKey.isBlank() -> "${target.first.label} has no key in Talon, and your ship needs one. Add it under AI. A server that takes none accepts any word."
+    target.second.isBlank() -> "Pick a default model on ${target.first.label} under AI."
     else -> null
 }
 

@@ -215,7 +215,7 @@ class BraveLeoCardTest {
             runBlocking { it.refresh() }
         }
         show(ai, missing)
-        onNodeWithText("Not on this ship. Install it from the Grubbery shell on your ship.").assertExists()
+        onNodeWithText("Armillary is not on your ship. Install it from the Apps page.").assertExists()
         assertTrue(onAllNodesWithText("More").fetchSemanticsNodes().isEmpty(), "nothing behind More either")
     }
 }

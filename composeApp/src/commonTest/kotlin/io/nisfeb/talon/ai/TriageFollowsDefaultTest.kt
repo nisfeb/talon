@@ -99,4 +99,27 @@ class TriageFollowsDefaultTest {
         assertFalse(gen(FeatureSetting(on = true, model = ModelRef("or", "m"), own = true)), "a model of its own")
         assertFalse(gen(null))
     }
+
+    // Transcription said "None chosen" while whisper-1 ran on the default.
+    @Test
+    fun `transcription shows what runs, its own model or whisper-1 on a default that can transcribe`() {
+        val openAi = AiProvider("oa", ProviderKind.OpenAi, "OpenAI", apiKey = "sk")
+        val p = AiProfile(providers = listOf(cloud, openAi, server), defaultModel = ModelRef("oa", "gpt-5"))
+        assertEquals(ModelRef("oa", WHISPER), p.transcriptionRef())
+        assertEquals(ModelRef("lm", WHISPER), p.copy(defaultModel = ModelRef("lm", "qwen3")).transcriptionRef(), "a server of your own may serve it")
+        assertNull(p.copy(defaultModel = ModelRef("or", "m")).transcriptionRef(), "OpenRouter has no speech endpoint")
+        assertNull(p.copy(defaultModel = null).transcriptionRef())
+        val own = p.copy(features = mapOf(AiFeature.Transcription to FeatureSetting(true, ModelRef("lm", "whisper-large"))))
+        assertEquals(ModelRef("lm", "whisper-large"), own.transcriptionRef())
+    }
+
+    @Test
+    fun `loops run only with the assistant on and a model for it`() {
+        val p = AiProfile(providers = listOf(cloud), defaultModel = ModelRef("or", "m"))
+        fun cfg(assistant: Boolean, profile: AiProfile = p) =
+            AiSettings.Config(provider = AiSettings.Provider.OpenRouter, apiKey = "sk-or", model = null, agentEnabled = assistant, savedProfile = profile)
+        assertTrue(cfg(true).loopsCanRun())
+        assertFalse(cfg(false).loopsCanRun(), "a key alone does not run them")
+        assertFalse(cfg(true, p.copy(defaultModel = null)).loopsCanRun(), "nor the switch without a model")
+    }
 }

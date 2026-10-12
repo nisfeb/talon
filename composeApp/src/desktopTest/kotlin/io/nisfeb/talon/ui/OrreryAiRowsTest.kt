@@ -37,6 +37,7 @@ import io.nisfeb.talon.ai.ProviderKind
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.orrery.DecideControl
 import io.nisfeb.talon.orrery.DecideSettings
+import io.nisfeb.talon.orrery.under
 import io.nisfeb.talon.orrery.OrreryAvailability
 import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.ui.screens.OrrerySettingsSection
@@ -152,84 +153,65 @@ class OrreryAiRowsTest {
     }
 
     @Test
-    fun `triage says why it cannot run, by what the ship answered`() {
+    fun `the reading row says why it cannot run, by what the ship answered`() {
         probe = HttpStatusCode.NotFound
         rows { _, _ ->
-            waitUntil(timeoutMillis = 5_000) { shows("Orrery is not on this ship.") }
-            switchBeside("Orrery triage").assertIsNotEnabled()
-            assertFalse(shows("Orrery analysis"), "no generator to point where there is no orrery")
+            waitUntil(timeoutMillis = 5_000) { shows("Orrery is not on your ship. Install it from the Apps page.") }
+            assertFalse(shows("Orrery needs an AI model"), "no model to offer where there is no orrery")
+            assertFalse(shows("More Orrery settings"), "nor a page to open")
         }
         probe = HttpStatusCode.Forbidden
-        rows { _, _ -> waitUntil(timeoutMillis = 5_000) { shows("Signed out of the ship.") } }
+        rows { _, _ -> waitUntil(timeoutMillis = 5_000) { shows("Signed out of your ship.") } }
     }
 
+    // No switch of its own: Use Orrery makes the key. Try again is for when that failed.
     @Test
-    fun `turning triage on asks the ship for a key, and a refusal says why`() = rows { _, orrery ->
-        switchBeside("Orrery triage").performClick()
+    fun `a device whose key could not be made says why, and Try again asks again`() = rows { _, orrery ->
+        waitUntil(timeoutMillis = 5_000) { shows("This device is not set up for Orrery yet.") }
+        assertFalse(shows("Orrery triage"))
+        onNodeWithText("Try again").performScrollTo().performClick()
         waitUntil(timeoutMillis = 5_000) { shows("HTTP 500: no keys today") }
         assertFalse(orrery.enabled.value)
     }
 
     @Test
-    fun `the generator turned on with a model the ship cannot reach says so, and writes nothing`() = rows { _, _ ->
-        waitUntil(timeoutMillis = 5_000) { shows("Orrery analysis") }
-        switchBeside("Orrery analysis").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("The ship cannot reach Anthropic.") }
-        assertTrue(sent.isEmpty())
+    fun `a device that reads shows when it last sent, and no switch to stop it here`() = rows(fed = true) { _, _ ->
+        // Sent already, or not yet: the first pass may have run by now.
+        waitUntil(timeoutMillis = 5_000) { shows("Not sent yet.") || shows("Last sent") }
+        assertTrue(shows("Send now"))
+        assertFalse(shows("Try again"))
+        assertFalse(shows("Leave reading to my computer"), "a phone always leaves the reading to a computer on the job")
+    }
+
+    // Jev, renamed: one switch, no Advanced, and nothing breaks without it.
+    @Test
+    fun `the decision model is one switch, and says what it needs where nothing offers one`() = rows { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("Decision model") }
+        assertFalse(shows("Jev"), "called a decision model")
+        assertFalse(shows("Advanced"))
+        assertTrue(shows("Needs an OpenRouter key under AI."))
+        switchBeside("Decision model").assertIsNotEnabled()
     }
 
     @Test
-    fun `the generator is pointed at a model the ship can reach, with that provider's key`() {
-        generator = """{"enabled":true}"""
-        rows { ai, _ ->
-            waitUntil(timeoutMillis = 5_000) { shows("Orrery analysis") }
-            // Catch-up's picker, the assistant's, then the generator's.
-            onAllNodesWithText("Default: claude, Anthropic").let { it[it.fetchSemanticsNodes().size - 1] }.performScrollTo().performClick()
-            assertTrue(shows("short context"), "a model with little context is flagged")
-            assertTrue(onAllNodesWithText("claude").fetchSemanticsNodes().isEmpty(), "Anthropic is not offered: the ship cannot reach it")
-            onNodeWithText("m1").performClick()
-            waitUntil(timeoutMillis = 5_000) { sent.isNotEmpty() }
-            val put = sent.single()
-            assertEquals("https://openrouter.ai/api/v1", put["url"]?.jsonPrimitive?.content)
-            assertEquals("m1", put["model"]?.jsonPrimitive?.content)
-            assertEquals("sk-or", put["api_key"]?.jsonPrimitive?.content)
-            waitUntil(timeoutMillis = 5_000) { ai.state.value.savedProfile!!.features[AiFeature.OrreryGenerator]?.model == ModelRef("or", "m1") }
-            waitUntil(timeoutMillis = 5_000) { shows("On the ship: m1 at https://openrouter.ai/api/v1.") }
-        }
+    fun `the decision model left on with nothing offering it says so, and can be turned off`() = rows(both.copy(jev = true)) { ai, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("Nothing offers a decision model now, so nothing is screened.") }
+        switchBeside("Decision model").performClick()
+        waitUntil(timeoutMillis = 5_000) { ai.state.value.savedProfile!!.jev == false }
     }
 
     @Test
-    fun `jev's thresholds are set under advanced, and nonsense is not`() = rows(both.copy(jev = true)) { _, _ ->
-        onNodeWithText("Advanced").performScrollTo().performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Nothing read with it yet today.") }
-        onNode(hasSetTextAction() and hasText("Gate threshold")).performTextReplacement("0.25")
-        waitForIdle()
-        assertEquals(0.25, decided.value.threshold)
-        onNode(hasSetTextAction() and hasText("Gate threshold")).performTextReplacement("5")
-        waitForIdle()
-        assertEquals(0.25, decided.value.threshold, "out of range is not a threshold")
-        onNode(hasSetTextAction() and hasText("Keep bodies at or above")).performTextReplacement("0.6")
-        onNode(hasSetTextAction() and hasText("Jev model")).performTextReplacement(" typesafe/jev-2 ")
-        waitForIdle()
-        assertEquals(0.6 to "typesafe/jev-2", decided.value.keep to decided.value.model)
-        onNodeWithText("Hide advanced").performClick()
-        waitForIdle()
-        assertFalse(shows("Gate threshold"))
-    }
-
-    // It was a bare box: one slip from an id that exists, and nothing said so.
-    @Test
-    fun `the jev model offers the provider's models as it is typed`() = rows(
-        both.copy(jev = true, providers = listOf(openRouter.copy(models = openRouter.models + ModelInfo("typesafe/jev-1.14", "TypeSafe: Jev 1.14", zdr = true), offersJev = true), anthropic)),
-    ) { _, _ ->
-        onNodeWithText("Advanced").performScrollTo().performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Nothing read with it yet today.") }
-        onNode(hasSetTextAction() and hasText("Jev model")).performTextReplacement("jv114")
-        waitUntil(timeoutMillis = 5_000) { shows("TypeSafe: Jev 1.14") }
-        onNodeWithText("TypeSafe: Jev 1.14").performClick()
-        waitForIdle()
-        assertEquals("typesafe/jev-1.14", decided.value.model)
-        assertFalse(shows("TypeSafe: Jev 1.14"), "picked: the list closes")
+    fun `an OpenRouter key offering a decision model turns it on with one switch`() = rows(
+        both.copy(providers = listOf(openRouter.copy(offersJev = true), anthropic)),
+    ) { ai, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("Decision model") }
+        assertFalse(shows("Needs an OpenRouter key"))
+        switchBeside("Decision model").performClick()
+        waitUntil(timeoutMillis = 5_000) { ai.state.value.savedProfile!!.jev == true }
+        // On: the screen, the status check and the body picks, at the kept thresholds.
+        val d = decided.value.under(ai.state.value)
+        assertTrue(d.on && d.gate && d.relevance)
+        assertEquals(0.3 to 0.5, d.threshold to d.keep)
     }
 
     // A user setting up Talon and Orrery for the first time found the AI he
@@ -239,22 +221,24 @@ class OrreryAiRowsTest {
 
     @Test
     fun `a ship with no model for Orrery is offered the default, sent with its key in one tap`() = rows(openRouterDefault) { ai, _ ->
-        waitUntil(timeoutMillis = 5_000) { shows("Orrery has no model on your ship yet") }
-        assertTrue(shows("sends your OpenRouter key to your ship"), "it says what the tap sends")
+        waitUntil(timeoutMillis = 5_000) { shows("Orrery needs an AI model on your ship") }
+        assertTrue(shows("Your OpenRouter key is copied to your ship"), "it says what the tap sends")
+        assertTrue(shows("your ship reads the chats and email you let it read"), "and what it lets the ship do")
         onNodeWithText("Use m1, OpenRouter").performScrollTo().performClick()
         waitUntil(timeoutMillis = 5_000) { sent.isNotEmpty() }
         assertEquals(
             Json.parseToJsonElement("""{"enabled":true,"url":"${io.nisfeb.talon.ai.ModelCatalog.OPENROUTER}","model":"m1","api_key":"sk-or"}"""),
             sent.single(),
         )
-        waitUntil(timeoutMillis = 5_000) { !shows("Orrery has no model on your ship yet") }
+        waitUntil(timeoutMillis = 5_000) { !shows("Orrery needs an AI model on your ship") }
         assertEquals(null, ai.state.value.savedProfile!!.features[AiFeature.OrreryGenerator]?.model, "Orrery follows the default model")
+        assertTrue(ai.state.value.savedProfile!!.generatorFollowsDefault(), "by the owner's own tap, so a new default moves it")
     }
 
     @Test
     fun `a default the ship cannot reach is said so, and nothing is sent`() = rows { _, _ ->
-        waitUntil(timeoutMillis = 5_000) { shows("Orrery has no model on your ship yet") }
-        assertTrue(shows("The ship cannot reach Anthropic."))
+        waitUntil(timeoutMillis = 5_000) { shows("Orrery needs an AI model on your ship") }
+        assertTrue(shows("Your ship cannot reach Anthropic."))
         assertFalse(shows("Use claude"), "no one-tap for a model the ship cannot run")
         assertTrue(sent.isEmpty(), sent.toString())
     }
@@ -264,16 +248,16 @@ class OrreryAiRowsTest {
         generator = """{"enabled":false,"model":"m1","api_key_set":true}"""
         rows(openRouterDefault) { _, _ ->
             waitForIdle()
-            assertFalse(shows("Orrery has no model on your ship yet"))
+            assertFalse(shows("Orrery needs an AI model on your ship"))
         }
     }
 
     @Test
     fun `not now puts the offer away and sends nothing`() = rows(openRouterDefault) { _, _ ->
-        waitUntil(timeoutMillis = 5_000) { shows("Orrery has no model on your ship yet") }
+        waitUntil(timeoutMillis = 5_000) { shows("Orrery needs an AI model on your ship") }
         onNodeWithText("Not now").performScrollTo().performClick()
         waitForIdle()
-        assertFalse(shows("Orrery has no model on your ship yet"))
+        assertFalse(shows("Orrery needs an AI model on your ship"))
         assertTrue(sent.isEmpty(), sent.toString())
     }
 
@@ -302,19 +286,8 @@ class OrreryAiRowsTest {
     fun `a ship that names a model but holds no key is told it lacks the key`() {
         generator = """{"enabled":false,"model":"moonshotai/kimi-k3","api_key_set":false}"""
         rows(openRouterDefault) { _, _ ->
-            waitUntil(timeoutMillis = 5_000) { shows("Orrery on your ship has no key for its AI yet") }
-            assertFalse(shows("Orrery has no model on your ship yet"))
-        }
-    }
-
-    @Test
-    fun `the generator turns off even when the default is out of the ship's reach`() {
-        generator = """{"enabled":true,"model":"m1","api_key_set":true}"""
-        rows { _, _ ->
-            waitUntil(timeoutMillis = 5_000) { shows("Orrery analysis") }
-            switchBeside("Orrery analysis").performClick()
-            waitUntil(timeoutMillis = 5_000) { sent.isNotEmpty() }
-            assertEquals(Json.parseToJsonElement("""{"enabled":false}"""), sent.single())
+            waitUntil(timeoutMillis = 5_000) { shows("Orrery on your ship needs a key for its model") }
+            assertFalse(shows("Orrery needs an AI model on your ship"))
         }
     }
 
@@ -327,24 +300,15 @@ class OrreryAiRowsTest {
 
     @Test
     fun `triage under a cloud default reads on this device, and says so`() = rows(both.copy(providers = both.providers + device), fed = true) { _, _ ->
-        waitUntil(timeoutMillis = 5_000) { shows("Your default model is not private, so triage reads on this device.") }
-        assertTrue(shows("Default: This device's own model, On this device"), "Default on triage's row is this device, not the cloud default")
+        waitUntil(timeoutMillis = 5_000) { shows("Your default model is not private, so this device reads with its own.") }
+        assertTrue(shows("Default: This device (private)"), "Default on triage's row is this device, not the cloud default")
     }
 
     @Test
     fun `triage under a private default reads with it`() = rows(AiProfile(listOf(lan, device), defaultModel = ModelRef("lan", "llama")), fed = true) { _, _ ->
-        waitUntil(timeoutMillis = 5_000) { shows("Orrery triage") }
+        waitUntil(timeoutMillis = 5_000) { shows("Read calls and status lines on this device") }
         waitUntil(timeoutMillis = 5_000) { shows("Default: llama, My server") }
         assertFalse(shows("Your default model is not private"))
-    }
-
-    @Test
-    fun `analysis on Default with a default the ship cannot run says so before anything is pressed`() {
-        generator = onTheShip
-        rows { _, _ ->
-            waitUntil(timeoutMillis = 5_000) { shows("The ship cannot reach Anthropic.") }
-            assertTrue(sent.isEmpty(), sent.toString())
-        }
     }
 
     @Test
@@ -361,6 +325,8 @@ class OrreryAiRowsTest {
             orrery.followDefault(following, tiny.copy(features = mapOf(AiFeature.OrreryGenerator to io.nisfeb.talon.ai.FeatureSetting(true, ModelRef("or", "m1"), own = true))))
             // A default the ship cannot run.
             orrery.followDefault(following, following.copy(defaultModel = ModelRef("an", "claude")))
+            // The ship runs something other than the old default: picked on Orrery's own page.
+            orrery.followDefault(following.copy(defaultModel = ModelRef("or", "other")), tiny)
             orrery.followDefault(tiny, tiny.copy(providers = listOf(openRouter, anthropic, lan), defaultModel = ModelRef("lan", "llama")))
             orrery.followDefault(following, tiny)
             waitUntil(timeoutMillis = 5_000) { sent.isNotEmpty() }
@@ -402,14 +368,4 @@ class OrreryAiRowsTest {
         }
     }
 
-    @Test
-    fun `picking Default for analysis is what makes it follow`() {
-        generator = onTheShip
-        rows(openRouterDefault) { ai, _ ->
-            waitUntil(timeoutMillis = 5_000) { shows("Orrery analysis") }
-            onAllNodesWithText("Default: m1, OpenRouter").let { it[it.fetchSemanticsNodes().size - 1] }.performScrollTo().performClick()
-            onAllNodesWithText("Default: m1, OpenRouter").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
-            waitUntil(timeoutMillis = 5_000) { ai.state.value.savedProfile!!.generatorFollowsDefault() }
-        }
-    }
 }

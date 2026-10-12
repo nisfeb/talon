@@ -1163,7 +1163,6 @@ fun App(
                     io.nisfeb.talon.orrery.frontierReadsMessages(aiSettings),
                 ) { aiSettings.state.value },
                 book = { repo.bookContacts.value },
-                standDown = io.nisfeb.talon.orrery.StandDown(uiSettings.orreryStandDown, uiSettings::setOrreryStandDown),
                 decide = io.nisfeb.talon.orrery.DecideControl(uiSettings.orreryDecide, uiSettings::setOrreryDecide),
             )
         }

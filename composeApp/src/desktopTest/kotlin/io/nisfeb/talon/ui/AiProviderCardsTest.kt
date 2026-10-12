@@ -38,7 +38,7 @@ import kotlin.test.assertTrue
 /**
  * The providers in AI settings, against a server of the owner's own:
  * an address is saved before its models are fetched, a refusal says
- * why, Test times it, a row comes and goes, and the default model is
+ * why, Save tries an OpenRouter key, a row comes and goes, and the default model is
  * picked from the list, narrowed by a search, or typed.
  */
 @OptIn(ExperimentalTestApi::class)
@@ -49,6 +49,8 @@ class AiProviderCardsTest {
     @Volatile private var listing = true
     // OpenRouter's list, where a test wants one; refused otherwise.
     @Volatile private var openRouterList: String? = null
+    // What OpenRouter says of a key.
+    @Volatile private var openRouterKey = 200
 
     private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
         createContext("/v1/models") { ex ->
@@ -72,6 +74,8 @@ class AiProviderCardsTest {
                 if (st == 200) """{"data":[{"id":"qwen3"},{"id":"whisper-large"},{"id":"text-embedding-3"}]}""" else "busy",
                 io.ktor.http.HttpStatusCode.fromValue(st),
             )
+        } else if ("openrouter.ai" in url && url.endsWith("/key")) {
+            respond("{}", io.ktor.http.HttpStatusCode.fromValue(openRouterKey))
         } else if ("openrouter.ai" in url && openRouterList != null) {
             respond(
                 if (url.endsWith("/endpoints/zdr")) """{"data":[]}""" else openRouterList!!,
@@ -131,19 +135,28 @@ class AiProviderCardsTest {
     }
 
     private fun ComposeUiTest.refusedFetch(ai: FakeAiSettings) {
-        onNodeWithText("Fetch models").performClick()
+        // Save is the one button: it fetches, and stays until a list has come.
+        onNodeWithText("Save").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Answered 503: busy") }
         assertEquals(address, ai.saved("srv")!!.baseUrl)
         assertTrue(ai.saved("srv")!!.models.isEmpty())
     }
 
+    // No Fetch or Test button: Save fetches, and a list is the test. OpenRouter
+    // lists its models for anyone, so its key is tried as well.
     @Test
-    fun `Test says how fast it answers, and that the key was refused`() = section(home.copy(baseUrl = address)) {
-        onNodeWithText("Test").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Answers in") }
-        status = 401
-        onNodeWithText("Test").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("The key was refused (401).") }
+    fun `saving an OpenRouter key tries it, and a refused one is said`() {
+        openRouterList = """{"data":[{"id":"openai/gpt-5","name":"OpenAI: GPT-5"}]}"""
+        openRouterKey = 401
+        section(AiProvider("or", ProviderKind.OpenRouter, "OpenRouter")) { ai ->
+            assertTrue(onAllNodesWithText("Fetch models").fetchSemanticsNodes().isEmpty() && onAllNodesWithText("Test").fetchSemanticsNodes().isEmpty())
+            onNode(hasSetTextAction() and hasText("API key")).performTextInput("sk-bad")
+            onNodeWithText("Save").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("The key was refused (401).") }
+            assertEquals("sk-bad", ai.saved("or")!!.apiKey, "kept, to be put right")
+        }
+        openRouterList = null
+        openRouterKey = 200
     }
 
     @Test
@@ -181,7 +194,7 @@ class AiProviderCardsTest {
     @Test
     fun `the default model is picked, searched for, or typed`() =
         section(home.copy(baseUrl = address, models = listOf(ModelInfo("qwen3"), ModelInfo("llama3"))), fetches = false) { ai ->
-            onNodeWithText("None chosen").performClick()
+            onNodeWithText("No model yet").performClick()
             onNodeWithText("llama3").performClick()
             waitForIdle()
             assertEquals(ModelRef("srv", "llama3"), ai.state.value.savedProfile!!.defaultModel)
@@ -207,8 +220,8 @@ class AiProviderCardsTest {
             waitForIdle()
             assertTrue(ai.state.value.savedProfile!!.isOn(AiFeature.Transcription))
             // The default model's picker, then this one below the switch.
-            assertEquals(2, onAllNodesWithText("None chosen").fetchSemanticsNodes().size)
-            onAllNodesWithText("None chosen")[1].performScrollTo().performClick()
+            assertEquals(2, onAllNodesWithText("No model yet").fetchSemanticsNodes().size)
+            onAllNodesWithText("No model yet")[1].performScrollTo().performClick()
             assertTrue(onAllNodesWithText("qwen3").fetchSemanticsNodes().isEmpty(), "a model that cannot transcribe is not offered")
             onNodeWithText("whisper-large").performClick()
             waitForIdle()
@@ -217,13 +230,13 @@ class AiProviderCardsTest {
     }
 
     @Test
-    fun `jev left on with nobody offering it says so, and can still be turned off`() =
+    fun `a decision model left on with nobody offering one says so, and can still be turned off`() =
         section(home.copy(baseUrl = address), jev = true, orreryPage = true) { ai ->
-            assertTrue(shows("No provider offers Jev any more, so nothing is being gated."))
-            switchBeside("Jev gating").assertIsEnabled().performClick()
+            assertTrue(shows("Nothing offers a decision model now, so nothing is screened."))
+            switchBeside("Decision model").assertIsEnabled().performClick()
             waitForIdle()
             assertEquals(false, ai.state.value.savedProfile!!.jev)
-            waitUntil(timeoutMillis = 5_000) { shows("Needs an OpenRouter provider with a key") }
+            waitUntil(timeoutMillis = 5_000) { shows("Needs an OpenRouter key under AI.") }
         }
 
     /** The switch drawn nearest [label]. */
@@ -244,7 +257,7 @@ class AiProviderCardsTest {
             ModelInfo("anthropic/claude-sonnet-4", "Claude Sonnet 4"),
             ModelInfo("openai/gpt-4o", "GPT-4o"),
         )), fetches = false) { ai ->
-            onNodeWithText("None chosen").performClick()
+            onNodeWithText("No model yet").performClick()
             onNode(hasSetTextAction() and hasText("Search, or type a model's id")).performTextInput("cl son")
             waitForIdle()
             assertTrue(onAllNodesWithText("Claude Sonnet 4").fetchSemanticsNodes().isNotEmpty())
@@ -265,7 +278,7 @@ class AiProviderCardsTest {
             {"id":"openai/gpt-5","name":"OpenAI: GPT-5","context_length":400000,"supported_parameters":["tools","max_tokens"]}]}"""
         section(AiProvider("or", ProviderKind.OpenRouter, "OpenRouter", apiKey = "k", models = listOf(ModelInfo("openai/gpt-5", "OpenAI: GPT-5")))) { ai ->
             waitUntil(timeoutMillis = 10_000) { ai.saved("or")!!.models.any { it.id == "anthropic/claude-opus-5.5" } }
-            onNodeWithText("None chosen").performClick()
+            onNodeWithText("No model yet").performClick()
             onNode(hasSetTextAction() and hasText("Search, or type a model's id")).performTextInput("opus 5.5")
             waitForIdle()
             assertTrue(onAllNodesWithText("OpenAI: GPT-5").fetchSemanticsNodes().isEmpty(), "the search narrows")

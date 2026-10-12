@@ -566,6 +566,12 @@ fun AiProfile.keepingLocal(local: AiProfile?): AiProfile {
  */
 fun AiSettings.Config.hasModelFor(f: AiFeature): Boolean = modelProblem(f) == null
 
+/**
+ * Loops run on the assistant, so only while it is on and has a model.
+ * They ran with it off, and lost its web tools without a word.
+ */
+fun AiSettings.Config.loopsCanRun(): Boolean = assistantOn() && hasModelFor(AiFeature.Assistant)
+
 /** Why [f] has no model a chat client can call, as a sentence, or null when it has one ([Resolved.problem]). */
 fun AiSettings.Config.modelProblem(f: AiFeature): String? {
     val r = profile().resolve(f) ?: return "No model is set."
@@ -697,6 +703,15 @@ fun AiProfile.withSwitches(s: kotlinx.serialization.json.JsonObject): AiProfile 
     jev = (s["jev"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: jev,
     orrery = (s["orrery"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: orrery,
 )
+
+/**
+ * What transcription runs on: its own speech model, else whisper-1 on the
+ * default provider where that one can transcribe, as
+ * [CallRecordingPublisher.sttFrom] does. The row said "None chosen" while
+ * whisper-1 ran.
+ */
+fun AiProfile.transcriptionRef(): ModelRef? = features[AiFeature.Transcription]?.model
+    ?: defaultModel?.takeIf { d -> provider(d.provider)?.kind.let { it == ProviderKind.OpenAi || it == ProviderKind.OpenAiCompatible } }?.copy(model = WHISPER)
 
 /** Orrery is on: turned on by the owner, on some device. Off by default. */
 fun AiSettings.Config.orreryOn(): Boolean = savedProfile?.orrery == true

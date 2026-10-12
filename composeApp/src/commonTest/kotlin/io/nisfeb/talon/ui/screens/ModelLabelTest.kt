@@ -54,4 +54,51 @@ class ModelLabelTest {
         val other = profile.copy(defaultModel = ModelRef("an", "claude-opus-5"))
         assertEquals("Default: claude-opus-5, Anthropic", defaultLabel(other))
     }
+
+    // The words the AI page uses now, plain ones (2026-10-12): "Not kept"
+    // for zero data retention, and the reading line the same for every
+    // provider, triage saying what it reads unasked.
+    private val device = AiProvider(io.nisfeb.talon.ai.DEVICE_PROVIDER, ProviderKind.ThisDevice, "On this device")
+    private val server = AiProvider("lan", ProviderKind.OpenAiCompatible, "My server", baseUrl = "http://10.0.0.5:11434/v1")
+    private val openRouter = AiProvider("or", ProviderKind.OpenRouter, "OpenRouter", apiKey = "k", models = listOf(ModelInfo("kept/1"), ModelInfo("safe/1", zdr = true)))
+
+    @Test
+    fun `labels name this device once, a model not kept, and no model at all`() {
+        val p = AiProfile(providers = listOf(device, openRouter))
+        assertEquals("This device (private)", refLabel(p, ModelRef(io.nisfeb.talon.ai.DEVICE_PROVIDER, "")))
+        assertEquals("safe/1, OpenRouter · Not kept", refLabel(p, ModelRef("or", "safe/1")))
+        assertEquals("kept/1, OpenRouter", refLabel(p, ModelRef("or", "kept/1")))
+        assertEquals("No model yet", refLabel(p, null))
+        assertEquals("No model yet. Add a provider above.", defaultLabel(p))
+        assertEquals("Default: This device (private)", defaultLabel(p, ModelRef(io.nisfeb.talon.ai.DEVICE_PROVIDER, "")))
+    }
+
+    @Test
+    fun `a provider's line says what it keeps in plain words`() {
+        assertEquals("Save to fetch its models. Whether it keeps what you send depends on your account.", providerSummary(anthropic))
+        assertEquals("2 models, 1 of them Not kept.", providerSummary(openRouter))
+        assertEquals("Save to fetch its models. Private: on your own machine or network.", providerSummary(server))
+        assertEquals("Save to fetch its models. Not on your network, so it is an online service.", providerSummary(server.copy(baseUrl = "https://llm.example.com/v1")))
+    }
+
+    @Test
+    fun `the reading line is the same for every provider, and triage says it reads unasked`() {
+        fun on(model: ModelRef, vararg ps: AiProvider) = AiProfile(
+            providers = ps.toList(),
+            features = mapOf(io.nisfeb.talon.ai.AiFeature.CatchUp to io.nisfeb.talon.ai.FeatureSetting(true, model), io.nisfeb.talon.ai.AiFeature.OrreryTriage to io.nisfeb.talon.ai.FeatureSetting(true, model, own = true)),
+        )
+        val catchUp = io.nisfeb.talon.ai.AiFeature.CatchUp
+        val triage = io.nisfeb.talon.ai.AiFeature.OrreryTriage
+        assertEquals("Messages you ask about go to this model and may be stored.", readingWarning(on(ModelRef("or", "kept/1"), openRouter), catchUp))
+        assertEquals("Every call and status line read here goes to this model and may be stored.", readingWarning(on(ModelRef("or", "kept/1"), openRouter), triage))
+        assertEquals(null, readingWarning(on(ModelRef("or", "safe/1"), openRouter), catchUp), "not kept")
+        assertEquals(null, readingWarning(on(ModelRef("lan", "llama"), server), catchUp), "private")
+        assertEquals("Messages you ask about go to Anthropic. Whether they are kept depends on your account.", readingWarning(on(ModelRef("an", "c"), anthropic), catchUp))
+        val arm = row.copy(models = listOf(ModelInfo("z/kept"), ModelInfo("z/safe", zdr = true)), suggested = emptyMap())
+        assertEquals("Messages pass through your vendor on the way to the model. The model may keep them.", readingWarning(on(ModelRef(ARMILLARY_PROVIDER, "z/kept"), arm), catchUp, "proxy"))
+        assertEquals("Messages pass through your vendor on the way to the model. Nothing keeps them.", readingWarning(on(ModelRef(ARMILLARY_PROVIDER, "z/safe"), arm), catchUp, "proxy"))
+        assertEquals(null, readingWarning(on(ModelRef(ARMILLARY_PROVIDER, "z/safe"), arm), catchUp, "lease"))
+        assertEquals("Messages you ask about go to this model and may be stored.", readingWarning(on(ModelRef(ARMILLARY_PROVIDER, "z/kept"), arm), catchUp, "lease"))
+        assertEquals(null, readingWarning(AiProfile(), catchUp), "no model, nothing to warn of")
+    }
 }
