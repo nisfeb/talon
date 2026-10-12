@@ -31,6 +31,18 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 
 /**
+ * What one assistant turn may write, its thinking included. At 1,024 a
+ * model that thinks first ran out before answering on a request for
+ * several events, came back empty twice, and the owner saw EmptyAnswer
+ * (2026-10-09 and 2026-10-12). Only what is written is paid for, though
+ * OpenRouter asks that the key could pay for all of it.
+ * ponytail: the most every model offered takes (GPT-4o-mini stops at
+ * 16,384); a cap per model from its list if a server of your own
+ * refuses it.
+ */
+const val AGENT_MAX_OUTPUT = 16_384
+
+/**
  * Tool-use sibling of [AiClient]: one round-trip of an agentic
  * conversation. Given the running [AgentMessage] history and the
  * advertised [ToolSpec]s, returns the model's [AgentTurn] — either a
@@ -52,7 +64,7 @@ class AgentClient(
         system: String,
         messages: List<AgentMessage>,
         tools: List<ToolSpec>,
-        maxOutputTokens: Int = 1024,
+        maxOutputTokens: Int = AGENT_MAX_OUTPUT,
     ): AgentTurn {
         val cfg = settingsProvider()
         return when (cfg.provider) {
