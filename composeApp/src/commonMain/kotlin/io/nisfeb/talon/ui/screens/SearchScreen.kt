@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -65,6 +66,7 @@ fun SearchScreen(
 ) {
     val aiState by aiSettings.state.collectAsState()
     var query by remember { mutableStateOf("") }
+    var showSyntaxHelp by remember { mutableStateOf(false) }
     val trimmed = query.trim()
 
     // Debounce typing — `db.messages().search(...)` is a full-table LIKE
@@ -193,9 +195,13 @@ fun SearchScreen(
                 value = query,
                 onValueChange = { query = it },
                 placeholder = {
+                    // One line only: a long placeholder wrapped to two
+                    // lines on a narrow phone, inflating the field so the
+                    // single-line cursor floated in the middle. The syntax
+                    // hints moved to the "Search tips" dialog.
                     Text(
-                        if (smartMode) "Search by meaning"
-                        else "Search · try from:~ship since:1w has:image",
+                        if (smartMode) "Search by meaning" else "Search messages",
+                        maxLines = 1,
                     )
                 },
                 singleLine = true,
@@ -217,33 +223,44 @@ fun SearchScreen(
         // flag, so a user with smart search on globally can still pick
         // substring for any individual search without disabling the
         // indexer.
-        if (semanticEnabled) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
+        // Smart toggle (when enabled) + the always-available syntax
+        // help. The operators work in substring mode, which every
+        // platform has, so the tips chip shows even without an embedder.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (semanticEnabled) {
                 FilterChip(
                     selected = smartMode,
                     onClick = { uiSettings.setSmartSearchPreferred(!smartPreferred) },
                     label = { Text(if (smartMode) "✨ Smart on" else "✨ Smart") },
                 )
-                if (smartMode) {
-                    val p = indexProgress
-                    val status = when {
-                        semanticBusy -> "Searching…"
-                        p.running && p.total > 0 -> "Indexing ${p.indexed} of ${p.total}…"
-                        p.running -> "Reading your messages…"
-                        p.total == 0 -> "No messages indexed yet"
-                        else -> "${p.indexed} messages indexed"
-                    }
-                    Text(
-                        status,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
+            FilterChip(
+                selected = false,
+                onClick = { showSyntaxHelp = true },
+                label = { Text("Search tips") },
+            )
+            if (semanticEnabled && smartMode) {
+                val p = indexProgress
+                val status = when {
+                    semanticBusy -> "Searching…"
+                    p.running && p.total > 0 -> "Indexing ${p.indexed} of ${p.total}…"
+                    p.running -> "Reading your messages…"
+                    p.total == 0 -> "No messages indexed yet"
+                    else -> "${p.indexed} messages indexed"
+                }
+                Text(
+                    status,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (showSyntaxHelp) {
+            SearchSyntaxDialog(onDismiss = { showSyntaxHelp = false })
         }
         HorizontalDivider()
         if (trimmed.length < 2 && highlightsEnabled && highlights.value.isNotEmpty()) {
@@ -516,5 +533,48 @@ private fun ParsedFilterChips(filter: io.nisfeb.talon.ui.SearchFilter) {
                 label = { Text(label, style = MaterialTheme.typography.labelSmall) },
             )
         }
+    }
+}
+
+/** The advanced-search cheat sheet, opened from the "Search tips" chip.
+ *  Lists every operator the parser in [io.nisfeb.talon.ui.SearchFilter]
+ *  understands. Keep in sync with parseSearchFilter. */
+@Composable
+private fun SearchSyntaxDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            io.nisfeb.talon.ui.TextButton(onClick = onDismiss) { Text("Got it") }
+        },
+        title = { Text("Advanced search") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SyntaxRow("from:~ship", "messages from one person")
+                SyntaxRow("in:chat/~ship/channel", "one conversation")
+                SyntaxRow("since:1w", "newer than the offset (m, h, d, w, mo)")
+                SyntaxRow("has:image", "messages with an image")
+                SyntaxRow("has:link", "messages with a link")
+                Text(
+                    "Combine them, e.g. from:~sampel has:image since:3d",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+    )
+}
+
+@Composable
+private fun SyntaxRow(op: String, desc: String) {
+    Column {
+        Text(
+            op,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+        )
+        Text(
+            desc,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
