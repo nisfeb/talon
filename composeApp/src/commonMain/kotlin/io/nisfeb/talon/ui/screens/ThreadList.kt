@@ -165,9 +165,21 @@ fun ThreadList(
                 (lastVisible.offset + lastVisible.size) <= info.viewportEndOffset
         }
     }
+    // Backfill the parent post when it isn't local yet. A notification
+    // tap can open a thread whose parent was never synced, and on a cold
+    // start the SSE channel isn't up yet — fetchThread is a silent no-op
+    // until it connects. Retry until the parent lands, so the thread
+    // doesn't render empty ("a thread that doesn't exist") for good.
+    // ponytail: 30 one-second tries covers the connect+bootstrap window;
+    // raise the cap if very slow ships still miss it.
     LaunchedEffect(whom, parentId) {
-        runCatching { repo.fetchThread(whom, parentId) }
-            .onFailure { Log.w("ThreadScreen", "fetchThread failed: ${it.message}") }
+        var tries = 0
+        while (db.messages().getOne(whom, parentId) == null && tries < 30) {
+            runCatching { repo.fetchThread(whom, parentId) }
+                .onFailure { Log.w("ThreadScreen", "fetchThread failed: ${it.message}") }
+            tries++
+            delay(1000)
+        }
     }
 
     // Snapshot the per-thread unread count at thread-open. The
