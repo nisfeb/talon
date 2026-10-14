@@ -1178,12 +1178,18 @@ fun App(
             val ship = loggedInShip ?: return@LaunchedEffect
             io.nisfeb.talon.orrery.settleOrreryGate(orreryGate, db, aiSettings, orreryRepo, url, ship)
         }
+        // The non-chat half of the Activity feed: every non-chat local
+        // notification (orrery, loop, armillary, invite, dm request) records
+        // a notice here next to the toast, so Activity can show it.
+        val noticeRepo = remember(db, loopScope) {
+            io.nisfeb.talon.notify.NoticeRepo(db.notices(), loopScope)
+        }
         // Armillary rides the same surface again: the owner's cookie,
         // and the AI settings, where the provider row it keeps lives.
         // The notifier is for a payment landing while the window is
         // behind the browser.
-        val armillaryRepo = remember(session, aiSettings, notifier) {
-            io.nisfeb.talon.armillary.ArmillaryRepo(session.http, loopScope, aiSettings, notifier)
+        val armillaryRepo = remember(session, aiSettings, notifier, noticeRepo) {
+            io.nisfeb.talon.armillary.ArmillaryRepo(session.http, loopScope, aiSettings, notifier, noticeRepo)
         }
         LaunchedEffect(armillaryRepo, mailShipUrl, loggedInShip) {
             val ship = loggedInShip
@@ -1258,7 +1264,13 @@ fun App(
                 // group/replace like Android's id-tagged notifications. A
                 // tag param on Notifier.notify is the upgrade path if it
                 // matters; for now each loop run is a standalone toast.
-                notify = { _, title, body -> notifier.notify(title, body) },
+                notify = { loopId, title, body ->
+                    notifier.notify(title, body)
+                    noticeRepo.record(
+                        "loop:$loopId", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_ASSISTANT,
+                        "loop-result", title, body, "loop:$loopId",
+                    )
+                },
             )
         }
         // Which calendars this device keeps off survives a restart.
@@ -1310,10 +1322,19 @@ fun App(
         }
         // New orrery proposals notify; one answered anywhere is taken back.
         // Not while Actions is on screen: the list is the news.
-        LaunchedEffect(orreryRepo, notifier) {
+        LaunchedEffect(orreryRepo, notifier, noticeRepo) {
             orreryRepo.onActions = { raise, clear ->
-                clear.forEach { notifier.clear("action:$it") }
-                if (!showActions) raise.forEach { notifier.notify(it.title, it.body, "action:" + it.id.ifBlank { "more" }) }
+                clear.forEach { notifier.clear("action:$it"); noticeRepo.dismiss("orrery:$it") }
+                raise.forEach {
+                    val key = it.id.ifBlank { "more" }
+                    // The inbox records every proposal; the toast is only
+                    // suppressed while the Actions list (the news) is open.
+                    noticeRepo.record(
+                        "orrery:$key", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_ASSISTANT,
+                        "orrery-proposal", it.title, it.body, "orrery:$key",
+                    )
+                    if (!showActions) notifier.notify(it.title, it.body, "action:$key")
+                }
             }
         }
         // "Run now", from both the Loops screen and the assistant's jobs pane.
@@ -1474,6 +1495,10 @@ fun App(
             DisposableEffect(repo, notifier) {
                 repo.dmInviteListener = { ship ->
                     runCatching { notifier.notify(callContacts.displayName(ship), "wants to message you") }
+                    noticeRepo.record(
+                        "dm:$ship", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "dm-request",
+                        callContacts.displayName(ship), "wants to message you", "dm:$ship",
+                    )
                 }
                 // A new group invite is as easy to miss as a DM request —
                 // toast it the same way so it doesn't sit unseen behind a
@@ -1482,6 +1507,10 @@ fun App(
                     val name = invite.title ?: invite.flag
                     val from = invite.inviter?.let { " from " + callContacts.displayName(it) } ?: ""
                     runCatching { notifier.notify(name, "invited you to a group$from") }
+                    noticeRepo.record(
+                        "invite:${invite.flag}", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "group-invite",
+                        name, "invited you to a group$from", "invite:${invite.flag}",
+                    )
                 }
                 onDispose {
                     repo.dmInviteListener = null

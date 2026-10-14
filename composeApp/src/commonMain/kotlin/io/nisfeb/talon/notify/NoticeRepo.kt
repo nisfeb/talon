@@ -61,6 +61,15 @@ class NoticeRepo(
 
     suspend fun markAllRead(domain: String? = null) = dao.markAllRead(domain)
 
+    /**
+     * An event handled elsewhere (an Orrery proposal answered on another
+     * device): mark its notice read so the inbox agrees. Fire-and-forget, to
+     * match [record], since callers are notification callbacks, not suspend.
+     */
+    fun dismiss(id: String) {
+        scope.launch { dao.markRead(id) }
+    }
+
     private suspend fun prune() {
         dao.pruneOlderThan(now() - MAX_AGE_MS)
         dao.pruneBeyond(MAX_COUNT)
