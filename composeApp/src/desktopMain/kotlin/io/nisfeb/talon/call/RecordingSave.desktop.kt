@@ -10,12 +10,13 @@ actual suspend fun saveWavFile(bytes: ByteArray, name: String): String? =
 actual suspend fun saveFile(bytes: ByteArray, name: String, extension: String, mime: String): String? =
     withContext(ioDispatcher) {
         runCatching {
-            val dir = java.io.File(System.getProperty("user.home"), "Downloads/Talon")
+            val dir = io.nisfeb.talon.util.talonDownloadsDir()
             dir.mkdirs()
             val safe = name.map { if (it.isLetterOrDigit() || it == '-' || it == '_') it else '-' }
                 .joinToString("")
                 .ifBlank { "recording" }
-            val f = java.io.File(dir, "$safe.$extension")
+            // Don't clobber a previous save of the same name.
+            val f = io.nisfeb.talon.util.uniquifyDownload(java.io.File(dir, "$safe.$extension"))
             f.writeBytes(bytes)
             f.absolutePath
         }.onFailure {
