@@ -10,6 +10,7 @@ import io.nisfeb.talon.data.ReactionEntity
 import io.nisfeb.talon.data.ThreadUnreadEntity
 import io.nisfeb.talon.data.UnreadEntity
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
@@ -238,6 +239,24 @@ class TlonChatRepoSendTest {
             "170.141.184.507",
             ship.pokesTo("channels").single().json.at("channel", "action", "post", "del").jsonPrimitive.content,
         )
+    }
+
+    // An edit (and a delete) pokes on the repo's own scope, not the screen's:
+    // launched on a screen's rememberCoroutineScope, leaving the chat while the
+    // poke was in flight cancelled it and the edit never reached the ship.
+    // Real time: holdPoke delays the ship's ack so there is a window to leave.
+    @Test
+    fun `an edit whose screen is left mid-poke still reaches the ship`() = live {
+        ship.holdPoke = 600
+        val screen = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+        screen.launch { repo.edit(nest, "170141184506", "edited", originalSentMs = 1) }
+        // Let the poke reach the held PUT, then leave the chat.
+        kotlinx.coroutines.delay(200)
+        screen.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+        val until = System.currentTimeMillis() + 5_000
+        while (ship.pokesTo("channels").isEmpty() && System.currentTimeMillis() < until) kotlinx.coroutines.delay(50)
+        val edit = ship.pokesTo("channels").single().json.at("channel", "action", "post", "edit")
+        assertEquals("170.141.184.506", edit.at("id").jsonPrimitive.content)
     }
 
     @Test

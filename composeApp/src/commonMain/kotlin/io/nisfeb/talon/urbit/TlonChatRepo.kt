@@ -3151,7 +3151,7 @@ class TlonChatRepo(
      * visible if the poke is rejected (e.g. user isn't an admin when
      * trying to delete someone else's channel post).
      */
-    suspend fun delete(whom: String, postId: String, parentId: String? = null) {
+    suspend fun delete(whom: String, postId: String, parentId: String? = null) = carry {
         val ch = channel ?: error("not connected")
         if (whomNeedsOptimisticDelete(whom)) {
             // Mirror what react/unreact do — apply the local change
@@ -3300,7 +3300,7 @@ class TlonChatRepo(
          *  are carried across the edit instead of being flattened into
          *  literal text. Null re-parses [text] alone (legacy callers). */
         originalContentJson: String? = null,
-    ) {
+    ) = carry {
         val ch = channel ?: error("not connected")
         if (!whom.startsWith("chat/")) error("edit only supported on channel chats")
         val content = originalContentJson
@@ -3365,7 +3365,7 @@ class TlonChatRepo(
         image: String,
         bodyMarkdown: String,
         originalSentMs: Long,
-    ) {
+    ) = carry {
         require(nest.startsWith("diary/")) { "not a diary channel: $nest" }
         val ch = channel ?: error("not connected")
         // The post as the ship has it: cites and image dimensions have
@@ -3408,7 +3408,7 @@ class TlonChatRepo(
         postId: String,
         content: JsonArray,
         originalSentMs: Long,
-    ) {
+    ) = carry {
         require(nest.startsWith("heap/")) { "not a heap channel: $nest" }
         val ch = channel ?: error("not connected")
         val essay = buildEssay(content, originalSentMs, kind = "/heap", meta = null)
