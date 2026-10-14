@@ -78,6 +78,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.DraftStore
@@ -2704,6 +2705,7 @@ private fun GroupChannelRow(
                     fontWeight = if (unread > 0) FontWeight.SemiBold else FontWeight.Normal,
                 ),
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (!draftPreview.isNullOrEmpty()) {
                 Text(
@@ -2711,6 +2713,7 @@ private fun GroupChannelRow(
                     style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic),
                     color = MaterialTheme.colorScheme.primary,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             } else if (timestamp != null) {
                 // Blank preview (image-only post) drops its slot rather
@@ -2721,6 +2724,7 @@ private fun GroupChannelRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
