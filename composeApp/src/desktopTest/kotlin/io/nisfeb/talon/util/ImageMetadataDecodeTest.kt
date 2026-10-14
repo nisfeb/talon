@@ -33,6 +33,25 @@ class ImageMetadataDecodeTest {
         assertTrue(redAt(out), "and it is the same picture")
     }
 
+    // A format the byte-level strip doesn't parse (here a BMP, standing in for
+    // WebP/HEIC) is decoded and re-encoded to a metadata-free JPEG rather than
+    // passed through with its metadata intact.
+    @Test
+    fun `an unparsed format is re-encoded to a stripped JPEG`() {
+        val bmp = picture("bmp")
+        assertTrue(
+            bmp[0] == 'B'.code.toByte() && bmp[1] == 'M'.code.toByte(),
+            "the input is a BMP, which the byte-level strip does not handle",
+        )
+        val out = stripImageMetadata(bmp)
+        assertTrue(
+            out[0] == 0xFF.toByte() && out[1] == 0xD8.toByte() && out[2] == 0xFF.toByte(),
+            "it came back as a JPEG (re-encoded), not the original BMP",
+        )
+        assertEquals(32 to 16, decode(out).let { it.width to it.height })
+        assertTrue(redAt(out), "and it is the same picture")
+    }
+
     @Test
     fun `a PNG decodes the same without its text`() {
         val plain = picture("png")
