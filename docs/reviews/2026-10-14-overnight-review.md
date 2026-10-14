@@ -1,8 +1,11 @@
 # Overnight bug-hunt and polish review — 2026-10-14
 
-STATUS: EXTENDING — all 7 dimensions + completeness sweep done; closing the
-screen-scope-write class. Fixed so far: R16 (F8), R11 (F9). Remaining: R12
-group-admin, R13 mail-file. Will re-mark REVIEW COMPLETE once the class is closed.
+REVIEW COMPLETE
+
+STATUS: COMPLETE — all 7 dimensions + completeness sweep done, and the
+screen-scope-write class is fully closed (all 6 instances fixed: F1, F2, F8, F9,
+F10, F11). 11 fixes applied (not pushed), 11 reported. See the gap report for open
+follow-ups (iOS leaf unreviewed, no PIT/app-run, two product decisions R1/R6).
 
 Branch: `polish/overnight-2026-10-14` (base `origin/master` 2b8ff1d8). Not pushed.
 Prompt: `.overnight-review-prompt.md`. Ran via a self-paced `/loop`, resumable.
@@ -10,10 +13,11 @@ Prompt: `.overnight-review-prompt.md`. Ran via a self-paced `/loop`, resumable.
 ## Summary
 
 - Total issues found: 22
-- Fixed on this branch: 9 (F1 6d307846, F2 4ec3d2a7, F3 663b7bf1, F4 e457c949,
-  F5 eaa1a275, F6 a7e4e97c, F7 f9cbc464, F8 ddf04fc2, F9 2b130b21)
-- Reported, still open: 13 (2 High, 6 Med, 5 Low) — R1-R4, R6-R10, R12-R15
-  (R5→F2, R16→F8, R11→F9)
+- Fixed on this branch: 11 (F1 6d307846, F2 4ec3d2a7, F3 663b7bf1, F4 e457c949,
+  F5 eaa1a275, F6 a7e4e97c, F7 f9cbc464, F8 ddf04fc2, F9 2b130b21, F10 ee964069,
+  F11 fb305913)
+- Reported, still open: 11 (2 High, 5 Med, 4 Low) — R1-R4, R6-R10, R14-R15
+  (R5→F2, R16→F8, R11→F9, R12→F10, R13→F11)
 
 ## Dimension coverage
 
@@ -136,6 +140,24 @@ between the two pinned the note "saving…" forever (replaceTree re-applies pend
 on every later scry). Wrapped both in `scope.async { … }.await()` (repo scope),
 matching the `write()` helper. Test cancels a save mid-PUT and asserts the row is
 not left pending. 17/17 in NotesRepoTest pass.
+
+### F10 — group-admin actions survive leaving the screen mid-poke (commit ee964069)
+
+The fix for R12. `pokeAGroup` (the chokepoint for kick/ban/unban/approve/deny/
+report/role/token+pending removal) and `inviteToGroup` poked on the caller's
+scope; the admin screens navigate back after the action, so leaving mid-poke
+dropped the membership change. Both now run on the repo scope via `carry`. The
+channel-admin writers already carried, so they nest harmlessly. Test cancels a
+kick mid-poke and asserts it still reaches the ship. 40/40 in TlonChatRepoSendTest
+pass (the group-action-5→-4 fallback tests still pass, so the wrap is behaviour-neutral).
+
+### F11 — filing mail to Lattice survives leaving the thread (commit fb305913)
+
+The fix for R13. `MailRepo.publishToLattice` ran on the caller's scope; navigating
+away mid-publish cancelled it. Now runs on the repo scope via `scope.async`,
+matching `sendMessage`. No dedicated test (the write goes to an external Lattice
+HTTP endpoint, not FakeShip); the `scope.async` pattern is covered by
+`sendMessage`'s tests.
 
 ## REPORTED
 
@@ -279,7 +301,7 @@ section switch, Android activity recreation), pending is never cleared, and
 `scope.async { … }.await()` the `write()` helper already uses. Same proven class
 as F1/F2; deferred only to keep this iteration scoped.
 
-### R12 (Med) — group-admin writes run on the screen scope, dropped on navigation
+### R12 (Med) — group-admin writes run on the screen scope, dropped on navigation — FIXED (F10, commit ee964069)
 
 `TlonChatRepo.approveRequest` (:2385), `denyRequest` (:2390), `kickFromGroup`
 (:2030), `banFromGroup` (:2035), `unbanFromGroup` (:2041), `revokeTokenInvite`
@@ -289,7 +311,7 @@ admin screen during the round-trip cancels the poke (and, with `confirm = true`,
 the ack-wait), so the membership change may not land. Fix: wrap in `carry`, same
 as F2.
 
-### R13 (Low) — mail "File to Lattice" runs on the screen scope
+### R13 (Low) — mail "File to Lattice" runs on the screen scope — FIXED (F11, commit fb305913)
 
 `MailThreadPane.kt:245` (`file()`) calls `MailRepo.publishToLattice`
 (`MailRepo.kt:496`), a plain suspend with no scope hop; navigating away during the
@@ -393,15 +415,19 @@ save-WAV / transcribe / publish-to-Lattice) run on the dialog's screen scope;
 closing the dialog mid-op drops them. Documented best-effort, so a lost local
 result, not a divergence — except the Lattice publish does write out.
 
-### The screen-scope-write class (F1, F2, F8, F9, R12, R13) — being closed
+### The screen-scope-write class (F1, F2, F8, F9, F10, F11) — CLOSED
 
 Six instances of one bug: a user write launched on a composable's
 `rememberCoroutineScope` instead of a repo scope, dropped when the screen is left
-mid-write. FIXED: F1 upload, F2 chat edit/delete, F8 profile edit (the worst — it
-diverged), F9 NotesRepo poke + updateNote (fixed the "saving…" pin too).
-REMAINING: R12 group-admin (Med), R13 mail-file (Low) — same repo-scope fix +
-leaving-midway test each. A grep for any remaining raw `rememberCoroutineScope` +
-repo-poke call sites (calls, calendar, mail-compose) is part of closing the class.
+mid-write. All fixed, each run on the repo scope (`carry`/`scope.async`):
+- F1 upload, F2 chat edit/delete, F8 profile edit (the worst — it diverged),
+  F9 NotesRepo poke + updateNote (also fixed the "saving…" pin), F10 group-admin
+  (kick/ban/approve/deny/invite), F11 mail file-to-Lattice.
+Straggler sweep: CalendarRepo writes (setDone/writeEvent/poke) already `carry`,
+OrreryRepo writes on its repo scope, and the call/party paths route through a
+`control` object rather than raw screen-scope pokes. No further instances found in
+the main write paths (an exhaustive per-function audit of every repo was not done;
+see the gap report).
 
 ### Dimension 7 clean (verified from code)
 
@@ -467,9 +493,10 @@ NOT covered / open follow-ups (in rough priority):
    android/desktop leaves. iOS-specific code (VoIP/CallKit, party video, iOS
    notification registration, the iOS Capabilities actuals) got zero scrutiny.
    This is a whole untouched dimension — needs its own pass.
-2. **The screen-scope-write class is half-fixed.** F1/F2 fixed; R16 (High), R11
-   (High), R12, R13 still open. Fix as one chunk (see that section above), and grep
-   calls/calendar/mail-compose for any remaining instances.
+2. **The screen-scope-write class is now CLOSED.** All six instances fixed (F1, F2,
+   F8-F11). Straggler sweep found no more in the main write paths (CalendarRepo/
+   OrreryRepo already repo-scoped, calls route through a control object). Caveat:
+   an exhaustive per-function audit of every repo was not done.
 3. **No mutation testing (PIT).** CLAUDE.md testing-standard rule 8 wants sandboxed
    PIT over new logic; F1/F2 added logic + tests but no PIT was run (sandbox setup
    is heavy and was out of scope for the self-paced loop). The F1/F2 tests are
