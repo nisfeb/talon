@@ -74,4 +74,39 @@ object DesktopUriHandler : UriHandler {
         Log.w(TAG, "native opener ${cmd.firstOrNull()} failed", it)
         false
     }
+
+    /**
+     * Hand a local file to the system opener by PATH (a deb into the package
+     * installer, a dmg to mount, an msi to run) and report whether it was
+     * actually accepted. Unlike [openUri] this passes the plain path, not a
+     * `file:` URI (java File.toURI yields a single-slash `file:/…` form some
+     * openers mishandle), and it CHECKS the opener's exit code instead of
+     * assuming a launched process succeeded — so a missing handler (no GUI
+     * package installer, a `.dmg` with no mounter) is visible to the caller
+     * rather than looking like a silent success.
+     */
+    fun openFile(file: java.io.File): Boolean {
+        val path = file.absolutePath
+        val cmd = when {
+            "linux" in osName -> arrayOf("xdg-open", path)
+            "mac" in osName || "darwin" in osName -> arrayOf("open", path)
+            "windows" in osName -> arrayOf("rundll32", "url.dll,FileProtocolHandler", path)
+            else -> return tryOpenUri(file.toURI().toString())
+        }
+        return runCatching {
+            val p = ProcessBuilder(*cmd)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .start()
+            // open / xdg-open / rundll32 all hand the file off and exit
+            // promptly. Still running after the grace period means it handed
+            // off to a foreground app — treat that as success; a prompt exit
+            // is judged by its code.
+            if (!p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) true
+            else p.exitValue() == 0
+        }.getOrElse {
+            Log.w(TAG, "file opener ${cmd.firstOrNull()} failed", it)
+            false
+        }
+    }
 }

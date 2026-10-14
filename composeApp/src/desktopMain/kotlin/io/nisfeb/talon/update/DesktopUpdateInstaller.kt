@@ -138,9 +138,14 @@ class DesktopUpdateInstaller(
         if (flavor == DesktopUpdateFlavor.AppImage && appImagePath != null) {
             replaceAppImage(file, File(appImagePath))
         } else {
-            // The system knows the file: a deb opens in the package
-            // installer, a dmg mounts, an msi runs.
-            DesktopUriHandler.openUri(file.toURI().toString())
+            // Hand the file to the system by path (a deb opens in the package
+            // installer, a dmg mounts, an msi runs), and check it was taken.
+            // If no opener accepted it, reveal the containing folder so the
+            // downloaded installer isn't a dead end the user can't find.
+            if (!DesktopUriHandler.openFile(file)) {
+                Log.w(TAG, "no opener took ${file.name}; revealing its folder")
+                DesktopUriHandler.openUri(file.parentFile.toURI().toString())
+            }
         }
     }
 
