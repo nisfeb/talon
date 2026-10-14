@@ -16,14 +16,11 @@ There is already one line that separates these, and it is the same line that dec
 
 Activity stays a single screen, a single reverse-chronological feed, with a row of domain filter chips instead of the current four tabs.
 
-- All: the merged timeline, newest first.
-- Chat: the `%activity` events (today's All/Mentions/Replies). Mentions and Replies stay as a secondary focus, see "Chat sub-focus" below.
-- Assistant: Orrery action proposals and loop results.
-- Account: Armillary credit, and whatever account-level events come later.
+- All: the merged timeline, newest first. Always present.
+- Chat: the `%activity` events, one timeline. Always present. Mentions and Replies fold into this timeline; they do not get their own control. Today's separate Mentions and Replies focus views go away. A reader scans the Chat timeline, or All.
+- Assistant, Account, and any later domain: present only when that domain currently has at least one retained (unpurged) notice. No live Assistant notice means no Assistant chip. This keeps the chip row honest: it reflects what is actually there, and a new domain lights up a chip the moment it has an event.
 
-Chips are the right control here because two different axes were being flattened into one tab row. "What kind" (mention, reply) is one axis; "what domain" (chat, assistant, account) is another. Chips carry the domain axis and let it grow (a future Calendar or Calls domain) without another tab war.
-
-Chat sub-focus: when the Chat chip is active, show a small secondary control for Mentions and Replies, preserving today's focus views. Do not promote Mentions and Replies to top-level chips; they are a sub-axis of Chat only.
+Chips are the right control here because two different axes were being flattened into one tab row. "What kind" (mention, reply) is one axis; "what domain" (chat, assistant, account) is another. Chips carry the domain axis and let it grow (a future Calendar or Calls domain) without another tab war. The domain axis is data-driven: the chip set is All, Chat, then one chip per domain that has a retained notice.
 
 Invites and DM requests are chat-adjacent (they are about people and conversations), so they map to the Chat domain, not a separate bucket.
 
@@ -104,11 +101,11 @@ Per the testing standard:
 - Tapping a row deep-links to the right section and marks the notice read; the badge drops.
 - Mark-all-read clears the active chip's unread.
 - The Threads Home tab appears only when at least one thread is followed, and renders the collection; a followed-thread reply still shows under Chat in Activity.
-- Retention: notices are capped (keep a recent window, prune on write) so the table cannot grow without bound. Say what the cap is.
+- Retention: notices are capped by BOTH a count and a day window, pruned on write, whichever bound is tighter. A domain's chip disappears when its last notice is pruned (see dynamic chips above), so test that pruning the last Assistant notice drops the Assistant chip.
 - Gap report: note that notice read-state is local-only and untested across devices by design.
 
-## Open decisions to confirm before code
+## Settled decisions (were open, resolved 2026-10-14)
 
-- Chat sub-focus as a secondary chip row versus folding Mentions/Replies into the Chat timeline entirely.
-- The retention window for notices (a count, a number of days, or both).
-- Whether Account is worth its own chip at launch with only Armillary in it, or folded into All until a second account event exists.
+- Mentions and Replies fold into the Chat timeline. No secondary chip row. The separate focus views go away.
+- Retention is count AND days, whichever is tighter.
+- Domain chips are data-driven: any domain with a retained (unpurged) notice gets a chip; it disappears when its notices are gone. Account is not special-cased; it appears when it has an event.
