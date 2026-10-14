@@ -1,12 +1,19 @@
 # Overnight bug-hunt and polish review — 2026-10-14
 
-REVIEW COMPLETE
+REVIEW COMPLETE (+ follow-up fix batch 2026-10-14 at sneagan's request)
 
-STATUS: COMPLETE — 7 dimensions + completeness sweep + a first iOS-leaf pass done,
-and the screen-scope-write class fully closed (F1, F2, F8-F11). 11 fixes applied
-(not pushed), 14 reported (incl. 3 iOS-leaf R17-R19, not fixable on this Linux
-host). Open follow-ups in the gap report: a second iOS pass (~34 thinner files),
-no PIT/app-run, two product decisions R1/R6.
+STATUS: COMPLETE. The review (7 dimensions + completeness sweep + iOS-leaf pass)
+found 25 issues; then sneagan said "fix everything except R7", and a follow-up
+batch cleared almost all of the reported ones. Now: 21 fixed (not pushed), and
+only R6, R7, R10 open. R7 excluded by sneagan (delete-rollback, data-loss risk).
+R6 and R10 are sync wire-format changes with cross-device upgrade risk, held for a
+decision (see "Follow-up batch" below). R4 needed no change (already covered).
+
+Follow-up batch fixes (this round): R1 re-encode a9568324, R8 notebook-create calm
+error b8d50667, R9 ui-pref mark-after-push 881a8a2b, R14 updater checked-open
+a888f427, R15 desktop downloads dir 559a7b46, R17/R18/R19 iOS 84bb1a0c (unverified,
+no iOS compiler here), R2 build-constant log 3743304e, R3 migration idempotency
+test 49bde1fd.
 
 Branch: `polish/overnight-2026-10-14` (base `origin/master` 2b8ff1d8). Not pushed.
 Prompt: `.overnight-review-prompt.md`. Ran via a self-paced `/loop`, resumable.
@@ -14,12 +21,12 @@ Prompt: `.overnight-review-prompt.md`. Ran via a self-paced `/loop`, resumable.
 ## Summary
 
 - Total issues found: 25
-- Fixed on this branch: 11 (F1 6d307846, F2 4ec3d2a7, F3 663b7bf1, F4 e457c949,
-  F5 eaa1a275, F6 a7e4e97c, F7 f9cbc464, F8 ddf04fc2, F9 2b130b21, F10 ee964069,
-  F11 fb305913)
-- Reported, still open: 14 (2 High, 6 Med, 6 Low) — R1-R4, R6-R10, R14-R15,
-  R17-R19 (R5→F2, R16→F8, R11→F9, R12→F10, R13→F11). R17-R19 are iOS-leaf, not
-  fixed here because iOS can't be compiled on this Linux host.
+- Fixed on this branch: 21 (original review F1-F11, plus the follow-up batch:
+  R1, R2, R3, R8, R9, R14, R15, R17, R18, R19 — see the header for commits)
+- Open: 3 — R7 (excluded by sneagan: delete rollback, data-loss risk), R6 and R10
+  (sync wire-format changes held for a decision). R4 needed no change.
+- Note: R17-R19 (iOS) and R18 (Swift) were written without an iOS compiler on this
+  host — verify on a Mac. F6 (search bar) still wants a phone eyeball.
 
 ## Dimension coverage
 
