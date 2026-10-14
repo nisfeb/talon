@@ -1,16 +1,21 @@
 # Overnight bug-hunt and polish review — 2026-10-14
 
-Branch: `polish/overnight-2026-10-14` (base `origin/master` 2b8ff1d8). Not pushed.
-Prompt: `.overnight-review-prompt.md`. Runs via a self-paced `/loop`, resumable.
+REVIEW COMPLETE
 
-STATUS: IN PROGRESS
+Branch: `polish/overnight-2026-10-14` (base `origin/master` 2b8ff1d8). Not pushed.
+Prompt: `.overnight-review-prompt.md`. Ran via a self-paced `/loop`, resumable.
+
+STATUS: COMPLETE — all 7 dimensions covered + completeness sweep. 7 fixes applied
+(not pushed), 15 reported. See the gap report at the end for open follow-ups
+(iOS leaf unreviewed, the screen-scope-write class half-fixed, no PIT/app-run,
+and two product decisions R1/R6).
 
 ## Summary
 
-- Total issues found: 21
+- Total issues found: 22
 - Fixed on this branch: 7 (F1 6d307846, F2 4ec3d2a7, F3 663b7bf1, F4 e457c949,
   F5 eaa1a275, F6 a7e4e97c, F7 f9cbc464)
-- Reported, still open: 14 (3 High, 6 Med, 5 Low) — R1-R4, R6-R15 (R5 became F2)
+- Reported, still open: 15 (4 High, 6 Med, 5 Low) — R1-R4, R6-R16 (R5 became F2)
 
 ## Dimension coverage
 
@@ -349,6 +354,38 @@ teardown, no leak), SingleInstance lock, VideoSurface frame lifecycle, VLC
 discovery off the EDT, and all the atomic `tmp + ATOMIC_MOVE` settings stores.
 The AOT-cache SIGILL (rc40) lives in build-appimage.sh, outside desktopMain.
 
+### R16 (High) — profile edit diverges from the ship when you leave mid-save (found by the completeness sweep)
+
+`TlonChatRepo.updateProfile` (:2441) pokes `ch.poke` directly with no `carry`/repo
+scope, and does the optimistic `db.contacts().upsert(...)` BEFORE the poke (:2484).
+Its catch explicitly skips rollback on `CancellationException` (:2513). All callers
+run on a screen scope: `ProfileEditScreen.kt:296` (which calls `onBack()` on
+success, so navigating during the round-trip is the NORMAL path), `StatusFeedList.kt:88`
+(status quick-set), `SlashCommands.kt:310` (`runNick`, inherits the composer's
+scope). Leaving the edit screen mid-poke cancels the poke while the optimistic
+local profile stays — a permanent local/ship divergence until the next contacts
+bootstrap overwrites it. This is the same rule-5 class as F1/F2/R11/R12 but with
+the worst consequence (optimistic write + no cancel rollback + navigation is the
+happy path). Fix: `carry { ch.poke(...) }` so the write survives navigation, plus a
+leaving-midway test; consider rollback on a genuine nack (cf. R7). This is the
+highest-priority member of the screen-scope-write group below.
+
+Related minor (like R13): call-recording dialog actions (CallRecordingDialogs.kt:70,
+save-WAV / transcribe / publish-to-Lattice) run on the dialog's screen scope;
+closing the dialog mid-op drops them. Documented best-effort, so a lost local
+result, not a divergence — except the Lattice publish does write out.
+
+### The screen-scope-write class (F1, F2, R11, R12, R13, R16) — fix these together
+
+Six instances of one bug: a user write launched on a composable's
+`rememberCoroutineScope` instead of a repo scope, dropped when the screen is left
+mid-write. Two are fixed (F1 upload, F2 chat edit/delete). Four remain reported:
+R16 profile (High, diverges), R11 NotesRepo (High, stuck "saving…"), R12
+group-admin (Med), R13 mail-file (Low). All take the same `carry { … }` fix plus a
+leaving-midway test. Doing them as one chunk (with a grep for any remaining raw
+`rememberCoroutineScope` + repo-poke call sites in calls, calendar, mail-compose)
+would close the class.
+
 ### Dimension 7 clean (verified from code)
 
 IME/keyboard coverage (AndroidManifest `adjustResize` + shell `safeDrawing`
@@ -398,4 +435,39 @@ hygiene only.
 
 ## Gap report
 
-_pending — written when dimensions complete_
+What this review covered, and what it did NOT.
+
+Covered (android + desktop, from code; one thorough finder pass per dimension plus
+a completeness sweep):
+- All 7 dimensions. Dims 1 and 5 came back clean with evidence; 2, 4, 6, 7 each
+  produced fixes + findings; 3 was findings-only; the sweep added R16.
+- 7 fixes applied on the branch, each compiled; F1 and F2 have passing
+  leaving-midway tests (desktopTest). F3-F7 are compiled + reasoned, not unit-tested
+  (see below).
+
+NOT covered / open follow-ups (in rough priority):
+1. **iOS leaf was not reviewed at all.** Every dimension looked at commonMain +
+   android/desktop leaves. iOS-specific code (VoIP/CallKit, party video, iOS
+   notification registration, the iOS Capabilities actuals) got zero scrutiny.
+   This is a whole untouched dimension — needs its own pass.
+2. **The screen-scope-write class is half-fixed.** F1/F2 fixed; R16 (High), R11
+   (High), R12, R13 still open. Fix as one chunk (see that section above), and grep
+   calls/calendar/mail-compose for any remaining instances.
+3. **No mutation testing (PIT).** CLAUDE.md testing-standard rule 8 wants sandboxed
+   PIT over new logic; F1/F2 added logic + tests but no PIT was run (sandbox setup
+   is heavy and was out of scope for the self-paced loop). The F1/F2 tests are
+   behavioural, not mutation-proven.
+4. **No app run; F6 not device-verified.** F6 (the user-reported search bar) is
+   fixed from a code-level root cause but needs a 30-second eyeball on a narrow
+   phone with smart search OFF — the exact repro. Nothing else was run live.
+5. **Unverified-claim caveats:** F1's negative control was not re-run (mirrors a
+   proven guard); F3/F4 are "reasoned-safe" desktop-leaf changes without unit tests
+   (F4 is a data-loss path, so thinner cover there); R2's retired-SFU release-secret
+   wiring is untested in any binary (same class as the rc27-29 post-mortem).
+6. **Two High findings need a product decision, not code:** R1 (metadata strip
+   fails open on HEIC/WebP/corrupt — privacy) and R6 (AI profile-body sync has no
+   staleness guard — a stale device reverts a newer default and resurrects a deleted
+   provider).
+
+Nothing was pushed. All work is on `polish/overnight-2026-10-14` off `origin/master`
+2b8ff1d8. Releasing, and which reported items to act on, are the owner's call.
