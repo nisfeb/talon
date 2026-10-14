@@ -1,21 +1,18 @@
 # Overnight bug-hunt and polish review — 2026-10-14
 
-REVIEW COMPLETE
+STATUS: EXTENDING — all 7 dimensions + completeness sweep done; now closing the
+screen-scope-write class the review flagged. R16 fixed (F8). R11 next, then R12/R13.
+Will re-mark REVIEW COMPLETE once the class is closed.
 
 Branch: `polish/overnight-2026-10-14` (base `origin/master` 2b8ff1d8). Not pushed.
 Prompt: `.overnight-review-prompt.md`. Ran via a self-paced `/loop`, resumable.
 
-STATUS: COMPLETE — all 7 dimensions covered + completeness sweep. 7 fixes applied
-(not pushed), 15 reported. See the gap report at the end for open follow-ups
-(iOS leaf unreviewed, the screen-scope-write class half-fixed, no PIT/app-run,
-and two product decisions R1/R6).
-
 ## Summary
 
 - Total issues found: 22
-- Fixed on this branch: 7 (F1 6d307846, F2 4ec3d2a7, F3 663b7bf1, F4 e457c949,
-  F5 eaa1a275, F6 a7e4e97c, F7 f9cbc464)
-- Reported, still open: 15 (4 High, 6 Med, 5 Low) — R1-R4, R6-R16 (R5 became F2)
+- Fixed on this branch: 8 (F1 6d307846, F2 4ec3d2a7, F3 663b7bf1, F4 e457c949,
+  F5 eaa1a275, F6 a7e4e97c, F7 f9cbc464, F8 ddf04fc2)
+- Reported, still open: 14 (3 High, 6 Med, 5 Low) — R1-R4, R6-R15 (R5→F2, R16→F8)
 
 ## Dimension coverage
 
@@ -118,6 +115,16 @@ have short placeholders that do not wrap, so they were left alone.
 `DmListScreen.kt`'s name, draft and author-time preview were `maxLines = 1` with no
 `overflow`, which Compose defaults to `Clip` — a long ship name or group title cut
 off mid-letter. Added `overflow = Ellipsis` to the three. Pure polish.
+
+### F8 — profile edit survives leaving the edit screen mid-save (commit ddf04fc2)
+
+The fix for R16. `updateProfile` did its optimistic local upsert then poked on the
+caller's scope, and its catch skips rollback on cancellation; the profile edit
+screen navigates back on success, so leaving mid-save is the normal path and left
+the local profile changed while the ship never heard — a permanent divergence.
+Wrapped the body in `carry` (repo scope). Test cancels the caller mid-poke (via
+`ship.holdPoke`) and asserts the self edit still reaches the ship. 39/39 in
+TlonChatRepoSendTest pass.
 
 ## REPORTED
 
@@ -354,7 +361,7 @@ teardown, no leak), SingleInstance lock, VideoSurface frame lifecycle, VLC
 discovery off the EDT, and all the atomic `tmp + ATOMIC_MOVE` settings stores.
 The AOT-cache SIGILL (rc40) lives in build-appimage.sh, outside desktopMain.
 
-### R16 (High) — profile edit diverges from the ship when you leave mid-save (found by the completeness sweep)
+### R16 (High) — profile edit diverges from the ship when you leave mid-save — FIXED (F8, commit ddf04fc2)
 
 `TlonChatRepo.updateProfile` (:2441) pokes `ch.poke` directly with no `carry`/repo
 scope, and does the optimistic `db.contacts().upsert(...)` BEFORE the poke (:2484).
@@ -375,16 +382,15 @@ save-WAV / transcribe / publish-to-Lattice) run on the dialog's screen scope;
 closing the dialog mid-op drops them. Documented best-effort, so a lost local
 result, not a divergence — except the Lattice publish does write out.
 
-### The screen-scope-write class (F1, F2, R11, R12, R13, R16) — fix these together
+### The screen-scope-write class (F1, F2, F8, R11, R12, R13) — being closed
 
 Six instances of one bug: a user write launched on a composable's
 `rememberCoroutineScope` instead of a repo scope, dropped when the screen is left
-mid-write. Two are fixed (F1 upload, F2 chat edit/delete). Four remain reported:
-R16 profile (High, diverges), R11 NotesRepo (High, stuck "saving…"), R12
-group-admin (Med), R13 mail-file (Low). All take the same `carry { … }` fix plus a
-leaving-midway test. Doing them as one chunk (with a grep for any remaining raw
-`rememberCoroutineScope` + repo-poke call sites in calls, calendar, mail-compose)
-would close the class.
+mid-write. FIXED: F1 upload, F2 chat edit/delete, F8 profile edit (the worst — it
+diverged). REMAINING: R11 NotesRepo (High, stuck "saving…"), R12 group-admin (Med),
+R13 mail-file (Low) — being worked now, same `carry { … }` fix + leaving-midway
+test each. A grep for any remaining raw `rememberCoroutineScope` + repo-poke call
+sites (calls, calendar, mail-compose) is part of closing the class.
 
 ### Dimension 7 clean (verified from code)
 
