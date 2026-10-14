@@ -98,6 +98,15 @@ class DefaultIceTest {
         assertEquals("https://sfu.talon.test", sfuBase)
     }
 
+    // Idempotency: a ship already moved (its scry now returns the new base)
+    // must not be poked again on the next connect, or every reconnect re-fires.
+    @Test
+    fun `a ship already on the new default sidecar is not moved again`() {
+        val onNew = """{"configured":true,"base":"https://sfu.talon.test","group":"talon"}"""
+        assertTrue(connect("[]", sfu = onNew).setSfu().isEmpty(), "a migrated ship does not re-fire")
+        assertEquals("https://sfu.talon.test", sfuBase)
+    }
+
     @Test
     fun `a sidecar of its own that looks like the old default is kept`() {
         assertTrue(connect("[]", sfu = """{"configured":true,"base":"http://10.0.0.2:8444","group":"talon"}""").setSfu().isEmpty())
