@@ -38,6 +38,28 @@ fun desktopUpdateFlavor(appImagePath: String?, osName: String): DesktopUpdateFla
 }
 
 /**
+ * The detached waiter that upgrades a Windows install after Talon has
+ * exited: wait for [pid] to be gone, run the MSI with no reboot (the
+ * files are free by then, so none is needed), then start the upgraded
+ * launcher at [appPath]. PowerShell single-quotes each argument, so a
+ * space in a path (Program Files) survives; a literal single quote in
+ * a path is doubled, which is its PowerShell escape.
+ *
+ * Pure so a test can pin the flags without spawning anything. msiexec
+ * self-elevates for a per-machine product, so no RunAs is forced on a
+ * per-user install.
+ */
+internal fun windowsUpdateCommand(pid: Long, msiPath: String, appPath: String): List<String> {
+    fun q(s: String) = s.replace("'", "''")
+    return listOf(
+        "powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
+        "Wait-Process -Id $pid -ErrorAction SilentlyContinue; " +
+            "Start-Process msiexec -Wait -ArgumentList '/i','${q(msiPath)}','/norestart'; " +
+            "Start-Process -FilePath '${q(appPath)}'",
+    )
+}
+
+/**
  * Desktop [UpdateInstallerHook]: fetches the installer for the way
  * this Talon was installed, checks its hash, and applies it.
  *
@@ -53,18 +75,24 @@ class DesktopUpdateInstaller(
     private val quit: () -> Unit,
     private val appImagePath: String? = System.getenv("APPIMAGE"),
     private val osName: String = System.getProperty("os.name", ""),
+    /** The packaged launcher's own path, which jpackage sets. Lets the
+     *  Windows updater reopen Talon after the MSI runs; null off a
+     *  packaged build, which falls back to just opening the installer. */
+    private val appPath: String? = System.getProperty("jpackage.app-path"),
     private val releasesPageUrl: String = "https://github.com/nisfeb/talon/releases/latest",
 ) : UpdateInstallerHook {
 
     private val flavor = desktopUpdateFlavor(appImagePath, osName)
 
-    override val readyHint: String = when (flavor) {
-        DesktopUpdateFlavor.AppImage -> "Verified — Talon will restart into it."
-        DesktopUpdateFlavor.Deb, DesktopUpdateFlavor.Dmg, DesktopUpdateFlavor.Msi ->
-            "Verified — opens the installer."
+    override val readyHint: String = when {
+        flavor == DesktopUpdateFlavor.AppImage -> "Verified — Talon will restart into it."
+        flavor == DesktopUpdateFlavor.Msi && appPath != null ->
+            "Verified — Talon will close, update, and reopen."
+        flavor == DesktopUpdateFlavor.Deb || flavor == DesktopUpdateFlavor.Dmg ||
+            flavor == DesktopUpdateFlavor.Msi -> "Verified — opens the installer."
         // Never reaches Ready: with no flavor, download() falls back
         // to the releases page and reports onFailure instead.
-        null -> ""
+        else -> ""
     }
 
     override suspend fun download(
@@ -137,6 +165,8 @@ class DesktopUpdateInstaller(
         val file = File(apkPath)
         if (flavor == DesktopUpdateFlavor.AppImage && appImagePath != null) {
             replaceAppImage(file, File(appImagePath))
+        } else if (flavor == DesktopUpdateFlavor.Msi && appPath != null) {
+            applyMsiAndRestart(file, appPath)
         } else {
             // Hand the file to the system by path (a deb opens in the package
             // installer, a dmg mounts, an msi runs), and check it was taken.
@@ -146,6 +176,32 @@ class DesktopUpdateInstaller(
                 Log.w(TAG, "no opener took ${file.name}; revealing its folder")
                 DesktopUriHandler.openUri(file.parentFile.toURI().toString())
             }
+        }
+    }
+
+    /**
+     * Apply a Windows MSI without the reboot a running app forces.
+     * Opening the .msi while Talon still holds its bundled runtime open
+     * makes Windows schedule the file swap for the next boot, and that
+     * reboot-time upgrade can leave the jpackage launcher with no
+     * working runtime — the "Failed to launch JVM" a user hit. Instead
+     * a detached waiter sits until this process exits, runs the
+     * installer with the files now free (so no reboot is needed), and
+     * starts the upgraded Talon. Same shape as [replaceAppImage]:
+     * spawn, then quit. If the waiter cannot start, fall back to
+     * opening the installer the old way and stay running.
+     */
+    private fun applyMsiAndRestart(msi: File, launcher: String) {
+        val ok = runCatching {
+            ProcessBuilder(windowsUpdateCommand(ProcessHandle.current().pid(), msi.absolutePath, launcher))
+                .redirectInput(ProcessBuilder.Redirect.from(File("NUL")))
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .start()
+        }.onFailure { Log.w(TAG, "could not start the MSI update waiter: ${it.message}") }.isSuccess
+        if (ok) quit()
+        else if (!DesktopUriHandler.openFile(msi)) {
+            DesktopUriHandler.openUri(msi.parentFile.toURI().toString())
         }
     }
 
