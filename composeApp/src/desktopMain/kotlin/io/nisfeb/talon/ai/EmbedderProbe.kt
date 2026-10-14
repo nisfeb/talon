@@ -63,8 +63,14 @@ object EmbedderProbe {
     private fun runProbe(): Boolean = runCatching {
         val javaBin = File(System.getProperty("java.home"), "bin/java").absolutePath
         val cp = System.getProperty("java.class.path") ?: return false
+        // Discard the child's output. We only read its exit code, and an
+        // undrained pipe deadlocks the child once it writes past the OS
+        // buffer (DJL/slf4j logs on a cold model load), which would time
+        // out and cache a false `bad` verdict that disables AI until a
+        // PROBE_VERSION bump.
         val proc = ProcessBuilder(javaBin, "-cp", cp, "io.nisfeb.talon.ai.EmbedderProbeMainKt")
-            .redirectErrorStream(true)
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
             .start()
         if (!proc.waitFor(PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
             proc.destroyForcibly()
