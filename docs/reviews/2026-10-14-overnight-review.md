@@ -2,22 +2,24 @@
 
 REVIEW COMPLETE
 
-STATUS: COMPLETE — all 7 dimensions + completeness sweep done, and the
-screen-scope-write class is fully closed (all 6 instances fixed: F1, F2, F8, F9,
-F10, F11). 11 fixes applied (not pushed), 11 reported. See the gap report for open
-follow-ups (iOS leaf unreviewed, no PIT/app-run, two product decisions R1/R6).
+STATUS: COMPLETE — 7 dimensions + completeness sweep + a first iOS-leaf pass done,
+and the screen-scope-write class fully closed (F1, F2, F8-F11). 11 fixes applied
+(not pushed), 14 reported (incl. 3 iOS-leaf R17-R19, not fixable on this Linux
+host). Open follow-ups in the gap report: a second iOS pass (~34 thinner files),
+no PIT/app-run, two product decisions R1/R6.
 
 Branch: `polish/overnight-2026-10-14` (base `origin/master` 2b8ff1d8). Not pushed.
 Prompt: `.overnight-review-prompt.md`. Ran via a self-paced `/loop`, resumable.
 
 ## Summary
 
-- Total issues found: 22
+- Total issues found: 25
 - Fixed on this branch: 11 (F1 6d307846, F2 4ec3d2a7, F3 663b7bf1, F4 e457c949,
   F5 eaa1a275, F6 a7e4e97c, F7 f9cbc464, F8 ddf04fc2, F9 2b130b21, F10 ee964069,
   F11 fb305913)
-- Reported, still open: 11 (2 High, 5 Med, 4 Low) — R1-R4, R6-R10, R14-R15
-  (R5→F2, R16→F8, R11→F9, R12→F10, R13→F11)
+- Reported, still open: 14 (2 High, 6 Med, 6 Low) — R1-R4, R6-R10, R14-R15,
+  R17-R19 (R5→F2, R16→F8, R11→F9, R12→F10, R13→F11). R17-R19 are iOS-leaf, not
+  fixed here because iOS can't be compiled on this Linux host.
 
 ## Dimension coverage
 
@@ -429,6 +431,57 @@ OrreryRepo writes on its repo scope, and the call/party paths route through a
 the main write paths (an exhaustive per-function audit of every repo was not done;
 see the gap report).
 
+### iOS leaf review (follow-up pass, the gap report's #1 item)
+
+Reviewed from code only (iOS can't compile on this Linux host). Covered all 5 Swift
+files (ContentView, CallPush, iOSApp, TalonModels, TalonRtc) + LlamaKit and ~13 of
+47 iosMain Kotlin files — the high-risk ones (Capabilities, the RTC/VoIP/CallKit
+bridge, the native-model interop, ImagePicker, IosNotifier, NsInterop, badge).
+
+CLEAN (verified): the Kotlin↔Swift boundary — the top risk — is sound; Swift
+constructs `VideoState` with all args explicitly, so the TF#95 default-arg bug is
+fixed, and the MediaState enum / Int32 mappings match `core/CallEngine.kt`. CallKit/
+PushKit always `reportNewIncomingCall` before `completion()`. Memory/lifecycle: K/N
+cross-heap lambda cycles are nilled in `close()`, PKPushRegistry held strongly,
+ImagePicker delegates retained. NsInterop `usePinned` bounds are correct. Capability
+flag VALUES all match the commonMain registry intent.
+
+### R17 (Med) — iOS drops local notifications for Armillary credit and orrery actions
+
+`IosNotifier.notify` (iosMain/.../notify/IosNotifier.kt:22) early-returns for any
+non-null key not prefixed `mail:`, intending to skip chat whoms (APNs-covered). But
+`ArmillaryRepo.kt:406` calls `notify("Armillary", …, "armillary")` and `App.kt:1316`
+calls `notify(it.title, it.body, "action:"+…)` (orrery proposals) — both keyed,
+neither mail, both silently dropped, though both features are enabled on iOS and
+have no APNs path. The docstring itself says "loop results, mail, invites" should
+post locally, so the guard is too aggressive. The matching `clear("action:…")` is
+honored, confirming the asymmetry. Fix: drop only bare chat-whom keys (an explicit
+local-post prefix allowlist for mail:/action:/armillary, or tag chat keys with a
+`chat:` prefix at call sites). iOS-only (not compilable here); logic is testable
+with a Notifier fake in commonTest.
+
+### R18 (Low) — iOS `onVideoChange` setter skips the main-queue hop
+
+`TalonRtc.swift:365` writes `videoListener` directly on the caller's thread, while
+the class contract (and every other listener setter) hops to main first, and
+`close()`/`publishVideo` touch it on main. A narrow race; in practice it is set once
+at init before frames flow. Fix: wrap the write in `main { [weak self] … }` like the
+siblings. iOS-only (Swift).
+
+### R19 (Low, doc) — stale iOS capability comments contradict the correct flag values
+
+`Capabilities.ios.kt:6-11` and `MainViewController.kt:53` say on-device AI / digest /
+loops "gate off" on iOS, but `isLoopsSupported` and `isLocalTriageSupported` are
+(correctly) true per the commonMain registry — only the on-device embedder and
+background scheduling gate off. The flag values are right; the prose drifted, and
+CLAUDE.md §4 treats these registry comments as load-bearing. Fix: correct both
+comments. iOS-leaf, comment-only.
+
+iOS follow-up (not done): ~34 thinner iosMain leaf files were not opened (Dictation,
+VoiceMessages, UrbWebView, QrLoginScanner, LocationSharing, DeviceLocation,
+HealthSharing, IosSessionStore, IosDraftStore, etc.). A later pass could target
+IosSessionStore (session persistence) and VoiceMessages (audio-session vs VoIP).
+
 ### Dimension 7 clean (verified from code)
 
 IME/keyboard coverage (AndroidManifest `adjustResize` + shell `safeDrawing`
@@ -489,10 +542,12 @@ a completeness sweep):
   (see below).
 
 NOT covered / open follow-ups (in rough priority):
-1. **iOS leaf was not reviewed at all.** Every dimension looked at commonMain +
-   android/desktop leaves. iOS-specific code (VoIP/CallKit, party video, iOS
-   notification registration, the iOS Capabilities actuals) got zero scrutiny.
-   This is a whole untouched dimension — needs its own pass.
+1. **iOS leaf: first pass done, a second pass remains.** The high-risk areas were
+   reviewed (Kotlin↔Swift boundary, CallKit/PushKit, capability values, the RTC and
+   native-model interop, notifier) — all clean except R17-R19. Still untouched:
+   ~34 thinner iosMain leaf files (IosSessionStore, VoiceMessages, Dictation,
+   UrbWebView, QrLoginScanner, location/health, the draft/theme/settings stores).
+   And nothing iOS was compiled or run (can't on this Linux host).
 2. **The screen-scope-write class is now CLOSED.** All six instances fixed (F1, F2,
    F8-F11). Straggler sweep found no more in the main write paths (CalendarRepo/
    OrreryRepo already repo-scoped, calls route through a control object). Caveat:
