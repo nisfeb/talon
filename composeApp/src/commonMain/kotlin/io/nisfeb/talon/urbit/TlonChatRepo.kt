@@ -2445,7 +2445,7 @@ class TlonChatRepo(
         status: String? = null,
         /** Color as `#RRGGBB`; null = don't change, empty = clear. */
         color: String? = null,
-    ) {
+    ) = carry {
         val ch = channel ?: error("not connected")
         // Modern %contacts uses `contact-action-1` with a kip-scoped
         // typed-field map (matches what `parseContact` reads back —
@@ -2469,7 +2469,11 @@ class TlonChatRepo(
             field("avatar", "look", avatarUrl)
             field("color", "tint", color) { urbitHexColor(it) }
         }
-        if (contactFields.isEmpty()) return
+        if (contactFields.isEmpty()) return@carry
+        // On the repo scope (carry): the optimistic upsert runs, then the
+        // poke, and leaving the profile screen mid-save (it calls onBack on
+        // success, so that is the normal path) no longer cancels the poke and
+        // strands the local edit as a permanent divergence from the ship.
         // Optimistic local update FIRST so the UI reflects the edit
         // before the poke round-trips. Merge with any existing row so
         // fields the caller didn't supply stay intact. Stamp

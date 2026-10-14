@@ -259,6 +259,23 @@ class TlonChatRepoSendTest {
         assertEquals("170.141.184.506", edit.at("id").jsonPrimitive.content)
     }
 
+    // A profile edit optimistically updates the local contact then pokes; it
+    // must poke on the repo scope, or leaving the edit screen (which navigates
+    // back on success) cancels the poke and strands the local edit as a
+    // permanent divergence from the ship. Real time via holdPoke.
+    @Test
+    fun `a profile edit whose screen is left mid-save still reaches the ship`() = live {
+        ship.holdPoke = 600
+        val screen = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+        screen.launch { repo.updateProfile(nickname = "Zod the Great") }
+        kotlinx.coroutines.delay(200)
+        screen.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+        val until = System.currentTimeMillis() + 5_000
+        while (ship.pokesTo("contacts").isEmpty() && System.currentTimeMillis() < until) kotlinx.coroutines.delay(50)
+        val self = ship.pokesTo("contacts").first { it.mark == "contact-action-1" }.json.at("self", "nickname", "value")
+        assertEquals("Zod the Great", self.jsonPrimitive.content)
+    }
+
     @Test
     fun `pinning writes the order the ship reads, and a refusal restores the old pin`() = live {
         seedChannel()
