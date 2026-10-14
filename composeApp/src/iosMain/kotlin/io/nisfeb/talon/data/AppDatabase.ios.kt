@@ -48,6 +48,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun urbUnfurls(): UrbUnfurlDao
     actual abstract fun followedThreads(): FollowedThreadDao
     actual abstract fun orreryCache(): OrreryCacheDao
+    actual abstract fun notices(): NoticeDao
 }
 
 internal fun sanitizeShipKey(shipKey: String): String =

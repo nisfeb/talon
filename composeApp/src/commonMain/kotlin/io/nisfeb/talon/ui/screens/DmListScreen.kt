@@ -132,6 +132,11 @@ fun DmListScreen(
     onOpenMail: () -> Unit = {},
     partyLinesTab: (@Composable () -> Unit)? = null,
     partyLinesOccupied: Boolean = false,
+    /** The followed-threads collection, shown as a conditional tab when the
+     *  owner follows at least one thread (null otherwise). [threadsUnread]
+     *  counts the followed threads with new replies, for the tab label. */
+    threadsTab: (@Composable () -> Unit)? = null,
+    threadsUnread: Int = 0,
     onOpenBookmarks: () -> Unit,
     onOpenActivity: () -> Unit,
     onOpenCalendar: () -> Unit = {},
@@ -366,6 +371,7 @@ fun DmListScreen(
         // to Groups rather than strand the list on a hidden tab.
         mutableStateOf(
             if (partyLinesTab == null && snap.selectedHomeTab == HomeTab.PartyLines) HomeTab.Groups
+            else if (threadsTab == null && snap.selectedHomeTab == HomeTab.Threads) HomeTab.Groups
             else snap.selectedHomeTab
         )
     }
@@ -521,6 +527,7 @@ fun DmListScreen(
             HomeTab.Groups -> homeRows.filter { it is HomeRow.GroupHead || it is HomeRow.GroupChild }
             HomeTab.Dms -> homeRows.filterIsInstance<HomeRow.Flat>()
             HomeTab.PartyLines -> emptyList()
+            HomeTab.Threads -> emptyList()
         }
     }
     val groupsUnread = remember(homeRows) {
@@ -591,6 +598,7 @@ fun DmListScreen(
                 HomeTab.Groups -> snap.groupsScroll = here
                 HomeTab.Dms -> snap.dmsScroll = here
                 HomeTab.PartyLines -> Unit
+                HomeTab.Threads -> Unit
             }
             selectedHomeTab = tab
         }
@@ -607,6 +615,7 @@ fun DmListScreen(
             HomeTab.Groups -> snap.groupsScroll
             HomeTab.Dms -> snap.dmsScroll
             HomeTab.PartyLines -> null
+            HomeTab.Threads -> null
         } ?: return@LaunchedEffect
         runCatching { listState.scrollToItem(saved.first, saved.second) }
     }
@@ -1090,20 +1099,31 @@ fun DmListScreen(
             onCreateNew = { creatingFolder = true },
         )
         if (selectedFolderId == null && selectedSpecial == SpecialTab.All) {
-            // Groups and DMs always, then Party lines where a caller has them.
-            val homeTabs = HomeTab.entries.take(if (partyLinesTab != null) 3 else 2)
+            // Groups and DMs always, then Party lines and Threads where a
+            // caller supplies them (the latter only when a thread is followed).
+            val homeTabs = buildList {
+                add(HomeTab.Groups)
+                add(HomeTab.Dms)
+                if (partyLinesTab != null) add(HomeTab.PartyLines)
+                if (threadsTab != null) add(HomeTab.Threads)
+            }
             io.nisfeb.talon.ui.AdaptiveTabRow(
                 labels = homeTabs.map { t ->
                     when (t) {
                         HomeTab.Groups -> if (groupsUnread > 0) "Groups · $groupsUnread" else "Groups"
                         HomeTab.Dms -> if (dmsUnread > 0) "DMs · $dmsUnread" else "DMs"
                         HomeTab.PartyLines -> "Party lines"
+                        HomeTab.Threads -> if (threadsUnread > 0) "Threads · $threadsUnread" else "Threads"
                     }
                 },
-                selected = homeTabs.indexOf(selectedHomeTab),
+                selected = homeTabs.indexOf(selectedHomeTab).coerceAtLeast(0),
                 onSelect = { switchHomeTab(homeTabs[it]) },
                 // Someone is on one of the lines right now.
-                dots = if (partyLinesOccupied && partyLinesTab != null) setOf(2) else emptySet(),
+                dots = if (partyLinesOccupied && partyLinesTab != null) {
+                    setOf(homeTabs.indexOf(HomeTab.PartyLines))
+                } else {
+                    emptySet()
+                },
             )
         }
         HorizontalDivider()
@@ -1152,6 +1172,9 @@ fun DmListScreen(
         if (partyLinesTab != null && selectedHomeTab == HomeTab.PartyLines &&
             selectedFolderId == null && selectedSpecial == SpecialTab.All
         ) partyLinesTab()
+        else if (threadsTab != null && selectedHomeTab == HomeTab.Threads &&
+            selectedFolderId == null && selectedSpecial == SpecialTab.All
+        ) threadsTab()
         else
         LazyColumn(
             state = listState,
@@ -2496,7 +2519,7 @@ private fun formatRelative(ms: Long): String {
 internal enum class SpecialTab { All, Unread, Mentions }
 
 /** The All view's two peers. The tabs are the section headers now. */
-internal enum class HomeTab { Groups, Dms, PartyLines }
+internal enum class HomeTab { Groups, Dms, PartyLines, Threads }
 
 @Composable
 private fun SpecialEmpty(text: String) {

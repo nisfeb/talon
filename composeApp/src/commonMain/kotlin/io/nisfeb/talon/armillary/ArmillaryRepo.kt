@@ -56,6 +56,8 @@ class ArmillaryRepo(
     private val aiSettings: AiSettingsRepository? = null,
     /** Told once when a payment lands, for a window behind the browser. The Noop one says nothing. */
     private val notifier: Notifier = NoopNotifier,
+    /** Records the credit in the Activity feed's Account domain. Null in a test. */
+    private val noticeRepo: io.nisfeb.talon.notify.NoticeRepo? = null,
     /** Where a model's tool use is read, the vendor's list not saying. A test hands in its own. */
     openRouter: ModelCatalog? = null,
     /** The Orrery pipe, whose generator a payment may point at Armillary. */
@@ -404,6 +406,10 @@ class ArmillaryRepo(
             val paid = p.copy(phase = Payment.Phase.PAID, addedMicro = added)
             _payment.value = paid
             notifier.notify("Armillary", money(added) + " added", "armillary")
+            noticeRepo?.record(
+                "armillary", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_ACCOUNT, "armillary-credit",
+                "Armillary", money(added) + " added", "armillary",
+            )
             scope.launch { afterPayment() }
             scope.launch {
                 delay(PAID_SHOWN_MS)

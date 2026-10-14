@@ -514,13 +514,22 @@ fun App(
     // causes, so the chat opens once the new ship's tree is up.
     LaunchedEffect(Unit) {
         io.nisfeb.talon.notify.OpenNoticeRequests.requests.collect { tag ->
-            if (tag.startsWith(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX)) {
-                // Over whatever section is open: the render shows the
-                // first flag that is true, and a section left open hid
-                // the calendar and took the back that should leave it.
-                sections.closeAll()
-                noticeCalendarTag = tag
-                showCalendar = true
+            // A tapped push, or a tapped Activity notice row, by its tag.
+            // closeAll first: the render shows the first open section, and
+            // one left open would hide the target and steal its back.
+            when {
+                tag.startsWith(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX) -> {
+                    sections.closeAll()
+                    noticeCalendarTag = tag
+                    showCalendar = true
+                }
+                // Activity notice targets (see NoticeRepo.record): the
+                // assistant and account domains, and the chat-adjacent ones.
+                tag.startsWith("orrery:") -> { sections.closeAll(); showActions = true }
+                tag.startsWith("loop:") -> { sections.closeAll(); showLoops = true }
+                tag.startsWith("invite:") -> { sections.closeAll(); showInvites = true }
+                tag == "armillary" -> { sections.closeAll(); showAssistant = true }
+                tag.startsWith("dm:") -> jumpToChat(tag.removePrefix("dm:"))
             }
         }
     }
@@ -1178,12 +1187,18 @@ fun App(
             val ship = loggedInShip ?: return@LaunchedEffect
             io.nisfeb.talon.orrery.settleOrreryGate(orreryGate, db, aiSettings, orreryRepo, url, ship)
         }
+        // The non-chat half of the Activity feed: every non-chat local
+        // notification (orrery, loop, armillary, invite, dm request) records
+        // a notice here next to the toast, so Activity can show it.
+        val noticeRepo = remember(db, loopScope) {
+            io.nisfeb.talon.notify.NoticeRepo(db.notices(), loopScope)
+        }
         // Armillary rides the same surface again: the owner's cookie,
         // and the AI settings, where the provider row it keeps lives.
         // The notifier is for a payment landing while the window is
         // behind the browser.
-        val armillaryRepo = remember(session, aiSettings, notifier) {
-            io.nisfeb.talon.armillary.ArmillaryRepo(session.http, loopScope, aiSettings, notifier)
+        val armillaryRepo = remember(session, aiSettings, notifier, noticeRepo) {
+            io.nisfeb.talon.armillary.ArmillaryRepo(session.http, loopScope, aiSettings, notifier, noticeRepo)
         }
         LaunchedEffect(armillaryRepo, mailShipUrl, loggedInShip) {
             val ship = loggedInShip
@@ -1258,7 +1273,13 @@ fun App(
                 // group/replace like Android's id-tagged notifications. A
                 // tag param on Notifier.notify is the upgrade path if it
                 // matters; for now each loop run is a standalone toast.
-                notify = { _, title, body -> notifier.notify(title, body) },
+                notify = { loopId, title, body ->
+                    notifier.notify(title, body)
+                    noticeRepo.record(
+                        "loop:$loopId", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_ASSISTANT,
+                        "loop-result", title, body, "loop:$loopId",
+                    )
+                },
             )
         }
         // Which calendars this device keeps off survives a restart.
@@ -1310,10 +1331,19 @@ fun App(
         }
         // New orrery proposals notify; one answered anywhere is taken back.
         // Not while Actions is on screen: the list is the news.
-        LaunchedEffect(orreryRepo, notifier) {
+        LaunchedEffect(orreryRepo, notifier, noticeRepo) {
             orreryRepo.onActions = { raise, clear ->
-                clear.forEach { notifier.clear("action:$it") }
-                if (!showActions) raise.forEach { notifier.notify(it.title, it.body, "action:" + it.id.ifBlank { "more" }) }
+                clear.forEach { notifier.clear("action:$it"); noticeRepo.dismiss("orrery:$it") }
+                raise.forEach {
+                    val key = it.id.ifBlank { "more" }
+                    // The inbox records every proposal; the toast is only
+                    // suppressed while the Actions list (the news) is open.
+                    noticeRepo.record(
+                        "orrery:$key", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_ASSISTANT,
+                        "orrery-proposal", it.title, it.body, "orrery:$key",
+                    )
+                    if (!showActions) notifier.notify(it.title, it.body, "action:$key")
+                }
             }
         }
         // "Run now", from both the Loops screen and the assistant's jobs pane.
@@ -1474,6 +1504,10 @@ fun App(
             DisposableEffect(repo, notifier) {
                 repo.dmInviteListener = { ship ->
                     runCatching { notifier.notify(callContacts.displayName(ship), "wants to message you") }
+                    noticeRepo.record(
+                        "dm:$ship", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "dm-request",
+                        callContacts.displayName(ship), "wants to message you", "dm:$ship",
+                    )
                 }
                 // A new group invite is as easy to miss as a DM request —
                 // toast it the same way so it doesn't sit unseen behind a
@@ -1482,6 +1516,10 @@ fun App(
                     val name = invite.title ?: invite.flag
                     val from = invite.inviter?.let { " from " + callContacts.displayName(it) } ?: ""
                     runCatching { notifier.notify(name, "invited you to a group$from") }
+                    noticeRepo.record(
+                        "invite:${invite.flag}", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "group-invite",
+                        name, "invited you to a group$from", "invite:${invite.flag}",
+                    )
                 }
                 onDispose {
                     repo.dmInviteListener = null
@@ -3194,13 +3232,15 @@ fun App(
                         val mailUnread by mailRepo.inboxUnread.collectAsState()
                         val assistantNews by assistantSession.news.collectAsState()
                         val threadsUnread by remember(db) { db.followedThreads().streamAnyUnread() }.collectAsState(initial = false)
+                        val noticesUnread by remember(db) { db.notices().unreadCount().map { it > 0 } }.collectAsState(initial = false)
                         val menuBadges = remember(
                             railStatusFeed, railPendingInvites,
                             railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship, calendarShares,
-                            orreryActions, mailUnread, assistantNews, threadsUnread,
+                            orreryActions, mailUnread, assistantNews, threadsUnread, noticesUnread,
                         ) {
                             MenuBadges(
                                 threadsUnread = threadsUnread,
+                                noticesUnread = noticesUnread,
                                 mailUnread = mailUnread,
                                 assistantNews = assistantNews,
                                 // A proposal is a question, and a question
@@ -3309,6 +3349,11 @@ fun App(
                                 // slot, where it sits beside Mail.
                                 RailTab.Home -> Unit
                                 RailTab.Chats -> {
+                                    val followedThreadRows by androidx.compose.runtime.remember(db) {
+                                        db.followedThreads().streamThreads().map { io.nisfeb.talon.data.threadsInOrder(it) }
+                                    }.collectAsState(initial = emptyList())
+                                    val followedUnread = followedThreadRows.count { it.unread > 0 }
+                                    val followedContacts by io.nisfeb.talon.ui.rememberContactMap(db)
                                     DmListScreen(
                                         orreryOn = orreryGate == true,
                                         db = db,
@@ -3366,6 +3411,37 @@ fun App(
                                                 contacts = callContacts,
                                                 onOpenLine = openLineFromList,
                                             )
+                                        },
+                                        threadsUnread = followedUnread,
+                                        // Followed threads moved out of Activity to here: a
+                                        // conditional Home tab, shown only when one is followed.
+                                        threadsTab = if (followedThreadRows.isEmpty()) {
+                                            null
+                                        } else {
+                                            {
+                                                androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
+                                                    if (followedUnread > 0) {
+                                                        io.nisfeb.talon.ui.TextButton(
+                                                            onClick = {
+                                                                repo.markThreadsRead(
+                                                                    followedThreadRows.filter { it.unread > 0 }.map { it.whom to it.parentPostId },
+                                                                )
+                                                            },
+                                                        ) { androidx.compose.material3.Text("Mark all read") }
+                                                    }
+                                                    io.nisfeb.talon.ui.FollowedThreadsList(
+                                                        rows = followedThreadRows,
+                                                        contactMap = followedContacts,
+                                                        showChat = true,
+                                                        onOpen = { row ->
+                                                            openChat = row.whom
+                                                            openThreadParent = row.parentPostId
+                                                            openThreadReplyAnchor = row.lastReplyId ?: row.parentPostId
+                                                        },
+                                                        modifier = Modifier.fillMaxSize(),
+                                                    )
+                                                }
+                                            }
                                         },
                                         onOpenInvites = { showInvites = true },
                                         onOpenBookmarks = onOpenBookmarks,
