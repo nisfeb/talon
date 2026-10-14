@@ -89,6 +89,12 @@ fun createAppDatabase(shipKey: String): AppDatabase {
         // shows a dialog and exits) rather than corrupting good data.
         throw timeout
     } catch (err: Throwable) {
+        // An Error (OutOfMemory, a failed native SQLite link, LinkageError)
+        // is never database corruption — wiping good data to "recover" from
+        // it destroys the user's local notes, loops and assistant history for
+        // nothing. Only an Exception (a genuinely unreadable/corrupt file)
+        // warrants the wipe; surface Errors to main()'s startup dialog.
+        if (err is Error) throw err
         Log.w(TAG, "DB open failed (${err.message}); wiping and retrying once")
         wipeDb(dbFile)
         buildAndPing(dbFile)
