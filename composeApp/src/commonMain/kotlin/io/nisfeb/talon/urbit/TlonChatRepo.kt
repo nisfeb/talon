@@ -1989,10 +1989,11 @@ class TlonChatRepo(
      * like, so the person was told it had gone and went looking at
      * the other ship.
      */
-    suspend fun inviteToGroup(flag: String, ship: String): Boolean {
+    suspend fun inviteToGroup(flag: String, ship: String): Boolean = carry {
         val ch = channel ?: error("not connected")
+        // Repo scope: leaving the invite screen must not cancel the invite.
         pokeGroupAction(ch, groupAction4InviteAdd(flag, ship))
-        return true
+        true
     }
 
     /**
@@ -2396,11 +2397,13 @@ class TlonChatRepo(
      * for the target group. All admin actions (meta, seat, entry,
      * role) go through this helper.
      */
-    private suspend fun pokeAGroup(flag: String, aGroup: JsonObject) {
+    private suspend fun pokeAGroup(flag: String, aGroup: JsonObject) = carry {
         val ch = channel ?: error("not connected")
         // Every one of these is an admin acting on somebody else's
         // membership and being shown the result: a kick, a ban, an ask
         // resolved. None of them may report a silence as done (confirm).
+        // On the repo scope so leaving the admin screen (which these
+        // screens do after the action) does not cancel the write.
         pokeGroupAction(ch, groupAction4(flag, aGroup))
     }
 

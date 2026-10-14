@@ -384,6 +384,22 @@ class TlonChatRepoSendTest {
         assertEquals(4, ship.pokesTo("groups").size)
     }
 
+    // Group-admin actions (kick/ban/approve/invite) poke on the repo scope;
+    // the admin screen navigates back after the action, so leaving mid-poke
+    // on the caller's scope would cancel it and the membership change would
+    // not land. Real time via holdPoke.
+    @Test
+    fun `a group kick whose screen is left mid-poke still reaches the ship`() = live {
+        ship.holdPoke = 600
+        val screen = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+        screen.launch { repo.kickFromGroup("~bus/garden", "~nec") }
+        kotlinx.coroutines.delay(200)
+        screen.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+        val until = System.currentTimeMillis() + 5_000
+        while (ship.pokesTo("groups").isEmpty() && System.currentTimeMillis() < until) kotlinx.coroutines.delay(50)
+        assertEquals("group-action-5", ship.pokesTo("groups").first().mark)
+    }
+
     // /v1/self is our own card alone; the directory is every contact.
     @Test
     fun `our own card is re-read alone, not with the whole directory`() = live {
