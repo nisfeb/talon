@@ -23,6 +23,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -193,9 +194,14 @@ fun SearchScreen(
                 value = query,
                 onValueChange = { query = it },
                 placeholder = {
+                    // One line, or the long hint wraps the placeholder to two
+                    // and the single-line input's cursor floats in a two-row
+                    // tall box (the reported mobile search-bar bug).
                     Text(
                         if (smartMode) "Search by meaning"
                         else "Search · try from:~ship since:1w has:image",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 },
                 singleLine = true,

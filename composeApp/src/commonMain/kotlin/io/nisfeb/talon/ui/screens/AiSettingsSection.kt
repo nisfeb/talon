@@ -1319,7 +1319,7 @@ private fun ModelPicker(
         DropdownMenu(expanded = open, onDismissRequest = { open = false; query = "" }, modifier = Modifier.heightIn(max = 460.dp)) {
             OutlinedTextField(
                 value = query, onValueChange = { query = it },
-                placeholder = { Text("Search, or type a model's id") }, singleLine = true,
+                placeholder = { Text("Search, or type a model's id", maxLines = 1, overflow = TextOverflow.Ellipsis) }, singleLine = true,
                 modifier = Modifier.padding(horizontal = 8.dp).fillMaxWidth(),
             )
             if (allowDefault) DropdownMenuItem(
