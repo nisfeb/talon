@@ -7,9 +7,9 @@ STATUS: IN PROGRESS
 
 ## Summary
 
-- Confirmed bugs: 10
-- Fixed: 2 (commits 6d307846, 4ec3d2a7)
-- Reported: 12 (3 High, 5 Med, 4 Low)
+- Confirmed bugs: 15
+- Fixed: 5 (6d307846, 4ec3d2a7, 663b7bf1, e457c949, eaa1a275)
+- Reported: 14 (3 High, 6 Med, 5 Low)
 - Polish items: 0 (dimension 7 not yet run)
 
 ## Dimension coverage
@@ -21,7 +21,7 @@ STATUS: IN PROGRESS
 | 3 | Offline-first + sync correctness | DONE — 6 findings (2 High), below |
 | 4 | Concurrency / lifecycle | DONE — 1 fixed (R5), 3 new findings, SSE/leaks clean |
 | 5 | Failure-path honesty | DONE — clean (one thorough pass) |
-| 6 | Desktop leaf correctness | not started |
+| 6 | Desktop leaf correctness | DONE — 3 fixed (F3-F5), 2 reported, rest clean |
 | 7 | UI polish, mobile-first | not started |
 
 ## FIXED
@@ -60,6 +60,38 @@ mid-poke still reaches the ship"` sets `ship.holdPoke`, cancels the caller scope
 mid-poke, and asserts the edit still lands. 38/38 in that class pass — the 37
 existing edit/delete wire tests confirm the `carry` wrap did not change behavior.
 R7 (delete has no rollback on refusal) is a separate concern, still open.
+
+### F3 — desktop AI probes could deadlock and permanently disable on-device AI (commit 663b7bf1)
+
+`EmbedderProbe.runProbe` and `LlamaProbe.run` (desktopMain) spawned a child JVM
+with `redirectErrorStream(true)` but only read its exit code, never draining the
+pipe. On a cold model load the child's DJL/slf4j or llama.cpp native logs fill the
+OS pipe buffer (~64 KB), the child blocks on write, the parent's `waitFor` times
+out and force-kills it, and a false `bad` verdict is cached — disabling semantic
+search / the local model until a `PROBE_VERSION` bump. Changed both to
+`redirectOutput(DISCARD).redirectError(DISCARD)` (the parent reads only the exit
+code). Desktop-leaf, not unit-tested (hard to drive a child JVM in CI); the change
+is self-evidently correct and compiles.
+
+### F4 — desktop DB wiped the user's local data on a non-corruption error (commit e457c949)
+
+`createAppDatabase` (AppDatabase.desktop.kt:91) caught every Throwable but the open
+timeout and wiped the database before retrying. An `OutOfMemoryError`, a failed
+native SQLite link, or a `LinkageError` is not corruption, yet it destroyed the
+user's local notes, loops and assistant history to "recover". Now rethrows `Error`
+(surfaced to main()'s existing startup dialog) and wipes only on an `Exception`
+(a genuinely unreadable file). Desktop-leaf data-loss fix; reasoned-safe
+(corruption surfaces as SQLiteException, never an Error), not unit-tested because
+injecting an Error into the Room open path is impractical. Broader refinement left
+reported below (R-note: match SQLITE_CORRUPT codes rather than all Exceptions).
+
+### F5 — window lookups broke under TALON_PROFILE (commit eaa1a275)
+
+With `TALON_PROFILE` set the window title is `"Talon ($profile)"`, but the
+bring-to-front routine (Main.kt:396) and the file-dialog parent lookup
+(DesktopFilePicker.kt:61) matched `it.title == "Talon"` exactly, so a tray or
+notification click failed to focus the window and dialogs opened unparented.
+Changed both to `startsWith("Talon")`.
 
 ## REPORTED
 
@@ -261,6 +293,40 @@ comments naming the exact bug they prevent:
 Minor (not a finding): MailList on a first-load failure shows `MailNotice(error)`
 AND "No mail." together — honest but slightly redundant; could suppress the empty
 line while an error is showing.
+
+### R14 (Med) — updater reports success when the installer opener silently fails
+
+`DesktopUpdateInstaller.install()` opens the downloaded deb/dmg/msi via
+`DesktopUriHandler.openUri(file.toURI().toString())`, and `tryRun` returns true on
+`ProcessBuilder.start()` success — it never calls `waitFor()`/`exitValue()`. So an
+`xdg-open`/`open`/`rundll32` that launches and immediately fails (no handler for
+`.deb`, package installer missing) reads as success, and the banner already said
+"Verified — opens the installer". Also `file.toURI().toString()` yields a
+single-slash `file:/...` form; passing `file.absolutePath` instead sidesteps any
+opener URI-parsing quirk (all three accept plain paths). Same unchecked pattern in
+`replaceAppImage`'s fallback (:164) and `DesktopUrbLinkLauncher.run` (:71). Not
+fixed: can't runtime-verify the opener behavior on macOS/Windows from this Linux
+host, and the URI-form part is platform-conditional. Fix: pass the absolute path
+and use a checked spawn (`waitFor(~5s)` + `exitValue()==0`) so `install` can
+surface a failure the way `download` already does.
+
+### R15 (Low) — desktop recording/attachment save hardcodes ~/Downloads/Talon and overwrites
+
+`RecordingSave.desktop.kt:13` hardcodes `File(user.home, "Downloads/Talon")`,
+ignoring the localized XDG download dir that `DesktopImageDownloader.downloadsDir()`
+resolves via `xdg-user-dir`, so saves land in a wrong/nonexistent path on a
+localized Linux desktop. It also has no `uniquify`, so a second file with the same
+name silently overwrites the first. `DesktopImageDownloader.saveBytes()` inherits
+both. Fix: route through the existing `downloadsDir()` + `uniquify()`.
+
+### Dimension 6 clean (verified)
+
+SystemNotifier (argv vectors, no shell injection; bounded, drained, daemon-thread
+processes), file/image pickers (correct platform thread, mutex, null/cancel),
+`decodeImageDimensions` (header-only, OOM-safe), window/tray lifecycle (bounded
+teardown, no leak), SingleInstance lock, VideoSurface frame lifecycle, VLC
+discovery off the EDT, and all the atomic `tmp + ATOMIC_MOVE` settings stores.
+The AOT-cache SIGILL (rc40) lives in build-appimage.sh, outside desktopMain.
 
 ### Dimension 3 minor notes (not ranked)
 
