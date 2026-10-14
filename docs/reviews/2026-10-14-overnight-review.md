@@ -7,10 +7,10 @@ STATUS: IN PROGRESS
 
 ## Summary
 
-- Confirmed bugs: 15
-- Fixed: 5 (6d307846, 4ec3d2a7, 663b7bf1, e457c949, eaa1a275)
-- Reported: 14 (3 High, 6 Med, 5 Low)
-- Polish items: 0 (dimension 7 not yet run)
+- Total issues found: 21
+- Fixed on this branch: 7 (F1 6d307846, F2 4ec3d2a7, F3 663b7bf1, F4 e457c949,
+  F5 eaa1a275, F6 a7e4e97c, F7 f9cbc464)
+- Reported, still open: 14 (3 High, 6 Med, 5 Low) — R1-R4, R6-R15 (R5 became F2)
 
 ## Dimension coverage
 
@@ -22,7 +22,7 @@ STATUS: IN PROGRESS
 | 4 | Concurrency / lifecycle | DONE — 1 fixed (R5), 3 new findings, SSE/leaks clean |
 | 5 | Failure-path honesty | DONE — clean (one thorough pass) |
 | 6 | Desktop leaf correctness | DONE — 3 fixed (F3-F5), 2 reported, rest clean |
-| 7 | UI polish, mobile-first | not started |
+| 7 | UI polish, mobile-first | DONE — 2 fixed (F6-F7), rest clean |
 
 ## FIXED
 
@@ -92,6 +92,27 @@ bring-to-front routine (Main.kt:396) and the file-dialog parent lookup
 (DesktopFilePicker.kt:61) matched `it.title == "Talon"` exactly, so a tray or
 notification click failed to focus the window and dialogs opened unparented.
 Changed both to `startsWith("Talon")`.
+
+### F6 — the mobile search bar rendered two rows tall with the cursor floating (commit a7e4e97c)
+
+This is the user-reported bug. `SearchScreen.kt`'s search field placeholder hint
+(`"Search · try from:~ship since:1w has:image"`, ~41 chars) had no `maxLines`, so
+on a narrow phone it wrapped to two lines. `singleLine = true` constrains the
+INPUT, not the placeholder, so the OutlinedTextField's decoration box grew to two
+rows and the single-line cursor sat centered between them. It showed only with
+smart search OFF (the default) — smart mode's placeholder ("Search by meaning") is
+short and fits. Fixed by capping the placeholder at `maxLines = 1, overflow =
+Ellipsis`; applied the same to the AI-settings model search, whose hint is also
+long. Reasoned from code (the root cause is a logic bug, not a rendering guess);
+NOT verified on a device — worth a quick eyeball on a phone with smart search off,
+which is the exact repro. The other search boxes (contacts, mail, emoji, tasks)
+have short placeholders that do not wrap, so they were left alone.
+
+### F7 — conversation rows clipped mid-glyph instead of ellipsizing (commit f9cbc464)
+
+`DmListScreen.kt`'s name, draft and author-time preview were `maxLines = 1` with no
+`overflow`, which Compose defaults to `Clip` — a long ship name or group title cut
+off mid-letter. Added `overflow = Ellipsis` to the three. Pure polish.
 
 ## REPORTED
 
@@ -327,6 +348,17 @@ processes), file/image pickers (correct platform thread, mutex, null/cancel),
 teardown, no leak), SingleInstance lock, VideoSurface frame lifecycle, VLC
 discovery off the EDT, and all the atomic `tmp + ATOMIC_MOVE` settings stores.
 The AOT-cache SIGILL (rc40) lives in build-appimage.sh, outside desktopMain.
+
+### Dimension 7 clean (verified from code)
+
+IME/keyboard coverage (AndroidManifest `adjustResize` + shell `safeDrawing`
+insets; composer resizes above the keyboard), touch targets (IconButton/NavIcon
+wrap Material3's 48.dp-minimum IconButton), contentDescriptions (null only on
+icons inside self-labeling text buttons), theme colors (all `Color(0x…)` are theme
+definitions or the deliberate amber flash overlay, none bypass colorScheme), and
+fixed widths (the 430.dp mail pane is wide-viewport-only; phone uses single-pane).
+Needs-device note: an 88.dp theme-editor label could clip at very large font
+scale, low risk (short strings).
 
 ### Dimension 3 minor notes (not ranked)
 
