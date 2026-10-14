@@ -23,8 +23,10 @@ data class MenuBadges(
     val mailUnread: Boolean = false,
     /** An assistant run finished, or waits on a confirmation, while it was not on screen. */
     val assistantNews: Boolean = false,
-    /** A thread the owner follows has unread replies: Activity's Threads tab. */
+    /** A thread the owner follows has unread replies: the Home Threads tab. */
     val threadsUnread: Boolean = false,
+    /** An unread non-chat notice (orrery, loop, armillary, invite) in Activity. */
+    val noticesUnread: Boolean = false,
 ) {
     /**
      * Read-site helper: returns true if [item]'s rail icon should
@@ -39,7 +41,8 @@ data class MenuBadges(
         RailItem.Actions -> actionsWaiting
         RailItem.Mail -> mailUnread
         RailItem.Assistant -> assistantNews
-        RailItem.Activity -> threadsUnread
+        RailItem.Activity -> noticesUnread
+        RailItem.Chats -> threadsUnread
         else -> false
     }
 

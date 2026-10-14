@@ -3232,13 +3232,15 @@ fun App(
                         val mailUnread by mailRepo.inboxUnread.collectAsState()
                         val assistantNews by assistantSession.news.collectAsState()
                         val threadsUnread by remember(db) { db.followedThreads().streamAnyUnread() }.collectAsState(initial = false)
+                        val noticesUnread by remember(db) { db.notices().unreadCount().map { it > 0 } }.collectAsState(initial = false)
                         val menuBadges = remember(
                             railStatusFeed, railPendingInvites,
                             railInvitesSnapshot, menuSeenState, railEffectiveStatusesSeenMs, ship, calendarShares,
-                            orreryActions, mailUnread, assistantNews, threadsUnread,
+                            orreryActions, mailUnread, assistantNews, threadsUnread, noticesUnread,
                         ) {
                             MenuBadges(
                                 threadsUnread = threadsUnread,
+                                noticesUnread = noticesUnread,
                                 mailUnread = mailUnread,
                                 assistantNews = assistantNews,
                                 // A proposal is a question, and a question
