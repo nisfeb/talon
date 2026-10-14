@@ -64,8 +64,9 @@ import androidx.sqlite.execSQL
         UrbUnfurlEntity::class,
         FollowedThreadEntity::class,
         OrreryCacheEntity::class,
+        NoticeEntity::class,
     ],
-    version = 55,
+    version = 56,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -101,6 +102,7 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun urbUnfurls(): UrbUnfurlDao
     abstract fun followedThreads(): FollowedThreadDao
     abstract fun orreryCache(): OrreryCacheDao
+    abstract fun notices(): NoticeDao
 }
 
 /**
@@ -156,5 +158,5 @@ val SHARED_MIGRATIONS = arrayOf(
     MAIL_ROWS_MIGRATION, CALENDAR_ROWS_MIGRATION, ORRERY_ACCOUNTS_MIGRATION, ORRERY_SENT_MIGRATION,
     COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION,
     URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, WATCHWORDS_DROP_MIGRATION, ASSISTANT_LOG_MIGRATION,
-    FOLLOWED_THREADS_MIGRATION, ORRERY_CACHE_MIGRATION,
+    FOLLOWED_THREADS_MIGRATION, ORRERY_CACHE_MIGRATION, NOTICE_MIGRATION,
 )
