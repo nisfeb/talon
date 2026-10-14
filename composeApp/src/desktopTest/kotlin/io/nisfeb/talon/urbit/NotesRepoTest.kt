@@ -5,6 +5,8 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
@@ -118,6 +120,27 @@ class NotesRepoTest {
         ship.answerApi = { _, _, _ -> null }
         assertFalse(notes.updateNote(book, 11, "mine", expectedRevision = 3), "the ship could not be reached")
         assertEquals("Simmer **long**.", db.notes().note(book.flagString, 11)?.bodyMd, "the ship's copy stands")
+    }
+
+    // A save marks the row pending, then clears it after the PUT settles. Run
+    // on the caller's scope, leaving the note screen between the two cancelled
+    // the clear, and replaceTree re-applied pending on every later scry,
+    // pinning the note as "saving…" forever. On the repo scope the clear runs
+    // regardless. Real time via a slow answerApi.
+    @Test
+    fun `a save left mid-flight does not pin the note as saving`() = live {
+        notes.bootstrap()
+        ship.answerApi = { method, _, _ ->
+            if (method == "PUT") { Thread.sleep(600); """{"body":{"type":"ok"}}""" } else null
+        }
+        val screen = CoroutineScope(SupervisorJob())
+        screen.launch { notes.updateNote(book, 11, "new body", expectedRevision = 3) }
+        delay(200)
+        assertEquals(true, db.notes().note(book.flagString, 11)?.pending, "marked saving while in flight")
+        screen.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+        val until = System.currentTimeMillis() + 5_000
+        while (db.notes().note(book.flagString, 11)?.pending == true && System.currentTimeMillis() < until) delay(50)
+        assertEquals(false, db.notes().note(book.flagString, 11)?.pending, "the clear ran on the repo scope despite leaving")
     }
 
     @Test

@@ -269,12 +269,15 @@ class NotesRepo(
 
     // ---- writes --------------------------------------------------------
 
-    private suspend fun poke(action: JsonObject): Boolean {
-        val ch = channel ?: return false
-        return runCatching { ch.poke(NotesPaths.APP, NotesPaths.POKE_MARK, action) }
+    // On the repo's scope, like write(): leaving the screen mid-poke (a
+    // rename, move, delete, publish) must not cancel the write. Every
+    // note/folder mutation but createNote/updateNote routes through here.
+    private suspend fun poke(action: JsonObject): Boolean = scope.async {
+        val ch = channel ?: return@async false
+        runCatching { ch.poke(NotesPaths.APP, NotesPaths.POKE_MARK, action) }
             .onFailure { Log.w(TAG, "notes poke failed", it) }
             .isSuccess
-    }
+    }.await()
 
     /**
      * A new note, over %notes' REST route; null when the host took it,
@@ -314,8 +317,13 @@ class NotesRepo(
         noteId: Long,
         body: String,
         expectedRevision: Long,
-    ): Boolean {
-        val ch = channel ?: return false
+    ): Boolean = scope.async {
+        // On the repo's scope: the row is marked pending before the PUT and
+        // the mark is cleared after. Leaving the screen mid-save on the
+        // caller's scope cancelled it between the two, and replaceTree then
+        // re-applied pending on every later scry, pinning the note as
+        // "saving…" forever.
+        val ch = channel ?: return@async false
         val key = flag.flagString
         db.notes().applyLocalEdit(key, noteId, body, nowMs())
         // Deliberately NOT a poke. A channel poke returns the moment eyre
@@ -354,8 +362,8 @@ class NotesRepo(
         // with the host's version rather than leaving an edit on screen
         // that never landed.
         refreshNotebook(flag)
-        return ok
-    }
+        return@async ok
+    }.await()
 
     suspend fun renameNote(flag: NotesFlag, noteId: Long, title: String): Boolean =
         poke(NotesActions.renameNote(flag, noteId, title))
