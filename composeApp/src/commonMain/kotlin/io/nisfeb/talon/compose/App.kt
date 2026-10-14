@@ -514,13 +514,22 @@ fun App(
     // causes, so the chat opens once the new ship's tree is up.
     LaunchedEffect(Unit) {
         io.nisfeb.talon.notify.OpenNoticeRequests.requests.collect { tag ->
-            if (tag.startsWith(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX)) {
-                // Over whatever section is open: the render shows the
-                // first flag that is true, and a section left open hid
-                // the calendar and took the back that should leave it.
-                sections.closeAll()
-                noticeCalendarTag = tag
-                showCalendar = true
+            // A tapped push, or a tapped Activity notice row, by its tag.
+            // closeAll first: the render shows the first open section, and
+            // one left open would hide the target and steal its back.
+            when {
+                tag.startsWith(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX) -> {
+                    sections.closeAll()
+                    noticeCalendarTag = tag
+                    showCalendar = true
+                }
+                // Activity notice targets (see NoticeRepo.record): the
+                // assistant and account domains, and the chat-adjacent ones.
+                tag.startsWith("orrery:") -> { sections.closeAll(); showActions = true }
+                tag.startsWith("loop:") -> { sections.closeAll(); showLoops = true }
+                tag.startsWith("invite:") -> { sections.closeAll(); showInvites = true }
+                tag == "armillary" -> { sections.closeAll(); showAssistant = true }
+                tag.startsWith("dm:") -> jumpToChat(tag.removePrefix("dm:"))
             }
         }
     }
