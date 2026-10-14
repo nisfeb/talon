@@ -10,6 +10,7 @@ import io.nisfeb.talon.data.ReactionEntity
 import io.nisfeb.talon.data.ThreadUnreadEntity
 import io.nisfeb.talon.data.UnreadEntity
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
@@ -240,6 +241,41 @@ class TlonChatRepoSendTest {
         )
     }
 
+    // An edit (and a delete) pokes on the repo's own scope, not the screen's:
+    // launched on a screen's rememberCoroutineScope, leaving the chat while the
+    // poke was in flight cancelled it and the edit never reached the ship.
+    // Real time: holdPoke delays the ship's ack so there is a window to leave.
+    @Test
+    fun `an edit whose screen is left mid-poke still reaches the ship`() = live {
+        ship.holdPoke = 600
+        val screen = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+        screen.launch { repo.edit(nest, "170141184506", "edited", originalSentMs = 1) }
+        // Let the poke reach the held PUT, then leave the chat.
+        kotlinx.coroutines.delay(200)
+        screen.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+        val until = System.currentTimeMillis() + 5_000
+        while (ship.pokesTo("channels").isEmpty() && System.currentTimeMillis() < until) kotlinx.coroutines.delay(50)
+        val edit = ship.pokesTo("channels").single().json.at("channel", "action", "post", "edit")
+        assertEquals("170.141.184.506", edit.at("id").jsonPrimitive.content)
+    }
+
+    // A profile edit optimistically updates the local contact then pokes; it
+    // must poke on the repo scope, or leaving the edit screen (which navigates
+    // back on success) cancels the poke and strands the local edit as a
+    // permanent divergence from the ship. Real time via holdPoke.
+    @Test
+    fun `a profile edit whose screen is left mid-save still reaches the ship`() = live {
+        ship.holdPoke = 600
+        val screen = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+        screen.launch { repo.updateProfile(nickname = "Zod the Great") }
+        kotlinx.coroutines.delay(200)
+        screen.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+        val until = System.currentTimeMillis() + 5_000
+        while (ship.pokesTo("contacts").isEmpty() && System.currentTimeMillis() < until) kotlinx.coroutines.delay(50)
+        val self = ship.pokesTo("contacts").first { it.mark == "contact-action-1" }.json.at("self", "nickname", "value")
+        assertEquals("Zod the Great", self.jsonPrimitive.content)
+    }
+
     @Test
     fun `pinning writes the order the ship reads, and a refusal restores the old pin`() = live {
         seedChannel()
@@ -346,6 +382,22 @@ class TlonChatRepoSendTest {
         repo.kickFromGroup("~bus/garden", "~wex")
         assertEquals("group-action-4", ship.pokesTo("groups").last().mark, "remembered")
         assertEquals(4, ship.pokesTo("groups").size)
+    }
+
+    // Group-admin actions (kick/ban/approve/invite) poke on the repo scope;
+    // the admin screen navigates back after the action, so leaving mid-poke
+    // on the caller's scope would cancel it and the membership change would
+    // not land. Real time via holdPoke.
+    @Test
+    fun `a group kick whose screen is left mid-poke still reaches the ship`() = live {
+        ship.holdPoke = 600
+        val screen = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+        screen.launch { repo.kickFromGroup("~bus/garden", "~nec") }
+        kotlinx.coroutines.delay(200)
+        screen.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+        val until = System.currentTimeMillis() + 5_000
+        while (ship.pokesTo("groups").isEmpty() && System.currentTimeMillis() < until) kotlinx.coroutines.delay(50)
+        assertEquals("group-action-5", ship.pokesTo("groups").first().mark)
     }
 
     // /v1/self is our own card alone; the directory is every contact.

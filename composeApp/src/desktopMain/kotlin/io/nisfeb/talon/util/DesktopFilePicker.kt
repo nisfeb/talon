@@ -58,7 +58,7 @@ class DesktopFilePicker : FilePicker {
     // monitor or stack it behind the app. Same title-based lookup
     // Main.kt's bring-to-front routine uses.
     private fun appFrame(): java.awt.Frame? =
-        java.awt.Frame.getFrames().firstOrNull { it.title == "Talon" }
+        java.awt.Frame.getFrames().firstOrNull { it.title.startsWith("Talon") }
 
     private companion object {
         // Both cases: the Linux portal matches its globs case-sensitively,

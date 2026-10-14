@@ -13,9 +13,11 @@ package io.nisfeb.talon.util
  *
  * PNG drops its text, EXIF and time chunks, and anything after IEND.
  *
- * Anything else, or a file that does not parse, goes as it came.
- * ponytail: WebP and HEIC pass through. iOS re-encodes its photos and
- * Android turns HEIC into JPEG, so only files attached as files keep it.
+ * Anything else (WebP, HEIC) or a file that does not parse is decoded and
+ * re-encoded to a metadata-free JPEG by [reencodeStrippingMetadata], so an
+ * attached raw HEIC or WebP photo cannot leak its GPS even though the
+ * byte-level strip above does not understand those containers. Only a file
+ * that cannot be decoded as an image at all goes as it came.
  */
 fun stripImageMetadata(bytes: ByteArray): ByteArray = runCatching {
     when {
@@ -23,7 +25,17 @@ fun stripImageMetadata(bytes: ByteArray): ByteArray = runCatching {
         bytes.size > 8 && PNG_SIGNATURE.indices.all { bytes[it] == PNG_SIGNATURE[it] } -> stripPng(bytes)
         else -> null
     }
-}.getOrNull() ?: bytes
+}.getOrNull() ?: reencodeStrippingMetadata(bytes) ?: bytes
+
+/**
+ * Decode [bytes] and re-encode to a JPEG carrying no metadata, or null if it
+ * cannot be decoded as an image. The fallback for formats the byte-level strip
+ * does not parse (WebP, HEIC) and for a corrupt-but-renderable file: the
+ * decoded pixels hold no EXIF/GPS and the platform JPEG encoders write none.
+ * Lossy (a re-compression) — the accepted cost of guaranteeing no leak over
+ * passing the original through untouched.
+ */
+internal expect fun reencodeStrippingMetadata(bytes: ByteArray): ByteArray?
 
 private const val FF = 0xFF.toByte()
 private val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)

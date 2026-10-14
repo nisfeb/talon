@@ -133,8 +133,12 @@ object LlamaProbe {
         val ok = runCatching {
             val javaBin = File(System.getProperty("java.home"), "bin/java").absolutePath
             val cp = System.getProperty("java.class.path") ?: return false
+            // Discard output: only the exit code is read, and an undrained
+            // pipe deadlocks the child once llama.cpp's verbose native logs
+            // fill the OS buffer, timing out into a false `bad` verdict.
             val proc = ProcessBuilder(javaBin, "-cp", cp, "io.nisfeb.talon.orrery.LlamaProbeMainKt", model.path)
-                .redirectErrorStream(true).start()
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD).start()
             if (!proc.waitFor(TIMEOUT_MS, TimeUnit.MILLISECONDS)) { proc.destroyForcibly(); return false }
             proc.exitValue() == 0
         }.getOrElse { Log.w(TAG, "probe spawn failed: ${it.message}"); false }

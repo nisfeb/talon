@@ -493,17 +493,19 @@ class MailRepo(
      * The slug is derived from the title and a seed, so publishing the
      * same thread twice edits one note rather than piling up copies.
      */
-    suspend fun publishToLattice(title: String, seed: String, gemtext: String): String? {
-        val url = shipUrl ?: return null
-        val ship = ourShip ?: return null
+    suspend fun publishToLattice(title: String, seed: String, gemtext: String): String? = scope.async {
+        // On the repo scope, like sendMessage: leaving the thread while the
+        // publish is in flight would otherwise cancel it on the screen scope.
+        val url = shipUrl ?: return@async null
+        val ship = ourShip ?: return@async null
         val slug = io.nisfeb.talon.urbit.LatticePublish.slug(title, seed)
-        return runSuspendCatching {
+        runSuspendCatching {
             io.nisfeb.talon.urbit.LatticePublish.publish(http, url, ship, slug, gemtext)
         }.onFailure {
             Log.w(TAG, "lattice publish failed", it)
             _problem.value = "Could not file to Lattice: ${it.message}"
         }.getOrNull()
-    }
+    }.await()
 
     // ---- one thread ----------------------------------------------------
 

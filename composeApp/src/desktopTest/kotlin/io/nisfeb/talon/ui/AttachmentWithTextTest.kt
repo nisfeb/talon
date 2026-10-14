@@ -231,4 +231,46 @@ class AttachmentWithTextTest {
             tmp.deleteRecursively()
         }
     }
+
+    // A dropped, pasted or multi-picked file uploads and sends on the repo's
+    // scope, not the screen's: leaving the chat mid-upload used to cancel the
+    // send and the file never went. The staged single-attachment path already
+    // carried on the repo; this is the same guarantee for the drop path.
+    // Real time: the virtual clock hides the wait.
+    @Test
+    fun `a dropped file whose screen is left mid-upload still sends`() {
+        val ship = hostingShip().apply {
+            val hosts = answerApi
+            answerApi = { method, path, body ->
+                if (path == "/put-here") Thread.sleep(1_000)
+                hosts(method, path, body)
+            }
+        }
+        val tmp = createTempDirectory(prefix = "talon-drop-").toFile()
+        val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
+            .setDriver(BundledSQLiteDriver())
+            .fallbackToDestructiveMigration(dropAllTables = true)
+            .build()
+        val events = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { ship.channel.events().collect {} }
+        // The screen's scope, like uploadOne's callers use. Cancelled when the
+        // user leaves the chat.
+        val screen = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+        try {
+            val repo = TlonChatRepo(db).also { it.attachForTest(ship.channel, "~zod", http = ship.http) }
+            val file = DroppedFile("cat.png", "image/png", byteArrayOf(1, 2, 3, 4))
+            screen.launch { uploadDroppedFile(file, repo, strategy) }
+            // Let the upload reach the slow PUT, then leave the chat.
+            Thread.sleep(300)
+            screen.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+            // The send still lands, on the repo's own scope.
+            val until = System.currentTimeMillis() + 8_000
+            while (texts.isEmpty() && System.currentTimeMillis() < until) Thread.sleep(100)
+            assertEquals(listOf("image https://cdn.test/zod/cat.png []"), texts.toList())
+        } finally {
+            screen.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+            events.cancel()
+            db.close()
+            tmp.deleteRecursively()
+        }
+    }
 }

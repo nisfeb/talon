@@ -234,6 +234,29 @@ object PendingQuotes {
 internal fun fileLink(name: String, url: String) = "[📎 ${name.replace('[', '(').replace(']', ')')}]($url)"
 
 /**
+ * Upload one dropped, pasted or multi-picked file and send it, on the repo's
+ * own scope. Launched from the screen's scope, leaving the chat mid-upload
+ * cancelled both the upload and the send and the file never went. The staged
+ * single-attachment path already carries on the repo for the same reason.
+ * The caller keeps the screen bookkeeping (the uploading flag, the error).
+ */
+internal suspend fun uploadDroppedFile(
+    file: DroppedFile,
+    repo: TlonChatRepo,
+    strategy: ChatSendStrategy,
+): Result<Unit> = repo.carry {
+    io.nisfeb.talon.util.runSuspendCatching {
+        val hostedUrl = repo.uploadImage(file.bytes, file.mimeType, file.name)
+        if (file.isImage) {
+            val dims = decodeImageDimensions(file.bytes)
+            strategy.sendImage(src = hostedUrl, width = dims?.first ?: 0, height = dims?.second ?: 0, alt = file.name)
+        } else {
+            strategy.sendText(fileLink(file.name, hostedUrl))
+        }
+    }
+}
+
+/**
  * Re-keys on [whom] so switching conversations starts the composer
  * fresh. Loads any persisted draft text from [drafts], and the quote
  * that was waiting on this composer's surface.
@@ -500,22 +523,8 @@ fun ChatComposer(
                 return
             }
             state.uploading = true
-            runCatching {
-                val hostedUrl = repo.uploadImage(file.bytes, file.mimeType, file.name)
-                if (file.isImage) {
-                    val dims = decodeImageDimensions(file.bytes)
-                    strategy.sendImage(
-                        src = hostedUrl,
-                        width = dims?.first ?: 0,
-                        height = dims?.second ?: 0,
-                        alt = file.name,
-                    )
-                } else {
-                    strategy.sendText(fileLink(file.name, hostedUrl))
-                }
-            }.onFailure { err ->
-                state.failed("upload", err)
-            }
+            uploadDroppedFile(file, repo, strategy)
+                .onFailure { err -> state.failed("upload", err) }
             state.uploading = false
     }
 

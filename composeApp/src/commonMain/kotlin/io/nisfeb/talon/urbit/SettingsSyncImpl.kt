@@ -268,8 +268,14 @@ class SettingsSyncImpl(
                     // Our own apply coming back through the StateFlow,
                     // or a duplicate of what we last pushed: not an edit.
                     if (lastSyncedUiPref(entry) == encoded) return@collect
-                    noteSyncedUiPref(entry, encoded)
+                    // Mark synced only once the push lands. Marking first
+                    // recorded a push that never happened on a slow ship, so
+                    // a re-edit to the same value would not re-push and the
+                    // next launch's "ship wins" bootstrap silently reverted
+                    // the change. (A failed push still is not retried before
+                    // the next edit — a pending-push queue would close that.)
                     runCatching { pokePutEntry(BUCKET_UI_PREFS, entry, encoded) }
+                        .onSuccess { noteSyncedUiPref(entry, encoded) }
                 }
             }
         }

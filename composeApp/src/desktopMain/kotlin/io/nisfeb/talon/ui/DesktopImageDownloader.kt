@@ -7,7 +7,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 /**
  * Desktop backend for [ImageDownloader]. Drops files into a Talon/
@@ -29,12 +28,12 @@ class DesktopImageDownloader(
                 )
             }
         val fileName = deriveFileName(url, contentType)
-        val dir = downloadsDir()
+        val dir = io.nisfeb.talon.util.talonDownloadsDir()
         runCatching {
             if (!dir.exists() && !dir.mkdirs()) {
                 throw IOException("couldn't create $dir")
             }
-            val out = uniquify(File(dir, fileName))
+            val out = io.nisfeb.talon.util.uniquifyDownload(File(dir, fileName))
             out.writeBytes(bytes)
             out.absolutePath
         }.fold(
@@ -70,52 +69,6 @@ class DesktopImageDownloader(
             val body = resp.body ?: throw IOException("empty body")
             return body.bytes() to ct
         }
-    }
-
-    /**
-     * <downloads>/Talon/ — on Linux the real (possibly localized) XDG
-     * download dir via `xdg-user-dir` (~/Téléchargements etc.), else
-     * ~/Downloads (macOS) / %USERPROFILE%\Downloads (Windows).
-     */
-    private fun downloadsDir(): File {
-        val home = System.getProperty("user.home")
-            ?: error("user.home not set")
-        val base = if ("linux" in System.getProperty("os.name").lowercase()) {
-            xdgDownloadDir(home) ?: File(home, "Downloads")
-        } else {
-            File(home, "Downloads")
-        }
-        return File(base, "Talon")
-    }
-
-    private fun xdgDownloadDir(home: String): File? = runCatching {
-        val p = ProcessBuilder("xdg-user-dir", "DOWNLOAD")
-            .redirectError(ProcessBuilder.Redirect.DISCARD)
-            .start()
-        if (!p.waitFor(2, TimeUnit.SECONDS)) {
-            p.destroy()
-            return null
-        }
-        val out = p.inputStream.bufferedReader().readText().trim()
-        // xdg-user-dir echoes $HOME when DOWNLOAD is unset — don't
-        // create ~/Talon in that case.
-        File(out).takeIf { out.isNotBlank() && out != home && it.isDirectory }
-    }.getOrNull()
-
-    /**
-     * If `target` already exists, append " (1)", " (2)", ... before the
-     * extension until we find a free name. Caps at 99 attempts and
-     * gives up so a malicious server can't loop us.
-     */
-    private fun uniquify(target: File): File {
-        if (!target.exists()) return target
-        val name = target.nameWithoutExtension
-        val ext = target.extension.takeIf { it.isNotBlank() }?.let { ".$it" } ?: ""
-        for (i in 1..99) {
-            val candidate = File(target.parentFile, "$name ($i)$ext")
-            if (!candidate.exists()) return candidate
-        }
-        return target  // fall back to overwrite — unlikely to hit
     }
 
     private fun deriveFileName(url: String, contentType: String?): String {

@@ -1989,10 +1989,11 @@ class TlonChatRepo(
      * like, so the person was told it had gone and went looking at
      * the other ship.
      */
-    suspend fun inviteToGroup(flag: String, ship: String): Boolean {
+    suspend fun inviteToGroup(flag: String, ship: String): Boolean = carry {
         val ch = channel ?: error("not connected")
+        // Repo scope: leaving the invite screen must not cancel the invite.
         pokeGroupAction(ch, groupAction4InviteAdd(flag, ship))
-        return true
+        true
     }
 
     /**
@@ -2396,11 +2397,13 @@ class TlonChatRepo(
      * for the target group. All admin actions (meta, seat, entry,
      * role) go through this helper.
      */
-    private suspend fun pokeAGroup(flag: String, aGroup: JsonObject) {
+    private suspend fun pokeAGroup(flag: String, aGroup: JsonObject) = carry {
         val ch = channel ?: error("not connected")
         // Every one of these is an admin acting on somebody else's
         // membership and being shown the result: a kick, a ban, an ask
         // resolved. None of them may report a silence as done (confirm).
+        // On the repo scope so leaving the admin screen (which these
+        // screens do after the action) does not cancel the write.
         pokeGroupAction(ch, groupAction4(flag, aGroup))
     }
 
@@ -2445,7 +2448,7 @@ class TlonChatRepo(
         status: String? = null,
         /** Color as `#RRGGBB`; null = don't change, empty = clear. */
         color: String? = null,
-    ) {
+    ) = carry {
         val ch = channel ?: error("not connected")
         // Modern %contacts uses `contact-action-1` with a kip-scoped
         // typed-field map (matches what `parseContact` reads back —
@@ -2469,7 +2472,11 @@ class TlonChatRepo(
             field("avatar", "look", avatarUrl)
             field("color", "tint", color) { urbitHexColor(it) }
         }
-        if (contactFields.isEmpty()) return
+        if (contactFields.isEmpty()) return@carry
+        // On the repo scope (carry): the optimistic upsert runs, then the
+        // poke, and leaving the profile screen mid-save (it calls onBack on
+        // success, so that is the normal path) no longer cancels the poke and
+        // strands the local edit as a permanent divergence from the ship.
         // Optimistic local update FIRST so the UI reflects the edit
         // before the poke round-trips. Merge with any existing row so
         // fields the caller didn't supply stay intact. Stamp
@@ -3151,7 +3158,7 @@ class TlonChatRepo(
      * visible if the poke is rejected (e.g. user isn't an admin when
      * trying to delete someone else's channel post).
      */
-    suspend fun delete(whom: String, postId: String, parentId: String? = null) {
+    suspend fun delete(whom: String, postId: String, parentId: String? = null) = carry {
         val ch = channel ?: error("not connected")
         if (whomNeedsOptimisticDelete(whom)) {
             // Mirror what react/unreact do — apply the local change
@@ -3300,7 +3307,7 @@ class TlonChatRepo(
          *  are carried across the edit instead of being flattened into
          *  literal text. Null re-parses [text] alone (legacy callers). */
         originalContentJson: String? = null,
-    ) {
+    ) = carry {
         val ch = channel ?: error("not connected")
         if (!whom.startsWith("chat/")) error("edit only supported on channel chats")
         val content = originalContentJson
@@ -3365,7 +3372,7 @@ class TlonChatRepo(
         image: String,
         bodyMarkdown: String,
         originalSentMs: Long,
-    ) {
+    ) = carry {
         require(nest.startsWith("diary/")) { "not a diary channel: $nest" }
         val ch = channel ?: error("not connected")
         // The post as the ship has it: cites and image dimensions have
@@ -3408,7 +3415,7 @@ class TlonChatRepo(
         postId: String,
         content: JsonArray,
         originalSentMs: Long,
-    ) {
+    ) = carry {
         require(nest.startsWith("heap/")) { "not a heap channel: $nest" }
         val ch = channel ?: error("not connected")
         val essay = buildEssay(content, originalSentMs, kind = "/heap", meta = null)

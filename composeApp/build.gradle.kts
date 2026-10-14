@@ -433,6 +433,20 @@ val generateTalonBuild = tasks.register("generateTalonBuild") {
 
             """.trimIndent(),
         )
+        // Surface build constants that resolved empty. Empty is legitimate
+        // (a dev build, or a feature not currently active), but a mistyped or
+        // missing secret in the release env resolves empty too and would make
+        // the feature a silent no-op in the shipped binary — the retired-SFU
+        // migration pokes nobody, the default sidecar is unset. Logging it
+        // makes that visible in the build log instead of undetectable.
+        listOf(
+            "defaultSfuBase" to sfuBase,
+            "defaultSfuKey" to sfuKey,
+            "defaultIce" to defaultIce,
+            "retiredSfuBase" to retiredSfuBase,
+        ).filter { it.second.isBlank() }.map { it.first }.takeIf { it.isNotEmpty() }?.let {
+            logger.lifecycle("TalonBuild: empty build constants (inactive if unintended): ${it.joinToString()}")
+        }
     }
 }
 

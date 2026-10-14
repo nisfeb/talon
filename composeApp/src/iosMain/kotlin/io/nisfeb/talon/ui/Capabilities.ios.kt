@@ -3,12 +3,13 @@ package io.nisfeb.talon.ui
 import platform.StoreKit.SKPaymentQueue
 import platform.UIKit.UIDevice
 
-// iOS capability matrix. On-device AI (MediaPipe / DJL-ONNX) has no iOS
-// backend, so every on-device feature gates off; the cloud Assistant is
-// pure HTTP and works. Loops run while the app is up; true background
-// scheduling (digest) would need BGTaskScheduler wiring that doesn't
-// exist yet, so that gates off. Touch affordances (swipe-nav,
-// tap-to-open-menu) are on.
+// iOS capability matrix. The semantic-search embedder (isOnDeviceAiSupported,
+// MediaPipe / DJL-ONNX) has no iOS backend and gates off, but local triage
+// (isLocalTriageSupported) runs on Apple's system model and the cloud Assistant
+// is pure HTTP, so both are on. Loops run while the app is up
+// (isLoopsSupported); true background scheduling (digest) would need
+// BGTaskScheduler wiring that doesn't exist yet, so that gates off. Touch
+// affordances (swipe-nav, tap-to-open-menu) are on.
 
 actual val isVoiceMessagesSupported: Boolean = true
 actual val isOnDeviceAiSupported: Boolean = false
