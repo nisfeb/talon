@@ -1,8 +1,8 @@
 # Overnight bug-hunt and polish review — 2026-10-14
 
-STATUS: EXTENDING — all 7 dimensions + completeness sweep done; now closing the
-screen-scope-write class the review flagged. R16 fixed (F8). R11 next, then R12/R13.
-Will re-mark REVIEW COMPLETE once the class is closed.
+STATUS: EXTENDING — all 7 dimensions + completeness sweep done; closing the
+screen-scope-write class. Fixed so far: R16 (F8), R11 (F9). Remaining: R12
+group-admin, R13 mail-file. Will re-mark REVIEW COMPLETE once the class is closed.
 
 Branch: `polish/overnight-2026-10-14` (base `origin/master` 2b8ff1d8). Not pushed.
 Prompt: `.overnight-review-prompt.md`. Ran via a self-paced `/loop`, resumable.
@@ -10,9 +10,10 @@ Prompt: `.overnight-review-prompt.md`. Ran via a self-paced `/loop`, resumable.
 ## Summary
 
 - Total issues found: 22
-- Fixed on this branch: 8 (F1 6d307846, F2 4ec3d2a7, F3 663b7bf1, F4 e457c949,
-  F5 eaa1a275, F6 a7e4e97c, F7 f9cbc464, F8 ddf04fc2)
-- Reported, still open: 14 (3 High, 6 Med, 5 Low) — R1-R4, R6-R15 (R5→F2, R16→F8)
+- Fixed on this branch: 9 (F1 6d307846, F2 4ec3d2a7, F3 663b7bf1, F4 e457c949,
+  F5 eaa1a275, F6 a7e4e97c, F7 f9cbc464, F8 ddf04fc2, F9 2b130b21)
+- Reported, still open: 13 (2 High, 6 Med, 5 Low) — R1-R4, R6-R10, R12-R15
+  (R5→F2, R16→F8, R11→F9)
 
 ## Dimension coverage
 
@@ -125,6 +126,16 @@ the local profile changed while the ship never heard — a permanent divergence.
 Wrapped the body in `carry` (repo scope). Test cancels the caller mid-poke (via
 `ship.holdPoke`) and asserts the self edit still reaches the ship. 39/39 in
 TlonChatRepoSendTest pass.
+
+### F9 — notebook writes survive leaving the screen mid-save (commit 2b130b21)
+
+The fix for R11. `NotesRepo.poke` (the shared path for rename/move/delete/publish/
+unpublish/restore and the folder ops) and `updateNote` ran on the caller's scope.
+`updateNote` marks the row pending before the PUT and clears it after, so a cancel
+between the two pinned the note "saving…" forever (replaceTree re-applies pending
+on every later scry). Wrapped both in `scope.async { … }.await()` (repo scope),
+matching the `write()` helper. Test cancels a save mid-PUT and asserts the row is
+not left pending. 17/17 in NotesRepoTest pass.
 
 ## REPORTED
 
@@ -252,7 +263,7 @@ on both devices. This matches the known, still-unfixed "app-fonts re-add after
 remove tombstone bug". Fix: timestamp removals (`removed: Map<id, Long>`) so an
 install newer than the last removal wins. Data-model + wire change.
 
-### R11 (High) — NotesRepo note writes run on the screen scope and leave the note stuck "saving…" forever
+### R11 (High) — NotesRepo note writes run on the screen scope and leave the note stuck "saving…" forever — FIXED (F9, commit 2b130b21)
 
 `NotesRepo.updateNote` (:312) and the `poke`-based writes (:272, used by
 deleteNote/renameNote/moveNote/publishNote/unpublishNote) run `ch.apiJson`/
@@ -382,15 +393,15 @@ save-WAV / transcribe / publish-to-Lattice) run on the dialog's screen scope;
 closing the dialog mid-op drops them. Documented best-effort, so a lost local
 result, not a divergence — except the Lattice publish does write out.
 
-### The screen-scope-write class (F1, F2, F8, R11, R12, R13) — being closed
+### The screen-scope-write class (F1, F2, F8, F9, R12, R13) — being closed
 
 Six instances of one bug: a user write launched on a composable's
 `rememberCoroutineScope` instead of a repo scope, dropped when the screen is left
 mid-write. FIXED: F1 upload, F2 chat edit/delete, F8 profile edit (the worst — it
-diverged). REMAINING: R11 NotesRepo (High, stuck "saving…"), R12 group-admin (Med),
-R13 mail-file (Low) — being worked now, same `carry { … }` fix + leaving-midway
-test each. A grep for any remaining raw `rememberCoroutineScope` + repo-poke call
-sites (calls, calendar, mail-compose) is part of closing the class.
+diverged), F9 NotesRepo poke + updateNote (fixed the "saving…" pin too).
+REMAINING: R12 group-admin (Med), R13 mail-file (Low) — same repo-scope fix +
+leaving-midway test each. A grep for any remaining raw `rememberCoroutineScope` +
+repo-poke call sites (calls, calendar, mail-compose) is part of closing the class.
 
 ### Dimension 7 clean (verified from code)
 
