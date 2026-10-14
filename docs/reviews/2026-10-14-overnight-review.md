@@ -20,7 +20,7 @@ STATUS: IN PROGRESS
 | 2 | Testing Standard applied to recent features | DONE — 1 fixed, findings below |
 | 3 | Offline-first + sync correctness | DONE — 6 findings (2 High), below |
 | 4 | Concurrency / lifecycle | DONE — 1 fixed (R5), 3 new findings, SSE/leaks clean |
-| 5 | Failure-path honesty | not started |
+| 5 | Failure-path honesty | DONE — clean (one thorough pass) |
 | 6 | Desktop leaf correctness | not started |
 | 7 | UI polish, mobile-first | not started |
 
@@ -234,6 +234,33 @@ route through MailRepo's own `scope.async`, matching `sendMessage` (`MailRepo.kt
   serialized event-apply path with a benign duplicate-read consequence.
 - No `runBlocking` on a UI path; the single `GlobalScope.launch` (App.kt:1365) is
   a deliberate deferred teardown that must outlive the composition re-key.
+
+## Dimension 5 notes — failure-path honesty (clean)
+
+One thorough finder pass, no new distinct bug. Every path that could conflate
+"ship didn't answer" with "nothing here" is already guarded, most with in-code
+comments naming the exact bug they prevent:
+
+- `scryFirstMatching` (TlonChatRepo.kt:5509) does collapse timeout / exhausted
+  budget / all-404 into one `null`, but every caller treats null honestly, not as
+  empty: `refreshConversation` (:2778), `loadOlder` (:2862) and `fetchActivityFeed`
+  (:2593) all `error("the ship did not …")`, and `bootstrapContacts` (:5035) only
+  updates the book `if (bookBody is JsonObject)` ("No answer is not an empty book").
+- List screens distinguish loading / failed / genuinely-empty: chat
+  (DmChatScreen.kt:2006 "Messages could not be loaded" vs "No messages yet"),
+  gallery (GalleryGridScreen.kt:140), activity (ActivityList.kt:66 with a Retry
+  button), mail (MailList + `_error` via MailNotice; transport+parse wrapped as
+  AuspexError), notebook (NotesChannelScreen.kt:208 "isn't synced yet" vs "Nothing
+  here yet").
+- Silent catches checked are best-effort cache restores (CalendarRepo getOrNull
+  falls back to retained state) or handled (`writeInBackground` default onFailed is
+  never the live path).
+- Retryable failures keep their retry affordance (activity Retry, gallery/chat
+  "open again to retry", mail backoff + clearError).
+
+Minor (not a finding): MailList on a first-load failure shows `MailNotice(error)`
+AND "No mail." together — honest but slightly redundant; could suppress the empty
+line while an error is showing.
 
 ### Dimension 3 minor notes (not ranked)
 
