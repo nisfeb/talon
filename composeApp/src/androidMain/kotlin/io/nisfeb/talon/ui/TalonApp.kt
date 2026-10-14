@@ -513,6 +513,12 @@ fun TalonApp(
     }
 
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(app.db)
+    // Followed threads, for the conditional Home Threads tab (moved here
+    // from Activity). Shown only when at least one is followed.
+    val followedThreadRows by androidx.compose.runtime.remember(app.db) {
+        app.db.followedThreads().streamThreads().map { io.nisfeb.talon.data.threadsInOrder(it) }
+    }.collectAsState(initial = emptyList())
+    val followedUnread = followedThreadRows.count { it.unread > 0 }
     // Register every call and party line with telecom for as long as
     // it lasts, and let the audio picker route through it meanwhile.
     val telecomCalls = remember(callController, partyLine) {
@@ -2974,6 +2980,35 @@ fun TalonApp(
                             }
                         },
                     )
+                },
+                threadsUnread = followedUnread,
+                threadsTab = if (followedThreadRows.isEmpty()) {
+                    null
+                } else {
+                    {
+                        androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
+                            if (followedUnread > 0) {
+                                io.nisfeb.talon.ui.TextButton(
+                                    onClick = {
+                                        app.repo.markThreadsRead(
+                                            followedThreadRows.filter { it.unread > 0 }.map { it.whom to it.parentPostId },
+                                        )
+                                    },
+                                ) { androidx.compose.material3.Text("Mark all read") }
+                            }
+                            io.nisfeb.talon.ui.FollowedThreadsList(
+                                rows = followedThreadRows,
+                                contactMap = contactMap,
+                                showChat = true,
+                                onOpen = { row ->
+                                    openWhom = row.whom
+                                    openThread = row.parentPostId
+                                    pendingThreadAnchor = row.lastReplyId ?: row.parentPostId
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
                 },
                 onOpenBookmarks = { bookmarksOpen = true },
                 onOpenActivity = { activityOpen = true },

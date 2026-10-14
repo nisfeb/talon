@@ -20,7 +20,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -86,23 +85,16 @@ fun ActivityList(
     val noticeDao = remember(db) { db.notices() }
     val notices by remember(db) { noticeDao.stream() }.collectAsState(initial = emptyList())
 
-    // Followed threads (kept here until they move to Home).
-    val threads by remember(db) {
-        db.followedThreads().streamThreads().map { io.nisfeb.talon.data.threadsInOrder(it) }
-    }.collectAsState(initial = emptyList())
-    val unreadThreads = threads.count { it.unread > 0 }
-
-    // Chips: All and Chat always; one per non-chat domain that has a notice;
-    // Threads when any is followed. A domain chip vanishes when its last
-    // notice is pruned, so the row only ever shows live content.
+    // Chips: All and Chat always; one per non-chat domain that has a notice.
+    // A domain chip vanishes when its last notice is pruned, so the row only
+    // ever shows live content. (Followed threads moved to the Home tab.)
     val domainChips = remember(notices) { notices.map { it.domain }.filter { it != DOMAIN_CHAT }.distinct().sorted() }
     val unreadByDomain = remember(notices) { notices.filter { !it.read }.groupingBy { it.domain }.eachCount() }
-    val chips = remember(domainChips, unreadThreads, unreadByDomain) {
+    val chips = remember(domainChips, unreadByDomain) {
         buildList {
             add(Chip(CHIP_ALL, "All", unreadByDomain.values.sum()))
             add(Chip(DOMAIN_CHAT, "Chat", unreadByDomain[DOMAIN_CHAT] ?: 0))
             domainChips.forEach { add(Chip(it, it.replaceFirstChar { c -> c.uppercase() }, unreadByDomain[it] ?: 0)) }
-            if (threads.isNotEmpty()) add(Chip(CHIP_THREADS, "Threads", unreadThreads))
         }
     }
     var chipKey by rememberSaveable { mutableStateOf(CHIP_ALL) }
@@ -114,7 +106,6 @@ fun ActivityList(
             DOMAIN_CHAT -> (chatItems.map { FeedRow.Chat(it) } +
                 notices.filter { it.domain == DOMAIN_CHAT }.map { FeedRow.Notice(it) }).sortedByDescending { it.ts }
             CHIP_ALL -> (chatItems.map { FeedRow.Chat(it) } + notices.map { FeedRow.Notice(it) }).sortedByDescending { it.ts }
-            CHIP_THREADS -> emptyList()
             else -> notices.filter { it.domain == selected }.map { FeedRow.Notice(it) }
         }
     }
@@ -142,23 +133,6 @@ fun ActivityList(
                     label = { Text(if (c.unread > 0) "${c.label} · ${c.unread}" else c.label) },
                 )
             }
-        }
-
-        if (selected == CHIP_THREADS) {
-            if (unreadThreads > 0) {
-                TextButton(
-                    onClick = { repo.markThreadsRead(threads.filter { it.unread > 0 }.map { it.whom to it.parentPostId }) },
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                ) { Text("Mark all read") }
-            }
-            io.nisfeb.talon.ui.FollowedThreadsList(
-                rows = threads,
-                contactMap = contactMap,
-                showChat = true,
-                onOpen = { row -> onOpenReply(row.whom, row.parentPostId, row.lastReplyId ?: row.parentPostId) },
-                modifier = Modifier.fillMaxSize(),
-            )
-            return@Column
         }
 
         // Mark-all-read for the notices in view (chat %activity has no client
@@ -233,7 +207,6 @@ fun ActivityList(
 }
 
 private const val CHIP_ALL = "all"
-private const val CHIP_THREADS = "threads"
 private const val DOMAIN_CHAT = "chat"
 
 private data class Chip(val key: String, val label: String, val unread: Int)

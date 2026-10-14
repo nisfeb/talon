@@ -3347,6 +3347,11 @@ fun App(
                                 // slot, where it sits beside Mail.
                                 RailTab.Home -> Unit
                                 RailTab.Chats -> {
+                                    val followedThreadRows by androidx.compose.runtime.remember(db) {
+                                        db.followedThreads().streamThreads().map { io.nisfeb.talon.data.threadsInOrder(it) }
+                                    }.collectAsState(initial = emptyList())
+                                    val followedUnread = followedThreadRows.count { it.unread > 0 }
+                                    val followedContacts by io.nisfeb.talon.ui.rememberContactMap(db)
                                     DmListScreen(
                                         orreryOn = orreryGate == true,
                                         db = db,
@@ -3404,6 +3409,37 @@ fun App(
                                                 contacts = callContacts,
                                                 onOpenLine = openLineFromList,
                                             )
+                                        },
+                                        threadsUnread = followedUnread,
+                                        // Followed threads moved out of Activity to here: a
+                                        // conditional Home tab, shown only when one is followed.
+                                        threadsTab = if (followedThreadRows.isEmpty()) {
+                                            null
+                                        } else {
+                                            {
+                                                androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
+                                                    if (followedUnread > 0) {
+                                                        io.nisfeb.talon.ui.TextButton(
+                                                            onClick = {
+                                                                repo.markThreadsRead(
+                                                                    followedThreadRows.filter { it.unread > 0 }.map { it.whom to it.parentPostId },
+                                                                )
+                                                            },
+                                                        ) { androidx.compose.material3.Text("Mark all read") }
+                                                    }
+                                                    io.nisfeb.talon.ui.FollowedThreadsList(
+                                                        rows = followedThreadRows,
+                                                        contactMap = followedContacts,
+                                                        showChat = true,
+                                                        onOpen = { row ->
+                                                            openChat = row.whom
+                                                            openThreadParent = row.parentPostId
+                                                            openThreadReplyAnchor = row.lastReplyId ?: row.parentPostId
+                                                        },
+                                                        modifier = Modifier.fillMaxSize(),
+                                                    )
+                                                }
+                                            }
                                         },
                                         onOpenInvites = { showInvites = true },
                                         onOpenBookmarks = onOpenBookmarks,

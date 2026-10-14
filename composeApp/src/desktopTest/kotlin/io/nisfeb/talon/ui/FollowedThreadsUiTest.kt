@@ -18,7 +18,9 @@ import io.nisfeb.talon.data.FollowedThreadEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.ThreadUnreadEntity
 import io.nisfeb.talon.data.threadsInOrder
-import io.nisfeb.talon.ui.screens.ActivityList
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+import kotlinx.coroutines.flow.map
 import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.ThreadList
 import io.nisfeb.talon.ui.theme.TalonTheme
@@ -166,19 +168,34 @@ class FollowedThreadsUiTest {
 
     private val openedReplies = mutableListOf<Triple<String, String, String>>()
 
-    private fun activity(seed: suspend AppDatabase.() -> Unit, block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit) = harness(seed, { db, repo ->
-        ActivityList(db = db, repo = repo, onOpenConversation = {}, onOpenReply = { w, p, r -> openedReplies += Triple(w, p, r) })
+    // Followed threads moved from Activity to a conditional Home tab. This
+    // renders exactly what that tab shows (see App.kt / TalonApp.kt): the
+    // followed-threads collection plus a mark-all-read, over the same data.
+    private fun threadsHome(seed: suspend AppDatabase.() -> Unit, block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit) = harness(seed, { db, repo ->
+        val rows = androidx.compose.runtime.remember(db) {
+            db.followedThreads().streamThreads().map { threadsInOrder(it) }
+        }.collectAsState(initial = emptyList()).value
+        val contactMap = io.nisfeb.talon.ui.rememberContactMap(db).value
+        androidx.compose.foundation.layout.Column {
+            if (rows.any { it.unread > 0 }) {
+                io.nisfeb.talon.ui.TextButton(onClick = {
+                    repo.markThreadsRead(rows.filter { it.unread > 0 }.map { it.whom to it.parentPostId })
+                }) { androidx.compose.material3.Text("Mark all read") }
+            }
+            io.nisfeb.talon.ui.FollowedThreadsList(
+                rows = rows, contactMap = contactMap, showChat = true,
+                onOpen = { row -> openedReplies += Triple(row.whom, row.parentPostId, row.lastReplyId ?: row.parentPostId) },
+            )
+        }
     }, block)
 
     @Test
-    fun `Activity's Threads tab lists every followed thread, new ones first, and opens one at its newest reply`() = activity({
+    fun `the Home Threads tab lists every followed thread, new ones first, and opens one at its newest reply`() = threadsHome({
         twoThreads()
         messages().upsert(post("~bus/170141184510", "~bus", "a DM question", 5_000, whom = "~bus"))
         messages().upsert(post("~bus/170141184511", "~bus", "a DM answer", 6_000, parent = "~bus/170141184510", whom = "~bus"))
         threadUnreads().upsert(ThreadUnreadEntity("~bus", "~bus/170141184510", 1, 1, 6_000))
     }) { _, _ ->
-        until("the tab") { shows("Threads · 2") }
-        onNodeWithText("Threads · 2").performClick()
         until("the DM's thread, which counts by default") { shows("a DM question") }
         assertTrue(shows("lunch plans") && !shows("football chatter"))
         onAllNodesWithText("lunch plans", substring = true)[0].performClick()
@@ -187,13 +204,12 @@ class FollowedThreadsUiTest {
     }
 
     @Test
-    fun `mark all read reads every followed thread with new replies`() = activity(twoThreads) { ship, db ->
-        until("the tab") { shows("Threads · 1") }
-        onNodeWithText("Threads · 1").performClick()
+    fun `mark all read reads every followed thread with new replies`() = threadsHome(twoThreads) { ship, db ->
+        until("the button") { shows("Mark all read") }
         onNodeWithText("Mark all read").performClick()
         until("the read") { ship.pokesTo("activity").any { "read" in it.json.toString() && "170.141.184.506" in it.json.toString() } }
         assertTrue(ship.pokesTo("activity").none { "170.141.184.508" in it.json.toString() }, "not the unfollowed one")
-        until("the tab clears") { shows("Threads") && !shows("Threads · 1") }
+        until("the button clears") { !shows("Mark all read") }
     }
 
     // ─── the thread ─────────────────────────────────────────────
