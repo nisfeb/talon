@@ -393,7 +393,7 @@ fun main() {
             // from non-EDT threads.
             javax.swing.SwingUtilities.invokeLater {
                 java.awt.Frame.getFrames()
-                    .firstOrNull { it.title == "Talon" }
+                    .firstOrNull { it.title.startsWith("Talon") }
                     ?.let { frame ->
                         if (!frame.isVisible) frame.isVisible = true
                         frame.extendedState = java.awt.Frame.NORMAL
