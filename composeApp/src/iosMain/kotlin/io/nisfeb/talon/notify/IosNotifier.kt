@@ -17,9 +17,15 @@ import platform.UserNotifications.UNUserNotificationCenter
  */
 class IosNotifier : Notifier {
     override fun notify(title: String, body: String, key: String?) {
-        // A non-null key that isn't mail is a chat whom, and chat is
-        // APNs-covered. Null keys and mail threads post locally.
-        if (key != null && !key.startsWith("mail:")) return
+        // Chat alerts are APNs pushes the system shows itself, keyed by the
+        // chat whom — posting here would double-notify, so those are skipped.
+        // Everything with no push path posts locally: a keyless alert, a mail
+        // thread, an orrery action proposal ("action:"), Armillary credit
+        // ("armillary"). The old guard dropped every keyed non-mail alert, so
+        // action and armillary alerts silently never showed.
+        val postsLocally = key == null ||
+            key.startsWith("mail:") || key.startsWith("action:") || key == "armillary"
+        if (!postsLocally) return
         val content = UNMutableNotificationContent()
         // The platform lib maps the properties read-only (the parent's
         // declaration wins over the mutable subclass's), so set them

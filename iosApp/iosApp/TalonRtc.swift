@@ -363,7 +363,10 @@ final class TalonRtcPeer: NSObject, NativeRtcPeer, RTCPeerConnectionDelegate {
     }
 
     func onVideoChange(listener: @escaping (VideoState) -> Void) {
-        videoListener = listener
+        // On main like the other listener setters: videoListener is read and
+        // nilled on main (publishVideo / close), so registering it off-main
+        // races those.
+        main { [weak self] in self?.videoListener = listener }
     }
 
     func localVideoView() -> Any? { localView }

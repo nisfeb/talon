@@ -50,7 +50,8 @@ import platform.UIKit.UIViewController
  * restart (JSON under Application Support). UI settings use the in-memory default
  * (persistence pending — it needs the per-ship rail-visibility DB
  * projection). Update install is a no-op — App Store owns updates.
- * On-device AI / digest / loops are gated off in Capabilities.ios.kt.
+ * The semantic-search embedder and background digest gate off in
+ * Capabilities.ios.kt; local triage and loops (while the app is up) are on.
  */
 fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.NativeModelFactory?): UIViewController {
     // The orrery triage's models live in Swift; the ladder asks this.
