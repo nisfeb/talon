@@ -7,9 +7,9 @@ STATUS: IN PROGRESS
 
 ## Summary
 
-- Confirmed bugs: 7
-- Fixed: 1 (commit 6d307846)
-- Reported: 10 (3 High, 4 Med, 3 Low)
+- Confirmed bugs: 10
+- Fixed: 2 (commits 6d307846, 4ec3d2a7)
+- Reported: 12 (3 High, 5 Med, 4 Low)
 - Polish items: 0 (dimension 7 not yet run)
 
 ## Dimension coverage
@@ -19,7 +19,7 @@ STATUS: IN PROGRESS
 | 1 | Cross-platform discipline (capability + section flags, android-only) | DONE — clean |
 | 2 | Testing Standard applied to recent features | DONE — 1 fixed, findings below |
 | 3 | Offline-first + sync correctness | DONE — 6 findings (2 High), below |
-| 4 | Concurrency / lifecycle | not started |
+| 4 | Concurrency / lifecycle | DONE — 1 fixed (R5), 3 new findings, SSE/leaks clean |
 | 5 | Failure-path honesty | not started |
 | 6 | Desktop leaf correctness | not started |
 | 7 | UI polish, mobile-first | not started |
@@ -47,6 +47,19 @@ Caveat: the test's negative control (that it FAILS without the fix) was not
 re-run to save a build; it mirrors the proven staged-path guard
 `"leaving the chat mid-upload still sends the picture"`, which exists precisely
 because this cancellation bug was observed there.
+
+### F2 — message edit and delete died when leaving the chat mid-poke (commit 4ec3d2a7)
+
+This is the fix for R5 (found in dimension 3, applied in dimension 4).
+`TlonChatRepo.edit`, `delete`, `editNotebookPost` and `editGalleryPost` poked the
+ship directly, and every caller launched them on the screen's
+`rememberCoroutineScope`, so leaving the chat mid-poke cancelled the edit/delete.
+Wrapped each in `carry { … }` (the repo's own scope, as the channel-admin writes
+and the F1 fix do). Test `TlonChatRepoSendTest."an edit whose screen is left
+mid-poke still reaches the ship"` sets `ship.holdPoke`, cancels the caller scope
+mid-poke, and asserts the edit still lands. 38/38 in that class pass — the 37
+existing edit/delete wire tests confirm the `carry` wrap did not change behavior.
+R7 (delete has no rollback on refusal) is a separate concern, still open.
 
 ## REPORTED
 
@@ -95,7 +108,7 @@ a single whole-app `AppShellTest` end-to-end pin (upload, the call migration, th
 mention classification) — each is covered at its seam instead. Acceptable, listed
 for the gap report.
 
-### R5 (High) — message edit and delete run on the screen's scope, dropped on navigation
+### R5 (High) — message edit and delete run on the screen's scope, dropped on navigation — FIXED (see F2, commit 4ec3d2a7)
 
 `TlonChatRepo.delete` (:3154), `edit` (:3292), `editNotebookPost` (:3361) and
 `editGalleryPost` (:3406) poke the ship directly and are NOT wrapped in a repo
@@ -173,6 +186,54 @@ peer B's copy, so when B pushes back its `removed=[b]` the re-added font is kill
 on both devices. This matches the known, still-unfixed "app-fonts re-add after
 remove tombstone bug". Fix: timestamp removals (`removed: Map<id, Long>`) so an
 install newer than the last removal wins. Data-model + wire change.
+
+### R11 (High) — NotesRepo note writes run on the screen scope and leave the note stuck "saving…" forever
+
+`NotesRepo.updateNote` (:312) and the `poke`-based writes (:272, used by
+deleteNote/renameNote/moveNote/publishNote/unpublishNote) run `ch.apiJson`/
+`ch.poke` directly in the caller's context — unlike the same file's `write()`
+helper (:299) which deliberately wraps in `scope.async { … }.await()` "so leaving
+the screen does not stop it". Callers launch on `rememberCoroutineScope`
+(`NoteScreen.kt:164`). Worse than a plain dropped write: `updateNote` calls
+`applyLocalEdit` (marks the row pending) at :320 BEFORE the network call and only
+clears it at :350 AFTER. If the screen scope is cancelled mid-flight (drawer or
+section switch, Android activity recreation), pending is never cleared, and
+`replaceTree` (:344-349) re-applies pending on every later scry — the note reads
+"saving…" permanently. Fix: route these through the repo scope, the same
+`scope.async { … }.await()` the `write()` helper already uses. Same proven class
+as F1/F2; deferred only to keep this iteration scoped.
+
+### R12 (Med) — group-admin writes run on the screen scope, dropped on navigation
+
+`TlonChatRepo.approveRequest` (:2385), `denyRequest` (:2390), `kickFromGroup`
+(:2030), `banFromGroup` (:2035), `unbanFromGroup` (:2041), `revokeTokenInvite`
+(:2375) all reach `ch.poke` with no `carry`/repo-scope hop, and `GroupAdminScreen.kt`
+launches them on `rememberCoroutineScope` (e.g. :220, :235, :250). Leaving the
+admin screen during the round-trip cancels the poke (and, with `confirm = true`,
+the ack-wait), so the membership change may not land. Fix: wrap in `carry`, same
+as F2.
+
+### R13 (Low) — mail "File to Lattice" runs on the screen scope
+
+`MailThreadPane.kt:245` (`file()`) calls `MailRepo.publishToLattice`
+(`MailRepo.kt:496`), a plain suspend with no scope hop; navigating away during the
+HTTP publish drops it and loses the result line. Archival, not a core write. Fix:
+route through MailRepo's own `scope.async`, matching `sendMessage` (`MailRepo.kt:676`).
+
+### Dimension 4 clean (verified)
+
+- Eyre SSE liveness: NO regression. `UrbitChannel.streamIdleMs` resets on every
+  stream line including eyre's `:` heartbeats; the `TlonChatRepo` watchdog
+  (:860-874) never force-reconnects a heartbeating-but-eventless stream. Guarded
+  and covered by `ChannelHeartbeatTest`/`ChannelHeartbeatLiveTest`.
+- Subscription/listener leaks: clean. Single-slot listeners set once at app-shell
+  level under keyed DisposableEffects, not per-screen. No `Unit`-keyed subscribe
+  to a changing param.
+- Shared mutable state / races: clean. Shared collections use Concurrent*/
+  MutableStateFlow atomic update. The one TOCTOU (`markReadSoon`) is on the
+  serialized event-apply path with a benign duplicate-read consequence.
+- No `runBlocking` on a UI path; the single `GlobalScope.launch` (App.kt:1365) is
+  a deliberate deferred teardown that must outlive the composition re-key.
 
 ### Dimension 3 minor notes (not ranked)
 
