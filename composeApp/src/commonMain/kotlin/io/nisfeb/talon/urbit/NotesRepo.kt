@@ -302,7 +302,17 @@ class NotesRepo(
     private suspend fun write(flag: NotesFlag, path: String, body: JsonObject): String? = scope.async {
         val ch = channel ?: return@async "Not connected to your ship."
         val resp = runCatching { ch.apiJson(method = "POST", path = path, body = body) }
-            .getOrElse { return@async "Your ship couldn't take it (${it.message ?: it::class.simpleName})." }
+            .getOrElse { err ->
+                // Calm, not a raw transport string: a slow or unreachable
+                // ship said "Read timed out" / "Connection refused" to the
+                // user verbatim. Say it plainly and tell them to retry.
+                return@async if (io.nisfeb.talon.util.isShipSlow(err)) {
+                    "Your ship is slow, so it didn't go through. Try again when it's back."
+                } else {
+                    "Your ship couldn't take it" +
+                        (io.nisfeb.talon.util.readableReason(err.message)?.let { " ($it)" } ?: "") + "."
+                }
+            }
         NotesParser.writeRefusal(resp).also { if (it == null) refreshNotebook(flag) }
     }.await()
 
