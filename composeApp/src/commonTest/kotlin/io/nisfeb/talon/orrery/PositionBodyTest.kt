@@ -23,6 +23,16 @@ class PositionBodyTest {
     }
 
     @Test
+    fun `a zone is appended, and a blank one is omitted`() {
+        val fix = LocationFix(30.2012, -81.6034, 12.4, 1_791_115_200_000L)
+        assertEquals(
+            """{"lat":30.201200,"lon":-81.603400,"acc":12,"at":"2026-10-04T12:00:00Z","zone":"Europe/Madrid"}""",
+            positionBody(fix, "Europe/Madrid"),
+        )
+        assertEquals(positionBody(fix), positionBody(fix, ""))
+    }
+
+    @Test
     fun `numbers near zero have no exponent, and no minus zero`() {
         // A Double near Greenwich prints as 4.0E-5 on its own.
         val body = positionBody(LocationFix(51.4779, 0.00004, 3.0, 1_791_115_200_000L))

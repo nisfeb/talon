@@ -138,13 +138,18 @@ private suspend fun sendPosition(api: OrreryApi, sent: OrrerySentDao, ship: Stri
 private const val POSITION_MISSING = "position:missing"
 
 /**
- * `{"lat":30.201200,"lon":-81.603400,"acc":12,"at":"…Z"}`: decimal
- * degrees as JSON numbers in fixed decimals, because the ship reads each
- * as `-?\d+(\.\d+)?` (orrery's +coordinate) and a Double's own text can
- * be `1.0E-4`. Six places is a tenth of a metre; the accuracy is metres.
+ * `{"lat":30.201200,"lon":-81.603400,"acc":12,"at":"…Z","zone":"…"}`:
+ * decimal degrees as JSON numbers in fixed decimals, because the ship
+ * reads each as `-?\d+(\.\d+)?` (orrery's +coordinate) and a Double's own
+ * text can be `1.0E-4`. Six places is a tenth of a metre; the accuracy is
+ * metres. [zone] is the device's IANA zone (e.g. `Europe/Madrid`); the
+ * ship follows it for the brief, nudges and rhythm, and seeds home from
+ * it once. Omitted when blank; the ship keeps whatever zone it had.
  */
-internal fun positionBody(fix: LocationFix): String =
-    """{"lat":${fixed(fix.lat, 6)},"lon":${fixed(fix.lon, 6)},"acc":${fixed(fix.accuracyM, 0)},"at":"${isoUtc(fix.atMs)}"}"""
+internal fun positionBody(fix: LocationFix, zone: String = ""): String {
+    val base = """{"lat":${fixed(fix.lat, 6)},"lon":${fixed(fix.lon, 6)},"acc":${fixed(fix.accuracyM, 0)},"at":"${isoUtc(fix.atMs)}""""
+    return if (zone.isBlank()) "$base}" else """$base,"zone":"$zone"}"""
+}
 
 /** [v] with [places] decimals and no exponent; "-0" never. */
 internal fun fixed(v: Double, places: Int): String {

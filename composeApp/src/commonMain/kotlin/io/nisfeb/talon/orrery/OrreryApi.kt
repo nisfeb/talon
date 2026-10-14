@@ -15,6 +15,7 @@ import io.ktor.http.contentType
 import io.ktor.http.encodeURLParameter
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
+import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -518,7 +519,8 @@ class OrreryApi(
      * See [positionBody] for the wire.
      */
     suspend fun postPosition(token: String, fix: LocationFix) {
-        request(bare, HttpMethod.Post, "/api/position", positionBody(fix)) {
+        val zone = TimeZone.currentSystemDefault().id
+        request(bare, HttpMethod.Post, "/api/position", positionBody(fix, zone)) {
             header(HttpHeaders.Authorization, "Bearer $token")
         }
     }
