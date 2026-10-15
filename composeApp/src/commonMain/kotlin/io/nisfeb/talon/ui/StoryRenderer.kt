@@ -665,7 +665,10 @@ private fun InlineCitation(cite: StoryPart.Citation) {
         // The parser only knows the nest ("Post in #ve8843l"); name the
         // channel once the contact map can.
         val placeName = LocalPlaceName.current
-        val label = cite.openTarget?.takeIf { it.contains('/') }
+        // A channel nest contains '/'; so does a "group:<flag>" open
+        // target, so exclude it or a group reference reads "Post in
+        // group:~host/name" instead of its own "Group …" label.
+        val label = cite.openTarget?.takeIf { it.contains('/') && !it.startsWith("group:") }
             ?.let { placeName(it) }
             ?.let { "Post in $it" }
             ?: cite.label

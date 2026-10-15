@@ -1422,8 +1422,14 @@ fun TalonApp(
                     }
                     when (jump) {
                         is io.nisfeb.talon.ui.CiteJump.Group -> {
+                            // Open the group's own page like a group link
+                            // does (channels for a member, a Join CTA for a
+                            // non-member). The old reveal did nothing for a
+                            // group you have not joined, so the tap went
+                            // nowhere.
+                            calendarOpen = false; homeOpen = false; assistantOpen = false; assistantListen = false; mailOpen = false
                             openWhom = null
-                            revealGroupRequest = jump.flag
+                            openGroupFlag = jump.flag
                         }
                         is io.nisfeb.talon.ui.CiteJump.Message -> {
                             openConversationAction()
