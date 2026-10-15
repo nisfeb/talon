@@ -63,6 +63,10 @@ class ArmillaryPaymentTest {
     @Volatile private var suggested = ""
     /** The ship's thirty seconds ran out before the vendor's answer came back. */
     @Volatile private var slowVendor = false
+    /** The followed checkout comes back refused, with the vendor's note. */
+    @Volatile private var phaseRefused = false
+    /** The desk is older than the phase route: GET /checkout/<nonce> 404s. */
+    @Volatile private var phaseMissing = false
     private val puts = CopyOnWriteArrayList<Pair<String, String>>()
     /** Every request that went to OpenRouter, with whatever authorised it. */
     private val toOpenRouter = CopyOnWriteArrayList<String>()
@@ -96,8 +100,11 @@ class ArmillaryPaymentTest {
             path.endsWith("/apps/armillary/api/checkout") ->
                 if (slowVendor) respond("""{"pending":true,"nonce":"n9"}""", HttpStatusCode.Accepted, json)
                 else ok("""{"url":"https://pay.example/c1","nonce":"n1"}""")
-            path.endsWith("/apps/armillary/api/checkout/n9") ->
-                ok("""{"phase":"answered","status":"pending","url":"https://pay.example/late","note":""}""")
+            path.endsWith("/apps/armillary/api/checkout/n9") -> when {
+                phaseMissing -> respond("", HttpStatusCode.NotFound)
+                phaseRefused -> ok("""{"phase":"answered","status":"refused","url":"","note":"Your card was declined."}""")
+                else -> ok("""{"phase":"answered","status":"pending","url":"https://pay.example/late","note":""}""")
+            }
             path.endsWith("/apps/armillary/api/account") -> ok(
                 """{"ship":"~zod","balance":$balance,"plan":"","subscription":{"active":false},"lease":{},"checkouts":{},"vendor":"~nisfeb","self":"~zod","stale":3}""",
             )
@@ -289,5 +296,24 @@ class ArmillaryPaymentTest {
     fun `a checkout the ship answered 202 for is followed to its page, not reported as failed`() = ship(setUp) { repo, _ ->
         slowVendor = true
         assertEquals("https://pay.example/late", repo.topUp("btcpay", null, 10_000_000).getOrThrow())
+    }
+
+    @Test
+    fun `a followed checkout the vendor refuses shows the vendor's note`() = ship(setUp) { repo, _ ->
+        slowVendor = true; phaseRefused = true
+        val r = repo.topUp("btcpay", null, 10_000_000)
+        assertTrue(r.isFailure)
+        assertEquals("Your card was declined.", r.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun `on a desk without the phase route a 202 stays pending and warns against ordering again`() = ship(setUp) { repo, _ ->
+        slowVendor = true; phaseMissing = true
+        val r = repo.topUp("btcpay", null, 10_000_000)
+        assertTrue(r.isFailure)
+        assertTrue(
+            r.exceptionOrNull()?.message?.contains("Do not order again") == true,
+            "the pending message must warn against a duplicate order",
+        )
     }
 }
