@@ -665,6 +665,9 @@ fun DmChatScreen(
 
     // ── message action sheet state ──
     var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    // The message whose full emoji browser is open, lifted out of the
+    // per-row action menu so the sheet has the screen's whole height.
+    var emojiPickerTarget by remember { mutableStateOf<MessageEntity?>(null) }
     var partyNoteOpen by remember(whom) { mutableStateOf(false) }
     // Long-press / right-click on any reaction chip surfaces the
     // per-reactor breakdown. Set to the message's reactions list and
@@ -1074,6 +1077,10 @@ fun DmChatScreen(
                             }
                     }
                 },
+                onBrowseEmoji = {
+                    actionTarget = null
+                    emojiPickerTarget = target
+                },
                 onReply = {
                     actionTarget = null
                     io.nisfeb.talon.ui.screens.ThreadOpenIntent.reply(target.id)
@@ -1362,6 +1369,23 @@ fun DmChatScreen(
                 reactionDetailsTarget = null
                 profileSheetShip = ship
             },
+        )
+    }
+
+    emojiPickerTarget?.let { target ->
+        val frequent by remember {
+            db.reactionUsage().streamTop(16)
+        }.collectAsState(initial = emptyList())
+        io.nisfeb.talon.ui.ReactionPickerSheet(
+            frequent = frequent.map { it.shortcode },
+            onPick = { code ->
+                emojiPickerTarget = null
+                scope.launch {
+                    runCatching { repo.react(whom, target.id, code) }
+                        .onFailure { composerState.failed("react", it) }
+                }
+            },
+            onDismiss = { emojiPickerTarget = null },
         )
     }
 
@@ -2350,6 +2374,8 @@ private fun MessageActionMenu(
     canModerate: Boolean,
     onDismiss: () -> Unit,
     onPickReaction: (String) -> Unit,
+    /** Open the full emoji browser (the quick-bar's magnifier). */
+    onBrowseEmoji: () -> Unit,
     onReply: () -> Unit,
     onQuote: () -> Unit,
     canQuote: Boolean,
@@ -2390,15 +2416,6 @@ private fun MessageActionMenu(
             val topUsage by remember {
                 db.reactionUsage().streamTop(8)
             }.collectAsState(initial = emptyList())
-            var searchOpen by remember { mutableStateOf(false) }
-            var searchQuery by remember { mutableStateOf("") }
-            val searchFocus = remember { FocusRequester() }
-            // Pull the keyboard up the moment the user taps the
-            // magnifying glass — without this, Android shows the
-            // text field but leaves it inert until tapped again.
-            LaunchedEffect(searchOpen) {
-                if (searchOpen) searchFocus.requestFocus()
-            }
 
             // Merge usage-ranked reactions with the default palette so
             // the row is always 8 wide even before the user has reacted
@@ -2424,15 +2441,12 @@ private fun MessageActionMenu(
                         .weight(1f)
                         .padding(start = 4.dp),
                 )
-                io.nisfeb.talon.ui.IconButton(tip = "Search emojis", onClick = {
-                        searchOpen = !searchOpen
-                        if (!searchOpen) searchQuery = ""
-                    },
+                io.nisfeb.talon.ui.IconButton(tip = "Browse emojis", onClick = onBrowseEmoji,
                     modifier = Modifier.size(32.dp),
                 ) {
                     Icon(
                         Icons.Filled.Search,
-                        contentDescription = "Search emojis",
+                        contentDescription = "Browse emojis",
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -2452,43 +2466,6 @@ private fun MessageActionMenu(
                             .clickable { onPickReaction(code) }
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     )
-                }
-            }
-            if (searchOpen) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search emojis") },
-                    singleLine = true,
-                    leadingIcon = {
-                        Icon(Icons.Filled.Search, contentDescription = null)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp)
-                        .focusRequester(searchFocus),
-                )
-                val results = remember(searchQuery) {
-                    if (searchQuery.isBlank()) emptyList()
-                    else EmojiCatalog.search(searchQuery, limit = 60)
-                }
-                if (results.isNotEmpty()) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.padding(top = 6.dp, start = 4.dp),
-                    ) {
-                        results.forEach { e ->
-                            Text(
-                                e.glyph,
-                                fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
-                                style = MaterialTheme.typography.titleLarge,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { onPickReaction(e.shortcode) }
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                            )
-                        }
-                    }
                 }
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))

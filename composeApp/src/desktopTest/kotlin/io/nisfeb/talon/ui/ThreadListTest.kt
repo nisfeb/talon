@@ -198,8 +198,12 @@ class ThreadListTest {
         assertTrue("170.141.184.507" in ship.pokesTo("chat").single().json.toString())
 
         menuOf("an answer")
-        onAllNodesWithContentDescription("Search emojis")[0].performClick()
-        onNode(hasSetTextAction() and androidx.compose.ui.test.hasText("Search emojis")).performTextInput("taco")
+        // The magnifier now opens the full picker sheet, not an inline field.
+        onAllNodesWithContentDescription("Browse emojis")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) {
+            onAllNodesWithText("Search emoji").fetchSemanticsNodes().isNotEmpty()
+        }
+        onNode(hasSetTextAction() and androidx.compose.ui.test.hasText("Search emoji")).performTextInput("taco")
         onAllNodesWithText("🌮")[0].performClick()
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").size == 2 }
     }

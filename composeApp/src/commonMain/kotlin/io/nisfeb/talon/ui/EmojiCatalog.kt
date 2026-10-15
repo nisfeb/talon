@@ -36,8 +36,7 @@ object EmojiCatalog {
         ":thumbup:" to ":thumbsup:",
     )
 
-    val entries: List<Entry> = listOf(
-        // --- Smileys ---
+    private val smileys: List<Entry> = listOf(
         Entry(":grinning:", "😀", listOf("grin", "happy", "smile")),
         Entry(":smiley:", "😃", listOf("smile", "happy")),
         Entry(":slight_smile:", "🙂", listOf("smile", "slight")),
@@ -122,7 +121,9 @@ object EmojiCatalog {
         Entry(":cat_face:", "🐱", listOf("cat")),
         Entry(":dog_face:", "🐶", listOf("dog", "puppy")),
 
-        // --- Gestures / body ---
+    )
+
+    private val gestures: List<Entry> = listOf(
         Entry(":thumbsup:", "👍", listOf("thumbs", "up", "yes", "ok")),
         Entry(":thumbsdown:", "👎", listOf("thumbs", "down", "no", "nope")),
         Entry(":ok_hand:", "👌", listOf("ok", "okay")),
@@ -161,7 +162,9 @@ object EmojiCatalog {
         Entry(":fist_right:", "🤜", listOf("fist", "right")),
         Entry(":middle_finger:", "🖕", listOf("middle", "finger", "flip")),
 
-        // --- Hearts / love ---
+    )
+
+    private val hearts: List<Entry> = listOf(
         Entry(":heart:", "❤️", listOf("heart", "love", "red")),
         Entry(":orange_heart:", "🧡", listOf("heart", "orange")),
         Entry(":yellow_heart:", "💛", listOf("heart", "yellow")),
@@ -183,7 +186,9 @@ object EmojiCatalog {
         Entry(":gift_heart:", "💝", listOf("gift", "heart")),
         Entry(":100:", "💯", listOf("100", "hundred", "perfect", "score")),
 
-        // --- Symbols ---
+    )
+
+    private val symbols: List<Entry> = listOf(
         Entry(":fire:", "🔥", listOf("fire", "lit", "hot")),
         Entry(":sparkles:", "✨", listOf("sparkle", "shine", "magic")),
         Entry(":star:", "⭐", listOf("star")),
@@ -254,7 +259,9 @@ object EmojiCatalog {
         Entry(":sailboat:", "⛵", listOf("sailboat", "boat")),
         Entry(":anchor:", "⚓", listOf("anchor", "ship")),
 
-        // --- Food / drink ---
+    )
+
+    private val food: List<Entry> = listOf(
         Entry(":coffee:", "☕", listOf("coffee", "tea", "hot")),
         Entry(":tea:", "🍵", listOf("tea", "matcha")),
         Entry(":beer:", "🍺", listOf("beer", "brew")),
@@ -308,7 +315,9 @@ object EmojiCatalog {
         Entry(":bottle:", "🍼", listOf("bottle", "baby")),
         Entry(":milk:", "🥛", listOf("milk")),
 
-        // --- Nature / animals ---
+    )
+
+    private val nature: List<Entry> = listOf(
         Entry(":dog:", "🐕", listOf("dog")),
         Entry(":cat:", "🐈", listOf("cat")),
         Entry(":mouse:", "🐭", listOf("mouse")),
@@ -364,7 +373,9 @@ object EmojiCatalog {
         Entry(":earth_americas:", "🌎", listOf("earth", "americas")),
         Entry(":earth_asia:", "🌏", listOf("earth", "asia")),
 
-        // --- Activities / objects ---
+    )
+
+    private val objects: List<Entry> = listOf(
         Entry(":soccer:", "⚽", listOf("soccer", "football")),
         Entry(":basketball:", "🏀", listOf("basketball")),
         Entry(":football:", "🏈", listOf("football", "american")),
@@ -401,7 +412,9 @@ object EmojiCatalog {
         Entry(":hourglass:", "⏳", listOf("hourglass", "wait")),
         Entry(":alarm:", "⏰", listOf("alarm", "clock")),
 
-        // --- Flags / misc ---
+    )
+
+    private val flags: List<Entry> = listOf(
         Entry(":us:", "🇺🇸", listOf("flag", "us", "usa", "america")),
         Entry(":pirate_flag:", "🏴‍☠️", listOf("pirate", "flag", "skull")),
         Entry(":white_flag:", "🏳️", listOf("flag", "white", "surrender")),
@@ -420,6 +433,21 @@ object EmojiCatalog {
         Entry(":older_woman:", "👵", listOf("older", "woman", "grandma")),
         Entry(":technologist:", "🧑‍💻", listOf("technologist", "developer", "coder")),
     )
+
+    /** Categories in display order, each with the label the picker shows. */
+    val categories: List<Pair<String, List<Entry>>> = listOf(
+        "Smileys" to smileys,
+        "Gestures" to gestures,
+        "Hearts" to hearts,
+        "Symbols" to symbols,
+        "Food & drink" to food,
+        "Nature" to nature,
+        "Objects" to objects,
+        "Flags" to flags,
+    )
+
+    /** Every entry, category order preserved so [search] ranking is unchanged. */
+    val entries: List<Entry> = categories.flatMap { it.second }
 
     /** Fast lookup by canonical shortcode. */
     private val byShortcode: Map<String, Entry> = entries.associateBy { it.shortcode }
