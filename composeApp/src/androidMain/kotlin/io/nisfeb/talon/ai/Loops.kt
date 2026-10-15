@@ -146,7 +146,7 @@ class Loops(
      * an alarm, where the app's own mail and calendar, built by the UI, may
      * not exist. On a scope of the run's own, ended with it.
      */
-    private suspend fun <T> withRunner(block: suspend (LoopRunner) -> T): T = withRunScope(scope) { run ->
+    private suspend fun <T> withActions(block: suspend (AssistantActions) -> T): T = withRunScope(scope) { run ->
         val url = sessionStore.active()?.shipUrl
         val http = runCatching { getSession().http }.getOrNull()
         val mail = if (url != null && http != null) io.nisfeb.talon.mail.MailRepo(http, run).also { it.attach(url) } else null
@@ -168,10 +168,45 @@ class Loops(
                 zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
                 send = { whom, text -> getRepo().send(whom, text) },
             )
-            block(runner(actions))
+            block(actions)
         } finally {
             mail?.detach()
             calendar?.detach()
+        }
+    }
+
+    private suspend fun <T> withRunner(block: suspend (LoopRunner) -> T): T =
+        withActions { block(runner(it)) }
+
+    /**
+     * Run one voice dictation to completion, autonomously (writes need no
+     * confirmation — see [DictationAgent]), and notify with the result.
+     * Reuses the loop assembly: the same mail/calendar/orrery/message
+     * tools and the same completer a scheduled loop gets, so a spoken
+     * instruction can do anything a loop can. The zero-friction surfaces
+     * (widget / tile / assist) capture a transcript and call this; they
+     * own the wake-lock + foreground, as the loop alarm path does.
+     */
+    suspend fun runDictation(transcript: String) {
+        if (transcript.isBlank()) return
+        if (sessionStore.activeShip() == null || !aiSettings.state.value.loopsCanRun()) return
+        runCatching { getRepo().start(getSession()) }
+        val summary = withActions { actions ->
+            val cfg = aiSettings.state.value
+            val webOn = cfg.assistantOn()
+            val tools = ToolCatalog.default(
+                getRepo(), getDb(), getEmbedder(),
+                braveSearch = braveClient.takeIf { webOn && cfg.braveApiKey.isNotBlank() },
+                urlFetcher = urlFetcher.takeIf { webOn },
+            ) { it } + actionTools(actions)
+            DictationAgent(
+                completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
+                tools = tools,
+                systemPrompt = LoopPrompt.forLoop(cfg),
+            ).run(transcript)
+        }
+        if (summary.isNotBlank()) {
+            Notifications.showLoop(context, DICTATION_NOTIFY_ID, "Dictation", summary, System.currentTimeMillis())
         }
     }
 
@@ -222,6 +257,9 @@ class Loops(
 
     companion object {
         const val ACTION_LOOP_FIRE = "io.nisfeb.talon.action.LOOP_FIRE"
+        // A fixed, negative id so a dictation's result notification never
+        // collides with a real loop's (loop ids are positive row ids).
+        private const val DICTATION_NOTIFY_ID = -1L
         private const val REQ_LOOPS = 7701
         // Headroom for one full agent round-trip (AgentClient's own call
         // timeout is 120s). A run cut by this budget still advances the
