@@ -1775,8 +1775,16 @@ fun App(
                           }
                           when (jump) {
                               is io.nisfeb.talon.ui.CiteJump.Group -> {
-                                  openChat = null
-                                  revealGroupRequest = jump.flag
+                                  // Open the group's own page: its channels
+                                  // for a member, a Join CTA for a non-member
+                                  // — the same landing a group link opens.
+                                  // The old reveal only scrolled the home
+                                  // list, which does nothing for a group you
+                                  // have not joined (the usual case for a
+                                  // shared reference), so the tap went nowhere.
+                                  showCalendar = false; showBookmarks = false; showAssistant = false
+                                  uiSettings.setActiveRailTab(RailTab.Chats)
+                                  openGroupHomeFlag = jump.flag
                               }
                               is io.nisfeb.talon.ui.CiteJump.Message -> {
                                   openConversationAction()

@@ -197,6 +197,32 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { showing("Select a chat to begin") }
     }
 
+    // The reported "goes nowhere": a group reference used to run the
+    // home-list reveal, which silently did nothing for a group you had
+    // not joined. It now opens the group's own page — here its Join CTA,
+    // since this ship is not in ~bus/crew (nothing seeded for it).
+    @Test
+    fun `tapping a group reference opens the group page`() = app(seed = {
+        messages().upsert(
+            MessageEntity(
+                "~bus", "~bus/170141184506", "~bus", 1_000,
+                """[{"block":{"cite":{"group":"~bus/crew"}}}]""", "/chat",
+            ),
+        )
+    }) {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("~bus").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("~bus")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
+        // Click the reference chip itself. "Referenced post" is the
+        // citation's own body text, rendered only in the chat pane, so it
+        // targets the chip and not the list's preview of the same message.
+        waitUntil(timeoutMillis = 5_000) { showing("Group ~bus/crew") && showing("Referenced post") }
+        onNodeWithText("Referenced post").performClick()
+        // The group's own page, in its non-member mode — not a no-op.
+        waitUntil(timeoutMillis = 5_000) { showing("You haven't joined this group") }
+    }
+
     // One Escape closed the image and the chat with it: the image took
     // the click's focus, went with the post when the viewer replaced it,
     // and the shell took focus back from the viewer.
