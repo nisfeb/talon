@@ -527,11 +527,36 @@ class DesktopPeerLink(
                         }
                     }
                     last.value = level
+                    if (!local) logAudioDiag(report)
                     inFlight.value = false
                 }
             }.onFailure { inFlight.value = false }
         }
         return last.value.takeIf { it >= 0f }
+    }
+
+    // When a party line sounds wrong — one member glitchy, or everyone
+    // slow and pitched-down — the AudioDeviceModule tells us nothing (it
+    // has no sample-rate getter). The inbound-rtp stats do: loss and
+    // concealment single out a bad stream, and a steadily growing
+    // accel/decel count is the jitter buffer chasing a drifting playout
+    // clock. Logged (throttled) into talon.log, the file users attach to
+    // a call report, so the next occurrence is diagnosable instead of
+    // guessed. Piggybacks the audio-level poll's getStats — no new call.
+    private val lastDiagMs = kotlinx.atomicfu.atomic(0L)
+
+    private fun logAudioDiag(report: dev.onvoid.webrtc.RTCStatsReport?) {
+        val now = io.nisfeb.talon.util.nowMs()
+        if (now - lastDiagMs.value < 10_000L) return
+        val inbound = report?.stats?.values.orEmpty()
+            .filter { it?.type == dev.onvoid.webrtc.RTCStatsType.INBOUND_RTP }
+            .mapNotNull { it?.attributes }
+            // audioLevel rides only on an audio inbound-rtp, so it also
+            // sorts audio from video without guessing a kind field.
+            .filter { it.containsKey("audioLevel") }
+        if (inbound.isEmpty()) return
+        lastDiagMs.value = now
+        audioStatsLines(inbound).forEach { Log.i("PartyLine", it) }
     }
 
     private val closed = kotlinx.atomicfu.atomic(false)
