@@ -650,10 +650,10 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     /** Open a checkout and send the person to it. */
     fun buy(rail: String, plan: String?, amountMicro: Long?) {
         val r = repo ?: return
-        note = null
+        note = "Asking ${account?.vendor?.ifBlank { null } ?: "the vendor"} for a checkout. From some ships this takes a minute." to false
         scope.launch {
             r.topUp(rail, plan, amountMicro)
-                .onSuccess { url -> uri.openUri(url) }
+                .onSuccess { url -> note = null; uri.openUri(url) }
                 .onFailure { note = (it.message ?: "The vendor did not answer.") to true }
         }
     }

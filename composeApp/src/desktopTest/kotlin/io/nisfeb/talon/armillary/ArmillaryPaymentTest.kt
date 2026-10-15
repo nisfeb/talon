@@ -61,6 +61,8 @@ class ArmillaryPaymentTest {
     @Volatile private var generator = """{"enabled":false}"""
     /** The vendor's picks, as the inference document carries them, or nothing. */
     @Volatile private var suggested = ""
+    /** The ship's thirty seconds ran out before the vendor's answer came back. */
+    @Volatile private var slowVendor = false
     private val puts = CopyOnWriteArrayList<Pair<String, String>>()
     /** Every request that went to OpenRouter, with whatever authorised it. */
     private val toOpenRouter = CopyOnWriteArrayList<String>()
@@ -91,7 +93,11 @@ class ArmillaryPaymentTest {
                     {"id":"big/tools","provider":"openrouter","in":1,"out":30000000,"tags":["zdr"]},
                     {"id":"huge/notools","provider":"openrouter","in":1,"out":90000000,"tags":["zdr"]}]""",
             )
-            path.endsWith("/apps/armillary/api/checkout") -> ok("""{"url":"https://pay.example/c1","nonce":"n1"}""")
+            path.endsWith("/apps/armillary/api/checkout") ->
+                if (slowVendor) respond("""{"pending":true,"nonce":"n9"}""", HttpStatusCode.Accepted, json)
+                else ok("""{"url":"https://pay.example/c1","nonce":"n1"}""")
+            path.endsWith("/apps/armillary/api/checkout/n9") ->
+                ok("""{"phase":"answered","status":"pending","url":"https://pay.example/late","note":""}""")
             path.endsWith("/apps/armillary/api/account") -> ok(
                 """{"ship":"~zod","balance":$balance,"plan":"","subscription":{"active":false},"lease":{},"checkouts":{},"vendor":"~nisfeb","self":"~zod","stale":3}""",
             )
@@ -277,5 +283,11 @@ class ArmillaryPaymentTest {
             assertFalse(p.isOn(AiFeature.CatchUp) || p.isOn(AiFeature.Assistant))
             assertTrue(onAllNodesWithText("Turn on").fetchSemanticsNodes().isEmpty())
         }
+    }
+
+    @Test
+    fun `a checkout the ship answered 202 for is followed to its page, not reported as failed`() = ship(setUp) { repo, _ ->
+        slowVendor = true
+        assertEquals("https://pay.example/late", repo.topUp("btcpay", null, 10_000_000).getOrThrow())
     }
 }

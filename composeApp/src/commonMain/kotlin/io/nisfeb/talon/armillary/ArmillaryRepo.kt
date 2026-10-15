@@ -298,16 +298,43 @@ class ArmillaryRepo(
      */
     suspend fun topUp(rail: String, plan: String?, amountMicro: Long?): Result<String> = runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
-        when (val answer = a.checkout(rail, plan, amountMicro)) {
+        val first = a.checkout(rail, plan, amountMicro)
+        val answer = if (first is CheckoutAnswer.Pending) followCheckout(a, first.nonce) else first
+        when (answer) {
             is CheckoutAnswer.Url -> {
                 val start = _account.value?.takeIf { it.hasView }?.balanceMicro ?: 0L
                 watchBalance(Payment(answer.nonce, rail, start, Payment.Phase.WAITING))
                 answer.url
             }
             is CheckoutAnswer.Pending ->
-                error("Your ship has asked the vendor and is still waiting. The checkout is queued: try again in a moment.")
+                error("Your ship has asked the vendor and is still waiting. Do not order again: the checkout appears under your checkouts when the vendor answers.")
             is CheckoutAnswer.Refused -> error(answer.reason)
         }
+    }
+
+    /**
+     * A checkout the ship answered 202 for. The order went out, and the
+     * vendor made the checkout, but its answer had not come back inside
+     * the ship's thirty seconds, which from a comet it often does not.
+     * Ordering again only makes another checkout nobody is sent to, so
+     * ask the ship how far this one has got, nudging it to look again,
+     * until the vendor's row arrives or [CHECKOUT_FOLLOW_MS] runs out.
+     * A desk older than the phase route stays Pending.
+     */
+    private suspend fun followCheckout(a: ArmillaryApi, nonce: String): CheckoutAnswer {
+        var waited = 0L
+        while (waited < CHECKOUT_FOLLOW_MS) {
+            delay(CHECKOUT_POLL_MS)
+            waited += CHECKOUT_POLL_MS
+            val p = try { a.checkoutPhase(nonce) } catch (e: ArmillaryError) { continue } ?: break
+            if (p.phase != "answered") continue
+            return when {
+                p.status == "refused" -> CheckoutAnswer.Refused(p.note.ifBlank { "The vendor refused the checkout." })
+                p.url.isNotBlank() -> CheckoutAnswer.Url(p.url, nonce)
+                else -> CheckoutAnswer.Refused("The vendor answered the checkout as ${p.status}.")
+            }
+        }
+        return CheckoutAnswer.Pending(nonce)
     }
 
     /** Ask the vendor to stop the subscription renewing. The view says when it is done. */
@@ -556,6 +583,13 @@ class ArmillaryRepo(
         /** How long to wait for a minted key, and how often to ask. */
         const val KEY_WAIT_MS = 30_000L
         const val KEY_POLL_MS = 2_000L
+
+        /**
+         * How long to follow a checkout past the ship's own thirty
+         * seconds, and how often to ask: the armillary page's cadence.
+         */
+        const val CHECKOUT_FOLLOW_MS = 90_000L
+        const val CHECKOUT_POLL_MS = 3_000L
 
         /** How long the balance is watched after a checkout opens, and how often. */
         const val WATCH_MS = 120_000L
