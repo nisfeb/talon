@@ -32,9 +32,13 @@ Google documents the webview restriction under
 1. Open [Google Cloud](https://console.cloud.google.com/), select or create a
    project, and keep that project selected for the remaining steps.
 2. Open **APIs & Services → Library**, find **Google Calendar API**, and enable
-   it. Gmail API is not required for calendar sync.
+   it. It also appears in the Library's Google Workspace section. Confirm it
+   is enabled in the same project as your OAuth client. Creating a client
+   does not enable the API. Gmail API and CalDAV API are not needed.
 3. Open **Google Auth Platform → Branding** (older navigation calls it **OAuth
-   consent screen**). Supply the app name and requested contact information.
+   consent screen**). The old **APIs & Services → OAuth consent screen** link
+   now opens Auth Platform's Overview; choose **Branding** in its sidebar.
+   Supply the app name and requested contact information.
 4. Under **Audience**, choose **External** for a personal Gmail account or
    accounts from different organizations. **Internal** only works for users
    inside the project's Workspace organization. If staying in **Testing**, add
@@ -42,8 +46,12 @@ Google documents the webview restriction under
    in Testing expire after seven days. For ongoing personal use, use **Publish
    app / In production** and reconnect after the change. Production status is
    separate from verification; it neither guarantees permanent tokens nor
-   bypasses Workspace administrator rules.
-5. Under **Clients → Create client**, choose **Web application**. Do not choose
+   bypasses Workspace administrator rules. If **Publish app** is disabled
+   with a link to Branding, finish and save the required fields there first.
+   Any homepage or policy links must describe your own app.
+5. Under **Clients**, check for an existing Calendar Web client first. If its
+   ID matches the ship and the callback below is correct, keep it. For a new
+   setup, choose **Create client → Web application**. Do not choose
    Desktop, Android, a service account, or an API key. Under **Authorized
    redirect URIs**, paste exactly the URI Calendar shows:
 
@@ -53,9 +61,13 @@ Google documents the webview restriction under
 
    Include the path, use the public HTTPS hostname, and omit a trailing slash.
    **Authorized JavaScript origins** is a different field.
-6. Save the client and securely retain its client ID and secret. If Google
-   offers a JSON download, keep it private. Never put it in a Git repository,
-   issue, screenshot, or support message.
+6. At creation, securely retain the client ID and secret and download the JSON
+   if offered. Google shows/downloads a full secret only at creation; reopening
+   the client later shows just its last four characters. If the ship already
+   has that client's saved secret, leave its secret field blank to retain it.
+   If it is lost everywhere, use Google's **Add secret** rotation flow and
+   update the ship before retiring the old secret. Never put secrets or client
+   JSON in a Git repository, issue, screenshot, or support message.
 
 Google's [web-server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server)
 describes the client and exact redirect requirements;
@@ -64,6 +76,21 @@ describes the client and exact redirect requirements;
 explain the publishing choices. Personal use may qualify for an exception,
 but an unverified-app notice can still appear. Only proceed if it identifies
 your own project and expected Calendar permissions.
+
+Google explains the one-time secret display in
+[Manage OAuth clients](https://support.google.com/cloud/answer/15549257#client-secret-hashing).
+
+### How the current Console differs from older instructions
+
+| Older instruction or assumption | Current behavior |
+| --- | --- |
+| Configure everything on “OAuth consent screen” | That link opens **Google Auth Platform**. App identity is under **Branding**, publishing/test users under **Audience**, clients under **Clients**, and declared scopes under **Data Access**. |
+| An OAuth client means the API is ready | API enablement is a separate **APIs & Services → Library** step in the same project. OAuth can succeed while Calendar API calls return 403. |
+| Reopen the client to copy/download its secret | Full secrets are available only when created. Preserve an already-saved secret; a masked value is not the secret to paste. |
+| “Connected” means events are syncing | The current released UI uses this for a stored refresh token. The API must also be available, a calendar linked, and a sync completed. |
+
+These navigation and secret-display details were checked in the live Console
+on 2026-10-16. They do not require a shared OAuth provider.
 
 ## Connect, link, then verify
 
@@ -120,6 +147,7 @@ does not handle repeating events like the Google integration does.
 | Token exchange fails | Matching client ID and secret; correct client type; start a fresh flow instead of reloading a used callback. |
 | Works for about seven days | Project still in Testing; publish for ongoing personal use and reconnect. Tokens can also expire or be revoked for other reasons. |
 | Connected but empty | Link a calendar, check last sync/errors, API enablement and account access. |
+| Connected, but calendar list says `Google answered HTTP 403` | First check **Google Calendar API** is enabled in the OAuth client's project. Enable it, allow configuration to propagate, then reopen Settings (or use **Refresh calendar list** with the companion change). Keep the working client and authorization. If 403 persists, check consent scope and Workspace policy; 403 alone does not identify a single cause. |
 | First account stops after connecting another | The single authorization was replaced. Reconnect the original account; do not unlink calendars merely to troubleshoot. |
 | Cloudflare rejects the ship before Calendar loads | This is a separate access-layer failure. Use an allowed browser or have the site owner diagnose the rule. Changing Google credentials cannot fix it. |
 
