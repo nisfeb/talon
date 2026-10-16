@@ -1009,6 +1009,14 @@ fun SettingsScreen(
                 io.nisfeb.talon.ai.DictationRun.blocker(aiState, hasShip = true)?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
+                // Bought speech to text: where the owner has no key of their own and the vendor offers it.
+                (io.nisfeb.talon.ai.DictationRun.hearing(aiState) as? io.nisfeb.talon.ai.Hearing.Armillary)?.let {
+                    Text(
+                        "Speech to text comes from Armillary, on ${it.model}.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 io.nisfeb.talon.ui.QuickDictationButtons()
             }
 

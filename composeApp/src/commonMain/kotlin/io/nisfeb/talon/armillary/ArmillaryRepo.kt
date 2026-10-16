@@ -558,7 +558,8 @@ class ArmillaryRepo(
             ?: row.models.filter { it.zdr }.map { it.id }.toSet()
         // What a payment learnt of tool use and context stays: the ship
         // says neither, and a refresh used to wipe them.
-        val models = inf.models.map { id ->
+        // Chat models only: a transcription model in a chat picker fails every message.
+        val models = io.nisfeb.talon.ai.chatModelsOf(inf.models, inf.suggested).map { id ->
             val had = row.models.firstOrNull { it.id == id }
             ModelInfo(id = id, name = id, zdr = id in zdr, tools = had?.tools, contextLength = had?.contextLength)
         }

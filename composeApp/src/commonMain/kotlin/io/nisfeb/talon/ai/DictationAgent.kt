@@ -251,10 +251,20 @@ class DictationRun(
          */
         fun blocker(cfg: AiSettings.Config, hasShip: Boolean): String? = when {
             !hasShip -> NO_SHIP
-            CallRecordingPublisher.sttFrom(cfg) == null -> NO_SPEECH_TO_TEXT
+            hearing(cfg) == null -> NO_SPEECH_TO_TEXT
             !cfg.loopsCanRun() && !cfg.orreryOn() -> NO_MODEL
             else -> null
         }
+
+        /**
+         * Where a dictation is heard: the owner's own transcription
+         * provider ([CallRecordingPublisher.sttFrom]) wherever there is
+         * one, else the Armillary vendor's transcription model
+         * ([armillaryHearing]), else nowhere, and the card says to set a
+         * key, as before Armillary offered one.
+         */
+        fun hearing(cfg: AiSettings.Config): Hearing? =
+            CallRecordingPublisher.sttFrom(cfg)?.let { Hearing.Own(it) } ?: cfg.profile().armillaryHearing()
 
         /** Speech to text with the transcription key from AI settings ([CallRecordingPublisher.sttFrom]). */
         fun whisper(http: HttpClient, stt: CallRecordingPublisher.Stt): suspend (ByteArray) -> String = { wav ->
@@ -269,7 +279,14 @@ class DictationRun(
          */
         fun why(e: Throwable): String {
             val refused = Regex("""^transcription failed: (\d{3})""").find(e.message.orEmpty())?.groupValues?.get(1)
+            val status = (e as? ModelHttpError)?.status
             return when {
+                // Armillary's refusals, as its other features say them.
+                status == 402 -> if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "$OUT_OF_CREDIT Top up under Settings, AI" else OUT_OF_CREDIT.trimEnd('.')
+                status == 401 || status == 403 -> "Armillary turned this phone away: its lease is off or at its limit. Check Settings, AI"
+                status == 413 -> "The recording was too long to send"
+                status == 400 || status == 404 -> "The speech model is not on offer right now. Check Settings, AI"
+                status == 429 || (status != null && status >= 500) -> "The speech service is busy. Try again in a moment"
                 io.nisfeb.talon.util.isTransientNetworkError(e) -> "No network, or the service did not answer"
                 refused != null -> "The transcription service said no ($refused)"
                 else -> io.nisfeb.talon.util.readableReason(e.message)?.trimEnd('.') ?: "Something went wrong"

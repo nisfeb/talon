@@ -23,7 +23,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
-import io.nisfeb.talon.ai.CallRecordingPublisher
 import io.nisfeb.talon.ai.DictationFlow
 import io.nisfeb.talon.ai.DictationOutcome
 import io.nisfeb.talon.ai.DictationRoute
@@ -408,14 +407,34 @@ class DictationService : Service() {
     ): DictationRun {
         val app = application as TalonApplication
         val cfg = app.aiSettings.state.value
-        val stt = CallRecordingPublisher.sttFrom(cfg)
-        val transcribe = stt?.let { s ->
-            val whisper = DictationRun.whisper(app.ktorHttp, s)
-            val timed: suspend (ByteArray) -> String = { wav ->
-                val t0 = System.currentTimeMillis()
-                whisper(wav).also { Log.i(TAG, "transcribed ${wav.size} bytes in ${System.currentTimeMillis() - t0} ms") }
+        // The owner's own key wherever there is one, else Armillary's
+        // transcription model, else none and the card asks for a key.
+        val transcribe: (suspend (ByteArray) -> String)? = when (val hearing = DictationRun.hearing(cfg)) {
+            null -> null
+            is io.nisfeb.talon.ai.Hearing.Own -> {
+                val whisper = DictationRun.whisper(app.ktorHttp, hearing.stt)
+                val own: suspend (ByteArray) -> String = { wav ->
+                    val t0 = System.currentTimeMillis()
+                    whisper(wav).also { Log.i(TAG, "transcribed ${wav.size} bytes in ${System.currentTimeMillis() - t0} ms") }
+                }
+                own
             }
-            timed
+            is io.nisfeb.talon.ai.Hearing.Armillary -> {
+                val bought: suspend (ByteArray) -> String = { wav ->
+                    val t0 = System.currentTimeMillis()
+                    // Compressed: the vendor's proxy keeps every body it is
+                    // sent, and caps them at 16 MB. The WAV only where the
+                    // phone cannot encode.
+                    val m4a = m4aOf(cacheDir, wav.copyOfRange(WAV_HEADER, wav.size), DictationRun.RATE)
+                    io.nisfeb.talon.ai.ArmillaryTranscribe.transcribe(
+                        app.ktorHttp, hearing, m4a ?: wav, if (m4a != null) "m4a" else "wav",
+                        java.util.Locale.getDefault().language,
+                    ).also {
+                        Log.i(TAG, "transcribed through Armillary (${hearing.model}), ${if (m4a != null) "m4a ${m4a.size}" else "wav ${wav.size}"} bytes in ${System.currentTimeMillis() - t0} ms")
+                    }
+                }
+                bought
+            }
         }
         val act: suspend (String) -> String = { words ->
             val p = prep!!
@@ -700,6 +719,8 @@ class DictationService : Service() {
     companion object {
         const val ACTION_LISTEN = "io.nisfeb.talon.action.DICTATION_LISTEN"
         const val ACTION_STOP = "io.nisfeb.talon.action.DICTATION_STOP"
+        /** WavFile.encode's header, before the PCM. */
+        private const val WAV_HEADER = 44
         const val ACTION_RETRY = "io.nisfeb.talon.action.DICTATION_RETRY"
         const val ACTION_DECIDE = "io.nisfeb.talon.action.DICTATION_DECIDE"
         private const val EXTRA_APPROVE = "approve"
@@ -716,6 +737,83 @@ class DictationService : Service() {
         private const val RUN_BUDGET_MS = 4L * 60 * 1000
         // The run, the transcription (up to 180 s) and two minutes of talking.
         private const val WAKE_LOCK_MS = 10L * 60 * 1000
+    }
+}
+
+/**
+ * 16-bit mono [pcm] as AAC in an MP4 box (m4a), about a tenth the size of
+ * the WAV: what goes to Armillary, whose proxy keeps every body it is
+ * sent. Null where the phone's encoder fails, and the WAV goes instead.
+ */
+private fun m4aOf(cacheDir: File, pcm: ByteArray, sampleRate: Int): ByteArray? {
+    val out = File.createTempFile("dictation", ".m4a", cacheDir)
+    var codec: android.media.MediaCodec? = null
+    var muxer: android.media.MediaMuxer? = null
+    return try {
+        val format = android.media.MediaFormat.createAudioFormat(android.media.MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, 1).apply {
+            setInteger(android.media.MediaFormat.KEY_AAC_PROFILE, android.media.MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            setInteger(android.media.MediaFormat.KEY_BIT_RATE, 32_000)
+            setInteger(android.media.MediaFormat.KEY_MAX_INPUT_SIZE, 16 * 1024)
+        }
+        val c = android.media.MediaCodec.createEncoderByType(android.media.MediaFormat.MIMETYPE_AUDIO_AAC).also { codec = it }
+        c.configure(format, null, null, android.media.MediaCodec.CONFIGURE_FLAG_ENCODE)
+        c.start()
+        val m = android.media.MediaMuxer(out.path, android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).also { muxer = it }
+        val info = android.media.MediaCodec.BufferInfo()
+        var track = -1
+        var offset = 0
+        var fed = false
+        var done = false
+        val until = System.currentTimeMillis() + 20_000
+        while (!done) {
+            if (System.currentTimeMillis() > until) error("the encoder took too long")
+            if (!fed) {
+                val i = c.dequeueInputBuffer(10_000)
+                if (i >= 0) {
+                    val buf = c.getInputBuffer(i) ?: error("no input buffer")
+                    buf.clear()
+                    val n = minOf(buf.capacity() and 1.inv(), pcm.size - offset)
+                    val us = offset / 2 * 1_000_000L / sampleRate
+                    if (n <= 0) {
+                        c.queueInputBuffer(i, 0, 0, us, android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        fed = true
+                    } else {
+                        buf.put(pcm, offset, n)
+                        c.queueInputBuffer(i, 0, n, us, 0)
+                        offset += n
+                    }
+                }
+            }
+            val o = c.dequeueOutputBuffer(info, 10_000)
+            when {
+                o == android.media.MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    track = m.addTrack(c.outputFormat)
+                    m.start()
+                }
+                o >= 0 -> {
+                    val buf = c.getOutputBuffer(o) ?: error("no output buffer")
+                    if (info.flags and android.media.MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) info.size = 0
+                    if (info.size > 0 && track >= 0) {
+                        buf.position(info.offset)
+                        buf.limit(info.offset + info.size)
+                        m.writeSampleData(track, buf, info)
+                    }
+                    c.releaseOutputBuffer(o, false)
+                    if (info.flags and android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) done = true
+                }
+            }
+        }
+        if (track < 0) error("the encoder gave no audio")
+        c.stop()
+        m.stop()
+        out.readBytes()
+    } catch (e: Exception) {
+        Log.w("Dictation", "could not compress the recording; the WAV goes instead: ${e.message}")
+        null
+    } finally {
+        runCatching { codec?.release() }
+        runCatching { muxer?.release() }
+        out.delete()
     }
 }
 
