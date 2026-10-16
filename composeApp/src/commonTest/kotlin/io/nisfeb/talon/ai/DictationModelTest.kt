@@ -55,7 +55,7 @@ class DictationModelTest {
         val p = profile(armillary = row(mapOf("default" to "f/1", "assistant" to "opus/5.5", "dictation" to "haiku/5.5"), mapOf("dictation" to "frontier")))
         assertEquals(Resolved(row(mapOf("default" to "f/1", "assistant" to "opus/5.5", "dictation" to "haiku/5.5"), mapOf("dictation" to "frontier")), "haiku/5.5"), p.resolve(AiFeature.Dictation))
         assertTrue(p.followsVendor(AiFeature.Dictation))
-        assertFalse(p.vendorZdr(AiFeature.Dictation), "its own tier, not the assistant's")
+        assertTrue(p.vendorZdr(AiFeature.Dictation), "on the frontier tier it still asks for ZDR")
     }
 
     @Test
