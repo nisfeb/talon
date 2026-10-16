@@ -2,7 +2,7 @@ package io.nisfeb.talon.ai
 
 import io.nisfeb.talon.orrery.DecideSettings
 import io.nisfeb.talon.orrery.onVendor
-import io.nisfeb.talon.orrery.openRouterKey
+import io.nisfeb.talon.orrery.decisionKey
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -53,15 +53,26 @@ class VendorPickTest {
     }
 
     @Test
-    fun `the decision gate takes the vendor's model on the lease's key, and only under a lease`() {
+    fun `the decision gate takes the vendor's model and route, under a lease or through the proxy`() {
         val leased = conf(profile())
-        assertEquals("sk-or-lease", openRouterKey(leased))
-        assertEquals("typesafe/jev-2", DecideSettings().onVendor(leased).model)
-        val proxied = conf(profile(armillary = row(base = "https://v.example/apps/armillary/v1")))
-        assertNull(proxied.profile().vendorDecision())
-        assertEquals("typesafe/jev-1.13", DecideSettings().onVendor(proxied).model)
+        assertEquals("sk-or-lease", decisionKey(leased))
+        val onLease = DecideSettings().onVendor(leased)
+        assertEquals("typesafe/jev-2" to "https://openrouter.ai/api/alpha/decisions", onLease.model to onLease.url, "OpenRouter's own route")
+        // Armillary 34: the proxy asks the vendor's route, on this device's Armillary key.
+        val proxied = conf(profile(armillary = row(base = "https://v.example/apps/armillary/v1/")))
+        val onProxy = DecideSettings().onVendor(proxied)
+        assertEquals("typesafe/jev-2" to "https://v.example/apps/armillary/alpha/decisions", onProxy.model to onProxy.url)
+        assertEquals("sk-or-lease", decisionKey(proxied))
         val unnamed = conf(profile(armillary = row(mapOf("default" to "f/1"))))
+        assertNull(unnamed.profile().vendorDecision())
         assertEquals("typesafe/jev-1.13", DecideSettings().onVendor(unnamed).model, "no fallback to a chat model")
+    }
+
+    @Test
+    fun `the decisions route is the base with a trailing v1 made alpha decisions`() {
+        assertEquals("https://openrouter.ai/api/alpha/decisions", decisionsUrl("https://openrouter.ai/api/v1"))
+        assertEquals("https://zod.example/apps/armillary/alpha/decisions", decisionsUrl(" https://zod.example/apps/armillary/v1/ "))
+        assertEquals("http://box.lan:8080/apps/armillary/alpha/decisions", decisionsUrl("http://box.lan:8080/apps/armillary"), "no /v1 to take off")
     }
 
     @Test

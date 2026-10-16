@@ -1,6 +1,5 @@
 package io.nisfeb.talon.ai
 
-import io.nisfeb.talon.orrery.openRouterKey
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

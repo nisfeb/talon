@@ -1367,11 +1367,11 @@ class OrreryRepo(
         fun nameOf(id: String): String? = bodies.firstOrNull { it.id == id }?.let { it.name ?: it.id }
     }
 
-    /** The decision model, when the owner has turned it on and an OpenRouter key is set. */
+    /** The decision model, when the owner has turned it on and the vendor names one. */
     private fun decider(): Pair<Decider, DecideSettings>? {
         val d = decide?.settings?.value?.under(cloud?.config?.invoke())?.onVendor(cloud?.config?.invoke())?.takeIf { it.on } ?: return null
-        val key = cloud?.config?.invoke()?.let(::openRouterKey) ?: return null
-        // The bare client: the ship's cookie has no business at OpenRouter.
+        val key = cloud?.config?.invoke()?.let(::decisionKey) ?: return null
+        // The bare client: the ship's cookie has no business at OpenRouter or the vendor.
         return OpenRouterDecider(bare, key, d) to d
     }
 

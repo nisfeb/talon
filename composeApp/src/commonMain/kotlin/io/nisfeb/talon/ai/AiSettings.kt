@@ -159,6 +159,15 @@ object AiSettings {
          */
         @kotlinx.serialization.Transient
         val zdrOnly: Boolean = false,
+        /**
+         * How long the call may wait for its answer, where it must wait
+         * longer than a client's own default: Armillary's proxy waits up
+         * to ten minutes for an upstream, a model on the owner's own
+         * hardware among them ([ARMILLARY_WAIT_MS]). 0 is the client's
+         * default. Derived by [forFeature], never stored.
+         */
+        @kotlinx.serialization.Transient
+        val upstreamTimeoutMs: Long = 0,
     ) {
         fun hasKey(): Boolean = apiKey.isNotBlank()
 

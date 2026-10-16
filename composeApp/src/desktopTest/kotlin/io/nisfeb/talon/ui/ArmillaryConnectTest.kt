@@ -61,7 +61,9 @@ class ArmillaryConnectTest {
     @Volatile private var mint: () -> Pair<HttpStatusCode, String>? = { null }
     @Volatile private var mintHoldMs = 0L
 
-    private val proxy = """{"mode":"proxy","base_url":"https://wex.example/apps/armillary/v1","key":"k.s","models":["stub/alpha","stub/beta"]}"""
+    /** The base the ship answers. A ship with no public_url answers its own loopback (armillary 33). */
+    @Volatile private var base = "https://wex.example/apps/armillary/v1"
+    private val proxy get() = """{"mode":"proxy","base_url":"$base","key":"k.s","models":["stub/alpha","stub/beta"]}"""
     /** The vendor the ship's account names; blank for a ship that never set Armillary up. */
     @Volatile private var vendor = "~nisfeb"
     private val funded get() = """{"ship":"~feb","balance":50000000,"plan":"","subscription":{"active":false},
@@ -245,5 +247,21 @@ class ArmillaryConnectTest {
         assertEquals(null, ai.state.value.savedProfile?.provider(ARMILLARY_PROVIDER), "no row made")
         assertEquals(0, keyAsks(), "nothing reached for a vendor")
         assertTrue(seen.none { it.startsWith("POST") }, seen.toString())
+    }
+
+    @Test
+    fun `a ship that is its own vendor with no public URL is reached at the address Talon signed in with`() {
+        hasKey = true
+        vendor = "~feb"
+        base = "http://localhost:8080/apps/armillary/v1"
+        val ai = settings()
+        val r = repo(ai)
+        assertEquals("https://ship.example/apps/armillary/v1", ai.state.value.savedProfile!!.provider(ARMILLARY_PROVIDER)!!.baseUrl)
+        assertTrue(r.noPublicUrl.value, "and the owner is asked to set one")
+        // Another vendor's loopback is not this ship's to rewrite.
+        vendor = "~nisfeb"
+        runBlocking { r.refresh() }
+        assertEquals(base, ai.state.value.savedProfile!!.provider(ARMILLARY_PROVIDER)!!.baseUrl)
+        assertFalse(r.noPublicUrl.value)
     }
 }

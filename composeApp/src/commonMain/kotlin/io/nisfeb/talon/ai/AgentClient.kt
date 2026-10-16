@@ -148,8 +148,10 @@ class AgentClient(
             headers()
             setBody(payload)
             timeout {
-                requestTimeoutMillis = 120_000
-                socketTimeoutMillis = 120_000
+                // Longer through Armillary, whose proxy may wait minutes on a slow upstream.
+                val wait = maxOf(120_000L, cfg.upstreamTimeoutMs)
+                requestTimeoutMillis = wait
+                socketTimeoutMillis = wait
                 connectTimeoutMillis = 15_000
             }
         }

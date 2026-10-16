@@ -384,6 +384,11 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     val noProblem = remember { MutableStateFlow<String?>(null) }
     val settingUp by (repo?.settingUp ?: noBusy).collectAsState()
     val keyProblem by (repo?.keyProblem ?: noProblem).collectAsState()
+    val noLocal = remember { MutableStateFlow(false) }
+    val noPublicUrl by (repo?.noPublicUrl ?: noLocal).collectAsState()
+    // The ship is its own vendor on its own key (armillary 34): it pays
+    // nothing, so its zero balance is no reason, and there is nothing to buy.
+    val free = inference?.free == true
     var more by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var buying by remember { mutableStateOf(false) }
@@ -438,6 +443,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             val vendor = a.vendor.ifBlank { "no vendor yet" }
             Text(
                 when {
+                    free -> "Your own inference on $vendor. Nothing is charged."
                     !a.hasView -> "Account with $vendor"
                     a.balanceMicro <= 0 -> "No credit with $vendor"
                     else -> money(a.balanceMicro) + " credit with " + vendor
@@ -467,7 +473,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
                 TextButton(onClick = { changingVendor = false }) { Text("Keep it") }
             }
         }
-        if (a.hasView) {
+        if (a.hasView && !free) {
             balanceWarning(a, io.nisfeb.talon.ui.isArmillaryPurchaseSupported)?.let { Quiet(it, error = true) }
             Quiet(planLine(a))
             paymentLine(payment, a.checkouts.firstOrNull { it.nonce == payment?.nonce })?.let { line ->
@@ -492,6 +498,11 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             } else Button(onClick = { repo?.setUpDevice(io.nisfeb.talon.ui.platformLabel) }) { Text("Set up this device") }
         }
     }
+    if (noPublicUrl) Quiet(
+        "Your ship has no public URL, so Talon reaches Armillary through the address you signed in with. " +
+            "Set Public URL in Armillary's Payments view so your other apps can reach it too.",
+        error = true,
+    )
     note?.let { (text, bad) -> Quiet(text, error = bad) }
 
     val subscription = plans.firstOrNull { it.kind == "subscription" }
@@ -501,7 +512,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         // Buying is the one part of this card that a store may refuse to
         // carry. The balance, the warning, the history and the vendor
         // stand without it; see isArmillaryPurchaseSupported.
-        if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) {
+        if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported && !free) {
             OutlinedButton(enabled = here && !inFlight, onClick = { buying = true }) { Text("Top up") }
             if (subscription != null && account?.subscriptionActive != true) {
                 TextButton(enabled = here && !inFlight, onClick = { subscribing = subscription; buying = true }) { Text(subscribeLabel(subscription)) }
@@ -553,7 +564,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     }
     if (leo && repo != null) BraveLeoLines(p, repo, account?.leaseDisabled == true)
 
-    if (buying && io.nisfeb.talon.ui.isArmillaryPurchaseSupported) TopUpSheet(
+    if (buying && io.nisfeb.talon.ui.isArmillaryPurchaseSupported && !free) TopUpSheet(
         plans = plans,
         subscribing = subscribing,
         onDismiss = { buying = false; subscribing = null },

@@ -34,8 +34,12 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 object ArmillaryTranscribe {
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** The vendor answers within two minutes or says 504; a little more for the upload. */
-    private const val TIMEOUT_MS = 150_000L
+    /**
+     * The proxy waits up to ten minutes on an upstream (armillary 33), and
+     * a self-vendor's own speech server is decoded on the ship first,
+     * about 11 s per 3.6 MB: [ARMILLARY_WAIT_MS] covers both.
+     */
+    private const val TIMEOUT_MS = ARMILLARY_WAIT_MS
 
     /** The request body: the audio as base64, kept to endpoints that keep nothing. */
     @OptIn(ExperimentalEncodingApi::class)

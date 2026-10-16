@@ -85,6 +85,16 @@ class ArmillaryRepo(
      */
     val keyProblem: StateFlow<String?> = _keyProblem.asStateFlow()
 
+    private val _noPublicUrl = MutableStateFlow(false)
+
+    /**
+     * The ship is its own vendor and has no public URL, so its inference
+     * base reads http://localhost:8080, which no other device reaches.
+     * Talon uses the ship address it signed in with instead, and the card
+     * asks the owner to set Public URL in Armillary's Payments view.
+     */
+    val noPublicUrl: StateFlow<Boolean> = _noPublicUrl.asStateFlow()
+
     private val _deletion = MutableStateFlow<Deletion?>(null)
 
     /**
@@ -475,16 +485,34 @@ class ArmillaryRepo(
             val had = row.models.firstOrNull { it.id == id }
             ModelInfo(id = id, name = id, zdr = id in zdr, tools = had?.tools, contextLength = had?.contextLength)
         }
-        val base = inf.baseUrl.trim().trimEnd('/').ifBlank { null }
-        val searchUrl = inf.searchUrl.trim().trimEnd('/').ifBlank { null }
+        val local = selfVendorOnLocalhost(inf.baseUrl)
+        _noPublicUrl.value = local
+        val base = reachable(inf.baseUrl, local).trim().trimEnd('/').ifBlank { null }
+        val searchUrl = reachable(inf.searchUrl, local).trim().trimEnd('/').ifBlank { null }
         val next = row.copy(baseUrl = base, apiKey = inf.key, models = models, suggested = inf.suggested, suggestedTiers = inf.suggestedTiers, searchUrl = searchUrl, searchKey = inf.searchKey)
         val updated = profile.copy(providers = profile.providers.map { if (it.id == ARMILLARY_PROVIDER) next else it })
         if (updated == profile) return
         ai.setProfile(updated)
     }
 
+    /** The ship is its own vendor and answered a base on its own loopback ([noPublicUrl]). */
+    private fun selfVendorOnLocalhost(base: String): Boolean {
+        if (!base.trim().startsWith(LOOPBACK_BASE)) return false
+        val vendor = _account.value?.vendor?.trim()?.removePrefix("~") ?: return false
+        return vendor.isNotBlank() && vendor == ship?.trim()?.removePrefix("~")
+    }
+
+    /** [url] on the ship address this device signed in with, where the ship answered its loopback. */
+    private fun reachable(url: String, local: Boolean): String {
+        val here = shipUrl?.trim()?.trimEnd('/')
+        return if (local && here != null && url.trim().startsWith(LOOPBACK_BASE)) here + url.trim().removePrefix(LOOPBACK_BASE) else url
+    }
+
     companion object {
         private const val TAG = "ArmillaryRepo"
+
+        /** What a ship with no public_url answers as its base (armillary 33). */
+        private const val LOOPBACK_BASE = "http://localhost:8080"
 
         /** OpenRouter's public list, which says what each model can do; no key is sent. */
 

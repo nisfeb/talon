@@ -539,5 +539,9 @@ class AiSettingsSectionTest {
         waitForIdle()
         assertTrue(onAllNodesWithText("Top up to turn on.").fetchSemanticsNodes().isEmpty(), "its zero balance is no reason")
         onNodeWithText("Catch-up").assertExists()
+        onNodeWithText("Nothing is charged.", substring = true).assertExists()
+        listOf("Top up", "Empty:", "No credit", "Pay as you go.").forEach {
+            assertTrue(onAllNodesWithText(it, substring = it != "Top up").fetchSemanticsNodes().isEmpty(), "no '$it' for a ship that pays nothing")
+        }
     }
 }

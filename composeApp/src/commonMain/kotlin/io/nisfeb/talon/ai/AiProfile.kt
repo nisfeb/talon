@@ -177,15 +177,17 @@ data class AiProfile(
     fun vendorZdr(f: AiFeature): Boolean = followsVendor(f)
 
     /**
-     * The vendor's decision model and the key it runs on: the lease's
-     * own OpenRouter key, so only under a lease, where the decisions
-     * route is OpenRouter's. Null where the vendor names none.
+     * The vendor's decision model, the route it is asked on and the key:
+     * under a lease OpenRouter's own decisions route, through the proxy
+     * the vendor's (armillary 34), both found from the row's base
+     * ([decisionsUrl]). Null where the vendor names no decision model.
      */
-    fun vendorDecision(): Pair<String, String>? {
+    fun vendorDecision(): VendorDecision? {
         val row = armillary() ?: return null
         val model = row.suggested["decision"]?.takeIf { it.isNotBlank() } ?: return null
-        if (row.apiKey.isBlank() || "openrouter.ai" !in row.baseUrl.orEmpty()) return null
-        return row.apiKey to model
+        val base = row.baseUrl?.takeIf { it.isNotBlank() } ?: return null
+        if (row.apiKey.isBlank()) return null
+        return VendorDecision(decisionsUrl(base), row.apiKey, model)
     }
 
     /** What [ref] runs on, or null where it names no provider this profile has. */
@@ -266,6 +268,17 @@ fun AiProfile.pinningModels(): AiProfile {
     return copy(defaultModel = pin(defaultModel), features = features.mapValues { (_, f) -> f.copy(model = pin(f.model)) })
 }
 
+/** Where the decision model is asked, with which key, and which model. */
+data class VendorDecision(val url: String, val key: String, val model: String)
+
+/**
+ * The decisions route for an inference base: a trailing "/v1" becomes
+ * "/alpha/decisions" (armillary 34; Orrery's decider-url follows the same
+ * rule). OpenRouter's https://openrouter.ai/api/v1 gives its own route,
+ * and the proxy's base gives the vendor's.
+ */
+fun decisionsUrl(base: String): String = base.trim().trimEnd('/').removeSuffix("/v1") + "/alpha/decisions"
+
 /** A feature's provider and model. */
 data class Resolved(val provider: AiProvider, val model: String) {
     val private: Boolean get() = provider.isPrivate
@@ -307,6 +320,13 @@ const val SPEECH_PROVIDER = "speech"
 
 /** The one Armillary row: a device buys from one ship, its own. */
 const val ARMILLARY_PROVIDER = "armillary"
+
+/**
+ * How long a call through Armillary may wait: its proxy waits up to ten
+ * minutes for an upstream (armillary 33), and a minute more covers the
+ * trip there and back. A model the owner runs on modest hardware is slow.
+ */
+const val ARMILLARY_WAIT_MS = 11 * 60_000L
 const val WHISPER = "whisper-1"
 
 internal fun providerOf(k: ProviderKind): AiSettings.Provider? = when (k) {
@@ -402,6 +422,7 @@ fun AiSettings.Config.forFeature(f: AiFeature): AiSettings.Config {
         // vendor's own proxy otherwise.
         usageInclude = r.provider.kind == ProviderKind.OpenRouter || r.provider.kind == ProviderKind.Armillary,
         zdrOnly = profile().vendorZdr(f),
+        upstreamTimeoutMs = if (r.provider.kind == ProviderKind.Armillary) ARMILLARY_WAIT_MS else 0,
     )
 }
 
