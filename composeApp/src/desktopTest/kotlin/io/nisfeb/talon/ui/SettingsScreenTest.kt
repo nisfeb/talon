@@ -408,23 +408,7 @@ class SettingsScreenTest {
 
     // ─── the AI tab's assistant extras, and Account ────────────────
 
-    private fun assistantOn() = FakeAiSettings(
-        io.nisfeb.talon.ai.AiSettings.Config(provider = io.nisfeb.talon.ai.AiSettings.Provider.Anthropic, apiKey = "sk-ant", model = null, agentEnabled = true),
-    )
-
-    @Test
-    fun `the assistant's web search key is saved, and only when it changed`() {
-        val ai = assistantOn()
-        settings(ai = ai) {
-            tap("AI")
-            onNodeWithText("Save key").performScrollTo().assertIsNotEnabled()
-            onNode(hasSetTextAction() and hasText("Brave Search key")).performTextInput(" brv-1 ")
-            onNodeWithText("Save key").performClick()
-            waitForIdle()
-            assertEquals("brv-1", ai.state.value.braveApiKey)
-            onNodeWithText("Save key").assertIsNotEnabled()
-        }
-    }
+    private fun assistantOn() = FakeAiSettings(io.nisfeb.talon.ai.paidSettings())
 
     @Test
     fun `a system prompt is edited under advanced, saved as changed, and reset to the default saves nothing`() {
@@ -458,42 +442,6 @@ class SettingsScreenTest {
         settings(ai = FakeAiSettings(io.nisfeb.talon.ai.AiSettings.Config(provider = io.nisfeb.talon.ai.AiSettings.Provider.Anthropic, apiKey = "sk-ant", model = null))) {
             tap("AI")
             assertTrue(onAllNodesWithText("Loops").fetchSemanticsNodes().isEmpty(), "a key alone does not run them")
-        }
-    }
-
-    @Test
-    fun `web search that comes with Armillary asks for no key`() {
-        val armillary = io.nisfeb.talon.ai.AiProvider(
-            io.nisfeb.talon.ai.ARMILLARY_PROVIDER, io.nisfeb.talon.ai.ProviderKind.Armillary, "Armillary",
-            searchUrl = "https://wex.example/apps/armillary/search", searchKey = "k.s",
-        )
-        val ai = FakeAiSettings(
-            io.nisfeb.talon.ai.AiSettings.Config(
-                provider = io.nisfeb.talon.ai.AiSettings.Provider.Anthropic, apiKey = "sk-ant", model = null, agentEnabled = true,
-                savedProfile = io.nisfeb.talon.ai.AiProfile(providers = listOf(armillary)),
-            ),
-        )
-        settings(ai = ai) {
-            tap("AI")
-            assertTrue(onAllNodesWithText("Web search comes with Armillary.").fetchSemanticsNodes().isNotEmpty())
-            assertTrue(onAllNodes(hasSetTextAction() and hasText("Brave Search key")).fetchSemanticsNodes().isEmpty())
-        }
-    }
-
-    @Test
-    fun `syncing the AI settings is switched off where there are keys to sync`() {
-        val ai = assistantOn()
-        settings(ai = ai) {
-            tap("AI")
-            tap("Advanced")
-            switchBeside("Copy AI keys to my other devices").performClick()
-            waitForIdle()
-            assertFalse(ai.state.value.syncEnabled)
-        }
-        settings {
-            tap("AI")
-            assertTrue(onAllNodesWithText("Advanced").fetchSemanticsNodes().isEmpty(), "nothing to sync and no assistant: nothing under Advanced")
-            assertTrue(onAllNodesWithText("Copy AI keys to my other devices").fetchSemanticsNodes().isEmpty(), "nothing to sync, nothing to switch")
         }
     }
 

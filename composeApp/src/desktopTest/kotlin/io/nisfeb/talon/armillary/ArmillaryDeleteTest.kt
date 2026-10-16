@@ -195,7 +195,7 @@ class ArmillaryDeleteTest {
         val r = repo(ai)
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r) }
             }
         }
         more("Delete account")
@@ -222,7 +222,7 @@ class ArmillaryDeleteTest {
         val r = repo(ai)
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r) }
             }
         }
         more("Delete account")
@@ -242,7 +242,7 @@ class ArmillaryDeleteTest {
         val r = repo(ai)
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r) }
             }
         }
         more("Delete account")

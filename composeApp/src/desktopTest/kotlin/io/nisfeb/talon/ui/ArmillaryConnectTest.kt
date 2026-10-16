@@ -105,7 +105,7 @@ class ArmillaryConnectTest {
     private fun ComposeUiTest.show(ai: FakeAiSettings, repo: ArmillaryRepo) = setContent {
         TalonTheme(darkTheme = false) {
             if (shown) Column(Modifier.verticalScroll(rememberScrollState())) {
-                AiSettingsSection(ai, orrery = null, armillary = repo, catalog = quietCatalog())
+                AiSettingsSection(ai, orrery = null, armillary = repo)
             }
         }
     }

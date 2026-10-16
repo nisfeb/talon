@@ -96,6 +96,13 @@ class ArmillaryRepo(
 
     private var api: ArmillaryApi? = null
     private var shipUrl: String? = null
+
+    /**
+     * Armillary's own page on this ship, where the owner picks their own
+     * models or brings their own provider key (the AI tab's "Manage models
+     * in Armillary"). Null until attached.
+     */
+    val pageUrl: String? get() = shipUrl?.trimEnd('/')?.let { "$it/apps/armillary#catalog" }
     private var ship: String? = null
     private var watching: Job? = null
     private var adopting: Job? = null

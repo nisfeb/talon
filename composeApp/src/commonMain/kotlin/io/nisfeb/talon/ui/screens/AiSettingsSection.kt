@@ -50,17 +50,10 @@ import io.nisfeb.talon.ai.ARMILLARY_PROVIDER
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.AiSpend
+import io.nisfeb.talon.ai.profile
 import io.nisfeb.talon.ai.FeatureSetting
-import io.nisfeb.talon.ai.ModelCatalog
 import io.nisfeb.talon.util.runSuspendCatching
-import io.nisfeb.talon.ai.ModelInfo
-import io.nisfeb.talon.ai.ModelRef
-import io.nisfeb.talon.ai.ProfileInputs
 import io.nisfeb.talon.ai.ProviderKind
-import io.nisfeb.talon.ai.defaultModel
-import io.nisfeb.talon.ai.followingVendor
-import io.nisfeb.talon.ai.vendorDefault
-import io.nisfeb.talon.ai.migrateProfile
 import io.nisfeb.talon.ai.without
 import io.nisfeb.talon.armillary.Account
 import io.nisfeb.talon.armillary.ArmillaryAvailability
@@ -90,7 +83,6 @@ import io.nisfeb.talon.ui.isCallRecordingSupported
 import io.nisfeb.talon.ui.isQuickDictationSupported
 import io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
-import io.nisfeb.talon.ai.transcriptionRef
 import io.nisfeb.talon.ui.isTouchPrimary
 import io.nisfeb.talon.urbit.isValidPatp
 import io.nisfeb.talon.util.nowMs
@@ -98,203 +90,100 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Settings > AI as the owner thinks of it: the providers they have, one
- * default model, and a row per feature with its switch and its model.
- * docs/superpowers/specs/2026-09-19-ai-settings-redesign.md is the plan;
- * the 2026-10-12 pass took out what the app can decide itself and moved
- * this device's own model and the decision model to the Orrery page.
- *
- * Until the owner changes something here the profile shown is the one
- * the old settings make, with what only the ship and the orrery pipe
- * know (Feed Orrery, the generator, the decision model) folded in; the
- * first change saves it.
+ * Settings > AI: Armillary-only (docs/superpowers/specs/2026-10-16-armillary-only-design.md).
+ * The Armillary card, a link to Armillary's own page for anyone who
+ * wants to pick models or bring a key, and one switch per feature. A
+ * payment turns them all on; until there is credit and a key, each says
+ * so. sneagan, 2026-10-16: "the easiest case needs to be paying a few
+ * bucks which should just turn everything on and call it a day."
  */
 @Composable
 fun AiSettingsSection(
     aiSettings: AiSettingsRepository,
     orrery: OrreryRepo?,
     armillary: ArmillaryRepo? = null,
-    catalog: ModelCatalog = remember { ModelCatalog() },
 ) {
-    val scope = rememberCoroutineScope()
+    val uri = LocalUriHandler.current
     val cfg by aiSettings.state.collectAsState()
-    // One collection each whether or not there is a ship, so nothing moves about.
-    val noFlag = remember { MutableStateFlow(false) }
-    val noGen = remember { MutableStateFlow<io.nisfeb.talon.orrery.GeneratorSettings?>(null) }
-    val fed by (orrery?.enabled ?: noFlag).collectAsState()
-    val gen by (orrery?.generatorSettings ?: noGen).collectAsState()
-    val noInference = remember { MutableStateFlow<Inference?>(null) }
-    // How an Armillary model is reached, which decides what the rows
-    // that read messages warn about.
-    val armillaryMode by (armillary?.inference ?: noInference).collectAsState()
+    val profile = cfg.profile()
     val spend by AiSpend.month.collectAsState()
     LaunchedEffect(Unit) { AiSpend.load() }
-    if (orrery != null) LaunchedEffect(orrery) { orrery.loadGenerator() }
+    val noAccount = remember { MutableStateFlow<Account?>(null) }
+    val account by (armillary?.account ?: noAccount).collectAsState()
+    val noDeletion = remember { MutableStateFlow<Deletion?>(null) }
+    val deletion by (armillary?.deletion ?: noDeletion).collectAsState()
+    // Always from the settings as they are now, not as this screen last drew them.
+    fun edit(change: (AiProfile) -> AiProfile) = aiSettings.setProfile(change(aiSettings.state.value.profile()))
+    fun setOn(f: AiFeature, on: Boolean) =
+        edit { p -> p.copy(features = p.features + (f to (p.features[f] ?: FeatureSetting()).copy(on = on))) }
+    val row = profile.armillary()
 
-    fun starting(): AiProfile = migrateProfile(
-        aiSettings.state.value,
-        ProfileInputs(
-            orreryFed = orrery?.enabled?.value == true,
-            generatorOn = orrery?.generatorSettings?.value?.enabled == true,
-            generatorUrl = orrery?.generatorSettings?.value?.url,
-            generatorModel = orrery?.generatorSettings?.value?.model,
-        ),
-    )
-    val started = remember(cfg, fed, gen) { starting() }
-    val profile = cfg.savedProfile ?: started
-    // Always from the settings as they are now: a fetch lands after the screen has moved on.
-    // The ship's generator moves with the default where it follows it.
-    fun edit(change: (AiProfile) -> AiProfile) {
-        val before = aiSettings.state.value.savedProfile ?: starting()
-        aiSettings.setProfile(change(before))
-        aiSettings.state.value.savedProfile?.let { orrery?.followDefault(before, it) }
+    Heading("Armillary")
+    Quiet("Talon's AI comes through Armillary on your ship: you top up, your ship pays for what you use, and every feature below runs on the models your vendor picks. They keep nothing they read.")
+    if (profile.ownKeysDropped) Row(verticalAlignment = Alignment.CenterVertically) {
+        Quiet("Your own AI keys are no longer used. To use your own provider, manage models in Armillary.", error = true)
+        TextButton(onClick = { edit { it.copy(ownKeysDropped = false) } }) { Text("OK") }
     }
-    fun setFeature(f: AiFeature, change: (FeatureSetting) -> FeatureSetting) =
-        edit { p -> p.copy(features = p.features + (f to change(p.features[f] ?: FeatureSetting()))) }
-    val chat = profile.providers.filter { it.kind != ProviderKind.ThisDevice }
-    // Each provider's models, fetched again on opening. They were fetched
-    // only when a key was saved here and do not travel with the profile,
-    // so a device given its key by sync had nothing to search, and a list
-    // from before a model came out could not find it ("opus 5.5", sneagan,
-    // 2026-10-07). Saved only where the list changed; a profile not yet
-    // saved is left as it is, since looking saves nothing.
-    LaunchedEffect(Unit) {
-        val saved = cfg.savedProfile ?: return@LaunchedEffect
-        saved.providers.filter { it.canFetchModels() }.forEach { p ->
-            runSuspendCatching { catalog.fetch(p) }.onSuccess { c ->
-                if (c.models != p.models || c.jev != p.offersJev) {
-                    edit { it.copy(providers = it.providers.map { q -> if (q.id == p.id) q.withCatalog(c) else q }) }
+    deletion?.let { Quiet(deletionLine(it)) }
+    if (row == null) {
+        // Nothing reaches the vendor before this press: the ship meets it
+        // when the owner asks to buy, not when they look.
+        val connect = {
+            edit { it.copy(providers = it.providers + AiProvider(ARMILLARY_PROVIDER, ProviderKind.Armillary, ProviderKind.Armillary.label)) }
+            armillary?.setUpDevice(io.nisfeb.talon.ui.platformLabel)
+            Unit
+        }
+        if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) StartWithArmillary(onStart = connect)
+        else {
+            // No buying here (the store's rule): a ship that pays from
+            // another device connects this one.
+            Quiet("Top up on another of your devices, then connect this one.")
+            OutlinedButton(enabled = armillary != null, onClick = connect) { Text("Connect this device") }
+        }
+    } else {
+        OutlinedCard(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    io.nisfeb.talon.ui.ArmillaryLogo()
+                    Text(row.label, style = MaterialTheme.typography.bodyLarge)
                 }
+                ArmillaryLines(row, armillary)
             }
         }
     }
-
-    // ── Providers ──────────────────────────────────────────────
-    Heading("Providers")
-    Quiet("Where Talon gets its AI. Private means it runs on your own machines. Not kept means the service promises not to store what you send.")
-    // Nothing set up at all is the one moment to say what Armillary is
-    // for. Everywhere else it is a row among rows; here it is the
-    // difference between having AI in Talon and going off to sign up
-    // somewhere for a key first.
-    // Not providers.isEmpty(): this device is always a provider, since
-    // every platform has a local rung, so that is never true. What is
-    // meant is nothing the owner had to go and set up.
-    // Not where credit cannot be bought here: a pitch for a service paid
-    // for somewhere else is what the store forbids.
-    val noDeletion = remember { MutableStateFlow<Deletion?>(null) }
-    val deletion by (armillary?.deletion ?: noDeletion).collectAsState()
-    deletion?.let { Quiet(deletionLine(it)) }
-    if (chat.isEmpty() && deletion == null && io.nisfeb.talon.ui.isArmillaryPurchaseSupported) StartWithArmillary(
-        onStart = {
-            // And make it the default, where there is none: the card says
-            // there is nothing more to set up, and with no default model
-            // nothing resolves and no feature runs. A blank model is the
-            // ship's first, which is what resolve reads it as.
-            edit { it.copy(providers = it.providers + AiProvider(ARMILLARY_PROVIDER, ProviderKind.Armillary, ProviderKind.Armillary.label), defaultModel = it.defaultModel ?: ModelRef(ARMILLARY_PROVIDER, "")) }
-            armillary?.setUpDevice(io.nisfeb.talon.ui.platformLabel)
-        },
-    )
-    // This device's own model is triage's alone: it is on the Orrery page.
-    showOrder(chat, profile.defaultModel).forEach { p ->
-        ProviderCard(
-            p = p,
-            catalog = catalog,
-            armillary = armillary,
-            onSave = { next -> edit { it.copy(providers = it.providers.map { q -> if (q.id == next.id) next else q }) } },
-            onRemove = { edit { it.without(p.id) } },
-        )
+    armillary?.pageUrl?.let { page ->
+        TextButton(onClick = { uri.openUri(page) }) { Text("Manage models in Armillary") }
+        Quiet("Pick your own models, or use your own provider key, on Armillary's page on your ship.")
     }
-    AddProvider(hasArmillary = profile.provider(ARMILLARY_PROVIDER) != null) { kind ->
-        // One Armillary row, on the stable id the repo writes to: this
-        // device buys from one ship, its own.
-        val p = if (kind == ProviderKind.Armillary) {
-            AiProvider(ARMILLARY_PROVIDER, kind, kind.label)
-        } else {
-            AiProvider("p" + nowMs().toString(36), kind, kind.label, baseUrl = if (kind == ProviderKind.OpenAiCompatible && !isTouchPrimary) "http://localhost:1234/v1" else null)
-        }
-        // The first one is the default model too: with none, nothing
-        // resolves, and the features that need a model stayed hidden
-        // with nothing saying why. A blank model is the provider's own.
-        edit { it.copy(providers = it.providers + p, defaultModel = it.defaultModel ?: ModelRef(p.id, "")) }
-        if (kind == ProviderKind.Armillary) armillary?.setUpDevice(io.nisfeb.talon.ui.platformLabel)
-    }
-
-    // ── Default model ──────────────────────────────────────────
-    Spacer(Modifier.height(12.dp))
-    Heading("Default model")
-    Quiet("Used by every feature unless you pick another below.")
-    ModelPicker(profile, profile.defaultModel, allowDefault = false, providers = chat) { ref -> edit { it.copy(defaultModel = ref, defaultOwn = true) } }
-    profile.vendorDefault()?.takeIf { profile.defaultModel != ModelRef(ARMILLARY_PROVIDER, "") }?.let { v ->
-        TextButton(onClick = { edit { it.copy(defaultModel = ModelRef(ARMILLARY_PROVIDER, ""), defaultOwn = false) } }) { Text("Use Armillary's pick, ${shortModelName(v)}") }
-    }
-    Quiet(
-        "Catch-up and the assistant send the messages you ask about to this model. Pick one marked Private or Not kept so they are not stored. " +
-            if (profile.providers.none { it.kind == ProviderKind.OpenAiCompatible }) "LM Studio or Ollama on a computer of yours is private: add it as a server of your own above." else "",
-    )
 
     // ── Features ───────────────────────────────────────────────
     Spacer(Modifier.height(12.dp))
     HorizontalDivider()
     Heading("Features")
-    // The models an Armillary vendor picks (armillary 19). A feature the
-    // owner picked by hand, here or on the ship's orrery, has one button
-    // back; orrery reads Armillary itself when told to follow.
-    if (profile.armillary()?.suggested?.isNotEmpty() == true) {
-        Quiet("Armillary picks a model for each feature. Choose your own to change it.")
+    // Why a feature that is on does nothing yet, in one line, or null.
+    val waiting: String? = when {
+        row == null -> if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up to turn on." else "Connect this device to turn on."
+        account?.hasView == true && account!!.balanceMicro <= 0 -> if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up to turn on." else "Waiting on credit."
+        row.apiKey.isBlank() -> "Waiting on this device's key from your ship."
+        else -> null
     }
-    FeatureRow(
-        "Catch-up", "Offers a summary when you open a chat with unread messages. Those messages go to the model below when you tap it.",
-        on = profile.isOn(AiFeature.CatchUp), spent = spend[AiFeature.CatchUp.name],
-        onSwitch = { on -> setFeature(AiFeature.CatchUp) { it.copy(on = on) } },
-    ) {
-        FeatureModel(
-            profile, AiFeature.CatchUp, chat, reads = true, armillaryMode = armillaryMode?.mode,
-            onFollow = { setFeature(AiFeature.CatchUp) { it.followingVendor() } },
-        ) { ref -> setFeature(AiFeature.CatchUp) { it.copy(model = ref, own = true) } }
-    }
-    if (isAssistantSupported) FeatureRow(
-        "Assistant", "Ask about your chats, or have it send and reply for you. It asks before changing anything. Loops run on it, and only while it is on.",
-        on = profile.isOn(AiFeature.Assistant), spent = spend[AiFeature.Assistant.name],
-        onSwitch = { on -> setFeature(AiFeature.Assistant) { it.copy(on = on) } },
-    ) {
-        FeatureModel(
-            profile, AiFeature.Assistant, chat, reads = true, flag = { if (it.tools == false) "no tool use" else null }, armillaryMode = armillaryMode?.mode,
-            onFollow = { setFeature(AiFeature.Assistant) { it.followingVendor() } },
-        ) { ref -> setFeature(AiFeature.Assistant) { it.copy(model = ref, own = true) } }
-    }
-    // Quick dictation runs the assistant on what was said, unattended, so
-    // it is on while the assistant is; only its model is its own. Per
-    // device: it never travels to an install that could not read it.
-    if (isQuickDictationSupported && isAssistantSupported && profile.isOn(AiFeature.Assistant)) FeatureRow(
-        "Dictation", "What a spoken note, question or errand runs on. A faster model answers sooner. Default is the assistant's model.",
-        on = true, spent = spend[AiFeature.Dictation.name], onSwitch = {}, switch = false,
-    ) {
-        FeatureModel(
-            profile, AiFeature.Dictation, chat, reads = true, flag = { if (it.tools == false) "no tool use" else null }, armillaryMode = armillaryMode?.mode,
-            onFollow = { setFeature(AiFeature.Dictation) { it.followingVendor() } },
-        ) { ref -> setFeature(AiFeature.Dictation) { it.copy(model = ref, own = true) } }
-    }
+    @Composable
+    fun Paid(f: AiFeature, title: String, line: String) = FeatureRow(
+        title, line, on = profile.isOn(f), spent = spend[f.name], onSwitch = { setOn(f, it) },
+    ) { waiting?.let { Quiet(it) } }
+    Paid(AiFeature.CatchUp, "Catch-up", "Offers a summary when you open a chat with unread messages. Those messages go to the model when you tap it.")
+    if (isAssistantSupported) Paid(
+        AiFeature.Assistant, "Assistant",
+        "Ask about your chats, or have it send and reply for you. It asks before changing anything. Loops and quick dictation run on it, and only while it is on.",
+    )
     // Where a party line can be recorded: there is nothing to transcribe elsewhere.
-    if (isCallRecordingSupported) {
-        val speech = profile.providers.filter { it.kind == ProviderKind.OpenAi || it.kind == ProviderKind.OpenAiCompatible }
-        FeatureRow(
-            "Transcription", "Writes recorded party lines up as text. Needs an OpenAI account or a server of your own with a speech model.",
-            on = profile.isOn(AiFeature.Transcription), spent = null, switchEnabled = speech.isNotEmpty(),
-            onSwitch = { on -> setFeature(AiFeature.Transcription) { it.copy(on = on) } },
-        ) {
-            if (speech.isEmpty()) Quiet("Add an OpenAI provider, or a server of your own with a speech model.")
-            else ModelPicker(profile, profile.transcriptionRef(), allowDefault = false, providers = speech, only = { it.speech }) { ref ->
-                setFeature(AiFeature.Transcription) { it.copy(model = ref) }
-            }
-        }
-    }
-    // The on-device index: search by meaning, topics and highlights.
+    if (isCallRecordingSupported) Paid(AiFeature.Transcription, "Call transcripts", "Writes recorded party lines up as text, through Armillary's speech model.")
+    // The on-device index: search by meaning, topics and highlights. No credit needed.
     if (isOnDeviceAiSupported) AiSettings.Feature.values()
         .filter { !it.requiresCloudKey && isOnDeviceAiFeatureSupported(it) }
         .forEach { feature ->
             FeatureRow(feature.label, feature.description, on = aiFeatureEnabled(cfg, feature), spent = null, onSwitch = { aiSettings.setFeature(feature, it) })
         }
-
 }
 
 /**
@@ -310,32 +199,14 @@ fun AiSettingsSection(
 fun OrrerySettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?) {
     val scope = rememberCoroutineScope()
     val cfg by aiSettings.state.collectAsState()
-    val noFlag = remember { MutableStateFlow(false) }
     val noDecide = remember { MutableStateFlow(DecideSettings()) }
-    val noGen = remember { MutableStateFlow<io.nisfeb.talon.orrery.GeneratorSettings?>(null) }
     val noShip = remember { MutableStateFlow(OrreryAvailability.UNKNOWN) }
-    val fed by (orrery?.enabled ?: noFlag).collectAsState()
     val decide by (orrery?.decide?.settings ?: noDecide).collectAsState()
-    val gen by (orrery?.generatorSettings ?: noGen).collectAsState()
     val availability by (orrery?.availability ?: noShip).collectAsState()
     val spend by AiSpend.month.collectAsState()
     LaunchedEffect(Unit) { AiSpend.load() }
-    // Off, the generator's settings are not asked for: nothing of Orrery is.
-    if (orrery != null && cfg.savedProfile?.orrery == true) LaunchedEffect(orrery) { orrery.loadGenerator() }
-    fun starting(): AiProfile = migrateProfile(
-        aiSettings.state.value,
-        ProfileInputs(
-            orreryFed = orrery?.enabled?.value == true,
-            generatorOn = orrery?.generatorSettings?.value?.enabled == true,
-            generatorUrl = orrery?.generatorSettings?.value?.url,
-            generatorModel = orrery?.generatorSettings?.value?.model,
-        ),
-    )
-    val started = remember(cfg, fed, gen) { starting() }
-    val profile = cfg.savedProfile ?: started
-    fun edit(change: (AiProfile) -> AiProfile) = aiSettings.setProfile(change(aiSettings.state.value.savedProfile ?: starting()))
-    fun setFeature(f: AiFeature, change: (FeatureSetting) -> FeatureSetting) =
-        edit { p -> p.copy(features = p.features + (f to change(p.features[f] ?: FeatureSetting()))) }
+    val profile = cfg.profile()
+    fun edit(change: (AiProfile) -> AiProfile) = aiSettings.setProfile(change(aiSettings.state.value.profile()))
     val on = profile.orrery == true
     val orreryHere = orrery != null && availability == OrreryAvailability.PRESENT
     // A ship without Orrery has nothing to turn on: turned on, the page
@@ -402,8 +273,7 @@ fun OrrerySettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?)
     HorizontalDivider()
     Heading("Settings")
     if (orrery == null) Quiet("Sign in to a ship to set Orrery up.")
-    if (orrery != null && orreryHere) GeneratorOffer(orrery, profile) { ref -> setFeature(AiFeature.OrreryGenerator) { it.copy(model = ref, own = true) } }
-    if (orrery != null) ReadingRow(orrery, profile, orreryHere, spend[AiFeature.OrreryTriage.name]) { ref -> setFeature(AiFeature.OrreryTriage) { it.copy(model = ref, own = true) } }
+    if (orrery != null) ReadingRow(orrery, orreryHere, spend[AiFeature.OrreryTriage.name])
     Spacer(Modifier.height(12.dp))
     HorizontalDivider()
     // Until the owner flips it here, the decision model is what this device had.
@@ -431,8 +301,8 @@ private fun OrreryAbout() {
             "channels you pick, and your mail. You can turn each of these off in Orrery's own settings on your ship.",
         "Talon read your calls and your contacts' status lines on each of your devices, and share your contacts " +
             "and, if you allow it, where you are.",
-        "An AI model do the reading. You choose which: one on this device, one on a computer of yours, or a " +
-            "service you pick. A service sees the text it reads.",
+        "An AI model do the reading. Talon reads on this device. Your ship reads with the models your Armillary " +
+            "vendor picks, which keep nothing, unless you choose others in Orrery's own settings.",
         "Orrery keep what it finds on your ship. It is not sent to the makers of Talon or anyone else.",
         "Orrery suggest things like a calendar entry or a message. Nothing is done until you approve it " +
             "under Actions.",
@@ -460,131 +330,7 @@ internal fun Quiet(text: String, error: Boolean = false) {
     )
 }
 
-// ── Providers ──────────────────────────────────────────────────────
-
-@Composable
-private fun ProviderCard(
-    p: AiProvider,
-    catalog: ModelCatalog,
-    armillary: ArmillaryRepo?,
-    onSave: (AiProvider) -> Unit,
-    onRemove: () -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    var key by remember(p.apiKey) { mutableStateOf(p.apiKey) }
-    var url by remember(p.baseUrl) { mutableStateOf(p.baseUrl.orEmpty()) }
-    var reveal by remember { mutableStateOf(false) }
-    var busy by remember { mutableStateOf(false) }
-    var note by remember(p.id) { mutableStateOf<Pair<String, Boolean>?>(null) }
-    val edited = p.copy(apiKey = key.trim(), baseUrl = url.trim().ifBlank { null })
-    val dirty = edited.apiKey != p.apiKey || edited.baseUrl != p.baseUrl
-
-    // Saved first, then the models fetched: a fetch that hangs used to
-    // hold the key in the screen, and backing out of Settings took the
-    // key with it. Anthropic's and OpenAI's lists need the key, and a
-    // server's needs the server, so a list is the test; OpenRouter lists
-    // its models for anyone, so its key is tried as well.
-    fun load(of: AiProvider) {
-        onSave(of)
-        scope.launch {
-            busy = true
-            runCatching { catalog.fetch(of) }
-                .onSuccess { c ->
-                    onSave(of.withCatalog(c))
-                    note = if (of.kind != ProviderKind.OpenRouter) null else catalog.check(of).let { r -> if (r.ok) null else r.detail to true }
-                }
-                .onFailure { note = (it.message ?: "No answer.") to true }
-            busy = false
-        }
-    }
-
-    OutlinedCard(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (p.kind == ProviderKind.Armillary) io.nisfeb.talon.ui.ArmillaryLogo()
-                        Text(p.label, style = MaterialTheme.typography.bodyLarge)
-                    }
-                    if (p.label != p.kind.label) Quiet(p.kind.label)
-                }
-                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                TextButton(onClick = {
-                    // A lease is the vendor's key on loan: give it back,
-                    // or it sits out there held by a device that has
-                    // forgotten it. Not first: the row waited on the
-                    // ship's answer, and on a busy ship Remove did
-                    // nothing anyone could see.
-                    if (p.kind == ProviderKind.Armillary) armillary?.giveLeaseBack()
-                    onRemove()
-                }) { Text("Remove") }
-            }
-            if (p.kind == ProviderKind.Armillary) {
-                ArmillaryLines(p, armillary)
-                return@Column
-            }
-            if (p.kind == ProviderKind.OpenAiCompatible) {
-                OutlinedTextField(
-                    value = url, onValueChange = { url = it },
-                    label = { Text("Address") }, placeholder = { Text("http://localhost:1234/v1") },
-                    singleLine = true, modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            OutlinedTextField(
-                value = key, onValueChange = { key = it },
-                label = { Text(if (p.kind == ProviderKind.OpenAiCompatible) "Key (leave empty if your server has none)" else "API key") },
-                singleLine = true,
-                visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = {
-                    io.nisfeb.talon.ui.IconButton(tip = if (reveal) "Hide key" else "Show key", onClick = { reveal = !reveal }) {
-                        Icon(if (reveal) TalonIcons.VisibilityOff else TalonIcons.Visibility, contentDescription = if (reveal) "Hide key" else "Show key")
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Quiet(providerSummary(p))
-            note?.let { (text, bad) -> Quiet(text, error = bad) }
-            // One button: Save keeps the key, fetches the models and tries
-            // it. Shown until a list has come, for a server added with its
-            // address already filled in. The list is fetched again each
-            // time Settings opens.
-            if (dirty || p.models.isEmpty()) OutlinedButton(enabled = !busy, onClick = { load(edited) }) { Text("Save") }
-        }
-    }
-}
-
-/**
- * Providers as Settings lists them: the default model's first, then the
- * ones set up, then those still waiting on a key or an address, and this
- * device's own model last. Profile order within each. Profile order put
- * a keyless OpenRouter above a working Armillary (sneagan, 2026-10-08).
- */
-internal fun showOrder(providers: List<AiProvider>, default: ModelRef?): List<AiProvider> =
-    providers.sortedBy { p ->
-        when {
-            p.id == default?.provider -> 0
-            p.kind == ProviderKind.ThisDevice -> 3
-            p.isSetUp() -> 1
-            else -> 2
-        }
-    }
-
-/** Has what a call needs: a key, or a server's address. Armillary's key is the one its ship gave this device. */
-private fun AiProvider.isSetUp(): Boolean =
-    if (kind == ProviderKind.OpenAiCompatible) !baseUrl.isNullOrBlank() else apiKey.isNotBlank()
-
-internal fun providerSummary(p: AiProvider): String {
-    val retention = when (p.kind) {
-        ProviderKind.Anthropic, ProviderKind.OpenAi -> " Whether it keeps what you send depends on your account."
-        ProviderKind.OpenAiCompatible -> if (p.isPrivate) " Private: on your own machine or network." else " Not on your network, so it is an online service."
-        else -> ""
-    }
-    if (p.models.isEmpty()) return "Save to fetch its models." + retention
-    val kept = p.models.count { it.zdr }
-    return "${p.models.size} models" +
-        (if (p.kind == ProviderKind.OpenRouter) ", $kept of them Not kept" else "") +
-        "." + retention
-}
+// ── Armillary ──────────────────────────────────────────────────────
 
 /** What this device reads with, and its download where it needs one. */
 @Composable
@@ -959,6 +705,11 @@ private const val INTRODUCING_MS = 60_000L
  * the same sheet with its plan fixed and the card rail alone, since
  * subscriptions are card only.
  */
+/** What a payment turns on, said on the top-up sheet. */
+internal const val CONSENT_LINE =
+    "Paying turns on every AI feature. They send what you ask about, and the messages in a chat you summarise, " +
+        "to the models your vendor picks, which keep nothing."
+
 @Composable
 private fun TopUpSheet(
     plans: List<Plan>,
@@ -996,6 +747,8 @@ private fun TopUpSheet(
                     )
                     Quiet("In dollars. The smallest the vendor takes is " + money(minMicro) + ".")
                 }
+                // The payment is the opt-in for cloud reading (sneagan, 2026-10-16), so it says what it turns on.
+                Quiet(CONSENT_LINE)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val rails = if (subscribing != null) listOf("stripe" to "Card") else listOf("stripe" to "Card", "btcpay" to "Bitcoin")
                     rails.forEach { (id, label) ->
@@ -1163,277 +916,16 @@ private fun plural(n: Int, one: String) = "$n $one" + if (n == 1) "" else "s"
 private fun StartWithArmillary(onStart: () -> Unit) {
     androidx.compose.material3.Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Let your ship handle it", style = MaterialTheme.typography.titleSmall)
+            Text("Turn on AI", style = MaterialTheme.typography.titleSmall)
             Text(
-                "Armillary buys the models for you, through your own ship. No accounts to make, no API keys to " +
-                    "copy in, no bill to watch on somebody else's dashboard: you top up, your ship spends it, " +
-                    "and the balance is on this screen.",
+                "Catch-up, the assistant, dictation and call transcripts, paid as you go from a few dollars. " +
+                    "Armillary buys the models for you through your own ship: no accounts to make and no keys " +
+                    "to copy in. You top up, your ship spends it, and the balance is on this screen.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                "Already have a key from OpenRouter, Anthropic or OpenAI? Add it below instead, or run a model " +
-                    "on this machine.",
-                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Button(onClick = onStart, modifier = Modifier.align(Alignment.End)) { Text("Set up Armillary") }
         }
-    }
-}
-
-@Composable
-private fun AddProvider(hasArmillary: Boolean, onAdd: (ProviderKind) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    androidx.compose.foundation.layout.Box {
-        OutlinedButton(onClick = { open = true }) { Text("Add a provider") }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            val kinds = buildList {
-                // First, because it is the one that asks nothing of the
-                // owner: the others all begin with going and getting an
-                // API key. One at most, since a device buys from one
-                // ship, its own. (The enum keeps it last, where an old
-                // build that cannot decode the name will not meet it.)
-                if (!hasArmillary) add(ProviderKind.Armillary)
-                add(ProviderKind.OpenRouter)
-                add(ProviderKind.Anthropic)
-                add(ProviderKind.OpenAi)
-                add(ProviderKind.OpenAiCompatible)
-            }
-            kinds.forEach { k ->
-                DropdownMenuItem(
-                    text = { Text(k.label) },
-                    leadingIcon = if (k == ProviderKind.Armillary) ({ io.nisfeb.talon.ui.ArmillaryLogo() }) else null,
-                    onClick = { open = false; onAdd(k) },
-                )
-            }
-        }
-    }
-}
-
-// ── Model pickers ──────────────────────────────────────────────────
-
-private const val DEVICE_MODEL = "This device (private)"
-
-private fun AiProvider.offered(): List<ModelInfo> =
-    if (kind == ProviderKind.ThisDevice) listOf(ModelInfo("", DEVICE_MODEL)) else models
-
-/**
- * What a model picker shows for [ref]. An Armillary model goes by its
- * short name beside Armillary's logo, and Armillary's default (a blank
- * model, or the vendor's pick for a feature, [vendorPick]) is "Default ·
- * Opus 5.5". It read "Default: its default, Armillary" (sneagan, 2026-10-09).
- */
-internal fun refLabel(profile: AiProfile, ref: ModelRef?, vendorPick: Boolean = false): String {
-    val r = ref ?: return "No model yet"
-    val p = profile.provider(r.provider) ?: return "${r.model}, on a provider no longer here"
-    // Said three times over: "This device's own model, On this device · Private".
-    if (p.kind == ProviderKind.ThisDevice) return DEVICE_MODEL
-    if (p.kind == ProviderKind.Armillary) {
-        val model = profile.resolve(r)?.model.orEmpty()
-        val name = if (model.isBlank()) "no models yet" else shortModelName(model)
-        return if (vendorPick || r.model.isBlank()) "Default · $name" else name
-    }
-    val m = p.offered().firstOrNull { it.id == r.model }
-    val name = m?.name ?: r.model.ifBlank { "its default" }
-    val badge = when {
-        p.isPrivate -> " · Private"
-        m?.zdr == true -> " · Not kept"
-        else -> ""
-    }
-    return "$name, ${p.label}$badge"
-}
-
-/** A feature row following the default model: "Default: " and the model, or Armillary's own "Default · Opus 5.5". */
-internal fun defaultLabel(profile: AiProfile, ref: ModelRef? = profile.defaultModel): String {
-    ref ?: return "No model yet. Add a provider above."
-    val d = refLabel(profile, ref)
-    return if (d.startsWith("Default")) d else "Default: $d"
-}
-
-/**
- * A model id as a person says it: "anthropic/claude-opus-5.5" is "Opus
- * 5.5", "openai/gpt-5" is "GPT-5", "google/gemini-2.5-pro" is "Gemini
- * 2.5 Pro". Dashed version numbers join with a dot, and a date stamp
- * goes.
- */
-internal fun shortModelName(id: String): String {
-    val base = id.substringAfterLast('/').substringBefore(':').removePrefix("claude-")
-    val words = mutableListOf<String>()
-    for (w in base.split('-').filter { it.isNotEmpty() }) {
-        if (w.length == 8 && w.all { it.isDigit() }) continue
-        val last = words.lastOrNull()
-        if (last != null && w.all { it.isDigit() } && last.last().isDigit() && last.all { it.isDigit() || it == '.' }) words[words.size - 1] = "$last.$w"
-        else words += w
-    }
-    if (words.isEmpty()) return id
-    val cap = words.map { w -> if (w.first().isLetter()) w.replaceFirstChar { it.uppercase() } else w }
-    // OpenAI writes its own as one word: GPT-5, GPT-4o Mini.
-    if (words[0].equals("gpt", ignoreCase = true)) {
-        return if (cap.size == 1) "GPT" else (listOf("GPT-" + cap[1]) + cap.drop(2)).joinToString(" ")
-    }
-    return cap.joinToString(" ")
-}
-
-/**
- * A searchable list of models, grouped by provider, with their badges.
- * Typing an id a provider did not list offers it anyway: a server may
- * load a model on demand, and a list may not have been fetched.
- */
-@Composable
-private fun ModelPicker(
-    profile: AiProfile,
-    selected: ModelRef?,
-    allowDefault: Boolean,
-    providers: List<AiProvider>,
-    only: (ModelInfo) -> Boolean = { true },
-    flag: (ModelInfo) -> String? = { null },
-    /** [selected] is the Armillary vendor's pick, shown as its default. */
-    vendorPick: Boolean = false,
-    /** What "Default" runs on this row: the default model, except where a feature follows only some of it. */
-    defaultRef: ModelRef? = profile.defaultModel,
-    onPick: (ModelRef?) -> Unit,
-) {
-    var open by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
-    androidx.compose.foundation.layout.Box {
-        OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth()) {
-            val shown = if (selected == null && allowDefault) defaultRef else selected
-            if (shown?.let { profile.provider(it.provider) }?.kind == ProviderKind.Armillary) {
-                io.nisfeb.talon.ui.ArmillaryLogo(modifier = Modifier.padding(end = 8.dp))
-            }
-            Text(
-                if (selected == null && allowDefault) defaultLabel(profile, defaultRef) else refLabel(profile, selected, vendorPick),
-                modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            Icon(TalonIcons.ExpandMore, contentDescription = null)
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false; query = "" }, modifier = Modifier.heightIn(max = 460.dp)) {
-            OutlinedTextField(
-                value = query, onValueChange = { query = it },
-                placeholder = { Text("Search, or type a model's id", maxLines = 1, overflow = TextOverflow.Ellipsis) }, singleLine = true,
-                modifier = Modifier.padding(horizontal = 8.dp).fillMaxWidth(),
-            )
-            if (allowDefault) DropdownMenuItem(
-                text = { Text(defaultLabel(profile, defaultRef)) },
-                leadingIcon = if (defaultRef?.let { profile.provider(it.provider) }?.kind == ProviderKind.Armillary) {
-                    { io.nisfeb.talon.ui.ArmillaryLogo() }
-                } else null,
-                onClick = { open = false; query = ""; onPick(null) },
-            )
-            val q = query.trim()
-            showOrder(providers, profile.defaultModel).forEach { p ->
-                val all = p.offered().filter(only)
-                val shown = rankModels(q, all).take(80)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                ) {
-                    if (p.kind == ProviderKind.Armillary) io.nisfeb.talon.ui.ArmillaryLogo(size = 14.dp)
-                    Text(p.label, style = MaterialTheme.typography.labelMedium)
-                }
-                shown.forEach { m ->
-                    DropdownMenuItem(
-                        text = {
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(m.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                                if (p.isPrivate) Badge("Private")
-                                if (m.zdr) Badge("Not kept")
-                                flag(m)?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
-                            }
-                        },
-                        onClick = { open = false; query = ""; onPick(ModelRef(p.id, m.id)) },
-                    )
-                }
-                if (all.size > shown.size && q.isEmpty()) Quiet("   ${all.size - shown.size} more: search to narrow.")
-                if (q.isNotEmpty() && p.kind != ProviderKind.ThisDevice && all.none { it.id == q }) DropdownMenuItem(
-                    text = { Text("Use \"$q\" on ${p.label}") },
-                    onClick = { open = false; query = ""; onPick(ModelRef(p.id, q)) },
-                )
-                if (all.isEmpty() && q.isEmpty()) Quiet("   No models fetched. Type a model's id.")
-            }
-        }
-    }
-}
-
-/**
- * [models] that fit [query], best first: each word of it fuzzily in the
- * model's id or name (its letters in order, gaps allowed), a word the id
- * or name starts with before one inside it before letters strewn through.
- * "cl son" finds anthropic/claude-sonnet-4, "gpt4o" openai/gpt-4o. A
- * plain substring filter missed both. All of them, as listed, for none.
- */
-internal fun rankModels(query: String, models: List<ModelInfo>): List<ModelInfo> {
-    val words = query.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
-    if (words.isEmpty()) return models
-    return models.mapNotNull { m ->
-        val id = m.id.lowercase()
-        val name = m.name.lowercase()
-        var score = 0
-        for (w in words) score += io.nisfeb.talon.ui.fuzzyScore(w, id, name, id.substringAfterLast('/')) ?: return@mapNotNull null
-        m to score
-    }.sortedBy { it.second }.map { it.first }
-}
-
-@Composable
-private fun Badge(text: String) {
-    Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-}
-
-/** A feature's model picker, and the warning when a row that reads messages sends them where they may be kept. */
-@Composable
-private fun FeatureModel(
-    profile: AiProfile,
-    f: AiFeature,
-    providers: List<AiProvider>,
-    reads: Boolean,
-    flag: (ModelInfo) -> String? = { null },
-    /** How an Armillary model is reached, where one is chosen: `lease` or `proxy`. */
-    armillaryMode: String? = null,
-    /** Back to the Armillary vendor's model, for a feature the owner picked by hand. */
-    onFollow: (() -> Unit)? = null,
-    onPick: (ModelRef?) -> Unit,
-) {
-    val vendor = profile.vendorModel(f)
-    val follows = profile.followsVendor(f)
-    ModelPicker(
-        profile, if (follows && vendor != null) ModelRef(vendor.provider.id, vendor.model) else profile.pick(f),
-        allowDefault = !follows, providers = providers, flag = flag, vendorPick = follows, defaultRef = profile.defaultFor(f), onPick = onPick,
-    )
-    if (follows) Quiet("Armillary's pick.")
-    else if (vendor != null && onFollow != null) TextButton(onClick = onFollow) { Text("Use Armillary's pick, ${shortModelName(vendor.model)}") }
-    // Said where the model is picked. It used to surface, for triage
-    // only, on the device model's card, where "OpenRouter has no key"
-    // read as no provider at all (sneagan, 2026-10-08). A row on with no
-    // model at all said nothing, and its feature never appeared.
-    val r = profile.resolve(f)
-    if (r == null) Quiet("No model yet. Add a provider above.", error = true)
-    else r.takeIf { it.provider.kind != ProviderKind.ThisDevice }?.problem()?.let { Quiet(it, error = true) }
-    if (reads) readingWarning(profile, f, armillaryMode)?.let { Quiet(it, error = true) }
-}
-
-/**
- * Why this row's model may keep your messages, or null when it is
- * Private or ZDR. Armillary is two answers: under a lease the request
- * goes straight to the model provider, so a ZDR model is as safe there
- * as anywhere; through the proxy it passes the vendor's ship, which is
- * worth saying even of a ZDR model.
- */
-internal fun readingWarning(profile: AiProfile, f: AiFeature, armillaryMode: String? = null): String? {
-    val r = profile.resolve(f) ?: return null
-    val notKept = r.provider.models.firstOrNull { it.id == r.model }?.zdr == true
-    // Triage reads every call and status line, unasked; the others what you ask about.
-    val what = if (f == AiFeature.OrreryTriage) "Every call and status line read here goes" else "Messages you ask about go"
-    // Through the vendor's ship nothing is stored; the model decides the
-    // rest. Under a lease the request goes straight to the model provider,
-    // and is said as any other.
-    if (r.provider.kind == ProviderKind.Armillary && armillaryMode == "proxy") {
-        return "Messages pass through your vendor on the way to the model. " + if (notKept) "Nothing keeps them." else "The model may keep them."
-    }
-    if (r.private || notKept) return null
-    return when (r.provider.kind) {
-        ProviderKind.Anthropic, ProviderKind.OpenAi -> "$what to ${r.provider.label}. Whether they are kept depends on your account."
-        else -> "$what to this model and may be stored."
     }
 }
 
@@ -1474,7 +966,7 @@ private fun FeatureRow(
  * it can be picked.
  */
 @Composable
-private fun ReadingRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, spent: Double?, onPick: (ModelRef?) -> Unit) {
+private fun ReadingRow(orrery: OrreryRepo, here: Boolean, spent: Double?) {
     val scope = rememberCoroutineScope()
     val availability by orrery.availability.collectAsState()
     val fed by orrery.enabled.collectAsState()
@@ -1497,11 +989,8 @@ private fun ReadingRow(orrery: OrreryRepo, profile: AiProfile, here: Boolean, sp
             )
             return@Column
         }
-        FeatureModel(profile, AiFeature.OrreryTriage, profile.providers, reads = true, onPick = onPick)
-        if (profile.pick(AiFeature.OrreryTriage) == null && profile.defaultModel != null && profile.defaultFor(AiFeature.OrreryTriage) != profile.defaultModel) {
-            Quiet("Your default model is not private, so this device reads with its own. Pick a model here to read elsewhere.")
-        }
-        if (profile.resolve(AiFeature.OrreryTriage)?.provider?.kind == ProviderKind.ThisDevice) DeviceModelLine(orrery)
+        // Always this device's own: it reads every call and status line unasked.
+        DeviceModelLine(orrery)
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (fed) {
                 Quiet(if (lastMs != null) "Last sent ${agoLabel(lastMs!!)}." else "Not sent yet.")
@@ -1583,61 +1072,6 @@ private fun HealthRow() {
 }
 
 /**
- * Orrery on, and the ship's generator with no model or no key: nothing
- * writes the brief or proposes anything, and nothing said so. The AI set
- * up in Talon stays in Talon, so a first-time owner expected it to carry
- * over and it did not (a user's report, 2026-10-09). The one step that
- * gives the ship a model is offered here, first on the page, with the
- * model Orrery would use when the ship can reach it.
- */
-@Composable
-private fun GeneratorOffer(orrery: OrreryRepo, profile: AiProfile, onPick: (ModelRef?) -> Unit) {
-    val gen by orrery.generatorSettings.collectAsState()
-    var hidden by remember { mutableStateOf(false) }
-    val g = gen ?: return
-    if (hidden || (g.model != null && g.keySet)) return
-    val scope = rememberCoroutineScope()
-    var busy by remember { mutableStateOf(false) }
-    var note by remember { mutableStateOf<String?>(null) }
-    // Orrery's own pick when the ship can run it, else the default model.
-    val own = profile.features[AiFeature.OrreryGenerator]?.model
-    val ref = own?.takeIf { generatorProblem(generatorTarget(profile, it)) == null }
-    val target = generatorTarget(profile, ref)
-    val problem = generatorProblem(target)
-    OutlinedCard(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            // Orrery names a model of its own when none was given, so on a
-            // current ship it is the key that is missing.
-            Text(if (g.model == null) "Orrery needs an AI model on your ship" else "Orrery on your ship needs a key for its model", style = MaterialTheme.typography.titleSmall)
-            Quiet("Until it has one, Orrery cannot write your brief or suggest anything. The AI set up in Talon stays in Talon.")
-            if (target != null && problem == null) {
-                val label = refLabel(profile, ModelRef(target.first.id, target.second))
-                // What the tap lets happen, not only what it sends: the
-                // ship's chat and mail readers read with this model and key.
-                Quiet("With $label, your ship reads the chats and email you let it read, and writes your brief. Your ${target.first.label} key is copied to your ship." + if (ref == null) " It follows your default model from then on." else "")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(enabled = !busy, onClick = {
-                        note = null
-                        busy = true
-                        scope.launch {
-                            orrery.pointGenerator(profile, true, ref)
-                                .onSuccess { onPick(ref) }
-                                .onFailure { note = it.message ?: "The ship did not answer." }
-                            busy = false
-                        }
-                    }) { Text("Use $label") }
-                    TextButton(enabled = !busy, onClick = { hidden = true }) { Text("Not now") }
-                }
-            } else {
-                Quiet(problem ?: "")
-                TextButton(onClick = { hidden = true }) { Text("Not now") }
-            }
-            note?.let { Quiet(it, error = true) }
-        }
-    }
-}
-
-/**
  * The decision model, one switch: before the reading model sees a call or
  * a status line it screens it, keeps feelings off status lines, picks
  * whom it is about and flags what needs help soon ([Decider]), at the
@@ -1647,8 +1081,8 @@ private fun GeneratorOffer(orrery: OrreryRepo, profile: AiProfile, onPick: (Mode
  */
 @Composable
 private fun DecisionRow(profile: AiProfile, on: Boolean, spent: Double?, onSwitch: (Boolean) -> Unit) {
-    // Where the decisions call can go: an OpenRouter key, or the Armillary lease's.
-    val offered = profile.jevProvider() != null || profile.vendorDecision() != null
+    // Where the decisions call can go: the Armillary lease's key, where the vendor names a decision model.
+    val offered = profile.vendorDecision() != null
     FeatureRow(
         "Decision model",
         "A small, fast model that screens each call and status line before the reading model sees it. " +
@@ -1661,8 +1095,8 @@ private fun DecisionRow(profile: AiProfile, on: Boolean, spent: Double?, onSwitc
     ) {}
     if (!offered) {
         Quiet(
-            if (on) "Nothing offers a decision model now, so nothing is screened. Turn it off, or add an OpenRouter key under AI."
-            else "Needs an OpenRouter key under AI.",
+            if (on) "Your Armillary vendor offers no decision model now, so nothing is screened."
+            else "Your Armillary vendor offers no decision model.",
             error = on,
         )
     }
@@ -1686,12 +1120,4 @@ private fun MoreOrreryRow(orrery: OrreryRepo) {
         }
         TextButton(onClick = { runCatching { uri.openUri(page) } }) { Text("Open") }
     }
-}
-
-/** Whether a list can be asked for without the owner: OpenRouter's is public, the rest need a key or an address. */
-internal fun AiProvider.canFetchModels(): Boolean = when (kind) {
-    ProviderKind.OpenRouter -> true
-    ProviderKind.Anthropic, ProviderKind.OpenAi -> apiKey.isNotBlank()
-    ProviderKind.OpenAiCompatible -> !baseUrl.isNullOrBlank()
-    ProviderKind.Armillary, ProviderKind.ThisDevice -> false
 }
