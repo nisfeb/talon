@@ -11,15 +11,17 @@ import kotlin.math.sqrt
  * [giveUpMs] with no speech at all ([heard] stays false: nothing to send),
  * or at [maxMs] whatever is happening.
  *
- * Speech is a frame louder than [minSpeechRms] and than [overFloor] times
- * the quietest frame so far, which is the room. The quietest frame and not
- * the first: the owner may start talking before the first frame lands.
+ * Speech is a frame at least as loud as [minSpeechRms] and as [overFloor]
+ * times the quietest frame so far, which is the room. The quietest frame
+ * and not the first: the owner may start talking before the first frame
+ * lands.
  *
  * ponytail: an energy gate, not a voice model. Steady loud noise (a car,
  * a fan) raises the floor with it; a voice that does not rise [overFloor]
- * above it ends the dictation early, and [maxMs] ends one in a room that
- * never goes quiet. The thresholds are the calibration knobs; WebRTC's VAD
- * is the upgrade if they fail on the phone.
+ * above it is not heard, so the dictation ends early or hears nothing, and
+ * [maxMs] ends one in a room that never goes quiet. The thresholds are
+ * the calibration knobs; WebRTC's VAD is the upgrade if they fail on the
+ * phone.
  */
 class EndOfSpeech(
     private val sampleRate: Int,

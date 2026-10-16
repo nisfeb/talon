@@ -107,6 +107,18 @@ class EndOfSpeechTest {
     }
 
     @Test
+    fun `a voice exactly at either threshold is speech`() {
+        val atMinimum = EndOfSpeech(rate)
+        atMinimum.offer(frame(100))
+        atMinimum.offer(frame(500))
+        assertTrue(atMinimum.heard, "exactly the minimum")
+        val overNoise = EndOfSpeech(rate)
+        overNoise.offer(frame(1_500))
+        overNoise.offer(frame(4_500))
+        assertTrue(overNoise.heard, "exactly three times the room")
+    }
+
+    @Test
     fun `a whisper under the minimum is not speech`() {
         val gate = EndOfSpeech(rate)
         gate.offer(frame(50))
