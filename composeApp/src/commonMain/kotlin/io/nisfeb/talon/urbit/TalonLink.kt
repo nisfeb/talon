@@ -51,6 +51,31 @@ sealed interface TalonLink {
         /** A group reference standing alone in a message's text; group 1 is the flag. */
         val GROUP_REFERENCE = Regex("(?<!\\S)/1/group/(~$SHIP_BODY/[a-z0-9][a-z0-9-]*)(?!\\S)")
 
+        /**
+         * Tlon's reference to a channel post, `/1/chan/<nest>/msg/<post>`
+         * or `.../msg/<post>/<reply>` for a reply in its thread (Tlon's
+         * citeToPath of contentReferenceToCite), the ids dot-grouped as
+         * Tlon writes them. Pasted in a chat in Tlon or Talon it goes out as
+         * the post's cite, which both show as a card that opens the post.
+         */
+        fun messageReference(nest: String, id: String, parentId: String? = null): String =
+            "/1/chan/$nest/msg/" + if (parentId != null) "${ud(parentId)}/${ud(id)}" else ud(id)
+
+        /**
+         * What "Copy link" on a message copies: Tlon's reference where the
+         * message is a channel post, so it becomes a card in Tlon and in
+         * Talon. A DM or group DM post has no reference anyone outside it
+         * could open, so it stays Talon's own link.
+         */
+        fun linkFor(whom: String, id: String, parentId: String? = null): String =
+            if (NEST.matches(whom)) messageReference(whom, id, parentId) else forMessage(whom, id, parentId)
+
+        /** A message reference standing alone in a message's text; group 1 is the nest, group 2 the where. */
+        val CHAN_REFERENCE = Regex("(?<!\\S)/1/chan/((?:chat|heap|diary)/~$SHIP_BODY/[a-z0-9][a-z0-9-]*)(/msg/[0-9][0-9.]*(?:/[0-9][0-9.]*)?)(?!\\S)")
+
+        /** An @ud as Tlon writes it in a reference: digits grouped by threes with dots. */
+        private fun ud(id: String): String = id.replace(".", "").reversed().chunked(3).joinToString(".").reversed()
+
         /** The group a typed or pasted code names: `~host/name`, Tlon's reference to it, or Talon's group link. */
         fun groupFlag(code: String): String? {
             val t = code.trim()

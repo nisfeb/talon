@@ -3,6 +3,7 @@ package io.nisfeb.talon.urbit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class TalonLinkTest {
     @Test fun `a message address round-trips with its whom, id and parent`() {
@@ -63,6 +64,20 @@ class TalonLinkTest {
     }
 
     // A group's reference, copied from its info pane (2026-10-09).
+    @Test fun `a channel post's link is Tlon's reference, a DM's stays Talon's`() {
+        // sneagan's example, 2026-10-16: the talon:// link made no card in either app.
+        assertEquals(
+            "/1/chan/chat/~darduc-mitfen/v3l8bgc0/msg/170.141.184.508.207.337.420.778.996.591.277.113.344",
+            TalonLink.linkFor("chat/~darduc-mitfen/v3l8bgc0", "170141184508207337420778996591277113344"),
+        )
+        assertEquals("/1/chan/heap/~bus/links/msg/170.141/170.142", TalonLink.linkFor("heap/~bus/links", "170142", parentId = "170.141"), "a reply names its thread first")
+        assertEquals("/1/chan/chat/~bus/talk/msg/999", TalonLink.messageReference("chat/~bus/talk", "999"))
+        for (whom in listOf("~bus", "0v4.abcde.fghij")) {
+            assertEquals(TalonLink.forMessage(whom, "~bus/170141184506"), TalonLink.linkFor(whom, "~bus/170141184506"))
+        }
+        assertTrue(TalonLink.CHAN_REFERENCE.matches(TalonLink.linkFor("chat/~darduc-mitfen/v3l8bgc0", "170141184508207337420778996591277113344")))
+    }
+
     @Test fun `a group reference is Tlon's path, and the join box takes it, the flag, or Talon's link`() {
         assertEquals("/1/group/~bus/the-club", TalonLink.groupReference("~bus/the-club"))
         for (code in listOf("/1/group/~bus/the-club", "~bus/the-club", " /1/group/~bus/the-club\n", TalonLink.forGroup("~bus/the-club"))) {
