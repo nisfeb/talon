@@ -26,7 +26,6 @@ import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.FeatureSetting
 import io.nisfeb.talon.ai.ModelRef
 import io.nisfeb.talon.ai.ProviderKind
-import io.nisfeb.talon.ai.forSync
 import io.nisfeb.talon.ai.wantsArmillaryRow
 import io.nisfeb.talon.ui.screens.AiSettingsSection
 import io.nisfeb.talon.ui.screens.deleteAccountWarning
@@ -142,7 +141,7 @@ class ArmillaryDeleteTest {
         val p = ai.state.value.savedProfile!!
         assertNull(p.provider(ARMILLARY_PROVIDER))
         assertTrue(p.features.values.none { it.model?.provider == ARMILLARY_PROVIDER } && p.defaultModel?.provider != ARMILLARY_PROVIDER)
-        assertTrue(!p.forSync().wantsArmillaryRow(), "another device would adopt the row back")
+        assertTrue(!p.wantsArmillaryRow(), "this device would adopt the row back")
         assertNull(r.account.value)
         assertEquals(Deletion("~wex", DeleteAnswer.Deleted), r.deletion.value)
         assertEquals("sk-ant", p.provider("main")?.apiKey, "the owner's own key stays")

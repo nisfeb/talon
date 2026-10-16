@@ -351,13 +351,6 @@ const val SPEECH_PROVIDER = "speech"
 const val ARMILLARY_PROVIDER = "armillary"
 const val WHISPER = "whisper-1"
 
-private fun kindOf(p: AiSettings.Provider): ProviderKind = when (p) {
-    AiSettings.Provider.OpenRouter -> ProviderKind.OpenRouter
-    AiSettings.Provider.Anthropic -> ProviderKind.Anthropic
-    AiSettings.Provider.OpenAi -> ProviderKind.OpenAi
-    AiSettings.Provider.Custom -> ProviderKind.OpenAiCompatible
-}
-
 internal fun providerOf(k: ProviderKind): AiSettings.Provider? = when (k) {
     ProviderKind.OpenRouter -> AiSettings.Provider.OpenRouter
     ProviderKind.Anthropic -> AiSettings.Provider.Anthropic
@@ -474,44 +467,11 @@ fun isPrivateUrl(url: String?): Boolean {
 // ---- storage and sync ------------------------------------------------------
 
 /**
- * The profile as it travels between devices: no keys, and no model
- * lists, which each device fetches.
- *
- * Armillary rows do not travel at all. The key is minted per ship and
- * per device, so another device's is no use here; and an older build
- * that cannot decode the kind drops the whole profile on arrival, which
- * a blob carrying none can never make it do.
- *
- * The model list and what it says about Jev are both this device's own
- * reading: sending the flag without the list told the device that had
- * fetched one that its provider no longer offers Jev.
- */
-fun AiProfile.forSync(): AiProfile = copy(
-    features = features - AiFeature.Dictation,
-    providers = providers
-        .filterNot { it.kind == ProviderKind.Armillary }
-        .map { it.copy(apiKey = "", models = emptyList(), offersJev = false) },
-    savedHereAtMs = 0,
-)
-
-/**
  * Each provider's key, where it has one. Not Armillary's: it is minted
  * for this device, and goes nowhere else.
  */
 fun AiProfile.keys(): Map<String, String> =
     providers.filter { it.apiKey.isNotBlank() && it.kind != ProviderKind.Armillary }.associate { it.id to it.apiKey }
-
-/** Keys arriving for providers, by id. A blank never erases one. */
-fun AiProfile.withKeys(keys: Map<String, String>, from: AiProfile? = null): AiProfile =
-    copy(
-        providers = providers.map { p ->
-            // The same id means the same provider only where the kind
-            // agrees: ids are shared constants, so an Anthropic key
-            // could otherwise be sent to OpenRouter.
-            val sameKind = from == null || from.provider(p.id)?.kind == p.kind
-            keys[p.id]?.takeIf { it.isNotBlank() && sameKind }?.let { p.copy(apiKey = it) } ?: p
-        },
-    )
 
 /**
  * A profile from elsewhere keeps this device's keys and model lists for
@@ -624,51 +584,12 @@ fun AiProfile.legacyInto(cfg: AiSettings.Config): AiSettings.Config {
 }
 
 /**
- * What an older install's write means for the profile: it changed what
- * the old fields describe, the default model's provider, key and model,
- * and the catch-up and assistant switches, and nothing else it cannot
- * see.
- * ponytail: an old install's private-model or transcription edits are
- * not carried into a profile; they are rare, and the old fields keep them.
+ * The switches that travel, as the old toggles did. Transcription stays
+ * per device: an older build turned it off where it had no speech key.
+ * ponytail: under Armillary-only it could travel too; it is left as it
+ * was so an older build's write cannot reach it.
  */
-fun AiProfile.withLegacy(cfg: AiSettings.Config): AiProfile {
-    var providers = providers
-    var def = defaultModel
-    val dp = def?.let { provider(it.provider) }
-    // Not an Armillary default: the old fields no longer describe it
-    // ([legacyInto]), and an old install's key would become its key.
-    if (dp != null && providerOf(dp.kind) != null && dp.kind != ProviderKind.Armillary) {
-        providers = providers.map {
-            if (it.id != dp.id) it else it.copy(
-                kind = kindOf(cfg.provider),
-                label = if (it.label == it.kind.label) kindOf(cfg.provider).label else it.label,
-                apiKey = cfg.apiKey.ifBlank { it.apiKey },
-                baseUrl = cfg.baseUrl,
-            )
-        }
-        def = def.copy(model = cfg.model.orEmpty())
-    } else if (dp == null && providers.isEmpty() && cfg.apiKey.isNotBlank()) {
-        // Only where there is nothing here to speak of. A profile with
-        // providers in it is one somebody curated, and an old install's
-        // key used to put back the provider they had just deleted.
-        providers = listOf(AiProvider(MAIN_PROVIDER, kindOf(cfg.provider), kindOf(cfg.provider).label, cfg.baseUrl, cfg.apiKey)) +
-            providers.filterNot { it.id == MAIN_PROVIDER }
-        def = ModelRef(MAIN_PROVIDER, cfg.model.orEmpty())
-    }
-    val f = features.toMutableMap()
-    f[AiFeature.CatchUp] = (f[AiFeature.CatchUp] ?: FeatureSetting()).copy(on = cfg.catchMeUpEnabled)
-    f[AiFeature.Assistant] = (f[AiFeature.Assistant] ?: FeatureSetting()).copy(on = cfg.assistantOn())
-    return copy(providers = providers, defaultModel = def, features = f)
-}
-
-/** The switches that travel whatever the key sync says, as the old toggles did. */
-// Transcription is not here: it is migrated from what the device
-// itself can do (a speech key, or an OpenAI chat key), so syncing it
-// let a phone with neither turn transcription off on the computer.
 private val SYNCED_SWITCHES = listOf(AiFeature.CatchUp, AiFeature.Assistant)
-
-/** Features each device sets for itself, which a profile from the ship never changes. */
-private val PER_DEVICE = setOf(AiFeature.Transcription, AiFeature.Dictation)
 
 /** The switches as the config entry carries them. Triage is Feed Orrery, per install; the generator is the ship's. */
 fun AiProfile.switches(): kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.buildJsonObject {
@@ -700,55 +621,6 @@ fun AiSettings.Config.orreryOn(): Boolean = savedProfile?.orrery == true
 
 /** The profile with Orrery turned [on], from the saved one or the one these settings make. */
 fun AiSettings.Config.withOrrery(on: Boolean): AiProfile = (savedProfile ?: migrateProfile(this)).copy(orrery = on)
-
-/**
- * The profile after one AI settings entry arrives from the ship, [merged]
- * being the old fields as already applied. The terms are the old ones:
- * switches travel always, in the config entry; providers, models and
- * keys only in the credentials entry, and only where this device syncs
- * them. What arrives keeps this device's own keys and model lists, taken
- * from its old fields where it has saved no profile. An older install's
- * write changes what the old fields describe.
- */
-fun profileAfterEntry(
-    entry: kotlinx.serialization.json.JsonObject,
-    current: AiSettings.Config,
-    merged: AiSettings.Config,
-): AiProfile? {
-    val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-    val incoming = (entry["profile"] as? kotlinx.serialization.json.JsonObject)
-        ?.takeIf { current.syncEnabled }
-        ?.let { runCatching { json.decodeFromJsonElement(AiProfile.serializer(), it) }.getOrNull() }
-    val switches = entry["switches"] as? kotlinx.serialization.json.JsonObject
-    val base = current.savedProfile
-    val fromNew = entry.containsKey("profile") || switches != null
-    val fromOld = !fromNew && base != null &&
-        (entry.containsKey("catchMeUpEnabled") || (entry.containsKey("apiKey") && !entry.containsKey("providerKeys")))
-    val local = base ?: migrateProfile(current)
-    var profile = when {
-        // Only a device with keys writes the credentials entry, so the
-        // switches in its profile can be older than the ones in config,
-        // which every device writes. Its providers and models are news;
-        // its switches are not, unless they came as switches.
-        // Transcription is not news from anywhere: it is this device's
-        // own (see SYNCED_SWITCHES), and the whole profile arriving took
-        // it anyway, so a phone with no speech model turned it off here.
-        incoming != null -> incoming.keepingLocal(local)
-            .let { it.copy(features = it.features.filterKeys { f -> f !in PER_DEVICE } + local.features.filterKeys { f -> f in PER_DEVICE }) }
-            .let { if (switches != null) it else it.withSwitches(local.switches()).copy(jev = local.jev, orrery = local.orrery) }
-        fromOld -> base!!.withLegacy(merged)
-        else -> base
-    }
-    // Switches with no profile here yet make one from this device's own settings.
-    if (switches != null) profile = (profile ?: migrateProfile(merged)).withSwitches(switches)
-    profile ?: return null
-    val keys = (entry["providerKeys"] as? kotlinx.serialization.json.JsonObject)
-        ?.mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { k to it } }?.toMap()
-    // The keys are matched against the profile they came with, so a
-    // shared id (they are constants) cannot put an Anthropic key on this
-    // device's OpenRouter provider.
-    return if (keys != null && current.syncEnabled) profile.withKeys(keys, from = incoming) else profile
-}
 
 /** The model Talon runs on [this] when none is picked; null where the provider's own list is all there is. */
 fun ProviderKind.defaultModel(): String? = when (this) {

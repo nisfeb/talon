@@ -61,22 +61,4 @@ class DictationModelTest {
         assertTrue(p.vendorZdr(AiFeature.Dictation), "on the frontier tier it still asks for ZDR")
     }
 
-    @Test
-    fun `a dictation's model never goes to the ship`() {
-        val p = profile(AiFeature.Dictation to FeatureSetting(model = ModelRef("p1", "fast/1"), own = true))
-        assertNull(p.forSync().features[AiFeature.Dictation])
-        // What an older install reads: no feature name it does not know.
-        val wire = Json.encodeToString(AiProfile.serializer(), p.forSync())
-        assertFalse("Dictation" in wire, wire)
-    }
-
-    @Test
-    fun `a profile from the ship keeps this device's dictation model`() {
-        val here = profile(AiFeature.Dictation to FeatureSetting(model = ModelRef("p1", "fast/1"), own = true))
-        val current = AiSettings.Config(provider = AiSettings.Provider.OpenRouter, apiKey = "", model = null, savedProfile = here)
-        val fromShip = profile(AiFeature.CatchUp to FeatureSetting(on = true))
-        val entry = buildJsonObject { put("profile", Json.encodeToJsonElement(AiProfile.serializer(), fromShip.forSync())) }
-        val after = profileAfterEntry(entry, current, current)
-        assertEquals(FeatureSetting(model = ModelRef("p1", "fast/1"), own = true), after?.features?.get(AiFeature.Dictation))
-    }
 }

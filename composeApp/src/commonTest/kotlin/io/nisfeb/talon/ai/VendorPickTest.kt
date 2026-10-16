@@ -83,11 +83,4 @@ class VendorPickTest {
         assertFalse(conf(profile(armillary = null)).forFeature(AiFeature.CatchUp).zdrOnly)
     }
 
-    @Test
-    fun `an own pick travels, and the vendor's row and picks never do`() {
-        val p = profile(AiFeature.Assistant to FeatureSetting(on = true, model = ModelRef("p1", "mine/1"), own = true))
-        val sent = p.forSync()
-        assertTrue(sent.features[AiFeature.Assistant]!!.own)
-        assertNull(sent.armillary())
-    }
 }

@@ -1,7 +1,7 @@
 package io.nisfeb.talon.urbit
-import io.nisfeb.talon.ai.forSync
+import io.nisfeb.talon.ai.profile
 import io.nisfeb.talon.ai.switches
-import io.nisfeb.talon.ai.keys
+import io.nisfeb.talon.ai.withSwitches
 import kotlin.concurrent.Volatile
 import io.nisfeb.talon.util.nowMs
 
@@ -154,16 +154,11 @@ class SettingsSyncImpl(
         private const val AI_ENTRY = "config"
 
         /**
-         * Credentials live in their own entry, apart from the
-         * preferences, because a put replaces a whole entry and the
-         * preferences are pushed by every device on every change. With
-         * both in one entry, a device that had no key of its own wiped
-         * the ship's copy the moment anybody toggled anything, and the
-         * ship stopped being the backup that makes a new install work.
-         * Nothing without a key of its own writes this entry.
+         * Where builds before Armillary-only kept AI keys. Keys no longer
+         * travel: this build reads nothing from it and takes it off the
+         * ship when it finds it ([bootstrap]).
          */
         internal const val AI_KEYS_ENTRY = "credentials"
-        private val REVOKED = kotlinx.serialization.serializer<Map<String, io.nisfeb.talon.ai.KeyMark>>()
 
         // Wire schema version for the ai-settings entry. v1 (no
         // marker) is everything written before rc33 — treated as
@@ -172,15 +167,18 @@ class SettingsSyncImpl(
         // local default-true values on every fresh install. v2
         // entries are explicit user writes from rc33+ and authoritative.
         private const val AI_SCHEMA_V2 = 2
+
+        // v3: Armillary-only (docs/superpowers/specs/2026-10-16-armillary-only-design.md).
+        // No keys or providers travel, and every switch defaults on, so
+        // an entry before v3 says nothing about the switches: an older
+        // build's "off" was mostly "no key yet". Its prompts still apply.
+        private const val AI_SCHEMA = 3
     }
 
     @Volatile private var channel: UrbitChannel? = null
     @Volatile private var ui: io.nisfeb.talon.ui.UiSettings? = null
     /** Where a push that an arriving entry calls for runs, off the event stream: the shell's scope. */
     @Volatile private var pushScope: kotlinx.coroutines.CoroutineScope? = null
-    private var marksPush: kotlinx.coroutines.Job? = null
-    /** A marks push asked for before there was a scope to run it in; it runs once there is. */
-    @Volatile private var marksOwed = false
     // Bootstrap can beat the host's attachUiSettings call. Hold what
     // the ship said until there's somewhere to put it.
     @Volatile private var pendingUiPrefs: JsonObject? = null
@@ -246,7 +244,6 @@ class SettingsSyncImpl(
         if (ui != null) return
         ui = settings
         pushScope = scope
-        if (marksOwed) pushMarks()
         // Drain anything bootstrap parked before we had a store.
         pendingUiPrefs?.let { parked ->
             pendingUiPrefs = null
@@ -442,9 +439,7 @@ class SettingsSyncImpl(
                 BUCKET_GROUP_ORDERS, BUCKET_FOLDERS, BUCKET_FOLDER_MEMBERS,
                 BUCKET_NOTIFY_PREFS, BUCKET_RAIL_ITEMS, BUCKET_BOOKMARKS,
                 BUCKET_BOOKMARK_FOLDERS, BUCKET_BOOKMARK_FOLDER_MEMBERS,
-                // Per-feature toggles follow the user; applyAiEntry gates
-                // the cloud-key fields on local syncEnabled, so the API
-                // key only travels with explicit consent.
+                // The switches and instructions follow the user; no key travels.
                 BUCKET_AI_SETTINGS,
                 // Pulled here too: a preference used to reach only a device
                 // connected when it changed, and a fresh login kept its
@@ -513,33 +508,27 @@ class SettingsSyncImpl(
             runCatching { pushAiSettings() }
                 .onFailure { Log.w(TAG, "ai-settings seed push failed", it) }
         } else {
-            // Schema upgrade: if the ship's entry is legacy (no
-            // schemaVersion), re-push from local so the bucket gets
-            // stamped v2. applyAiEntry already discarded the legacy
-            // toggle values and kept local defaults, so this push
-            // codifies the just-applied state on the ship.
-            // Idempotent — once the entry is v2, this branch is a
-            // no-op on every subsequent bootstrap.
+            // Schema upgrade: an entry older than this build's says
+            // nothing applyAiEntry takes about the switches, so this
+            // device's own (everything on, or what its owner set since)
+            // goes on the ship, stamped. Once it is, this is a no-op.
             val aiEntry = (deskMap?.get(BUCKET_AI_SETTINGS) as? JsonObject)?.get(AI_ENTRY)
-            val legacy = (aiEntry as? JsonObject)?.let {
-                (it["schemaVersion"].asInt() ?: 0) < AI_SCHEMA_V2
+            val legacy = (unwrap(aiEntry) as? JsonObject)?.let {
+                (it["schemaVersion"].asInt() ?: 0) < AI_SCHEMA
             } ?: false
             if (legacy) {
-                Log.i(TAG, "ship has legacy ai-settings entry — upgrading to schemaVersion=$AI_SCHEMA_V2")
+                Log.i(TAG, "ship has an older ai-settings entry — upgrading to schemaVersion=$AI_SCHEMA")
                 runCatching { pushAiSettings() }
                     .onFailure { Log.w(TAG, "ai-settings upgrade push failed", it) }
             }
-        }
-        // A key typed while signed out reached no ship, and nothing
-        // pushed it afterwards unless some other setting happened to
-        // change. On every connect, a device that has credentials makes
-        // sure the ship has them. Idempotent: the same entry again.
-        val creds = (deskMap?.get(BUCKET_AI_SETTINGS) as? JsonObject)?.get(AI_KEYS_ENTRY)
-        val cfg = aiSettings.state.value
-        if (cfg.syncEnabled && cfg.hasCredentials() && creds == null) {
-            Log.i(TAG, "ship has no credentials entry — seeding from this device")
-            runCatching { pushAiSettings() }
-                .onFailure { Log.w(TAG, "credentials seed push failed", it) }
+            // Keys no longer travel. The ones an older build left on the
+            // ship are taken off it; an older build sees the entry go and
+            // keeps what it has.
+            if ((deskMap?.get(BUCKET_AI_SETTINGS) as? JsonObject)?.containsKey(AI_KEYS_ENTRY) == true) {
+                Log.i(TAG, "ship holds AI keys from an older build — taking them off")
+                runCatching { pokeDelEntry(BUCKET_AI_SETTINGS, AI_KEYS_ENTRY) }
+                    .onFailure { Log.w(TAG, "removing the old credentials entry failed", it) }
+            }
         }
 
         // Subscribe for live updates from other devices.
@@ -911,119 +900,30 @@ class SettingsSyncImpl(
     }
 
     /**
-     * The credentials as they go on the wire. They are written to their
-     * own entry, and mirrored into the preferences entry for builds
-     * before 1.8 that read only that one: a key-less device's preference
-     * push drops the mirror, which is the old wipe, but the entry beside
-     * it still holds them and nothing this side of 1.8 reads the mirror.
+     * The AI settings on the ship: the switches, the old toggles that
+     * older builds read, and the instructions. No key, provider or model:
+     * Armillary is per ship and each device asks its own ship for a key.
      */
-    private fun JsonObjectBuilder.aiCredentials(cfg: AiSettings.Config) {
-        put("provider", cfg.provider.name)
-        // Only ship a credential we actually have. Emitting "" would
-        // make the ship's entry authoritatively key-less, and a
-        // later pull (here or on a peer) then blanks a real local
-        // key — the "keys not persisted" data loss. Absent ≠ empty.
-        // A removal travels as a mark in revokedKeys, below.
-        if (cfg.apiKey.isNotBlank()) put("apiKey", cfg.apiKey)
-        cfg.model?.let { put("model", it) }
-        cfg.baseUrl?.let { put("baseUrl", it) }
-        // Brave key rides the same opt-in gate as the LLM key —
-        // both are service credentials; same don't-ship-empty rule.
-        if (cfg.braveApiKey.isNotBlank()) put("braveApiKey", cfg.braveApiKey)
-        // STT key: same don't-ship-empty rule as the other
-        // credentials. Shipping "" whenever it was blank let a
-        // device that never had the key blank everyone's on its
-        // next push of any AI setting. A removal travels as an
-        // explicit stamp instead, so peers can tell "removed"
-        // from "this device just doesn't have it".
-        if (cfg.sttApiKey.isNotBlank()) {
-            put("sttApiKey", cfg.sttApiKey)
-        } else if (cfg.sttApiKeyRemovedAtMs > 0L) {
-            put("sttApiKeyRemovedAtMs", cfg.sttApiKeyRemovedAtMs)
-        }
-        // The private model. Its address is not a secret but
-        // it travels with the key that opens it.
-        cfg.privateBaseUrl?.let { put("privateBaseUrl", it) }
-        cfg.privateModel?.let { put("privateModel", it) }
-        if (cfg.privateApiKey.isNotBlank()) put("privateApiKey", cfg.privateApiKey)
-        // The profile's keys, by provider, on the same terms:
-        // only those a provider here actually has.
-        cfg.savedProfile?.keys()?.takeIf { it.isNotEmpty() }?.let { keys ->
-            put("providerKeys", buildJsonObject { keys.forEach { (id, k) -> put(id, k) } })
-        }
-        // The providers and models, which the frontier and
-        // private model fields above always kept to this
-        // entry: without keys or model lists.
-        cfg.savedProfile?.let {
-            put("profile", Json.encodeToJsonElement(io.nisfeb.talon.ai.AiProfile.serializer(), it.forSync()))
-        }
-        // Which model reads your messages: a fact about the frontier
-        // provider, and meaningless without one, so it travels here.
-        put("frontierReadsMessages", cfg.frontierReadsMessages)
-        // Every key taken out anywhere, so it leaves every device and
-        // no device's copy brings it back.
-        if (cfg.revokedKeys.isNotEmpty()) put("revokedKeys", Json.encodeToJsonElement(REVOKED, cfg.revokedKeys))
-    }
-
-    /**
-     * Push the current AI settings to %settings. Per-feature toggles
-     * (catchMeUp, smartFeatures, ask-Urbit, the agent) ALWAYS push —
-     * they are user preferences with no security cost and should follow
-     * the user across devices. Cloud-key fields (provider / apiKey /
-     * model / baseUrl) only push when the user has explicitly opted
-     * into sync via `syncEnabled`; the API key is service credential
-     * material and shipping it without consent leaks it to the ship.
-     *
-     * Toggling `syncEnabled` from on to off therefore overwrites the
-     * ship's entry with a feature-only blob, dropping the cloud-key
-     * fields without needing a separate clear path.
-     */
-
-
     override suspend fun pushAiSettings() {
         val cfg = aiSettings.state.value
-        // The credentials, in their own entry, and only from a device
-        // that has some. A device with none says nothing about them, so
-        // it cannot wipe the ship's copy by saving a preference.
-        if (cfg.syncEnabled && cfg.hasCredentials()) {
-            pokePutEntry(
-                BUCKET_AI_SETTINGS, AI_KEYS_ENTRY,
-                buildJsonObject {
-                    put("schemaVersion", AI_SCHEMA_V2)
-                    aiCredentials(cfg)
-                },
-            )
-        }
         pokePutEntry(
             BUCKET_AI_SETTINGS, AI_ENTRY,
             buildJsonObject {
-                // Stamp v2 so applyAiEntry on a peer device knows
-                // these toggle values are an explicit write, not a
-                // legacy seed from the rc8-era recovery path.
-                put("schemaVersion", AI_SCHEMA_V2)
+                put("schemaVersion", AI_SCHEMA)
                 put("catchMeUpEnabled", cfg.catchMeUpEnabled)
                 put("smartFeaturesEnabled", cfg.smartFeaturesEnabled)
                 put("askUrbitEnabled", cfg.askUrbitEnabled)
                 put("agentEnabled", cfg.agentEnabled)
-                // User's custom agent system-prompt parts (blank = built-in
-                // default). Preferences, not credentials — always push.
+                // The owner's instructions (blank = built-in default).
                 put("urbitKnowledgePrompt", cfg.urbitKnowledgePrompt)
                 put("assistantPrompt", cfg.assistantPrompt)
                 put("loopPrompt", cfg.loopPrompt)
-                // The profile's switches, which travel like the toggles
-                // above; its providers and models ride the credentials.
-                cfg.savedProfile?.let { put("switches", it.switches()) }
-                if (cfg.syncEnabled && cfg.hasCredentials()) aiCredentials(cfg)
+                put("switches", cfg.profile().switches())
             },
         )
     }
 
-    /**
-     * Nuke the ship's AI settings bucket. Used by callers that want
-     * to fully clear the user's AI prefs from the ship — pushAiSettings
-     * already drops the cloud-key fields on its own when syncEnabled
-     * flips off, so this is the harder reset.
-     */
+    /** Nuke the ship's AI settings bucket, for callers that want the user's AI prefs fully off the ship. */
     suspend fun clearAiSettingsOnShip() {
         val ch = channel ?: return
         val payload = buildJsonObject {
@@ -1167,163 +1067,44 @@ class SettingsSyncImpl(
         )
     }
 
+    /**
+     * An AI settings entry from the ship. Instructions from any explicit
+     * write (v2 on); switches and toggles only from this build's (v3 on),
+     * since an older build's "off" was mostly "no key yet". Keys,
+     * providers and models are never read, from any entry: a device asks
+     * its own ship for its Armillary key.
+     */
     private fun applyAiEntry(obj: JsonObject) {
         val current = aiSettings.state.value
         fun bool(key: String, default: Boolean) =
             obj[key].asText()?.toBooleanStrictOrNull() ?: default
-
-        // Schema version gate. Entries written by rc33+ carry
-        // `schemaVersion: 2`; everything before that is legacy data
-        // that may be stale (the rc8-era bug had Android's
-        // `aiSettings.onStateChange` unwired, so feature-toggle
-        // pushes silently dropped, and the bucket-empty recovery
-        // path then seeded defaults — which were FALSE for the four
-        // on-device features pre-rc30 — to the ship). Every fresh
-        // install since has been pulling those stale defaults back
-        // down and overwriting the rc30 default-true local state.
-        // For legacy entries we ignore feature toggles entirely
-        // (local defaults win) and trust only the explicit
-        // schemaVersion=2 writes a user has made on a post-rc33
-        // device. Cloud-key fields stay on the same wire-or-local
-        // path because they're already gated on local syncEnabled.
         val schemaVersion = obj["schemaVersion"].asInt() ?: 0
-        // Redact the service credentials before logging — the toggle values
-        // are the useful part of this debug line; apiKey/braveApiKey are
-        // secrets and the log sink (unlike the EncryptedSharedPreferences
-        // store) isn't encrypted.
-        val redacted = JsonObject(
-            obj.mapValues { (k, v) ->
-                if (k == "apiKey" || k == "braveApiKey" || k == "sttApiKey" || k == "privateApiKey" || k == "providerKeys") JsonPrimitive("***") else v
-            },
+        // The field names only: an older build's entry may still hold keys.
+        Log.i(TAG, "applyAiEntry schemaVersion=$schemaVersion fields=${obj.keys}")
+        var next = current
+        if (schemaVersion >= AI_SCHEMA_V2) next = next.copy(
+            // Absent keeps local; present (even blank) is adopted, so a
+            // peer's reset to the default ("") travels too.
+            urbitKnowledgePrompt = obj["urbitKnowledgePrompt"].asStr() ?: current.urbitKnowledgePrompt,
+            assistantPrompt = obj["assistantPrompt"].asStr() ?: current.assistantPrompt,
+            loopPrompt = obj["loopPrompt"].asStr() ?: current.loopPrompt,
         )
-        Log.i(TAG, "applyAiEntry schemaVersion=$schemaVersion obj=$redacted")
-
-        val features = if (schemaVersion >= AI_SCHEMA_V2) {
-            current.copy(
+        if (schemaVersion >= AI_SCHEMA) {
+            next = next.copy(
                 catchMeUpEnabled = bool("catchMeUpEnabled", current.catchMeUpEnabled),
                 smartFeaturesEnabled = bool("smartFeaturesEnabled", current.smartFeaturesEnabled),
                 askUrbitEnabled = bool("askUrbitEnabled", current.askUrbitEnabled),
                 agentEnabled = bool("agentEnabled", current.agentEnabled),
-                // Absent → keep local; present (even blank) → adopt, so a
-                // peer's reset-to-default ("") propagates too.
-                urbitKnowledgePrompt = obj["urbitKnowledgePrompt"].asStr() ?: current.urbitKnowledgePrompt,
-                assistantPrompt = obj["assistantPrompt"].asStr() ?: current.assistantPrompt,
-                loopPrompt = obj["loopPrompt"].asStr() ?: current.loopPrompt,
             )
+            (obj["switches"] as? JsonObject)?.let { next = next.copy(savedProfile = next.profile().withSwitches(it)) }
         } else {
-            Log.i(TAG, "applyAiEntry ignoring legacy feature toggles; keeping local defaults")
-            current
+            Log.i(TAG, "applyAiEntry: an older build's entry; its switches are not taken")
         }
-
-        // Cloud-key fields only apply when local sync is opted in —
-        // otherwise we respect the device's local key (or no-key).
-        // syncEnabled itself stays at the local value so the user's
-        // explicit consent on this device is the gate, not whatever
-        // a peer device wrote into the bucket.
-        // The transcription key: a real one wins; an absent one keeps ours;
-        // a removal stamp newer than our own last removal clears ours.
-        val remoteRemovedAt = obj["sttApiKeyRemovedAtMs"].asLong() ?: 0L
-        // Keys taken out on any device. The store keeps the marks of
-        // both sides and takes every marked key out of what it keeps,
-        // whichever side it came from (keepingCredentials).
-        val marks = (obj["revokedKeys"] as? JsonObject)
-            ?.let { runCatching { Json.decodeFromJsonElement(REVOKED, it) }.getOrNull() }.orEmpty()
-        val remoteStt: String? = obj["sttApiKey"].asStr()?.takeIf { it.isNotBlank() }
-            ?: if (remoteRemovedAt > current.sttApiKeyRemovedAtMs) "" else null
-        val merged = if (current.syncEnabled) {
-            val providerStr = obj["provider"].asStr()
-            val provider = providerStr?.let {
-                runCatching { AiSettings.Provider.valueOf(it) }.getOrNull()
-            }
-            // A remote entry that carries no key of its own says
-            // nothing about which provider to use or what to call the
-            // model: an absent field used to read as "set it to null",
-            // so one launch of a key-less profile build turned a working
-            // OpenRouter setup into Anthropic with no model name and a
-            // key that then answered 401.
-            val carries = obj["apiKey"].asStr()?.isNotBlank() == true ||
-                obj["braveApiKey"].asStr()?.isNotBlank() == true ||
-                obj["sttApiKey"].asStr() != null || remoteRemovedAt > 0L
-            if (provider != null && carries) {
-                features.copy(
-                    provider = provider,
-                    // Only overwrite the key when the entry actually
-                    // carries one — a peer push with syncEnabled=false
-                    // omits apiKey, and orEmpty() would blank a good
-                    // local key (data loss → silently disables AI).
-                    // Treat present-but-empty ("") as absent too: asStr()
-                    // returns "" (non-null) for an empty string, so the
-                    // ?: guard alone wouldn't catch a ship entry that was
-                    // seeded with apiKey:"" by an older client.
-                    apiKey = obj["apiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.apiKey,
-                    // Absent keeps what this device has, the way the
-                    // keys do. Only a blank string is a real erasure.
-                    model = obj["model"].asStr() ?: current.model,
-                    baseUrl = obj["baseUrl"].asStr() ?: current.baseUrl,
-                    // Same "only overwrite when present and non-empty" guard.
-                    braveApiKey = obj["braveApiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.braveApiKey,
-                    // The private model, on the same absent-keeps-local terms.
-                    privateBaseUrl = obj["privateBaseUrl"].asStr() ?: current.privateBaseUrl,
-                    privateModel = obj["privateModel"].asStr() ?: current.privateModel,
-                    privateApiKey = obj["privateApiKey"].asStr()?.takeIf { it.isNotBlank() } ?: current.privateApiKey,
-                    // Unlike apiKey, present-but-empty here means the user
-                    // cleared the key on a peer — nothing ever seeded
-                    // sttApiKey:"" — so adopt "" and let the removal
-                    // propagate. Absent still means a syncEnabled=false push
-                    // and keeps the local key.
-                    sttApiKey = remoteStt ?: current.sttApiKey,
-                    sttApiKeyRemovedAtMs = if (remoteStt == "") remoteRemovedAt else if (remoteStt != null) 0L else current.sttApiKeyRemovedAtMs,
-                )
-            } else features
-        } else features
-
-        // Which model reads your messages rides the credentials: the
-        // model it names is only here on a device that syncs them, and a
-        // device that keeps its messages off the cloud is not told
-        // otherwise by a peer.
-        val gated =
-            if (current.syncEnabled) merged.copy(frontierReadsMessages = bool("frontierReadsMessages", merged.frontierReadsMessages), revokedKeys = marks)
-            else merged
-
-        // The profile: a new install's arrives whole, an old install's
-        // write changes what its fields describe, keys come with the
-        // credentials. applyRemote's keepingCredentials holds the rest.
-        val withProfile = gated.copy(savedProfile = io.nisfeb.talon.ai.profileAfterEntry(obj, current, gated))
-        aiSettings.applyRemote(withProfile)
-        // A peer that had not heard of a removal yet wrote its
-        // credentials over the ones that carried it. Said again, once:
-        // the peer takes the marks from this push, and this device's
-        // next apply of its own entry finds nothing missing. Off the
-        // event stream, which two pokes waiting on acks held up, and
-        // one at a time, since an older build's every write lacks them.
-        val kept = aiSettings.state.value.revokedKeys
-        if (current.syncEnabled && obj.containsKey("provider") && io.nisfeb.talon.ai.mergedMarks(marks, kept) != marks) pushMarks()
-        // applyRemote deliberately bypasses onStateChange (anti-pingpong),
-        // which is also the only rearm-on-key-change hook — so a key or
-        // feature toggle arriving via sync must re-arm the loop scheduler
-        // here, or a device whose alarm was disarmed for lack of a key
-        // stays disarmed until restart even though loops can now run.
+        if (next == current) return
+        aiSettings.applyRemote(next)
+        // applyRemote bypasses onStateChange (anti-pingpong), which is also
+        // the only rearm hook, so a switch arriving here rearms loops itself.
         rearmLoops()
-    }
-
-    /**
-     * The AI settings pushed again for their revoked-key marks, off the
-     * event stream and one at a time. Owed until there is a scope: an
-     * entry applied at bootstrap, before the shell attached, lost it.
-     */
-    private fun pushMarks() {
-        if (marksPush?.isActive == true) return
-        val scope = pushScope ?: run { marksOwed = true; return }
-        marksOwed = false
-        marksPush = scope.launch {
-            try {
-                pushAiSettings()
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "revoked keys push failed", e)
-            }
-        }
     }
 
     override suspend fun addBookmark(whom: String, postId: String, ts: Long) {
@@ -1605,13 +1386,7 @@ class SettingsSyncImpl(
         // will be wiped. For bucket reorders this is the right call.
         rowBuckets[bucket]?.let { return it.applyAll(objects(entries)) }
         when (bucket) {
-            BUCKET_AI_SETTINGS -> {
-                // Preferences first, then the credentials, which are an
-                // entry of their own so that saving one cannot erase the
-                // other. An older ship has only the first.
-                (unwrap(entries?.get(AI_ENTRY)) as? JsonObject)?.let { applyAiEntry(it) }
-                (unwrap(entries?.get(AI_KEYS_ENTRY)) as? JsonObject)?.let { applyAiEntry(it) }
-            }
+            BUCKET_AI_SETTINGS -> (unwrap(entries?.get(AI_ENTRY)) as? JsonObject)?.let { applyAiEntry(it) }
             BUCKET_STATUS_SEEN -> {
                 val v = entries?.get(STATUS_SEEN_ENTRY) ?: return
                 val ms = (unwrap(v) as? JsonObject)?.get("ms").asLong() ?: return
@@ -1696,11 +1471,7 @@ class SettingsSyncImpl(
             return
         }
         when (bucket) {
-            BUCKET_AI_SETTINGS -> {
-                if (entry == AI_ENTRY || entry == AI_KEYS_ENTRY) {
-                    (unwrapped as? JsonObject)?.let { applyAiEntry(it) }
-                }
-            }
+            BUCKET_AI_SETTINGS -> if (entry == AI_ENTRY) (unwrapped as? JsonObject)?.let { applyAiEntry(it) }
             BUCKET_STATUS_SEEN -> {
                 val ms = (unwrapped as? JsonObject)?.get("ms").asLong() ?: return
                 bumpStatusesSeen(ms)
@@ -1746,10 +1517,7 @@ class SettingsSyncImpl(
                     ENTRY_NON_COMET_NAMES -> io.nisfeb.talon.ui.AzimuthNames.setEnabled(false)
                 }
             }
-            // An AI settings entry going away takes nothing here: absent is
-            // not empty, and a deliberate removal travels as a revoke mark
-            // or as the profile the owner saved (hasCredentials). A device
-            // with keys puts the credentials entry back on its next connect.
+            // An AI settings entry going away takes nothing here: absent is not empty.
             BUCKET_AI_SETTINGS -> Unit
             BUCKET_ASSISTANT_CONVERSATIONS -> {
                 // Deleting a conversation cascades to its turns locally.
@@ -1812,9 +1580,7 @@ class SettingsSyncImpl(
         // make here. We never honor it from the wire (a peer or anyone with
         // ship access could otherwise flip a read-only loop into one that
         // posts unattended). A freshly-synced loop arrives read-only; an
-        // existing one keeps whatever this device granted. Mirrors how AI
-        // cloud-key fields gate on local syncEnabled rather than crossing
-        // over from a peer.
+        // existing one keeps whatever this device granted.
         dao.upsert(
             io.nisfeb.talon.data.LoopEntity(
                 id = existing?.id ?: 0L,

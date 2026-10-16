@@ -46,10 +46,9 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
     suspend fun applySettingsEvent(payload: JsonObject)
 
     /**
-     * Push the current AI settings to %settings. Per-feature toggles
-     * always push; cloud-key fields push only when local syncEnabled
-     * is true (gated inside the impl). Default no-op for any future
-     * impl that doesn't support AI sync.
+     * Push the current AI settings to %settings: the switches and the
+     * instructions, never a key. Default no-op for any future impl that
+     * doesn't support AI sync.
      */
     suspend fun pushAiSettings() {}
 
