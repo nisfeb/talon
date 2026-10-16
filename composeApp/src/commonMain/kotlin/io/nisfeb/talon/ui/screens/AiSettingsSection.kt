@@ -133,9 +133,9 @@ fun AiSettingsSection(
         }
         if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) StartWithArmillary(onStart = connect)
         else {
-            // No buying here (the store's rule): a ship that pays from
-            // another device connects this one.
-            Quiet("Top up on another of your devices, then connect this one.")
+            // No buying here, and no pointing anywhere to buy (the store's
+            // rule): a ship that already has Armillary connects this device.
+            Quiet("AI in Talon runs through Armillary on your ship. Connect this device to use what your ship already has.")
             OutlinedButton(enabled = armillary != null, onClick = connect) { Text("Connect this device") }
         }
     } else {
@@ -161,7 +161,7 @@ fun AiSettingsSection(
     // Why a feature that is on does nothing yet, in one line, or null.
     val waiting: String? = when {
         row == null -> if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up to turn on." else "Connect this device to turn on."
-        account?.hasView == true && account!!.balanceMicro <= 0 -> if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up to turn on." else "Waiting on credit."
+        account?.hasView == true && account!!.balanceMicro <= 0 -> if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up to turn on." else "No credit on your Armillary account."
         row.apiKey.isBlank() -> "Waiting on this device's key from your ship."
         else -> null
     }
