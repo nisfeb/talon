@@ -938,12 +938,20 @@ class OrreryRepo(
      * a loop or a probe, push, then let the model and the ship go, so a
      * runtime of a gigabyte does not stay resident after the work.
      */
-    suspend fun pass(shipUrl: String, ship: String) {
+    suspend fun pass(shipUrl: String, ship: String) = headless(shipUrl, ship) { push() }
+
+    /**
+     * Attached for [block] alone, with no loop, probe or beacon, then let
+     * go: a background pass, or a dictation's orrery tools. Never
+     * [attach] for these: [detach] after it would take the proposals and
+     * notifications of whatever the app has attached.
+     */
+    suspend fun <T> headless(shipUrl: String, ship: String, block: suspend () -> T): T {
         this.shipUrl = shipUrl
         this.ship = ship
         api = OrreryApi(http, bare, shipUrl)
         try {
-            push()
+            return block()
         } finally {
             runCatching { LocalModels.reset() }
             cloudModel?.close()
