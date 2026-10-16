@@ -34,6 +34,8 @@ class DictationFlow(
     private val answer: suspend (id: String, approve: Boolean) -> Unit,
     /** The owner's word on what waits, shown with orrery's [reply]: true, false, or null for none in time. */
     private val decide: suspend (reply: String, waiting: List<OrreryAction>) -> Boolean?,
+    /** An answer made on the phone with no model ([CalendarQuestion]), or null where there is none. */
+    private val quick: suspend (text: String, earlier: List<Earlier>) -> String? = { _, _ -> null },
 ) {
     /** What was said and answered before, which a follow-up goes on from. */
     data class Earlier(val words: String, val line: String)
@@ -48,6 +50,9 @@ class DictationFlow(
      * could not take it, so the words are kept.
      */
     suspend fun handle(text: String, earlier: List<Earlier> = emptyList(), asked: Boolean = false): Reply {
+        // Before the route: "what's on today" written with no question
+        // mark is still a question, and no business of orrery's.
+        quick(text, earlier)?.let { return Reply(it, DictationRoute.Ask) }
         val to = if (asked && earlier.isNotEmpty()) DictationRoute.Ask else route(text)
         val line = when (to) {
             DictationRoute.Ask -> ask(text, earlier)

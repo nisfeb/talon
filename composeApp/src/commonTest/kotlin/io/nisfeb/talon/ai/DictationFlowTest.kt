@@ -85,12 +85,14 @@ class DictationFlowTest {
         val handed = mutableListOf<String>()
         val questions = mutableListOf<Pair<String, List<DictationFlow.Earlier>>>()
         val told = mutableListOf<String>()
+        var quick: String? = null
         fun flow() = DictationFlow(
             ask = { q, earlier -> questions += q to earlier; "You have ballet at 4:45." },
             instruct = { told += it; instructed },
             hand = { t, _ -> handed += t },
             answer = { id, ok -> answered += id to ok },
             decide = { _, waiting -> asked += waiting.map { it.id }; word },
+            quick = { _, _ -> quick },
         )
     }
 
@@ -183,5 +185,13 @@ class DictationFlowTest {
         assertTrue(said.endsWith("Now I say: Now this."))
         assertTrue("Turn 9" in said && "Turn 0" !in said)
         assertEquals("Alone.", DictationFlow.withEarlier("Alone.", emptyList()))
+    }
+
+    @Test
+    fun `what the phone answers itself goes to neither the model nor orrery`() = runBlocking {
+        val ship = Ship().apply { quick = "Today you have 3 events." }
+        // Written with no question mark, which alone would have gone to orrery.
+        assertEquals(DictationFlow.Reply("Today you have 3 events.", DictationRoute.Ask), ship.flow().handle("What's on today"))
+        assertTrue(ship.questions.isEmpty() && ship.told.isEmpty())
     }
 }

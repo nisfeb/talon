@@ -1,6 +1,8 @@
 package io.nisfeb.talon.ai
 
 import kotlinx.coroutines.flow.first
+import io.nisfeb.talon.calendar.dueDate
+import kotlinx.datetime.toLocalDateTime
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -320,6 +322,36 @@ class Loops(
                 tools = tools,
                 systemPrompt = DictationAgent.askPrompt,
             ).run(question, earlier).also { card = seen.card(actions.zone(), known) }
+        }
+
+        /**
+         * A plain question about what is on, answered from the calendar read
+         * while the owner talked, with no model: the card's days and tasks
+         * and a line to say ([CalendarQuestion]). Null where it is not one,
+         * or the calendar did not answer, and the model takes it.
+         */
+        suspend fun calendarAnswer(text: String, earlier: List<DictationFlow.Earlier> = emptyList()): String? {
+            val cal = calendar ?: return null
+            val zone = io.nisfeb.talon.ui.screens.zoneFor(cal.zone.value)
+            val now = System.currentTimeMillis()
+            val today = kotlin.time.Instant.fromEpochMilliseconds(now).toLocalDateTime(zone).date
+            val span = CalendarQuestion.parse(text, today, earlier.lastOrNull()?.words) ?: return null
+            val t0 = System.currentTimeMillis()
+            read.await()
+            val b = CalendarQuestion.bounds(span, zone)
+            // The read covers six hours back to a month ahead; earlier today, or further, is asked for.
+            val covered = b.first >= now - io.nisfeb.talon.calendar.CalendarRepo.BEHIND_MS + 60_000 &&
+                b.last <= now + io.nisfeb.talon.calendar.CalendarRepo.AHEAD_MS - 60_000
+            val rows = (if (covered) cal.rows.value else null) ?: cal.windowRows(b.first, b.last + 1) ?: return null
+            val tasks = cal.tasks.value.orEmpty()
+            val twentyFour = android.text.format.DateFormat.is24HourFormat(context)
+            val due = tasks.filter { t -> t.dueDate()?.let { it in span.from..span.to || (span.from <= today && it < today) } == true }
+            card = DictationCard(
+                days = DictationCards.days(rows, span.from, span.to, zone, now, twentyFour),
+                tasks = DictationCards.tasks(due, zone, now),
+            )
+            io.nisfeb.talon.util.Log.i("Dictation", "calendar answered on the phone in ${System.currentTimeMillis() - t0} ms (${span.said}${if (covered) "" else ", asked the ship"})")
+            return CalendarQuestion.answer(span, rows, tasks, zone, now, twentyFour)
         }
 
         /** Orrery for [block], attached headless, or null where Orrery is off. */

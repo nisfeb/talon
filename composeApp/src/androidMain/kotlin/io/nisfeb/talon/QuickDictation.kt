@@ -426,7 +426,7 @@ class DictationService : Service() {
                     if (orrery == null) {
                         QuickDictation.show(QuickDictation.Stage.Working("Working on it…"))
                         went(DictationRoute.Ask)
-                        p.dictate(words, locked, thread?.earlier.orEmpty())
+                        p.calendarAnswer(words, thread?.earlier.orEmpty()) ?: p.dictate(words, locked, thread?.earlier.orEmpty())
                     } else {
                         DictationFlow(
                             ask = { q, earlier ->
@@ -446,6 +446,7 @@ class DictationService : Service() {
                             },
                             answer = { id, ok -> orrery.setAction(id, if (ok) "approved" else "dismissed").getOrThrow() },
                             decide = { reply, waiting -> ownerDecides(reply, waiting, transcribe) },
+                            quick = { t, earlier -> p.calendarAnswer(t, earlier) },
                         ).handle(words, thread?.earlier.orEmpty(), thread?.asked == true)
                             .also { Log.i(TAG, "route=${it.route}${if (thread != null) ", a follow-up" else ""}"); went(it.route) }
                             .line
