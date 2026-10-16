@@ -145,6 +145,38 @@ equivalent replacement: it grants whoever holds the URL read access, is
 one-way, may be disabled by an organization, and the current feed importer
 does not handle repeating events like the Google integration does.
 
+
+### Give the connected account event-editing access
+
+1. In Google Calendar, switch to the account that owns the calendar to add.
+2. Open **Settings → Settings for my calendars → [calendar] → Shared with**.
+   Confirm its Calendar ID identifies the intended calendar; its display name
+   may be an old custom name rather than the account's email address.
+3. Choose **Add people and groups** and enter the Google account already
+   connected to the ship.
+4. For two-way event management, select **Make changes and see all event
+   details** (older interfaces call this **Make changes to events**). This
+   grants reading, creation, editing and deletion, including private event
+   details. **Make changes (see private events as free/busy)** does not expose
+   private-event details. **Make changes and manage sharing** is broader than
+   needed; it also allows changing who can access the calendar.
+5. Review the recipient and permission and press **Send**. Workspace policy
+   may restrict external sharing even when an option appears in the dialog.
+6. Switch to the connected account and add the shared calendar to its calendar
+   list using the invitation link, or **Other calendars → + → Subscribe to
+   calendar**, then select the owner's email for their primary calendar.
+   Confirm it appears in Google Calendar and shows the expected editor access.
+7. Reopen the ship's Google settings (or **Refresh calendar list**), then
+   **Link** the newly visible calendar and **Sync now**. Keep the same OAuth
+   account; do not reconnect as the calendar's owner.
+8. Check the successful sync time and existing events. When creating an event
+   on the ship, choose the intended Google-linked calendar, not a local one.
+
+This authorizes event management on the shared calendar. The integration's
+limits on invitations, attendees, conference links and recurring-instance
+edits still apply. See Google's
+[calendar sharing guide](https://support.google.com/calendar/answer/37082).
+
 ## Diagnose by the observed error
 
 | Symptom | What to check |
