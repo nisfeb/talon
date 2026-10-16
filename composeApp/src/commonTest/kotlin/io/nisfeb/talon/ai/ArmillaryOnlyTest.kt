@@ -64,6 +64,8 @@ class ArmillaryOnlyTest {
         val p = before.copy(providers = listOf(own, server, device))
         assertNull(p.resolve(AiFeature.CatchUp))
         assertNull(p.resolve(AiFeature.Assistant))
+        assertFalse(p.vendorZdr(AiFeature.CatchUp), "nothing runs, so nothing asks")
+        assertFalse(before.vendorZdr(AiFeature.OrreryTriage), "triage is this device's, never a call out")
         val c = AiSettings.Config(provider = AiSettings.Provider.OpenRouter, apiKey = "sk-own", model = "own/default", savedProfile = p)
         assertFalse(c.hasModelFor(AiFeature.CatchUp))
         assertEquals("", c.forFeature(AiFeature.CatchUp).apiKey, "the old key is never sent")

@@ -35,6 +35,16 @@ class AiProfileSyncTest {
     }
 
     @Test
+    fun `a switch arriving for a feature with no setting yet makes one`() {
+        val wire = kotlinx.serialization.json.buildJsonObject { put("CatchUp", JsonPrimitive(true)); put("Assistant", JsonPrimitive(false)) }
+        val p = AiProfile().withSwitches(wire)
+        assertTrue(p.isOn(AiFeature.CatchUp))
+        assertFalse(p.isOn(AiFeature.Assistant))
+        val nonsense = kotlinx.serialization.json.buildJsonObject { put("CatchUp", JsonPrimitive("maybe")) }
+        assertEquals(base.profile().features, base.profile().withSwitches(nonsense).features, "a value that is not a boolean moves nothing")
+    }
+
+    @Test
     fun `once a profile is saved its switch decides jev, before it the old ones do`() {
         val ds = DecideSettings(on = true, gate = false, relevance = false)
         val plain = base.copy(savedProfile = null)

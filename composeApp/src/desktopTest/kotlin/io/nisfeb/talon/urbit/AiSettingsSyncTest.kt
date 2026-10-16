@@ -172,4 +172,35 @@ class AiSettingsSyncTest {
         // Its switches carry only names it knows.
         assertTrue(sent["switches"]!!.jsonObject.keys.all { it in setOf("CatchUp", "Assistant", "jev", "orrery") })
     }
+
+    @Test
+    fun `this build's entry turns switches back on too, and an older one with no instructions keeps ours`() = runBlocking {
+        val off = paidSettings(assistant = false).let { c ->
+            c.copy(catchMeUpEnabled = false, assistantPrompt = "Mine.", savedProfile = c.profile().copy(features = c.profile().features + (AiFeature.CatchUp to io.nisfeb.talon.ai.FeatureSetting(false))))
+        }
+        val here = FakeAiSettings(off)
+        val sync = SettingsSyncImpl(db = db, aiSettings = here)
+        sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket("config" to """{"schemaVersion":2}"""))
+        assertEquals("Mine.", here.state.value.assistantPrompt, "absent is not empty")
+        val on = """{"schemaVersion":3,"catchMeUpEnabled":true,"agentEnabled":true,"askUrbitEnabled":true,"switches":{"CatchUp":true,"Assistant":true}}"""
+        sync.applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, bucket("config" to on))
+        val c = here.state.value
+        assertTrue(c.catchMeUpEnabled && c.assistantOn() && c.profile().isOn(AiFeature.CatchUp) && c.profile().isOn(AiFeature.Assistant))
+        assertEquals("Mine.", c.assistantPrompt)
+    }
+
+    @Test
+    fun `a ship that refuses to let the old keys go still finishes starting up`() = live {
+        ship.refuse = { p -> if ("del-entry" in p.json.toString()) "no" else null }
+        ship.scries["settings/desk/talon"] = buildJsonObject {
+            put("desk", buildJsonObject {
+                put("ai-settings", buildJsonObject {
+                    put("config", JsonPrimitive(olderEntry))
+                    put("credentials", JsonPrimitive(olderKeys))
+                })
+            })
+        }.toString()
+        SettingsSyncImpl(db = db, aiSettings = FakeAiSettings(paidSettings())).apply { attach(ship.channel) }.bootstrap()
+        assertTrue(ship.subscribed.any { it.startsWith("settings") }, "it went on to watch for changes: ${ship.subscribed}")
+    }
 }

@@ -69,6 +69,22 @@ class CallRecordingPublisherTest {
     }
 
     @Test
+    fun `a voice must be three times the room, a short word counts, and padding stops at the track's ends`() {
+        // A room at about 400 and a voice at about 1,100: under three times the room, so not speech.
+        assertTrue(CallRecordingPublisher.speechSpans(sound(2_000, 566) + sound(1_000, 1_556) + sound(2_000, 566), rate).isEmpty())
+        // A 280 ms word is a word.
+        assertEquals(1, CallRecordingPublisher.speechSpans(sound(1_000, 0) + sound(280, 4_000) + sound(1_000, 0), rate).size)
+        // The end is padded by 200 ms too.
+        val one = CallRecordingPublisher.speechSpans(sound(1_000, 0) + sound(2_000, 4_000) + sound(1_000, 0), rate).single()
+        assertTrue(ms(one.last + 1) in 3_180L..3_240L, "ends at ${ms(one.last + 1)}")
+        // Speech to the very start and end: padding stops at the track.
+        val edge = sound(1_500, 4_000) + sound(1_000, 0) + sound(1_500, 4_000)
+        val spans = CallRecordingPublisher.speechSpans(edge, rate)
+        assertEquals(0, spans.first().first)
+        assertTrue(spans.last().last < edge.size, "never past the track")
+    }
+
+    @Test
     fun `a long stretch is cut to fit, and silence or a click is nothing`() {
         val long = CallRecordingPublisher.speechSpans(sound(60_000, 4_000), rate)
         assertEquals(3, long.size)

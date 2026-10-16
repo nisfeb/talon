@@ -517,7 +517,7 @@ class SettingsSyncImpl(
                 (it["schemaVersion"].asInt() ?: 0) < AI_SCHEMA
             } ?: false
             if (legacy) {
-                Log.i(TAG, "ship has an older ai-settings entry — upgrading to schemaVersion=$AI_SCHEMA")
+                Log.i(TAG, "ship has an older ai-settings entry, upgrading to schemaVersion=$AI_SCHEMA")
                 runCatching { pushAiSettings() }
                     .onFailure { Log.w(TAG, "ai-settings upgrade push failed", it) }
             }
@@ -525,7 +525,7 @@ class SettingsSyncImpl(
             // ship are taken off it; an older build sees the entry go and
             // keeps what it has.
             if ((deskMap?.get(BUCKET_AI_SETTINGS) as? JsonObject)?.containsKey(AI_KEYS_ENTRY) == true) {
-                Log.i(TAG, "ship holds AI keys from an older build — taking them off")
+                Log.i(TAG, "ship holds AI keys from an older build, taking them off")
                 runCatching { pokeDelEntry(BUCKET_AI_SETTINGS, AI_KEYS_ENTRY) }
                     .onFailure { Log.w(TAG, "removing the old credentials entry failed", it) }
             }

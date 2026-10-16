@@ -72,6 +72,12 @@ class CallTranscriptWireTest {
             assertTrue(wav.size < 12 * 1024 * 1024, "under the vendor's cap once base64")
         }
         assertEquals(listOf("~bus", "~nec", "~bus"), t.utterances.map { it.speaker })
+        // Each put where its stretch starts, 200 ms before the voice.
+        val at = t.utterances.map { it.startMs }
+        assertTrue(at[0] in 780L..820L && at[1] in 3_280L..3_320L && at[2] in 5_780L..5_820L, at.toString())
+        // ~bus's first stretch: 1.5 s of voice and 200 ms each side, as 16 kHz WAV.
+        val first = Base64.decode(Json.parseToJsonElement(bodies.first()).jsonObject["input_audio"]!!.jsonObject["data"]!!.jsonPrimitive.content)
+        assertTrue((first.size - 44) / 32 in 1_860..1_960, "${(first.size - 44) / 32} ms sent")
         assertTrue(t.utterances.zipWithNext().all { (a, b) -> a.startMs <= b.startMs })
         assertTrue(t.utterances.all { it.text.startsWith("line ") }, "trimmed words: ${t.utterances}")
         assertTrue(t.failed.isEmpty())
