@@ -240,9 +240,13 @@ class DictationRun(
         const val RATE = 16_000
 
         const val NO_SHIP = "Log in to your ship in Talon first."
-        const val NO_SPEECH_TO_TEXT = "Set an OpenAI-compatible transcription key in AI settings."
-        const val NO_MODEL = "Turn on the assistant and give it a model in AI settings."
-        const val NO_MODEL_FOR_QUESTIONS = "Questions need the assistant. Turn it on and give it a model in AI settings."
+        /** No Armillary key on this device yet: credit first. Where buying is not allowed, nothing points to it. */
+        val NO_ARMILLARY: String get() =
+            if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up Armillary under Settings, AI, to dictate."
+            else "Connect Armillary under Settings, AI, to dictate."
+        const val NO_SPEECH_TO_TEXT = "Your Armillary vendor offers no speech model yet."
+        const val NO_MODEL = "Turn on the assistant under Settings, AI."
+        const val NO_MODEL_FOR_QUESTIONS = "Questions need the assistant. Turn it on under Settings, AI."
 
         /**
          * What stops a dictation before it records, in words for the owner;
@@ -251,6 +255,7 @@ class DictationRun(
          */
         fun blocker(cfg: AiSettings.Config, hasShip: Boolean): String? = when {
             !hasShip -> NO_SHIP
+            cfg.profile().armillary()?.apiKey.isNullOrBlank() -> NO_ARMILLARY
             hearing(cfg) == null -> NO_SPEECH_TO_TEXT
             !cfg.loopsCanRun() && !cfg.orreryOn() -> NO_MODEL
             else -> null

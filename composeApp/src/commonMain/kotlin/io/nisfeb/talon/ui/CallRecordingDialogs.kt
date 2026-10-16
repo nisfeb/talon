@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.dp
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.CallRecordingPublisher
+import io.nisfeb.talon.ai.armillaryHearing
+import io.nisfeb.talon.ai.profile
 import io.nisfeb.talon.call.RecordedCall
 import io.nisfeb.talon.call.saveFile
 import io.nisfeb.talon.call.saveWavFile
@@ -108,8 +110,14 @@ fun RecordingResultDialog(
                 if (!rec.isEmpty && hearing == null) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "To publish a transcript, top up Armillary under " +
-                            "Settings, AI, and keep Transcription on.",
+                        // What is missing, in order: credit, the vendor's speech model, the switch.
+                        when {
+                            sttConfig.profile().armillary()?.apiKey.isNullOrBlank() ->
+                                if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "To publish a transcript, top up Armillary under Settings, AI."
+                                else "To publish a transcript, connect Armillary under Settings, AI."
+                            sttConfig.profile().armillaryHearing() == null -> "Your Armillary vendor offers no speech model yet, so there is nothing to transcribe with."
+                            else -> "To publish a transcript, turn on Call transcripts under Settings, AI."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

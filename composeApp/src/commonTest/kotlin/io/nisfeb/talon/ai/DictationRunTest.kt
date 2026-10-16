@@ -121,6 +121,7 @@ class DictationRunTest {
         assertEquals(DictationRun.NO_SHIP, DictationRun.blocker(cfg(), hasShip = false))
         assertNull(DictationRun.blocker(cfg(), hasShip = true))
         assertEquals(DictationRun.NO_MODEL, DictationRun.blocker(cfg(agent = false), hasShip = true))
+        assertEquals(DictationRun.NO_ARMILLARY, DictationRun.blocker(paidSettings(key = ""), hasShip = true))
         assertEquals(DictationRun.NO_SPEECH_TO_TEXT, DictationRun.blocker(cfg(speech = false), hasShip = true))
     }
 

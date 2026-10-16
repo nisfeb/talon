@@ -6,7 +6,9 @@ import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Where a dictation is heard: the Armillary vendor's transcription model,
@@ -34,9 +36,18 @@ class ArmillaryHearingTest {
 
     @Test
     fun `before the vendor offers a model, nothing changes`() {
-        listOf(cfg(row(model = null)), cfg(row(model = " ")), cfg(row(base = null)), cfg(row(key = "")), cfg()).forEach { c ->
+        listOf(cfg(row(model = null)), cfg(row(model = " ")), cfg(row(base = null))).forEach { c ->
             assertNull(DictationRun.hearing(c))
             assertEquals(DictationRun.NO_SPEECH_TO_TEXT, DictationRun.blocker(c, hasShip = true))
+        }
+        // No Armillary key here yet: credit is what is missing, not a speech model.
+        listOf(cfg(row(key = "")), cfg()).forEach { c ->
+            assertNull(DictationRun.hearing(c))
+            assertEquals(DictationRun.NO_ARMILLARY, DictationRun.blocker(c, hasShip = true))
+        }
+        assertTrue("Top up" in DictationRun.NO_ARMILLARY || "Connect" in DictationRun.NO_ARMILLARY)
+        listOf(DictationRun.NO_ARMILLARY, DictationRun.NO_SPEECH_TO_TEXT, DictationRun.NO_MODEL, DictationRun.NO_MODEL_FOR_QUESTIONS).forEach {
+            assertFalse("key" in it.lowercase(), "no key to set any more: $it")
         }
     }
 

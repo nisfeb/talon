@@ -90,7 +90,7 @@ class CallRecordingDialogsTest {
 
     @Test
     fun `without a transcription model nothing publishes, and discarding asks twice`() = result(stt = io.nisfeb.talon.ai.paidSettings(speech = false)) {
-        assertTrue(shows("Captured 1 speaker.") && shows("top up Armillary"))
+        assertTrue(shows("Captured 1 speaker.") && shows("offers no speech model yet"))
         onNodeWithText("Publish transcript").assertIsNotEnabled()
         onNodeWithText("Discard").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("This is the only copy.") }
