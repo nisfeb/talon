@@ -92,6 +92,14 @@ Google explains the one-time secret display in
 These navigation and secret-display details were checked in the live Console
 on 2026-10-16. They do not require a shared OAuth provider.
 
+A live setup checked on 2026-10-16 had a matching Web client and HTTPS
+callback, and showed Connected, while Google Calendar API was disabled in
+that client's project. After the owner enabled the API, connected and linked
+a calendar, the released app imported existing events and recorded a
+successful sync. The important distinction is authorization versus API
+availability versus linked-calendar sync. This validates the setup diagnosis;
+it is not an end-to-end test of the proposed onboarding changes.
+
 ## Connect, link, then verify
 
 1. On the ship's **Settings → Google Calendar**, enter the matching client ID
