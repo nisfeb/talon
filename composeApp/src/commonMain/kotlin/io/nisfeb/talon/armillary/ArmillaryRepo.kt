@@ -2,23 +2,15 @@ package io.nisfeb.talon.armillary
 
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.ai.ARMILLARY_PROVIDER
-import io.nisfeb.talon.ai.AiFeature
 import io.nisfeb.talon.ai.AiProfile
 import io.nisfeb.talon.ai.AiProvider
 import io.nisfeb.talon.ai.AiSettingsRepository
-import io.nisfeb.talon.ai.FeatureSetting
-import io.nisfeb.talon.ai.ModelCatalog
 import io.nisfeb.talon.ai.ModelInfo
-import io.nisfeb.talon.ai.ModelRef
+import io.nisfeb.talon.ai.allOn
 import io.nisfeb.talon.ai.ProviderKind
-import io.nisfeb.talon.ai.armillaryBest
-import io.nisfeb.talon.ai.filledWithArmillary
 import io.nisfeb.talon.ai.followingVendorDefault
-import io.nisfeb.talon.ai.shipBase
 import io.nisfeb.talon.ai.wantsArmillaryRow
 import io.nisfeb.talon.ai.without
-import io.nisfeb.talon.orrery.OrreryRepo
-import io.nisfeb.talon.ui.isAssistantSupported
 import io.nisfeb.talon.ui.platformLabel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -58,12 +50,7 @@ class ArmillaryRepo(
     private val notifier: Notifier = NoopNotifier,
     /** Records the credit in the Activity feed's Account domain. Null in a test. */
     private val noticeRepo: io.nisfeb.talon.notify.NoticeRepo? = null,
-    /** Where a model's tool use is read, the vendor's list not saying. A test hands in its own. */
-    openRouter: ModelCatalog? = null,
-    /** The Orrery pipe, whose generator a payment may point at Armillary. */
-    private val orrery: () -> OrreryRepo? = { OrreryRepo.attached() },
 ) {
-    private val models by lazy { openRouter ?: ModelCatalog() }
     private val _availability = MutableStateFlow(ArmillaryAvailability.UNKNOWN)
     val availability: StateFlow<ArmillaryAvailability> = _availability.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
@@ -83,15 +70,6 @@ class ArmillaryRepo(
 
     /** The checkout this session opened last, while the card has something to say about it. */
     val payment: StateFlow<Payment?> = _payment.asStateFlow()
-
-    private val _offer = MutableStateFlow<String?>(null)
-
-    /**
-     * After a payment, the model catch-up and the assistant are ready on,
-     * while either is off. They read messages, so they are turned on by
-     * the owner's own tap ([acceptOffer]), never by the payment.
-     */
-    val offer: StateFlow<String?> = _offer.asStateFlow()
 
     private val _settingUp = MutableStateFlow(false)
 
@@ -152,7 +130,6 @@ class ArmillaryRepo(
         watching = null
         adopting?.cancel()
         adopting = null
-        _offer.value = null
         api = null
         shipUrl = null
         ship = null
@@ -369,7 +346,6 @@ class ArmillaryRepo(
         watching?.cancel()
         watching = null
         _payment.value = null
-        _offer.value = null
         _account.value = null
         _inference.value = null
         _plans.value = emptyList()
@@ -454,73 +430,16 @@ class ArmillaryRepo(
     }
 
     /**
-     * A payment landed: the AI settings made to work on what was bought
-     * (the owner's decisions, 2026-09-28). What does not work is given
-     * the strongest model the vendor sells, and what works stays
-     * ([filledWithArmillary]). Catch-up and the assistant are readied, not
-     * turned on ([offer]). With Orrery on and the ship's generator unable
-     * to run, it is pointed at Armillary too.
+     * A payment landed: this device's key, and every feature it pays for
+     * on. The payment is the owner's yes (sneagan, 2026-10-16: "paying a
+     * few bucks ... should just turn everything on"); the top-up sheet
+     * says what the features send.
      */
     private suspend fun afterPayment() {
         val ai = aiSettings ?: return
-        ensureKey(platformLabel).onFailure { Log.i(TAG, "no key after the payment: ${it.message}"); return }
-        if (catalog == null) api?.let { a -> runSuspendCatching { a.catalog() }.onSuccess { catalog = it } }
-        val profile = ai.state.value.savedProfile ?: return
-        val row = profile.provider(ARMILLARY_PROVIDER) ?: return
-        // Whether a model uses tools, which the vendor's list does not
-        // say and OpenRouter's does: a lease runs on OpenRouter's own ids.
-        val known = runSuspendCatching { models.fetch(OPENROUTER_ROW).models }
-            .onFailure { Log.i(TAG, "tool use not read: ${it.message}") }
-            .getOrDefault(emptyList()).associateBy { it.id }
-        val listed = row.models.map { m ->
-            known[m.id]?.let { k -> m.copy(tools = m.tools ?: k.tools, contextLength = m.contextLength ?: k.contextLength) } ?: m
-        }
-        val price = catalog.orEmpty().associate { it.id to it.outMicro }
-        val best = armillaryBest(listed) { price[it] ?: 0L } ?: return
-        val next = profile.copy(providers = profile.providers.map { if (it.id == ARMILLARY_PROVIDER) it.copy(models = listed) else it })
-            .filledWithArmillary(best)
-        if (next != profile) ai.setProfile(next)
-        pointGenerator(ai, best)
-        // What they would run on: the vendor's pick where it names one.
-        _offer.value = (next.resolve(AiFeature.CatchUp)?.takeIf { it.provider.id == ARMILLARY_PROVIDER }?.model ?: best).takeIf { !next.isOn(AiFeature.CatchUp) || (isAssistantSupported && !next.isOn(AiFeature.Assistant)) }
-    }
-
-    /**
-     * Orrery's generator on [best], where Orrery is on and the generator
-     * has no key or no model to run (the owner's decision, 2026-09-28).
-     * One that runs is the owner's and is left alone. The ship's chat and
-     * mail readers borrow its key, so they start reading what the Orrery
-     * page picked.
-     */
-    private suspend fun pointGenerator(ai: AiSettingsRepository, best: String) {
-        val profile = ai.state.value.savedProfile ?: return
-        if (profile.orrery != true) return
-        val o = orrery() ?: return
-        o.loadGenerator()
-        val g = o.generatorSettings.value ?: return
-        if (g.keySet && !g.model.isNullOrBlank()) return
-        val row = profile.provider(ARMILLARY_PROVIDER) ?: return
-        val base = row.shipBase() ?: return
-        o.setGenerator(true, base, best, row.apiKey)
-            .onSuccess {
-                val now = ai.state.value.savedProfile ?: return@onSuccess
-                val gen = (now.features[AiFeature.OrreryGenerator] ?: FeatureSetting()).copy(model = ModelRef(ARMILLARY_PROVIDER, best))
-                ai.setProfile(now.copy(features = now.features + (AiFeature.OrreryGenerator to gen)))
-            }
-            .onFailure { Log.i(TAG, "generator not pointed: ${it.message}") }
-    }
-
-    /** Catch-up and, where there is one, the assistant turned on, as offered. */
-    fun acceptOffer() {
-        _offer.value = null
-        val ai = aiSettings ?: return
+        ensureKey(platformLabel).onFailure { Log.i(TAG, "no key after the payment: ${it.message}") }
         val p = ai.state.value.savedProfile ?: return
-        val on = listOfNotNull(AiFeature.CatchUp, AiFeature.Assistant.takeIf { isAssistantSupported })
-        ai.setProfile(p.copy(features = p.features + on.associateWith { (p.features[it] ?: FeatureSetting()).copy(on = true) }))
-    }
-
-    fun declineOffer() {
-        _offer.value = null
+        p.allOn().takeIf { it != p }?.let(ai::setProfile)
     }
 
     /**
@@ -579,7 +498,6 @@ class ArmillaryRepo(
         private const val TAG = "ArmillaryRepo"
 
         /** OpenRouter's public list, which says what each model can do; no key is sent. */
-        private val OPENROUTER_ROW = AiProvider("openrouter", ProviderKind.OpenRouter, "OpenRouter")
 
         /** The vendor a ship buys from until its owner names another. */
         const val DEFAULT_VENDOR = "~nisfeb"

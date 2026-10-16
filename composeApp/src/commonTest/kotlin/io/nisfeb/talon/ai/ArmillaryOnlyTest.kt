@@ -82,4 +82,47 @@ class ArmillaryOnlyTest {
         assertEquals("Armillary has no key.", AiSettings.Config(provider = AiSettings.Provider.Custom, apiKey = "", model = null,
             savedProfile = before.copy(providers = listOf(device, row.copy(apiKey = "")))).modelProblem(AiFeature.CatchUp))
     }
+
+    @Test
+    fun `the reset runs once, own providers and keys go, and every paid feature is on`() {
+        val off = before.copy(
+            features = before.features + mapOf(
+                AiFeature.CatchUp to FeatureSetting(false, ModelRef("lm", "qwen"), own = true),
+                AiFeature.Assistant to FeatureSetting(false),
+                AiFeature.OrreryTriage to FeatureSetting(true, ModelRef(DEVICE_PROVIDER, "gemma-3n")),
+            ),
+            jev = true,
+            orrery = true,
+        )
+        val old = AiSettings.Config(
+            provider = AiSettings.Provider.OpenRouter, apiKey = "sk-own", model = "own/default", sttApiKey = "sk-whisper", braveApiKey = "brave",
+            privateApiKey = "sk-p", privateBaseUrl = "http://127.0.0.1:1234/v1", catchMeUpEnabled = false, agentEnabled = false, askUrbitEnabled = false,
+            assistantPrompt = "Be brief.", savedProfile = off,
+        )
+        val now = old.armillaryOnly()
+        val p = now.savedProfile!!
+        assertEquals(listOf(ProviderKind.ThisDevice, ProviderKind.Armillary), p.providers.map { it.kind })
+        assertTrue(PAID_FEATURES.all { p.isOn(it) }, p.features.toString())
+        assertTrue(p.features.values.none { it.own } && p.defaultModel == null)
+        assertEquals(listOf("", "", "", ""), listOf(now.apiKey, now.sttApiKey, now.braveApiKey, now.privateApiKey))
+        assertTrue(now.catchMeUpEnabled && now.assistantOn())
+        assertEquals("Be brief.", now.assistantPrompt, "the owner's instructions stay")
+        assertEquals(FeatureSetting(true, ModelRef(DEVICE_PROVIDER, "gemma-3n")), p.features[AiFeature.OrreryTriage], "triage keeps its device model and switch")
+        assertEquals(true, p.jev)
+        assertEquals(true, p.orrery)
+        assertTrue(p.armillaryOnly && p.ownKeysDropped)
+        // Once only: an owner's off after it is theirs.
+        val turnedOff = now.copy(savedProfile = p.copy(features = p.features + (AiFeature.CatchUp to FeatureSetting(false))))
+        assertEquals(turnedOff, turnedOff.armillaryOnly())
+    }
+
+    @Test
+    fun `a fresh install has everything on and nothing to say about keys`() {
+        val fresh = AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "", model = null).armillaryOnly()
+        val p = fresh.savedProfile!!
+        assertTrue(PAID_FEATURES.all { p.isOn(it) } && fresh.assistantOn())
+        assertFalse(p.ownKeysDropped)
+        assertEquals(listOf(ProviderKind.ThisDevice), p.providers.map { it.kind })
+        assertNull(p.resolve(AiFeature.CatchUp), "and nothing runs until there is an Armillary row")
+    }
 }

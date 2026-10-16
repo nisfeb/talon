@@ -1,8 +1,6 @@
 package io.nisfeb.talon.armillary
 
 import io.nisfeb.talon.ui.quietCatalog
-import androidx.room.Room
-import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -16,11 +14,8 @@ import io.nisfeb.talon.ai.AiProfile
 import io.nisfeb.talon.ai.AiProvider
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.DEVICE_PROVIDER
-import io.nisfeb.talon.ai.ModelCatalog
 import io.nisfeb.talon.ai.ModelRef
 import io.nisfeb.talon.ai.ProviderKind
-import io.nisfeb.talon.data.AppDatabase
-import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.urbit.FakeAiSettings
 import io.nisfeb.talon.ui.screens.AiSettingsSection
 import io.nisfeb.talon.ui.theme.TalonTheme
@@ -41,19 +36,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
-import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Paying for Armillary sets the AI settings up to run on it (the owner's
- * decisions, 2026-09-28): the gaps take the strongest model the vendor
- * sells, catch-up and the assistant are readied for one tap, and Orrery's
- * generator is pointed at it where it had nothing to run on.
+ * Paying for Armillary turns on everything it pays for, with no question
+ * (sneagan, 2026-10-16: paying "should just turn everything on and call
+ * it a day"), and the checkout flows that get the payment there.
  */
 class ArmillaryPaymentTest {
     @Volatile private var balance = 0L
@@ -124,17 +116,13 @@ class ArmillaryPaymentTest {
     /** What "Set up Armillary" leaves: the row, and a blank default on it. */
     private val setUp = AiProfile(providers = listOf(device, row), defaultModel = ModelRef(ARMILLARY_PROVIDER, ""), orrery = true)
 
-    /** A ship, an Orrery pipe on it and the Armillary repo, set up and refreshed once. */
+    /** A ship and the Armillary repo, set up and refreshed once. */
     private inner class Rig(profile: AiProfile) : AutoCloseable {
-        private val dir = createTempDirectory(prefix = "talon-armillary-paid-").toFile()
-        private val db = Room.databaseBuilder<AppDatabase>(File(dir, "t.db").absolutePath)
-            .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
         private val scope = CoroutineScope(SupervisorJob())
         val ai = FakeAiSettings().apply {
             applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "", model = null, savedProfile = profile))
         }
-        private val orrery = OrreryRepo(http, scope, db, "test", bareClient = http).apply { attach("https://ship.test", "~zod") }
-        val repo = ArmillaryRepo(http, scope, ai, openRouter = ModelCatalog(http), orrery = { orrery })
+        val repo = ArmillaryRepo(http, scope, ai)
 
         init {
             repo.attach("https://ship.test", "~zod")
@@ -143,10 +131,7 @@ class ArmillaryPaymentTest {
 
         override fun close() {
             repo.detach()
-            orrery.detach()
             runBlocking { scope.coroutineContext.job.cancelAndJoin() }
-            db.close()
-            dir.deleteRecursively()
         }
     }
 
@@ -161,78 +146,18 @@ class ArmillaryPaymentTest {
     }
 
     @Test
-    fun `a payment runs everything on the strongest model that can do the work, and asks before reading`() = ship(setUp) { repo, ai ->
+    fun `a payment turns every feature it pays for on, and asks nothing`() = ship(setUp) { repo, ai ->
+        assertFalse(ai.state.value.savedProfile!!.isOn(AiFeature.CatchUp), "off before")
         pay(repo)
-        withTimeout(10_000) { while (repo.offer.value == null) delay(20) }
+        withTimeout(10_000) { while (!ai.state.value.savedProfile!!.isOn(AiFeature.CatchUp)) delay(20) }
         val p = ai.state.value.savedProfile!!
-        // The priciest lacks tools, which the assistant needs.
-        val ours = ModelRef(ARMILLARY_PROVIDER, "big/tools")
-        assertEquals(ours, p.defaultModel)
-        assertEquals("big/tools", repo.offer.value)
-        assertFalse(p.isOn(AiFeature.CatchUp) || p.isOn(AiFeature.Assistant), "they read messages: the owner's tap, not the payment")
-        assertEquals(true, p.provider(ARMILLARY_PROVIDER)!!.models.first { it.id == "big/tools" }.tools, "what OpenRouter says of it is kept on the row")
-        assertEquals(listOf("/api/v1/models", "/api/v1/endpoints/zdr"), toOpenRouter.toList(), "its public list, asked with no key")
-        // Orrery is on and its generator had nothing to run on.
-        withTimeout(10_000) { while (puts.isEmpty()) delay(20) }
-        assertEquals("""{"enabled":true,"url":"https://openrouter.ai/api/v1","model":"big/tools","api_key":"lease.key"}""", puts.single().second)
-        withTimeout(10_000) { while (ai.state.value.savedProfile!!.features[AiFeature.OrreryGenerator]?.model != ours) delay(20) }
-
-        repo.acceptOffer()
-        val on = ai.state.value.savedProfile!!
-        assertTrue(on.isOn(AiFeature.CatchUp) && on.isOn(AiFeature.Assistant))
-        assertEquals(null, repo.offer.value)
-        // A refresh after keeps what was learnt of tool use.
-        repo.refresh()
-        assertEquals(true, ai.state.value.savedProfile!!.provider(ARMILLARY_PROVIDER)!!.models.first { it.id == "big/tools" }.tools)
-    }
-
-    @Test
-    fun `a generator that runs is left alone, and nothing is offered where both are on`() {
-        generator = """{"enabled":true,"model":"anthropic/claude-opus-5","api_key_set":true}"""
-        val on = setUp.copy(
-            features = mapOf(
-                AiFeature.CatchUp to io.nisfeb.talon.ai.FeatureSetting(on = true),
-                AiFeature.Assistant to io.nisfeb.talon.ai.FeatureSetting(on = true),
-            ),
-        )
-        ship(on) { repo, ai ->
-            pay(repo)
-            withTimeout(10_000) { while (ai.state.value.savedProfile!!.defaultModel?.model.isNullOrBlank()) delay(20) }
-            delay(500)
-            assertEquals(null, repo.offer.value)
-            assertTrue(puts.isEmpty(), "the owner's generator is theirs")
-        }
-    }
-
-    // sneagan, 2026-10-12: a top-up left the default on Fable, the
-    // priciest model, over the vendor's Opus. "fix it so the default
-    // follows armillary unless the user explicitly changes it".
-    @Test
-    fun `where the vendor names a default, a payment leaves the default on it and offers it`() {
-        suggested = ""","suggested":{"models":{"default":"small/tools"}}"""
-        ship(setUp) { repo, ai ->
-            pay(repo)
-            withTimeout(10_000) { while (repo.offer.value == null) delay(20) }
-            val p = ai.state.value.savedProfile!!
-            assertEquals(ModelRef(ARMILLARY_PROVIDER, ""), p.defaultModel, "not the model Talon rated best")
-            assertEquals("small/tools", p.resolve(p.defaultModel)?.model)
-            assertEquals("small/tools", repo.offer.value, "the offer names what they would run on")
-        }
-    }
-
-    @Test
-    fun `a default the payment wrote follows the vendor's again on the next refresh, and one picked by hand stays`() {
-        suggested = ""","suggested":{"models":{"default":"small/tools"}}"""
-        val written = setUp.copy(defaultModel = ModelRef(ARMILLARY_PROVIDER, "big/tools"))
-        ship(written) { _, ai ->
-            withTimeout(10_000) { while (ai.state.value.savedProfile!!.defaultModel != ModelRef(ARMILLARY_PROVIDER, "")) delay(20) }
-            assertEquals("small/tools", ai.state.value.savedProfile!!.resolve(AiFeature.Assistant)?.model)
-        }
-        ship(written.copy(defaultOwn = true)) { repo, ai ->
-            withTimeout(10_000) { while (ai.state.value.savedProfile!!.provider(ARMILLARY_PROVIDER)!!.suggested.isEmpty()) delay(20) }
-            repo.refresh()
-            assertEquals(ModelRef(ARMILLARY_PROVIDER, "big/tools"), ai.state.value.savedProfile!!.defaultModel)
-        }
+        assertTrue(listOf(AiFeature.CatchUp, AiFeature.Assistant, AiFeature.Transcription).all { p.isOn(it) })
+        assertTrue(ai.state.value.assistantOn() && ai.state.value.catchMeUpEnabled, "and the toggles older builds read")
+        assertEquals("lease.key", p.provider(ARMILLARY_PROVIDER)!!.apiKey)
+        assertEquals(null, p.resolve(AiFeature.Assistant)?.problem(), "the assistant runs")
+        assertTrue(toOpenRouter.isEmpty(), "nothing asked of OpenRouter to pick a model")
+        assertTrue(puts.isEmpty(), "Orrery's generator is the ship's to follow, not written from here")
+        assertEquals(p.orrery, true, "Orrery's switch is left as it was")
     }
 
     // The row never travels, so a profile from the device that paid named
@@ -249,49 +174,6 @@ class ArmillaryPaymentTest {
     }
 
     @OptIn(ExperimentalTestApi::class)
-    @Test
-    fun `the card says where the messages would go, and one tap turns both on`() = Rig(setUp).use { r ->
-        runBlocking {
-            pay(r.repo)
-            withTimeout(10_000) { while (r.repo.offer.value == null) delay(20) }
-        }
-        runComposeUiTest {
-            setContent {
-                TalonTheme(darkTheme = false) {
-                    Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(r.ai, orrery = null, armillary = r.repo, catalog = quietCatalog()) }
-                }
-            }
-            onNodeWithText("Catch-up and the assistant are set up on big/tools. Turn them on?", substring = true).assertExists()
-            onNodeWithText("which keeps nothing (zero data retention)", substring = true).assertExists()
-            onNodeWithText("Turn on").performScrollTo().performClick()
-            waitForIdle()
-            val p = r.ai.state.value.savedProfile!!
-            assertTrue(p.isOn(AiFeature.CatchUp) && p.isOn(AiFeature.Assistant))
-            assertTrue(onAllNodesWithText("Turn on").fetchSemanticsNodes().isEmpty(), "asked once")
-        }
-    }
-
-    @OptIn(ExperimentalTestApi::class)
-    @Test
-    fun `not now leaves both off and stops asking`() = Rig(setUp).use { r ->
-        runBlocking {
-            pay(r.repo)
-            withTimeout(10_000) { while (r.repo.offer.value == null) delay(20) }
-        }
-        runComposeUiTest {
-            setContent {
-                TalonTheme(darkTheme = false) {
-                    Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(r.ai, orrery = null, armillary = r.repo, catalog = quietCatalog()) }
-                }
-            }
-            onNodeWithText("Not now").performScrollTo().performClick()
-            waitForIdle()
-            val p = r.ai.state.value.savedProfile!!
-            assertFalse(p.isOn(AiFeature.CatchUp) || p.isOn(AiFeature.Assistant))
-            assertTrue(onAllNodesWithText("Turn on").fetchSemanticsNodes().isEmpty())
-        }
-    }
-
     @Test
     fun `a checkout the ship answered 202 for is followed to its page, not reported as failed`() = ship(setUp) { repo, _ ->
         slowVendor = true

@@ -9,9 +9,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /**
- * Where a dictation is heard: the owner's own key, else the Armillary
- * vendor's transcription model, else nowhere, exactly as before the vendor
- * offered one. Contract: lattice /project/talon/armillary-transcription-contract.
+ * Where a dictation is heard: the Armillary vendor's transcription model,
+ * else nowhere. Contract: lattice /project/talon/armillary-transcription-contract.
  */
 class ArmillaryHearingTest {
     private val whisper = "openai/whisper-large-v3-turbo"
@@ -28,7 +27,9 @@ class ArmillaryHearingTest {
     fun `the vendor's model hears a dictation where the owner has no key, and the blocker lifts`() {
         val c = cfg(row())
         assertEquals(Hearing("https://openrouter.ai/api/v1", "sk-or-lease", whisper), DictationRun.hearing(c))
-        assertEquals(DictationRun.NO_MODEL, DictationRun.blocker(c, hasShip = true), "past the key, on to the next thing missing")
+        assertEquals(null, DictationRun.blocker(c, hasShip = true), "the assistant is on by default, so nothing stops it")
+        val off = c.copy(agentEnabled = false, askUrbitEnabled = false)
+        assertEquals(DictationRun.NO_MODEL, DictationRun.blocker(off, hasShip = true), "past the key, on to the next thing missing")
     }
 
     @Test

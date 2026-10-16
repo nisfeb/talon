@@ -80,14 +80,13 @@ object AiSettings {
         // topic clustering, and bookmark-similarity highlighting. They all
         // share the same on-device index, so they're enabled together.
         val smartFeaturesEnabled: Boolean = true,
-        // Opt-in, unlike the others: the assistant is rolled out behind
-        // rc releases, so it defaults OFF and stays invisible until the
-        // user both configures a key and turns it on. The assistant
-        // subsumes MCP (ship tools) and web access — there are no separate
-        // toggles; both are active whenever the assistant is on (writes
-        // and pokes are still confirmed; dangerous MCP tools stay hidden).
-        val askUrbitEnabled: Boolean = false,
-        val agentEnabled: Boolean = false,
+        // On, like the others: paying for Armillary turns everything on
+        // (Armillary-only, 2026-10-16), and it runs only with a key. The
+        // assistant subsumes MCP (ship tools) and web access, active
+        // whenever it is on (writes and pokes are still confirmed;
+        // dangerous MCP tools stay hidden).
+        val askUrbitEnabled: Boolean = true,
+        val agentEnabled: Boolean = true,
         val syncEnabled: Boolean = true,
         // Brave Search API credential for the assistant's web search.
         // Optional (the assistant can open URLs without it). Travels with

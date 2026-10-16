@@ -132,6 +132,14 @@ data class AiProfile(
      * gone everywhere, until the owner puts something back.
      */
     val savedHereAtMs: Long = 0,
+    /**
+     * [AiSettings.Config.armillaryOnly] has run on this device: switches
+     * set after it are the owner's, and it never runs again. Local: the
+     * profile no longer travels.
+     */
+    val armillaryOnly: Boolean = false,
+    /** Own providers or keys were dropped by [AiSettings.Config.armillaryOnly]; the AI tab says so until the owner has read it. */
+    val ownKeysDropped: Boolean = false,
 ) {
     fun provider(id: String): AiProvider? = providers.firstOrNull { it.id == id }
 
@@ -378,6 +386,43 @@ fun migrateProfile(cfg: AiSettings.Config, inputs: ProfileInputs = ProfileInputs
     ),
     jev = inputs.jevOn,
 )
+
+/** The features a payment buys, which it turns on ([allOn]). Triage and the generator are Orrery's. */
+val PAID_FEATURES = listOf(AiFeature.CatchUp, AiFeature.Assistant, AiFeature.Transcription)
+
+/** Every feature a payment buys, on: the payment is the owner's yes (sneagan, 2026-10-16). */
+fun AiProfile.allOn(): AiProfile = copy(features = features + PAID_FEATURES.associateWith { (features[it] ?: FeatureSetting()).copy(on = true) })
+
+/**
+ * These settings as Armillary-only has them, once per device
+ * (docs/superpowers/specs/2026-10-16-armillary-only-design.md): own
+ * providers, own picks and the own keys in the old fields are dropped,
+ * and every paid feature is on, whatever it was. sneagan, 2026-10-16:
+ * the reset turns back on what someone turned off before, since most of
+ * those offs meant no key yet. Search by meaning runs on this device and
+ * keeps its switch. Triage keeps its device model and Orrery's switch.
+ */
+fun AiSettings.Config.armillaryOnly(): AiSettings.Config {
+    if (savedProfile?.armillaryOnly == true) return this
+    val p = profile()
+    val kept = p.providers.filter { it.kind == ProviderKind.Armillary || it.kind == ProviderKind.ThisDevice }
+    val hadOwn = kept.size != p.providers.size || apiKey.isNotBlank() || sttApiKey.isNotBlank() || braveApiKey.isNotBlank() || privateApiKey.isNotBlank()
+    val triage = p.features[AiFeature.OrreryTriage]?.let { s -> s.copy(model = s.model?.takeIf { it.provider == DEVICE_PROVIDER }, own = false) }
+    val profile = AiProfile(
+        providers = kept.ifEmpty { listOf(AiProvider(DEVICE_PROVIDER, ProviderKind.ThisDevice, ProviderKind.ThisDevice.label)) },
+        features = listOfNotNull(triage?.let { AiFeature.OrreryTriage to it }, p.features[AiFeature.OrreryGenerator]?.let { AiFeature.OrreryGenerator to it.copy(model = null, own = false) }).toMap(),
+        jev = p.jev,
+        orrery = p.orrery,
+        savedHereAtMs = p.savedHereAtMs,
+        armillaryOnly = true,
+        ownKeysDropped = hadOwn,
+    ).allOn()
+    return copy(
+        apiKey = "", sttApiKey = "", braveApiKey = "", privateApiKey = "", privateBaseUrl = null,
+        catchMeUpEnabled = true, askUrbitEnabled = true, agentEnabled = true,
+        savedProfile = profile,
+    )
+}
 
 /** The profile these settings stand for: the one the owner saved, else the one today's fields make. */
 fun AiSettings.Config.profile(): AiProfile = savedProfile ?: migrateProfile(this)

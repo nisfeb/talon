@@ -24,6 +24,13 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
     private val _state = MutableStateFlow(read())
     override val state: StateFlow<AiSettings.Config> = _state.asStateFlow()
 
+    // Armillary-only, once: written here, so it does not run again.
+    init {
+        val now = _state.value
+        val next = now.armillaryOnly()
+        if (next != now) persistAll(next)
+    }
+
     @Volatile
     override var onStateChange: ((AiSettings.Config, Boolean) -> Unit)? = null
 

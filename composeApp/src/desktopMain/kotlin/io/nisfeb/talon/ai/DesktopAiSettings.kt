@@ -35,7 +35,7 @@ class DesktopAiSettings : AiSettingsRepository {
         // deviceId, so a churning id makes this machine unable to recognize
         // its own prior claim — it reads a "foreign" fresh holder and skips
         // its own scheduled fire.
-        if (!file.exists()) return defaultConfig().also(::writeAtomically)
+        if (!file.exists()) return defaultConfig().armillaryOnly().also(::writeAtomically)
         val raw = runCatching { file.readText() }.getOrElse {
             // Transient I/O failure (permissions, FS hiccup). Don't touch
             // the file — it may be fine next launch and it holds the key.
@@ -55,7 +55,7 @@ class DesktopAiSettings : AiSettingsRepository {
                 // lease keys on deviceId, so it must land on disk now.
                 Log.w(TAG, "ai_settings.json unparseable; kept as .bak, using defaults", it)
                 runCatching { backUpExisting() }
-                defaultConfig().also(::writeAtomically)
+                defaultConfig().armillaryOnly().also(::writeAtomically)
             }
             // SmartFeatures folded four pre-0.14 toggles into one. The old
             // fields are dropped by ignoreUnknownKeys and the new one defaults
@@ -66,6 +66,9 @@ class DesktopAiSettings : AiSettingsRepository {
             // Back-fill a stable device id for configs written before it
             // existed, persisting so it stays put across launches.
             .let { if (it.deviceId.isBlank()) it.copy(deviceId = newDeviceId()).also(::writeAtomically) else it }
+            // Armillary-only, once, and only over a file that was read: an
+            // unreadable one is left alone, and is reset on a launch that can read it.
+            .let { cfg -> cfg.armillaryOnly().let { next -> if (next != cfg) next.also(::writeAtomically) else cfg } }
     }
 
     /** Seed smartFeaturesEnabled from the pre-0.14 per-feature fields when

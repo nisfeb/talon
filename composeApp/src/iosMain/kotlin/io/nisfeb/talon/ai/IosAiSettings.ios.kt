@@ -34,6 +34,13 @@ class IosAiSettings : AiSettingsRepository {
     override val state: StateFlow<AiSettings.Config> = _state.asStateFlow()
     override var onStateChange: ((AiSettings.Config, Boolean) -> Unit)? = null
 
+    // Armillary-only, once: written here, so it does not run again.
+    init {
+        val now = _state.value
+        val next = now.armillaryOnly()
+        if (next != now) commit(next, fireChange = false)
+    }
+
     private fun loadOrDefault(): AiSettings.Config {
         val raw = IosFiles.read(AI_FILE)
         val loaded = raw?.let {
