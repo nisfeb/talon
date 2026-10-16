@@ -54,6 +54,10 @@ class ArmillaryApiTest {
         assertEquals(listOf("stub/alpha", "stub/beta"), got.models)
         // A document from a desk that never says the mode is the proxy.
         assertEquals("proxy", inferenceOf(obj("""{"base_url":"u","key":"k"}""")).mode)
+        // Armillary 34: a ship that is its own vendor pays nothing. Older ships say nothing, which is not free.
+        assertTrue(inferenceOf(obj("""{"base_url":"u","key":"k","free":true}""")).free)
+        assertTrue(!inferenceOf(obj("""{"base_url":"u","key":"k"}""")).free)
+        assertTrue(!inferenceOf(obj("""{"base_url":"u","key":"k","free":"yes"}""")).free)
         assertTrue(inferenceOf(obj("{}")).models.isEmpty())
     }
 

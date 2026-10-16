@@ -110,6 +110,8 @@ fun AiSettingsSection(
     val account by (armillary?.account ?: noAccount).collectAsState()
     val noDeletion = remember { MutableStateFlow<Deletion?>(null) }
     val deletion by (armillary?.deletion ?: noDeletion).collectAsState()
+    val noInference = remember { MutableStateFlow<Inference?>(null) }
+    val inference by (armillary?.inference ?: noInference).collectAsState()
     // Always from the settings as they are now, not as this screen last drew them.
     fun edit(change: (AiProfile) -> AiProfile) = aiSettings.setProfile(change(aiSettings.state.value.profile()))
     fun setOn(f: AiFeature, on: Boolean) =
@@ -161,7 +163,8 @@ fun AiSettingsSection(
     // Why a feature that is on does nothing yet, in one line, or null.
     val waiting: String? = when {
         row == null -> if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up to turn on." else "Connect this device to turn on."
-        account?.hasView == true && account!!.balanceMicro <= 0 -> if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up to turn on." else "No credit on your Armillary account."
+        // A ship that is its own vendor on its own key pays nothing, and its zero balance is no reason.
+        inference?.free != true && account?.hasView == true && account!!.balanceMicro <= 0 -> if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up to turn on." else "No credit on your Armillary account."
         row.apiKey.isBlank() -> "Waiting on this device's key from your ship."
         else -> null
     }

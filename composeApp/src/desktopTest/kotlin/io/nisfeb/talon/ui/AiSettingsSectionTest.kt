@@ -440,11 +440,11 @@ class AiSettingsSectionTest {
 
     // ── Armillary-only (2026-10-16) ─────────────────────────────
 
-    private fun paid(balance: Long = 12_345_000) = FakeAiSettings().apply { applyRemote(io.nisfeb.talon.ai.paidSettings(speech = true)) }.let { ai ->
+    private fun paid(balance: Long = 12_345_000, free: Boolean = false) = FakeAiSettings().apply { applyRemote(io.nisfeb.talon.ai.paidSettings(speech = true)) }.let { ai ->
         ai to repo(ai) { path ->
             HttpStatusCode.OK to when {
                 path.endsWith("/api/inference") ->
-                    """{"mode":"lease","base_url":"https://openrouter.ai/api/v1","key":"sk-or-lease","models":["a/1"],"suggested":{"models":{"default":"a/1"}}}"""
+                    """{"mode":"proxy","base_url":"https://ship.example/apps/armillary/v1","key":"k.s","models":["a/1"],"suggested":{"models":{"default":"a/1"}},"free":$free}"""
                 path.endsWith("/api/plans") -> threeSizes
                 path.endsWith("/api/catalog") -> "[]"
                 else -> """{"ship":"~feb","balance":$balance,"plan":"","subscription":{"active":false},"lease":{},"checkouts":{},"vendor":"~nisfeb","self":"~feb","stale":3}"""
@@ -526,5 +526,18 @@ class AiSettingsSectionTest {
         waitForIdle()
         assertFalse(ai.state.value.profile().ownKeysDropped)
         assertTrue(onAllNodesWithText("Your own AI keys are no longer used.", substring = true).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `a ship that is its own vendor on its own key is not told to top up`() = runComposeUiTest {
+        val (ai, bought) = paid(balance = 0, free = true)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
+            }
+        }
+        waitForIdle()
+        assertTrue(onAllNodesWithText("Top up to turn on.").fetchSemanticsNodes().isEmpty(), "its zero balance is no reason")
+        onNodeWithText("Catch-up").assertExists()
     }
 }
