@@ -73,7 +73,7 @@ class DictationWireTest {
         val http = HttpClient(MockEngine { respond("""{"error":"bad key"}""", HttpStatusCode.Unauthorized, json) })
         val stt = CallRecordingPublisher.Stt("https://api.openai.com/v1/audio/transcriptions", "sk-x", "whisper-1")
         val out = DictationRun(transcribe = DictationRun.whisper(http, stt), act = { "x" }).fromAudio(ByteArray(44))
-        assertTrue(out is DictationOutcome.TranscribeFailed && "401" in out.reason, out.toString())
+        assertTrue(out is DictationOutcome.TranscribeFailed && out.why == "The transcription service said no (401)" && "bad key" in out.details, out.toString())
     }
 
     @Test

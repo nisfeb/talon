@@ -146,7 +146,7 @@ class DictationService : Service() {
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t
                 Log.w(TAG, "dictation failed", t)
-                tell("Dictation failed", t.message ?: "Something went wrong.")
+                tell("Dictation failed", DictationRun.why(t) + ".", details = io.nisfeb.talon.util.errorDetailsOf(t))
             } finally {
                 runCatching { wake.release() }
                 withContext(Dispatchers.Main) {
@@ -278,8 +278,9 @@ class DictationService : Service() {
             is DictationOutcome.NeedsSetup -> tell("Dictation not sent", outcome.what + " It is kept to try again.", retry = kept)
             is DictationOutcome.TranscribeFailed -> tell(
                 "Dictation not sent",
-                "It could not be turned into text: ${outcome.reason}. It is kept to try again.",
+                "${outcome.why}. It is kept to try again.",
                 retry = kept,
+                details = outcome.details,
             )
             is DictationOutcome.RunFailed -> {
                 // The words are what is left to try again, not the audio: no second transcription.
@@ -287,15 +288,16 @@ class DictationService : Service() {
                 if (words != kept) kept.delete()
                 tell(
                     "Dictation not done",
-                    "${outcome.reason}. It may have done part of it before it stopped.",
-                    "You said: ${outcome.transcript}\n\n${outcome.reason}. It may have done part of it before it stopped, so check before trying again.",
+                    "${outcome.why}. It may have done part of it before it stopped.",
+                    "You said: ${outcome.transcript}\n\n${outcome.why}. It may have done part of it before it stopped, so check before trying again.",
                     retry = words,
+                    details = outcome.details,
                 )
             }
         }
     }
 
-    private fun tell(title: String, text: String, long: String = text, retry: File? = null) {
+    private fun tell(title: String, text: String, long: String = text, retry: File? = null, details: String? = null) {
         Notifications.ensureChannel(this)
         val tag = retry?.name ?: "dictation-${System.currentTimeMillis()}"
         val n = NotificationCompat.Builder(this, Notifications.CHANNEL_DICTATION)
@@ -312,6 +314,16 @@ class DictationService : Service() {
                 PendingIntent.getForegroundService(
                     this, retry.name.hashCode(),
                     Intent(this, DictationService::class.java).setAction(ACTION_RETRY).putExtra(EXTRA_KEPT, retry.name),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                ),
+            )
+        }
+        if (details != null) {
+            n.addAction(
+                0, "Copy details",
+                PendingIntent.getBroadcast(
+                    this, tag.hashCode(),
+                    Intent(this, DictationCopyReceiver::class.java).putExtra(DictationCopyReceiver.EXTRA_DETAILS, details),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                 ),
             )
@@ -364,6 +376,19 @@ class DictationService : Service() {
         private const val RUN_BUDGET_MS = 4L * 60 * 1000
         // The run, the transcription (up to 180 s) and two minutes of talking.
         private const val WAKE_LOCK_MS = 10L * 60 * 1000
+    }
+}
+
+/** A failed dictation's error, whole, to the clipboard: "Copy error details" for a notification. */
+class DictationCopyReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val details = intent.getStringExtra(EXTRA_DETAILS) ?: return
+        context.getSystemService(android.content.ClipboardManager::class.java)
+            ?.setPrimaryClip(android.content.ClipData.newPlainText("Dictation error", details))
+    }
+
+    companion object {
+        const val EXTRA_DETAILS = "details"
     }
 }
 

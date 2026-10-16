@@ -100,11 +100,11 @@ sealed interface DictationOutcome {
     /** Talon cannot run one yet; [what] says what to set up. What was said is kept. */
     data class NeedsSetup(val what: String) : DictationOutcome
 
-    /** The audio did not become text. The audio is kept to try again. */
-    data class TranscribeFailed(val reason: String) : DictationOutcome
+    /** The audio did not become text: [why] in words, the error whole in [details]. The audio is kept to try again. */
+    data class TranscribeFailed(val why: String, val details: String) : DictationOutcome
 
     /** Heard, but the run failed. The text is kept to try again; the run may have done part of it. */
-    data class RunFailed(val transcript: String, val reason: String) : DictationOutcome
+    data class RunFailed(val transcript: String, val why: String, val details: String) : DictationOutcome
 }
 
 /**
@@ -125,7 +125,7 @@ class DictationRun(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            return DictationOutcome.TranscribeFailed(e.message ?: e::class.simpleName ?: "error")
+            return DictationOutcome.TranscribeFailed(why(e), io.nisfeb.talon.util.errorDetailsOf(e))
         }
         return if (text.isEmpty()) DictationOutcome.NothingHeard else fromText(text)
     }
@@ -140,7 +140,7 @@ class DictationRun(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            return DictationOutcome.RunFailed(text, e.message ?: e::class.simpleName ?: "error")
+            return DictationOutcome.RunFailed(text, why(e), io.nisfeb.talon.util.errorDetailsOf(e))
         }
         return DictationOutcome.Done(text, summary.ifBlank { "Done." })
     }
@@ -164,6 +164,21 @@ class DictationRun(
         /** Speech to text with the transcription key from AI settings ([CallRecordingPublisher.sttFrom]). */
         fun whisper(http: HttpClient, stt: CallRecordingPublisher.Stt): suspend (ByteArray) -> String = { wav ->
             text(CallTranscribe.transcribe(http, stt.endpoint, stt.key, stt.model, wav))
+        }
+
+        /**
+         * A failure as the owner is told it, in words: no network, a
+         * service that said no, or what it said where that reads as a
+         * sentence. Never an exception's name or a host; those are in
+         * the details.
+         */
+        fun why(e: Throwable): String {
+            val refused = Regex("""^transcription failed: (\d{3})""").find(e.message.orEmpty())?.groupValues?.get(1)
+            return when {
+                io.nisfeb.talon.util.isTransientNetworkError(e) -> "No network, or the service did not answer"
+                refused != null -> "The transcription service said no ($refused)"
+                else -> io.nisfeb.talon.util.readableReason(e.message)?.trimEnd('.') ?: "Something went wrong"
+            }
         }
 
         /** Whisper's segments as one line of text. */

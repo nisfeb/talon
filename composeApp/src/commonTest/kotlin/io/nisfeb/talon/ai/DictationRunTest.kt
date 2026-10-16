@@ -56,12 +56,14 @@ class DictationRunTest {
     }
 
     @Test
-    fun `a transcription that fails says why`() = runBlocking {
+    fun `a transcription that fails says why in words, the error whole kept`() = runBlocking {
         val out = DictationRun(
-            transcribe = { error("transcription failed: 401 bad key") },
+            transcribe = { error("transcription failed: 401 {\"error\":\"bad key\"}") },
             act = { "x" },
         ).fromAudio(audio)
-        assertEquals(DictationOutcome.TranscribeFailed("transcription failed: 401 bad key"), out)
+        assertIs<DictationOutcome.TranscribeFailed>(out)
+        assertEquals("The transcription service said no (401)", out.why)
+        assertTrue("bad key" in out.details && "IllegalStateException" in out.details)
     }
 
     @Test
@@ -70,15 +72,23 @@ class DictationRunTest {
             transcribe = { "call the dentist" },
             act = { throw IllegalStateException("the model did not answer") },
         ).fromAudio(audio)
-        assertEquals(DictationOutcome.RunFailed("call the dentist", "the model did not answer"), out)
+        assertIs<DictationOutcome.RunFailed>(out)
+        assertEquals("call the dentist", out.transcript)
+        assertEquals("the model did not answer", out.why)
     }
 
     @Test
-    fun `a failure with no message is named by its kind`() = runBlocking {
-        val out = DictationRun(transcribe = { "x" }, act = { throw IllegalArgumentException() }).fromAudio(audio)
-        assertEquals(DictationOutcome.RunFailed("x", "IllegalArgumentException"), out)
-        val heard = DictationRun(transcribe = { throw IllegalArgumentException() }, act = { "x" }).fromAudio(audio)
-        assertEquals(DictationOutcome.TranscribeFailed("IllegalArgumentException"), heard)
+    fun `no network is said as no network, never as a host it could not resolve`() {
+        val e = RuntimeException("wrapped", kotlinx.io.IOException("Unable to resolve host \"api.openai.com\": No address associated with hostname"))
+        assertEquals("No network, or the service did not answer", DictationRun.why(e))
+        assertTrue("api.openai.com" in io.nisfeb.talon.util.errorDetailsOf(e), "the host is in the details")
+    }
+
+    @Test
+    fun `an exception's own words reach the line only when they read as a sentence`() {
+        assertEquals("It took longer than 4 minutes", DictationRun.why(IllegalStateException("It took longer than 4 minutes")))
+        assertEquals("Something went wrong", DictationRun.why(IllegalArgumentException()))
+        assertEquals("Something went wrong", DictationRun.why(IllegalStateException("kotlinx.serialization.SerializationException: {\"x\":1}")))
     }
 
     @Test

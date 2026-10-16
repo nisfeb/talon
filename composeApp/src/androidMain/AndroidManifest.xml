@@ -232,6 +232,10 @@
             android:exported="false"
             android:foregroundServiceType="microphone|dataSync" />
 
+        <receiver
+            android:name="io.nisfeb.talon.DictationCopyReceiver"
+            android:exported="false" />
+
         <service
             android:name="io.nisfeb.talon.DictationTileService"
             android:exported="true"
