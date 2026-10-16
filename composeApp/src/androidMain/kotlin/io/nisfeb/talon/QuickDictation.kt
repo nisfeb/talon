@@ -28,6 +28,7 @@ import io.nisfeb.talon.ai.DictationFlow
 import io.nisfeb.talon.ai.DictationOutcome
 import io.nisfeb.talon.ai.DictationRoute
 import io.nisfeb.talon.ai.DictationRun
+import io.nisfeb.talon.ai.DictationSpeech
 import io.nisfeb.talon.ai.EndOfSpeech
 import io.nisfeb.talon.ai.acquireTalonWakeLock
 import io.nisfeb.talon.ai.loopsCanRun
@@ -143,6 +144,7 @@ object QuickDictation {
     fun followUp(ctx: Context) = hear(ctx)
 
     private fun hear(ctx: Context) {
+        hush()
         ending = null
         _stage.value = Stage.Listening(0f)
         ContextCompat.startForegroundService(ctx, Intent(ctx, DictationService::class.java).setAction(DictationService.ACTION_LISTEN))
@@ -155,13 +157,28 @@ object QuickDictation {
     fun cancel() { ending = Ending.Cancel }
 
     /** The owner's word on what waits: send it, or drop it. On a locked phone, only after the fingerprint. */
-    fun decide(approve: Boolean) { word?.complete(approve) }
+    fun decide(approve: Boolean) {
+        hush()
+        word?.complete(approve)
+    }
 
     /** The card went away having shown how it ended; a follow-up goes with it. */
     fun close() {
+        hush()
         if (_stage.value is Stage.Said) _stage.value = Stage.Idle
         thread = null
     }
+
+    /** Stops the voice mid-sentence: any tap on the card means the owner has moved on. */
+    @Volatile internal var onHush: (() -> Unit)? = null
+    fun hush() { onHush?.invoke() }
+
+    private const val PREFS = "talon_dictation"
+    private const val SPEAK = "speak"
+
+    /** Whether the card speaks its answers (Settings, on by default). */
+    fun speaks(ctx: Context): Boolean = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(SPEAK, true)
+    fun setSpeaks(ctx: Context, on: Boolean) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(SPEAK, on).apply()
 }
 
 /** The microphone, the transcription and the run, in the foreground for as long as they take. */
@@ -174,6 +191,21 @@ class DictationService : Service() {
     @Volatile private var listening = false
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /** The card's voice, made when a dictation starts so it is ready by the answer. */
+    private var voice: Voice? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        QuickDictation.onHush = { voice?.hush() }
+    }
+
+    /** Say [text], where the owner wants answers spoken, and return once it is said. */
+    private suspend fun say(text: String) {
+        if (text.isBlank() || !QuickDictation.speaks(this)) return
+        val v = voice ?: Voice(this).also { voice = it }
+        v.say(text)
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -189,6 +221,8 @@ class DictationService : Service() {
                     if (!already) QuickDictation.show(QuickDictation.Stage.Said("Talon could not start listening."))
                     return stopIfIdle()
                 }
+                // Waking the voice now: its engine takes a moment to start.
+                if (QuickDictation.speaks(this) && voice == null) voice = Voice(this)
                 if (!already) work { listenAndAct() }
             }
             ACTION_STOP -> QuickDictation.done()
@@ -256,6 +290,9 @@ class DictationService : Service() {
     }
 
     override fun onDestroy() {
+        QuickDictation.onHush = null
+        voice?.shutdown()
+        voice = null
         if (QuickDictation.stage.value is QuickDictation.Stage.Listening) QuickDictation.show(QuickDictation.Stage.Idle)
         scope.cancel()
         super.onDestroy()
@@ -456,14 +493,20 @@ class DictationService : Service() {
             QuickDictation.shown.first { !it }
             askInShade(ask, waiting.map { it.id })
         }
-        val hearing = if (transcribe == null) null else launch(Dispatchers.IO) { hearAnswer(word, ask, transcribe) }
+        val message = ask.proposals.firstOrNull { it.kind == "message" }
+        val asked = DictationSpeech.prompt(reply, ask.sending, message?.to, message?.text)
+        // Asked aloud first, and only then listened for: not to hear itself.
+        val hearing = launch(Dispatchers.IO) {
+            say(asked)
+            if (transcribe != null && word.isActive) hearAnswer(word, ask, transcribe)
+        }
         try {
             withTimeoutOrNull(APPROVE_WAIT_MS) { word.await() }
                 .also { Log.i(TAG, "the owner said ${it ?: "nothing in time"} to ${waiting.size} waiting") }
         } finally {
             // Stops the answer's recording, which is a blocking loop.
             QuickDictation.ending = QuickDictation.Ending.Cancel
-            hearing?.cancel()
+            hearing.cancel()
             shade.cancel()
             NotificationManagerCompat.from(this@DictationService).cancel(ASK_ID)
             QuickDictation.show(QuickDictation.Stage.Working("Telling orrery…"))
@@ -538,7 +581,7 @@ class DictationService : Service() {
     }
 
     /** Say how it went, and keep [kept] (the audio, or the words) only where it can be tried again. */
-    private fun report(kept: File, outcome: DictationOutcome, card: io.nisfeb.talon.ai.DictationCard? = null, followable: Boolean = false) {
+    private suspend fun report(kept: File, outcome: DictationOutcome, card: io.nisfeb.talon.ai.DictationCard? = null, followable: Boolean = false) {
         when (outcome) {
             is DictationOutcome.Done -> {
                 kept.delete()
@@ -570,7 +613,7 @@ class DictationService : Service() {
         }
     }
 
-    private fun tell(
+    private suspend fun tell(
         title: String,
         text: String,
         long: String = text,
@@ -617,6 +660,8 @@ class DictationService : Service() {
         }
         runCatching { NotificationManagerCompat.from(this).notify(tag, RESULT_ID, n.build()) }
             .onFailure { Log.w(TAG, "no permission to post the dictation's result") }
+        // The highlights aloud, the rest on the card; a late answer is not news enough to speak over another.
+        if (now !is QuickDictation.Stage.Listening && now !is QuickDictation.Stage.Approve) say(DictationSpeech.spoken(text))
     }
 
     private fun ongoing(text: String): Notification {
@@ -671,6 +716,58 @@ class DictationService : Service() {
         // The run, the transcription (up to 180 s) and two minutes of talking.
         private const val WAKE_LOCK_MS = 10L * 60 * 1000
     }
+}
+
+/**
+ * The card's voice: the phone's own text to speech, played as an
+ * assistant speaks, through the car where one is connected, with other
+ * audio ducked while it talks. Nothing leaves the phone to be spoken.
+ * Where the phone has no engine, nothing is said and the card still shows it.
+ */
+private class Voice(ctx: Context) {
+    private val ready = kotlinx.coroutines.CompletableDeferred<Boolean>()
+    private val tts = android.speech.tts.TextToSpeech(ctx.applicationContext) { ready.complete(it == android.speech.tts.TextToSpeech.SUCCESS) }
+    private val audio = ctx.getSystemService(android.media.AudioManager::class.java)
+    private val attributes = android.media.AudioAttributes.Builder()
+        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+        .build()
+    private val focus = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        .setAudioAttributes(attributes)
+        .build()
+    @Volatile private var saying: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
+    init {
+        tts.setAudioAttributes(attributes)
+        tts.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+            override fun onStart(id: String?) = Unit
+            override fun onDone(id: String?) { saying?.complete(Unit) }
+            @Deprecated("the platform's own")
+            override fun onError(id: String?) { saying?.complete(Unit) }
+            override fun onStop(id: String?, interrupted: Boolean) { saying?.complete(Unit) }
+        })
+    }
+
+    /** Say [text] and return once it is said, stopped, or a minute has gone. */
+    suspend fun say(text: String) {
+        val ok = kotlinx.coroutines.withTimeoutOrNull(3_000) { ready.await() } == true
+        if (!ok) return Log.w("Dictation", "no text to speech engine answered; the card shows it only")
+        val done = kotlinx.coroutines.CompletableDeferred<Unit>().also { saying = it }
+        audio?.requestAudioFocus(focus)
+        try {
+            tts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "dictation-${System.nanoTime()}")
+            kotlinx.coroutines.withTimeoutOrNull(60_000) { done.await() }
+        } finally {
+            audio?.abandonAudioFocusRequest(focus)
+        }
+    }
+
+    fun hush() {
+        tts.stop()
+        saying?.complete(Unit)
+    }
+
+    fun shutdown() = tts.shutdown()
 }
 
 /** A failed dictation's error, whole, to the clipboard: "Copy error details" for a notification. */

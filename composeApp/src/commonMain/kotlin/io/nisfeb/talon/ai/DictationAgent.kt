@@ -56,8 +56,9 @@ class DictationAgent(
             down, so expect the odd misheard word and read it for what
             they meant. No one is watching and nobody will answer a
             question: act on it now, completely, with the tools listed for
-            you, and nothing else. Your answer is shown as a notification,
-            so make it one short line saying what you did.
+            you, and nothing else. Your answer is read aloud and shown as a
+            notification, so make it one short plain line saying what you
+            did, with no markdown or @p.
 
             - Something to keep (a thought, a note, a list, what someone
               said): hand it to orrery with orrery_file_text, in the
@@ -80,10 +81,14 @@ class DictationAgent(
             The owner just asked you this out loud, and speech-to-text
             wrote it down, so expect the odd misheard word. No one will
             answer a question back. Look it up with the tools listed for
-            you and answer in one or two short sentences, shown as a
-            notification. You can only look things up here: if they asked
-            for something to be done, say it was not done, and that saying
-            it as an instruction rather than a question hands it to orrery.
+            you. Begin your answer with one short sentence that is read
+            aloud to the owner, who may be driving: the highlights only,
+            under 25 words, with no lists, links, markdown or @p. Then a
+            blank line, then the details, which are shown on screen; what
+            the tools found is drawn there too, so do not repeat every
+            item. You can only look things up here: if they asked for
+            something to be done, say it was not done, and that saying it
+            as an instruction rather than a question hands it to orrery.
         """.trimIndent()
 
         /** A question's whole prompt. */

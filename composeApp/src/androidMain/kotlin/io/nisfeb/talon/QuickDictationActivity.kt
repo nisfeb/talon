@@ -436,7 +436,7 @@ class QuickDictationActivity : ComponentActivity() {
         val body = TextStyle(fontSize = if (big) 24.sp else 20.sp, lineHeight = if (big) 32.sp else 28.sp, color = MaterialTheme.colorScheme.onSurface)
         fun inline(t: String) = inlineAnnotated(t, codeBg, link).withTalonLinks(names, link)
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            blocks.forEach { b ->
+            blocks.forEachIndexed { i, b ->
                 when (b) {
                     is MdBlock.Code -> Surface(color = codeBg, shape = RoundedCornerShape(12.dp)) {
                         Text(b.text, style = body.copy(fontFamily = FontFamily.Monospace, fontSize = 16.sp, lineHeight = 22.sp), modifier = Modifier.padding(12.dp))
@@ -450,7 +450,11 @@ class QuickDictationActivity : ComponentActivity() {
                         Text("${b.number}.", style = body.copy(color = link, fontWeight = FontWeight.SemiBold))
                         Text(inline(b.text), style = body)
                     }
-                    is MdBlock.Paragraph -> Text(inline(b.text), style = body)
+                    // The first paragraph is the highlight, the part said aloud.
+                    is MdBlock.Paragraph -> Text(
+                        inline(b.text),
+                        style = if (i == 0 && blocks.size > 1) body.copy(fontSize = 26.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold) else body,
+                    )
                 }
             }
         }
