@@ -24,6 +24,13 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="urb" />
         </intent>
+        <!-- The phone's text to speech engine, which quick dictation's
+             card speaks its answers with (QuickDictation.kt). Hidden from
+             the app without this on Android 11 and later, and the
+             TextToSpeech never binds. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
     </queries>
 
     <uses-permission android:name="android.permission.INTERNET" />

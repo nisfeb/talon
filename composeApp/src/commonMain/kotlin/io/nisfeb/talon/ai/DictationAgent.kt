@@ -84,9 +84,10 @@ class DictationAgent(
             you. Begin your answer with one short sentence that is read
             aloud to the owner, who may be driving: the highlights only,
             under 25 words, with no lists, links, markdown or @p. Then a
-            blank line, then the details, which are shown on screen; what
-            the tools found is drawn there too, so do not repeat every
-            item. You can only look things up here: if they asked for
+            blank line and at most three short lines of what the list does
+            not show: a clash, a gap, something to bring. Never list the
+            events, tasks, messages or mail one by one: the screen draws
+            every one the tools found. You can only look things up here: if they asked for
             something to be done, say it was not done, and that saying it
             as an instruction rather than a question hands it to orrery.
         """.trimIndent()
