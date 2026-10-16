@@ -39,16 +39,19 @@ Google documents the webview restriction under
    consent screen**). The old **APIs & Services → OAuth consent screen** link
    now opens Auth Platform's Overview; choose **Branding** in its sidebar.
    Supply the app name and requested contact information.
-4. Under **Audience**, choose **External** for a personal Gmail account or
-   accounts from different organizations. **Internal** only works for users
-   inside the project's Workspace organization. If staying in **Testing**, add
-   each account that will authorize the app to **Test users**. Calendar grants
-   in Testing expire after seven days. For ongoing personal use, use **Publish
-   app / In production** and reconnect after the change. Production status is
-   separate from verification; it neither guarantees permanent tokens nor
-   bypasses Workspace administrator rules. If **Publish app** is disabled
-   with a link to Branding, finish and save the required fields there first.
-   Any homepage or policy links must describe your own app.
+4. Under **Audience**, choose based on the account that will sign in to OAuth,
+   not the owners of every calendar it can access. **Internal** works when
+   that account belongs to the project's Workspace organization. Calendars
+   shared with that account can belong to personal Gmail or other organizations,
+   subject to their sharing policies. Choose **External** when the account
+   performing OAuth is outside the project's organization or is personal Gmail.
+   For External **Testing**, add the connecting account to **Test users**;
+   Calendar authorizations expire after seven days. For ongoing use, choose
+   Internal when appropriate, or **Publish app / In production** for External,
+   then reconnect to obtain a fresh authorization. Publishing is separate from
+   verification and does not bypass Workspace policy. If **Publish app** is
+   disabled with a link to Branding, finish its required fields first. Any
+   homepage or policy links must describe your own app.
 5. Under **Clients**, check for an existing Calendar Web client first. If its
    ID matches the ship and the callback below is correct, keep it. For a new
    setup, choose **Create client → Web application**. Do not choose
@@ -123,6 +126,21 @@ closed. Ship administrators and backups are part of that trust boundary.
 Disconnecting forgets the tokens locally; revoke the grant in your Google
 account as well if you want Google to invalidate it.
 
+### Use an Internal project with shared calendars
+
+For an organization-owned project, **Google Auth Platform → Audience → Make
+internal → Confirm** limits OAuth sign-in to that organization. This affects
+all OAuth clients in the project, so check that no external users need to
+sign in. Reconnect the same organization account from the ship afterward;
+keep its saved client, calendar links and sharing permissions. In a live
+setup on 2026-10-16, the Console then showed **Internal**, and the same account
+could authorize access to its own calendar and calendars shared from other
+organizations. Verify each link's last successful sync after reconnecting.
+
+Internal avoids the specific External Testing seven-day refresh-token rule;
+it does not guarantee that tokens can never expire or be revoked. Google
+explains [refresh-token expiration](https://developers.google.com/identity/protocols/oauth2/#expiration).
+
 ## Several Google accounts
 
 Do not connect accounts A, B and C consecutively expecting three connections.
@@ -185,7 +203,7 @@ edits still apply. See Google's
 | `access_denied` or admin block | Correct account, External/Internal audience, Testing allowlist, Workspace app policy. |
 | `disallowed_useragent` | Reopen in the system browser, not an embedded app webview. |
 | Token exchange fails | Matching client ID and secret; correct client type; start a fresh flow instead of reloading a used callback. |
-| Works for about seven days | Project still in Testing; publish for ongoing personal use and reconnect. Tokens can also expire or be revoked for other reasons. |
+| Works for about seven days | External project still in Testing; use Internal for an eligible organization account or publish External for ongoing use, then reconnect. Tokens can also expire or be revoked for other reasons. |
 | Connected but empty | Link a calendar, check last sync/errors, API enablement and account access. |
 | Connected, but calendar list says `Google answered HTTP 403` | First check **Google Calendar API** is enabled in the OAuth client's project. Enable it, allow configuration to propagate, then reopen Settings (or use **Refresh calendar list** with the companion change). Keep the working client and authorization. If 403 persists, check consent scope and Workspace policy; 403 alone does not identify a single cause. |
 | First account stops after connecting another | The single authorization was replaced. Reconnect the original account; do not unlink calendars merely to troubleshoot. |
