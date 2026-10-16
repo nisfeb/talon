@@ -149,8 +149,8 @@ class Loops(
     private suspend fun <T> withActions(block: suspend (AssistantActions) -> T): T = withRunScope(scope) { run ->
         val url = sessionStore.active()?.shipUrl
         val http = runCatching { getSession().http }.getOrNull()
-        val mail = if (url != null && http != null) io.nisfeb.talon.mail.MailRepo(http, run).also { it.attach(url) } else null
-        val calendar = if (url != null && http != null) io.nisfeb.talon.calendar.CalendarRepo(http, run).also { it.attach(url) } else null
+        val mail = if (url != null && http != null) io.nisfeb.talon.mail.MailRepo(http, run).also { it.attach(url, poll = false) } else null
+        val calendar = if (url != null && http != null) io.nisfeb.talon.calendar.CalendarRepo(http, run).also { it.attach(url, poll = false) } else null
         try {
             // The calendar tools read its calendars, tasks and window; have them first.
             calendar?.refresh()

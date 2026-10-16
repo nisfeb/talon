@@ -711,7 +711,13 @@ class CalendarRepo(
 
     private fun lists(): Triple<Any?, Any?, Any?> = Triple(_tasks.value, _rows.value, _rangeRows.value)
 
-    fun attach(baseUrl: String) {
+    /**
+     * Point at the ship's calendar. With [poll] false there is no poller:
+     * a headless run reads once with [refresh]. The poller's own first
+     * read plus the run's made two full reads in a row, each a dozen
+     * requests, and a dictation waited 13 to 30 seconds on them.
+     */
+    fun attach(baseUrl: String, poll: Boolean = true) {
         if (api != null && shipUrl == baseUrl) return
         shipUrl = baseUrl
         zoneAdopted = false
@@ -720,6 +726,7 @@ class CalendarRepo(
         api = CalendarApi(http, baseUrl)
         clearShipState()
         poller?.cancel()
+        if (!poll) return
         poller = scope.launch {
             // What the ship last said, while it is asked again. A month
             // that was right ten minutes ago beats an empty grid.
