@@ -81,7 +81,7 @@ actual fun QuickDictationButtons() {
                 ctx.getSystemService(StatusBarManager::class.java)?.requestAddTileService(
                     ComponentName(ctx, DictationTileService::class.java),
                     ctx.getString(R.string.dictate_label),
-                    Icon.createWithResource(ctx, R.drawable.ic_mic),
+                    Icon.createWithResource(ctx, R.drawable.ic_talon_mark),
                     ctx.mainExecutor,
                 ) {}
             }) { Text("Add tile") }

@@ -246,7 +246,7 @@
         <service
             android:name="io.nisfeb.talon.DictationTileService"
             android:exported="true"
-            android:icon="@drawable/ic_mic"
+            android:icon="@drawable/ic_talon_mark"
             android:label="@string/dictate_label"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>

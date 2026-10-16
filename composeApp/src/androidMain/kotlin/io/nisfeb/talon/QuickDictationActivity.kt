@@ -270,7 +270,7 @@ class QuickDictationActivity : ComponentActivity() {
     @Composable
     private fun Header(stage: Stage) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(TalonIcons.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Icon(androidx.compose.ui.res.painterResource(R.drawable.ic_talon_mark), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
             Text(
                 "DICTATION",
                 style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold),
