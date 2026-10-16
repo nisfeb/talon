@@ -5,16 +5,40 @@ phases; this doc is the design of record.
 
 ## As built (2026-10-16)
 
-All three surfaces are built on `feat/dictate-to-orrery`. The build differs from the design below in four places.
+Built on `feat/dictate-to-orrery` and run on the owner's Pixel 10 Pro (GrapheneOS, Android 17) through a side-by-side test install. The build moved on from the design below in these ways, most of them at the owner's word during the device run.
 
-- **One activity, not three paths.** `QuickDictationActivity` is the card the widget, the tile and the assist gesture all open. It is declared `showWhenLocked` in the manifest, starts `DictationService` while it is on screen (only a visible app may open the microphone), and goes when listening ends. Code: `androidMain/.../QuickDictation.kt` and `QuickDictationActivity.kt`.
-- **No VoiceInteractionService.** AOSP's `AssistantRoleBehavior` offers any app with an exported `ACTION_ASSIST` activity as the digital assistant, and SystemUI's `AssistManager` starts that activity with a plain `startActivityAsUser`. So the assist path is an intent filter, and no `RecognitionService` takes over the system's speech input. SystemUI opens a tile's activity over the lock screen when the manifest flag is set (`ActivityIntentHelper.wouldPendingShowOverLockscreen`).
-- **A locked phone sends nothing to anyone.** While the device is locked, a dictation keeps only the writes the owner batches without asking (`ALLOW_ALL_TOOLS`) plus `orrery_file_text` and `orrery_instruct`: no mail, messages, shares, invites or deletes, since anyone holding the phone can speak to it. `DictationAgent.LOCKED_WRITES` is the one place to change this.
-- **Failures keep what was said.** Every outcome is a notification (`DictationOutcome`). A failed transcription keeps the audio and a failed run keeps the words, each behind "Try again". Nothing is spent on a transcription when no model could act on it.
+### Ways in
 
-End of speech is an energy gate (`EndOfSpeech`): 1.8 s of quiet after speech, 8 s with none, 2 minutes at most. Its thresholds are the calibration knobs if the phone disagrees. Transcription is `CallRecordingPublisher.sttFrom`, the transcription key in AI settings. The run is `Loops.dictate`: the loop's tools plus orrery's (attached with `OrreryRepo.headless`), the dictation's own prompt, and the time.
+- **One card for every way in.** `QuickDictationActivity` is what the home-screen widget, the lock-screen widget, the Quick Settings tile and the assist gesture all open. It is `showWhenLocked` in the manifest and starts `DictationService` while it is on screen (only a visible app may open the microphone). Code: `androidMain/.../QuickDictation.kt` and `QuickDictationActivity.kt`.
+- **No VoiceInteractionService.** AOSP's `AssistantRoleBehavior` offers any app with an exported `ACTION_ASSIST` activity as the digital assistant, and SystemUI's `AssistManager` starts it with a plain `startActivityAsUser`. SystemUI opens a tile's or a lock-screen widget's activity over the lock screen when the manifest flag is set (`ActivityIntentHelper.wouldPendingShowOverLockscreen`, `startPendingIntentMaybeDismissingKeyguard`).
+- **The widget** is a round Talon mark with its name under it, a fixed 56 dp, for the home screen and the lock screen (`widgetCategory="home_screen|keyguard"`, the glanceable hub). The tile wears the same mark, traced from the launcher's monochrome layer, so it is not the system's mute microphone.
 
-Not verified on a device: the activity, service, tile, widget and assist binding compile and the APK builds, but none has run on the Pixel.
+### Where the words go (sneagan: "can that be the default behavior unless the message is detected to be a question?")
+
+- **A plain calendar question is answered on the phone** (`CalendarQuestion`): "what's on today / tomorrow / Friday / this week / next week / this weekend", from the calendar read while the owner talks. No model: on the phone two model calls had taken 18 s of a 21 s answer.
+- **Any other question** (whisper writes it with a "?", unless it is a polite request) goes to a read-only agent with its own short prompt and the 24 tools a dictation uses (`DictationAgent.askPrompt`, `readsFor`). It runs on the Dictation AI feature: the assistant's model until one is picked on this device or named "dictation" by an Armillary vendor, under the assistant's ZDR terms while it follows. The feature never syncs, since an older install drops a profile it cannot read.
+- **Everything else goes to orrery's instruct route without "do it"** (`DictationFlow`), so orrery's model tells a command from a todo and orrery's policy decides what waits. Over 2000 bytes it is read instead. With Orrery off, the agent acts on the words itself, as first built.
+
+### Approval (sneagan: "interactive approval immediately so that I can approve a dictated message in the car")
+
+- What orrery leaves waiting is shown on the same card, drawn as what it is (a message with whom it goes to and a bubble, an event with when and where, a task with its due), with Send and Don't send. The card asks aloud and then listens a few seconds for "send" or "cancel" (a strict list, so a stray word never sends). On a locked phone anything that reaches another person needs the fingerprint first (`requestDismissKeyguard`). When the card is not in front, a heads-up notification asks with the same two actions, its Send behind authentication.
+- The owner's policy on ricsul auto-approves nothing (`"auto": []`), so a todo asks too. Adding `task` (and `fact`) to orrery's auto list makes them land with no question. Talon does not approve on the policy's behalf.
+
+### The card
+
+- Large type for a car. Listening shows a microphone that swells with the voice, and working says what it is doing ("Asking orrery…"). The answer renders markdown with each @p, link and looked-up name tappable, and draws what it read: a day's events with times and places, tasks, people, messages and mail, each opening where it lives in Talon. Follow up dictates again in the same context.
+- **The highlights are spoken** on the phone's own text to speech (`DictationSpeech`): an answer opens with one sentence written to be heard, and only that is said. A Speak answers switch is in Settings.
+
+### Speed
+
+- The setup starts when listening does (`Loops.prepareDictation`): the ship's channel, mail and calendar attached without polling, the calendar read once and lighter. Only the calendar's tools wait for it.
+- A turn whose writes all reported success ends without a second model call (`DictationAgent.plainly`).
+
+### Failures
+
+Every outcome is a notification (`DictationOutcome`) and a line on the card. A failed transcription keeps the audio and a failed run keeps the words, each behind "Try again". The line says what failed in words, the error whole behind Copy details.
+
+End of speech is an energy gate (`EndOfSpeech`): 1.8 s of quiet after speech, 8 s with none, 2 minutes at most. On the Pixel a voice peaked at 606 to 1226 and room noise reached 244, so the 500 minimum holds.
 
 ## Goal
 
