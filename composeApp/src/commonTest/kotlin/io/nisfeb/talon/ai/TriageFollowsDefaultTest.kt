@@ -42,43 +42,12 @@ class TriageFollowsDefaultTest {
     }
 
     @Test
-    fun `the device model triage was started on keeps its name`() {
-        val named = FeatureSetting(on = true, model = ModelRef(DEVICE_PROVIDER, "gemma"))
-        assertEquals(Resolved(device, "gemma"), profile(ModelRef("or", "m"), named).triage())
-        assertEquals(ModelRef(DEVICE_PROVIDER, "gemma"), profile(ModelRef("or", "m"), named).defaultFor(AiFeature.OrreryTriage))
-        assertEquals(ModelRef("lm", "q"), profile(ModelRef("lm", "q"), named).defaultFor(AiFeature.OrreryTriage))
-        assertEquals(ModelRef("or", "m"), profile(ModelRef("or", "m")).defaultFor(AiFeature.CatchUp), "every other feature's default is the default")
-    }
-
-    @Test
     fun `taking the server out puts triage back on this device`() {
         val p = profile(ModelRef("lm", "qwen3")).without("lm")
         assertEquals(ProviderKind.ThisDevice, p.triage().provider.kind)
         // With the default still in the cloud, too.
         val q = profile(ModelRef("or", "m"), FeatureSetting(on = true, model = ModelRef("lm", ""))).without("lm")
         assertEquals(ProviderKind.ThisDevice, q.triage().provider.kind)
-    }
-
-    @Test
-    fun `the generator follows the default only where the owner picked Default`() {
-        fun gen(s: FeatureSetting?) = AiProfile(features = listOfNotNull(s?.let { AiFeature.OrreryGenerator to it }).toMap()).generatorFollowsDefault()
-        assertTrue(gen(FeatureSetting(on = true, model = null, own = true)))
-        assertFalse(gen(FeatureSetting(on = true, model = null)), "set up on the ship, maybe: left alone")
-        assertFalse(gen(FeatureSetting(on = true, model = ModelRef("or", "m"), own = true)), "a model of its own")
-        assertFalse(gen(null))
-    }
-
-    // Transcription said "None chosen" while whisper-1 ran on the default.
-    @Test
-    fun `transcription shows what runs, its own model or whisper-1 on a default that can transcribe`() {
-        val openAi = AiProvider("oa", ProviderKind.OpenAi, "OpenAI", apiKey = "sk")
-        val p = AiProfile(providers = listOf(cloud, openAi, server), defaultModel = ModelRef("oa", "gpt-5"))
-        assertEquals(ModelRef("oa", WHISPER), p.transcriptionRef())
-        assertEquals(ModelRef("lm", WHISPER), p.copy(defaultModel = ModelRef("lm", "qwen3")).transcriptionRef(), "a server of your own may serve it")
-        assertNull(p.copy(defaultModel = ModelRef("or", "m")).transcriptionRef(), "OpenRouter has no speech endpoint")
-        assertNull(p.copy(defaultModel = null).transcriptionRef())
-        val own = p.copy(features = mapOf(AiFeature.Transcription to FeatureSetting(true, ModelRef("lm", "whisper-large"))))
-        assertEquals(ModelRef("lm", "whisper-large"), own.transcriptionRef())
     }
 
     @Test

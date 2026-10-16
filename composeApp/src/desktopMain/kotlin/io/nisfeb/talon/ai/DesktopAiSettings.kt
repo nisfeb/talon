@@ -156,23 +156,6 @@ class DesktopAiSettings : AiSettingsRepository {
         onStateChange?.invoke(cfg, false)
     }
 
-    override fun setBraveApiKey(key: String) {
-        val cfg = _state.value.withBraveKey(key, io.nisfeb.talon.util.nowMs())
-        persist(cfg)
-        onStateChange?.invoke(cfg, false)
-    }
-
-    override fun setSttApiKey(key: String) {
-        val now = io.nisfeb.talon.util.nowMs()
-        val cfg = _state.value.copy(
-            sttApiKey = key,
-            sttApiKeyRemovedAtMs = if (key.isBlank()) now else 0L,
-            sttApiKeySetAtMs = if (key.isBlank()) _state.value.sttApiKeySetAtMs else now,
-        )
-        persist(cfg)
-        onStateChange?.invoke(cfg, false)
-    }
-
     override fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String) {
         val cfg = _state.value.copy(
             privateBaseUrl = baseUrl?.trim()?.takeIf { it.isNotEmpty() },
@@ -189,24 +172,10 @@ class DesktopAiSettings : AiSettingsRepository {
         onStateChange?.invoke(cfg, false)
     }
 
-    override fun setFrontierReadsMessages(on: Boolean) {
-        val cfg = _state.value.copy(frontierReadsMessages = on)
-        persist(cfg)
-        onStateChange?.invoke(cfg, false)
-    }
-
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
         val cfg = _state.value.withPrompt(kind, value)
         persist(cfg)
         onStateChange?.invoke(cfg, false)
-    }
-
-    override fun setSyncEnabled(enabled: Boolean) {
-        val cur = _state.value
-        val transitionedOff = cur.syncEnabled && !enabled
-        val cfg = cur.copy(syncEnabled = enabled)
-        persist(cfg)
-        onStateChange?.invoke(cfg, transitionedOff)
     }
 
     override fun applyRemote(config: AiSettings.Config) {

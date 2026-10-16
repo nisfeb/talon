@@ -124,10 +124,4 @@ class DictationRunTest {
         assertEquals(DictationRun.NO_SPEECH_TO_TEXT, DictationRun.blocker(cfg(speech = false), hasShip = true))
     }
 
-    @Test
-    fun `whisper's segments become one line`() {
-        val text = DictationRun.text(listOf(CallTranscribe.Segment(0, " buy milk "), CallTranscribe.Segment(900, "and eggs")))
-        assertEquals("buy milk and eggs", text)
-        assertEquals("", DictationRun.text(emptyList()))
-    }
 }

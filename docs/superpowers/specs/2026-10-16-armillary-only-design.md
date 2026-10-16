@@ -80,3 +80,18 @@ The tab is common code, so it changes on every platform at once. On iOS outside 
 
 - The lease-key call to OpenRouter's `/audio/transcriptions` is still unproven, and it becomes the only speech-to-text path. One real dictation take on the device settles it.
 - #27 and #28 merged into master.
+
+## As built (branch feat/armillary-only, 2026-10-16)
+
+sneagan approved the spec and chose the reset: every paid switch turns on once, even ones turned off on purpose before.
+
+- **Resolution** (`AiProfile.resolve`): every cloud feature runs on the vendor's model for it, else the vendor's default, else the row's first chat model. Own providers and picks left in a profile are ignored. Triage resolves to this device. With no Armillary row nothing runs. `vendorZdr` is true for every call on Armillary.
+- **The reset** (`AiSettings.Config.armillaryOnly`): runs once per device at load, on all three platforms. It drops own providers, picks and the own keys in the old fields, and turns on catch-up, the assistant and call transcripts. Search by meaning runs on the device and keeps its switch. Desktop resets only a file it could read. A profile flag stops it running again.
+- **Paying** (`ArmillaryRepo.afterPayment`): asks for this device's key and turns every paid feature on. It no longer picks a "best" model, offers anything, or writes Orrery's generator. Orrery on the ship follows Armillary itself.
+- **Other devices connect themselves.** Once the ship's Armillary account names a vendor, any device signed in to that ship adds its own row and asks its ship for a key, with no tap. Pay on the phone and the desktop runs. A ship that never set Armillary up contacts no vendor until someone presses "Set up Armillary".
+- **Where buying is not allowed** (iOS outside the US): "Connect this device" in place of the pitch, and the self-connect above.
+- **Call transcripts** go through Armillary a stretch of speech at a time (`CallRecordingPublisher.speechSpans`: pauses over 0.8 s cut a stretch, 25 s at most). This differs from the planned 10 MB WAV chunks. The vendor's speech route answers words with no timestamps, and each speaker's words are placed in the call by where their stretch starts. If Armillary passes segment timestamps through some day, the splitting can go.
+- **Sync** (schemaVersion 3): only the switches, the old toggles and the instructions go up. From an older entry only the instructions are taken. Bootstrap re-pushes an older config entry once, and deletes the `credentials` entry older builds left on the ship.
+- **The AI tab**: the Armillary card (the Remove button is gone), "Manage models in Armillary" (opens `/apps/armillary#catalog`), a one-time line when own keys were dropped, and one switch per feature with "Top up to turn on" while there is no credit or key. The top-up sheet carries the consent line. Advanced holds only the instructions. The Orrery page's reading row is this device's model, and the decision model is the vendor's.
+- **Left in place**: the `Config` fields `apiKey`, `syncEnabled`, `braveApiKey`, `sttApiKey` and the private-model fields stay as stored data (the reset blanks the keys). Their setters, the UI and the sync paths are gone. The triage cloud rung stays, but `triageInCloud` is always false now.
+- **Removed**: own provider cards, model pickers and catalogs (`ModelCatalog`), the default model row, the payment offer, the Brave and Whisper key fields, key sync and revoke marks on the wire, the generator offer and `followDefault`, `ArmillarySetup.kt`, and the multipart Whisper path for dictation.

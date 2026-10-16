@@ -63,8 +63,6 @@ data class AiProvider(
     val searchUrl: String? = null,
     val searchKey: String = "",
 ) {
-    fun withCatalog(c: Catalog): AiProvider = copy(models = c.models, offersJev = c.jev)
-
     /** On this device, or on a server on this machine or the owner's own network. */
     val isPrivate: Boolean
         get() = kind == ProviderKind.ThisDevice || (kind == ProviderKind.OpenAiCompatible && isPrivateUrl(baseUrl))
@@ -92,13 +90,6 @@ data class FeatureSetting(val on: Boolean = false, val model: ModelRef? = null, 
 
 /** The features an Armillary vendor picks the model for, by the vendor's names for them. */
 val VENDOR_FEATURES = mapOf(AiFeature.CatchUp to "catch_up", AiFeature.Assistant to "assistant", AiFeature.Dictation to "dictation")
-
-/**
- * This setting back on the Armillary vendor's pick: no longer the
- * owner's own, and on the Armillary row, so a private model chosen
- * before it does not hold it ([AiProfile.followsVendor]).
- */
-fun FeatureSetting.followingVendor(): FeatureSetting = copy(own = false, model = ModelRef(ARMILLARY_PROVIDER, ""))
 
 @Serializable
 data class AiProfile(
@@ -160,39 +151,6 @@ data class AiProfile(
         else -> vendorModel(f) ?: armillary()?.let { resolve(ModelRef(it.id, "")) }
     }
 
-    /**
-     * [f]'s own model, or null where it follows the default. The device
-     * model triage is started on, and the one a removed provider leaves
-     * it on, are nobody's pick: triage follows the default from there.
-     */
-    fun pick(f: AiFeature): ModelRef? {
-        val s = features[f] ?: return null
-        if (f == AiFeature.OrreryTriage && !s.own && s.model?.provider == DEVICE_PROVIDER) return null
-        return s.model
-    }
-
-    /**
-     * What "Default" is for [f]: the default model. Triage reads every
-     * message unasked, so it follows only a private default and stays on
-     * this device otherwise; a cloud model picked on its own row is the
-     * opt-in that takes it off the device.
-     */
-    fun defaultFor(f: AiFeature): ModelRef? {
-        // A dictation is the assistant run on what was said: until it has
-        // a model of its own it runs on the assistant's, whatever that is.
-        if (f == AiFeature.Dictation) return resolve(AiFeature.Assistant)?.let { ModelRef(it.provider.id, it.model) }
-        if (f != AiFeature.OrreryTriage) return defaultModel
-        defaultModel?.takeIf { resolve(it)?.private == true }?.let { return it }
-        return features[f]?.model?.takeIf { it.provider == DEVICE_PROVIDER } ?: ModelRef(DEVICE_PROVIDER, "")
-    }
-
-    /**
-     * The ship's generator follows the default model: the owner picked
-     * "Default" on its row. A row with no model the owner never picked
-     * may be a generator set up on the ship itself, which is left alone.
-     */
-    fun generatorFollowsDefault(): Boolean = features[AiFeature.OrreryGenerator]?.let { it.own && it.model == null } == true
-
     /** The Armillary row, where this device buys from its ship. */
     fun armillary(): AiProvider? = providers.firstOrNull { it.kind == ProviderKind.Armillary }
 
@@ -249,14 +207,6 @@ data class AiProfile(
     }
 
     fun isOn(f: AiFeature): Boolean = features[f]?.on == true
-
-    /**
-     * The provider Jev is reached through: an OpenRouter one with a key,
-     * whose ZDR list names Jev, or whose models were never fetched.
-     */
-    fun jevProvider(): AiProvider? = providers.firstOrNull {
-        it.kind == ProviderKind.OpenRouter && it.apiKey.isNotBlank() && (it.models.isEmpty() || it.offersJev)
-    }
 }
 
 /** The features besides triage that read the owner's messages. */
@@ -426,23 +376,6 @@ fun AiSettings.Config.armillaryOnly(): AiSettings.Config {
 
 /** The profile these settings stand for: the one the owner saved, else the one today's fields make. */
 fun AiSettings.Config.profile(): AiProfile = savedProfile ?: migrateProfile(this)
-
-/**
- * The OpenAI-shaped base the ship's generator can call on this
- * provider: none for Anthropic's own shape, this device, or a server
- * on this machine's loopback, which the ship cannot reach.
- */
-fun AiProvider.shipBase(): String? = when (kind) {
-    ProviderKind.OpenRouter -> ModelCatalog.OPENROUTER
-    ProviderKind.OpenAi -> "https://api.openai.com/v1"
-    ProviderKind.OpenAiCompatible -> baseUrl?.trim()?.trimEnd('/')?.removeSuffix("/chat/completions")
-        ?.takeUnless { u -> u.substringAfter("://").substringBefore('/').substringBefore(':').let { it == "localhost" || it.startsWith("127.") } }
-    // Whatever the ship handed us: OpenRouter's base under a lease, the
-    // vendor's proxy otherwise. Both are OpenAI-shaped and both take
-    // the key on the row, which is what the generator needs.
-    ProviderKind.Armillary -> baseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
-    else -> null
-}
 
 /**
  * The settings a feature's chat client should see: its resolved provider
@@ -651,15 +584,6 @@ fun AiProfile.withSwitches(s: kotlinx.serialization.json.JsonObject): AiProfile 
     jev = (s["jev"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: jev,
     orrery = (s["orrery"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: orrery,
 )
-
-/**
- * What transcription runs on: its own speech model, else whisper-1 on the
- * default provider where that one can transcribe, as
- * [CallRecordingPublisher.sttFrom] does. The row said "None chosen" while
- * whisper-1 ran.
- */
-fun AiProfile.transcriptionRef(): ModelRef? = features[AiFeature.Transcription]?.model
-    ?: defaultModel?.takeIf { d -> provider(d.provider)?.kind.let { it == ProviderKind.OpenAi || it == ProviderKind.OpenAiCompatible } }?.copy(model = WHISPER)
 
 /** Orrery is on: turned on by the owner, on some device. Off by default. */
 fun AiSettings.Config.orreryOn(): Boolean = savedProfile?.orrery == true

@@ -48,17 +48,6 @@ class DesktopAiSettingsTest {
     }
 
     @Test
-    fun `turning sync off says it was turned off`() {
-        val seen = mutableListOf<Boolean>()
-        DesktopAiSettings().apply {
-            onStateChange = { _, off -> seen += off }
-            setSyncEnabled(false)
-            setSyncEnabled(false)
-        }
-        assertEquals(listOf(true, false), seen, "only the transition counts")
-    }
-
-    @Test
     fun `an unreadable file is kept as a backup, key and all, and defaults written`() {
         file.parentFile.mkdirs()
         file.writeText("""{"provider":"OpenAi","apiKey":"sk-precious" GARBAGE""")

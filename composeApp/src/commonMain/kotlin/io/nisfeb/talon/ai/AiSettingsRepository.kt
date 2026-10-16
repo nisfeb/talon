@@ -35,8 +35,6 @@ interface AiSettingsRepository {
      */
     fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String)
 
-    /** Whether the frontier model may read messages too. Off by default. */
-    fun setFrontierReadsMessages(on: Boolean)
 
     /**
      * The AI settings as the new screen has them. The old fields are
@@ -46,15 +44,8 @@ interface AiSettingsRepository {
     fun setProfile(profile: AiProfile)
 
     fun setFeature(feature: AiSettings.Feature, enabled: Boolean)
-    fun setSyncEnabled(enabled: Boolean)
 
-    /** Set the Brave Search API credential (web_search tool). Separate from
-     *  the LLM key set via [update]. */
-    fun setBraveApiKey(key: String)
 
-    /** Set the dedicated speech-to-text (Whisper) credential used for
-     *  call transcription. Blank falls back to the chat key. */
-    fun setSttApiKey(key: String)
 
     /** Override one editable system-prompt part. Blank restores that part's
      *  built-in default. Synced like a preference, not a credential. */

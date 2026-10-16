@@ -103,27 +103,6 @@ class IosAiSettings : AiSettingsRepository {
         commit(new, fireChange = true)
     }
 
-    override fun setSyncEnabled(enabled: Boolean) {
-        commit(_state.value.copy(syncEnabled = enabled), fireChange = true)
-    }
-
-    override fun setBraveApiKey(key: String) {
-        commit(_state.value.withBraveKey(key, io.nisfeb.talon.util.nowMs()), fireChange = true)
-    }
-
-    override fun setSttApiKey(key: String) {
-        commit(
-            io.nisfeb.talon.util.nowMs().let { now ->
-                _state.value.copy(
-                    sttApiKey = key,
-                    sttApiKeyRemovedAtMs = if (key.isBlank()) now else 0L,
-                    sttApiKeySetAtMs = if (key.isBlank()) _state.value.sttApiKeySetAtMs else now,
-                )
-            },
-            fireChange = true,
-        )
-    }
-
     override fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String) {
         commit(
             _state.value.copy(
@@ -133,10 +112,6 @@ class IosAiSettings : AiSettingsRepository {
             ),
             fireChange = true,
         )
-    }
-
-    override fun setFrontierReadsMessages(on: Boolean) {
-        commit(_state.value.copy(frontierReadsMessages = on), fireChange = true)
     }
 
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {

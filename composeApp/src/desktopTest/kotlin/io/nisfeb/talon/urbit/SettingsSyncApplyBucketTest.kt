@@ -748,23 +748,11 @@ internal class FakeAiSettings(
             privateApiKey = apiKey,
         )
     }
-    override fun setFrontierReadsMessages(on: Boolean) {
-        _state.value = _state.value.copy(frontierReadsMessages = on)
-    }
     override fun setProfile(profile: io.nisfeb.talon.ai.AiProfile) {
         _state.value = profile.legacyInto(_state.value).copy(savedProfile = profile)
     }
-    override fun setBraveApiKey(key: String) {
-        _state.value = _state.value.copy(braveApiKey = key)
-    }
-    override fun setSttApiKey(key: String) {
-        _state.value = _state.value.copy(sttApiKey = key)
-    }
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
         _state.value = _state.value.withPrompt(kind, value)
-    }
-    override fun setSyncEnabled(enabled: Boolean) {
-        _state.value = _state.value.copy(syncEnabled = enabled)
     }
     override fun applyRemote(config: AiSettings.Config) {
         _state.value = config

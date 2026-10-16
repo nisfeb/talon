@@ -19,8 +19,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import io.nisfeb.talon.ai.withOrrery
-import io.nisfeb.talon.ai.defaultModel
-import io.nisfeb.talon.ai.shipBase
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -335,36 +333,6 @@ class OrreryRepo(
                 key?.takeIf { it.isNotBlank() }?.let { put("api_key", it) }
             },
         ).map { }
-
-    /** Point the ship's generator at [ref], else the default model, with that provider's key; one it cannot run is said so. */
-    suspend fun pointGenerator(profile: io.nisfeb.talon.ai.AiProfile, enabled: Boolean, ref: io.nisfeb.talon.ai.ModelRef?): Result<Unit> {
-        val t = generatorTarget(profile, ref)
-        // Turning it off, or on with nothing set up, names no model.
-        if (!enabled || t == null) return setGenerator(enabled)
-        generatorProblem(t)?.let { return Result.failure(IllegalStateException(it)) }
-        return setGenerator(true, t.first.shipBase()!!, t.second, t.first.apiKey)
-    }
-
-    /**
-     * The ship's generator moved with the default model, from [before] to
-     * [after], where the owner chose the default for it and the ship still
-     * runs that default with a key: the key was agreed to go when it was
-     * first pointed, and a model picked on Orrery's own page since is left
-     * alone. A default the ship cannot run leaves it where it is. On this
-     * repo's scope, so leaving the screen does not stop it.
-     */
-    fun followDefault(before: io.nisfeb.talon.ai.AiProfile, after: io.nisfeb.talon.ai.AiProfile) {
-        if (!after.generatorFollowsDefault()) return
-        val g = _generatorSettings.value ?: return
-        if (!g.enabled || g.model == null || !g.keySet) return
-        val now = generatorTarget(after, null) ?: return
-        val was = generatorTarget(before, null)?.let(::wire) ?: return
-        if (g.url?.trimEnd('/') != was.first || g.model != was.second) return
-        if (generatorProblem(now) != null || wire(now) == was) return
-        scope.launch {
-            pointGenerator(after, true, null).onFailure { Log.i(TAG, "generator did not follow the default: ${it.message}") }
-        }
-    }
 
     /** The owner's calendar day at [ms], which is what a day's tally is kept under. */
     private fun localDay(ms: Long): String = kotlin.time.Instant.fromEpochMilliseconds(ms)
@@ -2064,25 +2032,3 @@ internal const val BEACON_HEALTHY_MS = 60_000L
 internal fun beaconPauseAfter(pause: Long, livedMs: Long?): Long =
     io.nisfeb.talon.urbit.pauseAfterStream(pause, livedMs, BEACON_FIRST_PAUSE_MS, BEACON_HEALTHY_MS)
 
-
-/**
- * The provider and model the ship's generator would run for [ref], else
- * the default model, resolved as Talon's own features resolve it; null
- * where none is set. A blank model was sent as none, and Orrery filled
- * in a model of its own (kimi-k3) under the name the button showed.
- */
-internal fun generatorTarget(profile: io.nisfeb.talon.ai.AiProfile, ref: io.nisfeb.talon.ai.ModelRef?): Pair<io.nisfeb.talon.ai.AiProvider, String>? =
-    profile.resolve(ref ?: profile.defaultModel)?.let { r -> r.provider to r.model.ifBlank { r.provider.kind.defaultModel().orEmpty() } }
-
-/** Why the ship's generator cannot run [target], as a sentence, or null when it can. */
-internal fun generatorProblem(target: Pair<io.nisfeb.talon.ai.AiProvider, String>?): String? = when {
-    target == null -> "There is no AI set up in Talon yet. Add a provider under AI first."
-    target.first.shipBase() == null -> "Your ship cannot reach ${target.first.label}. Make your default model one on OpenRouter, OpenAI, Armillary or a server on your network, or set Orrery's model on your ship."
-    // Orrery runs no generator without a key ("the generator has no key").
-    target.first.apiKey.isBlank() -> "${target.first.label} has no key in Talon, and your ship needs one. Add it under AI. A server that takes none accepts any word."
-    target.second.isBlank() -> "Pick a default model on ${target.first.label} under AI."
-    else -> null
-}
-
-/** What the ship is told for [target]: its base, model and key. */
-private fun wire(target: Pair<io.nisfeb.talon.ai.AiProvider, String>) = Triple(target.first.shipBase(), target.second, target.first.apiKey)

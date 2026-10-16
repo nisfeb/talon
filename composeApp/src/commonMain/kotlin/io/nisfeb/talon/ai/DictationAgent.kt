@@ -281,8 +281,5 @@ class DictationRun(
             }
         }
 
-        /** Whisper's segments as one line of text. */
-        fun text(segments: List<CallTranscribe.Segment>): String =
-            segments.joinToString(" ") { it.text.trim() }.trim()
     }
 }

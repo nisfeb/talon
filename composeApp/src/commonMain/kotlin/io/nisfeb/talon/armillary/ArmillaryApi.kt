@@ -165,14 +165,6 @@ class ArmillaryApi(
         return true
     }
 
-    /** Give the lease back. A ship with no lease routes says so and nothing happens. */
-    suspend fun dropLease() {
-        val resp = send("/api/lease") { method = HttpMethod.Delete }
-        val text = reading { resp.bodyAsText() }
-        if (resp.status.value == NOT_FOUND || resp.status.value == NOT_IMPLEMENTED) return
-        if (!resp.status.isSuccess()) throw ArmillaryError.Refused(resp.status.value, armillaryReason(text))
-    }
-
     /** Ask the vendor to stop the subscription renewing. The view says when it is done. */
     suspend fun cancelSubscription() {
         request(HttpMethod.Post, "/api/cancel-subscription")

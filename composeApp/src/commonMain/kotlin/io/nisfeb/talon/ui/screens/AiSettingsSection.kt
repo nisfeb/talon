@@ -74,8 +74,6 @@ import io.nisfeb.talon.orrery.DecideSettings
 import io.nisfeb.talon.orrery.OrreryAvailability
 import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.orrery.RungStatus
-import io.nisfeb.talon.orrery.generatorProblem
-import io.nisfeb.talon.orrery.generatorTarget
 import kotlinx.serialization.json.put
 import io.nisfeb.talon.ui.icons.TalonIcons
 import io.nisfeb.talon.ui.isAssistantSupported

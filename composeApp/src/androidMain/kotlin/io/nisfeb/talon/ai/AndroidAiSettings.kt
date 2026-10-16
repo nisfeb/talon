@@ -72,26 +72,6 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         onStateChange?.invoke(_state.value, false)
     }
 
-    override fun setBraveApiKey(key: String) {
-        persistAll(_state.value.withBraveKey(key, io.nisfeb.talon.util.nowMs()))
-        onStateChange?.invoke(_state.value, false)
-    }
-
-    override fun setSttApiKey(key: String) {
-        val now = io.nisfeb.talon.util.nowMs()
-        val removedAt = if (key.isBlank()) now else 0L
-        val setAt = if (key.isBlank()) _state.value.sttApiKeySetAtMs else now
-        prefs.edit()
-            .putString(KEY_STT_API_KEY, key)
-            .putLong(KEY_STT_REMOVED_AT, removedAt)
-            .putLong(KEY_STT_SET_AT, setAt)
-            .apply()
-        _state.value = _state.value.copy(
-            sttApiKey = key, sttApiKeyRemovedAtMs = removedAt, sttApiKeySetAtMs = setAt,
-        )
-        onStateChange?.invoke(_state.value, false)
-    }
-
     override fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String) {
         val url = baseUrl?.trim()?.takeIf { it.isNotEmpty() }
         val name = model?.trim()?.takeIf { it.isNotEmpty() }
@@ -105,24 +85,10 @@ class AndroidAiSettings(context: Context) : AiSettingsRepository {
         onStateChange?.invoke(_state.value, false)
     }
 
-    override fun setFrontierReadsMessages(on: Boolean) {
-        prefs.edit().putBoolean(KEY_FRONTIER_READS, on).apply()
-        _state.value = _state.value.copy(frontierReadsMessages = on)
-        onStateChange?.invoke(_state.value, false)
-    }
-
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
         prefs.edit().putString(promptKey(kind), value).apply()
         _state.value = _state.value.withPrompt(kind, value)
         onStateChange?.invoke(_state.value, false)
-    }
-
-    override fun setSyncEnabled(enabled: Boolean) {
-        val wasEnabled = _state.value.syncEnabled
-        if (wasEnabled == enabled) return
-        prefs.edit().putBoolean(KEY_SYNC, enabled).apply()
-        _state.value = _state.value.copy(syncEnabled = enabled)
-        onStateChange?.invoke(_state.value, wasEnabled && !enabled)
     }
 
     override fun applyRemote(remote: AiSettings.Config) {

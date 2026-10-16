@@ -1,6 +1,5 @@
 package io.nisfeb.talon.armillary
 
-import io.nisfeb.talon.ui.quietCatalog
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -160,12 +159,12 @@ class ArmillaryPaymentTest {
         assertEquals(p.orrery, true, "Orrery's switch is left as it was")
     }
 
-    // The row never travels, so a profile from the device that paid named
-    // a provider this one did not have, and nothing ran here.
+    // Pay on the phone and the desktop runs: the row never travels, so a
+    // device of a ship that already buys from a vendor makes its own.
     @Test
-    fun `a profile from another device running on armillary gets this device's own row and key`() {
+    fun `a device of a ship that already buys connects itself, with its own key`() {
         keyed = false
-        ship(AiProfile(providers = listOf(device), defaultModel = ModelRef(ARMILLARY_PROVIDER, "big/tools"))) { _, ai ->
+        ship(AiProfile(providers = listOf(device))) { _, ai ->
             withTimeout(10_000) { while (ai.state.value.savedProfile!!.provider(ARMILLARY_PROVIDER)?.apiKey.isNullOrBlank()) delay(20) }
             val p = ai.state.value.savedProfile!!
             assertEquals("lease.key", p.provider(ARMILLARY_PROVIDER)!!.apiKey)

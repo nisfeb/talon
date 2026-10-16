@@ -8,8 +8,7 @@ import io.nisfeb.talon.ai.AiSettingsRepository
 import io.nisfeb.talon.ai.ModelInfo
 import io.nisfeb.talon.ai.allOn
 import io.nisfeb.talon.ai.ProviderKind
-import io.nisfeb.talon.ai.followingVendorDefault
-import io.nisfeb.talon.ai.wantsArmillaryRow
+import io.nisfeb.talon.ai.profile
 import io.nisfeb.talon.ai.without
 import io.nisfeb.talon.ui.platformLabel
 import kotlinx.coroutines.flow.combine
@@ -120,12 +119,14 @@ class ArmillaryRepo(
         api = ArmillaryApi(http, shipUrl)
         current = this
         scope.launch { refresh() }
-        // The owner's profile, from another device, may run on Armillary:
-        // the row never travels, so this device makes its own.
+        // The ship already buys from a vendor, set up on some device: this
+        // one connects too, with a key of its own, since the row never
+        // travels. Pay on the phone and the desktop runs. Not before:
+        // nothing reaches a vendor until the owner asks to buy.
         adopting = aiSettings?.let { ai ->
             scope.launch {
-                combine(_availability, ai.state) { here, cfg ->
-                    here == ArmillaryAvailability.PRESENT && cfg.savedProfile?.wantsArmillaryRow() == true
+                combine(_availability, _account, _deletion, ai.state) { here, acct, gone, cfg ->
+                    here == ArmillaryAvailability.PRESENT && gone == null && acct?.vendor?.isNotBlank() == true && cfg.profile().armillary() == null
                 }.distinctUntilChanged().collect { if (it) adopt(ai) }
             }
         }
@@ -363,20 +364,6 @@ class ArmillaryRepo(
     }
 
     /**
-     * Give the lease back as the provider row goes, on this repo's scope:
-     * the row goes at once, and leaving the screen does not stop it.
-     */
-    fun giveLeaseBack() {
-        scope.launch { dropLease().onFailure { Log.i(TAG, "lease not given back: ${it.message}") } }
-    }
-
-    /** Give a direct provider lease back. */
-    suspend fun dropLease(): Result<Unit> = runSuspendCatching {
-        val a = api ?: error("Not attached to a ship.")
-        a.dropLease()
-    }
-
-    /**
      * The balance, read from the vendor every few seconds. A payment
      * lands on the vendor while the person is still in their browser,
      * so the number here catches up by itself. With a [payment] the
@@ -449,13 +436,9 @@ class ArmillaryRepo(
         p.allOn().takeIf { it != p }?.let(ai::setProfile)
     }
 
-    /**
-     * This device's own Armillary row, and its own key, for a profile
-     * that runs on Armillary: what adding it by hand does. Without it the
-     * default named a provider this device did not have, and nothing ran.
-     */
+    /** This device's own Armillary row and key, for a ship that already buys: what "Set up Armillary" does. */
     private suspend fun adopt(ai: AiSettingsRepository) {
-        val p = ai.state.value.savedProfile?.takeIf { it.wantsArmillaryRow() } ?: return
+        val p = ai.state.value.profile().takeIf { it.armillary() == null } ?: return
         ai.setProfile(p.copy(providers = p.providers + AiProvider(ARMILLARY_PROVIDER, ProviderKind.Armillary, ProviderKind.Armillary.label)))
         ensureKey(platformLabel).onFailure { Log.i(TAG, "no key yet for the adopted row: ${it.message}") }
     }
@@ -495,8 +478,7 @@ class ArmillaryRepo(
         val base = inf.baseUrl.trim().trimEnd('/').ifBlank { null }
         val searchUrl = inf.searchUrl.trim().trimEnd('/').ifBlank { null }
         val next = row.copy(baseUrl = base, apiKey = inf.key, models = models, suggested = inf.suggested, suggestedTiers = inf.suggestedTiers, searchUrl = searchUrl, searchKey = inf.searchKey)
-        // A default the owner never picked follows the vendor's, which may have just changed.
-        val updated = profile.copy(providers = profile.providers.map { if (it.id == ARMILLARY_PROVIDER) next else it }).followingVendorDefault()
+        val updated = profile.copy(providers = profile.providers.map { if (it.id == ARMILLARY_PROVIDER) next else it })
         if (updated == profile) return
         ai.setProfile(updated)
     }
