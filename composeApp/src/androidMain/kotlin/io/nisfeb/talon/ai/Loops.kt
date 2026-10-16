@@ -179,19 +179,20 @@ class Loops(
         withActions { block(runner(it)) }
 
     /**
-     * Run one voice dictation to completion, autonomously (writes need no
-     * confirmation — see [DictationAgent]), and notify with the result.
-     * Reuses the loop assembly: the same mail/calendar/orrery/message
-     * tools and the same completer a scheduled loop gets, so a spoken
-     * instruction can do anything a loop can. The zero-friction surfaces
-     * (widget / tile / assist) capture a transcript and call this; they
-     * own the wake-lock + foreground, as the loop alarm path does.
+     * Act on one voice dictation, autonomously (writes need no
+     * confirmation, see [DictationAgent]), and return the agent's line.
+     * The loop assembly plus orrery: the same mail, calendar and message
+     * tools and completer a scheduled loop gets, and orrery's tools where
+     * Orrery is on, since a dictation is mostly for orrery. While
+     * [locked], only [DictationAgent.LOCKED_WRITES] among the writes.
+     * No write coordinator: a dictation runs only on the device it was
+     * spoken into, so there is no double write to guard. Throws when the
+     * run fails; [io.nisfeb.talon.DictationService] owns the foreground,
+     * the wake lock and the notification.
      */
-    suspend fun runDictation(transcript: String) {
-        if (transcript.isBlank()) return
-        if (sessionStore.activeShip() == null || !aiSettings.state.value.loopsCanRun()) return
+    suspend fun dictate(transcript: String, locked: Boolean): String {
         runCatching { getRepo().start(getSession()) }
-        val summary = withActions { actions ->
+        return withActions { actions ->
             val cfg = aiSettings.state.value
             val webOn = cfg.assistantOn()
             val tools = ToolCatalog.default(
@@ -199,15 +200,27 @@ class Loops(
                 braveSearch = braveClient.takeIf { webOn && cfg.braveApiKey.isNotBlank() },
                 urlFetcher = urlFetcher.takeIf { webOn },
             ) { it } + actionTools(actions)
-            DictationAgent(
-                completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
-                tools = tools,
-                systemPrompt = LoopPrompt.forLoop(cfg),
-            ).run(transcript)
+            withOrrery(cfg) { orrery ->
+                DictationAgent(
+                    // The time per call, as the assistant screen does: "tomorrow at three" needs today.
+                    completer = { sys, msgs, t -> agentClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
+                    tools = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked),
+                    systemPrompt = DictationAgent.prompt(cfg),
+                ).run(transcript)
+            }
         }
-        if (summary.isNotBlank()) {
-            Notifications.showLoop(context, DICTATION_NOTIFY_ID, "Dictation", summary, System.currentTimeMillis())
-        }
+    }
+
+    /**
+     * Orrery for one run, where it is on: attached headless, never
+     * [io.nisfeb.talon.orrery.OrreryRepo.attach], which would take the
+     * proposals of the one the app has attached when it let go.
+     */
+    private suspend fun <T> withOrrery(cfg: AiSettings.Config, block: suspend (io.nisfeb.talon.orrery.OrreryRepo?) -> T): T {
+        val s = sessionStore.active()
+        if (!cfg.orreryOn() || s == null) return block(null)
+        val repo = io.nisfeb.talon.orrery.OrreryRepo(getSession().http, scope, getDb(), io.nisfeb.talon.ui.platformLabel, getEmbedder())
+        return repo.headless(s.shipUrl, s.ship) { block(repo) }
     }
 
     private fun runner(actions: AssistantActions): LoopRunner {
@@ -257,9 +270,6 @@ class Loops(
 
     companion object {
         const val ACTION_LOOP_FIRE = "io.nisfeb.talon.action.LOOP_FIRE"
-        // A fixed, negative id so a dictation's result notification never
-        // collides with a real loop's (loop ids are positive row ids).
-        private const val DICTATION_NOTIFY_ID = -1L
         private const val REQ_LOOPS = 7701
         // Headroom for one full agent round-trip (AgentClient's own call
         // timeout is 120s). A run cut by this budget still advances the

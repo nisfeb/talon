@@ -202,6 +202,59 @@
                 android:resource="@xml/clock_widget_info" />
         </receiver>
 
+        <!--
+          Quick dictation (QuickDictation.kt). The card the widget, the
+          Quick Settings tile and the assist gesture open. showWhenLocked
+          in the manifest and not only in code: SystemUI reads the flag
+          here to open the tile's activity over the lock screen instead of
+          asking to unlock first. The ASSIST filter is all it takes to be
+          offered as the digital assistant (AssistantRoleBehavior counts
+          an exported ACTION_ASSIST activity); no VoiceInteractionService.
+        -->
+        <activity
+            android:name="io.nisfeb.talon.QuickDictationActivity"
+            android:exported="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity="io.nisfeb.talon.dictation"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density"
+            android:theme="@style/Theme.Talon.Dictation">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name="io.nisfeb.talon.DictationService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|dataSync" />
+
+        <service
+            android:name="io.nisfeb.talon.DictationTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_mic"
+            android:label="@string/dictate_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name="io.nisfeb.talon.DictationWidgetProvider"
+            android:exported="true"
+            android:label="@string/dictate_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/dictate_widget_info" />
+        </receiver>
+
         <receiver
             android:name="io.nisfeb.talon.LoopAlarmReceiver"
             android:exported="false" />

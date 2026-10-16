@@ -73,6 +73,7 @@ import io.nisfeb.talon.ui.isAssistantSupported
 import io.nisfeb.talon.ui.isBackgroundCallRingSupported
 import io.nisfeb.talon.ui.isCallsSupported
 import io.nisfeb.talon.ui.isLoopsSupported
+import io.nisfeb.talon.ui.isQuickDictationSupported
 import io.nisfeb.talon.ui.theme.ThemePreference
 import io.nisfeb.talon.ui.icons.TalonIcons
 import io.nisfeb.talon.ai.loopsCanRun
@@ -989,6 +990,25 @@ fun SettingsScreen(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+            // Quick dictation runs the same agent as a loop, unattended.
+            if (isQuickDictationSupported && aiState.loopsCanRun()) {
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+                Text("Quick dictation", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Speak, and Talon acts on it with nothing to confirm: a thought goes to orrery, " +
+                        "an appointment to your calendar. Start one from the tile, the widget, or the " +
+                        "assist gesture with Talon as your assistant. While the phone is locked it sends " +
+                        "no mail or messages.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                io.nisfeb.talon.ai.DictationRun.blocker(aiState, hasShip = true)?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                io.nisfeb.talon.ui.QuickDictationButtons()
             }
 
             }

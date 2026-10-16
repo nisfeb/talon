@@ -35,6 +35,10 @@ object Notifications {
     const val CHANNEL_LEAVE = "leave"
     /** A trip under way: silent, ongoing, while the phone tells the ship where it is each minute. */
     const val CHANNEL_TRIP = "trip"
+    /** A dictation being heard and acted on: silent, ongoing, for the minute it takes. */
+    const val CHANNEL_DICTATING = "dictating"
+    /** What a dictation did, or why it did not. */
+    const val CHANNEL_DICTATION = "dictation"
     // v2: the Ringer owns sound and vibration now, so the channel must
     // do neither. A channel's alerting cannot be changed after it is
     // created, so changing it means a new id.
@@ -194,6 +198,18 @@ object Notifications {
             mgr.createNotificationChannel(
                 NotificationChannel(CHANNEL_TRIP, "On the way", NotificationManager.IMPORTANCE_LOW)
                     .apply { description = "Shown while your ship hears where you are each minute on the way to an appointment" },
+            )
+        }
+        if (mgr.getNotificationChannel(CHANNEL_DICTATING) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(CHANNEL_DICTATING, "Dictating", NotificationManager.IMPORTANCE_LOW)
+                    .apply { description = "Shown while Talon listens to a dictation and acts on it" },
+            )
+        }
+        if (mgr.getNotificationChannel(CHANNEL_DICTATION) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(CHANNEL_DICTATION, "Dictations", NotificationManager.IMPORTANCE_DEFAULT)
+                    .apply { description = "What a dictation did, or why it could not" },
             )
         }
     }

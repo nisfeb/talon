@@ -15,7 +15,7 @@ package io.nisfeb.talon.ui
  *  - isTouchSwipeNavSupported — A, i; D: drag detectors claim click-with-drift and deaden links/buttons.
  *  - hasSoftKeyboard — A, i; D: focusing a field pops no keyboard over the content.
  *  - isDictationSupported — A, i (the platform speech recogniser); D: no recogniser to call.
- *  - isQuickDictationSupported — A (widget / tile / assist-app, autonomous run on AlarmManager + foreground service); D/i: no such surfaces.
+ *  - isQuickDictationSupported — A (widget, Quick Settings tile, assist role, a microphone foreground service); D/i: no such surfaces.
  *  - isTapToOpenMenuSupported — A, i; D: left-drag belongs to text selection, the menu is right-click.
  *  - isCallsSupported — A, D, i: a libwebrtc-backed CallEngine actual exists on each.
  *  - isCallRecordingSupported — A, D; i: the Swift bridge exposes no PCM tap.
@@ -154,10 +154,9 @@ expect val isDictationSupported: Boolean
 /**
  * Whether the zero-friction "dictate straight into orrery" surfaces
  * exist (home-screen widget, Quick Settings tile, assist-app). Android:
- * true — those are Android system integrations. Desktop / iOS: false, no
- * such surfaces (and the headless autonomous run rides Android's
- * AlarmManager/foreground-service plumbing). See
- * docs/superpowers/specs/2026-10-15-dictate-to-orrery-design.md.
+ * true, those are Android system integrations, and the recording runs in
+ * a microphone foreground service. Desktop / iOS: false, no such
+ * surfaces. See docs/superpowers/specs/2026-10-15-dictate-to-orrery-design.md.
  */
 expect val isQuickDictationSupported: Boolean
 

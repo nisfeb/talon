@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The dictation button: a mic on a round, the launcher icon's colour. -->
+<ImageView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_dictate"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_dictate_background"
+    android:padding="12dp"
+    android:scaleType="fitCenter"
+    android:src="@drawable/ic_mic"
+    android:contentDescription="@string/dictate_label" />
