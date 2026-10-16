@@ -3,6 +3,19 @@
 Status: approved 2026-10-15 (sneagan). Android-only feature. Built in
 phases; this doc is the design of record.
 
+## As built (2026-10-16)
+
+All three surfaces are built on `feat/dictate-to-orrery`. The build differs from the design below in four places.
+
+- **One activity, not three paths.** `QuickDictationActivity` is the card the widget, the tile and the assist gesture all open. It is declared `showWhenLocked` in the manifest, starts `DictationService` while it is on screen (only a visible app may open the microphone), and goes when listening ends. Code: `androidMain/.../QuickDictation.kt` and `QuickDictationActivity.kt`.
+- **No VoiceInteractionService.** AOSP's `AssistantRoleBehavior` offers any app with an exported `ACTION_ASSIST` activity as the digital assistant, and SystemUI's `AssistManager` starts that activity with a plain `startActivityAsUser`. So the assist path is an intent filter, and no `RecognitionService` takes over the system's speech input. SystemUI opens a tile's activity over the lock screen when the manifest flag is set (`ActivityIntentHelper.wouldPendingShowOverLockscreen`).
+- **A locked phone sends nothing to anyone.** While the device is locked, a dictation keeps only the writes the owner batches without asking (`ALLOW_ALL_TOOLS`) plus `orrery_file_text` and `orrery_instruct`: no mail, messages, shares, invites or deletes, since anyone holding the phone can speak to it. `DictationAgent.LOCKED_WRITES` is the one place to change this.
+- **Failures keep what was said.** Every outcome is a notification (`DictationOutcome`). A failed transcription keeps the audio and a failed run keeps the words, each behind "Try again". Nothing is spent on a transcription when no model could act on it.
+
+End of speech is an energy gate (`EndOfSpeech`): 1.8 s of quiet after speech, 8 s with none, 2 minutes at most. Its thresholds are the calibration knobs if the phone disagrees. Transcription is `CallRecordingPublisher.sttFrom`, the transcription key in AI settings. The run is `Loops.dictate`: the loop's tools plus orrery's (attached with `OrreryRepo.headless`), the dictation's own prompt, and the time.
+
+Not verified on a device: the activity, service, tile, widget and assist binding compile and the APK builds, but none has run on the Pixel.
+
 ## Goal
 
 The fewest possible actions to get a spoken thought processed into
