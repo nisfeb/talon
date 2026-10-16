@@ -39,6 +39,8 @@ object Notifications {
     const val CHANNEL_DICTATING = "dictating"
     /** What a dictation did, or why it did not. */
     const val CHANNEL_DICTATION = "dictation"
+    /** A dictated message or action waiting for the owner's OK: heads-up, so it is one glance away in a car. */
+    const val CHANNEL_DICTATION_ASK = "dictation_ask"
     // v2: the Ringer owns sound and vibration now, so the channel must
     // do neither. A channel's alerting cannot be changed after it is
     // created, so changing it means a new id.
@@ -204,6 +206,12 @@ object Notifications {
             mgr.createNotificationChannel(
                 NotificationChannel(CHANNEL_DICTATING, "Dictating", NotificationManager.IMPORTANCE_LOW)
                     .apply { description = "Shown while Talon listens to a dictation and acts on it" },
+            )
+        }
+        if (mgr.getNotificationChannel(CHANNEL_DICTATION_ASK) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(CHANNEL_DICTATION_ASK, "Dictations to approve", NotificationManager.IMPORTANCE_HIGH)
+                    .apply { description = "A dictated message or action waiting for your OK" },
             )
         }
         if (mgr.getNotificationChannel(CHANNEL_DICTATION) == null) {

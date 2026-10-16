@@ -36,11 +36,13 @@ class DictationAgent(
      * did (for the result notification), or "" for a blank dictation,
      * which runs nothing.
      */
-    suspend fun run(transcript: String): String {
+    suspend fun run(transcript: String, earlier: List<DictationFlow.Earlier> = emptyList()): String {
         val text = transcript.trim()
         if (text.isEmpty()) return ""
+        // A follow-up goes on from what was asked and answered before it.
+        val prior = earlier.flatMap { listOf(AgentMessage.User(it.words), AgentMessage.Assistant(it.line, emptyList())) }
         return AgentLoop(completer, tools, systemPrompt, maxSteps)
-            .run(question = text, confirm = { _, _ -> true }, finish = ::plainly)
+            .run(question = text, priorTurns = prior, confirm = { _, _ -> true }, finish = ::plainly)
     }
 
     companion object {
@@ -69,6 +71,26 @@ class DictationAgent(
             - If a tool you would need is missing, nothing was done that
               way: say so in your line rather than doing something else.
         """.trimIndent()
+
+        /**
+         * A question's role, where Orrery takes everything else
+         * ([DictationFlow]): look it up and answer, and do nothing.
+         */
+        val askRole: String = """
+            The owner just asked you this out loud, and speech-to-text
+            wrote it down, so expect the odd misheard word. No one will
+            answer a question back. Look it up with the tools listed for
+            you and answer in one or two short sentences, shown as a
+            notification. You can only look things up here: if they asked
+            for something to be done, say it was not done, and that saying
+            it as an instruction rather than a question hands it to orrery.
+        """.trimIndent()
+
+        /** A question's whole prompt. */
+        val askPrompt: String = DATA_NOT_INSTRUCTIONS + "\n\n" + askRole
+
+        /** [all] as a question may use them: the reads of [toolsFor]. */
+        fun readsFor(all: List<Tool>): List<Tool> = toolsFor(all, locked = false).filterNot { it.write }
 
         /**
          * The whole prompt: the content-is-data rule and [role]. Not the
@@ -214,12 +236,17 @@ class DictationRun(
         const val NO_SHIP = "Log in to your ship in Talon first."
         const val NO_SPEECH_TO_TEXT = "Set an OpenAI-compatible transcription key in AI settings."
         const val NO_MODEL = "Turn on the assistant and give it a model in AI settings."
+        const val NO_MODEL_FOR_QUESTIONS = "Questions need the assistant. Turn it on and give it a model in AI settings."
 
-        /** What stops a dictation before it records, in words for the owner; null when nothing does. */
+        /**
+         * What stops a dictation before it records, in words for the owner;
+         * null when nothing does. With Orrery on, a note needs no model of
+         * Talon's: only a question does, and it says so itself.
+         */
         fun blocker(cfg: AiSettings.Config, hasShip: Boolean): String? = when {
             !hasShip -> NO_SHIP
             CallRecordingPublisher.sttFrom(cfg) == null -> NO_SPEECH_TO_TEXT
-            !cfg.loopsCanRun() -> NO_MODEL
+            !cfg.loopsCanRun() && !cfg.orreryOn() -> NO_MODEL
             else -> null
         }
 

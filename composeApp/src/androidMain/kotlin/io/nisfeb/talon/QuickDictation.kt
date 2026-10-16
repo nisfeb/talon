@@ -24,11 +24,14 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import io.nisfeb.talon.ai.CallRecordingPublisher
+import io.nisfeb.talon.ai.DictationFlow
 import io.nisfeb.talon.ai.DictationOutcome
+import io.nisfeb.talon.ai.DictationRoute
 import io.nisfeb.talon.ai.DictationRun
 import io.nisfeb.talon.ai.EndOfSpeech
 import io.nisfeb.talon.ai.acquireTalonWakeLock
 import io.nisfeb.talon.ai.loopsCanRun
+import io.nisfeb.talon.ai.orreryOn
 import io.nisfeb.talon.call.WavFile
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +41,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -45,16 +49,19 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 
 /**
- * Quick dictation: speak, and Talon acts on it with nothing else
- * pressed. The home-screen widget, the Quick Settings tile and the assist
- * gesture (Talon as the digital assistant) all open
- * [QuickDictationActivity], which starts [DictationService] while it is
- * on screen, since only a visible app may open the microphone. The
- * service records until the owner stops talking ([EndOfSpeech]), has the
- * recording transcribed with the transcription key from AI settings, runs
- * the agent on the words with no confirmation ([io.nisfeb.talon.ai.Loops.dictate])
- * and posts what it did. A failure keeps what it had, the audio or the
- * words, behind a Retry.
+ * Quick dictation: speak, and Talon acts on it. The home-screen widget,
+ * the Quick Settings tile and the assist gesture (Talon as the digital
+ * assistant) all open [QuickDictationActivity], which starts
+ * [DictationService] while it is on screen, since only a visible app may
+ * open the microphone. The service records until the owner stops talking
+ * ([EndOfSpeech]) and has the recording transcribed with the transcription
+ * key from AI settings. With Orrery on, a question is answered and
+ * everything else is orrery's ([DictationFlow]): what orrery's policy
+ * leaves waiting is put to the owner on the same card, Send or Don't send,
+ * by tap or by saying it, with the fingerprint first on a locked phone
+ * for anything that reaches another person. With Orrery off the agent
+ * acts on the words itself ([io.nisfeb.talon.ai.Loops.DictationPrep.dictate]).
+ * A failure keeps what it had, the audio or the words, behind a Retry.
  *
  * Android-only: no desktop analog. The widget, the tile and the assistant
  * role are Android system surfaces, and the work rides a microphone
@@ -62,20 +69,82 @@ import java.io.File
  * See docs/superpowers/specs/2026-10-15-dictate-to-orrery-design.md.
  */
 object QuickDictation {
-    /** How loud the voice is while listening, 0 to 1; null when not listening. */
-    private val _level = MutableStateFlow<Float?>(null)
-    val level: StateFlow<Float?> = _level.asStateFlow()
+    /** What the card shows. */
+    sealed interface Stage {
+        data object Idle : Stage
+
+        /** [level] is how loud the voice is, 0 to 1. */
+        data class Listening(val level: Float) : Stage
+
+        /** What it is doing, in words: "Asking orrery…". */
+        data class Working(val label: String = "Working on it…") : Stage
+
+        /**
+         * Orrery's proposals waiting for the owner: its [reply], what each
+         * does ([proposals]), whether one is a message ([sending]), whether the
+         * card is listening for "send" or "cancel" ([hearing]), whether a
+         * locked phone needs the fingerprint first ([unlock]), and whether
+         * the owner already said send and only the fingerprint is left ([unlockNow]).
+         */
+        data class Approve(
+            val reply: String,
+            val proposals: List<io.nisfeb.talon.ai.CardProposal>,
+            /** The same, one line each, for the shade. */
+            val lines: List<String>,
+            val sending: Boolean,
+            val hearing: Boolean,
+            val unlock: Boolean,
+            val unlockNow: Boolean = false,
+        ) : Stage
+
+        /**
+         * How it ended: the [line], the events and tasks the answer read
+         * ([card]), and whether a follow-up can go on from it ([followable]).
+         */
+        data class Said(val line: String, val card: io.nisfeb.talon.ai.DictationCard? = null, val followable: Boolean = false) : Stage
+    }
+
+    private val _stage = MutableStateFlow<Stage>(Stage.Idle)
+    val stage: StateFlow<Stage> = _stage.asStateFlow()
+
+    internal fun show(s: Stage) { _stage.value = s }
+
+    /** Whether the card is in front, so the shade is asked only when it is not. */
+    private val _shown = MutableStateFlow(false)
+    val shown: StateFlow<Boolean> = _shown.asStateFlow()
+    internal fun shown(v: Boolean) { _shown.value = v }
 
     internal enum class Ending { Done, Cancel }
 
     /** Set by the owner (Done, Cancel or back), read by the capture loop. */
     @Volatile internal var ending: Ending? = null
 
-    internal fun setLevel(v: Float?) { _level.value = v }
+    /** The exchange a follow-up goes on from, while its card is up. */
+    internal data class Thread(val earlier: List<DictationFlow.Earlier>, val asked: Boolean)
+
+    @Volatile internal var thread: Thread? = null
+
+    /** The owner's word on what waits, for the run that asked. */
+    @Volatile private var word: kotlinx.coroutines.CompletableDeferred<Boolean>? = null
+
+    internal fun asking(): kotlinx.coroutines.CompletableDeferred<Boolean> =
+        kotlinx.coroutines.CompletableDeferred<Boolean>().also { word = it }
+
+    /** Whether a run is waiting for the owner's word. */
+    internal fun waiting(): Boolean = word?.isActive == true
 
     /** Start listening. Only from something on screen: a microphone service cannot start from the background. */
     fun listen(ctx: Context) {
+        thread = null
+        hear(ctx)
+    }
+
+    /** Dictate again in the same context: the card's Follow up. */
+    fun followUp(ctx: Context) = hear(ctx)
+
+    private fun hear(ctx: Context) {
         ending = null
+        _stage.value = Stage.Listening(0f)
         ContextCompat.startForegroundService(ctx, Intent(ctx, DictationService::class.java).setAction(DictationService.ACTION_LISTEN))
     }
 
@@ -84,6 +153,15 @@ object QuickDictation {
 
     /** Throw the recording away. */
     fun cancel() { ending = Ending.Cancel }
+
+    /** The owner's word on what waits: send it, or drop it. On a locked phone, only after the fingerprint. */
+    fun decide(approve: Boolean) { word?.complete(approve) }
+
+    /** The card went away having shown how it ended; a follow-up goes with it. */
+    fun close() {
+        if (_stage.value is Stage.Said) _stage.value = Stage.Idle
+        thread = null
+    }
 }
 
 /** The microphone, the transcription and the run, in the foreground for as long as they take. */
@@ -107,11 +185,23 @@ class DictationService : Service() {
                 // that never calls startForeground takes the app down.
                 if (!foreground(ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE, "Listening…")) {
                     listening = already
+                    // The card waits on this run; there will be none.
+                    if (!already) QuickDictation.show(QuickDictation.Stage.Said("Talon could not start listening."))
                     return stopIfIdle()
                 }
                 if (!already) work { listenAndAct() }
             }
             ACTION_STOP -> QuickDictation.done()
+            ACTION_DECIDE -> {
+                val approve = intent.getBooleanExtra(EXTRA_APPROVE, false)
+                val ids = intent.getStringArrayExtra(EXTRA_IDS).orEmpty().toList()
+                val type = if (listening) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                if (!foreground(type, "Working on your dictation…")) return stopIfIdle()
+                NotificationManagerCompat.from(this).cancel(ASK_ID)
+                // The run that asked is still waiting: its word. Otherwise
+                // the run has gone on and the answer goes to orrery here.
+                if (QuickDictation.waiting()) QuickDictation.decide(approve) else work { decideLate(ids, approve) }
+            }
             ACTION_RETRY -> {
                 val kept = intent.getStringExtra(EXTRA_KEPT)?.let { File(keptDir(), it) }
                 // A dataSync start, not a microphone one: a notification's
@@ -166,7 +256,7 @@ class DictationService : Service() {
     }
 
     override fun onDestroy() {
-        QuickDictation.setLevel(null)
+        if (QuickDictation.stage.value is QuickDictation.Stage.Listening) QuickDictation.show(QuickDictation.Stage.Idle)
         scope.cancel()
         super.onDestroy()
     }
@@ -176,22 +266,32 @@ class DictationService : Service() {
         val locked = getSystemService(KeyguardManager::class.java)?.isDeviceLocked == true
         // The run's setup, begun while the owner talks, not after.
         val prep = prepare()
+        // What this goes on from, where it is a follow-up.
+        val thread = QuickDictation.thread
         try {
             val heard = try {
-                record()
+                record(EndOfSpeech(DictationRun.RATE))
             } finally {
-                QuickDictation.setLevel(null)
                 withContext(Dispatchers.Main) { listening = false }
+                // Off the listening card, so how it ended can be said there.
+                if (QuickDictation.stage.value is QuickDictation.Stage.Listening) QuickDictation.show(QuickDictation.Stage.Working("Writing down what you said…"))
             }
             when {
-                heard == null -> Unit // cancelled
+                heard == null -> QuickDictation.show(QuickDictation.Stage.Idle) // cancelled
                 !heard.second -> tell("Nothing heard", "Talon did not hear anything to act on.")
                 else -> {
                     update("Working on your dictation…")
                     val wav = WavFile.encode(heard.first, DictationRun.RATE)
                     // Kept before it is sent, so nothing said is lost to a crash or a dead network.
                     val kept = File(keptDir(), "${System.currentTimeMillis()}.wav").apply { writeBytes(wav) }
-                    report(kept, pipeline(locked, prep).fromAudio(wav))
+                    var went: DictationRoute? = null
+                    val outcome = pipeline(locked, prep, thread) { went = it }.fromAudio(wav)
+                    // What a follow-up goes on from: this, after what came before it.
+                    val said = outcome as? DictationOutcome.Done
+                    QuickDictation.thread = said?.let {
+                        QuickDictation.Thread((thread?.earlier.orEmpty() + DictationFlow.Earlier(it.transcript, it.summary)).takeLast(4), went == DictationRoute.Ask)
+                    }
+                    report(kept, outcome, prep?.card, followable = said != null && prep != null)
                 }
             }
         } finally {
@@ -205,21 +305,26 @@ class DictationService : Service() {
         val prep = prepare()
         try {
             val run = pipeline(locked, prep)
-            report(kept, if (kept.extension == "txt") run.fromText(kept.readText()) else run.fromAudio(kept.readBytes()))
+            report(kept, if (kept.extension == "txt") run.fromText(kept.readText()) else run.fromAudio(kept.readBytes()), prep?.card)
         } finally {
             prep?.close()
         }
     }
 
-    /** The run's setup, where a run could happen at all: a ship, and a model to run on. */
+    /** The run's setup, where a run could happen at all: a ship, and orrery or a model to run on. */
     private fun prepare(): io.nisfeb.talon.ai.Loops.DictationPrep? {
         val app = application as TalonApplication
-        if (app.sessionStore.activeShip() == null || !app.aiSettings.state.value.loopsCanRun()) return null
+        val cfg = app.aiSettings.state.value
+        if (app.sessionStore.activeShip() == null || (!cfg.loopsCanRun() && !cfg.orreryOn())) return null
         return runCatching { app.loops.prepareDictation() }.onFailure { Log.w(TAG, "could not prepare the run", it) }.getOrNull()
     }
 
-    /** The recording and whether there was speech in it, or null when cancelled. */
-    private fun record(): Pair<ByteArray, Boolean>? {
+    /**
+     * The recording and whether there was speech in it, or null when
+     * cancelled. [level] says how loud, for the card, while listening to
+     * a dictation; the spoken answer to "send?" shows none.
+     */
+    private fun record(gate: EndOfSpeech, level: Boolean = true): Pair<ByteArray, Boolean>? {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             error("Talon needs the microphone to hear a dictation.")
         }
@@ -233,7 +338,6 @@ class DictationService : Service() {
             rec.release()
             error("The microphone did not open. Another app may be using it.")
         }
-        val gate = EndOfSpeech(DictationRun.RATE)
         val out = ByteArrayOutputStream()
         // The numbers the thresholds are tuned by, in a release logcat.
         fun said(how: String) = Log.i(TAG, "listened ${out.size() * 500L / DictationRun.RATE} ms, $how: heard=${gate.heard} peak=${gate.peak.toInt()} floor=${gate.floor.toInt()}")
@@ -250,7 +354,7 @@ class DictationService : Service() {
                 if (n < 0) error("The microphone stopped ($n).")
                 out.write(frame, 0, n)
                 val more = gate.offer(frame, n)
-                QuickDictation.setLevel(gate.level)
+                if (level) QuickDictation.show(QuickDictation.Stage.Listening(gate.level))
                 if (!more) return (out.toByteArray() to gate.heard).also { said("gate ended") }
             }
         } finally {
@@ -259,35 +363,186 @@ class DictationService : Service() {
         }
     }
 
-    private fun pipeline(locked: Boolean, prep: io.nisfeb.talon.ai.Loops.DictationPrep?): DictationRun {
+    private fun pipeline(
+        locked: Boolean,
+        prep: io.nisfeb.talon.ai.Loops.DictationPrep?,
+        thread: QuickDictation.Thread? = null,
+        went: (DictationRoute) -> Unit = {},
+    ): DictationRun {
         val app = application as TalonApplication
         val cfg = app.aiSettings.state.value
         val stt = CallRecordingPublisher.sttFrom(cfg)
+        val transcribe = stt?.let { s ->
+            val whisper = DictationRun.whisper(app.ktorHttp, s)
+            val timed: suspend (ByteArray) -> String = { wav ->
+                val t0 = System.currentTimeMillis()
+                whisper(wav).also { Log.i(TAG, "transcribed ${wav.size} bytes in ${System.currentTimeMillis() - t0} ms") }
+            }
+            timed
+        }
         val act: suspend (String) -> String = { words ->
+            val p = prep!!
             // A timeout here and not a cancellation: one would unwind
             // past the outcome and the words would go unkept.
-            withTimeoutOrNull(RUN_BUDGET_MS) { prep!!.dictate(words, locked) }
-                ?: error("It took longer than ${RUN_BUDGET_MS / 60_000} minutes")
+            withTimeoutOrNull(RUN_BUDGET_MS) {
+                p.orrery { orrery ->
+                    if (orrery == null) {
+                        QuickDictation.show(QuickDictation.Stage.Working("Working on it…"))
+                        went(DictationRoute.Ask)
+                        p.dictate(words, locked, thread?.earlier.orEmpty())
+                    } else {
+                        DictationFlow(
+                            ask = { q, earlier ->
+                                QuickDictation.show(QuickDictation.Stage.Working("Looking it up…"))
+                                p.ask(q, earlier)
+                            },
+                            instruct = { t ->
+                                QuickDictation.show(QuickDictation.Stage.Working("Asking orrery…"))
+                                val t0 = System.currentTimeMillis()
+                                orrery.instruct(t, apply = false).getOrThrow()
+                                    .also { Log.i(TAG, "orrery answered in ${System.currentTimeMillis() - t0} ms, ${it.actions.size} actions, ${it.actions.count { a -> a.status == "proposed" }} waiting") }
+                            },
+                            hand = { t, title ->
+                                QuickDictation.show(QuickDictation.Stage.Working("Handing it to orrery…"))
+                                val said = orrery.hand(t, title).getOrThrow()
+                                (said["dropped"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { error("Orrery did not take it: $it") }
+                            },
+                            answer = { id, ok -> orrery.setAction(id, if (ok) "approved" else "dismissed").getOrThrow() },
+                            decide = { reply, waiting -> ownerDecides(reply, waiting, transcribe) },
+                        ).handle(words, thread?.earlier.orEmpty(), thread?.asked == true)
+                            .also { Log.i(TAG, "route=${it.route}${if (thread != null) ", a follow-up" else ""}"); went(it.route) }
+                            .line
+                    }
+                }
+            } ?: error("It took longer than ${RUN_BUDGET_MS / 60_000} minutes")
         }
         return DictationRun(
-            transcribe = stt?.let { s ->
-                val whisper = DictationRun.whisper(app.ktorHttp, s)
-                val timed: suspend (ByteArray) -> String = { wav ->
-                    val t0 = System.currentTimeMillis()
-                    whisper(wav).also { Log.i(TAG, "transcribed ${wav.size} bytes in ${System.currentTimeMillis() - t0} ms") }
-                }
-                timed
-            },
+            transcribe = transcribe,
             act = act.takeIf { prep != null },
         )
     }
 
+    /**
+     * Put what orrery left waiting to the owner: on the card, which listens
+     * a few seconds for "send" or "cancel", and in the shade whenever the
+     * card is not in front. True for send, false for drop, null when no
+     * word came in [APPROVE_WAIT_MS], which leaves it waiting under Actions.
+     * Nothing that reaches another person is sent from a locked phone
+     * until the fingerprint: the card asks for it, the shade's Send needs it.
+     */
+    private suspend fun ownerDecides(
+        reply: String,
+        waiting: List<io.nisfeb.talon.orrery.OrreryAction>,
+        transcribe: (suspend (ByteArray) -> String)?,
+    ): Boolean? = kotlinx.coroutines.coroutineScope {
+        val word = QuickDictation.asking()
+        val ask = QuickDictation.Stage.Approve(
+            reply = reply,
+            proposals = waiting.map {
+                io.nisfeb.talon.ai.DictationCards.proposal(
+                    it, kotlinx.datetime.TimeZone.currentSystemDefault(), System.currentTimeMillis(),
+                    android.text.format.DateFormat.is24HourFormat(this@DictationService),
+                )
+            },
+            lines = waiting.map(DictationFlow::describe),
+            sending = waiting.any { it.kind == "message" },
+            hearing = transcribe != null,
+            unlock = DictationFlow.needsUnlock(waiting),
+        )
+        QuickDictation.show(ask)
+        update(if (ask.sending) "Waiting for your OK to send…" else "Waiting for your OK…")
+        // The shade, whenever the card is not in front: now, or once it goes.
+        val shade = launch {
+            QuickDictation.shown.first { !it }
+            askInShade(ask, waiting.map { it.id })
+        }
+        val hearing = if (transcribe == null) null else launch(Dispatchers.IO) { hearAnswer(word, ask, transcribe) }
+        try {
+            withTimeoutOrNull(APPROVE_WAIT_MS) { word.await() }
+                .also { Log.i(TAG, "the owner said ${it ?: "nothing in time"} to ${waiting.size} waiting") }
+        } finally {
+            // Stops the answer's recording, which is a blocking loop.
+            QuickDictation.ending = QuickDictation.Ending.Cancel
+            hearing?.cancel()
+            shade.cancel()
+            NotificationManagerCompat.from(this@DictationService).cancel(ASK_ID)
+            QuickDictation.show(QuickDictation.Stage.Working("Telling orrery…"))
+        }
+    }
+
+    /** One short listen for "send" or "cancel"; anything else leaves it to the buttons. */
+    private suspend fun hearAnswer(
+        word: kotlinx.coroutines.CompletableDeferred<Boolean>,
+        ask: QuickDictation.Stage.Approve,
+        transcribe: suspend (ByteArray) -> String,
+    ) {
+        QuickDictation.ending = null
+        // Eight seconds: the owner reads the card first (five was too few on the phone).
+        val clip = record(EndOfSpeech(DictationRun.RATE, endSilenceMs = 800, giveUpMs = 8_000, maxMs = 9_000), level = false)
+        val text = if (clip != null && clip.second) runCatching { transcribe(WavFile.encode(clip.first, DictationRun.RATE)) }.getOrNull() else null
+        val yes = text?.let(DictationFlow::heard)
+        Log.i(TAG, "spoken answer: ${if (text == null) "none" else "\"$text\""} -> $yes")
+        if (!word.isActive) return
+        when {
+            yes == false -> word.complete(false)
+            yes == true && ask.unlock && getSystemService(KeyguardManager::class.java)?.isDeviceLocked == true ->
+                // Said send on a locked phone: the card asks for the fingerprint now.
+                QuickDictation.show(ask.copy(hearing = false, unlockNow = true))
+            yes == true -> word.complete(true)
+            else -> QuickDictation.show(ask.copy(hearing = false))
+        }
+    }
+
+    /** Send or Don't send in the shade, heads-up, for when the card is not in front. */
+    private fun askInShade(ask: QuickDictation.Stage.Approve, ids: List<String>) {
+        Notifications.ensureChannel(this)
+        fun decide(approve: Boolean) = PendingIntent.getForegroundService(
+            this, if (approve) ASK_ID else ASK_ID + 1,
+            Intent(this, DictationService::class.java).setAction(ACTION_DECIDE)
+                .putExtra(EXTRA_APPROVE, approve).putExtra(EXTRA_IDS, ids.toTypedArray()),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val yes = NotificationCompat.Action.Builder(0, if (ask.sending) "Send" else "Do it", decide(true))
+            // From a locked phone, Android asks for the fingerprint before it fires.
+            .setAuthenticationRequired(ask.unlock)
+            .build()
+        val n = NotificationCompat.Builder(this, Notifications.CHANNEL_DICTATION_ASK)
+            .setSmallIcon(R.drawable.ic_stat_talon)
+            .setContentTitle(ask.reply)
+            .setContentText(ask.lines.joinToString("\n"))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(ask.lines.joinToString("\n")))
+            .setContentIntent(PendingIntent.getActivity(this, ASK_ID, Intent(this, QuickDictationActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            .addAction(yes)
+            .addAction(0, if (ask.sending) "Don't send" else "Don't", decide(false))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setOngoing(true)
+            .build()
+        runCatching { NotificationManagerCompat.from(this).notify(ASK_ID, n) }
+            .onFailure { Log.w(TAG, "no permission to ask in the shade") }
+    }
+
+    /** An answer from the shade after the run that asked has gone on: straight to orrery. */
+    private suspend fun decideLate(ids: List<String>, approve: Boolean) {
+        val prep = prepare() ?: return tell("Dictation", "Talon could not reach orrery to answer. It waits under Actions.")
+        try {
+            prep.orrery { orrery ->
+                if (orrery == null) return@orrery tell("Dictation", "Orrery is off. It waits under Actions.")
+                val failed = ids.mapNotNull { id -> orrery.setAction(id, if (approve) "approved" else "dismissed").exceptionOrNull() }
+                if (failed.isEmpty()) tell("Dictation", if (approve) "Done." else "Dropped. Nothing was done.")
+                else tell("Dictation", "Orrery did not take that answer. It waits under Actions.", details = io.nisfeb.talon.util.errorDetailsOf(failed.first()))
+            }
+        } finally {
+            prep.close()
+        }
+    }
+
     /** Say how it went, and keep [kept] (the audio, or the words) only where it can be tried again. */
-    private fun report(kept: File, outcome: DictationOutcome) {
+    private fun report(kept: File, outcome: DictationOutcome, card: io.nisfeb.talon.ai.DictationCard? = null, followable: Boolean = false) {
         when (outcome) {
             is DictationOutcome.Done -> {
                 kept.delete()
-                tell("Dictation", outcome.summary, "${outcome.summary}\n\nYou said: ${outcome.transcript}")
+                tell("Dictation", outcome.summary, "${outcome.summary}\n\nYou said: ${outcome.transcript}", card = card, followable = followable)
             }
             DictationOutcome.NothingHeard -> {
                 kept.delete()
@@ -315,7 +570,21 @@ class DictationService : Service() {
         }
     }
 
-    private fun tell(title: String, text: String, long: String = text, retry: File? = null, details: String? = null) {
+    private fun tell(
+        title: String,
+        text: String,
+        long: String = text,
+        retry: File? = null,
+        details: String? = null,
+        card: io.nisfeb.talon.ai.DictationCard? = null,
+        followable: Boolean = false,
+    ) {
+        // The card, where it is still up, says it too; never over one
+        // that is listening or asking, from an answer that came late.
+        val now = QuickDictation.stage.value
+        if (now !is QuickDictation.Stage.Listening && now !is QuickDictation.Stage.Approve) {
+            QuickDictation.show(QuickDictation.Stage.Said(text, card?.takeUnless { it.isEmpty }, followable))
+        }
         Notifications.ensureChannel(this)
         val tag = retry?.name ?: "dictation-${System.currentTimeMillis()}"
         val n = NotificationCompat.Builder(this, Notifications.CHANNEL_DICTATION)
@@ -386,6 +655,13 @@ class DictationService : Service() {
         const val ACTION_LISTEN = "io.nisfeb.talon.action.DICTATION_LISTEN"
         const val ACTION_STOP = "io.nisfeb.talon.action.DICTATION_STOP"
         const val ACTION_RETRY = "io.nisfeb.talon.action.DICTATION_RETRY"
+        const val ACTION_DECIDE = "io.nisfeb.talon.action.DICTATION_DECIDE"
+        private const val EXTRA_APPROVE = "approve"
+        private const val EXTRA_IDS = "ids"
+        private const val ASK_ID = 7707
+        // How long the owner has to say send: well inside RUN_BUDGET_MS,
+        // so a run that waited is a line, never a failure that runs it again.
+        private const val APPROVE_WAIT_MS = 2L * 60 * 1000
         private const val EXTRA_KEPT = "kept"
         private const val ONGOING_ID = 7705
         private const val RESULT_ID = 7706
