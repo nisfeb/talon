@@ -107,10 +107,11 @@ class VendorPickTest {
     }
 
     @Test
-    fun `a feature on the vendor's ZDR tier asks for ZDR endpoints, and only while it follows`() {
+    fun `a feature on the vendor's pick asks for ZDR endpoints on any tier, and only while it follows`() {
         val c = conf(profile())
         assertTrue(c.forFeature(AiFeature.CatchUp).zdrOnly)
-        assertFalse(c.forFeature(AiFeature.Assistant).zdrOnly, "the frontier tier asks nothing")
+        assertTrue(c.forFeature(AiFeature.Assistant).zdrOnly, "the frontier tier went out without the ZDR flag")
+        assertTrue(conf(profile(armillary = row(tiers = emptyMap()))).forFeature(AiFeature.CatchUp).zdrOnly, "a vendor that names no tiers")
         val own = conf(profile(AiFeature.CatchUp to FeatureSetting(on = true, model = ModelRef("p1", "mine/1"), own = true)))
         assertFalse(own.forFeature(AiFeature.CatchUp).zdrOnly, "the owner's own pick is theirs to route")
         assertFalse(conf(profile(armillary = null)).forFeature(AiFeature.CatchUp).zdrOnly)

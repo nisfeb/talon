@@ -155,8 +155,8 @@ object AiSettings {
         val usageInclude: Boolean = false,
         /**
          * Whether the call must go to a zero-data-retention endpoint only
-         * (OpenRouter's provider.zdr): an Armillary vendor put this
-         * feature on its ZDR tier. Derived by [forFeature], never stored.
+         * (OpenRouter's provider.zdr): this feature follows an
+         * Armillary vendor's pick. Derived by [forFeature], never stored.
          */
         @kotlinx.serialization.Transient
         val zdrOnly: Boolean = false,
