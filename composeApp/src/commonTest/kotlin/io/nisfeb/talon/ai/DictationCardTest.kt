@@ -71,4 +71,12 @@ class DictationCardTest {
         assertEquals(listOf("Oct 14", "Today", "Oct 18", null), tasks.map { it.due })
         assertEquals(listOf(true, false, false, false), tasks.map { it.overdue })
     }
+
+    @Test
+    fun `the last day asked is on the card, and noon is PM`() {
+        val rows = listOf(event("Lunch", at(22, 12, 30), at(22, 13)))
+        val days = DictationCards.days(rows, LocalDate(2026, 10, 16), LocalDate(2026, 10, 22), zone, now, twentyFour = false)
+        assertEquals("12:30 PM – 1:00 PM", days.single().events.single().time)
+        assertEquals("12:00 AM", DictationCards.clock(at(17, 0), zone, false))
+    }
 }

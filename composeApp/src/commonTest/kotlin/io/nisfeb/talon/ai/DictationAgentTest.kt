@@ -151,4 +151,28 @@ class DictationAgentTest {
         assertEquals("events", events.await())
         assertTrue(tools[1].write && !tools[0].write, "a wrapped tool keeps whether it writes")
     }
+
+    @Test
+    fun `every write the card can say plainly is said as the tool said it`() {
+        fun r(name: String, text: String, vararg args: Pair<String, String>) = call(name, *args).let { it to ToolResult(it.id, it.name, text) }
+        assertEquals("Added task \"Buy milk\" due 2026-10-17.", DictationAgent.plainly(listOf(r("create_task", "Added task \"Buy milk\" due 2026-10-17."))))
+        assertEquals("Updated \"Dentist\".", DictationAgent.plainly(listOf(r("update_event", "Updated \"Dentist\"."))))
+        assertEquals("Deleted \"Dentist\".", DictationAgent.plainly(listOf(r("delete_event", "Deleted \"Dentist\"."))))
+        assertEquals("Reopened: Staples return.", DictationAgent.plainly(listOf(r("complete_task", "Reopened: Staples return."))))
+        assertEquals("Mailed ~zod.", DictationAgent.plainly(listOf(r("send_mail", "Mailed ~zod."))))
+        assertEquals("Sent to them.", DictationAgent.plainly(listOf(r("send_message", "Sent."))))
+        // Each refused in its own words: back to the model.
+        listOf("create_task", "update_event", "delete_event", "complete_task", "send_mail", "send_message").forEach {
+            assertNull(DictationAgent.plainly(listOf(r(it, "The calendar did not take it."))), it)
+        }
+    }
+
+    @Test
+    fun `a question is offered reads only, and told it can only look things up`() {
+        val all = listOf(tool("search_history", false), tool("read_mail", false), tool("send_message", true), tool("create_event", true), tool("web_search", false))
+        assertEquals(listOf("search_history", "read_mail"), DictationAgent.readsFor(all).map { it.spec.name })
+        assertTrue(DATA_NOT_INSTRUCTIONS in DictationAgent.askPrompt)
+        assertTrue("only look things up" in DictationAgent.askPrompt)
+        assertTrue("read" in DictationAgent.askPrompt && "aloud" in DictationAgent.askPrompt)
+    }
 }

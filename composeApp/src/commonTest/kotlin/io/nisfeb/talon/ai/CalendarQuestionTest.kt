@@ -90,4 +90,22 @@ class CalendarQuestionTest {
         assertEquals("Nothing on your calendar on Tuesday.", say(span("What's on Tuesday?")!!))
         assertEquals("Next up, Ballet today at 4:45 PM.", say(span("What's next?")!!))
     }
+
+    @Test
+    fun `an overdue task counts on a span from today, and an all-day first event is all day`() {
+        val overdue = task("Staples return", LocalDate(2026, 10, 14))
+        assertEquals(
+            "Today you have 3 events. You're in Core Sync until 1:00 PM. Next is Ballet at 4:45 PM. One task is due.",
+            say(span("What's on today?")!!, listOf(overdue)),
+        )
+        val trip = CalendarRow(
+            id = "trip", meta = JsonObject(mapOf("name" to JsonPrimitive("Spain trip"))), cat = "allday", all = true,
+            l = LocalDateTime(2026, 10, 20, 0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds(),
+            r = LocalDateTime(2026, 10, 21, 0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds(),
+        )
+        assertEquals(
+            "On Tuesday you have one event. First is Spain trip all day.",
+            CalendarQuestion.answer(span("What's on Tuesday?")!!, listOf(trip), emptyList(), zone, now, false),
+        )
+    }
 }
