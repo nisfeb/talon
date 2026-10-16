@@ -26,6 +26,13 @@ You can keep several calendars, and each has a colour and a name. Events have pl
 
 Synced calendars pull from ICS, CalDAV or a Google calendar every few minutes. Each shows when it last pulled and any error, with a Sync now button. A change made elsewhere shows after the next pull, and one shared onward from a Google or followed calendar takes two. A refusal from the ship is shown rather than swallowed, and you choose which calendar new events go to.
 
+For Google, choose **Calendars → Set up Google in browser**. Authorization runs
+in the system browser even on mobile, since Google rejects embedded webviews.
+Follow [the setup guide](google-calendar-setup.md) to create the client,
+authorize an account and link its calendars. Calendar currently holds one
+Google authorization; reconnecting another account replaces it. The guide
+explains the distinction and the current multi-account limits.
+
 The last answer from the ship is kept on the device, so a cold start paints the month it had while the fresh one loads. An event someone posted in chat, or mailed you, can be added to your own calendar in one tap, and the assistant can post events into chats as cards.
 
 ## Signatures with your ship's key

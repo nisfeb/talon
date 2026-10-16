@@ -162,6 +162,8 @@ fun CalendarScreen(
      *  over CalDAV, following, Google, ICS feeds. Null where the host
      *  cannot show it. */
     onOpenWebSettings: (() -> Unit)? = null,
+    /** Google authorization must use the system browser, including on mobile. */
+    onOpenGoogleSettings: (() -> Unit)? = null,
     /** For sending an event on: the chats, the mail, and who we are. Null keeps those actions off. */
     db: io.nisfeb.talon.data.AppDatabase? = null,
     chat: io.nisfeb.talon.urbit.TlonChatRepo? = null,
@@ -1148,6 +1150,7 @@ fun CalendarScreen(
             status = status,
             onMakeLocal = { id -> say("Making it local…", "The ship would not make that calendar local.") { repo.makeLocal(id) } },
             onOpenWebSettings = onOpenWebSettings,
+            onOpenGoogleSettings = onOpenGoogleSettings,
             onShare = { id, ship, edit ->
                 status = "Sharing with $ship…"
                 scope.launch {
@@ -1560,6 +1563,7 @@ private fun CalendarsDialog(
     status: String?,
     onMakeLocal: (id: String) -> Unit,
     onOpenWebSettings: (() -> Unit)?,
+    onOpenGoogleSettings: (() -> Unit)?,
     onShare: (id: String, ship: String, edit: Boolean) -> Unit,
     onRevoke: (id: String, ship: String) -> Unit,
     onAccept: (key: String) -> Unit,
@@ -1579,11 +1583,34 @@ private fun CalendarsDialog(
     // The share whose Revoke was tapped once; a second tap revokes.
     var revoking by remember { mutableStateOf<Pair<String, String>?>(null) }
     var deleting by remember { mutableStateOf<String?>(null) }
+    var googleOpenError by remember { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Calendars") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (onOpenGoogleSettings != null) {
+                    Text("Connect Google Calendar", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Set up your Google OAuth client on your ship, authorize Google, then link the calendars you want. Your ship keeps the credentials and syncs even when Talon is closed.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "Calendar currently connects one Google account, with several calendars. Reconnecting with another account replaces its authorization. Sharing a work calendar with that account requires its owner's permission and Workspace policy to allow it.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "Google sign-in opens in your system browser. Sign into your ship there if asked; in older Calendar versions, open Settings → Google Calendar after the page opens.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    googleOpenError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                    TextButton(onClick = {
+                        googleOpenError = null
+                        try { onOpenGoogleSettings(); onDismiss() }
+                        catch (_: Exception) { googleOpenError = "Could not open the browser. Open your ship's Calendar page in a browser and choose Settings → Google Calendar." }
+                    }) { Text("Set up Google in browser") }
+                    HorizontalDivider()
+                }
                 status?.let {
                     Text(
                         it, style = MaterialTheme.typography.bodySmall,

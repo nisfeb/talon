@@ -2045,6 +2045,12 @@ fun TalonApp(
                     twentyFourHour = app.uiSettings.homeTwentyFourHour.collectAsState().value,
                     onBack = { calendarOpen = false },
                     onOpenWebSettings = { calendarPageOpen = true },
+                    onOpenGoogleSettings = {
+                        val s = app.sessionStore.active()?.shipUrl
+                        checkNotNull(s) { "Sign into your ship first." }
+                        // Google refuses embedded webviews; use Android's browser.
+                        platformUriHandler.openUri(s.trimEnd('/') + io.nisfeb.talon.calendar.CalendarApi.APP_PATH + "#google")
+                    },
                     db = app.db, chat = app.repo, mail = mailRepo, ourShip = loggedInShip,
                     openPushTag = calendarPushTag,
                     onOpenedPush = { calendarPushTag = null },
