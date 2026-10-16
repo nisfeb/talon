@@ -38,8 +38,8 @@ object DictationSpeech {
         else -> "${spoken(reply)} Say yes, or cancel."
     }
 
-    /** [md] as words: markdown marks, link targets, list bullets and @p sigils gone. */
-    fun plain(md: String): String = md
+    /** [md] as words: markdown marks, link targets, list bullets and @p sigils gone, and times said as times. */
+    fun plain(md: String): String = times(md)
         .replace(Regex("""\[([^\]]*)]\([^)]*\)"""), "$1")
         .replace(Regex("""(?i)\b(?:https?://|urb://|talon://|www\.)\S*[^\s.,;:!?)]"""), "")
         .replace(Regex("""(?m)^\s*(?:[-*+]|\d+[.)]|#{1,6})\s+"""), "")
@@ -48,4 +48,33 @@ object DictationSpeech {
         .replace(Regex("""\s+"""), " ")
         .replace(Regex("""\s+([.,;:!?])"""), "$1")
         .trim()
+
+    // A twelve-hour time with its AM or PM, or a twenty-four-hour one
+    // with two hour digits. A bare "3:16" may be a verse or a score.
+    private val CLOCK = Regex("""\b(?:(\d{1,2}):([0-5]\d)\s?([AaPp])(?:\.[Mm]\.|[Mm])|([01]\d|2[0-3]):([0-5]\d))(?![\w:])""")
+    // A span between times, by a dash, never a date's hyphens.
+    private val SPAN = Regex("""(\d|[AaPp][Mm])(?:\s*[\u2013\u2014]\s*|\s+-\s+)(\d)""")
+
+    /**
+     * Clock times as a person says them: the engine read "4:45" as "four
+     * colon forty-five" (sneagan, 2026-10-16). "4:45 PM" is "4 45 PM",
+     * "6:05 AM" is "6 oh 5 AM", "1:00 PM" is "1 PM", noon and midnight by
+     * name, a 24-hour "16:30" as "4 30 PM", and "4:45 – 7:15" is "4 45 to 7 15".
+     */
+    fun times(text: String): String = CLOCK.replace(SPAN.replace(text) { "${it.groupValues[1]} to ${it.groupValues[2]}" }) { m ->
+        val g = m.groupValues
+        val twelve = g[1].isNotEmpty()
+        var h = (if (twelve) g[1] else g[4]).toInt()
+        val min = (if (twelve) g[2] else g[5]).toInt()
+        val pm = if (twelve) g[3].equals("p", ignoreCase = true) else h >= 12
+        if (!twelve && h > 12) h -= 12
+        if (min == 0 && (h == 12 || h == 0)) return@replace if (pm) "noon" else "midnight"
+        if (h == 0) h = 12
+        val minutes = when {
+            min == 0 -> ""
+            min < 10 -> " oh $min"
+            else -> " $min"
+        }
+        "$h$minutes ${if (pm) "PM" else "AM"}"
+    }
 }

@@ -41,4 +41,15 @@ class DictationSpeechTest {
         assertEquals("Add a todo to buy milk. Say yes, or cancel.", DictationSpeech.prompt("Add a todo to buy milk.", sending = false, to = null, text = null))
         assertEquals("", DictationSpeech.spoken("   "))
     }
+
+    @Test
+    fun `times are said as times, never as colons`() {
+        assertEquals("Ballet from 4 45 PM to 7 15 PM.", DictationSpeech.spoken("Ballet from 4:45 PM \u2013 7:15 PM."))
+        assertEquals("Core Sync at noon, then 1 PM.", DictationSpeech.spoken("Core Sync at 12:00 PM, then 1:00 PM."))
+        assertEquals("Up at 6 oh 5 AM.", DictationSpeech.spoken("Up at 6:05 AM."))
+        assertEquals("Mass at 9 AM, game at 4 30 PM, home by midnight.", DictationSpeech.spoken("Mass at 09:00, game at 16:30, home by 00:00."))
+        assertEquals("Next is Ballet today at 4 45 PM.", DictationSpeech.spoken("Next is Ballet today at 4:45 PM."))
+        // Not a time: a ratio, a verse, a list label.
+        assertEquals("The score was 3:1 and John 3:16 says.", DictationSpeech.spoken("The score was 3:1 and John 3:16 says."))
+    }
 }
