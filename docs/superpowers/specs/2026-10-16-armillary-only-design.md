@@ -95,3 +95,14 @@ sneagan approved the spec and chose the reset: every paid switch turns on once, 
 - **The AI tab**: the Armillary card (the Remove button is gone), "Manage models in Armillary" (opens `/apps/armillary#catalog`), a one-time line when own keys were dropped, and one switch per feature with "Top up to turn on" while there is no credit or key. The top-up sheet carries the consent line. Advanced holds only the instructions. The Orrery page's reading row is this device's model, and the decision model is the vendor's.
 - **Left in place**: the `Config` fields `apiKey`, `syncEnabled`, `braveApiKey`, `sttApiKey` and the private-model fields stay as stored data (the reset blanks the keys). Their setters, the UI and the sync paths are gone. The triage cloud rung stays, but `triageInCloud` is always false now.
 - **Removed**: own provider cards, model pickers and catalogs (`ModelCatalog`), the default model row, the payment offer, the Brave and Whisper key fields, key sync and revoke marks on the wire, the generator offer and `followDefault`, `ArmillarySetup.kt`, and the multipart Whisper path for dictation.
+
+### Armillary 33 and 34 (sneagan, 2026-10-16; armillary PRs #6 and #7, unreleased)
+
+Built against armillary's spec `docs/superpowers/specs/2026-10-16-own-inference.md`.
+
+- **free**: `GET /api/inference` says `free: true` for a ship that is its own vendor with `own_free` on. Talon treats it as funded. No "Top up to turn on", no Top up or Subscribe button, no balance warning or plan line, and the top-up sheet never opens. The card says "Your own inference on ~ship. Nothing is charged." Older ships send no `free`, which reads as false.
+- **Decisions through the proxy**: the route is the inference base with a trailing `/v1` turned into `/alpha/decisions` (`decisionsUrl`), which is OpenRouter's own route under a lease and the vendor's under the proxy. The model is the vendor's `suggested.models.decision`, and the key is this device's Armillary key. A 404 ("decisions: not offered") stops that pass asking, and the reading model reads, as the gate always did on a failure. A 402 is said in the out-of-credit words every Armillary feature uses. A 502 is a failed decision.
+- **Waits**: every call through Armillary (chat, the assistant, transcription) waits eleven minutes (`ARMILLARY_WAIT_MS`), since the proxy waits ten for a slow upstream. A call that is not through Armillary keeps its own wait.
+- **Transcription** keeps the JSON body. Call audio already goes in stretches of 25 s at most, which decode on the ship in a few seconds each.
+- **No public URL**: when the vendor is this ship and the base starts with `http://localhost:8080`, Talon uses the ship address it signed in with (base and Brave search alike), and the card asks the owner to set Public URL in Armillary's Payments view.
+- "Manage models in Armillary" stays on `/apps/armillary#catalog` until a `#own` route ships. There is no "device" model value.
