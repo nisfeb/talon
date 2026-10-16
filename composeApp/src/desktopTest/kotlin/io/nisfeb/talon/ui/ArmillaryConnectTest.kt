@@ -62,8 +62,10 @@ class ArmillaryConnectTest {
     @Volatile private var mintHoldMs = 0L
 
     private val proxy = """{"mode":"proxy","base_url":"https://wex.example/apps/armillary/v1","key":"k.s","models":["stub/alpha","stub/beta"]}"""
-    private val funded = """{"ship":"~feb","balance":50000000,"plan":"","subscription":{"active":false},
-        "lease":{},"checkouts":{},"vendor":"~nisfeb","self":"~feb","stale":3}"""
+    /** The vendor the ship's account names; blank for a ship that never set Armillary up. */
+    @Volatile private var vendor = "~nisfeb"
+    private val funded get() = """{"ship":"~feb","balance":50000000,"plan":"","subscription":{"active":false},
+        "lease":{},"checkouts":{},"vendor":"$vendor","self":"~feb","stale":3}"""
 
     private fun repo(ai: FakeAiSettings): ArmillaryRepo {
         val client = HttpClient(MockEngine { req ->
@@ -217,5 +219,31 @@ class ArmillaryConnectTest {
         r.setUpDevice("desktop")
         runBlocking { withTimeout(10_000) { r.inference.first { it != null } } }
         assertEquals(1, keyAsks())
+    }
+
+    /** Settings that never set Armillary up here: this device and nothing else. */
+    private fun bare() = FakeAiSettings().apply {
+        applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "", model = null,
+            savedProfile = AiProfile(providers = listOf(AiProvider(io.nisfeb.talon.ai.DEVICE_PROVIDER, ProviderKind.ThisDevice, "On this device")))))
+    }
+
+    @Test
+    fun `a device of a ship that already buys connects itself, with no tap`() {
+        hasKey = true
+        val ai = bare()
+        repo(ai)
+        runBlocking { withTimeout(10_000) { while (ai.state.value.savedProfile?.provider(ARMILLARY_PROVIDER)?.apiKey.isNullOrBlank()) delay(20) } }
+        assertEquals("k.s", ai.rowKey())
+    }
+
+    @Test
+    fun `a ship that never named a vendor is not connected, and nothing asks for a key`() {
+        vendor = ""
+        val ai = bare()
+        repo(ai)
+        runBlocking { delay(1_500) }
+        assertEquals(null, ai.state.value.savedProfile?.provider(ARMILLARY_PROVIDER), "no row made")
+        assertEquals(0, keyAsks(), "nothing reached for a vendor")
+        assertTrue(seen.none { it.startsWith("POST") }, seen.toString())
     }
 }
