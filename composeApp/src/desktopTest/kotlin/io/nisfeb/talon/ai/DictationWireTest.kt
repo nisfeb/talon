@@ -106,7 +106,9 @@ class DictationWireTest {
                     tools = DictationAgent.toolsFor(orreryTools(repo), locked = true),
                 ).run("Linus has a dentist appointment to book")
             }
-            assertEquals("Handed the dentist note to orrery.", summary)
+            // Said from the result: no second model call to word it.
+            assertEquals("Filed in orrery: Dentist for Linus.", summary)
+            assertEquals(1, turn, "the model was asked to word a note that was filed")
             val (route, body) = asked.single()
             assertEquals("POST /apps/orrery/api/read", route)
             val sent = Json.parseToJsonElement(body).jsonObject

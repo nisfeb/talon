@@ -174,30 +174,48 @@ class DictationService : Service() {
     private suspend fun listenAndAct() {
         // Read now, not when the run starts: the owner may unlock while it works.
         val locked = getSystemService(KeyguardManager::class.java)?.isDeviceLocked == true
-        val heard = try {
-            record()
-        } finally {
-            QuickDictation.setLevel(null)
-            withContext(Dispatchers.Main) { listening = false }
-        }
-        when {
-            heard == null -> Unit // cancelled
-            !heard.second -> tell("Nothing heard", "Talon did not hear anything to act on.")
-            else -> {
-                update("Working on your dictation…")
-                val wav = WavFile.encode(heard.first, DictationRun.RATE)
-                // Kept before it is sent, so nothing said is lost to a crash or a dead network.
-                val kept = File(keptDir(), "${System.currentTimeMillis()}.wav").apply { writeBytes(wav) }
-                report(kept, pipeline(locked).fromAudio(wav))
+        // The run's setup, begun while the owner talks, not after.
+        val prep = prepare()
+        try {
+            val heard = try {
+                record()
+            } finally {
+                QuickDictation.setLevel(null)
+                withContext(Dispatchers.Main) { listening = false }
             }
+            when {
+                heard == null -> Unit // cancelled
+                !heard.second -> tell("Nothing heard", "Talon did not hear anything to act on.")
+                else -> {
+                    update("Working on your dictation…")
+                    val wav = WavFile.encode(heard.first, DictationRun.RATE)
+                    // Kept before it is sent, so nothing said is lost to a crash or a dead network.
+                    val kept = File(keptDir(), "${System.currentTimeMillis()}.wav").apply { writeBytes(wav) }
+                    report(kept, pipeline(locked, prep).fromAudio(wav))
+                }
+            }
+        } finally {
+            prep?.close()
         }
     }
 
     private suspend fun retry(kept: File) {
         if (!kept.exists()) return tell("Dictation gone", "That dictation is no longer kept on this phone.")
         val locked = getSystemService(KeyguardManager::class.java)?.isDeviceLocked == true
-        val run = pipeline(locked)
-        report(kept, if (kept.extension == "txt") run.fromText(kept.readText()) else run.fromAudio(kept.readBytes()))
+        val prep = prepare()
+        try {
+            val run = pipeline(locked, prep)
+            report(kept, if (kept.extension == "txt") run.fromText(kept.readText()) else run.fromAudio(kept.readBytes()))
+        } finally {
+            prep?.close()
+        }
+    }
+
+    /** The run's setup, where a run could happen at all: a ship, and a model to run on. */
+    private fun prepare(): io.nisfeb.talon.ai.Loops.DictationPrep? {
+        val app = application as TalonApplication
+        if (app.sessionStore.activeShip() == null || !app.aiSettings.state.value.loopsCanRun()) return null
+        return runCatching { app.loops.prepareDictation() }.onFailure { Log.w(TAG, "could not prepare the run", it) }.getOrNull()
     }
 
     /** The recording and whether there was speech in it, or null when cancelled. */
@@ -241,14 +259,14 @@ class DictationService : Service() {
         }
     }
 
-    private fun pipeline(locked: Boolean): DictationRun {
+    private fun pipeline(locked: Boolean, prep: io.nisfeb.talon.ai.Loops.DictationPrep?): DictationRun {
         val app = application as TalonApplication
         val cfg = app.aiSettings.state.value
         val stt = CallRecordingPublisher.sttFrom(cfg)
         val act: suspend (String) -> String = { words ->
             // A timeout here and not a cancellation: one would unwind
             // past the outcome and the words would go unkept.
-            withTimeoutOrNull(RUN_BUDGET_MS) { app.loops.dictate(words, locked) }
+            withTimeoutOrNull(RUN_BUDGET_MS) { prep!!.dictate(words, locked) }
                 ?: error("It took longer than ${RUN_BUDGET_MS / 60_000} minutes")
         }
         return DictationRun(
@@ -260,7 +278,7 @@ class DictationService : Service() {
                 }
                 timed
             },
-            act = act.takeIf { app.sessionStore.activeShip() != null && cfg.loopsCanRun() },
+            act = act.takeIf { prep != null },
         )
     }
 

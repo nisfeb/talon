@@ -14,6 +14,7 @@ import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.TimeUnit
@@ -137,6 +138,8 @@ class Loops(
     // never goes stale on a key change — and every wake-up reuses the pool
     // instead of leaving a fresh one behind.
     private val agentClient by lazy { AgentClient(io.nisfeb.talon.ai.AiFeature.Assistant) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Assistant) } }
+    // A dictation's own model where it has one, else the assistant's (AiProfile.resolve).
+    private val dictationClient by lazy { AgentClient(io.nisfeb.talon.ai.AiFeature.Dictation) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Dictation) } }
     private val braveClient by lazy { BraveSearchClient { aiSettings.state.value } }
     private val urlFetcher by lazy { UrlFetcher { aiSettings.state.value } }
 
@@ -179,41 +182,90 @@ class Loops(
         withActions { block(runner(it)) }
 
     /**
-     * Act on one voice dictation, autonomously (writes need no
-     * confirmation, see [DictationAgent]), and return the agent's line.
-     * The loop assembly plus orrery: the same mail, calendar and message
-     * tools and completer a scheduled loop gets, and orrery's tools where
-     * Orrery is on, since a dictation is mostly for orrery. While
-     * [locked], only [DictationAgent.LOCKED_WRITES] among the writes.
-     * No write coordinator: a dictation runs only on the device it was
-     * spoken into, so there is no double write to guard. Throws when the
-     * run fails; [io.nisfeb.talon.DictationService] owns the foreground,
-     * the wake lock and the notification.
+     * Begin a dictation's run before anything is said: the ship's channel,
+     * mail and the calendar attached, the calendar read, the contacts
+     * loaded. Started when listening starts, so it is ready, or nearly,
+     * by the time the words are: on the phone this setup took six
+     * seconds after them. [DictationPrep.close] it when the dictation is
+     * over, run or not.
      */
-    suspend fun dictate(transcript: String, locked: Boolean): String {
-        val t0 = System.currentTimeMillis()
-        runCatching { getRepo().start(getSession()) }
-        val t1 = System.currentTimeMillis()
-        return withActions { actions ->
-            io.nisfeb.talon.util.Log.i("Dictation", "set up: repo ${t1 - t0} ms, mail and calendar ${System.currentTimeMillis() - t1} ms")
+    fun prepareDictation(): DictationPrep = DictationPrep()
+
+    /**
+     * One dictation's mail, calendar and contacts, on a scope of its own.
+     * Nothing here waits: the calendar read runs on, and only the
+     * calendar's tools wait for it ([waitingFor]), so a note for orrery
+     * never does.
+     */
+    inner class DictationPrep internal constructor() {
+        private val run = CoroutineScope(scope.coroutineContext + kotlinx.coroutines.SupervisorJob(scope.coroutineContext[kotlinx.coroutines.Job]))
+        private val url = sessionStore.active()?.shipUrl
+        private val http = runCatching { getSession().http }.getOrNull()
+        private val mail = if (url != null && http != null) io.nisfeb.talon.mail.MailRepo(http, run).also { it.attach(url, poll = false) } else null
+        private val calendar = if (url != null && http != null) io.nisfeb.talon.calendar.CalendarRepo(http, run).also { it.attach(url, poll = false) } else null
+        private val started = run.async { runCatching { getRepo().start(getSession()) } }
+        private val read = run.async {
+            val t0 = System.currentTimeMillis()
+            // What the tools read and no more: shares, sync state and tags were half the requests.
+            runCatching { calendar?.refresh(rarely = false) }
+            io.nisfeb.talon.util.Log.i("Dictation", "calendar read in ${System.currentTimeMillis() - t0} ms")
+        }
+        private val contacts = run.async {
+            val db = getDb()
+            runCatching {
+                io.nisfeb.talon.ui.ContactMap(
+                    contacts = db.contacts().stream().first(),
+                    clubs = db.clubs().stream().first(),
+                    groups = db.groups().streamGroups().first(),
+                    channelGroups = db.groups().streamChannelGroups().first(),
+                )
+            }.getOrElse { io.nisfeb.talon.ui.ContactMap() }
+        }
+
+        /**
+         * Act on [transcript], autonomously (writes need no confirmation,
+         * see [DictationAgent]), and return the line for the notification.
+         * The loop's mail, calendar and message tools plus orrery's where
+         * Orrery is on, [DictationAgent.TOOLS] of them; while [locked], only
+         * [DictationAgent.LOCKED_WRITES] among the writes. No write
+         * coordinator: a dictation runs only on the device it was spoken
+         * into. Throws when the run fails.
+         */
+        suspend fun dictate(transcript: String, locked: Boolean): String {
+            started.await()
             val cfg = aiSettings.state.value
+            val known = contacts.await()
+            val actions = AssistantActions(
+                db = getDb(), contacts = { known }, mail = mail, calendar = calendar,
+                zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
+                send = { whom, text -> getRepo().send(whom, text) },
+            )
             val webOn = cfg.assistantOn()
             val tools = ToolCatalog.default(
                 getRepo(), getDb(), getEmbedder(),
                 braveSearch = braveClient.takeIf { webOn && cfg.braveApiKey.isNotBlank() },
                 urlFetcher = urlFetcher.takeIf { webOn },
             ) { it } + actionTools(actions)
-            withOrrery(cfg) { orrery ->
+            return withOrrery(cfg) { orrery ->
                 val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked)
+                    .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
                 // What a locked phone was allowed, readable in a release logcat.
-                io.nisfeb.talon.util.Log.i("Dictation", "locked=$locked, ${offered.size} tools, writes: " + offered.filter { it.write }.joinToString { it.spec.name })
+                io.nisfeb.talon.util.Log.i("Dictation", "locked=$locked, ${offered.size} tools, calendar read ${if (read.isCompleted) "done" else "pending"}, writes: " + offered.filter { it.write }.joinToString { it.spec.name })
                 DictationAgent(
-                    // The time per call, as the assistant screen does: "tomorrow at three" needs today.
-                    completer = { sys, msgs, t -> agentClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
+                    // The time per call, as the assistant screen does:
+                    // "tomorrow at three" needs today. The phone's zone
+                    // until the calendar says its own.
+                    completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
                     tools = offered,
-                    systemPrompt = DictationAgent.prompt(cfg),
+                    systemPrompt = DictationAgent.prompt,
                 ).run(transcript)
             }
+        }
+
+        fun close() {
+            run.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+            mail?.detach()
+            calendar?.detach()
         }
     }
 

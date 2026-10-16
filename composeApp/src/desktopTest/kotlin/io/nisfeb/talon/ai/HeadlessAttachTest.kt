@@ -63,6 +63,21 @@ class HeadlessAttachTest {
     }
 
     @Test
+    fun `a dictation's calendar read asks for what its tools read and no more`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob())
+        try {
+            val cal = CalendarRepo(http, scope)
+            cal.attach("https://ship.test", poll = false)
+            cal.refresh(rarely = false)
+            val read = asked.map { it.substringAfterLast("/apps/calendar") }.toSet()
+            assertTrue(read.any { it.endsWith("/window.json") } && read.any { it.endsWith("/calendars.json") } && read.any { it.endsWith("/config.json") }, read.toString())
+            assertTrue(read.none { "share" in it || "tags" in it || "google" in it || "caldav" in it }, "read what no tool reads: $read")
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun `the app's calendar still polls`() = runBlocking {
         val scope = CoroutineScope(SupervisorJob())
         try {

@@ -28,7 +28,7 @@ import kotlinx.coroutines.CancellationException
 class DictationAgent(
     private val completer: AgentLoop.Completer,
     private val tools: List<Tool>,
-    private val systemPrompt: String = composePrompt(AgentPrompt.urbitKnowledge, role),
+    private val systemPrompt: String = prompt,
     private val maxSteps: Int = 8,
 ) {
     /**
@@ -40,7 +40,7 @@ class DictationAgent(
         val text = transcript.trim()
         if (text.isEmpty()) return ""
         return AgentLoop(completer, tools, systemPrompt, maxSteps)
-            .run(question = text, confirm = { _, _ -> true })
+            .run(question = text, confirm = { _, _ -> true }, finish = ::plainly)
     }
 
     companion object {
@@ -70,9 +70,27 @@ class DictationAgent(
               way: say so in your line rather than doing something else.
         """.trimIndent()
 
-        /** The effective prompt: the owner's Urbit knowledge, then [role]. */
-        fun prompt(cfg: AiSettings.Config): String =
-            composePrompt(cfg.urbitKnowledgePrompt.ifBlank { AgentPrompt.urbitKnowledge }, role)
+        /**
+         * The whole prompt: the content-is-data rule and [role]. Not the
+         * Urbit knowledge the assistant gets: it is about the ship's MCP
+         * tools and scrying, which a dictation has none of, and every
+         * model call paid for it.
+         */
+        val prompt: String = DATA_NOT_INSTRUCTIONS + "\n\n" + role
+
+        /**
+         * The tools a dictation is offered: the ones a spoken note,
+         * question or errand uses. Not orrery's settings, calendar
+         * sharing and sync, reactions, the web: their descriptions were a
+         * third of every request, and nobody dictates them.
+         */
+        val TOOLS: Set<String> = setOf(
+            "search_history", "read_conversation", "send_message", "find_person", "find_conversation",
+            "send_mail", "list_mail", "search_mail", "read_mail",
+            "list_calendars", "list_events", "create_event", "update_event", "delete_event",
+            "list_tasks", "create_task", "complete_task",
+            "orrery_guide", "orrery_find", "orrery_read", "orrery_observe", "orrery_file_text", "orrery_instruct", "orrery_correct",
+        )
 
         /**
          * The writes a dictation keeps while the phone is locked: the
@@ -83,11 +101,55 @@ class DictationAgent(
          */
         val LOCKED_WRITES: Set<String> = ALLOW_ALL_TOOLS + setOf("orrery_file_text", "orrery_instruct")
 
-        /** [all] as a dictation may use them; while [locked], only [LOCKED_WRITES] among the writes. */
+        /**
+         * The tools that read the calendar as it was read in: they wait
+         * for that read, which runs while the owner talks ([waitingFor]).
+         * send_mail too, for an event it sends as an invite.
+         */
+        val CALENDAR_TOOLS: Set<String> = setOf(
+            "list_calendars", "list_events", "create_event", "update_event", "delete_event",
+            "list_tasks", "create_task", "complete_task", "send_mail",
+        )
+
+        /** [all] as a dictation may use them: [TOOLS] only, and while [locked], only [LOCKED_WRITES] among the writes. */
         fun toolsFor(all: List<Tool>, locked: Boolean): List<Tool> =
-            all.dedupToolNames().filter { !locked || !it.write || it.spec.name in LOCKED_WRITES }
+            all.dedupToolNames().filter { it.spec.name in TOOLS && (!locked || !it.write || it.spec.name in LOCKED_WRITES) }
+
+        /**
+         * A turn's writes said back to the owner as the tools reported
+         * them, so no second model call is spent wording "done": about
+         * three seconds on the phone. Null, and the model words it, unless
+         * every call in the turn was a write that said it worked in the
+         * words below; a read, a refusal or anything unforeseen goes back
+         * to the model.
+         */
+        fun plainly(turn: List<Pair<ToolCall, ToolResult>>): String? {
+            if (turn.isEmpty()) return null
+            return turn.map { (call, r) -> said(call, r.content) ?: return null }.joinToString("\n")
+        }
+
+        private fun said(call: ToolCall, result: String): String? {
+            fun arg(k: String) = (call.args[k] as? kotlinx.serialization.json.JsonPrimitive)?.content?.trim()?.takeIf { it.isNotEmpty() }
+            return when (call.name) {
+                // Its note on syncing is for the model, not the owner.
+                "create_event" -> result.takeIf { it.startsWith("Added \"") }?.substringBefore(" It is synced")
+                "create_task" -> result.takeIf { it.startsWith("Added task \"") }
+                "update_event" -> result.takeIf { it.startsWith("Updated \"") }
+                "delete_event" -> result.takeIf { it.startsWith("Deleted \"") }
+                "complete_task" -> result.takeIf { it.startsWith("Done: ") || it.startsWith("Reopened: ") }
+                "send_mail" -> result.takeIf { it.startsWith("Mailed ") }
+                "send_message" -> result.takeIf { it == "Sent." }?.let { "Sent to ${arg("whom") ?: "them"}." }
+                "orrery_file_text" -> result.takeIf { it.startsWith("Handed to orrery to read") }
+                    ?.let { "Filed in orrery: " + (arg("title") ?: arg("text")?.take(80) ?: "your note") + "." }
+                else -> null
+            }
+        }
     }
 }
+
+/** These tools [names] each waiting for [ready] before they run; the rest as they are. */
+fun List<Tool>.waitingFor(names: Set<String>, ready: suspend () -> Unit): List<Tool> =
+    map { t -> if (t.spec.name !in names) t else Tool(t.spec, t.write) { args -> ready(); t.execute(args) } }
 
 /** How one dictation ended. Every one of them is a notification. */
 sealed interface DictationOutcome {

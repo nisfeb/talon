@@ -840,9 +840,11 @@ class CalendarRepo(
 
     /**
      * Everything, or with [full] false only the events and tasks: the
-     * calendars, shares, sync, tags and config change rarely.
+     * calendars, shares, sync, tags and config change rarely. With
+     * [rarely] false a full read leaves out shares, sync state and tags:
+     * what a headless run's tools read, in half the requests.
      */
-    suspend fun refresh(full: Boolean = true) = gate.withLock {
+    suspend fun refresh(full: Boolean = true, rarely: Boolean = true) = gate.withLock {
         val a = api ?: return@withLock
         try {
             val now = nowMs()
@@ -853,7 +855,7 @@ class CalendarRepo(
             details.clear()
             if (full) _calendars.value = runSuspendCatching { a.calendars() }.getOrNull() ?: _calendars.value
             _tasks.value = runSuspendCatching { a.tasks() }.getOrNull() ?: _tasks.value
-            if (full) readRarely(a)
+            if (full && rarely) readRarely(a)
             keep()
             if (full) runSuspendCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball; _leadMin.value = it.leadMin }
             noteReminders(w.rows)
