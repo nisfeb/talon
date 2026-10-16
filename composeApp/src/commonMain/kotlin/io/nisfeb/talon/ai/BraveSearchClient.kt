@@ -27,19 +27,16 @@ import kotlinx.serialization.json.jsonPrimitive
  * unit-tested without a live API, mirroring AgentClient's build/parse split.
  */
 /**
- * Where web search goes and the key it sends: the owner's own Brave key
- * to Brave, else the Armillary vendor's search, which forwards to Brave
- * on the vendor's key and takes this ship's Armillary key in Brave's own
- * header. Null for neither.
+ * Where web search goes and the key it sends: the Armillary vendor's
+ * search, which forwards to Brave on the vendor's key and takes this
+ * ship's Armillary key in Brave's own header. Null where it offers none.
  */
 fun AiSettings.Config.braveSearch(): Pair<String, String>? {
-    braveApiKey.trim().takeIf { it.isNotEmpty() }?.let { return BRAVE_API to it }
     val row = profile().armillary() ?: return null
     val url = row.searchUrl?.takeIf { it.isNotBlank() } ?: return null
     return row.searchKey.takeIf { it.isNotBlank() }?.let { url to it }
 }
 
-const val BRAVE_API = "https://api.search.brave.com"
 
 class BraveSearchClient(private val settings: () -> AiSettings.Config) {
 

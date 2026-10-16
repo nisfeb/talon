@@ -94,19 +94,6 @@ class ArmillarySetupTest {
         assertEquals(FeatureSetting(on = false, model = ours), p.features[AiFeature.Assistant])
     }
 
-    // The assistant runs on tools; one following a default that has none
-    // answered every request that needed a tool with an error.
-    @Test
-    fun `an assistant on a model without tools gets armillary's, and catch-up keeps the default`() {
-        val p = AiProfile(
-            providers = listOf(device, openRouter, armillary),
-            defaultModel = ModelRef("main", "perplexity/sonar"),
-        ).filledWithArmillary("big/tools")
-        assertEquals(ModelRef("main", "perplexity/sonar"), p.defaultModel, "it works, for what needs no tools")
-        assertEquals(ours, p.features[AiFeature.Assistant]?.model)
-        assertNull(p.features[AiFeature.CatchUp], "catch-up needs no tools")
-    }
-
     /** The Armillary row with the vendor naming [default] as everyone's default model. */
     private fun vendor(default: String = "mid/tools") = armillary.copy(suggested = mapOf("default" to default))
 

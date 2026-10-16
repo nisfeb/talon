@@ -6,7 +6,6 @@ import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 import kotlin.test.assertNull
 
 /**
@@ -28,7 +27,7 @@ class ArmillaryHearingTest {
     @Test
     fun `the vendor's model hears a dictation where the owner has no key, and the blocker lifts`() {
         val c = cfg(row())
-        assertEquals(Hearing.Armillary("https://openrouter.ai/api/v1", "sk-or-lease", whisper), DictationRun.hearing(c))
+        assertEquals(Hearing("https://openrouter.ai/api/v1", "sk-or-lease", whisper), DictationRun.hearing(c))
         assertEquals(DictationRun.NO_MODEL, DictationRun.blocker(c, hasShip = true), "past the key, on to the next thing missing")
     }
 
@@ -41,12 +40,12 @@ class ArmillaryHearingTest {
     }
 
     @Test
-    fun `the owner's own key wins over the vendor's`() {
+    fun `an own speech key left from before is not heard through`() {
         val openAi = AiProvider("oa", ProviderKind.OpenAi, "OpenAI", apiKey = "sk-own")
         val c = cfg(row(), openAi, features = mapOf(AiFeature.Transcription to FeatureSetting(on = true, model = ModelRef("oa", "whisper-1"))))
-        val heard = DictationRun.hearing(c)
-        assertIs<Hearing.Own>(heard)
-        assertEquals("sk-own", heard.stt.key)
+            .copy(sttApiKey = "sk-whisper")
+        assertEquals(Hearing("https://openrouter.ai/api/v1", "sk-or-lease", whisper), DictationRun.hearing(c))
+        assertNull(DictationRun.hearing(cfg(row(model = null), openAi).copy(sttApiKey = "sk-whisper")), "and without the vendor's model, nothing")
     }
 
     @Test

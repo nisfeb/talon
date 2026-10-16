@@ -59,7 +59,7 @@ object ArmillaryTranscribe {
      */
     suspend fun transcribe(
         http: HttpClient,
-        hearing: Hearing.Armillary,
+        hearing: Hearing,
         audio: ByteArray,
         format: String,
         language: String? = null,
@@ -89,25 +89,19 @@ object ArmillaryTranscribe {
     }
 }
 
-/** Where a dictation's audio is turned into text ([DictationRun.hearing]). */
-sealed interface Hearing {
-    /** The owner's own transcription provider: a Whisper key, or a server of theirs. */
-    data class Own(val stt: CallRecordingPublisher.Stt) : Hearing
-
-    /** Armillary's: the vendor's transcription model, on the row's base and key. */
-    data class Armillary(val baseUrl: String, val key: String, val model: String) : Hearing
-}
+/** Where speech is turned into text: the vendor's transcription model, on the row's base and key ([DictationRun.hearing]). */
+data class Hearing(val baseUrl: String, val key: String, val model: String)
 
 /**
  * The transcription the Armillary vendor offers this owner, or null: a
  * model named under "transcription" and a row that can reach it.
  */
-fun AiProfile.armillaryHearing(): Hearing.Armillary? {
+fun AiProfile.armillaryHearing(): Hearing? {
     val row = armillary() ?: return null
     val model = row.suggested[TRANSCRIPTION]?.takeIf { it.isNotBlank() } ?: return null
     val base = row.baseUrl?.takeIf { it.isNotBlank() } ?: return null
     if (row.apiKey.isBlank()) return null
-    return Hearing.Armillary(base, row.apiKey, model)
+    return Hearing(base, row.apiKey, model)
 }
 
 /** The vendor's name for its speech-to-text tier, under suggested.models. */

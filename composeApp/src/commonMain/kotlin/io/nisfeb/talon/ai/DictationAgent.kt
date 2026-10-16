@@ -256,20 +256,8 @@ class DictationRun(
             else -> null
         }
 
-        /**
-         * Where a dictation is heard: the owner's own transcription
-         * provider ([CallRecordingPublisher.sttFrom]) wherever there is
-         * one, else the Armillary vendor's transcription model
-         * ([armillaryHearing]), else nowhere, and the card says to set a
-         * key, as before Armillary offered one.
-         */
-        fun hearing(cfg: AiSettings.Config): Hearing? =
-            CallRecordingPublisher.sttFrom(cfg)?.let { Hearing.Own(it) } ?: cfg.profile().armillaryHearing()
-
-        /** Speech to text with the transcription key from AI settings ([CallRecordingPublisher.sttFrom]). */
-        fun whisper(http: HttpClient, stt: CallRecordingPublisher.Stt): suspend (ByteArray) -> String = { wav ->
-            text(CallTranscribe.transcribe(http, stt.endpoint, stt.key, stt.model, wav))
-        }
+        /** Where a dictation is heard: the Armillary vendor's transcription model ([armillaryHearing]), else nowhere. */
+        fun hearing(cfg: AiSettings.Config): Hearing? = cfg.profile().armillaryHearing()
 
         /**
          * A failure as the owner is told it, in words: no network, a

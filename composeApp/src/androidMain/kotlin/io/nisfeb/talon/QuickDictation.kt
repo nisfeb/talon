@@ -407,34 +407,22 @@ class DictationService : Service() {
     ): DictationRun {
         val app = application as TalonApplication
         val cfg = app.aiSettings.state.value
-        // The owner's own key wherever there is one, else Armillary's
-        // transcription model, else none and the card asks for a key.
-        val transcribe: (suspend (ByteArray) -> String)? = when (val hearing = DictationRun.hearing(cfg)) {
-            null -> null
-            is io.nisfeb.talon.ai.Hearing.Own -> {
-                val whisper = DictationRun.whisper(app.ktorHttp, hearing.stt)
-                val own: suspend (ByteArray) -> String = { wav ->
-                    val t0 = System.currentTimeMillis()
-                    whisper(wav).also { Log.i(TAG, "transcribed ${wav.size} bytes in ${System.currentTimeMillis() - t0} ms") }
+        // Armillary's transcription model, else none and the card says why.
+        val transcribe: (suspend (ByteArray) -> String)? = DictationRun.hearing(cfg)?.let { hearing ->
+            val bought: suspend (ByteArray) -> String = { wav ->
+                val t0 = System.currentTimeMillis()
+                // Compressed: the vendor's proxy keeps every body it is
+                // sent, and caps them at 16 MB. The WAV only where the
+                // phone cannot encode.
+                val m4a = m4aOf(cacheDir, wav.copyOfRange(WAV_HEADER, wav.size), DictationRun.RATE)
+                io.nisfeb.talon.ai.ArmillaryTranscribe.transcribe(
+                    app.ktorHttp, hearing, m4a ?: wav, if (m4a != null) "m4a" else "wav",
+                    java.util.Locale.getDefault().language,
+                ).also {
+                    Log.i(TAG, "transcribed through Armillary (${hearing.model} at ${android.net.Uri.parse(hearing.baseUrl).host}), ${if (m4a != null) "m4a ${m4a.size}" else "wav ${wav.size}"} bytes of ${wav.size} in ${System.currentTimeMillis() - t0} ms")
                 }
-                own
             }
-            is io.nisfeb.talon.ai.Hearing.Armillary -> {
-                val bought: suspend (ByteArray) -> String = { wav ->
-                    val t0 = System.currentTimeMillis()
-                    // Compressed: the vendor's proxy keeps every body it is
-                    // sent, and caps them at 16 MB. The WAV only where the
-                    // phone cannot encode.
-                    val m4a = m4aOf(cacheDir, wav.copyOfRange(WAV_HEADER, wav.size), DictationRun.RATE)
-                    io.nisfeb.talon.ai.ArmillaryTranscribe.transcribe(
-                        app.ktorHttp, hearing, m4a ?: wav, if (m4a != null) "m4a" else "wav",
-                        java.util.Locale.getDefault().language,
-                    ).also {
-                        Log.i(TAG, "transcribed through Armillary (${hearing.model} at ${android.net.Uri.parse(hearing.baseUrl).host}), ${if (m4a != null) "m4a ${m4a.size}" else "wav ${wav.size}"} bytes of ${wav.size} in ${System.currentTimeMillis() - t0} ms")
-                    }
-                }
-                bought
-            }
+            bought
         }
         val act: suspend (String) -> String = { words ->
             val p = prep!!

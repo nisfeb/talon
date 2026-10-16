@@ -103,7 +103,7 @@ class LoopWriteCoordinatorTest {
             runs = runDao,
             tools = emptyList(),
             completer = { _, _, _ -> AgentTurn.Final("done") },
-            aiConfig = { AiSettings.Config(AiSettings.Provider.Anthropic, "k", model = null, agentEnabled = true) },
+            aiConfig = { paidSettings() },
             notify = { _, _, _ -> },
             coordinator = coordinator,
             now = { lease.now },

@@ -44,40 +44,6 @@ class VendorPickTest {
     }
 
     @Test
-    fun `triage and transcription are never the vendor's`() {
-        val p = profile(AiFeature.OrreryTriage to FeatureSetting(on = true, model = ModelRef("p1", "t/1")))
-        assertEquals(Resolved(own, "t/1"), p.resolve(AiFeature.OrreryTriage))
-        assertNull(p.vendorModel(AiFeature.Transcription))
-    }
-
-    @Test
-    fun `a model picked by hand is the owner's, and one tap follows the vendor again`() {
-        val picked = FeatureSetting(on = true, model = ModelRef("p1", "mine/1"), own = true)
-        val p = profile(AiFeature.Assistant to picked)
-        assertEquals(Resolved(own, "mine/1"), p.resolve(AiFeature.Assistant))
-        assertFalse(p.followsVendor(AiFeature.Assistant))
-        val back = profile(AiFeature.Assistant to picked.followingVendor())
-        assertEquals(Resolved(row(), "f/1"), back.resolve(AiFeature.Assistant))
-        assertTrue(back.isOn(AiFeature.Assistant), "following keeps the switch")
-    }
-
-    @Test
-    fun `a private model chosen before counts as the owner's own, until one tap`() {
-        val local = FeatureSetting(on = true, model = ModelRef(DEVICE_PROVIDER, "qwen"))
-        val p = profile(AiFeature.CatchUp to local)
-        assertEquals(Resolved(device, "qwen"), p.resolve(AiFeature.CatchUp))
-        assertFalse(p.followsVendor(AiFeature.CatchUp))
-        assertEquals(Resolved(row(), "z/1"), profile(AiFeature.CatchUp to local.followingVendor()).resolve(AiFeature.CatchUp))
-    }
-
-    @Test
-    fun `with no Armillary row, or one the vendor says nothing on, nothing changes`() {
-        val s = FeatureSetting(on = true, model = ModelRef("p1", "own/1"))
-        assertEquals(Resolved(own, "own/1"), profile(AiFeature.CatchUp to s, armillary = null).resolve(AiFeature.CatchUp))
-        assertEquals(Resolved(own, "own/1"), profile(AiFeature.CatchUp to s, armillary = row(emptyMap())).resolve(AiFeature.CatchUp))
-    }
-
-    @Test
     fun `a followed feature's client gets the row's base, key and the vendor's model`() {
         val c = conf(profile())
         val got = c.forFeature(AiFeature.Assistant)
@@ -102,18 +68,18 @@ class VendorPickTest {
     fun `web search uses the owner's own Brave key, else the vendor's search`() {
         val vendor = conf(profile())
         assertEquals("https://v.example/apps/armillary/brave" to "id.secret", vendor.braveSearch())
-        assertEquals(BRAVE_API to "brave-own", vendor.copy(braveApiKey = " brave-own ").braveSearch())
+        assertEquals("https://v.example/apps/armillary/brave" to "id.secret", vendor.copy(braveApiKey = " brave-own ").braveSearch(), "an own key left from before is not used")
         assertNull(conf(profile(armillary = null)).braveSearch())
     }
 
     @Test
-    fun `a feature on the vendor's pick asks for ZDR endpoints on any tier, and only while it follows`() {
+    fun `every call on Armillary asks for ZDR endpoints, on any tier`() {
         val c = conf(profile())
         assertTrue(c.forFeature(AiFeature.CatchUp).zdrOnly)
         assertTrue(c.forFeature(AiFeature.Assistant).zdrOnly, "the frontier tier went out without the ZDR flag")
         assertTrue(conf(profile(armillary = row(tiers = emptyMap()))).forFeature(AiFeature.CatchUp).zdrOnly, "a vendor that names no tiers")
         val own = conf(profile(AiFeature.CatchUp to FeatureSetting(on = true, model = ModelRef("p1", "mine/1"), own = true)))
-        assertFalse(own.forFeature(AiFeature.CatchUp).zdrOnly, "the owner's own pick is theirs to route")
+        assertTrue(own.forFeature(AiFeature.CatchUp).zdrOnly, "a pick from before runs on Armillary, under its terms")
         assertFalse(conf(profile(armillary = null)).forFeature(AiFeature.CatchUp).zdrOnly)
     }
 

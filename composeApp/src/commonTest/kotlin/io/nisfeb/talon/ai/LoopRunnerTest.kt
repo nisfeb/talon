@@ -31,9 +31,8 @@ class LoopRunnerTest {
         intervalMinutes = 60, createdAt = 0, updatedAt = 0, lastRunAt = 0,
     )
 
-    /** A key, and the assistant on: loops run on it, and only while it is on. */
-    private fun config(key: String, assistant: Boolean = true) =
-        AiSettings.Config(AiSettings.Provider.Anthropic, key, model = null, agentEnabled = assistant)
+    /** An Armillary key, and the assistant on: loops run on it, and only while it is on. */
+    private fun config(key: String, assistant: Boolean = true) = paidSettings(key, assistant)
 
     private fun tool(name: String, write: Boolean) = Tool(
         spec = ToolSpec(name, "", JsonObject(emptyMap())),

@@ -9,9 +9,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * What a dictation runs on: the assistant's model until it has one of its
- * own, picked on this device or named "dictation" by an Armillary vendor;
- * and it never travels, since an older install drops a profile it cannot read.
+ * What a dictation runs on: the model an Armillary vendor names
+ * "dictation", else the assistant's; and it never travels, since an older
+ * install drops a profile it cannot read.
  */
 class DictationModelTest {
     private val own = AiProvider("p1", ProviderKind.OpenRouter, "OpenRouter", apiKey = "sk-own")
@@ -34,13 +34,16 @@ class DictationModelTest {
         val p = profile()
         assertEquals(Resolved(row(), "opus/5.5"), p.resolve(AiFeature.Assistant))
         assertEquals(p.resolve(AiFeature.Assistant), p.resolve(AiFeature.Dictation))
-        assertFalse(p.followsVendor(AiFeature.Dictation))
     }
 
     @Test
-    fun `it follows the assistant onto the owner's own model too`() {
-        val p = profile(AiFeature.Assistant to FeatureSetting(on = true, model = ModelRef("p1", "mine/1"), own = true))
-        assertEquals(Resolved(own, "mine/1"), p.resolve(AiFeature.Dictation))
+    fun `a model picked before this build is not run, the vendor's is`() {
+        val p = profile(
+            AiFeature.Assistant to FeatureSetting(on = true, model = ModelRef("p1", "mine/1"), own = true),
+            AiFeature.Dictation to FeatureSetting(model = ModelRef("p1", "fast/1"), own = true),
+        )
+        assertEquals(Resolved(row(), "opus/5.5"), p.resolve(AiFeature.Dictation))
+        assertTrue(p.vendorZdr(AiFeature.Dictation))
     }
 
     @Test
@@ -56,20 +59,6 @@ class DictationModelTest {
         assertEquals(Resolved(row(mapOf("default" to "f/1", "assistant" to "opus/5.5", "dictation" to "haiku/5.5"), mapOf("dictation" to "frontier")), "haiku/5.5"), p.resolve(AiFeature.Dictation))
         assertTrue(p.followsVendor(AiFeature.Dictation))
         assertTrue(p.vendorZdr(AiFeature.Dictation), "on the frontier tier it still asks for ZDR")
-    }
-
-    @Test
-    fun `a model the owner picks wins over both`() {
-        val p = profile(AiFeature.Dictation to FeatureSetting(model = ModelRef("p1", "fast/1"), own = true))
-        assertEquals(Resolved(own, "fast/1"), p.resolve(AiFeature.Dictation))
-        assertFalse(p.vendorZdr(AiFeature.Dictation))
-    }
-
-    @Test
-    fun `picking Default goes back to the assistant's`() {
-        val p = profile(AiFeature.Dictation to FeatureSetting(model = null, own = true))
-        assertEquals(p.resolve(AiFeature.Assistant), p.resolve(AiFeature.Dictation))
-        assertEquals(ModelRef(ARMILLARY_PROVIDER, "opus/5.5"), p.defaultFor(AiFeature.Dictation))
     }
 
     @Test
