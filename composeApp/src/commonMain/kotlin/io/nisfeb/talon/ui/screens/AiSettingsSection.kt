@@ -628,6 +628,12 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     var more by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var buying by remember { mutableStateOf(false) }
+    // A checkout is in flight. Following a slow one runs up to ~2 minutes
+    // (ArmillaryRepo.followCheckout), and the vendor already made the
+    // checkout on the first 202 — so a second order in that window is a
+    // real duplicate nobody is sent to. Hold the buy affordances closed
+    // until this one resolves.
+    var inFlight by remember { mutableStateOf(false) }
     var subscribing by remember { mutableStateOf<Plan?>(null) }
     var confirmCancel by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -650,11 +656,13 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     /** Open a checkout and send the person to it. */
     fun buy(rail: String, plan: String?, amountMicro: Long?) {
         val r = repo ?: return
-        note = null
+        if (inFlight) return
+        inFlight = true
+        note = "Asking ${account?.vendor?.ifBlank { null } ?: "the vendor"} for a checkout. From some ships this takes a minute." to false
         scope.launch {
             r.topUp(rail, plan, amountMicro)
-                .onSuccess { url -> uri.openUri(url) }
-                .onFailure { note = (it.message ?: "The vendor did not answer.") to true }
+                .onSuccess { url -> inFlight = false; note = null; uri.openUri(url) }
+                .onFailure { inFlight = false; note = (it.message ?: "The vendor did not answer.") to true }
         }
     }
 
@@ -747,9 +755,9 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         // carry. The balance, the warning, the history and the vendor
         // stand without it; see isArmillaryPurchaseSupported.
         if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) {
-            OutlinedButton(enabled = repo != null && where == ArmillaryAvailability.PRESENT, onClick = { buying = true }) { Text("Top up") }
+            OutlinedButton(enabled = here && !inFlight, onClick = { buying = true }) { Text("Top up") }
             if (subscription != null && account?.subscriptionActive != true) {
-                TextButton(enabled = here, onClick = { subscribing = subscription; buying = true }) { Text(subscribeLabel(subscription)) }
+                TextButton(enabled = here && !inFlight, onClick = { subscribing = subscription; buying = true }) { Text(subscribeLabel(subscription)) }
             }
         }
         if (refreshing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
