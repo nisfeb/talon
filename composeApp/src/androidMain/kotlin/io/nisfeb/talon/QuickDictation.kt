@@ -217,13 +217,15 @@ class DictationService : Service() {
         }
         val gate = EndOfSpeech(DictationRun.RATE)
         val out = ByteArrayOutputStream()
+        // The numbers the thresholds are tuned by, in a release logcat.
+        fun said(how: String) = Log.i(TAG, "listened ${out.size() * 500L / DictationRun.RATE} ms, $how: heard=${gate.heard} peak=${gate.peak.toInt()} floor=${gate.floor.toInt()}")
         try {
             rec.startRecording()
             while (true) {
                 when (QuickDictation.ending) {
-                    QuickDictation.Ending.Cancel -> return null
+                    QuickDictation.Ending.Cancel -> return null.also { said("cancelled") }
                     // Pressed Done: sent even if the gate heard nothing, since the owner says they spoke.
-                    QuickDictation.Ending.Done -> return out.toByteArray() to (out.size() > 0)
+                    QuickDictation.Ending.Done -> return (out.toByteArray() to (out.size() > 0)).also { said("done pressed") }
                     null -> Unit
                 }
                 val n = rec.read(frame, 0, frame.size)
@@ -231,7 +233,7 @@ class DictationService : Service() {
                 out.write(frame, 0, n)
                 val more = gate.offer(frame, n)
                 QuickDictation.setLevel(gate.level)
-                if (!more) return out.toByteArray() to gate.heard
+                if (!more) return (out.toByteArray() to gate.heard).also { said("gate ended") }
             }
         } finally {
             runCatching { rec.stop() }
@@ -250,7 +252,14 @@ class DictationService : Service() {
                 ?: error("It took longer than ${RUN_BUDGET_MS / 60_000} minutes")
         }
         return DictationRun(
-            transcribe = stt?.let { DictationRun.whisper(app.ktorHttp, it) },
+            transcribe = stt?.let { s ->
+                val whisper = DictationRun.whisper(app.ktorHttp, s)
+                val timed: suspend (ByteArray) -> String = { wav ->
+                    val t0 = System.currentTimeMillis()
+                    whisper(wav).also { Log.i(TAG, "transcribed ${wav.size} bytes in ${System.currentTimeMillis() - t0} ms") }
+                }
+                timed
+            },
             act = act.takeIf { app.sessionStore.activeShip() != null && cfg.loopsCanRun() },
         )
     }

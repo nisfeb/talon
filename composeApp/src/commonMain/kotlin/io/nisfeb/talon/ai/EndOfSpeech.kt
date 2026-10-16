@@ -39,9 +39,16 @@ class EndOfSpeech(
     var level: Float = 0f
         private set
 
+    /** The loudest frame so far, for calibrating the thresholds on a device. */
+    var peak: Double = 0.0
+        private set
+
+    /** The quietest frame so far: the room. */
+    var floor: Double = Double.MAX_VALUE
+        private set
+
     private var elapsedMs = 0L
     private var quietMs = 0L
-    private var floor = Double.MAX_VALUE
 
     /** Take the first [bytes] of [pcm]; true to keep listening. */
     fun offer(pcm: ByteArray, bytes: Int = pcm.size): Boolean {
@@ -51,6 +58,7 @@ class EndOfSpeech(
         elapsedMs += frameMs
         val r = rms(pcm, samples)
         level = (r / LOUD_RMS).toFloat().coerceIn(0f, 1f)
+        peak = maxOf(peak, r)
         // Digital silence is the mic starting up, not the room: as the
         // floor it would make any steady noise speech, and a dictation in
         // a car would run to maxMs.

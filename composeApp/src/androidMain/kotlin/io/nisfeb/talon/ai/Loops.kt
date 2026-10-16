@@ -191,8 +191,11 @@ class Loops(
      * the wake lock and the notification.
      */
     suspend fun dictate(transcript: String, locked: Boolean): String {
+        val t0 = System.currentTimeMillis()
         runCatching { getRepo().start(getSession()) }
+        val t1 = System.currentTimeMillis()
         return withActions { actions ->
+            io.nisfeb.talon.util.Log.i("Dictation", "set up: repo ${t1 - t0} ms, mail and calendar ${System.currentTimeMillis() - t1} ms")
             val cfg = aiSettings.state.value
             val webOn = cfg.assistantOn()
             val tools = ToolCatalog.default(
@@ -201,10 +204,13 @@ class Loops(
                 urlFetcher = urlFetcher.takeIf { webOn },
             ) { it } + actionTools(actions)
             withOrrery(cfg) { orrery ->
+                val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked)
+                // What a locked phone was allowed, readable in a release logcat.
+                io.nisfeb.talon.util.Log.i("Dictation", "locked=$locked, ${offered.size} tools, writes: " + offered.filter { it.write }.joinToString { it.spec.name })
                 DictationAgent(
                     // The time per call, as the assistant screen does: "tomorrow at three" needs today.
                     completer = { sys, msgs, t -> agentClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
-                    tools = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked),
+                    tools = offered,
                     systemPrompt = DictationAgent.prompt(cfg),
                 ).run(transcript)
             }
