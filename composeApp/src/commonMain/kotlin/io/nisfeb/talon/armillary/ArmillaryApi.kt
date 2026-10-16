@@ -119,6 +119,23 @@ class ArmillaryApi(
     }
 
     /**
+     * How far a checkout the ship answered 202 for has got, and a nudge
+     * so the ship looks at the vendor again. Null on a desk older than
+     * the route (armillary 16), or one that will not say.
+     */
+    suspend fun checkoutPhase(nonce: String): CheckoutPhase? {
+        val resp = send("/api/checkout/$nonce?nudge=1") { method = HttpMethod.Get }
+        if (!resp.status.isSuccess()) return null
+        val o = reading { Json.parseToJsonElement(resp.bodyAsText()).jsonObject }
+        return CheckoutPhase(
+            phase = o.str("phase").orEmpty(),
+            status = o.str("status").orEmpty(),
+            url = o.str("url").orEmpty(),
+            note = o.str("note").orEmpty(),
+        )
+    }
+
+    /**
      * Ask the vendor for an inference key. True when the secret came
      * back inside the wait; 202 is false, meaning the op is queued and
      * the next pass will land it.
@@ -382,6 +399,16 @@ sealed class CheckoutAnswer {
     /** The vendor refused, and said which field was wrong. */
     data class Refused(val reason: String) : CheckoutAnswer()
 }
+
+/** How far a queued checkout has got, as `GET /api/checkout/<nonce>` says. */
+data class CheckoutPhase(
+    /** `placing`, `queued`, `sent` or `answered`. */
+    val phase: String,
+    /** The vendor's row, once answered: its status, its page, and why it was refused. */
+    val status: String = "",
+    val url: String = "",
+    val note: String = "",
+)
 
 // ── readers ────────────────────────────────────────────────────────
 //
