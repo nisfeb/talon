@@ -48,6 +48,19 @@ class CalendarQuestionTest {
     }
 
     @Test
+    fun `a word the card cannot answer sends it to the model`() {
+        // sneagan, 2026-10-16: each was answered with the day's events.
+        assertNull(span("What do I have left to do before Barcelona?"))
+        assertNull(span("What do I have to get done before I go?", earlier = "When do I arrive in Barcelona?"))
+        assertNull(span("When do I arrive in Barcelona?", earlier = "What's on my calendar today?"))
+        assertNull(span("What do I have to do today?"))
+        assertNull(span("What's next before the trip?"))
+        // Filler is still a plain question.
+        assertEquals(LocalDate(2026, 10, 17), span("Hey Talon, what's on for tomorrow?")?.from)
+        assertEquals(today, span("Okay, what's my schedule look like?")?.from)
+    }
+
+    @Test
     fun `a bare follow-up to a calendar question asks it for other days`() {
         assertEquals(LocalDate(2026, 10, 17), span("And tomorrow?", earlier = "What's on my calendar today?")?.from)
         assertNull(span("And tomorrow?"))

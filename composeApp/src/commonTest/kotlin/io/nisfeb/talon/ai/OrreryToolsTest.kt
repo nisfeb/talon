@@ -21,7 +21,7 @@ import kotlin.test.assertTrue
 class OrreryToolsTest {
 
     /** What was asked of orrery, and what it was told to answer. */
-    private class Tap(
+    internal class Tap(
         val hits: List<Pair<String, String>> = emptyList(),
         val answer: List<String> = listOf("1: written"),
     ) : OrreryTap {

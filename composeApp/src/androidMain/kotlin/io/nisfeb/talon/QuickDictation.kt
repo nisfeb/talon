@@ -450,7 +450,7 @@ class DictationService : Service() {
                         DictationFlow(
                             ask = { q, earlier ->
                                 QuickDictation.show(QuickDictation.Stage.Working("Looking it up…"))
-                                p.ask(q, earlier)
+                                p.ask(q, earlier, orrery)
                             },
                             instruct = { t ->
                                 QuickDictation.show(QuickDictation.Stage.Working("Asking orrery…"))

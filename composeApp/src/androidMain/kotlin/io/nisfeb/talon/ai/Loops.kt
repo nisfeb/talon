@@ -302,8 +302,9 @@ class Loops(
         /**
          * Answer a question, looking things up only: where Orrery is on,
          * everything that is not a question is orrery's ([DictationFlow]).
+         * [orrery] is the one the flow attached, read for what it holds.
          */
-        suspend fun ask(question: String, earlier: List<DictationFlow.Earlier> = emptyList()): String {
+        suspend fun ask(question: String, earlier: List<DictationFlow.Earlier> = emptyList(), orrery: io.nisfeb.talon.orrery.OrreryRepo? = null): String {
             val cfg = aiSettings.state.value
             if (!cfg.loopsCanRun()) return DictationRun.NO_MODEL_FOR_QUESTIONS
             started.await()
@@ -314,7 +315,7 @@ class Loops(
                 zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
                 onEvents = seen::events, onTasks = seen::tasks, onPeople = seen::people, onMail = seen::mail,
             )
-            val tools = DictationAgent.readsFor(ToolCatalog.default(getRepo(), getDb(), getEmbedder(), onMessages = seen::messages) { known.displayName(it) } + actionTools(actions))
+            val tools = DictationAgent.readsFor(ToolCatalog.default(getRepo(), getDb(), getEmbedder(), onMessages = seen::messages) { known.displayName(it) } + actionTools(actions), orrery?.asTap())
                 .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
             io.nisfeb.talon.util.Log.i("Dictation", "route=ask, ${tools.size} tools, calendar read ${if (read.isCompleted) "done" else "pending"}")
             return DictationAgent(

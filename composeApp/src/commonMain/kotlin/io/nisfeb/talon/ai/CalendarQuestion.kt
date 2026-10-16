@@ -20,7 +20,8 @@ import kotlin.time.Instant
  * spoken line come from it in no time. On the phone a model took 18 s of
  * its 21 to say what the card already showed. Only plain questions about
  * what is on, for a day or a few; anything else (with whom, when is X,
- * am I free) goes to the model as before.
+ * am I free, what is left to do before a trip) goes to the model, which
+ * reads orrery too.
  */
 object CalendarQuestion {
     /** The days asked about, and how to say them: "today", "this week", "on Friday". */
@@ -37,10 +38,23 @@ object CalendarQuestion {
         Regex("""\bwhat(?:'s| is) (?:next|my next (?:event|meeting|thing|appointment))\b"""),
     )
 
-    /** Asked about something the card does not show by itself: the model, then. */
-    private val NOT_PLAIN = Regex("""\b(?:with|about|when is|when's|where|who|free|busy|how many|how long|add|remind|cancel|move|delete|book|schedule a|invite)\b""")
-
     private val WEEKDAYS = DayOfWeek.entries.associateBy { it.name.lowercase() }
+
+    /**
+     * Every word a plain "what's on" question is made of. One more word
+     * ("left", "done", "Barcelona", "with") asks what the card cannot
+     * say, and the model takes it: "What do I have left to do before
+     * Barcelona?" was answered with the day's events (sneagan, 2026-10-16).
+     */
+    // ponytail: a word list, so a calendar question with a stray word
+    // waits ~5 s for the model instead of ~2 s here. The safe way round.
+    private val PLAIN = setOf(
+        "what", "what's", "whats", "how", "how's", "hows", "is", "do", "does", "i", "have", "got", "anything",
+        "on", "happening", "going", "planned", "scheduled", "coming", "up", "look", "looks", "like",
+        "my", "the", "for", "and", "hey", "so", "then", "ok", "okay", "please", "talon",
+        "day", "week", "weekend", "schedule", "calendar", "agenda", "morning", "afternoon", "evening",
+        "next", "event", "meeting", "thing", "appointment", "today", "tonight", "tomorrow", "this",
+    ) + WEEKDAYS.keys
 
     /**
      * The days [text] asks what is on, or null where it is not plainly
@@ -49,7 +63,7 @@ object CalendarQuestion {
      */
     fun parse(text: String, today: LocalDate, earlier: String? = null): Span? {
         val t = text.lowercase().replace('’', '\'').replace(Regex("""[^a-z0-9' ]"""), " ").replace(Regex("""\s+"""), " ").trim()
-        if (t.isEmpty() || NOT_PLAIN.containsMatchIn(t)) return null
+        if (t.isEmpty() || t.split(' ').any { it !in PLAIN }) return null
         val asked = ASKS.any { it.containsMatchIn(t) }
         val followUp = !asked && earlier != null && parse(earlier, today) != null && t.split(' ').size <= 5
         if (!asked && !followUp) return null

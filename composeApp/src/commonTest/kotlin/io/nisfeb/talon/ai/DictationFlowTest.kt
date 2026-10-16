@@ -188,6 +188,28 @@ class DictationFlowTest {
     }
 
     @Test
+    fun `what is left before a trip goes to the model, and so do its follow-ups`() = runBlocking {
+        val questions = mutableListOf<Pair<String, List<DictationFlow.Earlier>>>()
+        val flow = DictationFlow(
+            ask = { q, earlier -> questions += q to earlier; "Answered." },
+            instruct = { error("a question is not orrery's") },
+            hand = { _, _ -> error("a question is not orrery's") },
+            answer = { _, _ -> },
+            decide = { _, _ -> null },
+            // As the phone wires it (Loops.calendarAnswer).
+            quick = { t, earlier -> CalendarQuestion.parse(t, kotlinx.datetime.LocalDate(2026, 10, 16), earlier.lastOrNull()?.words)?.let { "The day's events." } },
+        )
+        // sneagan's conversation, 2026-10-16: the first and the last were answered with the day's events.
+        var earlier = emptyList<DictationFlow.Earlier>()
+        for (q in listOf("What do I have left to do before Barcelona?", "When do I arrive in Barcelona?", "What do I have to get done before I go")) {
+            val r = flow.handle(q, earlier, asked = earlier.isNotEmpty())
+            assertEquals(DictationFlow.Reply("Answered.", DictationRoute.Ask), r, q)
+            earlier = earlier + DictationFlow.Earlier(q, r.line)
+        }
+        assertEquals(listOf(0, 1, 2), questions.map { it.second.size }, "each goes on from what came before it")
+    }
+
+    @Test
     fun `what the phone answers itself goes to neither the model nor orrery`() = runBlocking {
         val ship = Ship().apply { quick = "Today you have 3 events." }
         // Written with no question mark, which alone would have gone to orrery.
