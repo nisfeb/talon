@@ -33,6 +33,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.CopyOnWriteArrayList
@@ -183,6 +184,28 @@ class ArmillaryConnectTest {
         runBlocking { withTimeout(10_000) { r.inference.first { it != null } } }
         assertEquals("k.s", ai.rowKey())
         assertEquals(1, keyAsks())
+    }
+
+    @Test
+    fun `the key is on the row by the time the inference shows`() {
+        val ai = settings()
+        val r = repo(ai)
+        val seenKeys = CopyOnWriteArrayList<String>()
+        // Unconfined: runs the moment the inference is set, in the gap
+        // where it used to be set before the row was written.
+        val watch = CoroutineScope(Dispatchers.Unconfined).launch {
+            r.inference.first { it != null }
+            seenKeys += ai.rowKey()
+        }
+        r.setUpDevice("desktop")
+        runBlocking { withTimeout(10_000) { watch.join() } }
+        assertEquals(listOf("k.s"), seenKeys)
+        // And a refresh that finds the key the same way.
+        val ai2 = settings()
+        hasKey = true
+        val r2 = repo(ai2)
+        assertEquals("k.s", ai2.rowKey())
+        assertEquals("k.s", r2.inference.value?.key)
     }
 
     @Test

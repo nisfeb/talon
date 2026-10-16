@@ -185,8 +185,9 @@ class ArmillaryRepo(
             if (_availability.value != ArmillaryAvailability.PRESENT) {
                 return Result.failure(IllegalStateException(_error.value ?: "Armillary does not answer on this ship."))
             }
+            var got: Inference? = null
             runSuspendCatching { a.inference() }
-                .onSuccess { if (it is InferenceAnswer.Have) { _inference.value = it.inference; _keyProblem.value = null } }
+                .onSuccess { if (it is InferenceAnswer.Have) got = it.inference }
                 .onFailure {
                     Log.i(TAG, "inference skipped: ${it.message}")
                     if (_inference.value == null) _keyProblem.value = keyProblemLine(it)
@@ -202,7 +203,7 @@ class ArmillaryRepo(
                 .onFailure { Log.i(TAG, "catalog skipped: ${it.message}") }
             // The catalog is what says which models are ZDR, and it is
             // read last, so the row is written once everything is in.
-            _inference.value?.let(::publish)
+            got?.let(::took) ?: _inference.value?.let(::publish)
             return Result.success(Unit)
         } finally {
             _refreshing.value = false
@@ -535,9 +536,11 @@ class ArmillaryRepo(
 
     /** An inference config just read: kept, and written onto the provider row. */
     private fun took(inf: Inference): Inference {
+        // The row first: whatever waits for the inference reads the key
+        // off the row, and found it blank when it woke in between.
+        publish(inf)
         _inference.value = inf
         _keyProblem.value = null
-        publish(inf)
         return inf
     }
 
