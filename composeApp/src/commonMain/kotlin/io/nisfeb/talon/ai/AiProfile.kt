@@ -77,7 +77,9 @@ data class ModelRef(val provider: String, val model: String)
 @Serializable
 // OrreryBrief does nothing now that the ship writes the brief; it stays
 // so a profile saved with it, here or by an older install, still reads.
-enum class AiFeature { CatchUp, Assistant, OrreryTriage, OrreryGenerator, OrreryBrief, Transcription }
+// Dictation is per device and never travels ([forSync]): an older
+// install cannot read a feature it does not know, and drops the profile.
+enum class AiFeature { CatchUp, Assistant, OrreryTriage, OrreryGenerator, OrreryBrief, Transcription, Dictation }
 
 /**
  * A feature's switch and model; a null [model] follows the default model.
@@ -89,7 +91,7 @@ enum class AiFeature { CatchUp, Assistant, OrreryTriage, OrreryGenerator, Orrery
 data class FeatureSetting(val on: Boolean = false, val model: ModelRef? = null, val own: Boolean = false)
 
 /** The features an Armillary vendor picks the model for, by the vendor's names for them. */
-val VENDOR_FEATURES = mapOf(AiFeature.CatchUp to "catch_up", AiFeature.Assistant to "assistant")
+val VENDOR_FEATURES = mapOf(AiFeature.CatchUp to "catch_up", AiFeature.Assistant to "assistant", AiFeature.Dictation to "dictation")
 
 /**
  * This setting back on the Armillary vendor's pick: no longer the
@@ -161,6 +163,9 @@ data class AiProfile(
      * opt-in that takes it off the device.
      */
     fun defaultFor(f: AiFeature): ModelRef? {
+        // A dictation is the assistant run on what was said: until it has
+        // a model of its own it runs on the assistant's, whatever that is.
+        if (f == AiFeature.Dictation) return resolve(AiFeature.Assistant)?.let { ModelRef(it.provider.id, it.model) }
         if (f != AiFeature.OrreryTriage) return defaultModel
         defaultModel?.takeIf { resolve(it)?.private == true }?.let { return it }
         return features[f]?.model?.takeIf { it.provider == DEVICE_PROVIDER } ?: ModelRef(DEVICE_PROVIDER, "")
@@ -180,7 +185,11 @@ data class AiProfile(
     fun vendorModel(f: AiFeature): Resolved? {
         val name = VENDOR_FEATURES[f] ?: return null
         val row = armillary() ?: return null
-        val model = row.suggested[name]?.takeIf { it.isNotBlank() } ?: row.suggested["default"]?.takeIf { it.isNotBlank() } ?: return null
+        val named = row.suggested[name]?.takeIf { it.isNotBlank() }
+        // Not the vendor's default for a dictation: one the vendor did not
+        // name follows the assistant ([defaultFor]), which may be the vendor's anyway.
+        if (named == null && f == AiFeature.Dictation) return null
+        val model = named ?: row.suggested["default"]?.takeIf { it.isNotBlank() } ?: return null
         return Resolved(row, model)
     }
 
@@ -203,7 +212,11 @@ data class AiProfile(
      * can put a feature on its frontier tier without losing the
      * guarantee. A model the owner picks is theirs to route.
      */
-    fun vendorZdr(f: AiFeature): Boolean = followsVendor(f)
+    fun vendorZdr(f: AiFeature): Boolean {
+        // On the assistant's model, under the assistant's terms.
+        if (f == AiFeature.Dictation && pick(f) == null && vendorModel(f) == null) return vendorZdr(AiFeature.Assistant)
+        return followsVendor(f)
+    }
 
     /**
      * The vendor's decision model and the key it runs on: the lease's
@@ -516,6 +529,7 @@ fun isPrivateUrl(url: String?): Boolean {
  * fetched one that its provider no longer offers Jev.
  */
 fun AiProfile.forSync(): AiProfile = copy(
+    features = features - AiFeature.Dictation,
     providers = providers
         .filterNot { it.kind == ProviderKind.Armillary }
         .map { it.copy(apiKey = "", models = emptyList(), offersJev = false) },
@@ -695,6 +709,9 @@ fun AiProfile.withLegacy(cfg: AiSettings.Config): AiProfile {
 // let a phone with neither turn transcription off on the computer.
 private val SYNCED_SWITCHES = listOf(AiFeature.CatchUp, AiFeature.Assistant)
 
+/** Features each device sets for itself, which a profile from the ship never changes. */
+private val PER_DEVICE = setOf(AiFeature.Transcription, AiFeature.Dictation)
+
 /** The switches as the config entry carries them. Triage is Feed Orrery, per install; the generator is the ship's. */
 fun AiProfile.switches(): kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.buildJsonObject {
     SYNCED_SWITCHES.forEach { f -> put(f.name, kotlinx.serialization.json.JsonPrimitive(isOn(f))) }
@@ -759,7 +776,7 @@ fun profileAfterEntry(
         // own (see SYNCED_SWITCHES), and the whole profile arriving took
         // it anyway, so a phone with no speech model turned it off here.
         incoming != null -> incoming.keepingLocal(local)
-            .let { it.copy(features = it.features.filterKeys { f -> f != AiFeature.Transcription } + local.features.filterKeys { f -> f == AiFeature.Transcription }) }
+            .let { it.copy(features = it.features.filterKeys { f -> f !in PER_DEVICE } + local.features.filterKeys { f -> f in PER_DEVICE }) }
             .let { if (switches != null) it else it.withSwitches(local.switches()).copy(jev = local.jev, orrery = local.orrery) }
         fromOld -> base!!.withLegacy(merged)
         else -> base

@@ -25,6 +25,10 @@ actual fun rememberDictation(onResult: (String) -> Unit): (() -> Unit)? {
     return remember { { IosDictation.start { current.value(it) } } }
 }
 
+/** No quick dictation on iOS ([isQuickDictationSupported]). */
+@Composable
+actual fun QuickDictationButtons() {}
+
 @OptIn(ExperimentalForeignApi::class)
 private object IosDictation {
     private const val TAG = "IosDictation"

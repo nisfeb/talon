@@ -12,4 +12,15 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowBackground">#FAFAF9</item>
     </style>
+
+    <!-- Quick dictation's card: the screen behind it, dimmed, shows
+         through. One theme for light and dark, since Compose paints the
+         card itself. -->
+    <style name="Theme.Talon.Dictation" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

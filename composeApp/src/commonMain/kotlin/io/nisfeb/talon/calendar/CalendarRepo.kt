@@ -711,7 +711,13 @@ class CalendarRepo(
 
     private fun lists(): Triple<Any?, Any?, Any?> = Triple(_tasks.value, _rows.value, _rangeRows.value)
 
-    fun attach(baseUrl: String) {
+    /**
+     * Point at the ship's calendar. With [poll] false there is no poller:
+     * a headless run reads once with [refresh]. The poller's own first
+     * read plus the run's made two full reads in a row, each a dozen
+     * requests, and a dictation waited 13 to 30 seconds on them.
+     */
+    fun attach(baseUrl: String, poll: Boolean = true) {
         if (api != null && shipUrl == baseUrl) return
         shipUrl = baseUrl
         zoneAdopted = false
@@ -720,6 +726,7 @@ class CalendarRepo(
         api = CalendarApi(http, baseUrl)
         clearShipState()
         poller?.cancel()
+        if (!poll) return
         poller = scope.launch {
             // What the ship last said, while it is asked again. A month
             // that was right ten minutes ago beats an empty grid.
@@ -833,9 +840,11 @@ class CalendarRepo(
 
     /**
      * Everything, or with [full] false only the events and tasks: the
-     * calendars, shares, sync, tags and config change rarely.
+     * calendars, shares, sync, tags and config change rarely. With
+     * [rarely] false a full read leaves out shares, sync state and tags:
+     * what a headless run's tools read, in half the requests.
      */
-    suspend fun refresh(full: Boolean = true) = gate.withLock {
+    suspend fun refresh(full: Boolean = true, rarely: Boolean = true) = gate.withLock {
         val a = api ?: return@withLock
         try {
             val now = nowMs()
@@ -846,7 +855,7 @@ class CalendarRepo(
             details.clear()
             if (full) _calendars.value = runSuspendCatching { a.calendars() }.getOrNull() ?: _calendars.value
             _tasks.value = runSuspendCatching { a.tasks() }.getOrNull() ?: _tasks.value
-            if (full) readRarely(a)
+            if (full && rarely) readRarely(a)
             keep()
             if (full) runSuspendCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball; _leadMin.value = it.leadMin }
             noteReminders(w.rows)

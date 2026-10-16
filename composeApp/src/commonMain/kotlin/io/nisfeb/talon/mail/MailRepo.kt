@@ -265,8 +265,13 @@ class MailRepo(
 
     // ---- lifecycle -----------------------------------------------------
 
-    /** Point at a signed-in ship. Safe to call again on a re-login. */
-    fun attach(baseUrl: String) {
+    /**
+     * Point at a signed-in ship. Safe to call again on a re-login. With
+     * [poll] false nothing is read until asked: a headless run's mail
+     * tools ask the ship themselves, and a poll alongside them only
+     * slowed the ship down for the run.
+     */
+    fun attach(baseUrl: String, poll: Boolean = true) {
         if (shipUrl == baseUrl && api != null) return
         shipUrl = baseUrl
         api = AuspexApi(http, baseUrl)
@@ -276,7 +281,7 @@ class MailRepo(
         seenUnread = null
         pageCache.value = emptyMap()
         threadCache.value = emptyMap()
-        startPolling()
+        if (poll) startPolling()
     }
 
     fun detach() {

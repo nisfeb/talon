@@ -9,3 +9,11 @@ import androidx.compose.runtime.Composable
  */
 @Composable
 expect fun rememberDictation(onResult: (String) -> Unit): (() -> Unit)?
+
+/**
+ * Buttons that set up quick dictation's ways in (a Quick Settings tile,
+ * a home-screen widget, Talon as the assistant), where
+ * [isQuickDictationSupported]. Nothing elsewhere.
+ */
+@Composable
+expect fun QuickDictationButtons()

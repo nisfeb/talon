@@ -48,6 +48,8 @@ object ToolCatalog {
         // fetcher self-checks the assistant is on and hardens against
         // internal/SSRF targets.
         urlFetcher: UrlFetcher? = null,
+        // What search_history and read_conversation showed: a dictation's card draws them.
+        onMessages: (List<MessageEntity>) -> Unit = {},
         displayName: (String) -> String,
     ): List<Tool> = listOfNotNull(
         Tool(
@@ -72,6 +74,7 @@ object ToolCatalog {
             // with no on-device embedder.
             val hits = embedder?.hybridSearch(q, k)
                 ?: keywordSearch(db, AskUrbit.salientTerms(q)).take(k)
+            onMessages(hits)
             format(hits, displayName)
         },
         Tool(
@@ -88,7 +91,9 @@ object ToolCatalog {
         ) { args ->
             val whom = args.str("whom") ?: return@Tool "Error: whom is required."
             val count = (args.int("count") ?: 30).coerceIn(1, 100)
-            format(db.messages().latestFor(whom, count).asReversed(), displayName)
+            val read = db.messages().latestFor(whom, count).asReversed()
+            onMessages(read)
+            format(read, displayName)
         },
         Tool(
             spec = ToolSpec(

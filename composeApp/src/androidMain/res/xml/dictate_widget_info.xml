@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One cell, no updates: the button never changes. On the lock screen
+     too (keyguard: the glanceable hub, Android 15 on), where a tap opens
+     the card over the lock screen without unlocking, as the tile does:
+     SystemUI starts a widget's activity "maybe dismissing keyguard", and
+     the card is showWhenLocked. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="40dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="1"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:resizeMode="none"
+    android:widgetCategory="home_screen|keyguard"
+    android:initialLayout="@layout/widget_dictate"
+    android:previewLayout="@layout/widget_dictate"
+    android:description="@string/widget_dictate_description" />

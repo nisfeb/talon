@@ -75,6 +75,12 @@ class AgentLoop(
         priorTurns: List<AgentMessage> = emptyList(),
         confirm: suspend (ToolCall, Tool) -> Boolean,
         onEvent: (Event) -> Unit = {},
+        /**
+         * The answer straight from a turn's results, with no model call to
+         * word it, or null to ask the model as usual: a dictation that only
+         * filed a note says so itself (see [DictationAgent.plainly]).
+         */
+        finish: (List<Pair<ToolCall, ToolResult>>) -> String? = { null },
     ): String {
         val history = mutableListOf<AgentMessage>()
         history.addAll(priorTurns)
@@ -108,6 +114,11 @@ class AgentLoop(
                         runOne(call, confirm, onEvent)
                     }
                     history.add(AgentMessage.ToolResults(results))
+                    finish(turn.calls.zip(results))?.let {
+                        Log.i(TAG, "step $step: finished from the results, no model call")
+                        onEvent(Event.Answer(it))
+                        return it
+                    }
                 }
             }
         }

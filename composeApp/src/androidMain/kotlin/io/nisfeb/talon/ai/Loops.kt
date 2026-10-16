@@ -1,6 +1,8 @@
 package io.nisfeb.talon.ai
 
 import kotlinx.coroutines.flow.first
+import io.nisfeb.talon.calendar.dueDate
+import kotlinx.datetime.toLocalDateTime
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -14,6 +16,7 @@ import io.nisfeb.talon.urbit.SessionStore
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.TimeUnit
@@ -137,6 +140,8 @@ class Loops(
     // never goes stale on a key change — and every wake-up reuses the pool
     // instead of leaving a fresh one behind.
     private val agentClient by lazy { AgentClient(io.nisfeb.talon.ai.AiFeature.Assistant) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Assistant) } }
+    // A dictation's own model where it has one, else the assistant's (AiProfile.resolve).
+    private val dictationClient by lazy { AgentClient(io.nisfeb.talon.ai.AiFeature.Dictation) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Dictation) } }
     private val braveClient by lazy { BraveSearchClient { aiSettings.state.value } }
     private val urlFetcher by lazy { UrlFetcher { aiSettings.state.value } }
 
@@ -146,11 +151,11 @@ class Loops(
      * an alarm, where the app's own mail and calendar, built by the UI, may
      * not exist. On a scope of the run's own, ended with it.
      */
-    private suspend fun <T> withRunner(block: suspend (LoopRunner) -> T): T = withRunScope(scope) { run ->
+    private suspend fun <T> withActions(block: suspend (AssistantActions) -> T): T = withRunScope(scope) { run ->
         val url = sessionStore.active()?.shipUrl
         val http = runCatching { getSession().http }.getOrNull()
-        val mail = if (url != null && http != null) io.nisfeb.talon.mail.MailRepo(http, run).also { it.attach(url) } else null
-        val calendar = if (url != null && http != null) io.nisfeb.talon.calendar.CalendarRepo(http, run).also { it.attach(url) } else null
+        val mail = if (url != null && http != null) io.nisfeb.talon.mail.MailRepo(http, run).also { it.attach(url, poll = false) } else null
+        val calendar = if (url != null && http != null) io.nisfeb.talon.calendar.CalendarRepo(http, run).also { it.attach(url, poll = false) } else null
         try {
             // The calendar tools read its calendars, tasks and window; have them first.
             calendar?.refresh()
@@ -168,11 +173,207 @@ class Loops(
                 zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
                 send = { whom, text -> getRepo().send(whom, text) },
             )
-            block(runner(actions))
+            block(actions)
         } finally {
             mail?.detach()
             calendar?.detach()
         }
+    }
+
+    private suspend fun <T> withRunner(block: suspend (LoopRunner) -> T): T =
+        withActions { block(runner(it)) }
+
+    /**
+     * Begin a dictation's run before anything is said: the ship's channel,
+     * mail and the calendar attached, the calendar read, the contacts
+     * loaded. Started when listening starts, so it is ready, or nearly,
+     * by the time the words are: on the phone this setup took six
+     * seconds after them. [DictationPrep.close] it when the dictation is
+     * over, run or not.
+     */
+    fun prepareDictation(): DictationPrep = DictationPrep()
+
+    /**
+     * One dictation's mail, calendar and contacts, on a scope of its own.
+     * Nothing here waits: the calendar read runs on, and only the
+     * calendar's tools wait for it ([waitingFor]), so a note for orrery
+     * never does.
+     */
+    inner class DictationPrep internal constructor() {
+        private val run = CoroutineScope(scope.coroutineContext + kotlinx.coroutines.SupervisorJob(scope.coroutineContext[kotlinx.coroutines.Job]))
+        private val url = sessionStore.active()?.shipUrl
+        private val http = runCatching { getSession().http }.getOrNull()
+        private val mail = if (url != null && http != null) io.nisfeb.talon.mail.MailRepo(http, run).also { it.attach(url, poll = false) } else null
+        private val calendar = if (url != null && http != null) io.nisfeb.talon.calendar.CalendarRepo(http, run).also { it.attach(url, poll = false) } else null
+        private val started = run.async { runCatching { getRepo().start(getSession()) } }
+        private val read = run.async {
+            val t0 = System.currentTimeMillis()
+            // What the tools read and no more: shares, sync state and tags were half the requests.
+            runCatching { calendar?.refresh(rarely = false) }
+            io.nisfeb.talon.util.Log.i("Dictation", "calendar read in ${System.currentTimeMillis() - t0} ms")
+        }
+        private val contacts = run.async {
+            val db = getDb()
+            runCatching {
+                io.nisfeb.talon.ui.ContactMap(
+                    contacts = db.contacts().stream().first(),
+                    clubs = db.clubs().stream().first(),
+                    groups = db.groups().streamGroups().first(),
+                    channelGroups = db.groups().streamChannelGroups().first(),
+                )
+            }.getOrElse { io.nisfeb.talon.ui.ContactMap() }
+        }
+
+        /**
+         * Act on [transcript], autonomously (writes need no confirmation,
+         * see [DictationAgent]), and return the line for the notification.
+         * The loop's mail, calendar and message tools plus orrery's where
+         * Orrery is on, [DictationAgent.TOOLS] of them; while [locked], only
+         * [DictationAgent.LOCKED_WRITES] among the writes. No write
+         * coordinator: a dictation runs only on the device it was spoken
+         * into. Throws when the run fails.
+         */
+        suspend fun dictate(transcript: String, locked: Boolean, earlier: List<DictationFlow.Earlier> = emptyList()): String {
+            started.await()
+            val cfg = aiSettings.state.value
+            val known = contacts.await()
+            val seen = Seen()
+            val actions = AssistantActions(
+                db = getDb(), contacts = { known }, mail = mail, calendar = calendar,
+                zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
+                send = { whom, text -> getRepo().send(whom, text) },
+                onEvents = seen::events, onTasks = seen::tasks, onPeople = seen::people, onMail = seen::mail,
+            )
+            val webOn = cfg.assistantOn()
+            val tools = ToolCatalog.default(
+                getRepo(), getDb(), getEmbedder(),
+                braveSearch = braveClient.takeIf { webOn && cfg.braveApiKey.isNotBlank() },
+                urlFetcher = urlFetcher.takeIf { webOn },
+                onMessages = seen::messages,
+            ) { known.displayName(it) } + actionTools(actions)
+            return withOrrery(cfg) { orrery ->
+                val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked)
+                    .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
+                // What a locked phone was allowed, readable in a release logcat.
+                io.nisfeb.talon.util.Log.i("Dictation", "locked=$locked, ${offered.size} tools, calendar read ${if (read.isCompleted) "done" else "pending"}, writes: " + offered.filter { it.write }.joinToString { it.spec.name })
+                DictationAgent(
+                    // The time per call, as the assistant screen does:
+                    // "tomorrow at three" needs today. The phone's zone
+                    // until the calendar says its own.
+                    completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
+                    tools = offered,
+                    systemPrompt = DictationAgent.prompt,
+                ).run(transcript, earlier).also { card = seen.card(actions.zone(), known) }
+            }
+        }
+
+        /** The events and tasks the last answer read, for its card; null before one. */
+        @Volatile var card: DictationCard? = null
+            private set
+
+        /** What the calendar tools showed during one run. */
+        private inner class Seen {
+            private var events: Triple<List<io.nisfeb.talon.calendar.CalendarRow>, kotlinx.datetime.LocalDate, kotlinx.datetime.LocalDate>? = null
+            private var tasks: List<io.nisfeb.talon.calendar.CalendarTask>? = null
+            private val people = mutableListOf<PersonMatch>()
+            private var messages: List<io.nisfeb.talon.data.MessageEntity>? = null
+            private var mail: List<io.nisfeb.talon.mail.InboxEntry>? = null
+            fun people(found: List<PersonMatch>) { people += found }
+            fun messages(m: List<io.nisfeb.talon.data.MessageEntity>) { messages = m }
+            fun mail(m: List<io.nisfeb.talon.mail.InboxEntry>) { mail = m }
+            fun events(rows: List<io.nisfeb.talon.calendar.CalendarRow>, from: kotlinx.datetime.LocalDate, to: kotlinx.datetime.LocalDate) { events = Triple(rows, from, to) }
+            fun tasks(t: List<io.nisfeb.talon.calendar.CalendarTask>) { tasks = t }
+            fun card(zone: kotlinx.datetime.TimeZone, known: io.nisfeb.talon.ui.ContactMap): DictationCard {
+                val now = System.currentTimeMillis()
+                val twentyFour = android.text.format.DateFormat.is24HourFormat(context)
+                val name = { ship: String -> known.displayName(ship) }
+                return DictationCard(
+                    days = events?.let { (r, f, t) -> DictationCards.days(r, f, t, zone, now, twentyFour) }.orEmpty(),
+                    tasks = tasks?.let { DictationCards.tasks(it, zone, now) }.orEmpty(),
+                    people = DictationCards.people(people),
+                    messages = messages?.let { m ->
+                        DictationCards.messages(m, name, { io.nisfeb.talon.urbit.StoryCache.textFor(it.id, it.contentJson) }, zone, now, twentyFour)
+                    }.orEmpty(),
+                    mail = mail?.let { DictationCards.mail(it, name, zone, now, twentyFour) }.orEmpty(),
+                )
+            }
+        }
+
+        /**
+         * Answer a question, looking things up only: where Orrery is on,
+         * everything that is not a question is orrery's ([DictationFlow]).
+         */
+        suspend fun ask(question: String, earlier: List<DictationFlow.Earlier> = emptyList()): String {
+            val cfg = aiSettings.state.value
+            if (!cfg.loopsCanRun()) return DictationRun.NO_MODEL_FOR_QUESTIONS
+            started.await()
+            val known = contacts.await()
+            val seen = Seen()
+            val actions = AssistantActions(
+                db = getDb(), contacts = { known }, mail = mail, calendar = calendar,
+                zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
+                onEvents = seen::events, onTasks = seen::tasks, onPeople = seen::people, onMail = seen::mail,
+            )
+            val tools = DictationAgent.readsFor(ToolCatalog.default(getRepo(), getDb(), getEmbedder(), onMessages = seen::messages) { known.displayName(it) } + actionTools(actions))
+                .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
+            io.nisfeb.talon.util.Log.i("Dictation", "route=ask, ${tools.size} tools, calendar read ${if (read.isCompleted) "done" else "pending"}")
+            return DictationAgent(
+                completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
+                tools = tools,
+                systemPrompt = DictationAgent.askPrompt,
+            ).run(question, earlier).also { card = seen.card(actions.zone(), known) }
+        }
+
+        /**
+         * A plain question about what is on, answered from the calendar read
+         * while the owner talked, with no model: the card's days and tasks
+         * and a line to say ([CalendarQuestion]). Null where it is not one,
+         * or the calendar did not answer, and the model takes it.
+         */
+        suspend fun calendarAnswer(text: String, earlier: List<DictationFlow.Earlier> = emptyList()): String? {
+            val cal = calendar ?: return null
+            val zone = io.nisfeb.talon.ui.screens.zoneFor(cal.zone.value)
+            val now = System.currentTimeMillis()
+            val today = kotlin.time.Instant.fromEpochMilliseconds(now).toLocalDateTime(zone).date
+            val span = CalendarQuestion.parse(text, today, earlier.lastOrNull()?.words) ?: return null
+            val t0 = System.currentTimeMillis()
+            read.await()
+            val b = CalendarQuestion.bounds(span, zone)
+            // The read covers six hours back to a month ahead; earlier today, or further, is asked for.
+            val covered = b.first >= now - io.nisfeb.talon.calendar.CalendarRepo.BEHIND_MS + 60_000 &&
+                b.last <= now + io.nisfeb.talon.calendar.CalendarRepo.AHEAD_MS - 60_000
+            val rows = (if (covered) cal.rows.value else null) ?: cal.windowRows(b.first, b.last + 1) ?: return null
+            val tasks = cal.tasks.value.orEmpty()
+            val twentyFour = android.text.format.DateFormat.is24HourFormat(context)
+            val due = tasks.filter { t -> t.dueDate()?.let { it in span.from..span.to || (span.from <= today && it < today) } == true }
+            card = DictationCard(
+                days = DictationCards.days(rows, span.from, span.to, zone, now, twentyFour),
+                tasks = DictationCards.tasks(due, zone, now),
+            )
+            io.nisfeb.talon.util.Log.i("Dictation", "calendar answered on the phone in ${System.currentTimeMillis() - t0} ms (${span.said}${if (covered) "" else ", asked the ship"})")
+            return CalendarQuestion.answer(span, rows, tasks, zone, now, twentyFour)
+        }
+
+        /** Orrery for [block], attached headless, or null where Orrery is off. */
+        suspend fun <T> orrery(block: suspend (io.nisfeb.talon.orrery.OrreryRepo?) -> T): T = withOrrery(aiSettings.state.value, block)
+
+        fun close() {
+            run.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+            mail?.detach()
+            calendar?.detach()
+        }
+    }
+
+    /**
+     * Orrery for one run, where it is on: attached headless, never
+     * [io.nisfeb.talon.orrery.OrreryRepo.attach], which would take the
+     * proposals of the one the app has attached when it let go.
+     */
+    private suspend fun <T> withOrrery(cfg: AiSettings.Config, block: suspend (io.nisfeb.talon.orrery.OrreryRepo?) -> T): T {
+        val s = sessionStore.active()
+        if (!cfg.orreryOn() || s == null) return block(null)
+        val repo = io.nisfeb.talon.orrery.OrreryRepo(getSession().http, scope, getDb(), io.nisfeb.talon.ui.platformLabel, getEmbedder())
+        return repo.headless(s.shipUrl, s.ship) { block(repo) }
     }
 
     private fun runner(actions: AssistantActions): LoopRunner {

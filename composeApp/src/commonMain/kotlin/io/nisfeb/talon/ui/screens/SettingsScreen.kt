@@ -73,9 +73,11 @@ import io.nisfeb.talon.ui.isAssistantSupported
 import io.nisfeb.talon.ui.isBackgroundCallRingSupported
 import io.nisfeb.talon.ui.isCallsSupported
 import io.nisfeb.talon.ui.isLoopsSupported
+import io.nisfeb.talon.ui.isQuickDictationSupported
 import io.nisfeb.talon.ui.theme.ThemePreference
 import io.nisfeb.talon.ui.icons.TalonIcons
 import io.nisfeb.talon.ai.loopsCanRun
+import io.nisfeb.talon.ai.orreryOn
 import io.nisfeb.talon.ai.braveSearch
 
 @Composable
@@ -989,6 +991,33 @@ fun SettingsScreen(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+            // Quick dictation runs the same agent as a loop, unattended.
+            if (isQuickDictationSupported && (aiState.loopsCanRun() || aiState.orreryOn())) {
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+                Text("Quick dictation", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Speak, and Talon hands it to orrery: a note, a todo, a message to send. A question " +
+                        "is answered. What orrery's policy holds for you shows on the card: say \"send\" or tap, " +
+                        "and on a locked phone, your fingerprint. Start one from the tile, the widget, or the " +
+                        "assist gesture with Talon as your assistant.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                io.nisfeb.talon.ai.DictationRun.blocker(aiState, hasShip = true)?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                // Bought speech to text: where the owner has no key of their own and the vendor offers it.
+                (io.nisfeb.talon.ai.DictationRun.hearing(aiState) as? io.nisfeb.talon.ai.Hearing.Armillary)?.let {
+                    Text(
+                        "Speech to text comes from Armillary, on ${it.model}.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                io.nisfeb.talon.ui.QuickDictationButtons()
             }
 
             }

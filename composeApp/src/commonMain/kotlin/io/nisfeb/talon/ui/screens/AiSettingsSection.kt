@@ -87,6 +87,7 @@ import kotlinx.serialization.json.put
 import io.nisfeb.talon.ui.icons.TalonIcons
 import io.nisfeb.talon.ui.isAssistantSupported
 import io.nisfeb.talon.ui.isCallRecordingSupported
+import io.nisfeb.talon.ui.isQuickDictationSupported
 import io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported
 import io.nisfeb.talon.ui.isOnDeviceAiSupported
 import io.nisfeb.talon.ai.transcriptionRef
@@ -260,6 +261,18 @@ fun AiSettingsSection(
             profile, AiFeature.Assistant, chat, reads = true, flag = { if (it.tools == false) "no tool use" else null }, armillaryMode = armillaryMode?.mode,
             onFollow = { setFeature(AiFeature.Assistant) { it.followingVendor() } },
         ) { ref -> setFeature(AiFeature.Assistant) { it.copy(model = ref, own = true) } }
+    }
+    // Quick dictation runs the assistant on what was said, unattended, so
+    // it is on while the assistant is; only its model is its own. Per
+    // device: it never travels to an install that could not read it.
+    if (isQuickDictationSupported && isAssistantSupported && profile.isOn(AiFeature.Assistant)) FeatureRow(
+        "Dictation", "What a spoken note, question or errand runs on. A faster model answers sooner. Default is the assistant's model.",
+        on = true, spent = spend[AiFeature.Dictation.name], onSwitch = {}, switch = false,
+    ) {
+        FeatureModel(
+            profile, AiFeature.Dictation, chat, reads = true, flag = { if (it.tools == false) "no tool use" else null }, armillaryMode = armillaryMode?.mode,
+            onFollow = { setFeature(AiFeature.Dictation) { it.followingVendor() } },
+        ) { ref -> setFeature(AiFeature.Dictation) { it.copy(model = ref, own = true) } }
     }
     // Where a party line can be recorded: there is nothing to transcribe elsewhere.
     if (isCallRecordingSupported) {
@@ -1464,6 +1477,8 @@ private fun FeatureRow(
     onSwitch: (Boolean) -> Unit,
     switchEnabled: Boolean = true,
     busy: Boolean = false,
+    /** False for a row with no switch of its own. */
+    switch: Boolean = true,
     content: @Composable ColumnScope.() -> Unit = {},
 ) {
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1474,7 +1489,7 @@ private fun FeatureRow(
                 spent?.let { Quiet(money(kotlin.math.round(it * 1_000_000).toLong()) + " this month.") }
             }
             if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-            else Switch(checked = on, onCheckedChange = onSwitch, enabled = switchEnabled)
+            else if (switch) Switch(checked = on, onCheckedChange = onSwitch, enabled = switchEnabled)
         }
         if (on) content()
     }

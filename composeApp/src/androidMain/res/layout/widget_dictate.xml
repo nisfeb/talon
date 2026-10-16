@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The dictation button, looking like an app icon: the Talon mark in its
+     orange on a round of the launcher icon's background, with its name
+     under it. The round is a fixed size centred in the cell, since an
+     oval drawn to the cell went oblong on any grid that is not square.
+     The whole cell takes the tap. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_dictate"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:orientation="vertical">
+
+    <ImageView
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:background="@drawable/widget_dictate_background"
+        android:padding="11dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_talon_mark"
+        android:tint="#FFF7A103"
+        android:contentDescription="@string/dictate_label" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="@string/dictate_label"
+        android:textColor="#FFFFFFFF"
+        android:textSize="12sp"
+        android:singleLine="true"
+        android:shadowColor="#AA000000"
+        android:shadowRadius="4"
+        android:shadowDy="1" />
+</LinearLayout>

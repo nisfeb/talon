@@ -11,6 +11,7 @@ actual val isLocalCometSupported: Boolean = false
 actual val isTouchSwipeNavSupported: Boolean = true
 actual val hasSoftKeyboard: Boolean = true
 actual val isDictationSupported: Boolean = true
+actual val isQuickDictationSupported: Boolean = true
 actual val isTapToOpenMenuSupported: Boolean = true
 
 actual val platformLabel: String = "Android ${android.os.Build.VERSION.RELEASE}"

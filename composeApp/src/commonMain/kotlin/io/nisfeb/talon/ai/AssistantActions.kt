@@ -52,6 +52,14 @@ class AssistantActions(
     val zone: () -> TimeZone = { TimeZone.currentSystemDefault() },
     /** Sends a chat message; null where there is no ship session to send with. */
     val send: (suspend (whom: String, text: String) -> Unit)? = null,
+    /** What list_events showed, and for which days: a dictation's card draws them. */
+    val onEvents: (rows: List<CalendarRow>, from: LocalDate, to: LocalDate) -> Unit = { _, _, _ -> },
+    /** What list_tasks showed. */
+    val onTasks: (List<io.nisfeb.talon.calendar.CalendarTask>) -> Unit = {},
+    /** Whom find_person found. */
+    val onPeople: (List<PersonMatch>) -> Unit = {},
+    /** What list_mail and search_mail showed. */
+    val onMail: (List<io.nisfeb.talon.mail.InboxEntry>) -> Unit = {},
 )
 
 /**
@@ -127,6 +135,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
     ) { args ->
         val name = args.text("name") ?: return@Tool "Error: name is required."
         val found = findPeople(name, a.contacts().contacts)
+        a.onPeople(found)
         if (found.isEmpty()) "Nobody matches \"$name\"."
         else found.take(8).joinToString("\n") { "ship=${it.ship} dm_whom=${it.ship} names=${it.names.joinToString(", ")}" }
     })
@@ -215,6 +224,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 ?: return@Tool "Error: view must be inbox, sent, archived or all."
             val n = (args.int("count") ?: 15).coerceIn(1, 50)
             val page = mail.listing(view, null, n) ?: return@Tool "The mail app did not answer${mail.error.value?.let { ": $it" } ?: ""}."
+            a.onMail(page.threads.take(n))
             mailLines(page.threads.take(n)).ifBlank { "No mail." }
         })
         add(Tool(
@@ -233,6 +243,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             val n = (args.int("count") ?: 15).coerceIn(1, 50)
             val page = mail.listing(io.nisfeb.talon.mail.MailView.ALL, q, n)
                 ?: return@Tool "The mail app did not answer${mail.error.value?.let { ": $it" } ?: ""}."
+            a.onMail(page.threads.take(n))
             mailLines(page.threads.take(n)).ifBlank { "No mail matches \"$q\"." }
         })
         add(Tool(
@@ -376,6 +387,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             val rows = cal.windowRows(fromMs, toMs) ?: return@Tool "The calendar did not answer."
             val names = cal.calendars.value.associate { it.id to it.name.ifBlank { it.id } }
             val shown = rows.filter { r -> daysOf(r, zone).any { it in from..to } }
+            a.onEvents(shown, from, to)
             if (shown.isEmpty()) "Nothing between $from and $to."
             else shown.take(100).joinToString("\n") { describeRow(it, zone, names) }
         })
@@ -541,6 +553,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             val withDone = args.text("include_done") == "true"
             val tasks = cal.tasksOrAsk() ?: return@Tool "The calendar did not answer${cal.error.value?.let { ": $it" } ?: ""}."
             val all = taskOrder(tasks.filter { withDone || !it.done })
+            a.onTasks(all)
             // Calendar by NAME, the way list_events shows it — the raw id
             // is opaque to the model and the user alike.
             val names = cal.calendars.value.associate { it.id to it.name.ifBlank { it.id } }
