@@ -197,11 +197,13 @@ data class AiProfile(
         return resolve(s?.model ?: defaultModel)?.private != true
     }
 
-    /** Whether [f] follows the vendor onto its ZDR tier, so its calls must go to ZDR endpoints only. */
-    fun vendorZdr(f: AiFeature): Boolean {
-        val name = VENDOR_FEATURES[f] ?: return false
-        return followsVendor(f) && armillary()?.suggestedTiers?.get(name) == "zdr"
-    }
+    /**
+     * Whether [f]'s calls must go to ZDR endpoints only: on every tier
+     * the vendor runs it on, as Orrery asks on every call, so a vendor
+     * can put a feature on its frontier tier without losing the
+     * guarantee. A model the owner picks is theirs to route.
+     */
+    fun vendorZdr(f: AiFeature): Boolean = followsVendor(f)
 
     /**
      * The vendor's decision model and the key it runs on: the lease's

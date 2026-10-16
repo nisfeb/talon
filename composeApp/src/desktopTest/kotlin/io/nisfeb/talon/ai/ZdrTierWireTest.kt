@@ -56,4 +56,16 @@ class ZdrTierWireTest {
         AgentClient(http = http()) { cfg(false) }.completeWithTools("system", listOf(AgentMessage.User("hi")), emptyList())
         assertNull(sent!!["provider"])
     }
+
+    @Test
+    fun `the assistant on the vendor's frontier tier asks for ZDR endpoints too`() = runTest {
+        val row = AiProvider(
+            ARMILLARY_PROVIDER, ProviderKind.Armillary, "Armillary", baseUrl = "https://openrouter.ai/api/v1", apiKey = "sk-or-lease",
+            suggested = mapOf("default" to "anthropic/claude-sonnet-5.5"), suggestedTiers = mapOf("assistant" to "frontier"),
+        )
+        val c = AiSettings.Config(provider = AiSettings.Provider.OpenRouter, apiKey = "", model = null, savedProfile = AiProfile(providers = listOf(row)))
+        AgentClient(http = http()) { c.forFeature(AiFeature.Assistant) }.completeWithTools("system", listOf(AgentMessage.User("hi")), emptyList())
+        assertEquals("anthropic/claude-sonnet-5.5", sent!!["model"]!!.jsonPrimitive.content)
+        assertEquals(true, sent!!["provider"]!!.jsonObject["zdr"]!!.jsonPrimitive.boolean)
+    }
 }
