@@ -430,7 +430,7 @@ class DictationService : Service() {
                         app.ktorHttp, hearing, m4a ?: wav, if (m4a != null) "m4a" else "wav",
                         java.util.Locale.getDefault().language,
                     ).also {
-                        Log.i(TAG, "transcribed through Armillary (${hearing.model}), ${if (m4a != null) "m4a ${m4a.size}" else "wav ${wav.size}"} bytes in ${System.currentTimeMillis() - t0} ms")
+                        Log.i(TAG, "transcribed through Armillary (${hearing.model} at ${android.net.Uri.parse(hearing.baseUrl).host}), ${if (m4a != null) "m4a ${m4a.size}" else "wav ${wav.size}"} bytes of ${wav.size} in ${System.currentTimeMillis() - t0} ms")
                     }
                 }
                 bought
