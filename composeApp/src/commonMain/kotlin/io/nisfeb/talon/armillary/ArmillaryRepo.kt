@@ -363,8 +363,8 @@ class ArmillaryRepo(
         val a = api ?: error("Not attached to a ship.")
         when (val got = a.inference()) {
             is InferenceAnswer.Have -> took(got.inference)
-            InferenceAnswer.NoKey -> error("it holds no Armillary key yet")
-            InferenceAnswer.Missing -> error("Armillary is not on it")
+            InferenceAnswer.NoKey -> error("Your ship holds no Armillary key for this device yet.")
+            InferenceAnswer.Missing -> error("Armillary is not on your ship.")
         }
     }
 

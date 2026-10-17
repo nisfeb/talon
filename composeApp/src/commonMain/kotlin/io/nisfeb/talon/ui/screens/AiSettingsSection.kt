@@ -123,7 +123,7 @@ fun AiSettingsSection(
     val row = profile.armillary()
 
     Heading("Armillary")
-    Quiet("Talon's AI comes through Armillary on your ship: you top up, your ship pays for what you use, and every feature below runs on the models your vendor picks. They keep nothing they read.")
+    Quiet(armillaryIntro(io.nisfeb.talon.ui.isArmillaryPurchaseSupported))
     if (profile.ownKeysDropped) Row(verticalAlignment = Alignment.CenterVertically) {
         Quiet("Your own AI keys are no longer used. To use your own provider, manage models in Armillary.", error = true)
         TextButton(onClick = { edit { it.copy(ownKeysDropped = false) } }) { Text("OK") }
@@ -181,7 +181,7 @@ fun AiSettingsSection(
     Paid(AiFeature.CatchUp, "Catch-up", "Offers a summary when you open a chat with unread messages. Those messages go to the model when you tap it.")
     if (isAssistantSupported) Paid(
         AiFeature.Assistant, "Assistant",
-        "Ask about your chats, or have it send and reply for you. It asks before changing anything. Loops and quick dictation run on it, and only while it is on.",
+        assistantLine(isQuickDictationSupported),
     )
     // Where a party line can be recorded: there is nothing to transcribe elsewhere.
     if (isCallRecordingSupported) Paid(AiFeature.Transcription, "Call transcripts", "Writes recorded calls and party lines up as text, through Armillary's speech model.")
@@ -485,7 +485,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
                     scope.launch {
                         repo?.setVendor(typed, io.nisfeb.talon.ui.platformLabel)
                             ?.onSuccess { note = "Your account is with $typed now." to false }
-                            ?.onFailure { note = (it.message ?: "The ship did not answer.") to true }
+                            ?.onFailure { note = keyProblemLine(it) to true }
                     }
                 }) { Text("Use this vendor") }
                 TextButton(onClick = { changingVendor = false }) { Text("Keep it") }
@@ -547,7 +547,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             note = null
             scope.launch {
                 val r = repo ?: return@launch
-                r.refresh(fresh = true).onFailure { note = (it.message ?: "The ship did not answer.") to true }
+                r.refresh(fresh = true).onFailure { note = keyProblemLine(it) to true }
                 // A device with no key asks again: nothing else on the card did.
                 if (r.inference.value == null && r.availability.value == ArmillaryAvailability.PRESENT) {
                     r.setUpDevice(io.nisfeb.talon.ui.platformLabel)
@@ -605,7 +605,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
                 scope.launch {
                     repo?.cancelSubscription()
                         ?.onSuccess { note = "Asked your ship to stop it renewing. The account says so once the vendor confirms." to false }
-                        ?.onFailure { note = (it.message ?: "The ship did not answer.") to true }
+                        ?.onFailure { note = keyProblemLine(it) to true }
                 }
             }) { Text("Cancel it") }
         },
@@ -625,7 +625,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
                     scope.launch {
                         repo?.deleteAccount()
                             ?.onSuccess { answer -> deleteRefusedLine(answer, a.vendor)?.let { note = it to true } }
-                            ?.onFailure { note = (it.message ?: "The ship did not answer.") to true }
+                            ?.onFailure { note = keyProblemLine(it) to true }
                     }
                 }) { Text("Delete account") }
             },
@@ -652,7 +652,7 @@ private fun BraveLeoLines(p: AiProvider, repo: ArmillaryRepo, leaseDisabled: Boo
         return
     }
     val inf = got.getOrElse {
-        Quiet("Your ship did not answer for Leo: " + (it.message ?: "no answer from the ship"), error = true)
+        Quiet(keyProblemLine(it), error = true)
         return
     }
     when (val s = leoSetup(inf, leaseDisabled, model, p.models)) {
@@ -889,6 +889,22 @@ internal fun checkoutPage(p: Payment?, row: Checkout?): String? {
     return p.url.ifBlank { row?.url.orEmpty() }.ifBlank { null }
 }
 
+/** The AI section's first line. [canBuy] false names no top up (isArmillaryPurchaseSupported). */
+internal fun armillaryIntro(canBuy: Boolean): String =
+    "Talon's AI comes through Armillary on your ship: " + (if (canBuy) "you top up, your ship pays for what you use, " else "your ship pays for what you use, ") +
+        "and every feature below runs on the models your vendor picks. They keep nothing they read."
+
+/** The assistant's row, naming quick dictation only where there is any (isQuickDictationSupported). */
+internal fun assistantLine(quickDictation: Boolean): String =
+    "Ask about your chats, or have it send and reply for you. It asks before changing anything. " +
+        (if (quickDictation) "Loops and quick dictation run on it, and only while it is on." else "Loops run on it, and only while it is on.")
+
+/** What the pitch says Armillary pays for: the features this platform has. */
+internal fun pitchFeatures(assistant: Boolean, dictation: Boolean, transcripts: Boolean): String {
+    val all = listOfNotNull("Catch-up", "the assistant".takeIf { assistant }, "dictation".takeIf { dictation }, "call transcripts".takeIf { transcripts })
+    return if (all.size == 1) all.single() else all.dropLast(1).joinToString(", ") + " and " + all.last()
+}
+
 /** How many ledger rows the history shows, which is as many as the view carries. */
 internal const val HISTORY_ROWS = 50
 
@@ -972,7 +988,7 @@ private fun StartWithArmillary(onStart: () -> Unit) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Turn on AI", style = MaterialTheme.typography.titleSmall)
             Text(
-                "Catch-up, the assistant, dictation and call transcripts, paid as you go from a few dollars. " +
+                pitchFeatures(isAssistantSupported, isQuickDictationSupported, isCallRecordingSupported) + ", paid as you go from a few dollars. " +
                     "Armillary buys the models for you through your own ship: no accounts to make and no keys " +
                     "to copy in. You top up, your ship spends it, and the balance is on this screen.",
                 style = MaterialTheme.typography.bodySmall,
