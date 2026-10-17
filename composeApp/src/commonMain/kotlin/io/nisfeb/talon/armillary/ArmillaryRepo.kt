@@ -331,34 +331,44 @@ class ArmillaryRepo(
      * this ship included. The ship says hello to it, and the key is
      * asked for again, since a key belongs to one vendor.
      */
-    suspend fun setVendor(ship: String, deviceName: String): Result<Inference> = runSuspendCatching {
+    suspend fun setVendor(ship: String, deviceName: String): Result<Inference> = scope.async { runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
         a.setVendor(ship.trim())
         refresh()
         ensureKey(deviceName).getOrThrow()
-    }
+    } }.await()
 
     /**
-     * Open a checkout and answer the URL to send the person to. The
-     * balance is then watched, for a couple of minutes on a card and a
-     * quarter of an hour on bitcoin, which settles after a block, so
-     * the payment shows once made without anyone having to tap Refresh.
+     * Open a checkout and answer the URL to send the person to, or null
+     * where the vendor made it and its answer has not come back. The
+     * checkout is then watched, for a couple of minutes on a card and a
+     * quarter of an hour on bitcoin, which settles after a block, so the
+     * payment shows once made without anyone having to tap Refresh, and
+     * the card offers its page ([Payment.url], or the vendor's row once it
+     * comes). On this repo's scope: a screen left while the vendor answers
+     * does not lose the checkout it made.
      */
-    suspend fun topUp(rail: String, plan: String?, amountMicro: Long?): Result<String> = runSuspendCatching {
+    suspend fun topUp(rail: String, plan: String?, amountMicro: Long?): Result<String?> = scope.async { runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
         val first = a.checkout(rail, plan, amountMicro)
         val answer = if (first is CheckoutAnswer.Pending) followCheckout(a, first.nonce) else first
+        val start = _account.value?.takeIf { it.hasView }?.balanceMicro ?: 0L
         when (answer) {
             is CheckoutAnswer.Url -> {
-                val start = _account.value?.takeIf { it.hasView }?.balanceMicro ?: 0L
-                watchBalance(Payment(answer.nonce, rail, start, Payment.Phase.WAITING))
+                watchBalance(Payment(answer.nonce, rail, start, Payment.Phase.WAITING, url = answer.url))
                 answer.url
             }
-            is CheckoutAnswer.Pending ->
-                error("Your ship has asked the vendor and is still waiting. Do not order again: the checkout appears under your checkouts when the vendor answers.")
+            // Watched as any other: the card says not to order again, and
+            // offers the page once the vendor's row brings it. It used to
+            // say the checkout would appear "under your checkouts", which
+            // no screen shows.
+            is CheckoutAnswer.Pending -> {
+                watchBalance(Payment(answer.nonce, rail, start, Payment.Phase.WAITING))
+                null
+            }
             is CheckoutAnswer.Refused -> error(answer.reason)
         }
-    }
+    } }.await()
 
     /**
      * A checkout the ship answered 202 for. The order went out, and the
@@ -386,11 +396,11 @@ class ArmillaryRepo(
     }
 
     /** Ask the vendor to stop the subscription renewing. The view says when it is done. */
-    suspend fun cancelSubscription(): Result<Unit> = runSuspendCatching {
+    suspend fun cancelSubscription(): Result<Unit> = scope.async { runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
         a.cancelSubscription()
         watchBalance(null)
-    }
+    } }.await()
 
     /**
      * Delete this ship's account at its vendor, on the repo's scope, so
@@ -455,14 +465,20 @@ class ArmillaryRepo(
 
     /**
      * What an account just read says about the payment in flight. True
-     * once it has said something final: the balance rose, or the row
-     * says the checkout failed, expired or was refused.
+     * once it has said something final: paid, or the row says the
+     * checkout failed, expired or was refused. Where the view carries the
+     * checkout's row, the row says whether it was paid and how much: the
+     * balance was measured from one read before the checkout opened, so
+     * spending since made a $5 payment $4.97, and a credit from elsewhere
+     * read as paid before anyone had. With no row, the balance rising.
      */
     private fun settle(acct: Account): Boolean {
         val p = _payment.value ?: return false
         if (p.phase != Payment.Phase.WAITING && p.phase != Payment.Phase.UNSEEN) return false
-        if (acct.hasView && acct.balanceMicro > p.startMicro) {
-            val added = acct.balanceMicro - p.startMicro
+        val row = acct.checkouts.firstOrNull { p.nonce.isNotBlank() && it.nonce == p.nonce }
+        val rose = if (acct.hasView) acct.balanceMicro - p.startMicro else 0L
+        if (row?.status == "paid" || (row == null && rose > 0)) {
+            val added = row?.amountMicro?.takeIf { it > 0 } ?: rose.coerceAtLeast(0L)
             val paid = p.copy(phase = Payment.Phase.PAID, addedMicro = added)
             _payment.value = paid
             notifier.notify("Armillary", money(added) + " added", "armillary")
@@ -477,8 +493,7 @@ class ArmillaryRepo(
             }
             return true
         }
-        val row = acct.checkouts.firstOrNull { it.nonce == p.nonce } ?: return false
-        if (row.status in ENDED_STATUSES) {
+        if (row != null && row.status in ENDED_STATUSES) {
             _payment.value = p.copy(phase = Payment.Phase.ENDED)
             return true
         }
@@ -634,6 +649,8 @@ data class Payment(
     val phase: Phase,
     /** How much the balance rose, once it has. */
     val addedMicro: Long = 0L,
+    /** The checkout's page, as the vendor answered it; blank until it has. */
+    val url: String = "",
 ) {
     enum class Phase {
         /** The watch is running and nothing has landed. */

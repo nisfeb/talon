@@ -70,6 +70,7 @@ import io.nisfeb.talon.armillary.LedgerRow
 import io.nisfeb.talon.armillary.Payment
 import io.nisfeb.talon.armillary.Plan
 import io.nisfeb.talon.armillary.money
+import io.nisfeb.talon.armillary.keyProblemLine
 import io.nisfeb.talon.orrery.DecideSettings
 import io.nisfeb.talon.orrery.OrreryAvailability
 import io.nisfeb.talon.orrery.OrreryRepo
@@ -433,10 +434,12 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         if (inFlight) return
         inFlight = true
         note = "Asking ${account?.vendor?.ifBlank { null } ?: "the vendor"} for a checkout. From some ships this takes a minute." to false
+        // The repo carries the checkout and its watch; this only waits to
+        // open the page. With none yet, the payment line says so.
         scope.launch {
             r.topUp(rail, plan, amountMicro)
-                .onSuccess { url -> inFlight = false; note = null; uri.openUri(url) }
-                .onFailure { inFlight = false; note = (it.message ?: "The vendor did not answer.") to true }
+                .onSuccess { url -> inFlight = false; note = null; url?.let { runCatching { uri.openUri(it) } } }
+                .onFailure { inFlight = false; note = keyProblemLine(it) to true }
         }
     }
 
@@ -486,11 +489,17 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         if (a.hasView && !free) {
             balanceWarning(a, io.nisfeb.talon.ui.isArmillaryPurchaseSupported)?.let { Quiet(it, error = true) }
             Quiet(planLine(a))
-            paymentLine(payment, a.checkouts.firstOrNull { it.nonce == payment?.nonce })?.let { line ->
+            val row = a.checkouts.firstOrNull { it.nonce == payment?.nonce }
+            paymentLine(payment, row)?.let { line ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (payment?.phase == Payment.Phase.WAITING) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                     Quiet(line, error = payment?.phase == Payment.Phase.ENDED)
                 }
+            }
+            // The page again: the browser closed, the screen left before
+            // it opened, or a checkout whose page the vendor sent late.
+            checkoutPage(payment, row)?.let { page ->
+                TextButton(onClick = { runCatching { uri.openUri(page) } }) { Text("Open the checkout") }
             }
         } else if (a.vendor.isNotBlank()) {
             IntroducingLine()
@@ -848,13 +857,31 @@ internal fun paymentLine(p: Payment?, row: Checkout?): String? {
         "expired" -> return "The checkout expired before it was paid"
         "refused" -> return row.note.ifBlank { "The vendor refused the checkout" }
     }
+    // No page yet: the vendor made the checkout and its answer is still on
+    // the way. Ordering again only makes a second one nobody is sent to.
+    val noPage = p.url.isBlank() && row?.url.isNullOrBlank()
     return when (p.phase) {
-        Payment.Phase.WAITING ->
-            if (p.rail == ArmillaryRepo.BTC_RAIL) "Waiting for your bitcoin payment to confirm, usually ten to twenty minutes"
-            else "Waiting for your payment"
-        Payment.Phase.UNSEEN -> "No payment seen yet. If you paid, it arrives within a few minutes; Refresh to check."
+        Payment.Phase.WAITING -> when {
+            noPage -> "Your ship is waiting for the vendor's checkout. Do not order again: it opens from here when it comes"
+            p.rail == ArmillaryRepo.BTC_RAIL -> "Waiting for your bitcoin payment to confirm, usually ten to twenty minutes"
+            else -> "Waiting for your payment"
+        }
+        Payment.Phase.UNSEEN ->
+            if (noPage) "The vendor has not sent the checkout yet. Do not order again: Refresh to look for it."
+            else "No payment seen yet. If you paid, it arrives within a few minutes; Refresh to check."
         else -> null
     }
+}
+
+/**
+ * The page of the checkout this session opened, while paying it is
+ * still to do: its own URL, or the vendor's row's once that comes.
+ * Null once paid, seen, or over.
+ */
+internal fun checkoutPage(p: Payment?, row: Checkout?): String? {
+    if (p == null || (p.phase != Payment.Phase.WAITING && p.phase != Payment.Phase.UNSEEN)) return null
+    if (row != null && row.status != "pending") return null
+    return p.url.ifBlank { row?.url.orEmpty() }.ifBlank { null }
 }
 
 /** How many ledger rows the history shows, which is as many as the view carries. */
