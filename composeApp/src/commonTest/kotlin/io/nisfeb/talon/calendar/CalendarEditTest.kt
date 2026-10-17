@@ -290,10 +290,10 @@ class CalendarEditTest {
     }
 
     @Test fun `a task's draft comes from its row, due on the day the row is on`() {
-        val ny = TimeZone.of("America/New_York")
-        val dayStart = LocalDate(2026, 9, 30).atTime(0, 0).toInstant(ny).toEpochMilliseconds()
+        // As the feed gives it: midnight UTC of the due day, whatever the zone.
+        val dayStart = LocalDate(2026, 9, 30).atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds()
         val meta = io.nisfeb.talon.mail.AuspexApi.json.parseToJsonElement("""{"name":"Buy milk","note":"oat","tags":["home"],"list":"shop"}""").jsonObject
-        val d = taskDraft(CalendarRow(id = "t1", cal = "home", meta = meta, cat = "todo", kind = "todo", all = true, l = dayStart, r = dayStart, done = true), ny, day)!!
+        val d = taskDraft(CalendarRow(id = "t1", cal = "home", meta = meta, cat = "todo", kind = "todo", all = true, l = dayStart, r = dayStart, done = true), day)!!
         assertEquals(EventCat.TODO, d.cat)
         assertEquals("Buy milk" to "oat", d.name to d.note)
         assertEquals(listOf("home"), d.tags)
@@ -301,7 +301,23 @@ class CalendarEditTest {
         assertEquals(LocalDate(2026, 9, 30), d.due)
         assertEquals(true, d.done)
         assertEquals(true, "list" in d.otherMeta, "meta the form does not edit is kept")
-        assertNull(taskDraft(CalendarRow(id = "t2", cat = "todo", l = 0, r = 0), ny, day)!!.due, "no day, no due")
+        assertNull(taskDraft(CalendarRow(id = "t2", cat = "todo", l = 0, r = 0), day)!!.due, "no day, no due")
+    }
+
+    // West of UTC a task due 1 October opened as due 30 September, read in
+    // the calendar's zone, and saving even a rename wrote 30 September.
+    @Test fun `a task due 1 October in a calendar in New York stays due 1 October through a rename`() {
+        val oct1Utc = LocalDate(2026, 10, 1).atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds()
+        val row = CalendarRow(id = "t1", cal = "home", meta = kotlinx.serialization.json.buildJsonObject { put("name", kotlinx.serialization.json.JsonPrimitive("Pay rent")) },
+            cat = "todo", kind = "todo", all = true, l = oct1Utc, r = oct1Utc)
+        assertEquals(LocalDate(2026, 10, 1), row.dueDay(), "the row's day, as the grid shows it")
+        val d = taskDraft(row, day)!!
+        assertEquals(LocalDate(2026, 10, 1), d.due)
+        val saved = eventBody(d.copy(name = "Pay the rent"), id = "t1")
+        assertEquals(oct1Utc, saved["due_ms"]!!.jsonPrimitive.content.toLong(), "the rename keeps the day")
+        // The grid and the editor agree on it in New York, where midnight UTC is the evening before.
+        assertEquals(listOf(LocalDate(2026, 10, 1)), daysOf(row, TimeZone.of("America/New_York")))
+        assertNull(row.copy(l = 0, r = 0).dueDay(), "no day, none")
     }
 
     // ─── reminders ───────────────────────────────────────────────
@@ -376,7 +392,7 @@ class CalendarEditTest {
         val old = kotlinx.serialization.json.Json.parseToJsonElement("""{"cat":"todo","meta":{"name":"x"}}""").jsonObject
         assertNull(draftFromEvent(old, oct1)!!.priority)
         val row = CalendarRow(id = "t1", cat = "todo", kind = "todo", all = true, l = 0, r = 0, priority = 9)
-        assertEquals(9, taskDraft(row, TimeZone.UTC, oct1)!!.priority)
+        assertEquals(9, taskDraft(row, oct1)!!.priority)
     }
 
     @Test

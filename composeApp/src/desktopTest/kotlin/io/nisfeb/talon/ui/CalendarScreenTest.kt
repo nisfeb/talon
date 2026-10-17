@@ -65,6 +65,10 @@ class CalendarScreenTest {
     @Volatile private var leadMin = 30
     private fun alarms(json: String) = if (reminders) ",\"alarms\":$json" else ""
     @Volatile private var tasksJson = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"}}]"""
+    /** The calendar's own zone, as config.json gives it. */
+    @Volatile private var calendarZone = "UTC"
+    /** Rows the window has besides the four below, each led by a comma. */
+    @Volatile private var moreRows = ""
     private val soon = java.time.LocalDate.now().atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
     /** A weekly lesson at 16:00 in New York, from a CalDAV calendar, read in a UTC calendar, on the same day as the
      *  other rows: the device's date, whose 16:00 in New York (20:00 or 21:00 UTC) is that date in UTC too. */
@@ -95,7 +99,7 @@ class CalendarScreenTest {
                 {"id":"s1","cal":"default","idx":3,"kind":"daily","meta":{"name":"Standup"},"l":${soon + HOUR},"r":${soon + HOUR + 15 * 60_000L}${alarms("[]")}},
                 {"id":"b1","cal":"~nec/work","meta":{"name":"Board meeting"},"l":${soon + 2 * HOUR},"r":${soon + 3 * HOUR}${alarms("[]")}},
                 {"id":"f1","cal":"family","idx":5,"kind":"rrule","meta":{"name":"Fencing lesson"},"l":$lessonAt,"r":${lessonAt + HOUR}${alarms("[]")}}
-                ]}""",
+                $moreRows]}""",
             )
             path.endsWith("/event.json") && req.url.parameters["id"] == "f1" -> json(lessonJson)
             path.endsWith("/event.json") -> json(
@@ -104,7 +108,7 @@ class CalendarScreenTest {
             path.endsWith("/events.json") -> json(tasksJson)
             path.endsWith("/calendars.json") ->
                 json("""[{"id":"default","name":"Personal","kind":"local"},{"id":"~nec/work","name":"Work","kind":"local"},{"id":"family","name":"Family","kind":"caldav"}]""")
-            path.endsWith("/config.json") -> json(if (reminders) """{"title":"Calendar","zone":"UTC","ball":"abc123","lead_min":$leadMin}""" else """{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
+            path.endsWith("/config.json") -> json(if (reminders) """{"title":"Calendar","zone":"$calendarZone","ball":"abc123","lead_min":$leadMin}""" else """{"title":"Calendar","zone":"$calendarZone","ball":"abc123"}""")
             path.endsWith("/share/shares.json") ->
                 json("""{"shares":{},"offers":{},"accepted":{"~nec/work":{"key":"~nec/work","mode":"read"}}}""")
             path.endsWith("/google.json") -> json("""{"connected":false,"linked":{}}""")
@@ -822,5 +826,53 @@ class CalendarScreenTest {
     fun `no reminder, nothing opens`() = calendar {
         waitForIdle()
         assertTrue(onAllNodesWithText("Edit").fetchSemanticsNodes().isEmpty() && opened.isEmpty())
+    }
+
+    // ─── days west of UTC ───────────────────────────────────────────
+
+    private fun header(d: java.time.LocalDate) =
+        "${listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[d.dayOfWeek.value - 1]} ${d.dayOfMonth} ${kotlinx.datetime.format.MonthNames.ENGLISH_ABBREVIATED.names[d.monthValue - 1]}"
+
+    // In New York a task due 1 October opened as due 30 September, and
+    // saving even a rename wrote 30 September: its row's day, midnight
+    // UTC, was read in the calendar's zone.
+    @Test
+    fun `a task opened from its day keeps that day in a calendar west of UTC, and a rename keeps it too`() {
+        calendarZone = "America/New_York"
+        val today = java.time.LocalDate.now()
+        val dueMs = today.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+        moreRows = """,{"id":"t9","cal":"default","cat":"todo","kind":"todo","all":true,"meta":{"name":"Pay rent"},"l":$dueMs,"r":$dueMs}"""
+        calendar {
+            open("Pay rent")
+            val day = "${today.dayOfMonth} ${kotlinx.datetime.format.MonthNames.ENGLISH_ABBREVIATED.names[today.monthValue - 1]}"
+            assertTrue(shows("Due $day"), "due on its own day")
+            onNodeWithText("Edit").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Edit task") }
+            assertTrue(shows(io.nisfeb.talon.util.formatDate(kotlinx.datetime.LocalDate(today.year, today.monthValue, today.dayOfMonth))), "the editor opens on it")
+            field("Name").performTextReplacement("Pay the rent")
+            save()
+            val body = wrote("Pay the rent")
+            assertTrue("\"due_ms\":$dueMs" in body, body)
+        }
+    }
+
+    // A tapped reminder for an all-day event opened the day before west of
+    // UTC: its start, midnight UTC, was read in the device's zone.
+    @Test
+    fun `a tapped reminder opens an all-day event on its own day west of UTC`() {
+        val was = java.util.TimeZone.getDefault()
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("America/New_York"))
+        try {
+            val today = java.time.LocalDate.now()
+            val l = today.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+            moreRows = """,{"id":"a1","cal":"default","cat":"allday","all":true,"meta":{"name":"Fair"},"l":$l,"r":${l + 86_400_000L}}"""
+            calendar(pushTag = "cal-a1-0") {
+                waitUntil(timeoutMillis = 15_000) { onAllNodesWithText("Edit").fetchSemanticsNodes().isNotEmpty() }
+                assertTrue(shows("Fair"))
+                assertTrue(!shows(header(today.minusDays(1))), "not the day before")
+            }
+        } finally {
+            java.util.TimeZone.setDefault(was)
+        }
     }
 }

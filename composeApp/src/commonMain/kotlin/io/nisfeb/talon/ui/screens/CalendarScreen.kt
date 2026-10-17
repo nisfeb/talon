@@ -119,6 +119,7 @@ import io.nisfeb.talon.ui.telUri
 import io.nisfeb.talon.calendar.dueDate
 import io.nisfeb.talon.calendar.groupTasks
 import io.nisfeb.talon.calendar.taskDraft
+import io.nisfeb.talon.calendar.dueDay
 import io.nisfeb.talon.calendar.inFilter
 import io.nisfeb.talon.calendar.matches
 import io.nisfeb.talon.calendar.taskOrder
@@ -378,7 +379,7 @@ fun CalendarScreen(
     /** A task opens at once from its row; an event reads its rule first. */
     fun openRow(r: CalendarRow) {
         if (r.isTask) {
-            taskDraft(r, zone, selected)?.let { d ->
+            taskDraft(r, selected)?.let { d ->
                 editing = r.id to d
                 editingIdx = null
                 editingAt = null
@@ -406,7 +407,9 @@ fun CalendarScreen(
         if (openPushTag == null || openPushTag == openedPushTag) return@LaunchedEffect
         val r = calendarRowOfPushTag(openPushTag, rows.orEmpty()) ?: return@LaunchedEffect
         openedPushTag = openPushTag
-        val day = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(TimeZone.currentSystemDefault()).date
+        // Its day as the grid has it: an all-day row's in date-space, read
+        // in the device's zone it opened on the day before west of UTC.
+        val day = daysOf(r, zone).first()
         year = day.year
         month = day.month.number
         selected = day
@@ -480,7 +483,7 @@ fun CalendarScreen(
     fun whenLineOf(r: CalendarRow): String {
         val day = daysOf(r, zone).first()
         val d = "${d3(day.dayOfWeek)} ${day.day} ${MonthNames.ENGLISH_ABBREVIATED.names[day.month.number - 1]} ${day.year}"
-        return if (r.isTask) (r.dueLabel(zone)?.let { "$it" } ?: "No due date") else "$d · ${spanLabel(r, day, zone, twentyFourHour)}"
+        return if (r.isTask) (r.dueLabel()?.let { "$it" } ?: "No due date") else "$d · ${spanLabel(r, day, zone, twentyFourHour)}"
     }
     fun textOf(r: CalendarRow): String {
         // A card with Add on it, for whoever sees it. A task is not an event to add.
@@ -681,8 +684,8 @@ fun CalendarScreen(
                 status = status ?: error,
                 onTick = ::tick,
                 onOpen = { t ->
-                    // The row's day is midnight in the calendar's zone, as the window feed has it.
-                    val dayMs = t.dueDate()?.atTime(0, 0)?.toInstant(zone)?.toEpochMilliseconds() ?: 0L
+                    // The row's day is midnight UTC, as the window feed has it.
+                    val dayMs = t.dueDate()?.atTime(0, 0)?.toInstant(TimeZone.UTC)?.toEpochMilliseconds() ?: 0L
                     view(CalendarRow(id = t.id, cal = t.cal, meta = t.meta, cat = "todo", kind = "todo", all = true, l = dayMs, r = dayMs, done = t.done, priority = t.priority))
                 },
                 pending = pendingTasks,
@@ -886,7 +889,7 @@ fun CalendarScreen(
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val whenText = when {
-                        r.isTask -> (r.dueLabel(zone) ?: "No due date") + (if (r.done) " · done" else "") +
+                        r.isTask -> (r.dueLabel() ?: "No due date") + (if (r.done) " · done" else "") +
                             (io.nisfeb.talon.calendar.priorityBand(r.priority)?.let { " · $it priority" } ?: "")
                         else -> {
                             // The row's own day, not whatever day is selected now.
@@ -1311,9 +1314,8 @@ fun CalendarScreen(
 private fun d3(d: DayOfWeek) = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[d.isoDayNumber - 1]
 
 /** A task row's due day, or null when it has none. */
-private fun CalendarRow.dueLabel(zone: TimeZone): String? {
-    if (l == 0L) return null
-    val d = Instant.fromEpochMilliseconds(l).toLocalDateTime(zone).date
+private fun CalendarRow.dueLabel(): String? {
+    val d = dueDay() ?: return null
     return "Due ${d.day} ${MonthNames.ENGLISH_ABBREVIATED.names[d.month.number - 1]}"
 }
 

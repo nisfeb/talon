@@ -436,26 +436,31 @@ private val EDITED_META = setOf("name", "note", "location", "tags", "color")
 
 /**
  * A task's draft from the row the screen already has: its calendar,
- * meta, tick and due day, the day being midnight in [zone] as the feed
- * gives it. A task has no rule to read, so its editor needs nothing
- * from the ship and opens at once; it waited on a read that queued
- * behind everything else the ship was doing. Only the time a ticked
- * task was done is missing (the list does not carry it): saving reads it.
+ * meta, tick and due day. A task has no rule to read, so its editor
+ * needs nothing from the ship and opens at once; it waited on a read
+ * that queued behind everything else the ship was doing. Only the time
+ * a ticked task was done is missing (the list does not carry it):
+ * saving reads it.
  */
-fun taskDraft(r: CalendarRow, zone: TimeZone, today: LocalDate): EventDraft? = draftFromEvent(
+fun taskDraft(r: CalendarRow, today: LocalDate): EventDraft? = draftFromEvent(
     kotlinx.serialization.json.buildJsonObject {
         put("cat", "todo")
         put("cal", r.cal)
         put("meta", r.meta)
         put("done", r.done)
         r.priority?.let { put("priority", it) }
-        if (r.l > 0) {
-            val due = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(zone).date
-            put("due_ms", due.atTime(0, 0).toInstant(TimeZone.UTC).toEpochMilliseconds())
-        }
+        r.dueDay()?.let { put("due_ms", it.utcMidnightMs()) }
     },
     today,
 )
+
+/**
+ * A task row's due day, or null for none. The feed gives it as midnight
+ * UTC, date-space like every all-day row: read in the calendar's zone,
+ * west of UTC a task due 1 October opened as due 30 September, and
+ * saving even a rename wrote that.
+ */
+fun CalendarRow.dueDay(): LocalDate? = l.takeIf { it > 0 }?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date }
 
 fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
     fun str(k: String) = e[k]?.jsonPrimitive?.contentOrNull
