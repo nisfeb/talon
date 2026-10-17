@@ -122,8 +122,13 @@ object LocationWatch {
         }
     }
 
+    /**
+     * No more fixes, and none still waiting to go: a fix queued for the
+     * network outlived the switch going off and went up after it.
+     */
     private fun stopListening(ctx: Context) {
         (ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager)?.removeUpdates(intent(ctx))
+        WorkManager.getInstance(ctx).cancelUniqueWork(WORK)
     }
 
     private fun intent(ctx: Context): PendingIntent = PendingIntent.getBroadcast(
@@ -132,8 +137,9 @@ object LocationWatch {
         PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0),
     )
 
-    /** Hand a fix to the worker; a newer one replaces one still waiting. */
+    /** Hand a fix to the worker; a newer one replaces one still waiting. One delivered after the switch went off goes nowhere. */
     fun send(ctx: Context, loc: Location) {
+        if (!sharing(ctx)) return
         val data = workDataOf(
             "lat" to loc.latitude, "lon" to loc.longitude,
             "acc" to (if (loc.hasAccuracy()) loc.accuracy.toDouble() else MAX_MATCH_M), "at" to loc.time,
@@ -167,7 +173,10 @@ class LocationWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val session = app.sessionStore.active() ?: return Result.success()
         val d = inputData
         val fix = LocationFix(d.getDouble("lat", 0.0), d.getDouble("lon", 0.0), d.getDouble("acc", MAX_MATCH_M), d.getLong("at", System.currentTimeMillis()))
-        return sendLocation(app.session.http, app.db, session.shipUrl, session.ship, fix, placeName(fix)).fold(
+        // Asked again as it sends: the switch may have gone off while this waited for the network.
+        val sharing = { LocationWatch.sharing(applicationContext) }
+        if (!sharing()) return Result.success()
+        return sendLocation(app.session.http, app.db, session.shipUrl, session.ship, fix, placeName(fix), sharing = sharing).fold(
             onSuccess = {
                 // Where the owner is now moves when to leave: the ship looks again, and so does the alarm.
                 // Not on a trip: the alert has gone, and a read a minute would only cost the ship.
