@@ -51,7 +51,10 @@ class DesktopCallEngine(
     override val state: StateFlow<MediaState> = _state
 
     private val factory = DesktopWebRtcFactory.get()
-    private val gathered = CompletableDeferred<Unit>()
+    // One per gather: the first was already complete when a restart
+    // offer waited on it, so a restart went out with few or none of its
+    // new candidates, and signalling here does not trickle.
+    @Volatile private var gathered = CompletableDeferred<Unit>()
     private var micTrack: AudioTrack? = null
 
     // ── video ────────────────────────────────────────────────────
@@ -241,8 +244,7 @@ class DesktopCallEngine(
 
     override suspend fun restartIce(): SessionDesc? {
         val offer = suspendSdp { pc.createOffer(RTCOfferOptions().apply { iceRestart = true }, it) }
-        suspendSet { pc.setLocalDescription(offer, it) }
-        awaitGathering()
+        setLocalAndGather(offer)
         val sdp = pc.localDescription?.sdp ?: return null
         Log.i("Trunk", "ice restart offer: " + sdp.lines().count { it.startsWith("a=candidate") } + " candidates")
         return SessionDesc(sdp, sdpFingerprint(sdp))
@@ -251,8 +253,7 @@ class DesktopCallEngine(
     override suspend fun createOffer(): SessionDesc {
         _state.value = MediaState.Gathering
         val offer = suspendSdp { pc.createOffer(RTCOfferOptions(), it) }
-        suspendSet { pc.setLocalDescription(offer, it) }
-        awaitGathering()
+        setLocalAndGather(offer)
         val sdp = pc.localDescription?.sdp ?: error("no local description")
         Log.i("Trunk", "offer sdp: " + sdp.lines().count { it.startsWith("a=candidate") } + " candidates")
         return SessionDesc(sdp, sdpFingerprint(sdp))
@@ -264,8 +265,7 @@ class DesktopCallEngine(
         suspendSet { pc.setRemoteDescription(desc, it) }
         adoptVideoTransceiver()
         val answer = suspendSdp { pc.createAnswer(RTCAnswerOptions(), it) }
-        suspendSet { pc.setLocalDescription(answer, it) }
-        awaitGathering()
+        setLocalAndGather(answer)
         val sdp = pc.localDescription?.sdp ?: error("no local description")
         Log.i("Trunk", "answer sdp: " + sdp.lines().count { it.startsWith("a=candidate") } + " candidates")
         // No manual state write: the pc observer owns transitions. A
@@ -413,6 +413,12 @@ class DesktopCallEngine(
     /** A dead STUN/TURN server must degrade, not break: when gathering
      *  stalls (unreachable server keeps ICE in %gathering), proceed
      *  with whatever candidates we have — Tier 0 still works. */
+    private suspend fun setLocalAndGather(desc: RTCSessionDescription) {
+        gathered = CompletableDeferred()
+        suspendSet { pc.setLocalDescription(desc, it) }
+        awaitGathering()
+    }
+
     private suspend fun awaitGathering() {
         runCatching { withTimeout(8_000) { gathered.await() } }
             .onFailure { Log.w("Trunk", "gathering incomplete after 8s — proceeding with partial candidates") }

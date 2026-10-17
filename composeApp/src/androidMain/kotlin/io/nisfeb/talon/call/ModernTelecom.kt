@@ -35,6 +35,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Same shape as [TalonTelecom]: process-global, because the push
  * receiver registers a ring before the app is up, and the app adopts
  * that call by id when it answers.
+ *
+ * Android-only: no desktop analog, as desktop has no telecom stack or
+ * system call log. iOS's is CallKit (CallPush.swift).
  */
 object ModernTelecom {
     /** True on Android 16.1+, where this backend is the one that logs. */

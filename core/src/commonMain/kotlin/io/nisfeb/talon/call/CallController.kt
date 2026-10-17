@@ -105,6 +105,8 @@ class CallController(
     /** Fallback ICE and sidecar this build ships, adopted by a ship
      *  that has none. [CallDefaults.None] adopts nothing. */
     private val defaults: CallDefaults = CallDefaults.None,
+    /** How long a lost path may take to come back. A knob for tests. */
+    private val restartGiveUpMs: Long = RESTART_GIVE_UP_MS,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     private val _state = MutableStateFlow<CallUiState>(CallUiState.None)
@@ -281,7 +283,7 @@ class CallController(
         loop = scope.launch { runLoop() }
         scope.launch {
             io.nisfeb.talon.util.NetworkChanges.events.collect {
-                if (_state.value is CallUiState.Active && isCaller) tryIceRestart("network changed")
+                if (_state.value is CallUiState.Active && isCaller) tryIceRestart("network changed", mediaLost = false)
             }
         }
     }
@@ -289,9 +291,23 @@ class CallController(
     fun stop() {
         loop?.cancel()
         loop = null
-        channel?.deleteSoon(scope, timeoutMs = 3_000)
+        val ch = channel
         channel = null
+        // A call placed or live as the app lets go of it is hung up on the
+        // peer too: ended only here, they sat on a dead call until their
+        // own watchdog gave up. A ring is left to our other devices.
+        val id = callId
+        val p = peer
+        val live = _state.value is CallUiState.Outgoing || _state.value is CallUiState.Active
         endLocal("stopped")
+        if (ch == null) return
+        scope.launch {
+            // Bounded: the ack would come down the stream just cancelled.
+            if (live && id != null && p != null) withTimeoutOrNull(STOP_HANGUP_MS) {
+                runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.sendAction(p, TrunkSig.Hangup(id))) }
+            }
+            ch.deleteSoon(scope, timeoutMs = 3_000)
+        }
     }
 
     /** Give [ch] up: never resumed, and ended on the ship so its watch does not clog. */
@@ -824,6 +840,18 @@ class CallController(
         }
     }
 
+    /**
+     * Hang up the call if one is placed or live, and say whether there
+     * was one. For a control that ends "whatever is on": the call's
+     * Ended notice is not a call, and a ring is not ours to end there.
+     */
+    fun hangupLive(): Boolean {
+        val s = _state.value
+        if (s !is CallUiState.Outgoing && s !is CallUiState.Active) return false
+        hangup()
+        return true
+    }
+
     fun hangup() {
         scope.launch {
             val id = callId ?: return@launch
@@ -863,6 +891,11 @@ class CallController(
                 Log.w(TAG, "the camera would not start")
             }
         }
+    }
+
+    /** Flip our camera front to back on the live call, where the platform can. */
+    fun switchCamera() {
+        engine?.switchCamera()
     }
 
     /** What the live call could share; empty between calls. */
@@ -945,7 +978,17 @@ class CallController(
         } finally {
             startingRecording = false
         }
-        if (!told) return "Couldn't tell $p in your chat, so the call isn't being recorded."
+        if (!told) {
+            // Not told now is often told later: a notice the ship could not
+            // take waits in the queue and goes when it is back, saying a
+            // call is recorded that never was. The stop goes after it, and
+            // queues behind it, so the two arrive in order.
+            // ponytail: a refused notice followed by a stop the ship takes
+            // reaches the peer as a stray stop line. Withdrawing the queued
+            // row instead needs a second hook from the app roots.
+            scope.launch { runCatching { notice(p, RECORDING_OFF) } }
+            return "Couldn't tell $p in your chat, so the call isn't being recorded."
+        }
         // The call ended while the notice went: say it stopped, too.
         if (engine !== eng || peer != p) {
             scope.launch { runCatching { notice(p, RECORDING_OFF) } }
@@ -1126,6 +1169,32 @@ class CallController(
     }
 
     var onTicket: ((String, TrunkTicket) -> Unit)? = null
+
+    /** The line [joinGranted] last stepped onto, "host/name": a room is a slug, the same on two hosts. */
+    @Volatile private var grantedKey: String? = null
+
+    /**
+     * Step [line] onto the line [ticket] from [host] grants: the
+     * [onTicket] of both app roots. Off another group's line first.
+     * Kept on it, its bar took this line's name, this join was dropped
+     * because the line was busy, and its presence told that host we had
+     * left a line we were still on. A grant for the line we are on is
+     * nothing to do.
+     */
+    fun joinGranted(line: PartyLine, host: String, ticket: TrunkTicket, ourShip: String) {
+        val key = "$host/${ticket.name}"
+        val st = line.state.value
+        val busy = st is PartyState.Connecting || st is PartyState.Live
+        if (busy && grantedKey == key) return
+        if (busy) line.leave()
+        grantedKey = key
+        line.join(ticket, ourShip)
+        // The topic lives on the host's room, not in Galene.
+        line.setTopic(lineFor(host, ticket.name)?.title.orEmpty())
+        // Waits for the line to be on this room, so a rejoin, which winds
+        // the old session down first, counts too.
+        beginPresenceAnnounce(host, ticket.name, line.state)
+    }
 
     /** Diagnostic sink: iOS points it at the on-device call trace
      *  (Documents/call-trace.txt) so a user can hand back the Kotlin
@@ -1707,6 +1776,10 @@ class CallController(
                         scope.launch { poke(recv.from, TrunkSig.Hangup(old)) }
                     }
                     callId = sig.id
+                    // Theirs now, so they restart ice, not us: still the
+                    // caller here, a network change sent a restart offer
+                    // they ignore, and the call ended 25 s later.
+                    isCaller = false
                     pendingOffer = CompletableDeferred()
                     _state.value = CallUiState.Incoming(recv.from)
                     armRingWatchdog()
@@ -1847,7 +1920,7 @@ class CallController(
             val cur = _state.value
             if (cur is CallUiState.Active && cur.media != MediaState.Live) {
                 Log.w(TAG, "media never connected after ${connectTimeoutMs}ms")
-                endCall("couldn't connect")
+                giveUp("couldn't connect")
             }
         }
     }
@@ -1878,7 +1951,7 @@ class CallController(
                         // (the unavailable-engine says how to fix the
                         // mic). Ending here first replaced it with a
                         // generic "connection failed".
-                        if (_state.value is CallUiState.Active) tryIceRestart("media failed")
+                        if (_state.value is CallUiState.Active) tryIceRestart("media failed", mediaLost = true)
                     }
                     else -> {
                         val cur = _state.value
@@ -1894,8 +1967,10 @@ class CallController(
      * caller sends a fresh offer with ICE restart over the same
      * signaling; the callee answers in place. Either side gives up and
      * hangs up if media is not back within [RESTART_GIVE_UP_MS].
+     * [mediaLost] is false for a network change, which says nothing yet
+     * about whether the call still works.
      */
-    private fun tryIceRestart(why: String) {
+    private fun tryIceRestart(why: String, mediaLost: Boolean) {
         val eng = engine ?: return
         val id = callId ?: return
         val p = peer ?: return
@@ -1908,6 +1983,16 @@ class CallController(
                     Log.w(TAG, "ice restart: $why")
                     val offer = runCatching { eng.restartIce() }.getOrNull()
                     if (offer == null) {
+                        restarting = false
+                        // An engine that cannot restart (iOS has no restartIce
+                        // yet) ended every call whose phone changed networks,
+                        // one losing cellular in a lift among them, though
+                        // most calls carry on over the path left. Failed
+                        // media comes back here and ends it if not.
+                        if (!mediaLost) {
+                            Log.i(TAG, "no ice restart here; the call goes on unless its media fails")
+                            return@launch
+                        }
                         endCall("connection failed")
                         return@launch
                     }
@@ -1916,12 +2001,24 @@ class CallController(
             } else {
                 Log.w(TAG, "waiting for the caller to restart ice: $why")
             }
-            delay(RESTART_GIVE_UP_MS)
+            delay(restartGiveUpMs)
             val cur = _state.value
             if (restartToken == token && cur is CallUiState.Active && cur.media != MediaState.Live) {
-                endCall("connection failed")
+                giveUp("connection failed")
             }
         }
+    }
+
+    /**
+     * Give up on the call by ourselves, after a watchdog. A callee that
+     * never went live tells nobody: two of our devices answering at once
+     * each send an accept, the caller takes the first, and the other's
+     * give-up hung up the call the first one was on. The caller's own
+     * watchdog ends its side of a call that never connected.
+     */
+    private fun giveUp(reason: String) {
+        val cur = _state.value
+        if (!isCaller && cur is CallUiState.Active && cur.connectedAtMs == 0L) endLocal(reason) else endCall(reason)
     }
 
     private fun endCall(reason: String) {
@@ -1952,6 +2049,11 @@ class CallController(
         }
         ringToken++
         connectToken++
+        // The restart is this call's: left set, the next call never
+        // restarted, and its give-up timer could end the next call while
+        // it was still connecting.
+        restarting = false
+        restartToken++
         mediaWatch?.cancel()
         mediaWatch = null
         engine?.close()
@@ -2086,5 +2188,40 @@ class CallController(
         private const val RECORD_HEARTBEAT_MS = 30_000L
         private const val RESTART_GIVE_UP_MS = 25_000L
         private const val PRESENCE_HEARTBEAT_MS = 30_000L
+        /** How long [stop] waits on the hangup of a call it ends. */
+        private const val STOP_HANGUP_MS = 3_000L
+
+        /**
+         * Decline [callId] from [from] with no controller: the ring
+         * notification's Decline, in a process that may have no app up.
+         * On a channel of its own, ended on the ship after, or eyre kept
+         * it and queued its ack for nobody. Waits at most [waitMs] on the
+         * poke, whose ack comes down a stream nothing here reads. False
+         * when it could not be sent.
+         */
+        suspend fun declineWithoutApp(
+            session: UrbitSession,
+            from: String,
+            callId: String,
+            waitMs: Long = 5_000L,
+        ): Boolean {
+            val ch = session.openChannel()
+            return try {
+                // Timed out is sent: the PUT went, only its ack is late.
+                withTimeoutOrNull(waitMs) {
+                    ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.sendAction(from, TrunkSig.Reject(callId, "declined")))
+                }
+                true
+            } catch (c: kotlin.coroutines.cancellation.CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                Log.w(TAG, "decline poke failed", t)
+                false
+            } finally {
+                withContext(NonCancellable) {
+                    io.nisfeb.talon.util.runSuspendCatching { withTimeoutOrNull(3_000) { ch.delete() } }
+                }
+            }
+        }
     }
 }

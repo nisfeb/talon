@@ -25,6 +25,10 @@ import io.nisfeb.talon.util.Log
  * Stops on the same paths that clear the notification — answered,
  * declined, or the caller gave up — and on its own after the ring
  * timeout, so a missed call can never leave the phone buzzing.
+ *
+ * Android-only: no desktop analog. Desktop rings only while Talon is
+ * open, through CallController's own tones, and iOS rings through
+ * CallKit; this is the ring for a push that wakes a phone.
  */
 object Ringer {
 

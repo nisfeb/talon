@@ -43,6 +43,8 @@ class IosCallEngine(private val native: NativeRtcPeer) : CallEngine {
             }
         }
 
+    override fun switchCamera() = native.switchCamera()
+
     override suspend fun createOffer(): SessionDesc {
         _state.value = MediaState.Gathering
         val sdp = await { done -> native.createOffer(done) }

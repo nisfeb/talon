@@ -129,8 +129,11 @@ fun rememberPartyRecording(
     }
     val partyState by partyStateFlow.collectAsState()
     val isAdmin = (partyState as? io.nisfeb.talon.call.PartyState.Live)?.ops == true
-    LaunchedEffect(isAdmin, recordingNow) {
-        if (recordingNow && !isAdmin) {
+    // Only a live line can say we lost them: rejoining after a drop reads
+    // Connecting, and stopping there ended the recording the line kept.
+    val lostOps = (partyState as? io.nisfeb.talon.call.PartyState.Live)?.ops == false
+    LaunchedEffect(lostOps, recordingNow) {
+        if (recordingNow && lostOps) {
             partyLine?.stopRecording()
             callController?.endRecordingAnnounce()
         }

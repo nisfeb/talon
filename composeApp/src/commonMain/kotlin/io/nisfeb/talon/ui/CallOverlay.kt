@@ -235,6 +235,9 @@ fun CallStrip(
                     else controller.setCamera(!video.localOn)
                 }
             } else null,
+            onSwitchCamera = if (isVideoCallsSupported && isCameraSwitchSupported && engine != null) {
+                { controller.switchCamera() }
+            } else null,
             screenShare = if (isScreenShareSupported && engine != null) shareControl else null,
             sharing = video.sharing,
             videoPane = if (isVideoCallsSupported && engine != null && video.anyOn) {

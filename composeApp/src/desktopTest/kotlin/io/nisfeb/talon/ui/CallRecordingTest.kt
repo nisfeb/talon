@@ -140,6 +140,12 @@ class CallRecordingTest {
         showing("Not recording")
         showing("Couldn't tell ~bus in your chat")
         assertTrue("tap" !in events && !shows("● Recording"), events.toString())
+        // A notice not taken now may go later: its stop goes after it.
+        waitUntil(timeoutMillis = 10_000) { "notice ~bus: ${CallController.RECORDING_OFF}" in events }
+        assertEquals(
+            listOf("notice ~bus: ${CallController.RECORDING_ON}", "notice ~bus: ${CallController.RECORDING_OFF}"),
+            events.toList(),
+        )
     }
 
     @Test
