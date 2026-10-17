@@ -64,9 +64,10 @@ class CallRecorder(
     private class Clip {
         val chunks = mutableListOf<ByteArray>()
         @Volatile var rate = 0
-        /** Real captured frames, as opposed to the silence we padded in.
-         *  Zero means this speaker never spoke while we recorded, and the
-         *  clip is pure padding — not worth a Whisper upload. */
+        /** Real captured frames, as opposed to the silence we padded in,
+         *  muted frames among it. Zero means this speaker never spoke
+         *  while we recorded, and the clip is pure padding — not worth a
+         *  Whisper upload. */
         @Volatile var frames = 0
         @Volatile var open = true
     }
@@ -110,9 +111,13 @@ class CallRecorder(
         return { pcm, r ->
             // A sink registered just as stop() ran must not append into
             // a clip nobody will read again.
-            if (clip.open && _recording.value && !(isSelf && selfMuted())) {
+            if (clip.open && _recording.value) {
+                // Muted, our frame is kept as silence of its length, and
+                // not counted as speech. Dropped, everything said after
+                // the mute ran early in the recording by the mute's length.
+                val silent = isSelf && selfMuted()
                 clip.rate = r
-                clip.frames++
+                if (!silent) clip.frames++
                 if (r > rate) rate = r
                 if (clip.chunks.isEmpty()) {
                     // The lead silence, measured where the speaker's audio
@@ -120,7 +125,7 @@ class CallRecorder(
                     val elapsedMs = (now() - startMs).coerceAtLeast(0)
                     pad(clip.chunks, ((r.toLong() * elapsedMs / 1000L).toInt()) * 2)
                 }
-                clip.chunks.add(pcm)
+                clip.chunks.add(if (silent) ByteArray(pcm.size) else pcm)
             }
         }
     }
