@@ -137,7 +137,7 @@ fun LocationPicker(
                                 },
                                 onFailure = {
                                     busy = false
-                                    problem = "Could not look that up: ${it.message}"
+                                    problem = lookupFailedLine(it)
                                 },
                             )
                         }
@@ -169,6 +169,14 @@ fun LocationPicker(
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
 }
+
+/**
+ * A place lookup that failed, in words, with the way round it: the
+ * service's own text ("HTTP 500", a parser's complaint) went on screen.
+ */
+internal fun lookupFailedLine(e: Throwable): String =
+    if (io.nisfeb.talon.util.isTransientNetworkError(e)) "The place search did not answer. Check the connection, or type latitude, longitude."
+    else "Could not look that up. Try again, or type latitude, longitude."
 
 /**
  * "42.36, -71.06", with or without the space, and either order of
