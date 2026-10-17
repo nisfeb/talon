@@ -48,6 +48,7 @@ import io.nisfeb.talon.ui.ReactionPalette
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -60,6 +61,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Semaphore
 import io.nisfeb.talon.data.latestPerConversation
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -532,6 +534,73 @@ class TlonChatRepo(
         lastEventMs = nowMs()
         notificationHealth.markSseConnected(true)
         notificationHealth.markSseEvent(lastEventMs)
+        // The event stream opens with the channel, once it has had a PUT
+        // (eyre has no channel to stream before its first): eyre answers
+        // each poke down it. Opened only after the pass, every poke the
+        // pass made (settings, levels, the queue's drain) waited out its
+        // ack and lost the answer, so a refused queued DM was taken as
+        // sent. What it brings is applied only once the pass is done
+        // ([applying]), as before, so no fact lands under a scry that was
+        // read before it.
+        val applying = CompletableDeferred<Unit>()
+        // A stream that fails while the pass reads ends the session after
+        // the pass, not in the middle of it: the next pass resumes a kept
+        // channel, which reads nothing.
+        var streamFailed: Throwable? = null
+        // Acks ride their own queue instead of being awaited inline. Each
+        // ack is a network PUT to the ship; awaiting it after every event
+        // capped ingestion at one round-trip per event, so a burst of
+        // events (and the poke-echo that un-greys a just-sent message)
+        // drained only as fast as we could ack — the "pending stays on
+        // screen long after it posted" lag. Draining acks on a separate
+        // coroutine lets applyEvent (which does the reap) run at DB speed;
+        // the single consumer keeps acks in order and Eyre tolerates them
+        // arriving a beat behind ingestion.
+        val ackQueue = Channel<Long>(Channel.UNLIMITED)
+        val ackJob = launch {
+            // In batches: one ack covers every event before it.
+            ackInBatches(ackQueue) { ch.ack(it) }
+        }
+        fun stream() = launch {
+            try {
+                // Buffered without bound: held at the gate, the stream
+                // would stop at the first event, and every ack behind it.
+                ch.events().buffer(Channel.UNLIMITED).collect { event ->
+                    applying.await()
+                    lastEventMs = nowMs()
+                    notificationHealth.markSseEvent(lastEventMs)
+                    runCatching { applyEvent(event.body) }
+                        .onFailure {
+                            // Rethrow cancellation so structured-concurrency
+                            // children of applyEvent can propagate properly;
+                            // without this any future child coroutine that
+                            // gets cancelled would silently fall through and
+                            // the caller would see a "stuck" UI.
+                            if (it is kotlinx.coroutines.CancellationException) throw it
+                            Log.w(TAG, "apply event failed", it)
+                        }
+                    // Acked once applied, never before: an event acked and
+                    // then lost with the session is not replayed.
+                    event.id?.let {
+                        ch.applied(it)
+                        ackQueue.trySend(it)
+                    }
+                }
+                Log.w(TAG, "event stream completed; will reconnect")
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                streamFailed = t
+            } finally {
+                // Close on normal completion AND cancellation so the ack
+                // consumer drains what's queued and exits with us.
+                ackQueue.close()
+                // The channel stays: the next stream resumes it. It is
+                // deleted where it is given up, in stop() and when the ship
+                // dropped one of its subscriptions (see applyEvent).
+            }
+        }
+        var streaming: Job? = null
         if (kept != null) {
             Log.i(TAG, "resuming the channel")
             // What came while it was down is replayed: nothing to read again.
@@ -613,6 +682,7 @@ class TlonChatRepo(
                     }
                     .onFailure { Log.e(TAG, "subscribe failed", it) }
             }
+            streaming = stream()
 
             // Re-scry init-posts + activity every reconnect so we catch up on
             // anything that landed while the stream was down. The
@@ -805,6 +875,10 @@ class TlonChatRepo(
             // streamed, so the deep read launched above still finishes.
             if (ch.gone) {
                 lastBootstrapMs = 0L
+                streaming?.cancelAndJoin()
+                // Gone by the stream itself, a 403 among them: said, so the
+                // next pass waits as the loop has it wait for that.
+                streamFailed?.let { throw it }
                 return@coroutineScope
             }
         }
@@ -816,50 +890,8 @@ class TlonChatRepo(
         // quietest ship: measuring events alone made this fire on every
         // idle ship, forever, and each reconnect re-ran the whole
         // bootstrap. See UrbitChannel.streamIdleMs.
-        // Acks ride their own queue instead of being awaited inline. Each
-        // ack is a network PUT to the ship; awaiting it after every event
-        // capped ingestion at one round-trip per event, so a burst of
-        // events (and the poke-echo that un-greys a just-sent message)
-        // drained only as fast as we could ack — the "pending stays on
-        // screen long after it posted" lag. Draining acks on a separate
-        // coroutine lets applyEvent (which does the reap) run at DB speed;
-        // the single consumer keeps acks in order and Eyre tolerates them
-        // arriving a beat behind ingestion.
-        val ackQueue = Channel<Long>(Channel.UNLIMITED)
-        val ackJob = launch {
-            // In batches: one ack covers every event before it.
-            ackInBatches(ackQueue) { ch.ack(it) }
-        }
-        val collectJob = launch {
-            try {
-                ch.events().collect { event ->
-                    lastEventMs = nowMs()
-                    notificationHealth.markSseEvent(lastEventMs)
-                    runCatching { applyEvent(event.body) }
-                        .onFailure {
-                            // Rethrow cancellation so structured-concurrency
-                            // children of applyEvent can propagate properly;
-                            // without this any future child coroutine that
-                            // gets cancelled would silently fall through and
-                            // the caller would see a "stuck" UI.
-                            if (it is kotlinx.coroutines.CancellationException) throw it
-                            Log.w(TAG, "apply event failed", it)
-                        }
-                    event.id?.let {
-                        ch.applied(it)
-                        ackQueue.trySend(it)
-                    }
-                }
-            } finally {
-                // Close on normal completion AND cancellation so the ack
-                // consumer drains what's queued and exits with us.
-                ackQueue.close()
-                // The channel stays: the next stream resumes it. It is
-                // deleted where it is given up, in stop() and when the ship
-                // dropped one of its subscriptions (see applyEvent).
-            }
-            Log.w(TAG, "event stream completed; will reconnect")
-        }
+        val collectJob = streaming ?: stream()
+        applying.complete(Unit)
         collectJob.invokeOnCompletion { ackJob.cancel() }
         sessionJob = collectJob
         // A reconnect asked for while this one was connecting is answered
@@ -880,6 +912,7 @@ class TlonChatRepo(
         }
         collectJob.join()
         watchdogJob.cancel()
+        streamFailed?.let { throw it }
     }
 
     /**

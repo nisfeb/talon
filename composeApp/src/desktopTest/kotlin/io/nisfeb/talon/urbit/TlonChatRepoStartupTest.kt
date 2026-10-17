@@ -460,9 +460,13 @@ class TlonChatRepoStartupTest {
         loseWatch = { w -> if (w == RECIPES && once.getAndSet(false)) java.io.IOException("lost") else null }
     }) { _ ->
         until("the notebook watched") { RECIPES in ship.subscribed }
-        until("a stream on the new channel") { channelsStreamed().isNotEmpty() }
+        until("a stream on the new channel") { channelsPut().size == 2 && channelsStreamed().lastOrNull() == channelsPut().last() }
         assertEquals(2, channelsPut().size, "a second channel: ${channelsPut()}")
-        assertEquals(channelsPut().last(), channelsStreamed().single(), "the stream is the one with every watch")
+        // The stream opens with the subscribe PUT, so the poke answers of
+        // the pass reach it (review H8): the channel given up had one too,
+        // dropped with it. The one that stays is on the channel with
+        // every watch.
+        assertEquals(channelsPut().last(), channelsStreamed().last(), "the stream is the one with every watch")
     }
 
     // Its watch goes out before the stream opens, so a channel given up
@@ -591,5 +595,45 @@ class TlonChatRepoStartupTest {
         until("the invite gone") { repo.invitesFlow.value?.none { it.flag == "~bus/garden" } == true }
         assertEquals(1, announced.size, "announced once")
     }
-}
 
+    // Eyre answers each poke down the event stream, and the stream opened
+    // only after the whole first pass: every poke made while the pass read
+    // waited out its 15 s ack, and a refused one was taken as sent (review
+    // H8, 2026-10-17). The notebook list, the pass's last read, is held,
+    // so the queue's drain runs while the pass still reads.
+    @Test
+    fun `a poke made while the first pass reads hears the ship's answer, a refusal included`() = runBlocking<Unit> {
+        val refused = "~zod/170141184506"
+        val taken = "~zod/170141184507"
+        for ((id, text, sent) in listOf(Triple(refused, "refused here", 5_000L), Triple(taken, "taken", 6_000L))) {
+            db.messages().upsert(io.nisfeb.talon.data.MessageEntity("~bus", id, "~zod", sent, """[{"inline":["$text"]}]""", "/chat", status = "queued"))
+        }
+        started(prepare = {
+            scries[init] = initPosts
+            holdScry = { if (it == "notes/v0/notebooks") 30_000 else 0 }
+            refuse = { if (it.app == "chat" && "refused here" in it.json.toString()) "not allowed" else null }
+        }) { _ ->
+            val t0 = System.currentTimeMillis()
+            withTimeout(10_000) {
+                while (db.messages().getOne("~bus", refused)?.status != "failed" || db.messages().getOne("~bus", taken)?.status != null) delay(50)
+            }
+            assertTrue(System.currentTimeMillis() - t0 < 10_000)
+            assertTrue("notes/v0/notebooks" in ship.scried, "the pass was still reading: ${ship.scried}")
+            assertEquals(2, ship.pokesTo("chat").size, "each answered, neither waited out")
+        }
+    }
+
+    // A post in flight when the last run was killed stayed "pending" with
+    // no send of it running, and the refresh's purge deleted it (review M1).
+    @Test
+    fun `a post left in flight by the last run goes with the queue`() = runBlocking<Unit> {
+        db.messages().upsert(io.nisfeb.talon.data.MessageEntity("chat/~bus/general", "local_1", "~zod", 5_000, """[{"inline":["mid-send"]}]""", "/chat", status = "pending"))
+        started(prepare = {
+            scries[init] = initPosts
+            scries["channels/v4/chat/~bus/general/posts/newest/30/post"] = """{"posts":{}}"""
+        }) { _ ->
+            until("asked whether it landed, then sent again") { ship.pokesTo("channels").any { "mid-send" in it.json.toString() } }
+            until("in flight again, until its echo") { db.messages().getOne("chat/~bus/general", "local_1")?.status == "pending" }
+        }
+    }
+}
