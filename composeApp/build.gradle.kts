@@ -474,6 +474,13 @@ compose.desktop {
         // login screen; object-heavy heaps save more. The AOT cache below
         // is trained with it, and a cache only maps under the same flag.
         jvmArgs += listOf("-XX:+UseCompactObjectHeaders")
+        // Main.kt sets the X11 window class to "Talon" so panels match the
+        // window to its desktop entry; the field is in a package Java keeps
+        // closed. Linux only: each OS packages on its own runner, and
+        // elsewhere the JVM would warn the package doesn't exist.
+        if (System.getProperty("os.name").startsWith("Linux")) {
+            jvmArgs += listOf("--add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED")
+        }
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)

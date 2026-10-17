@@ -252,6 +252,24 @@ internal fun startupProbeLine(): String {
     return "talon-first-frame-ms=$ms heap-used-mb=${(rt.totalMemory() - rt.freeMemory()) / (1024 * 1024)}"
 }
 
+/**
+ * Name the X11 window class [name] so Linux panels and docks match Talon's
+ * windows to its desktop entry (StartupWMClass=Talon in the AppImage) and
+ * show its icon. AWT otherwise derives the class from the main class,
+ * io-nisfeb-talon-compose-MainKt. Reaching the field needs --add-opens
+ * java.desktop/sun.awt.X11, which the Linux build adds; anywhere else this
+ * is a no-op.
+ */
+private fun setX11WmClass(name: String) {
+    runCatching {
+        val toolkit = java.awt.Toolkit.getDefaultToolkit()
+        if (toolkit.javaClass.name != "sun.awt.X11.XToolkit") return
+        toolkit.javaClass.getDeclaredField("awtAppClassName")
+            .apply { isAccessible = true }
+            .set(null, name)
+    }
+}
+
 fun main() {
     io.nisfeb.talon.util.DesktopNetworkWatcher.start()
     io.nisfeb.talon.util.UiWatchdog.start()
@@ -265,6 +283,8 @@ fun main() {
     Thread.setDefaultUncaughtExceptionHandler(
         ExitPolicy.fatalHandler(Thread.getDefaultUncaughtExceptionHandler(), { m, e -> io.nisfeb.talon.util.Log.e("Talon", m, e) }),
     )
+    // Before any window exists: the class is read when a window is created.
+    setX11WmClass("Talon")
 
     // Decide once, in a child JVM, whether this host's libstdc++ can run
     // the DJL tokenizer without a SIGSEGV. Fire-and-forget; the verdict
