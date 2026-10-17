@@ -31,7 +31,8 @@ import kotlin.test.assertTrue
 /**
  * Orrery after a ship that did not answer: a first check that failed is
  * tried again until the beacon runs, turning it off with a reader whose
- * state could not be read still turns that reader off or says it did not.
+ * state could not be read still turns that reader off or says it did not,
+ * and a refinement asked for from a dialog then closed still lands.
  */
 class OrreryRecoveryTest {
     private val page = "<html><body><h1>502 Bad Gateway</h1></body></html>"
@@ -152,5 +153,25 @@ class OrreryRecoveryTest {
             assertTrue(off, "off here all the same")
             assertTrue(db.orreryAccounts().get("~zod") != null, "the key is kept, to give back at the next start")
         }
+    }
+
+    @Test
+    fun `a refinement asked for from a dialog then closed still lands, and what it filed beside it raises nothing`() = attached { repo, _ ->
+        until("present") { repo.availability.value == OrreryAvailability.PRESENT }
+        until("the open list read") { repo.actions.value.isNotEmpty() }
+        val raised = CopyOnWriteArrayList<String>()
+        repo.onActions = { raise, _ -> raised += raise.map { it.id } }
+        refineHoldMs = 400
+        val dialog = CoroutineScope(SupervisorJob())
+        dialog.launch { repo.refine("a1", "blue ones") }
+        delay(100)
+        dialog.coroutineContext.job.cancelAndJoin()
+        until("the revision lands though the dialog went") { repo.actions.value.any { it.title == "Buy blue goggles" } }
+        assertEquals(listOf("a1", "a2"), repo.actions.value.map { it.id })
+        // The ship lists them both now: the one filed beside it was seen in the dialog.
+        actions = """[{"id":"a1","kind":"task","title":"Buy blue goggles","status":"proposed","by":"generator"},
+            {"id":"a2","kind":"task","title":"Book the pool","status":"proposed","by":"generator"}]"""
+        repo.refreshActions()
+        assertEquals(emptyList(), raised.toList())
     }
 }

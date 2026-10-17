@@ -1802,17 +1802,22 @@ class OrreryRepo(
      * time it could not move, or refused outright.
      *
      * It stays proposed either way: approving is the same tap it was.
+     * On this repo's scope: a dialog closed while the model reads does
+     * not drop the revision or what it filed beside it.
      */
-    suspend fun refine(id: String, text: String): Result<io.nisfeb.talon.orrery.Refined> = runCatching {
+    suspend fun refine(id: String, text: String): Result<io.nisfeb.talon.orrery.Refined> = scope.async { runCatching {
         val a = api ?: error("Not attached to a ship.")
         val s = ship ?: error("Not attached to a ship.")
         val answer = a.refine(db.orreryAccounts().get(s)?.token, id, text)
         answer.action?.let { revised ->
             _actions.value = (_actions.value.map { if (it.id == revised.id) revised else it } + answer.extras)
                 .distinctBy { it.id }
+            // Seen in the dialog that asked for them, as [instruct]'s are:
+            // the next read raised a notification for each.
+            seenProposals = seenProposals?.plus(answer.extras.filter { it.status in OPEN_STATUSES }.map { it.id })
         }
         answer
-    }
+    } }.await()
 
     /**
      * The same, taken at once: the lists change now and the ship is told
