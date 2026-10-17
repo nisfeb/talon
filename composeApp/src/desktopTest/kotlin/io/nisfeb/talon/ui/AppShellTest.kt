@@ -924,6 +924,51 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { showing("Message") }
     }
 
+    // ---- Adding a contact (review 2026-10-17) ----
+
+    private fun ComposeUiTest.addOnContacts(who: String) {
+        onNodeWithContentDescription("More").performClick()
+        onNodeWithText("Contacts").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("~patp, or a word name") }
+        onNodeWithText("~patp, or a word name").performTextInput(who)
+        waitForIdle()
+        onNodeWithText("Add").performClick()
+    }
+
+    // The fields cleared at once and the write's end was thrown away, so a
+    // refusal left nothing to try again with and said nothing.
+    @Test
+    fun `an add the ship refuses keeps what was typed and says why`() = app(setup = {
+        refuse = { if (it.app == "contacts") "not now" else null }
+    }) { ship ->
+        addOnContacts("~bus")
+        waitUntil(timeoutMillis = 10_000) { showing("Couldn't add ~bus: the ship refused it (not now).") }
+        assertTrue(ship.pokesTo("contacts").isNotEmpty())
+        assertTrue(showing("~bus"), "what was typed is still in the box")
+        assertTrue(showing("Copy error details"))
+    }
+
+    @Test
+    fun `an add that never reaches the ship says it calmly, as something to try again`() = app(setup = {
+        lose = { if (it.app == "contacts") kotlinx.io.IOException("connection reset") else null }
+    }) {
+        addOnContacts("~bus")
+        waitUntil(timeoutMillis = 10_000) { showing("Couldn't add ~bus: your ship is slow or out of reach. Try again when it's back.") }
+        assertTrue(onAllNodes(hasSetTextAction() and androidx.compose.ui.test.hasText("~bus")).fetchSemanticsNodes().isNotEmpty(), "kept")
+    }
+
+    // Leaving Contacts mid-add does not stop it: it runs on the repo's scope.
+    @Test
+    fun `an add left midway still reaches the ship`() = app { ship ->
+        ship.holdPoke = 1_500
+        addOnContacts("~bus")
+        onNodeWithContentDescription("Back").performClick()
+        home()
+        waitUntil(timeoutMillis = 10_000) { ship.pokesTo("contacts").size >= 2 }
+        ship.holdPoke = 0
+        assertTrue(ship.pokesTo("contacts").any { "page" in it.json.toString() }, ship.pokesTo("contacts").toString())
+    }
+
     // Areas of the app get shortcuts the owner sets: pressed anywhere, the
     // area opens as its rail item would open it.
     @Test

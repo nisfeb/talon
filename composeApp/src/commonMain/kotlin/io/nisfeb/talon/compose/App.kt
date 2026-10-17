@@ -2607,11 +2607,7 @@ fun App(
                             showNewDm = false
                             openChat = peer
                         },
-                        onAddContact = { patp, nickname ->
-                            rightPaneScope.launch {
-                                runCatching { repo.addContact(patp, nickname) }
-                            }
-                        },
+                        onAddContact = { patp, nickname -> repo.carry { repo.addContact(patp, nickname) } },
                         bookContacts = bookContacts,
                         onJoinGroup = { flag ->
                             showNewDm = false
@@ -2623,9 +2619,9 @@ fun App(
                     showContacts -> io.nisfeb.talon.ui.screens.ContactsScreen(
                         db = db,
                         bookContacts = bookContacts,
-                        onAddContact = { patp, nickname ->
-                            rightPaneScope.launch { runCatching { repo.addContact(patp, nickname) } }
-                        },
+                        // On the repo's scope, awaited: Contacts keeps what was
+                        // typed until the ship has it, and says why when not.
+                        onAddContact = { patp, nickname -> repo.carry { repo.addContact(patp, nickname) } },
                         onRemoveContact = { patp ->
                             rightPaneScope.launch { runCatching { repo.removeContact(patp) } }
                         },

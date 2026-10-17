@@ -2080,9 +2080,9 @@ fun TalonApp(
             contactsOpen -> io.nisfeb.talon.ui.screens.ContactsScreen(
                 db = app.db,
                 bookContacts = bookContacts,
-                onAddContact = { patp, nickname ->
-                    appScope.launch { runCatching { app.repo.addContact(patp, nickname) } }
-                },
+                // On the repo's scope, awaited: Contacts keeps what was typed
+                // until the ship has it, and says why when not.
+                onAddContact = { patp, nickname -> app.repo.carry { app.repo.addContact(patp, nickname) } },
                 onRemoveContact = { patp ->
                     appScope.launch { runCatching { app.repo.removeContact(patp) } }
                 },
@@ -2954,9 +2954,7 @@ fun TalonApp(
                     openWhom = patp
                 },
                 onBack = { newDmOpen = false },
-                onAddContact = { patp, nickname ->
-                    appScope.launch { runCatching { app.repo.addContact(patp, nickname) } }
-                },
+                onAddContact = { patp, nickname -> app.repo.carry { app.repo.addContact(patp, nickname) } },
                 bookContacts = bookContacts,
                 onJoinGroup = { flag ->
                     newDmOpen = false

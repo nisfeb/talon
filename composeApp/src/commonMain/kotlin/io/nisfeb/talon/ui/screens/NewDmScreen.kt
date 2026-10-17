@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.Avatar
 import androidx.compose.material.icons.Icons
@@ -45,9 +46,10 @@ fun NewDmScreen(
     db: AppDatabase,
     onPickPeer: (patp: String) -> Unit,
     onBack: () -> Unit,
-    /** Add the entered ~patp to %contacts (with an optional nickname).
+    /** Add the entered ~patp to %contacts (with an optional nickname),
+     *  returning once the ship has it and throwing when it does not.
      *  Default no-op for call sites that haven't wired it. */
-    onAddContact: (patp: String, nickname: String?) -> Unit = { _, _ -> },
+    onAddContact: suspend (patp: String, nickname: String?) -> Unit = { _, _ -> },
     /** Ships already in the curated contact book — drives whether the
      *  "Add contact" affordance shows. NOT the broad /v1/all table
      *  (which includes every known peer). */
@@ -64,6 +66,9 @@ fun NewDmScreen(
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
     var query by remember { mutableStateOf("") }
     var newContactName by remember { mutableStateOf("") }
+    val addScope = androidx.compose.runtime.rememberCoroutineScope()
+    var adding by remember { mutableStateOf(false) }
+    var addProblem by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
     val contacts by remember { db.contacts().stream() }.collectAsState(initial = emptyList())
 
     val q = query.trim().lowercase().removePrefix("~")
@@ -215,11 +220,26 @@ fun NewDmScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                val addContact = {
-                    onAddContact(asPatp, newContactName.trim().takeIf { it.isNotBlank() })
-                    newContactName = ""
-                    // Keep `query`: the natural flow is add-then-Start,
-                    // and clearing it would disable the Start button.
+                // The name stays until the ship has it, and a refusal says
+                // so, as on Contacts.
+                val addContact: () -> Unit = {
+                    val patp = asPatp
+                    adding = true
+                    addProblem = null
+                    addScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                        try {
+                            onAddContact(patp, newContactName.trim().takeIf { it.isNotBlank() })
+                            newContactName = ""
+                            // Keep `query`: the natural flow is add-then-Start,
+                            // and clearing it would disable the Start button.
+                        } catch (c: kotlinx.coroutines.CancellationException) {
+                            throw c
+                        } catch (t: Throwable) {
+                            addProblem = io.nisfeb.talon.util.problemOf("Couldn't add ${io.nisfeb.talon.ui.shipHandle(patp)}", t)
+                        } finally {
+                            adding = false
+                        }
+                    }
                 }
                 OutlinedTextField(
                     value = newContactName,
@@ -227,12 +247,13 @@ fun NewDmScreen(
                     placeholder = { Text("nickname (optional)") },
                     singleLine = true,
                     keyboardOptions = io.nisfeb.talon.ui.GoKeyboard,
-                    keyboardActions = io.nisfeb.talon.ui.goActions(addContact),
-                    modifier = Modifier.weight(1f).submitOnEnter(true, addContact),
+                    keyboardActions = io.nisfeb.talon.ui.goActions { if (!adding) addContact() },
+                    modifier = Modifier.weight(1f).submitOnEnter(!adding, addContact),
                 )
-                TextButton(onClick = addContact) { Text("Add contact") }
+                TextButton(onClick = addContact, enabled = !adding) { Text(if (adding) "Adding…" else "Add contact") }
             }
         }
+        addProblem?.let { io.nisfeb.talon.ui.ProblemLine(it) }
         HorizontalDivider()
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
