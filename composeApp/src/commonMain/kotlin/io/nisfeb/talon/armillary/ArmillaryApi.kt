@@ -207,15 +207,22 @@ class ArmillaryApi(
         return text
     }
 
-    /** Anything that stops a request arriving is [ArmillaryError.Unreachable]. */
-    private suspend fun send(path: String, build: HttpRequestBuilder.() -> Unit): HttpResponse =
-        try {
+    /**
+     * Anything that stops a request arriving is [ArmillaryError.Unreachable],
+     * and so is the web server in front of the ship answering for it. The
+     * ship's own 502 for a vendor that refused is JSON, and stays a refusal.
+     */
+    private suspend fun send(path: String, build: HttpRequestBuilder.() -> Unit): HttpResponse {
+        val resp = try {
             owner.request(root + path, build)
         } catch (c: CancellationException) {
             throw c
         } catch (t: Throwable) {
             throw ArmillaryError.Unreachable(t)
         }
+        io.nisfeb.talon.orrery.proxyAnswered(resp)?.let { throw ArmillaryError.Unreachable(it) }
+        return resp
+    }
 
     private inline fun <T> reading(block: () -> T): T = try {
         block()

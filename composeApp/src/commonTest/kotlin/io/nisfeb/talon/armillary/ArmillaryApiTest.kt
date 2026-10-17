@@ -238,6 +238,22 @@ class ArmillaryApiTest {
         assertEquals(CheckoutAnswer.Refused("amount: below the minimum"), refused.checkout("stripe", null, 1L))
     }
 
+    // nginx's page for a ship that is down was read as the ship refusing,
+    // and a checkout as the vendor refusing it.
+    @Test
+    fun `a proxy's page for a ship that is down is no answer, and the ship's own 502 is still a refusal`() = runTest {
+        val page = "<html><body><h1>502 Bad Gateway</h1></body></html>"
+        for (status in listOf(HttpStatusCode.BadGateway, HttpStatusCode.ServiceUnavailable, HttpStatusCode.GatewayTimeout)) {
+            val down = api { status to page }
+            val e = runCatching { down.probe() }.exceptionOrNull()
+            assertTrue(e is ArmillaryError.Unreachable && (e.cause as io.nisfeb.talon.orrery.ProxyAnswered).status == status.value, "$status: $e")
+            assertTrue(runCatching { down.checkout("stripe", null, 5_000_000L) }.exceptionOrNull() is ArmillaryError.Unreachable)
+            assertTrue(runCatching { down.deleteAccount() }.exceptionOrNull() is ArmillaryError.Unreachable)
+            assertTrue(runCatching { api { status to "" }.account() }.exceptionOrNull() is ArmillaryError.Unreachable)
+        }
+        assertEquals(DeleteAnswer.Refused("stripe: down"), api { HttpStatusCode.BadGateway to """{"error":"stripe: down"}""" }.deleteAccount())
+    }
+
     @Test
     fun `a mint that has not landed inside the wait answers false, and so does a desk without leases`() = runTest {
         assertTrue(api { HttpStatusCode.OK to """{"id":"k1","name":"Talon","secret":"s"}""" }.mintKey("Talon"))

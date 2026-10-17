@@ -1791,7 +1791,9 @@ class OrreryRepo(
             setAction(id, status, note).onFailure { e ->
                 answering.update { it - id }
                 if (was != null) _actions.value = listOf(was) + _actions.value.filterNot { it.id == id }
-                _answerProblem.value = "Orrery did not take that answer: ${e.message ?: "no reason given"}"
+                // No answer is not a refusal: said as one, a proxy's error page was the reason.
+                _answerProblem.value = if (e is OrreryError.Unreachable) "Your ship did not answer, so that answer was not given. Try it again."
+                else "Orrery did not take that answer: ${e.message ?: "no reason given"}"
                 Log.w(TAG, "answer $status on $id refused: ${e.message}")
             }
         }
@@ -1866,11 +1868,12 @@ class OrreryRepo(
          * connection, or a proxy answering 502 or 503 with no ship behind
          * it, cost it nothing, and waiting longer after those left the pipe
          * idle for hours after a restart. The first waits longer each time;
-         * the second keeps the usual ten minutes.
+         * the second keeps the usual ten minutes. A proxy's 504 is a ship
+         * too busy to answer in time, which is the first.
          */
         internal fun costTheShip(e: Throwable): Boolean = when (e) {
             is OrreryError.Refused -> e.status != 502 && e.status != 503
-            is OrreryError.Unreachable -> generateSequence(e.cause) { it.cause }.take(5).any {
+            is OrreryError.Unreachable -> (e.cause as? ProxyAnswered)?.let { it.status == 504 } ?: generateSequence(e.cause) { it.cause }.take(5).any {
                 it is io.ktor.client.plugins.HttpRequestTimeoutException || it is io.ktor.client.network.sockets.SocketTimeoutException
             }
             else -> !io.nisfeb.talon.util.isTransientNetworkError(e)
