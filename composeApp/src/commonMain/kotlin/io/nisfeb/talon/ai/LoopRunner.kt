@@ -74,10 +74,11 @@ class LoopRunner(
         }
         val output = outcome.getOrElse {
             if (it is CancellationException) {
-                // Cut short (its time ran out, or Android stopped the work):
-                // said, not silent. The stamp above stands, so it is not run
-                // a second time for this fire.
-                withContext(NonCancellable) { record(loop, ts, ok = false, output = CUT_SHORT) }
+                // Cut short (its time ran out, or Talon was stopped): said,
+                // not silent. The stamp above stands, so it is not run a
+                // second time for this fire. Caught, so a database closing
+                // under a quit cannot replace the cancellation.
+                withContext(NonCancellable) { runCatching { record(loop, ts, ok = false, output = CUT_SHORT) } }
                 throw it
             }
             "Error: ${it.message ?: it::class.simpleName}"
@@ -132,7 +133,7 @@ class LoopRunner(
     companion object {
         const val RUN_HISTORY_KEEP = 20
         const val NOTIFY_BODY_CHARS = 200
-        const val CUT_SHORT = "Stopped before it finished: it ran out of time, or the phone ended the run. " +
+        const val CUT_SHORT = "Stopped before it finished: it ran out of time, or Talon was stopped. " +
             "It may have done part of it. It runs again at its next time."
 
 

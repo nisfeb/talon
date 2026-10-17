@@ -62,6 +62,20 @@ class LoopRunnerTest {
         assertEquals(listOf(Triple(7L, "Loop: Test", LoopRunner.CUT_SHORT.take(LoopRunner.NOTIFY_BODY_CHARS))), told)
     }
 
+    // Desktop closes the database as it quits, maybe mid-run: the record
+    // failing must not replace the cancellation, or runDue went on.
+    @Test
+    fun `a cut short run whose record fails still ends as cancelled`() = runBlocking {
+        val runner = LoopRunner(
+            loops = FakeLoopDao(), runs = FakeLoopRunDao(closed = true), tools = emptyList(),
+            completer = { _, _, _ -> throw CancellationException("quit") },
+            aiConfig = { config("k") },
+            notify = { _, _, _ -> },
+        )
+        assertFailsWith<CancellationException> { runner.runLoop(loop) }
+        Unit
+    }
+
     @Test
     fun `a run its budget cuts short in the middle is said, and the loop is not due again`() = runBlocking {
         val loops = FakeLoopDao(listOf(loop))
@@ -198,9 +212,12 @@ private class FakeLoopDao(private val due: List<LoopEntity> = emptyList()) : Loo
     override suspend fun clearAll() {}
 }
 
-private class FakeLoopRunDao : LoopRunDao {
+private class FakeLoopRunDao(private val closed: Boolean = false) : LoopRunDao {
     val inserted = mutableListOf<LoopRunEntity>()
-    override suspend fun insert(run: LoopRunEntity): Long { inserted += run; return run.id }
+    override suspend fun insert(run: LoopRunEntity): Long {
+        check(!closed) { "the database is closed" }
+        inserted += run; return run.id
+    }
     override fun streamForLoop(loopId: Long, limit: Int): Flow<List<LoopRunEntity>> = flowOf(emptyList())
     override suspend fun deleteForLoop(loopId: Long) {}
     override suspend fun pruneForLoop(loopId: Long, keep: Int) {}
