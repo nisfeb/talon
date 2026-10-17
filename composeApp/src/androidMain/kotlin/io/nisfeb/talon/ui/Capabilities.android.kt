@@ -28,13 +28,13 @@ actual val isWindowFullScreenSupported: Boolean = false
 // UnifiedPush wakes the process, so a ring lands with the app closed.
 actual val isBackgroundCallRingSupported: Boolean = true
 
-// The system back gesture already owns the left edge here.
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = true
 // Android: port pending (MediaProjection behind a foreground service).
 actual val isScreenShareSupported: Boolean = false
 actual val isCameraSwitchSupported: Boolean = true
 
+// The system back gesture already owns the left edge here.
 actual val isEdgeSwipeBackSupported: Boolean = false
 
 // Android draws colour emoji in the default family already.

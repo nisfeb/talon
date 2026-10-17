@@ -20,7 +20,7 @@ package io.nisfeb.talon.ui
  *  - isCallsSupported — A, D, i: a libwebrtc-backed CallEngine actual exists on each.
  *  - isCallRecordingSupported — A, D (party lines and 1:1 calls); i: the Swift bridge exposes no PCM tap.
  *  - isWindowFullScreenSupported — D (window placement is ours); A/i: the app already is the whole screen.
- *  - isBackgroundCallRingSupported — A (UnifiedPush), D (long-running process), i (PushKit + CallKit).
+ *  - isBackgroundCallRingSupported — A (UnifiedPush), i (PushKit + CallKit). D: closing the window quits, so a ring lands only while Talon is open.
  *  - isVideoCallsSupported — A, D, i: camera capture + render end-to-end on all three.
  *  - isPartyVideoSupported — A, D, i: PeerLink publishes and renders cameras on all three.
  *  - isCameraSwitchSupported — A, i; D: a webcam has one lens and no switch.
@@ -38,7 +38,7 @@ package io.nisfeb.talon.ui
  *  - isRelayNotificationSetupNeeded — i: the app is suspended in the background, so the relay's push is its only notification. A: a foreground service keeps the ship's stream. D: notifies while it runs.
  *  - isAppIconBadgeSupported — i: the unread count on the app icon, a switch in Settings (off until turned on). A: launchers draw their own dot from the notifications. D: no icon to badge.
  *  - isArmillaryPurchaseSupported — A, D; i on the US App Store storefront only. Apple allows a button to an outside checkout there and nowhere else (guideline 3.1.1(a)), so elsewhere buying, its pitch and every "top up" go. The card, the balance and the history do not depend on it.
- *  - isPhoneDialSupported — A, i: the assistant's call_place opens the dialer at a number. D: a computer has no phone to dial, and tel: links go nowhere.
+ *  - isPhoneDialSupported — A, i on an iPhone: the assistant's call_place opens the dialer at a number. D, iPad: no phone to dial, and tel: links go nowhere.
  *  - isBraveLeoSupported: D, i, where Brave takes a model of your own (Settings > Leo > Bring your own model; iOS since Brave 1.88). A: Brave for Android has no such form yet (brave-browser#59722).
  *
  * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
@@ -46,7 +46,7 @@ package io.nisfeb.talon.ui
  */
 expect val isVoiceMessagesSupported: Boolean
 
-/** Whether a tel: link opens a dialer, so the assistant can offer call_place. */
+/** Whether a tel: link opens a dialer, so the assistant can offer call_place: a phone, not an iPad. */
 expect val isPhoneDialSupported: Boolean
 
 /**
@@ -228,24 +228,14 @@ expect val isWindowFullScreenSupported: Boolean
 /**
  * Whether an incoming call can ring this device while the app is in
  * the background. Android: true (UnifiedPush wakes the process).
- * Desktop: true (a long-running process hears the channel). iOS: true
+ * Desktop: false, closing the window quits Talon, so it rings only
+ * while open (minimised or unfocused still rings). iOS: true
  * — PushKit wakes the app and CallKit rings it, over the relay's APNs
  * VoIP leg. Gates only an informational line in Settings' calls
  * section; nothing is greyed out.
  */
 expect val isBackgroundCallRingSupported: Boolean
 
-/**
- * A swipe in from the left edge navigates *back* rather than opening
- * the ship switcher.
- *
- * True on iOS: a Compose view controller gets none of UIKit's
- * navigation gesture, so the app supplies it — and going back is far
- * more frequent than switching ships, which keeps its tap affordance
- * on the Talon logo. False on Android, where the system back gesture
- * already owns the edge and the drawer can have the in-app swipe;
- * false on desktop, which has no touch edge at all.
- */
 /**
  * Camera on a 1:1 call.
  *
@@ -282,6 +272,17 @@ expect val isScreenShareSupported: Boolean
  */
 expect val isCameraSwitchSupported: Boolean
 
+/**
+ * A swipe in from the left edge navigates *back* rather than opening
+ * the ship switcher.
+ *
+ * True on iOS: a Compose view controller gets none of UIKit's
+ * navigation gesture, so the app supplies it — and going back is far
+ * more frequent than switching ships, which keeps its tap affordance
+ * on the Talon logo. False on Android, where the system back gesture
+ * already owns the edge and the drawer can have the in-app swipe;
+ * false on desktop, which has no touch edge at all.
+ */
 expect val isEdgeSwipeBackSupported: Boolean
 
 /**
