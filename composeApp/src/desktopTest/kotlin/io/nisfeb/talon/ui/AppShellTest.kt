@@ -924,6 +924,59 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { showing("Message") }
     }
 
+    // ---- Getting out of a page, and landing in front (review 2026-10-17) ----
+
+    /** ~bus's chat, then the page of ~bus/crew from the reference in it. */
+    private fun ComposeUiTest.groupPageFromChat() {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("~bus").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("~bus")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Referenced post") }
+        onNodeWithText("Referenced post").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("You haven't joined this group") }
+    }
+
+    // A group's page was a plain value outside the registry: Escape closed
+    // the chat hidden behind it, and a shortcut (as the rail and the iOS
+    // menu) put its section down and left the page, so nothing opened.
+    @Test
+    fun `a group's page is left by Escape and by a shortcut, and does not come back`() = app(seed = {
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"block":{"cite":{"group":"~bus/crew"}}}]""", "/chat"))
+    }) {
+        groupPageFromChat()
+        press(Key.Escape)
+        waitUntil(timeoutMillis = 5_000) { !showing("You haven't joined this group") }
+        // Back on the chat it was opened from, which is still there.
+        waitUntil(timeoutMillis = 5_000) { present("Message actions") }
+        onNodeWithText("Referenced post").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("You haven't joined this group") }
+        press(Key.Comma, ctrl = true)
+        waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
+        assertTrue(!showing("You haven't joined this group"))
+        onNodeWithContentDescription("Back").performClick()
+        home()
+        Thread.sleep(300)
+        waitForIdle()
+        assertTrue(!showing("You haven't joined this group"), "the group page went with the pick")
+    }
+
+    // A full-screen page outside the registry: Escape (and the iOS back
+    // gesture) closed Settings, hidden behind it, and left the QR up.
+    @Test
+    fun `Escape leaves the login QR for the Settings it was opened from`() = app {
+        onNodeWithContentDescription("Settings").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
+        onNodeWithText("Account").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Login QR generator") }
+        onNodeWithText("Login QR generator").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Generate login QR") }
+        press(Key.Escape)
+        waitUntil(timeoutMillis = 5_000) { !showing("Generate login QR") }
+        assertTrue(showing("Appearance") && !present("Chats"), "Settings, where it was opened")
+        press(Key.Escape)
+        home()
+    }
+
     // ---- Adding a contact (review 2026-10-17) ----
 
     private fun ComposeUiTest.addOnContacts(who: String) {

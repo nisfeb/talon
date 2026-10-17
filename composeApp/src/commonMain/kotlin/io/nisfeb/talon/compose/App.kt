@@ -322,8 +322,9 @@ fun App(
     var openChatFocusMessageId by remember { mutableStateOf<String?>(null) }
     /** Login-handoff QR generator. Reachable from LoginScreen
      *  ("Signing in on another device? Make a login QR →") on cold launch
-     *  and from Settings once a ship is logged in. */
-    var shareLoginQrOpen by remember { mutableStateOf(false) }
+     *  and from Settings once a ship is logged in. Full-screen, so a
+     *  section: as a dialog, Escape and back closed what lay behind it. */
+    var shareLoginQrOpen by remember { sections.flag() }
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
     // Multi-image viewer state — set by the photo / gif drilldown
     // (MediaListPane) so the viewer's prev/next + arrow-key
@@ -412,8 +413,10 @@ fun App(
     var showNewDm by remember { sections.flag() }
     var showContacts by remember { sections.flag() }
     var showGroupAdminList by remember { sections.flag() }
-    var openGroupAdminFlag by remember { mutableStateOf<String?>(null) }
-    var openGroupHomeFlag by remember { mutableStateOf<String?>(null) }
+    // A group's pages are sections too, on the group they show: plain
+    // values, the rail and Escape could not leave them.
+    var openGroupAdminFlag by remember { sections.page<String>() }
+    var openGroupHomeFlag by remember { sections.page<String>() }
     /** A ship whose invite-me code was scanned or tapped: message it, or invite it to a group. */
     var inviteShipFromCode by remember { mutableStateOf<String?>(null) }
     // Notebook overlay state. notebookComposeOpen + notebookEdit*
@@ -502,10 +505,9 @@ fun App(
         switchShipAction()
         viewerImageUrl = null
         viewerImageList = null
-        showSelfProfile = false
-        showSettings = false
-        showSidebarSettings = false
-        showApps = false
+        // Every section, the old ship's group pages among them: a list
+        // that named four left those on screen over the new ship.
+        sections.closeAll()
     }
     // A tapped system notification (iOS) asks for a chat from outside
     // the composition; land there the way the call strip's Message
@@ -629,36 +631,6 @@ fun App(
     PlatformBackHandler(enabled = viewerImageUrl != null && viewerImageList == null) {
         viewerImageUrl = null
     }
-    PlatformBackHandler(enabled = showSelfProfile) {
-        showSelfProfile = false
-    }
-    PlatformBackHandler(enabled = showStatusFeed) {
-        showStatusFeed = false
-    }
-    // Below every handler that follows in priority: it answers only for
-    // a section that has none of its own.
-    PlatformBackHandler(enabled = sections.anyOpen) { sections.closeLast() }
-    PlatformBackHandler(enabled = showInvites) {
-        showInvites = false
-    }
-    PlatformBackHandler(enabled = profileSheetShip != null) {
-        profileSheetShip = null
-    }
-    PlatformBackHandler(enabled = showBookmarks) { showBookmarks = false }
-    PlatformBackHandler(enabled = showCalendar) { showCalendar = false }
-    PlatformBackHandler(enabled = showActivity) { showActivity = false }
-    PlatformBackHandler(enabled = showAssistant) { showAssistant = false }
-    PlatformBackHandler(enabled = showSearch) { showSearch = false }
-    PlatformBackHandler(enabled = showNewDm) { showNewDm = false }
-    PlatformBackHandler(enabled = showActions) { showActions = false }
-    PlatformBackHandler(enabled = showContacts) { showContacts = false }
-    PlatformBackHandler(
-        enabled = openGroupAdminFlag != null,
-    ) { openGroupAdminFlag = null }
-    PlatformBackHandler(
-        enabled = showGroupAdminList && openGroupAdminFlag == null,
-    ) { showGroupAdminList = false }
-    PlatformBackHandler(enabled = openGroupHomeFlag != null) { openGroupHomeFlag = null }
     // Notebook: compose overlays the post viewer (which overlays the list).
     PlatformBackHandler(enabled = notebookComposeOpen) {
         notebookComposeOpen = false
@@ -699,15 +671,24 @@ fun App(
     PlatformBackHandler(
         enabled = openGalleryPostId != null && !galleryComposeOpen,
     ) { openGalleryPostId = null }
-    PlatformBackHandler(enabled = showSettings) {
-        showSettings = false
+    // Every section, the newest first, by the registry that knows them
+    // all. After everything above, which the sections are drawn over;
+    // per-section handlers here outranked the newest one, so back could
+    // close a section hidden behind the one on screen.
+    PlatformBackHandler(enabled = sections.anyOpen) { sections.closeLast() }
+    // The profile sheet floats over any section.
+    PlatformBackHandler(enabled = profileSheetShip != null) {
+        profileSheetShip = null
     }
-    PlatformBackHandler(enabled = showSidebarSettings) {
-        showSidebarSettings = false
-    }
-    PlatformBackHandler(enabled = showApps) { showApps = false }
-    PlatformBackHandler(enabled = showLoops) {
-        showLoops = false
+    // A wish to listen is for the opening it was made for. Left set, the
+    // assistant listened again on every later open, unasked. The pages a
+    // payment or a terminal asked Settings to start on are the same.
+    LaunchedEffect(showAssistant) { if (!showAssistant) assistantListen = false }
+    LaunchedEffect(showSettings) {
+        if (!showSettings) {
+            settingsStartOnAccount = false
+            settingsStartOnAi = false
+        }
     }
 
     // Ship-scoped graph. Re-keyed on (loggedInShip ?: "__loggedout__")

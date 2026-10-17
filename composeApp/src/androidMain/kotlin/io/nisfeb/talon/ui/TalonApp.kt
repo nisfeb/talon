@@ -619,10 +619,18 @@ fun TalonApp(
     }.collectAsState()
     val partyFloats = partyLine != null && !partyIdle && !inlineCallUiShown.value
 
+    // Every full-screen section is a flag made here, so the drawer's
+    // reset and the back button cannot miss one. See Sections for the
+    // bug this ends.
+    val sections = remember { io.nisfeb.talon.ui.Sections() }
     /** A ship whose invite-me code was scanned or tapped: message it, or invite it to a group. */
     var inviteShipFromCode by remember { mutableStateOf<String?>(null) }
+    // A group's page is a section, on the group it shows. As a plain value
+    // the drawer could not leave it: picking Chats, Settings or the
+    // assistant did nothing, and the first Back closed it from under
+    // whatever had been picked.
     var openGroupFlag by remember {
-        mutableStateOf(initialOpenWhom?.takeIf { it.startsWith("group:") }?.removePrefix("group:"))
+        sections.page(initialOpenWhom?.takeIf { it.startsWith("group:") }?.removePrefix("group:"))
     }
     // Scroll target is consumed once the chat screen actually uses it,
     // so navigating back and reopening doesn't re-snap to the same msg.
@@ -639,13 +647,14 @@ fun TalonApp(
     // opened conversation still snaps to the newest message.
     val chatScrollState = remember(openWhom) { LazyListState() }
     val chatScrollAnchored = remember(openWhom) { mutableStateOf(false) }
-    // Every full-screen section is a flag made here, so the drawer's
-    // reset and the back button cannot miss one. See Sections for the
-    // bug this ends.
-    val sections = remember { io.nisfeb.talon.ui.Sections() }
-    var searchOpen by remember { sections.flag() }
+    // Search and New message are drawn beneath the chat they open, Search
+    // kept open under it so back returns to the results: held by name for
+    // the back handlers below, which let the chat's back come first.
+    val searchSection = remember { sections.flag() }
+    var searchOpen by searchSection
     var revealGroupRequest by remember { mutableStateOf<String?>(null) }
-    var newDmOpen by remember { sections.flag() }
+    val newDmSection = remember { sections.flag() }
+    var newDmOpen by newDmSection
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
     var viewerImageList by remember {
         mutableStateOf<io.nisfeb.talon.ui.screens.ViewerImageList?>(null)
@@ -705,25 +714,11 @@ fun TalonApp(
         settingsOpen = true
     }
     var assistantOpen by remember { sections.flag() }
-    inviteShipFromCode?.let { ship ->
-        io.nisfeb.talon.ui.InviteToGroupDialog(
-            db = app.db, repo = app.repo, ship = ship, shipName = io.nisfeb.talon.ui.shipHandle(ship),
-            onDismiss = { inviteShipFromCode = null },
-            onMessage = {
-                inviteShipFromCode = null
-                // Every section, not a list of them: one left out stays on top.
-                sections.leave {
-                    sections.closeAll(); assistantListen = false; openGroupFlag = null
-                    openWhom = ship
-                }
-            },
-        )
-    }
     var loopsOpen by remember { sections.flag() }
     var sidebarSettingsOpen by remember { sections.flag() }
     var appsOpen by remember { sections.flag() }
     var adminListOpen by remember { sections.flag() }
-    var adminGroupFlag by remember { mutableStateOf<String?>(null) }
+    var adminGroupFlag by remember { sections.page<String>() }
     var invitesOpen by remember { sections.flag() }
     var actionsOpen by remember { sections.flag() }
     /** The thing Orrery opens on, from a leave alert; taken when shown. */
@@ -731,9 +726,8 @@ fun TalonApp(
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
     /** Login-handoff QR generator. Reachable from the LoginScreen
      *  "Make a login QR" link (pre-login) and from settings
-     *  once a ship is logged in. State is local because the screen
-     *  is short-lived and doesn't need to survive ship switches. */
-    var shareLoginQrOpen by remember { mutableStateOf(false) }
+     *  once a ship is logged in. Full-screen, so a section. */
+    var shareLoginQrOpen by remember { sections.flag() }
 
     // Phase 3 right-pane state — Android phone always renders these as
     // full-screen replaces (no DesktopShell on phone). Tablet landscape
@@ -760,11 +754,12 @@ fun TalonApp(
      * branch wins for ever.
      */
     fun closeSections() {
-        // Every section flag, including any added after this was written.
+        // Every section, the group pages too, including any added after
+        // this was written.
         sections.closeAll()
-        adminGroupFlag = null
         groupInfoOpenFor = null
         groupInfoDrilldown = null
+        pendingThreadAnchor = null
         // An open conversation is a thing to put down too. It is not a
         // section, so it survived this and sat behind whatever section
         // was picked -- invisible, but still holding a back handler.
@@ -773,6 +768,30 @@ fun TalonApp(
         openWhom = null
         openThread = null
     }
+    inviteShipFromCode?.let { ship ->
+        io.nisfeb.talon.ui.InviteToGroupDialog(
+            db = app.db, repo = app.repo, ship = ship, shipName = io.nisfeb.talon.ui.shipHandle(ship),
+            onDismiss = { inviteShipFromCode = null },
+            onMessage = {
+                inviteShipFromCode = null
+                // Every section, not a list of them: one left out stays on top.
+                sections.leave { closeSections(); openWhom = ship }
+            },
+        )
+    }
+    // A wish is for the opening it was made for. Left set, the assistant
+    // listened again on every later open, unasked; Mail reopened a
+    // thread tapped days before, or wrote to the last profile's ship; and
+    // Settings started on AI. Cleared however the section is left, since
+    // only its own toolbar back used to.
+    LaunchedEffect(assistantOpen) { if (!assistantOpen) assistantListen = false }
+    LaunchedEffect(mailOpen) {
+        if (!mailOpen) {
+            pendingMailThread = null
+            mailTo = null
+        }
+    }
+    LaunchedEffect(settingsOpen) { if (!settingsOpen) settingsStartOnAi = false }
 
     // Read once above for a cold start; this is the warm one. A mail
     // notification tapped while the app was already running set the
@@ -1110,16 +1129,21 @@ fun TalonApp(
         }
     }
 
-    // Sharing Shortcut path: the user already chose the channel in
-    // the system share sheet, so dispatch the share immediately and
-    // open that conversation without rendering the in-app picker.
+    // A share arriving puts the sections down: the picker is drawn
+    // beneath them, so with one open it was hidden, and Back threw the
+    // share away. A chat stays; the picker is drawn over it and its Back
+    // comes back to it. On the Sharing Shortcut path the user already
+    // chose the channel in the system share sheet, so the share goes at
+    // once and that conversation opens without the in-app picker.
     LaunchedEffect(pendingShare, pendingShareTarget) {
-        val share = pendingShare
+        val share = pendingShare ?: return@LaunchedEffect
         val target = pendingShareTarget
-        if (share != null && !target.isNullOrBlank()) {
+        if (!target.isNullOrBlank()) {
             dispatchShare(share, target)
-            openWhom = target
+            sections.leave { closeSections(); openWhom = target }
             onShareConsumed()
+        } else {
+            sections.leave { sections.closeAll() }
         }
     }
 
@@ -1599,30 +1623,18 @@ fun TalonApp(
         // overlays everything else (you can open it from a chat, which
         // means both `viewerImageUrl` and `openWhom` are non-null at
         // the same time), so its handler is registered last.
-        // Registered first, so every handler below outranks it: it only
-        // answers for a section that has none of its own, which is every
-        // section somebody adds and forgets to give one.
+        // Every section, the newest first, by the registry that knows them
+        // all, with no handler of its own for any: one each outranked the
+        // newest (Contacts, then Mail from a profile: back closed the
+        // Contacts hidden under Mail).
         BackHandler(enabled = sections.anyOpen) { sections.closeLast() }
-        BackHandler(enabled = editingProfile) { editingProfile = false }
-        BackHandler(enabled = statusFeedOpen) { statusFeedOpen = false }
-        BackHandler(enabled = mailOpen) { mailOpen = false }
-        BackHandler(enabled = bookmarksOpen) { bookmarksOpen = false }
-        BackHandler(enabled = calendarOpen) { calendarOpen = false }
-        BackHandler(enabled = activityOpen) { activityOpen = false }
-        BackHandler(enabled = contactsOpen) { contactsOpen = false }
-        BackHandler(enabled = homeOpen) { homeOpen = false }
-        BackHandler(enabled = settingsOpen) { settingsOpen = false }
-        BackHandler(enabled = assistantOpen) { assistantOpen = false }
-        BackHandler(enabled = loopsOpen) { loopsOpen = false }
-        BackHandler(enabled = sidebarSettingsOpen) { sidebarSettingsOpen = false }
-        BackHandler(enabled = appsOpen) { appsOpen = false }
-        BackHandler(enabled = adminGroupFlag != null) { adminGroupFlag = null }
-        BackHandler(enabled = adminListOpen && adminGroupFlag == null) {
-            adminListOpen = false
-        }
-        BackHandler(enabled = invitesOpen) { invitesOpen = false }
-        BackHandler(enabled = shareLoginQrOpen) { shareLoginQrOpen = false }
-        BackHandler(enabled = notebookComposeOpen) {
+        // The sections are drawn over the chat and all that goes with it,
+        // whose handlers come later and so would win: they wait while one
+        // is up, or a section opened from a chat took two backs and lost
+        // the chat. Search and New message are drawn under the chat they
+        // open, so the chat's back still comes before theirs.
+        val sectionOnTop = sections.anyOpenExcept(searchSection, newDmSection)
+        BackHandler(enabled = notebookComposeOpen && !sectionOnTop) {
             notebookComposeOpen = false
             notebookEditPostId = null
         }
@@ -1648,28 +1660,27 @@ fun TalonApp(
                 }
             }
         }
-        BackHandler(enabled = openNotebookPostId != null) { openNotebookPostId = null }
-        BackHandler(enabled = galleryComposeOpen) { galleryComposeOpen = false }
-        BackHandler(enabled = openGalleryPostId != null) { openGalleryPostId = null }
-        BackHandler(enabled = openGroupFlag != null) { openGroupFlag = null }
-        BackHandler(enabled = pendingShare != null) { onShareConsumed() }
-        BackHandler(enabled = searchOpen) { searchOpen = false }
-        BackHandler(enabled = newDmOpen) { newDmOpen = false }
-        BackHandler(enabled = openThread != null) { openThread = null }
+        BackHandler(enabled = openNotebookPostId != null && !sectionOnTop) { openNotebookPostId = null }
+        BackHandler(enabled = galleryComposeOpen && !sectionOnTop) { galleryComposeOpen = false }
+        BackHandler(enabled = openGalleryPostId != null && !sectionOnTop) { openGalleryPostId = null }
+        BackHandler(enabled = openThread != null && !sectionOnTop) { openThread = null }
         // Phase 3 right-pane back-stack — drilldown above group-info so
         // back from a media list returns to the group-info pane, not
         // straight to the chat.
-        BackHandler(enabled = groupInfoDrilldown != null) {
+        BackHandler(enabled = groupInfoDrilldown != null && !sectionOnTop) {
             closeDrilldownAction()
         }
-        BackHandler(enabled = groupInfoOpenFor != null && groupInfoDrilldown == null) {
+        BackHandler(enabled = groupInfoOpenFor != null && groupInfoDrilldown == null && !sectionOnTop) {
             closeRightPaneAction()
         }
-        BackHandler(enabled = openThread == null && openWhom != null) { openWhom = null }
+        BackHandler(enabled = openThread == null && openWhom != null && !sectionOnTop) { openWhom = null }
         // After the chat handler: an open note is *inside* a notes/
         // channel, so both are enabled and the later registration has to
         // be this one or back would close the whole notebook.
-        BackHandler(enabled = openNoteId != null) { openNoteId = null }
+        BackHandler(enabled = openNoteId != null && !sectionOnTop) { openNoteId = null }
+        // The share picker is drawn over the chat: its back, after the
+        // chat's, cancels the share and leaves the chat where it was.
+        BackHandler(enabled = pendingShare != null && !sectionOnTop) { onShareConsumed() }
         // Registered last so it wins over the chat handler when an
         // image is opened from inside a chat.
         BackHandler(enabled = viewerImageList != null) { viewerImageList = null }
@@ -1831,10 +1842,10 @@ fun TalonApp(
                         onPick = { picked ->
                             drawerScope.launch { drawerState.close() }
                             if (picked != loggedInShip) {
-                                openWhom = null
+                                // Every section, the old ship's group and
+                                // admin pages too, not the two that were listed.
+                                closeSections()
                                 switchShipAction()
-                                searchOpen = false
-                                newDmOpen = false
                                 app.switchShip(picked)
                             }
                         },
@@ -1844,13 +1855,11 @@ fun TalonApp(
                         },
                         onSignOut = { picked ->
                             drawerScope.launch { drawerState.close() }
-                            openWhom = null
                             closeSections()
                             app.forgetShip(picked, alsoData = false)
                         },
                         onForget = { picked ->
                             drawerScope.launch { drawerState.close() }
-                            openWhom = null
                             closeSections()
                             app.forgetShip(picked, alsoData = true)
                         },
@@ -2028,7 +2037,7 @@ fun TalonApp(
                 composeTo = mailTo,
                 onComposeToConsumed = { mailTo = null },
                 initialThread = pendingMailThread,
-                onBack = { mailOpen = false; pendingMailThread = null },
+                onBack = { mailOpen = false },
                 // What a mail cannot carry, the ship's own storage can:
                 // the same upload chat images take.
                 upload = { bytes, mime, name -> app.repo.uploadImage(bytes, mime, name) },
@@ -2299,9 +2308,9 @@ fun TalonApp(
                 session = assistantSession,
                 scheduler = app.loops,
                 onRunLoop = { app.loops.runOneNow(it) },
-                onBack = { assistantOpen = false; assistantListen = false },
+                onBack = { assistantOpen = false },
                 onOpenMessage = { whom, postId, parentId ->
-                    assistantOpen = false; assistantListen = false
+                    assistantOpen = false
                     openWhom = whom
                     if (parentId != null) {
                         pendingThreadAnchor = postId
@@ -2387,7 +2396,7 @@ fun TalonApp(
                         },
                         shipPushStatus = { app.repo.trunkDebug() },
                     ),
-                    onBack = { settingsOpen = false; settingsStartOnAi = false },
+                    onBack = { settingsOpen = false },
                     startOnAi = settingsStartOnAi,
                     onOpenSidebarSettings = { sidebarSettingsOpen = true },
                     onOpenApps = { appsOpen = true },
@@ -3061,20 +3070,16 @@ fun TalonApp(
                 onSignOut = {
                     app.signOutActive()
                     TalonSyncService.stop(context)
-                    openWhom = null
+                    closeSections()
                     switchShipAction()
-                    searchOpen = false
-                    newDmOpen = false
                 },
                 allShips = allShips,
                 activeShip = loggedInShip,
                 shipNicknames = app.shipProfiles.nicknames.collectAsState().value,
                 onSwitchShip = { ship ->
                     if (ship != loggedInShip) {
-                        openWhom = null
+                        closeSections()
                         switchShipAction()
-                        searchOpen = false
-                        newDmOpen = false
                         app.switchShip(ship)
                     }
                 },
