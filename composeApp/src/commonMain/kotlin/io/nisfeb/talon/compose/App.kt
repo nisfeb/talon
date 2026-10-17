@@ -1208,6 +1208,11 @@ fun App(
             val ship = loggedInShip
             if (mailShipUrl != null && ship != null) armillaryRepo.attach(mailShipUrl, ship) else armillaryRepo.detach()
         }
+        // Back in front: the vendor's picks and the account read again.
+        val armillaryWindow = androidx.compose.ui.platform.LocalWindowInfo.current
+        LaunchedEffect(armillaryRepo) {
+            androidx.compose.runtime.snapshotFlow { armillaryWindow.isWindowFocused }.collect { if (it) armillaryRepo.resumed() }
+        }
         val orreryActions by orreryRepo.actions.collectAsState()
         // Whether the menu offers Orrery: on, and not known to be missing.
         val orreryOn = io.nisfeb.talon.orrery.orreryOffered(orreryGate == true, orreryRepo.availability.collectAsState().value)

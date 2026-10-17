@@ -49,6 +49,10 @@ class ArmillaryRepo(
     private val notifier: Notifier = NoopNotifier,
     /** Records the credit in the Activity feed's Account domain. Null in a test. */
     private val noticeRepo: io.nisfeb.talon.notify.NoticeRepo? = null,
+    /** How often the vendor's picks are read off the ship while attached; a test's own. */
+    private val picksEveryMs: Long = PICKS_EVERY_MS,
+    /** The clock coming back to the front is measured on; a test's own. */
+    private val now: () -> Long = { io.nisfeb.talon.util.nowMs() },
 ) {
     private val _availability = MutableStateFlow(ArmillaryAvailability.UNKNOWN)
     val availability: StateFlow<ArmillaryAvailability> = _availability.asStateFlow()
@@ -115,6 +119,8 @@ class ArmillaryRepo(
     private var ship: String? = null
     private var watching: Job? = null
     private var adopting: Job? = null
+    private var ticking: Job? = null
+    @kotlin.concurrent.Volatile private var resumedAtMs = 0L
 
     // Coroutines alone touch the repo, so one lock is the whole of the
     // guard; commonMain has no synchronized, iOS being native.
@@ -128,7 +134,19 @@ class ArmillaryRepo(
         this.ship = ship
         api = ArmillaryApi(http, shipUrl)
         current = this
+        // Read in full just now: coming to the front at once reads nothing again.
+        resumedAtMs = now()
         scope.launch { refresh() }
+        // The vendor's picks reach the ship within five minutes, and the
+        // row took them only on a refresh: once a process, or a tap. A
+        // phone's process lives for days and kept the old models. This
+        // reads the ship's own config, so it costs the vendor nothing.
+        ticking = scope.launch {
+            while (isActive) {
+                delay(picksEveryMs)
+                readPicks()
+            }
+        }
         // The ship already buys from a vendor, set up on some device: this
         // one connects too, with a key of its own, since the row never
         // travels. Pay on the phone and the desktop runs. Not before:
@@ -148,6 +166,9 @@ class ArmillaryRepo(
         watching = null
         adopting?.cancel()
         adopting = null
+        ticking?.cancel()
+        ticking = null
+        resumedAtMs = 0L
         api = null
         shipUrl = null
         ship = null
@@ -202,6 +223,37 @@ class ArmillaryRepo(
             return Result.success(Unit)
         } finally {
             _refreshing.value = false
+        }
+    }
+
+    /** The vendor's picks, the key and the models read off the ship and put on the row; a failed read keeps what the row had. */
+    private suspend fun readPicks() = lock.withLock {
+        val a = api ?: return@withLock
+        runSuspendCatching { a.inference() }
+            .onSuccess { if (it is InferenceAnswer.Have) took(it.inference) }
+            .onFailure { Log.i(TAG, "picks skipped: ${it.message}") }
+    }
+
+    /**
+     * The app is in front again: the vendor's picks and the account read
+     * now, so a change made while it was away, a payment on another
+     * device among them, shows at once. At most once a minute: a window's
+     * focus comes back each time a menu or dialog closes. The full
+     * [refresh], whose catalog read reaches the vendor, keeps its own
+     * triggers.
+     */
+    fun resumed() {
+        val at = now()
+        if (api == null || at - resumedAtMs < RESUME_GAP_MS) return
+        resumedAtMs = at
+        scope.launch {
+            readPicks()
+            lock.withLock {
+                val a = api ?: return@withLock
+                runSuspendCatching { a.account() }
+                    .onSuccess { _account.value = it; settle(it) }
+                    .onFailure { Log.i(TAG, "account skipped: ${it.message}") }
+            }
         }
     }
 
@@ -518,6 +570,12 @@ class ArmillaryRepo(
 
         /** The vendor a ship buys from until its owner names another. */
         const val DEFAULT_VENDOR = "~nisfeb"
+
+        /** How often the vendor's picks are read off the ship: twice its own five-minute peek. */
+        const val PICKS_EVERY_MS = 10 * 60_000L
+
+        /** The least time between two reads for the app coming back to the front. */
+        const val RESUME_GAP_MS = 60_000L
 
         /** How long to wait for a minted key, and how often to ask. */
         const val KEY_WAIT_MS = 30_000L
