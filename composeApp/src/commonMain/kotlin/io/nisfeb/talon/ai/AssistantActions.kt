@@ -819,7 +819,8 @@ internal fun describeRow(r: CalendarRow, zone: TimeZone, calNames: Map<String, S
 private suspend fun CalendarRepo.wrote(body: JsonObject, readBack: Boolean = true): String? {
     val since = nowMs()
     if (!writeEvent(body, readBack).ok) return "The calendar did not take it."
-    return refusal((body["id"] as? JsonPrimitive)?.contentOrNull, since)?.let { "The calendar refused it: ${it.trimEnd('.')}." }
+    // An add's refusal is recorded with the id "", having none of its own.
+    return refusal((body["id"] as? JsonPrimitive)?.contentOrNull.orEmpty(), since)?.let { "The calendar refused it: ${it.trimEnd('.')}." }
 }
 
 /** The occurrence of [id] on [on], or else its next one, reading past the widget's window when need be. */

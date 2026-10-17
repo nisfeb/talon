@@ -1123,8 +1123,9 @@ fun CalendarScreen(
                 // why it refused one: looked for after [savedAt].
                 val savedAt = nowMs()
                 var refused: String? = null
-                // Whose refusal to look for: an add has no id of its own.
-                var lookFor: String? = id
+                // Whose refusal to look for: the calendar records an add's
+                // as "", having no id of its own; null for either of two.
+                var lookFor: String? = id ?: ""
                 var looked = false
                 val ghost = if (id == null) placeholderFor(d) else null
                 if (ghost != null) pendingRows = pendingRows + ghost
@@ -1163,7 +1164,7 @@ fun CalendarScreen(
                                 looked = true
                                 if (!repo.pokeEvent(onlyBody(d), readBack = false)) null
                                 else {
-                                    refused = repo.refusal(null, savedAt)
+                                    refused = repo.refusal("", savedAt)
                                     if (refused != null) null
                                     else repo.writeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
                                         .also { halfDone = !it.ok }

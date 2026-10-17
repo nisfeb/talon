@@ -376,6 +376,8 @@ class AssistantActionsToolsTest {
         ),
     ) { h ->
         assertEquals("Deleted \"Standup\" and every occurrence.", h.run("delete_event", argsOf("event" to "r1")))
+        // An add has no id: its refusal is recorded as "", not any at all.
+        assertEquals("Added task \"Buy milk\".", h.run("create_task", argsOf("name" to "Buy milk")))
     }
 
     // ─── finding, cards and mail refused ───────────────────────────
