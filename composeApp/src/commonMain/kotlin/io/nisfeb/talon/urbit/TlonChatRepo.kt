@@ -1525,6 +1525,12 @@ class TlonChatRepo(
         }
         slowDetails.value = null
         drainPauseMs = FIRST_DRAIN_PAUSE_MS
+        // Settings writes the ship has not taken go with the rest: a
+        // resumed channel runs no settings bootstrap to send them.
+        if (settingsSync != null) {
+            io.nisfeb.talon.util.runSuspendCatching { settingsSync.flushPending() }
+                .onFailure { Log.w(TAG, "kept settings not sent", it) }
+        }
     }
 
     /**

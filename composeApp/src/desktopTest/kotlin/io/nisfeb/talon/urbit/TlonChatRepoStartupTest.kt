@@ -4,6 +4,7 @@ import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import java.io.File
@@ -634,6 +635,39 @@ class TlonChatRepoStartupTest {
         }) { _ ->
             until("asked whether it landed, then sent again") { ship.pokesTo("channels").any { "mid-send" in it.json.toString() } }
             until("in flight again, until its echo") { db.messages().getOne("chat/~bus/general", "local_1")?.status == "pending" }
+        }
+    }
+
+    // A settings change the ship did not answer went only with a new
+    // channel's settings bootstrap: a resumed channel never sent it, and
+    // the next bootstrap's ship-wins apply then wiped it (review H7).
+    @Test
+    fun `a settings change kept for the ship goes when the channel resumes, and a bootstrap keeps it`() = runBlocking<Unit> {
+        val sync = SettingsSyncImpl(db = db, aiSettings = FakeAiSettings())
+        ship.scries[init] = initPosts
+        // The desk as the ship holds it, each settings poke taken into it.
+        ship.answerSettingsDesk("""{"desk":{"folders":{"5":"{\"name\":\"From the ship\",\"sortOrder\":1}"}}}""")
+        // Made before the session: no channel to send it on.
+        val early = sync.createFolder("Early", 0)
+        val repo = TlonChatRepo(db, settingsSync = sync)
+        repo.start(UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") })
+        try {
+            withTimeout(60_000) {
+                connected(repo)
+                until("the early folder sent") { ship.pokesTo("settings").any { "\"entry-key\":\"$early\"" in it.json.toString() } }
+                assertEquals(setOf("From the ship", "Early"), db.folders().streamFolders().first().map { it.name }.toSet())
+                ship.lose = { if (it.app == "settings") java.io.IOException("lost") else null }
+                sync.setNotifyLevel("~bus", io.nisfeb.talon.data.NotifyLevel.NONE)
+                ship.lose = { null }
+                val before = streams()
+                ship.endStreams()
+                until("the stream again") { streams() > before }
+                until("the kept change sent") { ship.pokesTo("settings").any { "~bus" in it.json.toString() } }
+                assertEquals(1, channelsStreamed().size, "resumed, not a new channel")
+                assertEquals(emptyList(), db.settingsOutbox().all())
+            }
+        } finally {
+            repo.stop()
         }
     }
 
