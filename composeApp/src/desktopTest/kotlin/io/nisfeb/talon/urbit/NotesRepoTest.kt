@@ -110,15 +110,15 @@ class NotesRepoTest {
         ship.answerApi = { method, path, _ ->
             if (method == "PUT" && path == "/notes/~/v1/notebooks/~bus/recipes/notes/11") """{"body":{"type":"ok"}}""" else null
         }
-        assertTrue(notes.updateNote(book, 11, "Simmer all day.", expectedRevision = 3))
+        assertNull(notes.updateNote(book, 11, "Simmer all day.", expectedRevision = 3))
         val sent = ship.api.single { !it.startsWith("GET ") }
         assertTrue("\"expectedRevision\":3" in sent && "Simmer all day." in sent, sent)
         assertEquals(false, db.notes().note(book.flagString, 11)?.pending, "no longer marked in flight")
 
         ship.answerApi = { _, _, _ -> """{"body":{"type":"error","errorType":"revision-mismatch"}}""" }
-        assertFalse(notes.updateNote(book, 11, "mine", expectedRevision = 2), "someone else saved first")
+        assertEquals(NotesRepo.NOTE_CHANGED, notes.updateNote(book, 11, "mine", expectedRevision = 2), "someone else saved first")
         ship.answerApi = { _, _, _ -> null }
-        assertFalse(notes.updateNote(book, 11, "mine", expectedRevision = 3), "the ship could not be reached")
+        assertTrue(notes.updateNote(book, 11, "mine", expectedRevision = 3) != NotesRepo.NOTE_CHANGED, "a route the ship lacks is not a conflict")
         assertEquals("Simmer **long**.", db.notes().note(book.flagString, 11)?.bodyMd, "the ship's copy stands")
     }
 
@@ -244,5 +244,32 @@ class NotesRepoTest {
         assertTrue("notes/v0/notes/~bus/recipes/stream" in ship.subscribed && "notes/v0/notes/~bus/drinks/stream" in ship.subscribed)
         assertTrue(2 in ship.subscribePuts, "${ship.subscribePuts}")
     }
-}
 
+    // Every failed save was called a conflict, and with the ship down the
+    // unsaved body stood in the notebook as the saved one: the edit is put
+    // in before the save, and the read after it failed too.
+    @Test
+    fun `a save with the ship down says so and leaves the host's copy, not the unsaved body`() = live {
+        notes.bootstrap()
+        ship.answerApi = { _, _, _ -> throw java.io.IOException("Connection refused") }
+        ship.loseScry = { kotlinx.io.IOException("The network connection was lost.") }
+        val said = notes.updateNote(book, 11, "not saved", expectedRevision = 3)
+        assertEquals("Your ship is slow, so it didn't go through. Try again when it's back.", said)
+        val row = db.notes().note(book.flagString, 11)
+        assertEquals("Simmer **long**.", row?.bodyMd, "the host's copy, not the edit")
+        assertEquals(false, row?.pending)
+    }
+
+    @Test
+    fun `a save each host refuses is said as what it is`() = live {
+        notes.bootstrap()
+        ship.answerApi = { _, _, _ -> """{"body":{"type":"error","errorType":"not-authorized"}}""" }
+        assertEquals("You can't edit this notebook. Its owner can make you an editor.", notes.updateNote(book, 11, "mine", expectedRevision = 3))
+        ship.answerApi = { _, _, _ -> """{"body":{"type":"pending"}}""" }
+        assertTrue(notes.updateNote(book, 11, "mine", expectedRevision = 3)!!.startsWith("Sent."), "a cross-ship save in flight")
+        ship.answerApi = { _, _, _ -> """{"body":{"errorType":"unknown","message":[],"type":"error"}}""" }
+        assertEquals(NotesRepo.NOTE_CHANGED, notes.updateNote(book, 11, "mine", expectedRevision = 2), "the live ship's word for a stale revision")
+        assertEquals("Simmer **long**.", db.notes().note(book.flagString, 11)?.bodyMd)
+    }
+
+}
