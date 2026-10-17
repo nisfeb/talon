@@ -41,6 +41,8 @@ import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.data.DmInviteEntity
 import io.nisfeb.talon.data.FollowedThreadEntity
 import io.nisfeb.talon.data.GroupEntity
+import io.nisfeb.talon.data.MarkDao
+import io.nisfeb.talon.data.MarkEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.ReactionEntity
 import io.nisfeb.talon.data.UnreadEntity
@@ -3602,8 +3604,10 @@ class TlonChatRepo(
 
     /**
      * When the last read of every chat's posts began, init-posts or
-     * /changes; 0 before the first. In memory only: a launch reads
-     * init-posts, as it always has.
+     * /changes; 0 before the first. Kept in the database too (marks):
+     * in memory only, a launch read init-posts' ten a chat, opening read
+     * the newest fifty, and paging asked only below the oldest kept, so
+     * a busy chat kept a hole between them for good.
      */
     @Volatile private var postsReadMs = 0L
 
@@ -3618,11 +3622,11 @@ class TlonChatRepo(
      */
     private suspend fun catchUpPosts(ch: UrbitChannel) {
         val start = nowMs()
-        val since = postsReadMs
+        val since = postsReadMs.takeIf { it > 0 } ?: db.marks().get(MarkDao.POSTS_READ) ?: 0L
         if (useChanges(since, start, changesUnserved)) {
             try {
                 readChanges(ch, since - CHANGES_OVERLAP_MS)
-                postsReadMs = start
+                postsRead(start)
                 return
             } catch (t: Throwable) {
                 // A slow ship is not asked for init-posts on top.
@@ -3632,7 +3636,12 @@ class TlonChatRepo(
             }
         }
         bootstrap(ch, count = INITIAL_PAGE_COUNT)
-        postsReadMs = start
+        postsRead(start)
+    }
+
+    private suspend fun postsRead(startMs: Long) {
+        postsReadMs = startMs
+        db.marks().put(MarkEntity(MarkDao.POSTS_READ, startMs))
     }
 
     /**

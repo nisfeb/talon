@@ -636,4 +636,25 @@ class TlonChatRepoStartupTest {
             until("in flight again, until its echo") { db.messages().getOne("chat/~bus/general", "local_1")?.status == "pending" }
         }
     }
+
+    // postsReadMs was in memory only: a launch read init-posts' ten a
+    // chat, opening a chat its newest fifty, and paging only below the
+    // oldest kept, so a busy chat kept a hole between them for good
+    // (review M14). The next launch reads what changed since.
+    @Test
+    fun `a launch reads what changed since the last run's read, not ten of every chat`() = runBlocking<Unit> {
+        val began = System.currentTimeMillis()
+        started(prepare = { scries[init] = initPosts }) { repo -> connected(repo) }
+        started(prepare = { answerScry = { p -> if (p.startsWith("groups-ui/v11/changes/")) changes else null } }) { _ ->
+            until("its post") { db.messages().getOne("chat/~bus/general", "170141184511") != null }
+            assertEquals(1, ship.scried.count { "init-posts/10" in it }, "init-posts once, at the first launch: ${ship.scried}")
+            val asked = ship.scried.first { it.startsWith("groups-ui/v11/changes/") }.removePrefix("groups-ui/v11/changes/")
+            val m = Regex("""~(\d{4})\.(\d{1,2})\.(\d{1,2})\.\.(\d{2})\.(\d{2})\.(\d{2})""").matchEntire(asked)
+            assertNotNull(m, asked)
+            val (y, mo, d, h, mi, se) = m.destructured
+            val sinceMs = java.time.ZonedDateTime.of(y.toInt(), mo.toInt(), d.toInt(), h.toInt(), mi.toInt(), se.toInt(), 0, java.time.ZoneOffset.UTC)
+                .toInstant().toEpochMilli()
+            assertTrue(sinceMs in (began - CHANGES_OVERLAP_MS - 2_000L)..(began - CHANGES_OVERLAP_MS + 30_000L), "since $asked against $began")
+        }
+    }
 }
