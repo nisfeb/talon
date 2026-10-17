@@ -42,7 +42,13 @@ import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.performTextReplacement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The whole desktop app against a [FakeShip]: getting into a section and,
@@ -59,6 +65,8 @@ class AppShellTest {
         // The test window is 1024dp wide: Modifier.size clamps anything
         // wider to that, so 1200 here is really 1024.
         width: androidx.compose.ui.unit.Dp = 1200.dp,
+        /** The ship as it is before the app first asks it anything. */
+        setup: FakeShip.() -> Unit = {},
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -73,6 +81,7 @@ class AppShellTest {
         val ship = FakeShip("~zod").apply {
             scries["activity/v6/feed/init/30"] = """{"all":[]}"""
             scries["groups-ui/v7/init"] = """{"foreigns":{}}"""
+            setup()
         }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         try {
@@ -383,6 +392,263 @@ class AppShellTest {
         assertTrue(!showing("Edit profile"))
         press(Key.Escape)
         home()
+    }
+
+    // ---- Calendar meetings (the calendar app's version 34) ----
+
+    private val hour = 3_600_000L
+    /** Noon today, where the device is; the calendar's zone is UTC, so this is also each row's wall clock. */
+    private val noon = java.time.LocalDate.now().atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+    private val planningMeta =
+        """{"name":"Planning","conference":"https://meet.google.com/abc-defg-hij",""" +
+            """"guests":[{"email":"ana@example.com","name":"Ana","status":"accepted"},{"email":"me@example.com","status":"needs-action","self":true}],""" +
+            """"ships":[{"ship":"~bus","status":"tentative"}]}"""
+    /** One invitation from ~nec, unanswered; its host's last one went on Work. */
+    private val gardenParty =
+        """[{"key":"~nec/inv1","host":"~nec","uid":"inv1","name":"Garden party","start_ms":${noon + 5 * hour},"status":"","cal":"","route":"work","ships":[{"ship":"~zod","status":"needs-action"}],"at_ms":1}]"""
+
+    /**
+     * A ship whose calendar has a daily standup, a Google meeting this ship
+     * is asked to, and a copy of ~nec's event. [invites] null is a calendar
+     * older than 34, whose invites.json is a 404.
+     */
+    private fun withCalendar(invites: String? = "[]", more: FakeShip.FakeCalendar.() -> Unit = {}): FakeShip.() -> Unit = {
+        calendar = FakeShip.FakeCalendar().apply {
+            calendars = """[{"id":"default","name":"Personal","kind":"local"},{"id":"work","name":"Work","kind":"google"}]"""
+            rows = """[
+                {"id":"s1","cal":"default","idx":7,"cat":"timed","kind":"rrule","meta":{"name":"Standup"},"l":$noon,"r":${noon + 15 * 60_000L}},
+                {"id":"g1","cal":"work","meta":$planningMeta,"l":${noon + hour},"r":${noon + 2 * hour}},
+                {"id":"c1","cal":"default","meta":{"name":"Seed swap","host":"~nec","ships":[{"ship":"~nec","status":"accepted"},{"ship":"~zod","status":"needs-action","self":true}]},"l":${noon + 3 * hour},"r":${noon + 4 * hour}}
+            ]"""
+            events["s1"] = """{"id":"s1","cal":"default","cat":"timed","kind":"rrule","start_ms":${noon - 7 * 24 * hour},"zone":"UTC","dur_min":15,"fin":"dur","args":{"rrule":"FREQ=DAILY"},"meta":{"name":"Standup"}}"""
+            events["g1"] = """{"id":"g1","cal":"work","cat":"timed","kind":"once","start_ms":${noon + hour},"zone":"UTC","dur_min":60,"fin":"dur","meta":$planningMeta}"""
+            this.invites = invites
+            more()
+        }
+    }
+
+    private fun ComposeUiTest.openCalendar() {
+        onNodeWithContentDescription("Calendar").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("Standup") }
+    }
+
+    private fun ComposeUiTest.field(label: String) = onNode(hasSetTextAction() and androidx.compose.ui.test.hasText(label))
+
+    /** Standup's occurrence today, opened, renamed, and saved as this one only. */
+    private fun ComposeUiTest.renameThisStandupOnly() {
+        onNodeWithText("Standup").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Close") }
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("This change applies to") }
+        onNodeWithText("This one only").performScrollTo().performClick()
+        field("Name").performTextReplacement("Standup, moved")
+        onAllNodesWithText("Save")[0].performClick()
+    }
+
+    @Test
+    fun `this one only is one edit-at on a calendar that has it, and invitations are read after the month`() = app(
+        setup = withCalendar {
+            onPoke = { if ("edit-at" in it) rows = rows.replace("\"name\":\"Standup\"", "\"name\":\"Standup, moved\"") }
+        },
+    ) { ship ->
+        val cal = ship.calendar!!
+        Thread.sleep(1_000)
+        assertTrue(ship.requests.none { it.endsWith("/invites.json") }, "nothing of invitations before the calendar is opened")
+        val opened = ship.requests.size
+        openCalendar()
+        waitUntil(timeoutMillis = 5_000) { ship.requests.any { it.endsWith("/invites.json") } }
+        val asked = ship.requests.toList()
+        val month = (opened until asked.size).firstOrNull { asked[it].endsWith("/window.json") }
+        assertTrue(month != null && asked.indexOfFirst { it.endsWith("/invites.json") } > month, "the month first, then invitations: $asked")
+        renameThisStandupOnly()
+        waitUntil(timeoutMillis = 5_000) { cal.pokes.isNotEmpty() }
+        waitUntil(timeoutMillis = 10_000) { showing("Standup, moved") && !showing("syncing") }
+        assertEquals(
+            listOf("""{"action":"edit-at","id":"s1","home":"default","at_ms":$noon,"cat":"timed","meta":{"name":"Standup, moved"},"kind":"once","start_ms":$noon,"zone":"UTC","fin":"dur","dur_min":15}"""),
+            cal.pokes.toList(),
+            "one step, nothing added and nothing skipped",
+        )
+    }
+
+    @Test
+    fun `on a calendar older than invitations, this one only adds the one-off and then skips the occurrence`() = app(setup = withCalendar(invites = null)) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        renameThisStandupOnly()
+        waitUntil(timeoutMillis = 10_000) { cal.pokes.size >= 2 }
+        assertTrue("\"add-event\"" in cal.pokes[0] && "Standup, moved" in cal.pokes[0], cal.pokes[0])
+        assertEquals("""{"action":"skip-event","id":"s1","idx":7}""", cal.pokes[1])
+        assertTrue(cal.pokes.none { "edit-at" in it })
+        assertTrue(!showing("invitation"), "no invitations on a calendar without them")
+    }
+
+    // A refused edit-at must not fall back to add and skip: the ship has
+    // the feature, and said no to this one.
+    @Test
+    fun `an edit-at the ship refuses reopens the editor, and nothing else is sent`() = app(setup = withCalendar { refusePoke = { "edit-at" in it } }) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        renameThisStandupOnly()
+        waitUntil(timeoutMillis = 10_000) { showing("The ship did not take the change.") }
+        assertTrue(onAllNodes(hasSetTextAction() and androidx.compose.ui.test.hasText("Standup, moved")).fetchSemanticsNodes().isNotEmpty(), "the edit is still there")
+        assertEquals(1, cal.pokes.size)
+    }
+
+    @Test
+    fun `a Google invitation shows its link and guests, and the owner's answer is an rsvp the details then show`() = app(
+        setup = withCalendar {
+            onPoke = { if ("\"rsvp\"" in it) rows = rows.replace("\"email\":\"me@example.com\",\"status\":\"needs-action\"", "\"email\":\"me@example.com\",\"status\":\"tentative\"") }
+        },
+    ) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        onNodeWithText("Planning").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Guests: Ana (going), ~bus (maybe)") }
+        assertTrue(showing("Join") && !showing("me@example.com"), "the link, and the owner is not among the guests")
+        val before = ship.requests.size
+        onNodeWithText("Maybe").performClick()
+        waitUntil(timeoutMillis = 5_000) { cal.pokes.isNotEmpty() }
+        assertEquals(listOf("""{"action":"rsvp","id":"g1","home":"work","status":"tentative"}"""), cal.pokes.toList())
+        assertTrue(cal.answers.isEmpty(), "an rsvp, not an invitation's answer")
+        // Read back into the month, and the details say it.
+        waitUntil(timeoutMillis = 10_000) { ship.requests.drop(before).count { it.endsWith("/window.json") } >= 2 }
+        waitForIdle()
+        onNodeWithText("Planning").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodes(androidx.compose.ui.test.hasText("Maybe") and androidx.compose.ui.test.isSelected()).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test
+    fun `answering a copy of another ship's event answers its invitation, which tells the host`() = app(setup = withCalendar()) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        onNodeWithText("Seed swap").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("From ~nec. Guests: ~nec (going)") }
+        onNodeWithText("Going").performClick()
+        waitUntil(timeoutMillis = 5_000) { cal.answers.isNotEmpty() }
+        assertEquals(listOf("""{"key":"~nec/c1","status":"accepted","cal":"default"}"""), cal.answers.toList())
+        assertTrue(cal.pokes.isEmpty(), "no rsvp for a copy")
+    }
+
+    @Test
+    fun `an invitation is accepted onto the calendar picked, and then it is on the calendar and no longer counted`() = app(
+        setup = withCalendar(invites = gardenParty) {
+            answer = {
+                invites = invites!!.replace("\"status\":\"\",\"cal\":\"\"", "\"status\":\"accepted\",\"cal\":\"default\"")
+                rows = rows.trimEnd().removeSuffix("]") + """,{"id":"inv1","cal":"default","meta":{"name":"Garden party","host":"~nec"},"l":${noon + 5 * hour},"r":${noon + 6 * hour}}]"""
+                """{"ok":true,"cal":"default","told":true}"""
+            }
+        },
+    ) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        waitUntil(timeoutMillis = 5_000) { showing("1 invitation") }
+        onNodeWithText("1 invitation").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Garden party") && showing("from ~nec") && showing("no answer yet") }
+        // Where that host's last one went, until another is picked.
+        onNodeWithContentDescription("Calendar for Garden party").assertTextContains("Work")
+        onNodeWithContentDescription("Calendar for Garden party").performClick()
+        onNode(androidx.compose.ui.test.hasText("Personal") and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isPopup())).performClick()
+        onNodeWithContentDescription("Calendar for Garden party").assertTextContains("Personal")
+        onNodeWithText("Going").performClick()
+        waitUntil(timeoutMillis = 5_000) { cal.answers.isNotEmpty() }
+        assertEquals(listOf("""{"key":"~nec/inv1","status":"accepted","cal":"default"}"""), cal.answers.toList())
+        waitUntil(timeoutMillis = 10_000) { showing("· going") }
+        onNodeWithText("Done").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("Garden party") && !showing("1 invitation") }
+    }
+
+    @Test
+    fun `an answer the ship refuses, one only half done, and one that never reaches it each say so`() = app(
+        setup = withCalendar(invites = gardenParty) { answer = { null }; refusePoke = { "\"rsvp\"" in it } },
+    ) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        onNodeWithText("Planning").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Guests:") }
+        onNodeWithText("No").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("The ship did not take the answer.") }
+        assertEquals(1, cal.pokes.size)
+
+        onNodeWithText("1 invitation").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Garden party") }
+        onNodeWithText("Maybe").performClick()
+        waitUntil(timeoutMillis = 5_000) { cal.answers.size == 1 && showing("The ship did not take the answer.") && !showing("Answering") }
+
+        cal.answer = { """{"ok":false,"cal":"work","told":false}""" }
+        onNodeWithText("Going").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("The event could not be put on that calendar, and ~nec could not be told.") }
+
+        cal.lose = true
+        onNodeWithText("Going").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("No answer from the ship. Nothing was changed.") }
+    }
+
+    // The answer runs on the calendar's own scope: leaving the calendar
+    // while a busy ship has not yet taken it does not lose it.
+    @Test
+    fun `an answer given just before leaving the calendar still reaches the ship`() = app(
+        setup = withCalendar(invites = gardenParty) { hold = kotlinx.coroutines.CompletableDeferred() },
+    ) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        onNodeWithText("1 invitation").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Garden party") }
+        onNodeWithText("Maybe").performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.requests.any { it.endsWith("/invites/answer") } }
+        onNodeWithText("Done").performClick()
+        onNodeWithContentDescription("Chats").performClick()
+        home()
+        val before = ship.requests.size
+        cal.hold!!.complete(Unit)
+        waitUntil(timeoutMillis = 5_000) { cal.answers.size == 1 }
+        assertEquals("""{"key":"~nec/inv1","status":"tentative","cal":"work"}""", cal.answers.single())
+        // And read back behind it, with nobody on the screen to ask.
+        waitUntil(timeoutMillis = 10_000) { ship.requests.drop(before).any { it.endsWith("/invites.json") } }
+    }
+
+    @Test
+    fun `the editor writes guests and a video call as the calendar's page does`() = app(setup = withCalendar()) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        onNodeWithText("Planning").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Close") }
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("Video call") }
+        assertTrue(showing("Keep the current link") && showing("Google Meet"), "a Google calendar, and an event with a link")
+        field("ana@example.com, ~bus").performTextReplacement("ana@example.com, ~bus, ~nec")
+        onAllNodesWithText("Save")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { cal.pokes.isNotEmpty() }
+        val edited = kotlinx.serialization.json.Json.parseToJsonElement(cal.pokes.single()).jsonObject["meta"]!!.jsonObject
+        // A guest kept keeps their answer, the owner stays, and the new ship has none yet.
+        assertEquals("""[{"ship":"~bus","status":"tentative"},{"ship":"~nec","status":"needs-action"}]""", edited["ships"].toString())
+        assertEquals(
+            """[{"email":"me@example.com","status":"needs-action","self":true},{"email":"ana@example.com","name":"Ana","status":"accepted"}]""",
+            edited["guests"].toString(),
+        )
+        assertEquals("\"https://meet.google.com/abc-defg-hij\"", edited["conference"].toString())
+        assertTrue("call" !in edited, "Keep leaves meta alone")
+
+        // A new event on the local calendar: no Meet offered, and an email refused.
+        onAllNodesWithContentDescription("New event")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Video call") }
+        assertTrue(!showing("Google Meet") && !showing("Keep the current link"))
+        field("Name").performTextInput("Tea")
+        field("Guests, comma separated").performTextInput("bo@example.com, ~nec")
+        onAllNodesWithText("Save")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Email guests need a calendar linked to Google") }
+        assertEquals(1, cal.pokes.size)
+
+        // On the Google calendar it goes, with a Meet asked for.
+        onNode(androidx.compose.ui.test.hasText("Work") and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isDialog())).performScrollTo().performClick()
+        onNodeWithText("Google Meet").performScrollTo().performClick()
+        onAllNodesWithText("Save")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { cal.pokes.size == 2 }
+        val added = kotlinx.serialization.json.Json.parseToJsonElement(cal.pokes[1]).jsonObject
+        assertEquals("add-event", added["action"]!!.jsonPrimitive.content)
+        assertEquals(
+            """{"name":"Tea","ships":[{"ship":"~nec","status":"needs-action"}],"guests":[{"email":"bo@example.com","status":"needs-action"}],"call":"meet"}""",
+            added["meta"].toString(),
+        )
     }
 
     // "When adding a new contact and pressing Message, it should exit you

@@ -109,6 +109,8 @@ class CalendarScreenTest {
                 json("""{"shares":{},"offers":{},"accepted":{"~nec/work":{"key":"~nec/work","mode":"read"}}}""")
             path.endsWith("/google.json") -> json("""{"connected":false,"linked":{}}""")
             path.endsWith("/zones.json") -> json("""["UTC","America/New_York"]""")
+            // A calendar older than invitations (34): "this one only" is add, then skip.
+            path.endsWith("/invites.json") -> respond("", HttpStatusCode.NotFound)
             else -> json("[]")
         }
     })
