@@ -2,10 +2,30 @@ package io.nisfeb.talon.orrery
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
-/** What a failed check of Orrery says, and how often it is tried again. */
+/** What a failed check or read of Orrery says, and how often a failed check is tried again. */
 class OrreryProblemLinesTest {
     private val down = OrreryError.Unreachable(ProxyAnswered(502))
+
+    @Test
+    fun `a failed read is said by what failed`() {
+        assertEquals("Your ship did not answer", readProblemLine(down))
+        assertEquals("Orrery is not on your ship now", readProblemLine(OrreryError.Refused(404, "not found")))
+        assertEquals("Orrery no longer takes this device's key", readProblemLine(OrreryError.Refused(403, "forbidden")))
+        assertEquals("Orrery could not be read: busy", readProblemLine(OrreryError.Refused(500, "busy")))
+        assertEquals("Orrery could not be read", readProblemLine(OrreryError.Refused(500, "<html>")), "never an error page")
+        assertEquals("Orrery's answer could not be read", readProblemLine(OrreryError.Garbled(RuntimeException("x"))))
+    }
+
+    @Test
+    fun `only a key refused as the pass reads it is offered a new key`() {
+        assertTrue(isKeyRefused(OrreryError.Refused(403, "forbidden")))
+        assertFalse(isKeyRefused(OrreryError.Refused(403, "outside this key's scope")))
+        assertFalse(isKeyRefused(OrreryError.Refused(404, "forbidden")))
+        assertFalse(isKeyRefused(down))
+    }
 
     @Test
     fun `a failed check is said plainly, and that it is asked again`() {
