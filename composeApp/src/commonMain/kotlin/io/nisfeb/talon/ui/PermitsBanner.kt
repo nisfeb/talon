@@ -134,30 +134,52 @@ private const val RECHECK_MS = 30L * 60 * 1000
 private const val FOCUS_RECHECK_MS = 10L * 60 * 1000
 
 /**
- * The ship's permits page, signed in. The phone's browser is not signed
- * in to the ship, and grubbery answered it "forbidden": where there is
- * an in-app browser the page opens there with this session's cookie.
- * Desktop has none, and goes through eyre's login, which asks for the
- * access key only where the browser is signed out and then goes on to
- * the page. [after] runs when the in-app page closes.
+ * A page on the ship ([pageUrl], titled [title]), opened signed in. The
+ * phone's browser is not signed in to the ship, so a ship page sent
+ * there asked for the access key, and grubbery answered it "forbidden":
+ * where there is an in-app browser the page opens there with this
+ * session's cookie. Desktop has none, and goes through eyre's login,
+ * which asks for the access key only where the browser is signed out
+ * and then goes on to the page. [after] runs when the in-app page closes.
  */
 @Composable
-internal fun rememberPermitsPage(shipUrl: String, inApp: Boolean = isUrbWebViewSupported, after: () -> Unit = {}): () -> Unit {
+internal fun rememberShipPage(
+    shipUrl: String,
+    pageUrl: String,
+    title: String,
+    inApp: Boolean = isUrbWebViewSupported,
+    after: () -> Unit = {},
+): () -> Unit {
     val cookie = LocalShipCookie.current
     val uriHandler = LocalUriHandler.current
-    var open by remember(shipUrl) { mutableStateOf(false) }
+    var open by remember(shipUrl, pageUrl) { mutableStateOf(false) }
     if (open && cookie != null) {
-        ShipPageSheet(title = "Permissions", pageUrl = permitsUrl(shipUrl), shipUrl = shipUrl, cookie = cookie) {
+        ShipPageSheet(title = title, pageUrl = pageUrl, shipUrl = shipUrl, cookie = cookie) {
             open = false
             after()
         }
     }
     return {
         if (inApp && cookie != null) open = true
-        else runCatching { uriHandler.openUri(permitsLoginUrl(shipUrl)) }
+        else runCatching { uriHandler.openUri(shipLoginUrl(shipUrl, pageUrl)) }
     }
 }
 
+/** The ship's permits page, signed in ([rememberShipPage]). */
+@Composable
+internal fun rememberPermitsPage(shipUrl: String, inApp: Boolean = isUrbWebViewSupported, after: () -> Unit = {}): () -> Unit =
+    rememberShipPage(shipUrl, permitsUrl(shipUrl), "Permissions", inApp, after)
+
+/**
+ * Eyre's login, going on to [pageUrl] on [shipUrl] once signed in. The
+ * page's #fragment is left off: the login form posts without it.
+ */
+fun shipLoginUrl(shipUrl: String, pageUrl: String): String {
+    val base = shipUrl.trimEnd('/')
+    val path = pageUrl.removePrefix(base).substringBefore('#').ifBlank { "/" }
+    return "$base/~/login?redirect=$path"
+}
+
 /** Eyre's login, going on to the permits page once signed in. */
-fun permitsLoginUrl(shipUrl: String): String = shipUrl.trimEnd('/') + "/~/login?redirect=/apps/grubbery/permits"
+fun permitsLoginUrl(shipUrl: String): String = shipLoginUrl(shipUrl, permitsUrl(shipUrl))
 
