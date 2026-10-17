@@ -49,21 +49,55 @@ fun MailScreen(
     /** Storage for a file too big to attach; see [MailComposer]. */
     upload: (suspend (ByteArray, String, String) -> String)? = null,
 ) {
-    io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:more")
     var openThread by remember { mutableStateOf(initialThread) }
     androidx.compose.runtime.LaunchedEffect(initialThread) { if (initialThread != null) openThread = initialThread }
     var composing by remember { mutableStateOf<MailIntent?>(null) }
-    // Back steps out of what is open inside mail first: the composer,
-    // then a message, to the list. Only the section's own back answered
-    // it, which closed all of mail and landed on the chat list.
-    io.nisfeb.talon.ui.PlatformBackHandler(enabled = composing != null || openThread != null) {
-        if (composing != null) composing = null else openThread = null
-    }
     androidx.compose.runtime.LaunchedEffect(composeTo) {
         if (composeTo != null) {
             composing = MailIntent(to = listOf(composeTo))
             onComposeToConsumed()
         }
+    }
+    MailScreen(
+        repo = repo,
+        contacts = contacts,
+        ourShip = ourShip,
+        openThread = openThread,
+        onOpenThread = { openThread = it },
+        composing = composing,
+        onCompose = { composing = it },
+        onBack = onBack,
+        modifier = modifier,
+        upload = upload,
+    )
+}
+
+/**
+ * [MailScreen] with what is open held by the host: the shared shell's
+ * Mail tab on a phone, where a link or a profile's Mail button sets it.
+ * On a phone that tab was the bare workspace, with no menu button and
+ * no way back, and the tab is saved, so Talon reopened on it (an iPhone
+ * user, 2026-10-17: "I can't navigate anymore").
+ */
+@Composable
+fun MailScreen(
+    repo: MailRepo,
+    contacts: ContactMap,
+    ourShip: String,
+    openThread: String?,
+    onOpenThread: (String?) -> Unit,
+    composing: MailIntent?,
+    onCompose: (MailIntent?) -> Unit,
+    onBack: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    upload: (suspend (ByteArray, String, String) -> String)? = null,
+) {
+    io.nisfeb.talon.notify.ClearNotificationsWhileShown("mail:more")
+    // Back steps out of what is open inside mail first: the composer,
+    // then a message, to the list. Only the section's own back answered
+    // it, which closed all of mail and landed on the chat list.
+    io.nisfeb.talon.ui.PlatformBackHandler(enabled = composing != null || openThread != null) {
+        if (composing != null) onCompose(null) else onOpenThread(null)
     }
 
     // Its header is hand rolled rather than a TopAppBar in a
@@ -92,9 +126,9 @@ fun MailScreen(
             contacts = contacts,
             ourShip = ourShip,
             openThread = openThread,
-            onOpenThread = { openThread = it },
+            onOpenThread = onOpenThread,
             composing = composing,
-            onCompose = { composing = it },
+            onCompose = onCompose,
             upload = upload,
         )
     }
