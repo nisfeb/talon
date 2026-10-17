@@ -402,10 +402,15 @@ class TlonChatRepo(
         baseUrl = session.baseUrl
         scope.launch {
             // One-shot cleanup for anyone whose DM history was doubled
-            // by the applyChatDelta dotted-id bug. Idempotent: on a
-            // clean DB it's a no-op.
-            runCatching { dedupeDottedIds() }
-                .onFailure { Log.w(TAG, "dotted-id dedupe failed", it) }
+            // by the applyChatDelta dotted-id bug. Once a database: every
+            // write undots (MessageDao.upsert, setStatus), and the scan
+            // reads every row, the LIKE having no index to use.
+            runCatching {
+                if (db.marks().get(MarkDao.DOTTED_IDS_DEDUPED) == null) {
+                    dedupeDottedIds()
+                    db.marks().put(MarkEntity(MarkDao.DOTTED_IDS_DEDUPED, nowMs()))
+                }
+            }.onFailure { Log.w(TAG, "dotted-id dedupe failed", it) }
             // A post left in flight by the last run (killed mid-send) goes
             // with the queue: the refresh's purge used to delete it instead.
             runCatching { db.messages().requeueStalePending() }
@@ -424,9 +429,8 @@ class TlonChatRepo(
     /**
      * Walk every row whose id / postId is dot-grouped and collapse it
      * onto its undotted twin (or rename in place if none exists). See
-     * [DottedIdDedupe] for the planner. Cheap — runs once per boot,
-     * the `LIKE '%.%'` scan is indexed by the primary key path and
-     * skips the common undotted case entirely.
+     * [DottedIdDedupe] for the planner. Runs once a database ([start]):
+     * the `LIKE '%.%'` scan reads every row.
      */
     internal suspend fun dedupeDottedIds() {
         val msgRows = db.messages().findDottedIdRows()
