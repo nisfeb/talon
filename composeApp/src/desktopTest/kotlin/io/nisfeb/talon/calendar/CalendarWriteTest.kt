@@ -416,7 +416,7 @@ class CalendarWriteTest {
     // showed an edit before the ship's copy came back: Home kept the old
     // event for as long as a busy ship took.
     @Test
-    fun `an event's edit is in the window and the month at once, and back if refused`() {
+    fun `an event's edit is in the window and the month at once and back if refused`() {
         val soon = System.currentTimeMillis() + 3_600_000
         calendar(window = { """{"rows":[${dentist(soon)}]}""" }) { repo, ship ->
             repo.loadRange(soon - 86_400_000, soon + 86_400_000)
@@ -463,7 +463,7 @@ class CalendarWriteTest {
     // "Added to Work" for an event the calendar then refused: the ship
     // acks a poke before reading it, and keeps why it refused in outcomes.json.
     @Test
-    fun `a task the calendar refuses after taking it is said, kept for later, and leaves the list`() = calendar(
+    fun `a task the calendar refuses after taking it is said and kept for later and leaves the list`() = calendar(
         setup = { refuseLater = { if ("Buy bread" in it) "the task could not be read" else null } },
     ) { repo, _ ->
         val said = CopyOnWriteArrayList<String>()
@@ -506,7 +506,7 @@ class CalendarWriteTest {
     // ─── a ship down is not a refusal, nor a refusal a ship down ────
 
     @Test
-    fun `a share write while the ship is down says so, and a refusal after it says refused`() = calendar { repo, ship ->
+    fun `a share write while the ship is down says so and a refusal after it says refused`() = calendar { repo, ship ->
         ship.down = true
         assertTrue(!repo.revoke("default", "~nec"))
         assertTrue("isn't answering" in repo.failedLine("refused"), repo.failedLine("refused"))
