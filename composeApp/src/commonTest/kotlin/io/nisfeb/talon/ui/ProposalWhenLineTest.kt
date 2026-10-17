@@ -25,6 +25,7 @@ class ProposalWhenLineTest {
             "Dentist, 2026-10-20 to 2026-10-22, Main St",
             whenLine(event("""{"starts":"2026-10-20","ends":"2026-10-22","location":"Main St"}"""), ny),
         )
+        assertEquals("Dentist, 2026-10-20", whenLine(event("""{"starts":"2026-10-20","ends":"2026-10-20T18:00:00Z"}"""), ny), "an end on the same day names no last day")
     }
 
     @Test

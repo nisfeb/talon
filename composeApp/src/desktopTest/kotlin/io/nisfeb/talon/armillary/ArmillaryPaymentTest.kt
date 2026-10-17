@@ -128,12 +128,18 @@ class ArmillaryPaymentTest {
     private val setUp = AiProfile(providers = listOf(device, row), defaultModel = ModelRef(ARMILLARY_PROVIDER, ""), orrery = true)
 
     /** A ship and the Armillary repo, set up and refreshed once. */
+    /** What the repo told the person, as "title: body". */
+    private val told = CopyOnWriteArrayList<String>()
+    private val notifier = object : io.nisfeb.talon.notify.Notifier {
+        override fun notify(title: String, body: String, key: String?) { told += "$title: $body" }
+    }
+
     private inner class Rig(profile: AiProfile) : AutoCloseable {
         private val scope = CoroutineScope(SupervisorJob())
         val ai = FakeAiSettings().apply {
             applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "", model = null, savedProfile = profile))
         }
-        val repo = ArmillaryRepo(http, scope, ai)
+        val repo = ArmillaryRepo(http, scope, ai, notifier)
 
         init {
             repo.attach("https://ship.test", "~zod")
@@ -254,6 +260,37 @@ class ArmillaryPaymentTest {
             checkouts = """{"n1":{"nonce":"n1","rail":"stripe","amount":5000000,"url":"https://pay.example/c1","status":"paid"}}"""
             repo.refresh()
             assertEquals(Payment.Phase.PAID to 5_000_000L, repo.payment.value!!.let { it.phase to it.addedMicro })
+            assertEquals(listOf("Armillary: $5.00 added"), told.toList(), "the person is told what they paid")
+        }
+    }
+
+    @Test
+    fun `a paid row with no amount says what the balance rose by, and one that ended says so`() {
+        balance = 10_000_000
+        ship(setUp) { repo, _ ->
+            repo.topUp("stripe", "five", null).getOrThrow()
+            balance = 15_000_000
+            checkouts = """{"n1":{"nonce":"n1","rail":"stripe","amount":0,"url":"https://pay.example/c1","status":"paid"}}"""
+            repo.refresh()
+            assertEquals(5_000_000L, repo.payment.value!!.addedMicro)
+        }
+        balance = 10_000_000
+        ship(setUp) { repo, _ ->
+            repo.topUp("stripe", "five", null).getOrThrow()
+            checkouts = """{"n1":{"nonce":"n1","rail":"stripe","amount":5000000,"url":"https://pay.example/c1","status":"expired"}}"""
+            repo.refresh()
+            assertEquals(Payment.Phase.ENDED, repo.payment.value!!.phase)
+        }
+    }
+
+    @Test
+    fun `with no row and no rise nothing is paid yet`() {
+        balance = 10_000_000
+        ship(setUp) { repo, _ ->
+            repo.topUp("stripe", "five", null).getOrThrow()
+            repo.refresh()
+            assertEquals(Payment.Phase.WAITING, repo.payment.value!!.phase)
+            assertEquals(emptyList(), told.toList())
         }
     }
 

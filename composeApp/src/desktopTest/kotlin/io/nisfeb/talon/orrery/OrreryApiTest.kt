@@ -268,6 +268,10 @@ class OrreryApiTest {
             assertEquals(status.value, (e.cause as ProxyAnswered).status)
             assertFailsWith<OrreryError.Unreachable> { api(status, "").actions("t") }
         }
+        // Only those three: a 501 or a 505 page is the ship's own refusal.
+        for (status in listOf(HttpStatusCode.NotImplemented, HttpStatusCode.VersionNotSupported)) {
+            assertEquals(status.value, assertFailsWith<OrreryError.Refused> { api(status, page).probe() }.status)
+        }
         val (scry, _) = ship { HttpStatusCode.BadGateway to page }
         assertFailsWith<OrreryError.Unreachable> { scry.beacon() }
         // Orrery's own 502, its model failing, is still the refusal it is.

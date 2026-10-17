@@ -17,6 +17,8 @@ class OrreryProblemLinesTest {
         assertEquals("Orrery could not be read: busy", readProblemLine(OrreryError.Refused(500, "busy")))
         assertEquals("Orrery could not be read", readProblemLine(OrreryError.Refused(500, "<html>")), "never an error page")
         assertEquals("Orrery's answer could not be read", readProblemLine(OrreryError.Garbled(RuntimeException("x"))))
+        assertEquals("Orrery could not be read: This install has no orrery key yet.", readProblemLine(IllegalStateException("This install has no orrery key yet.")))
+        assertEquals("Orrery could not be read", readProblemLine(RuntimeException("java.io.IOException: at https://ship")), "never an exception's text")
     }
 
     @Test
