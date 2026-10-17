@@ -291,9 +291,23 @@ class CallController(
     fun stop() {
         loop?.cancel()
         loop = null
-        channel?.deleteSoon(scope, timeoutMs = 3_000)
+        val ch = channel
         channel = null
+        // A call placed or live as the app lets go of it is hung up on the
+        // peer too: ended only here, they sat on a dead call until their
+        // own watchdog gave up. A ring is left to our other devices.
+        val id = callId
+        val p = peer
+        val live = _state.value is CallUiState.Outgoing || _state.value is CallUiState.Active
         endLocal("stopped")
+        if (ch == null) return
+        scope.launch {
+            // Bounded: the ack would come down the stream just cancelled.
+            if (live && id != null && p != null) withTimeoutOrNull(STOP_HANGUP_MS) {
+                runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.sendAction(p, TrunkSig.Hangup(id))) }
+            }
+            ch.deleteSoon(scope, timeoutMs = 3_000)
+        }
     }
 
     /** Give [ch] up: never resumed, and ended on the ship so its watch does not clog. */
@@ -2109,5 +2123,8 @@ class CallController(
         private const val RECORD_HEARTBEAT_MS = 30_000L
         private const val RESTART_GIVE_UP_MS = 25_000L
         private const val PRESENCE_HEARTBEAT_MS = 30_000L
+        /** How long [stop] waits on the hangup of a call it ends. */
+        private const val STOP_HANGUP_MS = 3_000L
+
     }
 }
