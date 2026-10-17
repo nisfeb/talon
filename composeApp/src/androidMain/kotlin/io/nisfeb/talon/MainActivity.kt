@@ -241,7 +241,7 @@ class MainActivity : ComponentActivity() {
      * doesn't stay visible over the lock screen afterwards.
      */
     private fun showOverLockScreenIfRinging(intent: Intent?) {
-        if (intent?.hasExtra(Notifications.EXTRA_ANSWER_FROM) != true) return
+        if (intent == null || !io.nisfeb.talon.call.RingIntents.isRing(intent::hasExtra)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -298,6 +298,14 @@ class MainActivity : ComponentActivity() {
             // answer extra would re-accept on the next cold launch.
             intent.removeExtra(Notifications.EXTRA_ANSWER_FROM)
             intent.removeExtra(Notifications.EXTRA_ANSWER_CALL_ID)
+            consumedDeepLink = true
+        }
+        // A ring to look at, not to answer: shown over the lock screen
+        // above, and the in-app ring does the rest. Stripped like the rest,
+        // or the intent the task keeps would show us over the lock screen
+        // on the next launch.
+        if (intent.hasExtra(Notifications.EXTRA_RINGING_FROM)) {
+            intent.removeExtra(Notifications.EXTRA_RINGING_FROM)
             consumedDeepLink = true
         }
         intent.getStringExtra(Notifications.EXTRA_CALL_BACK)?.let {
