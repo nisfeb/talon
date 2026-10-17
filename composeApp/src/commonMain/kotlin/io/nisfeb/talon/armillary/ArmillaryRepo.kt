@@ -53,6 +53,8 @@ class ArmillaryRepo(
     private val picksEveryMs: Long = PICKS_EVERY_MS,
     /** The clock coming back to the front is measured on; a test's own. */
     private val now: () -> Long = { io.nisfeb.talon.util.nowMs() },
+    /** The first pause before a failed check of the ship is tried again; a test's own. */
+    private val probeRetryFirstMs: Long = io.nisfeb.talon.orrery.PROBE_RETRY_FIRST_MS,
 ) {
     private val _availability = MutableStateFlow(ArmillaryAvailability.UNKNOWN)
     val availability: StateFlow<ArmillaryAvailability> = _availability.asStateFlow()
@@ -120,7 +122,11 @@ class ArmillaryRepo(
     private var watching: Job? = null
     private var adopting: Job? = null
     private var ticking: Job? = null
+    private var retrying: Job? = null
     @kotlin.concurrent.Volatile private var resumedAtMs = 0L
+
+    /** The app is in front ([resumed]) or behind ([paused]); in front until told. */
+    @kotlin.concurrent.Volatile private var inFront = true
 
     // Coroutines alone touch the repo, so one lock is the whole of the
     // guard; commonMain has no synchronized, iOS being native.
@@ -140,11 +146,14 @@ class ArmillaryRepo(
         // The vendor's picks reach the ship within five minutes, and the
         // row took them only on a refresh: once a process, or a tap. A
         // phone's process lives for days and kept the old models. This
-        // reads the ship's own config, so it costs the vendor nothing.
+        // reads the ship's own config, so it costs the vendor nothing. Only
+        // while it is any use: with no Armillary on the ship, no row on
+        // this device, or the app behind, a read is the ship's cost for
+        // nobody, every ten minutes for the life of the process.
         ticking = scope.launch {
             while (isActive) {
                 delay(picksEveryMs)
-                readPicks()
+                if (inFront && _availability.value == ArmillaryAvailability.PRESENT && aiSettings?.state?.value?.profile()?.armillary() != null) readPicks()
             }
         }
         // The ship already buys from a vendor, set up on some device: this
@@ -168,6 +177,8 @@ class ArmillaryRepo(
         adopting = null
         ticking?.cancel()
         ticking = null
+        retrying?.cancel()
+        retrying = null
         resumedAtMs = 0L
         api = null
         shipUrl = null
@@ -197,13 +208,18 @@ class ArmillaryRepo(
         try {
             runSuspendCatching { a.probe() }
                 .onSuccess { _availability.value = it; _error.value = null }
-                .onFailure { _availability.value = ArmillaryAvailability.UNKNOWN; _error.value = it.message }
+                .onFailure {
+                    _availability.value = ArmillaryAvailability.UNKNOWN
+                    // Said on the card, which only said "Checking your ship".
+                    _error.value = checkProblemLine(it)
+                    retryCheck()
+                }
             if (_availability.value != ArmillaryAvailability.PRESENT) {
                 return Result.failure(IllegalStateException(_error.value ?: "Armillary does not answer on this ship."))
             }
             var got: Inference? = null
             runSuspendCatching { a.inference() }
-                .onSuccess { if (it is InferenceAnswer.Have) got = it.inference }
+                .onSuccess { if (it is InferenceAnswer.Have) got = it.inference else if (it is InferenceAnswer.NoKey) dropKey() }
                 .onFailure {
                     Log.i(TAG, "inference skipped: ${it.message}")
                     if (_inference.value == null) _keyProblem.value = keyProblemLine(it)
@@ -230,8 +246,39 @@ class ArmillaryRepo(
     private suspend fun readPicks() = lock.withLock {
         val a = api ?: return@withLock
         runSuspendCatching { a.inference() }
-            .onSuccess { if (it is InferenceAnswer.Have) took(it.inference) }
+            .onSuccess { if (it is InferenceAnswer.Have) took(it.inference) else if (it is InferenceAnswer.NoKey) dropKey() }
             .onFailure { Log.i(TAG, "picks skipped: ${it.message}") }
+    }
+
+    /**
+     * A check that failed, tried again further apart each time and never
+     * in step with other clients, until the ship answers: the card said
+     * "Checking your ship" all session after one 502, and nothing adopted.
+     */
+    private fun retryCheck() {
+        if (retrying?.isActive == true || api == null) return
+        retrying = scope.launch {
+            var failures = 0
+            while (_availability.value == ArmillaryAvailability.UNKNOWN && _error.value != null) {
+                delay(io.nisfeb.talon.urbit.jittered(io.nisfeb.talon.orrery.probeRetryMs(++failures, probeRetryFirstMs)))
+                refresh()
+            }
+        }
+    }
+
+    /**
+     * The ship says it holds no key for this device: a vendor changed, or
+     * the key revoked. The row kept the old key and the card said
+     * Connected; now the key goes from the row, and the card offers to
+     * set this device up. A read that failed says nothing of the kind,
+     * and keeps what the row had.
+     */
+    private fun dropKey() {
+        _inference.value = null
+        val ai = aiSettings ?: return
+        val profile = ai.state.value.savedProfile ?: return
+        val row = profile.provider(ARMILLARY_PROVIDER)?.takeIf { it.apiKey.isNotBlank() } ?: return
+        ai.setProfile(profile.copy(providers = profile.providers.map { if (it.id == ARMILLARY_PROVIDER) row.copy(apiKey = "") else it }))
     }
 
     /**
@@ -243,6 +290,7 @@ class ArmillaryRepo(
      * triggers.
      */
     fun resumed() {
+        inFront = true
         val at = now()
         if (api == null || at - resumedAtMs < RESUME_GAP_MS) return
         resumedAtMs = at
@@ -255,6 +303,11 @@ class ArmillaryRepo(
                     .onFailure { Log.i(TAG, "account skipped: ${it.message}") }
             }
         }
+    }
+
+    /** The app went behind: the picks are not read again until it is back ([resumed] reads them then). */
+    fun paused() {
+        inFront = false
     }
 
     /**
@@ -669,6 +722,14 @@ data class Payment(
 
 /** An account deletion the ship took: from which vendor, and how it answered. */
 data class Deletion(val vendor: String, val answer: DeleteAnswer)
+
+/** A failed check for Armillary, said plainly: no status codes and no error pages. */
+internal fun checkProblemLine(e: Throwable): String = when (e) {
+    is ArmillaryError.Refused -> io.nisfeb.talon.util.readableReason(e.reason)
+        ?.let { "Armillary on your ship could not answer: $it." } ?: "Armillary on your ship could not answer."
+    is ArmillaryError.Garbled -> "Your ship's answer about Armillary could not be read."
+    else -> "Your ship did not answer."
+} + " Talon asks again by itself."
 
 /** A failed key ask, said plainly: no HTTP codes or exception names on the card. */
 internal fun keyProblemLine(e: Throwable): String = when (e) {

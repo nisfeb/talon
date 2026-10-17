@@ -397,6 +397,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     val keyProblem by (repo?.keyProblem ?: noProblem).collectAsState()
     val noLocal = remember { MutableStateFlow(false) }
     val noPublicUrl by (repo?.noPublicUrl ?: noLocal).collectAsState()
+    val checkProblem by (repo?.error ?: noProblem).collectAsState()
     // The ship is its own vendor on its own key (armillary 34): it pays
     // nothing, so its zero balance is no reason, and there is nothing to buy.
     val free = inference?.free == true
@@ -448,7 +449,11 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         ArmillaryAvailability.PRESENT -> Unit
         ArmillaryAvailability.MISSING -> Quiet("Armillary is not on your ship. Install it from the Apps page.")
         ArmillaryAvailability.SIGNED_OUT -> Quiet("Signed out of the ship.")
-        ArmillaryAvailability.UNKNOWN -> Quiet("Checking your ship.")
+        ArmillaryAvailability.UNKNOWN -> {
+            Quiet("Checking your ship.")
+            // Why it is still checking, where a check failed.
+            checkProblem?.let { Quiet(it, error = true) }
+        }
     }
     if (where == ArmillaryAvailability.MISSING) Quiet("Armillary is published by ~ricsul-bilwyt, the same as Orrery and the Calendar.")
     account?.let { a ->

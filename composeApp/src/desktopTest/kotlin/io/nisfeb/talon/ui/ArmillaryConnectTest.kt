@@ -56,6 +56,8 @@ class ArmillaryConnectTest {
     private val seen = CopyOnWriteArrayList<String>()
     @Volatile private var hasKey = false
     @Volatile private var inferenceLost = false
+    /** The web server in front of the ship answers for it: the ship is down. */
+    @Volatile private var down = false
 
     /** The ship's answer to a key request; null mints the key. */
     @Volatile private var mint: () -> Pair<HttpStatusCode, String>? = { null }
@@ -73,6 +75,7 @@ class ArmillaryConnectTest {
         val client = HttpClient(MockEngine { req ->
             val path = req.url.encodedPath
             seen += req.method.value + " " + path
+            if (down) return@MockEngine respond("<html><body>502 Bad Gateway</body></html>", HttpStatusCode.BadGateway)
             val (status, body) = when {
                 path.endsWith("/api/inference") -> when {
                     inferenceLost -> throw java.io.IOException("connection reset")
@@ -161,6 +164,18 @@ class ArmillaryConnectTest {
         onNodeWithText("Refresh").performScrollTo().performClick()
         waitUntil(timeoutMillis = 5_000) { seen.count { it == "GET /apps/armillary/api/inference" } >= 4 }
         assertEquals(1, keyAsks())
+    }
+
+    // A 502 while the ship restarted: the card said "Checking your ship"
+    // all session, with the reason hidden.
+    @Test
+    fun `a ship that did not answer the first check says so, and that it asks again`() = runComposeUiTest {
+        down = true
+        val ai = settings()
+        show(ai, repo(ai))
+        onNodeWithText("Checking your ship.").assertExists()
+        onNodeWithText("Your ship did not answer. Talon asks again by itself.").assertExists()
+        assertFalse(shows("Bad Gateway"), "never the proxy's page")
     }
 
     @Test
