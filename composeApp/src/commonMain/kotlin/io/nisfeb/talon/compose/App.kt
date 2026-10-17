@@ -3660,19 +3660,41 @@ fun App(
                                 }
                             } else if (activeRailTab == RailTab.Mail && !showAssistant) {
                                 {
-                                    io.nisfeb.talon.ui.screens.MailWorkspace(
-                                        repo = mailRepo,
-                                        contacts = callContacts,
-                                        ourShip = ship,
-                                        openThread = openMailThread,
-                                        onOpenThread = { openMailThread = it },
-                                        composing = mailComposing,
-                                        onCompose = { mailComposing = it },
-                                        // What a mail cannot carry, the
-                                        // ship's own storage can: the same
-                                        // upload chat images take.
-                                        upload = { bytes, mime, name -> repo.uploadImage(bytes, mime, name) },
-                                    )
+                                    // What a mail cannot carry, the ship's own
+                                    // storage can: the same upload chat images take.
+                                    val upload: suspend (ByteArray, String, String) -> String = { bytes, mime, name -> repo.uploadImage(bytes, mime, name) }
+                                    if (expanded) {
+                                        io.nisfeb.talon.ui.screens.MailWorkspace(
+                                            repo = mailRepo,
+                                            contacts = callContacts,
+                                            ourShip = ship,
+                                            openThread = openMailThread,
+                                            onOpenThread = { openMailThread = it },
+                                            composing = mailComposing,
+                                            onCompose = { mailComposing = it },
+                                            upload = upload,
+                                        )
+                                    } else {
+                                        // No rail on screen: the bare workspace
+                                        // had no menu button and no way back,
+                                        // and ran under the clock on an iPhone.
+                                        io.nisfeb.talon.ui.screens.MailScreen(
+                                            repo = mailRepo,
+                                            contacts = callContacts,
+                                            ourShip = ship,
+                                            openThread = openMailThread,
+                                            onOpenThread = { openMailThread = it },
+                                            composing = mailComposing,
+                                            onCompose = { mailComposing = it },
+                                            // As leaving Mail by the rail does.
+                                            onBack = {
+                                                openMailThread = null
+                                                mailComposing = null
+                                                uiSettings.setActiveRailTab(RailTab.Chats)
+                                            },
+                                            upload = upload,
+                                        )
+                                    }
                                 }
                             } else if (activeRailTab == RailTab.Calendar && !showAssistant) {
                                 {

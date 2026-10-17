@@ -283,6 +283,25 @@ class AppShellTest {
         home()
     }
 
+    // An iPhone user, 2026-10-17: the Mail tab on a phone was the bare
+    // mail list, under the clock, with no menu button and no way back,
+    // and the tab is saved, so Talon opened on it again.
+    @Test
+    fun `with no rail, Mail has its header and a way back to the chats`() {
+        val ui = InMemoryUiSettings()
+        app(ui = ui, width = 600.dp) {
+            assertTrue(!present("Mail"), "a phone-width window has no rail")
+            // Where the drawer, the home page and a saved tab all land.
+            ui.setActiveRailTab(RailTab.Mail)
+            waitUntil(timeoutMillis = 5_000) { showing("Mail runs in Grubbery, which this ship does not have yet.") }
+            assertTrue(onAllNodesWithText("Mail").fetchSemanticsNodes().isNotEmpty() && present("Back"), "the mail screen's own header")
+            onNodeWithContentDescription("Back").performClick()
+            // The chat list; no rail, so no Chats button to look for.
+            waitUntil(timeoutMillis = 5_000) { present("New message") }
+            assertTrue(!showing("Mail runs in Grubbery"))
+        }
+    }
+
     @Test
     fun `a thread opened from a message sits beside the chat`() = app(seed = {
         messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["shall we meet"]}]""", "/chat"))
