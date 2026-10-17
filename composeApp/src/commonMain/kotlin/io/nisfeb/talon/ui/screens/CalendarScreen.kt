@@ -1376,6 +1376,10 @@ private fun EventEditor(
 ) {
     var d by remember { mutableStateOf(initial) }
     var editScope by remember { mutableStateOf(EditScope.ALL) }
+    // One occurrence made the series' own exception (edit-at) stays on the
+    // series' calendar, as on the calendar's page: a calendar picked for it
+    // was dropped without a word, so none is offered.
+    val keepsCalendar = recurringOccurrence && meetings && editScope == EditScope.ONLY
     var zoneText by remember { mutableStateOf(initial.zone.orEmpty()) }
     var pickingDate by remember { mutableStateOf(false) }
     var pickingUntil by remember { mutableStateOf(false) }
@@ -1399,7 +1403,12 @@ private fun EventEditor(
                     value = d.name, onValueChange = { d = d.copy(name = it) }, label = { Text("Name") }, singleLine = true,
                     modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus),
                 )
-                if (calendars.size > 1) {
+                if (calendars.size > 1 && keepsCalendar) {
+                    Text(
+                        "This one stays on ${calendars.firstOrNull { it.id == initial.cal }?.let { it.name.ifBlank { it.id } } ?: "its series' calendar"}, with its series.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (calendars.size > 1) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                         calendars.forEach { c ->
                             FilterChip(selected = d.cal == c.id, onClick = { d = d.copy(cal = c.id) }, label = { Text(c.name.ifBlank { c.id }) })
@@ -1668,7 +1677,7 @@ private fun EventEditor(
         },
         confirmButton = {
             Button(onClick = {
-                val ready = d.copy(minuteOfDay = time.hour * 60 + time.minute)
+                val ready = d.copy(minuteOfDay = time.hour * 60 + time.minute, cal = if (keepsCalendar) initial.cal else d.cal)
                 problem = when {
                     ready.name.isBlank() -> "A name is needed."
                     ready.repeats && ready.rawKind == null && ready.repeat == Repeat.WEEKLY && ready.weekdays.isEmpty() -> "Pick the weekdays."

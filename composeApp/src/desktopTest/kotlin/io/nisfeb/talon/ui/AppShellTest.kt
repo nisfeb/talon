@@ -456,16 +456,18 @@ class AppShellTest {
 
     private fun ComposeUiTest.field(label: String) = onNode(hasSetTextAction() and androidx.compose.ui.test.hasText(label))
 
-    /** Standup's occurrence today, opened, renamed, put on [calendar] if named, and saved as this one only. */
-    private fun ComposeUiTest.renameThisStandupOnly(calendar: String? = null) {
+    /** Standup's occurrence today, opened, renamed, and saved as this one only; [kept] is the calendar it is said to stay on. */
+    private fun ComposeUiTest.renameThisStandupOnly(kept: String? = null) {
         onNodeWithText("Standup").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Close") }
         onNodeWithText("Edit").performClick()
         waitUntil(timeoutMillis = 10_000) { showing("This change applies to") }
         onNodeWithText("This one only").performScrollTo().performClick()
         field("Name").performTextReplacement("Standup, moved")
-        if (calendar != null) {
-            onNode(androidx.compose.ui.test.hasText(calendar) and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isDialog())).performScrollTo().performClick()
+        if (kept != null) {
+            // A calendar picked for it was dropped without a word: none is offered.
+            waitUntil(timeoutMillis = 5_000) { showing("This one stays on $kept, with its series.") }
+            assertTrue(onAllNodes(androidx.compose.ui.test.hasText("Work") and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isDialog())).fetchSemanticsNodes().isEmpty())
         }
         onAllNodesWithText("Save")[0].performClick()
     }
@@ -485,9 +487,9 @@ class AppShellTest {
         val asked = ship.requests.toList()
         val month = (opened until asked.size).firstOrNull { asked[it].endsWith("/window.json") }
         assertTrue(month != null && asked.indexOfFirst { it.endsWith("/invites.json") } > month, "the month first, then invitations: $asked")
-        // Another calendar picked too: one occurrence stays with its series,
-        // as on the calendar's page, so home is the series' own and no cal goes.
-        renameThisStandupOnly(calendar = "Work")
+        // One occurrence stays with its series, as on the calendar's page,
+        // so home is the series' own and no cal goes; none is offered.
+        renameThisStandupOnly(kept = "Personal")
         waitUntil(timeoutMillis = 5_000) { cal.pokes.isNotEmpty() }
         waitUntil(timeoutMillis = 10_000) { showing("Standup, moved") && !showing("syncing") }
         assertEquals(
