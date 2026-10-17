@@ -531,6 +531,65 @@ class AppShellTest {
         assertEquals(1, cal.pokes.size, "no skip: ${cal.pokes}")
     }
 
+    // The add kept, the skip refused: both are on the calendar, said so,
+    // and the editor stays shut, or saving again adds a third.
+    @Test
+    fun `on an older calendar, a skip it refuses says both are kept`() = app(
+        setup = withCalendar(invites = null) { refuseLater = { if ("skip-event" in it) "no such occurrence" else null } },
+    ) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        renameThisStandupOnly()
+        waitUntil(timeoutMillis = 10_000) { showing("kept the old one too") }
+        assertEquals(2, cal.pokes.size)
+        assertTrue(!showing("This change applies to"), "the editor stays shut")
+    }
+
+    // Leaving while a busy ship has the save: the refusal is still found,
+    // and said when the calendar is opened again.
+    @Test
+    fun `a save refused after the calendar was left is said when it opens again`() = app(
+        setup = withCalendar {
+            hold = kotlinx.coroutines.CompletableDeferred()
+            refuseLater = { if ("edit-at" in it) "no repeating event has an occurrence there, or the new one could not be read" else null }
+        },
+    ) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        renameThisStandupOnly()
+        waitUntil(timeoutMillis = 5_000) { ship.requests.any { it.endsWith("/calendar.calendar") } }
+        onNodeWithContentDescription("Chats").performClick()
+        home()
+        cal.hold!!.complete(Unit)
+        waitUntil(timeoutMillis = 10_000) { cal.outcomesRead.get() > 0 }
+        waitForIdle()
+        onNodeWithContentDescription("Calendar").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("\"Standup, moved\" was not saved: no repeating event has an occurrence there") }
+    }
+
+    // A card for an event the calendar then refused pointed at nothing.
+    @Test
+    fun `a new event's card goes to its chat only once the calendar has kept it`() = app(
+        seed = { messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat")) },
+        setup = withCalendar { refuseLater = { if ("Refused tea" in it) "the event could not be read: its name, kind, start or rule" else null } },
+    ) { ship ->
+        openCalendar()
+        onAllNodesWithContentDescription("New event")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Also post to a chat") }
+        field("Name").performTextInput("Refused tea")
+        onNodeWithText("Also post to a chat…").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Post the event to which chat?") }
+        onAllNodes(androidx.compose.ui.test.hasText("~bus") and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isDialog()))[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Posts to") }
+        onAllNodesWithText("Save")[0].performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("Not saved: the event could not be read") }
+        assertTrue(ship.pokesTo("chat").isEmpty(), "nothing posted for a refused event")
+        assertTrue(showing("Posts to"), "the editor back with where the card was to go")
+        field("Refused tea").performTextReplacement("Tea")
+        onAllNodesWithText("Save")[0].performClick()
+        waitUntil(timeoutMillis = 10_000) { ship.pokesTo("chat").any { "Tea" in it.json.toString() } }
+    }
+
     // A change the calendar keeps says nothing more: no refusal of it, and
     // one an hour old, said or not, is not this one's.
     @Test

@@ -102,6 +102,7 @@ import io.nisfeb.talon.calendar.guestsOf
 import io.nisfeb.talon.calendar.guestsProblem
 import io.nisfeb.talon.calendar.joinLink
 import io.nisfeb.talon.calendar.rsvpBody
+import io.nisfeb.talon.calendar.splitBody
 import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.CalendarTask
@@ -250,6 +251,8 @@ fun CalendarScreen(
     LaunchedEffect(availability) { if (availability == CalendarAvailability.PRESENT) zones = repo.zones() }
     var managing by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
+    // A save's refusal found after this screen had gone: said now.
+    LaunchedEffect(repo) { repo.unheard.value?.let { status = it; repo.heard() } }
 
     val grid = remember(year, month) { monthGrid(year, month) }
     // The page is read again on opening: ten minutes is a long time
@@ -453,9 +456,15 @@ fun CalendarScreen(
         viewing = null
         if (r.host.isNotEmpty()) answerInvite("${r.host}/${r.id}", r.host, st, r.cal)
         else say("Answering…", "The ship did not take the answer.") {
-            // Refused when the event names no guest who is the owner.
+            // Refused when the event names no guest who is the owner;
+            // looked for behind the write, which leaving does not stop.
             val since = nowMs()
-            repo.writeEvent(rsvpBody(r.id, r.cal, st)).ok.also { ok -> if (ok) repo.refusal(r.id, since)?.let { status = "Not answered: $it" } }
+            val (ok, check) = repo.carry {
+                val ok = repo.writeEvent(rsvpBody(r.id, r.cal, st)).ok
+                ok to if (!ok) null else repo.behind { repo.refusalOfSave(r.id, since) { "Your answer to \"${r.name}\" was not taken: $it" } }
+            }
+            check?.await()?.let { repo.heard(); status = "Not answered: $it" }
+            ok
         }
     }
     // Sending an event on: to a chat as a message, by mail with an
@@ -1119,39 +1128,43 @@ fun CalendarScreen(
                 val series = editingSeries
                 // The one-off went in but the ship would not skip the old.
                 var halfDone = false
+                val bothKept = "\"${d.name.trim()}\" is on its new day and time, but the ship kept the old one too: open it and choose Skip this one."
                 // The calendar acks a poke before it reads it, and keeps
-                // why it refused one: looked for after [savedAt].
+                // why it refused one: looked for after [savedAt], under the
+                // poke's id, an add's being "" (it has none of its own).
                 val savedAt = nowMs()
+                val lookFor = id ?: ""
                 var refused: String? = null
-                // Whose refusal to look for: the calendar records an add's
-                // as "", having no id of its own; null for either of two.
-                var lookFor: String? = id ?: ""
-                var looked = false
+                // The old two steps' skip went: refused, both are kept.
+                var skipped = false
                 val ghost = if (id == null) placeholderFor(d) else null
+                // A new event's card, posted once the calendar has kept it:
+                // one for an event it refused pointed at nothing.
+                val target = postTo?.takeIf { id == null && chat != null && ghost != null }
+                val card = if (target != null) textOf(ghost!!) else null
                 if (ghost != null) pendingRows = pendingRows + ghost
                 if (id != null) pendingEdits = pendingEdits + (id to d)
                 act(if (id == null) "Adding…" else "Saving…", "The ship did not take the change; \"${d.name.trim()}\" is as it was.") {
                     // The whole write on the repo's scope: leaving the screen
                     // no longer cancels it partway (a series edit is two pokes).
-                    val written = repo.carry {
+                    val (written, check) = repo.carry {
                         // A ticked task opened from its row lacks when it was
                         // done; read it here, behind the closed editor, or the
                         // save would stamp it done now.
                         val d = if (id != null && d.cat == EventCat.TODO && d.done && d.doneMs == null) {
                             d.copy(doneMs = repo.eventDetail(id)?.get("done_ms")?.jsonPrimitive?.longOrNull)
                         } else d
-                        when {
+                        val w = when {
                             id == null || idx == null || series == null ->
                                 repo.writeEvent(eventBody(d, id))
                             editScope == EditScope.ALL ->
                                 repo.writeEvent(eventBody(seriesEdit(d, opened = series.second, series = series.first), id))
-                            // The page's own two steps: end the old, then add.
-                            editScope == EditScope.FOLLOWING -> {
-                                lookFor = null
-                                if (repo.pokeEvent(buildJsonObject { put("action", "cap-event"); put("id", id); put("dom", idx) }, readBack = false)) {
-                                    repo.writeEvent(eventBody(d))
-                                } else null
-                            }
+                            // One step, as the page has sent it since calendar
+                            // 18: in two, a cap kept and an add refused lost
+                            // every occurrence that followed.
+                            // ponytail: a calendar older than 18 drops it, the series as it was
+                            editScope == EditScope.FOLLOWING ->
+                                repo.writeEvent(splitBody(d, id, home = series.first.cal, idx = idx))
                             // One step where the calendar has it: the occurrence
                             // becomes the series' own exception, and on Google
                             // it moves for every guest.
@@ -1160,23 +1173,31 @@ fun CalendarScreen(
                             // Add, then skip the old, once the add is known
                             // kept: skipping first, or on the ship's ack alone,
                             // lost the occurrence whenever the add was refused.
-                            else -> {
-                                looked = true
+                            else ->
                                 if (!repo.pokeEvent(onlyBody(d), readBack = false)) null
                                 else {
-                                    refused = repo.refusal("", savedAt)
+                                    refused = repo.refusalOfSave("", savedAt) { "\"${d.name.trim()}\" was not saved: $it" }
                                     if (refused != null) null
                                     else repo.writeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
-                                        .also { halfDone = !it.ok }
+                                        .also { halfDone = !it.ok; skipped = true }
                                 }
-                            }
+                        }
+                        // Taken, then perhaps refused: looked for here, on the
+                        // repo's scope, so leaving the calendar mid-save loses
+                        // neither the refusal nor the card.
+                        w to if (w?.ok != true || halfDone) null else repo.behind {
+                            val why = repo.refusalOfSave(lookFor, savedAt) { if (skipped) bothKept else "\"${d.name.trim()}\" was not saved: $it" }
+                            val unposted = why == null && target != null &&
+                                io.nisfeb.talon.util.runSuspendCatching { chat!!.send(target, card!!) }.isFailure
+                            why to unposted
                         }
                     }
                     val ok = written?.ok == true || halfDone
                     // Not reopened: saving again would add it twice.
-                    if (halfDone) status = "\"${d.name.trim()}\" is on its new day and time, but the ship kept the old one too: open it and choose Skip this one."
+                    if (halfDone) status = bothKept
                     if (ghost != null) pendingRows = pendingRows - ghost
                     if (id != null) pendingEdits = pendingEdits - id
+                    if (refused != null) repo.heard()
                     // Not saved: the editor back with what was typed, and why.
                     // It closed for good, and a ship down for a restart lost the edit.
                     if (!ok && editing == null) {
@@ -1194,24 +1215,23 @@ fun CalendarScreen(
                             if (kept != null) savedRows = savedRows - kept
                             if (id != null) savedEdits = savedEdits - id
                         }
-                        // Taken, then refused: the editor back, as the page's
-                        // "Not saved".
-                        // ponytail: an add-then-skip's skip refused is not looked for; its add was
-                        if (!halfDone && !looked) scope.launch {
-                            val why = repo.refusal(lookFor, savedAt) ?: return@launch
+                        if (target != null) postTo = null
+                        // Refused: the editor back, as the page's "Not saved",
+                        // with where its card was to go.
+                        if (check != null) scope.launch {
+                            val (why, unposted) = check.await()
+                            // Said when it does not go: the event is made either way.
+                            if (unposted) status = "The event is on the calendar, but posting it to ${labelOf(target!!)} did not go."
+                            if (why == null) return@launch
+                            repo.heard()
                             if (kept != null) savedRows = savedRows - kept
                             if (id != null) savedEdits = savedEdits - id
-                            if (editing == null) { editFailed = "Not saved: $why"; editing = id to d } else status = "Not saved: $why"
+                            when {
+                                skipped -> status = bothKept
+                                editing == null -> { editFailed = "Not saved: $why"; editing = id to d; if (target != null) postTo = target }
+                                else -> status = "Not saved: $why"
+                            }
                         }
-                    }
-                    // A new event, posted where it was asked to go.
-                    val target = postTo
-                    if (ok && id == null && target != null && chat != null && ghost != null) {
-                        // Said when it does not go: the event is made either way.
-                        if (io.nisfeb.talon.util.runSuspendCatching { chat.send(target, textOf(ghost)) }.isFailure) {
-                            status = "The event is on the calendar, but posting it to ${labelOf(target)} did not go."
-                        }
-                        postTo = null
                     }
                     ok
                 }

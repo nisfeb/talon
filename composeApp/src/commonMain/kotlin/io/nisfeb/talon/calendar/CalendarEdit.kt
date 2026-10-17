@@ -278,6 +278,20 @@ fun editAtBody(d: EventDraft, id: String, home: String?, atMs: Long): JsonObject
     }
 }
 
+/**
+ * "This and following" as one step (calendar 18 on, as its page sends
+ * it): the series [id] on [home] ends before occurrence [idx], and a new
+ * one, add-event's fields from [d], starts there, keeping the old one's
+ * skips that fall on its days.
+ */
+fun splitBody(d: EventDraft, id: String, home: String?, idx: Int): JsonObject = buildJsonObject {
+    put("action", "split-event")
+    put("id", id)
+    home?.let { put("home", it) }
+    put("idx", idx)
+    eventBody(d).forEach { (k, v) -> if (k != "action") put(k, v) }
+}
+
 /** The owner's own answer to a Google invitation: accepted, tentative or declined. */
 fun rsvpBody(id: String, home: String, status: String): JsonObject = buildJsonObject {
     put("action", "rsvp")

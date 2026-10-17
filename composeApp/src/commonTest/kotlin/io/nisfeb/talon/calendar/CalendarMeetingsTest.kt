@@ -44,6 +44,18 @@ class CalendarMeetingsTest {
         )
     }
 
+    // app.hoon's split-event reads id, home and idx (the series ends
+    // before it, as cap-event's dom), then add-event's own fields and
+    // calendar for the new one.
+    @Test fun `this and following is one split-event, add-event's fields and the series named`() {
+        val d = EventDraft(name = "Lesson", date = day, minuteOfDay = 17 * 60, durMin = 45, zone = "America/New_York", cal = "family", repeat = Repeat.WEEKLY, weekdays = setOf(kotlinx.datetime.DayOfWeek.MONDAY))
+        assertEquals(
+            """{"action":"split-event","id":"f1","home":"family","idx":5,"cat":"timed","meta":{"name":"Lesson"},"cal":"family",""" +
+                """"kind":"weekly","start_ms":1789344000000,"args":{"at":1020,"days":["mon"]},"zone":"America/New_York","fin":"dur","dur_min":45}""",
+            splitBody(d, "f1", "family", 5).toString(),
+        )
+    }
+
     @Test fun `rsvp is the page's body`() {
         assertEquals("""{"action":"rsvp","id":"g1","home":"work","status":"tentative"}""", rsvpBody("g1", "work", "tentative").toString())
     }

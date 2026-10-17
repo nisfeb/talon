@@ -264,19 +264,41 @@ class CalendarRepo(
      * Why the calendar refused a write it had taken, as its own page
      * asks: it answers a poke before reading it, and keeps what it
      * refused, with why, in outcomes.json. After [REFUSAL_WAIT_MS], the
-     * newest refusal of [id] (any, for null) since [sinceMs], less a
-     * minute's slack for the ship's clock, each said once. Null for none,
-     * or for a calendar that keeps no record.
+     * newest refusal of [id] (the poke's, "" for an add) since [sinceMs],
+     * less a minute's slack for the ship's clock, each said once. Null for
+     * none, or for a calendar that keeps no record.
      */
-    suspend fun refusal(id: String?, sinceMs: Long): String? = carry {
+    suspend fun refusal(id: String, sinceMs: Long): String? = carry {
         delay(REFUSAL_WAIT_MS)
         val a = api ?: return@carry null
         val got = runSuspendCatching { a.outcomes() }.getOrNull() ?: return@carry null
-        val r = got.refusals.lastOrNull { it.atMs > saidRefusalMs && it.atMs >= sinceMs - 60_000 && (id == null || it.id == id) }
+        val r = got.refusals.lastOrNull { it.atMs > saidRefusalMs && it.atMs >= sinceMs - 60_000 && it.id == id }
             ?: return@carry null
         saidRefusalMs = r.atMs
         r.why.ifBlank { "the calendar refused it" }
     }
+
+    private val _unheard = MutableStateFlow<String?>(null)
+
+    /**
+     * A save's refusal found after the calendar screen that made it had
+     * gone, worded by that save: said when the calendar next opens.
+     */
+    val unheard: StateFlow<String?> = _unheard.asStateFlow()
+
+    /** [refusal] of a save on the calendar screen, kept in [unheard] as [line] words it until [heard]. */
+    suspend fun refusalOfSave(id: String, sinceMs: Long, line: (String) -> String): String? = carry {
+        refusal(id, sinceMs)?.also { _unheard.value = line(it) }
+    }
+
+    /** The calendar screen has said what [unheard] held. */
+    fun heard() { _unheard.value = null }
+
+    /**
+     * [block] on this repo's scope, not awaited: what a screen started
+     * with a write, finished after the screen has gone.
+     */
+    fun <T> behind(block: suspend () -> T): kotlinx.coroutines.Deferred<T> = scope.async { block() }
 
     /** Whether "only this one" can go as one edit-at: asked now if not yet known; unknown is no. */
     suspend fun editsAt(): Boolean {
