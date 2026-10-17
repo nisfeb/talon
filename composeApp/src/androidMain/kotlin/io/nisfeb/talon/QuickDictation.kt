@@ -1011,10 +1011,12 @@ private fun m4aOf(cacheDir: File, pcm: ByteArray, sampleRate: Int): ByteArray? {
 }
 
 /**
- * The card's voice: the phone's own text to speech, played as an
- * assistant speaks, through the car where one is connected, with other
- * audio ducked while it talks. Nothing leaves the phone to be spoken.
- * Where the phone has no engine, nothing is said and the card still shows it.
+ * The card's voice, Archie's: the phone's own text to speech, a man's
+ * voice where the phone has one, older ([io.nisfeb.talon.ai.ArchieVoice]),
+ * played as an assistant speaks, through the car where one is connected,
+ * with other audio ducked while it talks. Nothing leaves the phone to be
+ * spoken. Where the phone has no engine, nothing is said and the card
+ * still shows it.
  */
 private class Voice(ctx: Context) {
     private val ready = kotlinx.coroutines.CompletableDeferred<Boolean>()
@@ -1028,6 +1030,25 @@ private class Voice(ctx: Context) {
         .setAudioAttributes(attributes)
         .build()
     @Volatile private var saying: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    private var tuned = false
+
+    /** Archie's voice, once the engine is up: a man's where there is one, and older. */
+    private fun tune() {
+        tuned = true
+        val wanted = java.util.Locale.getDefault().toLanguageTag()
+        val voices = runCatching { tts.voices }.getOrNull().orEmpty()
+        val options = voices.map {
+            io.nisfeb.talon.ai.ArchieVoice.Option(it.name, it.locale.toLanguageTag(), it.features.orEmpty(), it.isNetworkConnectionRequired, it.quality)
+        }
+        val pick = io.nisfeb.talon.ai.ArchieVoice.pick(options, wanted)
+        pick?.let { name -> voices.firstOrNull { it.name == name }?.let { runCatching { tts.voice = it } } }
+        tts.setPitch(io.nisfeb.talon.ai.ArchieVoice.PITCH)
+        tts.setSpeechRate(io.nisfeb.talon.ai.ArchieVoice.RATE)
+        // Which voices this phone has, so a missed man's voice can be named in ArchieVoice.
+        val mine = options.filter { it.languageTag.substringBefore('-') == wanted.substringBefore('-') }
+        Log.i("Dictation", "voice: ${pick ?: "the engine's own (no man's voice found)"}, of ${mine.size} for $wanted: " +
+            mine.joinToString { "${it.name}${if (it.network) " (network)" else ""}${if (it.features.isNotEmpty()) " ${it.features}" else ""}" })
+    }
 
     init {
         tts.setAudioAttributes(attributes)
@@ -1044,6 +1065,7 @@ private class Voice(ctx: Context) {
     suspend fun say(text: String) {
         val ok = kotlinx.coroutines.withTimeoutOrNull(3_000) { ready.await() } == true
         if (!ok) return Log.w("Dictation", "no text to speech engine answered; the card shows it only")
+        if (!tuned) tune()
         val done = kotlinx.coroutines.CompletableDeferred<Unit>().also { saying = it }
         audio?.requestAudioFocus(focus)
         try {
