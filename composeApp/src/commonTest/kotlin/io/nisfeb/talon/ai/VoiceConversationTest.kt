@@ -173,6 +173,8 @@ class VoiceConversationTest {
         assertEquals(listOf("list_events", "create_event", "orrery_file_text", "orrery_instruct", "read_brief"), offered[1], "no delete behind a lock")
         assertEquals(offered[0], offered[2], "unlocked again, it is back")
         assertEquals(offered[2], t.toolNames)
+        val unsaid = VoiceConversation(model.completer, listOf(tool("delete_event", true)), null, { null })
+        assertEquals(listOf("delete_event", "read_brief"), unsaid.toolNames, "unlocked unless the host says")
     }
 
     @Test
