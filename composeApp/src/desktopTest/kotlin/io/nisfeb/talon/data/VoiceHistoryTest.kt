@@ -67,18 +67,20 @@ class VoiceHistoryTest {
     fun `the opener counts what the chat list counts, and judges only what could ask the owner`() = runBlocking {
         db.messages().upsert(msg("~bus", "~bus", "can you grab milk?", 3_000))
         db.messages().upsert(msg("~bus", "~zod", "sure", 3_500))
-        db.messages().upsert(msg("chat/~nec/general", "~nec", "~zod did the deploy go out?", 2_000))
+        db.messages().upsert(msg("chat/~nec/general", "~nec", "~zod did the deploy go out?", 4_000))
         db.messages().upsert(msg("chat/~nec/general", "~nec", "lunch anyone?", 2_500))
         db.messages().upsert(msg("chat/~nec/general", "~nec", "~zodiac is not you", 2_600))
-        db.unreads().upsert(UnreadEntity("~bus", count = 2, notifyCount = 0, recencyMs = 3_500))
-        db.unreads().upsert(UnreadEntity("chat/~nec/general", count = 3, notifyCount = 1, recencyMs = 2_600))
+        // A message with no words in it: nothing to judge.
+        db.messages().upsert(MessageEntity("~bus", "~bus/2900", "~bus", 2_900, "[]", "/chat"))
+        db.unreads().upsert(UnreadEntity("~bus", count = 3, notifyCount = 0, recencyMs = 3_500))
+        db.unreads().upsert(UnreadEntity("chat/~nec/general", count = 3, notifyCount = 1, recencyMs = 4_000))
         // Unread with nothing kept to show: the chat list does not count it.
-        db.unreads().upsert(UnreadEntity("~wep", count = 5, notifyCount = 0, recencyMs = 1_000))
-        assertEquals(5, Briefing.chatUnread(db))
+        db.unreads().upsert(UnreadEntity("~wep", count = 7, notifyCount = 0, recencyMs = 1_000))
+        assertEquals(6, Briefing.chatUnread(db))
         assertEquals(
             listOf(
-                Briefing.Said("~bus", "~bus", "can you grab milk?"),
                 Briefing.Said("~nec", "chat/~nec/general", "~zod did the deploy go out?"),
+                Briefing.Said("~bus", "~bus", "can you grab milk?"),
             ),
             Briefing.unreadSaid(db, "zod", StoryCache::textFor),
             "newest first; the owner's own and a channel's chatter left out",

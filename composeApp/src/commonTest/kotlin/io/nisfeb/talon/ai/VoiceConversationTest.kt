@@ -54,6 +54,11 @@ class VoiceConversationTest {
     @Test
     fun `the opener is the counts and the model's rest, and a failed model still opens it`() = runBlocking {
         val t = talk(Model(AgentTurn.Final("Your first meeting is in 30 minutes. Shall I read you the brief?")))
+        val model = Model(AgentTurn.Final("Your first meeting is in 30 minutes. Shall I read you the brief?"))
+        val t2 = talk(model)
+        assertEquals("Your first meeting is in 30 minutes. Shall I read you the brief?", t2.opener("You have 2 new emails.", "digest"))
+        assertTrue("do not say those numbers again" in model.calls.single().first, "the opener's own prompt")
+        assertEquals(AgentMessage.User("digest"), model.calls.single().second.single())
         assertEquals("Your first meeting is in 30 minutes. Shall I read you the brief?", t.opener("You have 2 new emails.", "digest"))
         assertEquals(DictationFlow.Earlier(VoiceConversation.OPENED, "You have 2 new emails. Your first meeting is in 30 minutes. Shall I read you the brief?"), t.said.single())
         val failing = VoiceConversation({ _, _, _ -> error("no network") }, emptyList(), null, { null })
@@ -77,9 +82,22 @@ class VoiceConversationTest {
         assertEquals(VoiceConversation.Next.Say("A1 is the wifi."), t.next("What's A1 again?"))
         val (system, messages, _) = model.calls.last()
         assertTrue("What you read out to the owner earlier" in system && "Load the BT26 wifi" in system, system)
+        assertTrue(system.startsWith(DATA_NOT_INSTRUCTIONS) && "orrery_instruct" in system && "read_brief with aloud" in system, "Archie's own prompt")
         assertEquals(AgentMessage.User("Yes, read me the brief"), messages[0])
         assertEquals(AgentMessage.Assistant(VoiceConversation.READING, emptyList()), messages[1])
         assertEquals(AgentMessage.User("What's A1 again?"), messages.last())
+    }
+
+    @Test
+    fun `read out along with something else, the model still words the turn`() = runBlocking {
+        val model = Model(
+            AgentTurn.Calls(null, listOf(call("read_brief", "aloud" to true), call("list_events"))),
+            AgentTurn.Final("Here's the brief, and your next meeting is at nine."),
+        )
+        val next = talk(model).next("Read me the brief and my next meeting") as VoiceConversation.Next.Say
+        assertEquals("Here's the brief, and your next meeting is at nine.", next.line)
+        assertEquals(3, next.inFull.size)
+        assertEquals(2, model.calls.size)
     }
 
     @Test

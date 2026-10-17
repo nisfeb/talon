@@ -31,6 +31,7 @@ class BriefingTest {
         assertEquals("You have 4 chat messages, 4 of them questions for you.", Briefing.countsLine(null, 4, 9), "never more questions than messages")
         assertEquals("No new mail or messages.", Briefing.countsLine(0, 0, null))
         assertEquals("No new messages.", Briefing.countsLine(null, 0, null))
+        assertEquals("No new mail.", Briefing.countsLine(0, null, null))
         assertEquals("", Briefing.countsLine(null, null, null), "nothing known, nothing said: the model's part opens it")
     }
 
@@ -38,7 +39,10 @@ class BriefingTest {
     fun `the title, and how soon`() {
         assertEquals("Archie, Saturday 17 October", Briefing.title(LocalDate(2026, 10, 17)))
         assertEquals("in a minute", Briefing.soon(40_000))
+        assertEquals("in about 2 minutes", Briefing.soon(2 * 60_000L))
         assertEquals("in about 25 minutes", Briefing.soon(25 * 60_000L))
+        assertEquals("in about 89 minutes", Briefing.soon(89 * 60_000L))
+        assertEquals("in about 2 hours", Briefing.soon(90 * 60_000L))
         assertEquals("in about 2 hours", Briefing.soon(125 * 60_000L))
     }
 
