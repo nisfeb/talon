@@ -29,10 +29,10 @@ import java.util.concurrent.TimeUnit
  * run rather than captured stale.
  *
  * One AlarmManager wake-up is armed at the earliest next-fire across all
- * enabled loops; on fire the receiver calls [runDueNow], which runs every
- * loop that's due and re-arms. Inexact (setAndAllowWhileIdle) like the
- * Loops are deferrable, which avoids the SCHEDULE_EXACT_ALARM
- * permission.
+ * enabled loops; on fire the receiver hands off to a worker that calls
+ * [runDueNow], which runs every loop that's due and re-arms. Inexact
+ * (setAndAllowWhileIdle): loops are deferrable, which avoids the
+ * SCHEDULE_EXACT_ALARM permission.
  *
  * Android-only: no desktop analog — depends on AlarmManager / BootReceiver
  * (CLAUDE.md §6). Desktop runs the same [LoopRunner] on a while-open ticker
@@ -66,14 +66,10 @@ class Loops(
      *  process can be reclaimed (fire-and-forget [reschedule] would race). */
     suspend fun rescheduleNow() = rearm()
 
-    /** Run every due loop now, then re-arm. Called by the alarm receiver
-     *  inside goAsync(). Capped so a slow agent can't hold the wake lock /
-     *  goAsync budget open indefinitely.
-     *
-     *  ponytail: goAsync + one timeout is the Stage-1 ceiling. If loops
-     *  routinely run long, or many come due at once, move execution to a
-     *  foreground service (TalonSyncService-style) — a BroadcastReceiver
-     *  isn't meant to hold the process for minutes. */
+    /** Run every due loop now, then re-arm. Called by the alarm's
+     *  [io.nisfeb.talon.LoopWorker], which WorkManager keeps alive for as
+     *  long as it takes. Capped so a slow agent can't hold the job open
+     *  indefinitely; a loop the cap cuts short says so in its result. */
     suspend fun runDueNow() {
         try {
             if (sessionStore.activeShip() == null) return

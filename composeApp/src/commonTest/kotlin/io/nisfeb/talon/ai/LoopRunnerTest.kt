@@ -40,22 +40,44 @@ class LoopRunnerTest {
         execute = { "" },
     )
 
+    // A run cut short (its budget, or Android stopping its worker) went
+    // unsaid: stamped, so never run again, and no result anywhere.
     @Test
-    fun `cancelled run still stamps lastRunAt and records no row`() = runBlocking {
+    fun `cancelled run still stamps lastRunAt, and says it was cut short`() = runBlocking {
         val loops = FakeLoopDao()
         val runs = FakeLoopRunDao()
+        val told = mutableListOf<Triple<Long, String, String>>()
         val runner = LoopRunner(
             loops = loops, runs = runs, tools = emptyList(),
             completer = { _, _, _ -> throw CancellationException("budget") },
             aiConfig = { config("k") },
-            notify = { _, _, _ -> },
+            notify = { id, title, body -> told += Triple(id, title, body) },
             now = { 5_000 },
         )
         // The cancellation propagates out of runLoop...
         assertFailsWith<CancellationException> { runner.runLoop(loop) }
         // ...but lastRunAt was stamped first, so the loop is no longer due.
         assertEquals(7L to 5_000L, loops.lastMarkRan)
-        assertTrue(runs.inserted.isEmpty(), "no run row for a cancelled run")
+        assertEquals(listOf(LoopRunEntity(loopId = 7, ranAt = 5_000, ok = false, output = LoopRunner.CUT_SHORT)), runs.inserted)
+        assertEquals(listOf(Triple(7L, "Loop: Test", LoopRunner.CUT_SHORT.take(LoopRunner.NOTIFY_BODY_CHARS))), told)
+    }
+
+    @Test
+    fun `a run its budget cuts short in the middle is said, and the loop is not due again`() = runBlocking {
+        val loops = FakeLoopDao(listOf(loop))
+        val runs = FakeLoopRunDao()
+        var told = 0
+        val runner = LoopRunner(
+            loops = loops, runs = runs, tools = emptyList(),
+            completer = { _, _, _ -> kotlinx.coroutines.awaitCancellation() },
+            aiConfig = { config("k") },
+            notify = { _, _, _ -> told++ },
+            now = { 10_000_000 },
+        )
+        assertNull(kotlinx.coroutines.withTimeoutOrNull(200) { runner.runDue() })
+        assertEquals(7L to 10_000_000L, loops.lastMarkRan)
+        assertEquals(listOf(false to LoopRunner.CUT_SHORT), runs.inserted.map { it.ok to it.output })
+        assertEquals(1, told)
     }
 
     // The Assistant row says loops run on it, and they ran with it off,

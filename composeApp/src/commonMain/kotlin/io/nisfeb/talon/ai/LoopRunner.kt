@@ -7,6 +7,8 @@ import io.nisfeb.talon.data.LoopRunDao
 import io.nisfeb.talon.data.LoopRunEntity
 import io.nisfeb.talon.util.formatFullLocal
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
 
 /**
@@ -49,7 +51,8 @@ class LoopRunner(
      *  the alarm path land here. No-ops without an AI key (no error noise).
      *  Stamps `lastRunAt` BEFORE the cancellable agent call so a run that's
      *  later timed out / cancelled still advances the schedule — otherwise
-     *  the loop stays due and re-fires every wake (token + battery drain). */
+     *  the loop stays due and re-fires every wake (token + battery drain).
+     *  A run cut short that way is recorded and notified as [CUT_SHORT]. */
     suspend fun runLoop(loop: LoopEntity) {
         if (!aiConfig().loopsCanRun()) return
         val ts = now()
@@ -69,11 +72,20 @@ class LoopRunner(
             AgentLoop(completer = completer, tools = active, systemPrompt = LoopPrompt.forLoop(aiConfig()))
                 .run(question = question, confirm = { _, _ -> loop.writesAuthorized })
         }
-        val ok = outcome.isSuccess
         val output = outcome.getOrElse {
-            if (it is CancellationException) throw it
+            if (it is CancellationException) {
+                // Cut short (its time ran out, or Android stopped the work):
+                // said, not silent. The stamp above stands, so it is not run
+                // a second time for this fire.
+                withContext(NonCancellable) { record(loop, ts, ok = false, output = CUT_SHORT) }
+                throw it
+            }
             "Error: ${it.message ?: it::class.simpleName}"
         }
+        record(loop, ts, outcome.isSuccess, output)
+    }
+
+    private suspend fun record(loop: LoopEntity, ts: Long, ok: Boolean, output: String) {
         runs.insert(LoopRunEntity(loopId = loop.id, ranAt = ts, ok = ok, output = output))
         runs.pruneForLoop(loop.id, RUN_HISTORY_KEEP)
         notify(loop.id, "Loop: ${loop.name}", output.take(NOTIFY_BODY_CHARS))
@@ -120,6 +132,9 @@ class LoopRunner(
     companion object {
         const val RUN_HISTORY_KEEP = 20
         const val NOTIFY_BODY_CHARS = 200
+        const val CUT_SHORT = "Stopped before it finished: it ran out of time, or the phone ended the run. " +
+            "It may have done part of it. It runs again at its next time."
+
 
         /** Tools no loop may ever call, even with writesAuthorized set:
          *  irreversible-by-design actions stay behind the interactive
