@@ -893,6 +893,11 @@ class CallController(
         }
     }
 
+    /** Flip our camera front to back on the live call, where the platform can. */
+    fun switchCamera() {
+        engine?.switchCamera()
+    }
+
     /** What the live call could share; empty between calls. */
     suspend fun screenSources(): List<ScreenSource> = engine?.screenSources().orEmpty()
 

@@ -54,6 +54,9 @@ class IceRestartTest {
             assertTrue(c.state.value is CallUiState.Active, "a network change ended a live call: ${c.state.value}")
             assertTrue(h.putsSnapshot().none { TrunkHarness.sigIdIn(it, "hangup") == id })
 
+            c.switchCamera()
+            assertEquals(1, eng.switched, "the flip reaches the call's engine")
+
             // The path really gone is what ends it, as before.
             eng.stateFlow.value = MediaState.Failed
             val end = withTimeout(5_000) { c.state.first { it is CallUiState.Ended } }

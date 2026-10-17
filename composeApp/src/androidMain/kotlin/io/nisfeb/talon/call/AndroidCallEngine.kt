@@ -217,6 +217,11 @@ class AndroidCallEngine(
      * low enough that a phone on cellular does not melt, and Talon has
      * no simulcast to fall back on.
      */
+    // As the party line's up link flips it; nothing with the camera off.
+    override fun switchCamera() {
+        runCatching { capturer?.switchCamera(null) }
+    }
+
     override suspend fun setCameraEnabled(enabled: Boolean): Boolean {
         val sender = videoSender ?: return false
         if (!enabled) {

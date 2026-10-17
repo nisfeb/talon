@@ -208,8 +208,11 @@ internal class ScriptedCallEngine(
 
     @Volatile var answersSet = 0
         private set
+    @Volatile var switched = 0
+        private set
 
     override suspend fun restartIce(): SessionDesc? = restart
+    override fun switchCamera() { switched++ }
 
     override suspend fun createOffer(): SessionDesc = desc
     override suspend fun acceptOffer(remote: SessionDesc): SessionDesc = desc
