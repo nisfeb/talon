@@ -24,7 +24,6 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.DatabaseOpenTimeoutException
 import io.nisfeb.talon.data.createAppDatabase
 import io.nisfeb.talon.ui.DraftStore
-import io.nisfeb.talon.ui.InMemoryDraftStore
 import io.nisfeb.talon.update.DesktopUpdateInstaller
 import io.nisfeb.talon.update.HttpUpdateChecker
 import io.nisfeb.talon.update.UpdateRuntime
@@ -77,7 +76,20 @@ private class DesktopAppGraph {
         io.nisfeb.talon.ui.StoredRelaySettings(io.nisfeb.talon.ui.JvmUiSettingsStore(File(io.nisfeb.talon.util.AppDirs.userData, "relay.json")))
     val lastOpenChatStore: io.nisfeb.talon.notify.LastOpenChatStore =
         io.nisfeb.talon.notify.DesktopLastOpenChatStore()
-    val drafts: DraftStore = InMemoryDraftStore()
+    // On disk, a file per ship as on iOS: held in memory, every draft was
+    // lost on quit or an update. Written off the main thread and in
+    // order, since a save comes with every keystroke.
+    private val draftWrites = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "talon-drafts").apply { isDaemon = true } }
+    val drafts: DraftStore = io.nisfeb.talon.ui.FileDraftStore(
+        activeShip = { sessionStore.activeShip() },
+        read = { io.nisfeb.talon.ui.JvmUiSettingsStore(File(io.nisfeb.talon.util.AppDirs.userData, it)).read() },
+        write = { name, text ->
+            draftWrites.execute {
+                runCatching { io.nisfeb.talon.ui.JvmUiSettingsStore(File(io.nisfeb.talon.util.AppDirs.userData, name)).write(text) }
+                    .onFailure { io.nisfeb.talon.util.Log.w("Drafts", "could not keep a draft: ${it.message}") }
+            }
+        },
+    )
 
     private val updateScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
