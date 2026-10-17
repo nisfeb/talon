@@ -1103,7 +1103,8 @@ fun DmChatScreen(
                 },
                 onCopyLink = {
                     actionTarget = null
-                    clipboardManager.setText(AnnotatedString(io.nisfeb.talon.urbit.TalonLink.forMessage(target.whom, target.id, target.parentId)))
+                    // Tlon's reference for a channel post, which Tlon and Talon both show as a card.
+                    clipboardManager.setText(AnnotatedString(io.nisfeb.talon.urbit.TalonLink.linkFor(target.whom, target.id, target.parentId)))
                 },
                 onToggleBookmark = {
                     actionTarget = null

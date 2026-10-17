@@ -184,6 +184,61 @@ class ChatStoryTest {
         assertEquals(2, story.size)
     }
 
+    // ─── a pasted message reference ─────────────────────────────
+
+    private fun chanCite(nest: String, where: String) =
+        kotlinx.serialization.json.Json.parseToJsonElement("""{"block":{"cite":{"chan":{"nest":"$nest","where":"$where"}}}}""")
+
+    @Test
+    fun `a pasted message reference goes out as the post's cite, as Tlon's pathToCite makes it`() {
+        val ref = "/1/chan/chat/~darduc-mitfen/v3l8bgc0/msg/170.141.184.508.207.337.420.778.996.591.277.113.344"
+        assertEquals(
+            JsonArray(listOf(chanCite("chat/~darduc-mitfen/v3l8bgc0", "/msg/170.141.184.508.207.337.420.778.996.591.277.113.344"))),
+            chatTextToStory(ref),
+        )
+        // Ahead of the words, as Tlon puts a reference in a chat.
+        val story = chatTextToStory("look at this $ref please")
+        assertEquals(chanCite("chat/~darduc-mitfen/v3l8bgc0", "/msg/170.141.184.508.207.337.420.778.996.591.277.113.344"), story[0])
+        assertEquals(chatTextToStory("look at this  please")[0], story[1])
+        // A reply, a plain-digit id as some clients write it, a heap post.
+        assertEquals(JsonArray(listOf(chanCite("chat/~bus/talk", "/msg/170.141/170.142"))), chatTextToStory("/1/chan/chat/~bus/talk/msg/170.141/170.142"))
+        assertEquals(JsonArray(listOf(chanCite("heap/~bus/links", "/msg/170141184508"))), chatTextToStory("/1/chan/heap/~bus/links/msg/170141184508"))
+    }
+
+    @Test
+    fun `what Talon sends opens the post it names`() {
+        val sent = chatTextToStory(io.nisfeb.talon.urbit.TalonLink.messageReference("chat/~bus/talk", "170141184508207337420778996591277113344", "170141184508000000000000000000000000000"))
+        val cite = sent[0].jsonObject["block"]!!.jsonObject["cite"]!!.jsonObject
+        assertEquals(
+            CiteTarget.ChannelPost("chat/~bus/talk", "170.141.184.508.000.000.000.000.000.000.000.000.000", "170.141.184.508.207.337.420.778.996.591.277.113.344"),
+            parseCite(cite).target,
+        )
+    }
+
+    @Test
+    fun `a reference's host is no mention, and a ship after it still is`() {
+        val text = "/1/chan/chat/~bus/talk/msg/170.141 ask ~zod"
+        assertEquals(listOf(text.indexOf("~zod") until text.length), mentionRanges(text))
+    }
+
+    @Test
+    fun `a group and a post in one message are two cites, in the order they stand`() {
+        val story = chatTextToStory("/1/chan/chat/~bus/talk/msg/170.141 and /1/group/~zod/crew")
+        assertEquals(chanCite("chat/~bus/talk", "/msg/170.141"), story[0])
+        assertEquals(groupCite("~zod/crew"), story[1])
+        assertEquals(chatTextToStory("and")[0], story[2])
+    }
+
+    @Test
+    fun `a message reference shown in code, a quote, a link or a word stays text`() {
+        for (text in listOf(
+            "`/1/chan/chat/~bus/talk/msg/170.141`", "> /1/chan/chat/~bus/talk/msg/170.141", "https://x.test/1/chan/chat/~bus/talk/msg/170.141",
+            "see:/1/chan/chat/~bus/talk/msg/170.141", "/1/chan/chat/~bus/talk", "/1/chan/chat/~bus/talk/msg/", "/1/chan/notes/~bus/n/note/1",
+        )) {
+            assertTrue(chatTextToStory(text).none { "\"chan\"" in it.toString() }, text)
+        }
+    }
+
     @Test
     fun `the same reference twice is one cite, and two groups are two`() {
         val story = chatTextToStory("/1/group/~bus/club\n/1/group/~bus/club /1/group/~zod/other")

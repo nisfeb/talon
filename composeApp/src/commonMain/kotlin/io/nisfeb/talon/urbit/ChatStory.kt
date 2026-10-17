@@ -107,24 +107,37 @@ fun editedStory(contentJson: String, newText: String): JsonArray {
 private val STORY_JSON = Json { ignoreUnknownKeys = true }
 
 /**
- * The group references that go out as cites: those standing alone outside
- * code and quotes. One in a code block or a quote is being shown, not
- * shared, and pulling it out left an empty block or a bare ">".
+ * The references that go out as cites, in the order they stand: Tlon's
+ * paths to a group or a channel post ([TalonLink.GROUP_REFERENCE],
+ * [TalonLink.CHAN_REFERENCE]), standing alone outside code and quotes.
+ * One in a code block or a quote is being shown, not shared, and pulling
+ * it out left an empty block or a bare ">".
  */
-private fun groupReferences(text: String): List<MatchResult> {
+private fun references(text: String): List<MatchResult> {
     val code = codeRanges(text)
-    return TalonLink.GROUP_REFERENCE.findAll(text).filter { m ->
+    return (TalonLink.GROUP_REFERENCE.findAll(text) + TalonLink.CHAN_REFERENCE.findAll(text)).filter { m ->
         val lineStart = text.lastIndexOf('\n', m.range.first - 1) + 1
         code.none { m.range.first in it } && !text.substring(lineStart).trimStart().startsWith(">")
-    }.toList()
+    }.sortedBy { it.range.first }.toList()
+}
+
+/** The cite a reference stands for, as Tlon's pathToCite makes it. */
+private fun citeOf(ref: MatchResult) = buildJsonObject {
+    put("block", buildJsonObject {
+        put("cite", buildJsonObject {
+            if (ref.value.trim().startsWith("/1/group/")) put("group", ref.groupValues[1])
+            else put("chan", buildJsonObject { put("nest", ref.groupValues[1]); put("where", ref.groupValues[2]) })
+        })
+    })
 }
 
 internal fun chatTextToStory(text: String): JsonArray {
-    // A pasted group reference goes out as the group's cite, ahead of
-    // the text, as Tlon's composer sends one in a chat (toPostData).
-    val refs = groupReferences(text)
+    // A pasted reference goes out as its cite, ahead of the text, as
+    // Tlon's composer sends one in a chat (toPostData): a group's, or a
+    // channel post's from "Copy link" here or "Copy ref" in Tlon.
+    val refs = references(text)
     if (refs.isNotEmpty()) return buildJsonArray {
-        for (flag in refs.map { it.groupValues[1] }.distinct()) add(buildJsonObject { put("block", buildJsonObject { put("cite", buildJsonObject { put("group", flag) }) }) })
+        refs.map(::citeOf).distinct().forEach { add(it) }
         val rest = buildString {
             var at = 0
             for (m in refs) { append(text, at, m.range.first); at = m.range.last + 1 }
@@ -235,8 +248,9 @@ internal fun mentionRanges(text: String): List<IntRange> {
     if (!PATP_REGEX.containsMatchIn(text)) return emptyList()
     val sent = ArrayDeque(shipsIn(chatTextToStory(text)))
     if (sent.isEmpty()) return emptyList()
-    // A group reference's ~host is part of the reference, not a mention.
-    val code = codeRanges(text) + URL_IN_TEXT.findAll(text).map { it.range } + TalonLink.GROUP_REFERENCE.findAll(text).map { it.range }
+    // A reference's ~host is part of the reference, not a mention.
+    val code = codeRanges(text) + URL_IN_TEXT.findAll(text).map { it.range } + TalonLink.GROUP_REFERENCE.findAll(text).map { it.range } +
+        TalonLink.CHAN_REFERENCE.findAll(text).map { it.range }
     fun patpChar(c: Char) = c.isLetterOrDigit() || c == '-'
     val out = mutableListOf<IntRange>()
     for (m in PATP_REGEX.findAll(text)) {

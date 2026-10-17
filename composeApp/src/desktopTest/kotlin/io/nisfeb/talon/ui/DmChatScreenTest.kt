@@ -77,6 +77,12 @@ class DmChatScreenTest {
         try {
             runComposeUiTest {
                 setContent {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.compose.ui.platform.LocalClipboardManager provides object : androidx.compose.ui.platform.ClipboardManager {
+                            override fun getText(): androidx.compose.ui.text.AnnotatedString? = null
+                            override fun setText(annotatedString: androidx.compose.ui.text.AnnotatedString) { copied += annotatedString.text }
+                        },
+                    ) {
                     TalonTheme(darkTheme = false) {
                         DmChatScreen(
                             db = db, repo = repo, drafts = InMemoryDraftStore(), http = createAppHttpClient(),
@@ -86,6 +92,7 @@ class DmChatScreenTest {
                             onOpenImage = {}, onOpenSelfProfile = {},
                             initialScrollMessageId = jumpTo,
                         )
+                    }
                     }
                 }
                 waitForIdle()
@@ -98,6 +105,9 @@ class DmChatScreenTest {
             tmp.deleteRecursively()
         }
     }
+
+    /** What the screen put on the clipboard. */
+    private val copied = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun msg(id: String, author: String, text: String, sent: Long, deleted: Boolean = false, parent: String? = null) =
         MessageEntity("~bus", id, author, sent, """[{"inline":["$text"]}]""", "/chat", isDeleted = deleted, parentId = parent)
@@ -629,5 +639,38 @@ class DmChatScreenTest {
         waitForIdle()
         assertEquals(first, ship.scried.count { "/writs/older/" in it }, "not asked again on every layout change")
     }
-}
 
+    // "Copy link" gave a talon:// address that neither Tlon nor a chat in
+    // Talon made anything of (sneagan, 2026-10-16). A channel post copies
+    // Tlon's reference, which both show as a card.
+    @Test
+    fun `copy link on a channel post copies Tlon's reference to it`() = chat(whom = "chat/~darduc-mitfen/v3l8bgc0", seed = {
+        messages().upsert(MessageEntity("chat/~darduc-mitfen/v3l8bgc0", "170141184508207337420778996591277113344", "~bus", 1_000, """[{"inline":["a post worth sharing"]}]""", "/chat"))
+    }) { _, _ ->
+        menuOf("a post worth sharing")
+        onNodeWithText("Copy link").performClick()
+        waitForIdle()
+        assertEquals(listOf("/1/chan/chat/~darduc-mitfen/v3l8bgc0/msg/170.141.184.508.207.337.420.778.996.591.277.113.344"), copied.toList())
+    }
+
+    @Test
+    fun `copy link in a DM stays Talon's own link, since nobody else could open the post`() = chat(seed = {
+        messages().upsert(msg("~bus/170141184506", "~bus", "just between us", 1_000))
+    }) { _, _ ->
+        menuOf("just between us")
+        onNodeWithText("Copy link").performClick()
+        waitForIdle()
+        assertTrue(copied.single().startsWith("talon://chat/"), copied.toString())
+    }
+
+    @Test
+    fun `a pasted post reference goes to the ship as the post's cite`() = chat { ship, _ ->
+        send("/1/chan/chat/~darduc-mitfen/v3l8bgc0/msg/170.141.184.508.207.337.420.778.996.591.277.113.344")
+        waitUntil(timeoutMillis = 20_000) { ship.pokesTo("chat").isNotEmpty() }
+        val sent = ship.pokesTo("chat").single().json.toString()
+        assertTrue(
+            "\"cite\":{\"chan\":{\"nest\":\"chat/~darduc-mitfen/v3l8bgc0\",\"where\":\"/msg/170.141.184.508.207.337.420.778.996.591.277.113.344\"}}" in sent,
+            sent,
+        )
+    }
+}
