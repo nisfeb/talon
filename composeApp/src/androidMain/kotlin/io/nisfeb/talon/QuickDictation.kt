@@ -407,6 +407,8 @@ class DictationService : Service() {
     ): DictationRun {
         val app = application as TalonApplication
         val cfg = app.aiSettings.state.value
+        // Whether the calendar alone answers: the decision model's call, on a client with no ship cookie.
+        val decider = io.nisfeb.talon.ai.CalendarQuestion.decider(app.ktorHttp, cfg)
         // The owner's own key wherever there is one, else Armillary's
         // transcription model, else none and the card asks for a key.
         val transcribe: (suspend (ByteArray) -> String)? = when (val hearing = DictationRun.hearing(cfg)) {
@@ -445,12 +447,12 @@ class DictationService : Service() {
                     if (orrery == null) {
                         QuickDictation.show(QuickDictation.Stage.Working("Working on it…"))
                         went(DictationRoute.Ask)
-                        p.calendarAnswer(words, thread?.earlier.orEmpty()) ?: p.dictate(words, locked, thread?.earlier.orEmpty())
+                        p.calendarAnswer(words, thread?.earlier.orEmpty(), decider) ?: p.dictate(words, locked, thread?.earlier.orEmpty())
                     } else {
                         DictationFlow(
                             ask = { q, earlier ->
                                 QuickDictation.show(QuickDictation.Stage.Working("Looking it up…"))
-                                p.ask(q, earlier)
+                                p.ask(q, earlier, orrery)
                             },
                             instruct = { t ->
                                 QuickDictation.show(QuickDictation.Stage.Working("Asking orrery…"))
@@ -465,7 +467,7 @@ class DictationService : Service() {
                             },
                             answer = { id, ok -> orrery.setAction(id, if (ok) "approved" else "dismissed").getOrThrow() },
                             decide = { reply, waiting -> ownerDecides(reply, waiting, transcribe) },
-                            quick = { t, earlier -> p.calendarAnswer(t, earlier) },
+                            quick = { t, earlier -> p.calendarAnswer(t, earlier, decider) },
                         ).handle(words, thread?.earlier.orEmpty(), thread?.asked == true)
                             .also { Log.i(TAG, "route=${it.route}${if (thread != null) ", a follow-up" else ""}"); went(it.route) }
                             .line
