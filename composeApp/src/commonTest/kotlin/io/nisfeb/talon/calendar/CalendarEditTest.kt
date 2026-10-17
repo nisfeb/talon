@@ -320,6 +320,16 @@ class CalendarEditTest {
         assertNull(row.copy(l = 0, r = 0).dueDay(), "no day, none")
     }
 
+    // A second calendar named as the first, or one named Default, wrote
+    // over a calendar already there.
+    @Test fun `a new calendar's id is its name made safe, and never one already in use`() {
+        assertEquals("work-trips", newCalendarId("Work trips!", listOf("default")))
+        assertEquals("default-2", newCalendarId("Default", listOf("default")))
+        assertEquals("work-3", newCalendarId("work", listOf("default", "work", "work-2")))
+        assertEquals("cal", newCalendarId("!!!", emptyList()))
+        assertEquals("cal-2", newCalendarId("", listOf("cal")))
+    }
+
     // ─── reminders ───────────────────────────────────────────────
 
     private val oct1 = LocalDate(2026, 10, 1)

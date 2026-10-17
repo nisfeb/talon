@@ -944,7 +944,11 @@ fun CalendarScreen(
                     phoneNumbersIn(r.location + "\n" + r.note).forEach { phone ->
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.Filled.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                            Text(phone, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).clickable { open(telUri(phone)) })
+                            // Dialled only where there is a phone to dial; copied anywhere.
+                            Text(
+                                phone, style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f).then(if (io.nisfeb.talon.ui.isPhoneDialSupported) Modifier.clickable { open(telUri(phone)) } else Modifier),
+                            )
                             io.nisfeb.talon.ui.IconButton(tip = "Copy the number", onClick = { copy(phone) }, modifier = Modifier.size(32.dp)) {
                                 Icon(TalonIcons.ContentCopy, contentDescription = "Copy the number", modifier = Modifier.size(16.dp))
                             }
@@ -1302,7 +1306,7 @@ fun CalendarScreen(
             onDecline = { key -> say("Declining…", "The ship did not decline it.") { repo.decline(key) } },
             onSync = { say("Syncing…", "A sync did not start; the rows say which.") { repo.syncNow() } },
             onAdd = { name, colour ->
-                val id = name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifBlank { "cal" }
+                val id = io.nisfeb.talon.calendar.newCalendarId(name, calendars.map { it.id })
                 say("Adding \"$name\"…", "The ship did not add the calendar.") {
                     repo.poke(buildJsonObject { put("action", "add-calendar"); put("id", id); put("name", name); put("color", colour) })
                 }

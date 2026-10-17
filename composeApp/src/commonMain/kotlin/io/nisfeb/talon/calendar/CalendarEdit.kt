@@ -462,6 +462,17 @@ fun taskDraft(r: CalendarRow, today: LocalDate): EventDraft? = draftFromEvent(
  */
 fun CalendarRow.dueDay(): LocalDate? = l.takeIf { it > 0 }?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date }
 
+/**
+ * An id for a new calendar named [name]: its words, made safe, and one
+ * none of [taken] has. Two names that read alike ("Work", "work!"), or
+ * one called Default, made an id already in use.
+ */
+fun newCalendarId(name: String, taken: Collection<String>): String {
+    val base = name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifBlank { "cal" }
+    if (base !in taken) return base
+    return generateSequence(2) { it + 1 }.map { "$base-$it" }.first { it !in taken }
+}
+
 fun draftFromEvent(e: JsonObject, today: LocalDate): EventDraft? {
     fun str(k: String) = e[k]?.jsonPrimitive?.contentOrNull
     fun num(k: String) = e[k]?.jsonPrimitive?.intOrNull

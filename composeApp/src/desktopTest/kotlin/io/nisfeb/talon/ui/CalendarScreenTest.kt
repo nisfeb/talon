@@ -875,4 +875,36 @@ class CalendarScreenTest {
             java.util.TimeZone.setDefault(was)
         }
     }
+
+    // ─── what a tick, a number and a new calendar do ────────────────
+
+    @Test
+    fun `a tick while the ship is down says it is not answering, not that it refused`() = calendar {
+        onNodeWithContentDescription("Tasks").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Buy milk") }
+        down = true
+        onAllNodes(isToggleable())[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("isn't answering") }
+        assertTrue(!shows("did not take"))
+    }
+
+    // A computer has no phone to dial: the number is there to copy, not to tap.
+    @Test
+    fun `a phone number on desktop is copied, not dialled`() = calendar {
+        open("Dentist")
+        assertTrue(onAllNodes(hasText("020 7946 0958") and androidx.compose.ui.test.hasClickAction()).fetchSemanticsNodes().isEmpty(), "nothing to tap")
+        assertTrue(shows("020 7946 0958"))
+        assertTrue(onAllNodesWithContentDescription("Copy the number").fetchSemanticsNodes().size == 1)
+    }
+
+    // A calendar named as one already there went out under that one's id.
+    @Test
+    fun `a new calendar named as one already there gets an id of its own`() = calendar {
+        onNodeWithContentDescription("Calendars").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("New calendar") }
+        field("Name").performScrollTo().performTextInput("Family")
+        onAllNodesWithText("Add").let { it[it.fetchSemanticsNodes().size - 1] }.performScrollTo().performClick()
+        val body = wrote("add-calendar")
+        assertTrue("\"id\":\"family-2\"" in body && "\"name\":\"Family\"" in body, body)
+    }
 }
