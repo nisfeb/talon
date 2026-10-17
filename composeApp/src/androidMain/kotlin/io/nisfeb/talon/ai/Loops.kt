@@ -143,6 +143,10 @@ class Loops(
     // A dictation's own model where it has one, else the assistant's (AiProfile.resolve).
     private val dictationClient by lazy { AgentClient(io.nisfeb.talon.ai.AiFeature.Dictation) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Dictation) } }
     private val braveClient by lazy { BraveSearchClient { aiSettings.state.value } }
+
+    /** Place search for a dictation, where the assistant is on and the vendor offers search. */
+    private fun placesClient(): BraveSearchClient? =
+        aiSettings.state.value.takeIf { it.assistantOn() && it.braveSearch() != null }?.let { braveClient }
     private val urlFetcher by lazy { UrlFetcher { aiSettings.state.value } }
 
     /**
@@ -245,10 +249,15 @@ class Loops(
                 onEvents = seen::events, onTasks = seen::tasks, onPeople = seen::people, onMail = seen::mail,
             )
             val webOn = cfg.assistantOn()
+            // The vendor's search, not an own key: since Armillary-only an
+            // own Brave key is always blank, and this gate had taken web
+            // search away from every run.
+            val searchOn = webOn && cfg.braveSearch() != null
             val tools = ToolCatalog.default(
                 getRepo(), getDb(), getEmbedder(),
-                braveSearch = braveClient.takeIf { webOn && cfg.braveApiKey.isNotBlank() },
+                braveSearch = braveClient.takeIf { searchOn },
                 urlFetcher = urlFetcher.takeIf { webOn },
+                places = braveClient.takeIf { searchOn },
                 onMessages = seen::messages,
             ) { known.displayName(it) } + actionTools(actions)
             return withOrrery(cfg) { orrery ->
@@ -366,7 +375,7 @@ class Loops(
                 send = { whom, text -> getRepo().send(whom, text) },
                 onEvents = talkSeen::events, onTasks = talkSeen::tasks, onPeople = talkSeen::people, onMail = talkSeen::mail,
             )
-            val tools = ToolCatalog.default(getRepo(), getDb(), getEmbedder(), onMessages = talkSeen::messages) { known.displayName(it) } + actionTools(actions)
+            val tools = ToolCatalog.default(getRepo(), getDb(), getEmbedder(), places = placesClient(), onMessages = talkSeen::messages) { known.displayName(it) } + actionTools(actions)
             val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked)
                 .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
             return VoiceConversation(
@@ -433,7 +442,7 @@ class Loops(
                 zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
                 onEvents = seen::events, onTasks = seen::tasks, onPeople = seen::people, onMail = seen::mail,
             )
-            val tools = DictationAgent.readsFor(ToolCatalog.default(getRepo(), getDb(), getEmbedder(), onMessages = seen::messages) { known.displayName(it) } + actionTools(actions), orrery?.asTap())
+            val tools = DictationAgent.readsFor(ToolCatalog.default(getRepo(), getDb(), getEmbedder(), places = placesClient(), onMessages = seen::messages) { known.displayName(it) } + actionTools(actions), orrery?.asTap())
                 .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
             io.nisfeb.talon.util.Log.i("Dictation", "route=ask, ${tools.size} tools, calendar read ${if (read.isCompleted) "done" else "pending"}")
             return DictationAgent(
@@ -510,10 +519,12 @@ class Loops(
         // a scheduled run never sees a tool it can only fail with.
         val cfg = aiSettings.state.value
         val webOn = cfg.assistantOn()
+        val searchOn = webOn && cfg.braveSearch() != null
         val tools = ToolCatalog.default(
             getRepo(), db, getEmbedder(),
-            braveSearch = braveClient.takeIf { webOn && cfg.braveApiKey.isNotBlank() },
+            braveSearch = braveClient.takeIf { searchOn },
             urlFetcher = urlFetcher.takeIf { webOn },
+            places = braveClient.takeIf { searchOn },
         ) { it }
         return LoopRunner(
             loops = db.loops(),

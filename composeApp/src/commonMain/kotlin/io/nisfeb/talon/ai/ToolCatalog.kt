@@ -48,6 +48,10 @@ object ToolCatalog {
         // fetcher self-checks the assistant is on and hardens against
         // internal/SSRF targets.
         urlFetcher: UrlFetcher? = null,
+        // When non-null, the find_places tool is added: the vendor's place
+        // search. Apart from braveSearch so a dictation can have places
+        // without the web.
+        places: BraveSearchClient? = null,
         // What search_history and read_conversation showed: a dictation's card draws them.
         onMessages: (List<MessageEntity>) -> Unit = {},
         displayName: (String) -> String,
@@ -187,6 +191,29 @@ object ToolCatalog {
                 if (q.isBlank()) return@Tool "Error: query is required."
                 val count = (args.int("count") ?: 5).coerceIn(1, 20)
                 brave.search(q, count)
+            }
+        },
+        // Places near somewhere, nearest first (sneagan, 2026-10-17: "what is
+        // the closest home Depot to nutcracker rehearsal"). Read-only.
+        places?.let { client ->
+            Tool(
+                spec = ToolSpec(
+                    "find_places",
+                    "Find places near somewhere, nearest first by straight-line distance, with each one's address, today's hours and phone: " +
+                        "a shop or service by name (Home Depot) or by kind (hardware store, pharmacy). " +
+                        "To search near a calendar event, first read its location with list_events and pass that as near. " +
+                        "The answer says what near was found as; say so if it is not the place meant.",
+                    toolSchema(
+                        "query" to ("string" to "What to find: a name or a kind of place."),
+                        "near" to ("string" to "Where to search from: an address, a place's name, or lat,lon."),
+                        "area" to ("string" to "The city, state and country near is in, when known, e.g. jacksonville fl united states, so a name is found in the right town."),
+                        "count" to ("integer" to "How many, nearest first (default 3, max 10)."),
+                        required = listOf("query", "near"),
+                    ),
+                ),
+                write = false,
+            ) { args ->
+                client.places(args.str("query").orEmpty(), args.str("near").orEmpty(), args.str("area"), (args.int("count") ?: 3))
             }
         },
         // Fetch a specific URL — only present when the caller opts in.

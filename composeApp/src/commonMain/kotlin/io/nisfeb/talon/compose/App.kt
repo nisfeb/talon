@@ -1257,6 +1257,7 @@ fun App(
                     } else {
                         null
                     },
+                    places = if (loopBraveOn) io.nisfeb.talon.ai.BraveSearchClient { aiSettings.state.value } else null,
                 ) { it } + io.nisfeb.talon.ai.actionTools(
                     // The mail, calendar, task and event tools, as the assistant has them;
                     // no calls, since no one is there to talk.

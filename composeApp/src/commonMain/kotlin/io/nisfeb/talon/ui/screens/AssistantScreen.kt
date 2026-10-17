@@ -369,6 +369,7 @@ fun AssistantScreen(
                 tools = (ToolCatalog.default(
                     repo, db, embedder,
                     braveSearch = if (braveKeyPresent) braveSearch else null,
+                    places = if (braveKeyPresent) braveSearch else null,
                     urlFetcher = urlFetcher,
                 ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) +
                     orrery?.let { io.nisfeb.talon.ai.orreryTools(it) }.orEmpty() + mcpTools + latticeTools).dedupToolNames(),

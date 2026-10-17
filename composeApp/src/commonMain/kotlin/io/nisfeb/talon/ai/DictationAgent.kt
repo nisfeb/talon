@@ -127,13 +127,15 @@ class DictationAgent(
          * The tools a dictation is offered: the ones a spoken note,
          * question or errand uses. Not orrery's settings, calendar
          * sharing and sync, reactions, the web: their descriptions were a
-         * third of every request, and nobody dictates them.
+         * third of every request, and nobody dictates them. Places near
+         * somewhere, though, are asked in the car.
          */
         val TOOLS: Set<String> = setOf(
             "search_history", "read_conversation", "send_message", "find_person", "find_conversation",
             "send_mail", "list_mail", "search_mail", "read_mail",
             "list_calendars", "list_events", "create_event", "update_event", "delete_event",
             "list_tasks", "create_task", "complete_task",
+            "find_places",
             "orrery_guide", "orrery_find", "orrery_read", "orrery_observe", "orrery_file_text", "orrery_instruct", "orrery_correct",
         )
 
