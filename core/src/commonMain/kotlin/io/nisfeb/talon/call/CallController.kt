@@ -973,7 +973,17 @@ class CallController(
         } finally {
             startingRecording = false
         }
-        if (!told) return "Couldn't tell $p in your chat, so the call isn't being recorded."
+        if (!told) {
+            // Not told now is often told later: a notice the ship could not
+            // take waits in the queue and goes when it is back, saying a
+            // call is recorded that never was. The stop goes after it, and
+            // queues behind it, so the two arrive in order.
+            // ponytail: a refused notice followed by a stop the ship takes
+            // reaches the peer as a stray stop line. Withdrawing the queued
+            // row instead needs a second hook from the app roots.
+            scope.launch { runCatching { notice(p, RECORDING_OFF) } }
+            return "Couldn't tell $p in your chat, so the call isn't being recorded."
+        }
         // The call ended while the notice went: say it stopped, too.
         if (engine !== eng || peer != p) {
             scope.launch { runCatching { notice(p, RECORDING_OFF) } }
