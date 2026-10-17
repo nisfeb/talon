@@ -28,27 +28,12 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class DraftShipBindingTest {
 
-    /** Drafts per ship, resolving the active ship at call time the way
-     *  the iOS store does, and binding the way it does too. A fake on
-     *  purpose: the real IosDraftStore is iosMain and unreachable from
-     *  here, so this mirrors its Bound semantics — the contract this
-     *  test exists to pin. */
-    private class ShipDrafts(private val active: () -> String) : DraftStore() {
-        val byShip = mutableMapOf<String, MutableMap<String, String>>()
-        private fun of(ship: String) = byShip.getOrPut(ship) { mutableMapOf() }
-        override fun load(whom: String) = of(active())[whom] ?: ""
-        // Blank removes, as the real stores do.
-        override fun save(whom: String, draft: String) { if (draft.isBlank()) of(active()).remove(whom) else of(active())[whom] = draft }
-        override fun clear(whom: String) { of(active()).remove(whom) }
-        override fun bound(): DraftStore {
-            val ship = active()
-            return object : DraftStore() {
-                override fun load(whom: String) = of(ship)[whom] ?: ""
-                override fun save(whom: String, draft: String) { if (draft.isBlank()) of(ship).remove(whom) else of(ship)[whom] = draft }
-                override fun clear(whom: String) { of(ship).remove(whom) }
-            }
-        }
-    }
+    /** What a [FileDraftStore] wrote, by file name, in place of the disk. */
+    private val files = mutableMapOf<String, String>()
+
+    /** The draft [whom] on [ship], as its file holds it. */
+    private fun kept(ship: String, whom: String): String? =
+        files[draftsFileName(ship)]?.let { kotlinx.serialization.json.Json.decodeFromString<Map<String, String>>(it)[whom] }
 
     private val noSend = object : ChatSendStrategy {
         override suspend fun sendText(text: String) = Unit
@@ -66,7 +51,8 @@ class DraftShipBindingTest {
             .build()
         try {
             var active = "~a"
-            val drafts = ShipDrafts { active }
+            // The desktop and iOS store itself, over a map for the disk.
+            val drafts = FileDraftStore({ active }, read = { files[it] }, write = { name, text -> files[name] = text })
             runComposeUiTest {
                 // Same conversation on both ships; the tree re-keys on the
                 // ship exactly as the shell does.
@@ -92,13 +78,14 @@ class DraftShipBindingTest {
                 shipKey = "~b"
                 waitForIdle()
             }
-            assertEquals("typed on a", drafts.byShip["~a"]?.get("~group"))
+            assertEquals("typed on a", kept("~a", "~group"))
             // The incoming composer may record its own empty start; what it
             // must never hold is the outgoing ship's text.
-            assertTrue(drafts.byShip["~b"]?.get("~group").isNullOrEmpty(), "the incoming ship must not inherit the outgoing draft")
+            assertTrue(kept("~b", "~group").isNullOrEmpty(), "the incoming ship must not inherit the outgoing draft")
         } finally {
             db.close()
             tmp.deleteRecursively()
         }
     }
 }
+

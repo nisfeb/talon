@@ -92,6 +92,13 @@ class SettingsCallsTest {
         assertTrue(!shows("Allowed"), "no allow list while open")
     }
 
+    // Closing the window quits Talon, so the line saying a ring comes only
+    // while it is open is true on desktop, and shown there.
+    @Test
+    fun `the calls tab says a call rings only while Talon is open`() = calls {
+        waitUntil(timeoutMillis = 5_000) { shows("Incoming calls ring only while Talon is open.") }
+    }
+
     @Test
     fun `a ship is blocked`() = calls {
         addTo(1, "~sampel-palnet")

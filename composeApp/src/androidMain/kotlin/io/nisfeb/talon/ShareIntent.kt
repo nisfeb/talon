@@ -8,6 +8,10 @@ import android.os.Build
  * External content handed to us via `ACTION_SEND`. We surface the two
  * shapes Tlon-style messaging cares about: plain text (URLs, snippets)
  * and single image attachments.
+ *
+ * Android-only: no desktop analog. A computer has no share sheet that
+ * hands Talon content; a file dropped on the chat ([io.nisfeb.talon.ui.fileDropTarget])
+ * or pasted covers it there.
  */
 sealed class ShareIntent {
     data class Text(val text: String) : ShareIntent()

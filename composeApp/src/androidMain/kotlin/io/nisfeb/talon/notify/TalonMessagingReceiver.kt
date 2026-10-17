@@ -44,6 +44,9 @@ import org.unifiedpush.android.connector.data.PushMessage
  *       <action android:name="org.unifiedpush.android.connector.REGISTRATION_FAILED"/>
  *     </intent-filter>
  *   </receiver>
+ *
+ * Android-only: no desktop analog. A desktop Talon hears the ship's own
+ * stream while it is open, and needs no push to wake it.
  */
 class TalonMessagingReceiver : MessagingReceiver() {
 

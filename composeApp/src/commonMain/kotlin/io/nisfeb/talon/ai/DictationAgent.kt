@@ -147,6 +147,8 @@ class DictationAgent(
          * and handing words to orrery. Anyone holding a locked phone can
          * speak to it, so nothing that reaches another person (mail, a
          * message, a share, an invite) and nothing destructive.
+         * update_event refuses, while locked, an event with guests
+         * ([AssistantActions.locked]): a change to it reaches them.
          */
         val LOCKED_WRITES: Set<String> = ALLOW_ALL_TOOLS + setOf("orrery_file_text", "orrery_instruct")
 
@@ -162,7 +164,11 @@ class DictationAgent(
 
         /** [all] as a dictation may use them: [TOOLS] only, and while [locked], only [LOCKED_WRITES] among the writes. */
         fun toolsFor(all: List<Tool>, locked: Boolean): List<Tool> =
-            all.dedupToolNames().filter { it.spec.name in TOOLS && (!locked || !it.write || it.spec.name in LOCKED_WRITES) }
+            whileLocked(all.dedupToolNames().filter { it.spec.name in TOOLS }, locked)
+
+        /** [tools] less the writes [LOCKED_WRITES] leaves out, while [locked]. */
+        fun whileLocked(tools: List<Tool>, locked: Boolean): List<Tool> =
+            if (!locked) tools else tools.filter { !it.write || it.spec.name in LOCKED_WRITES }
 
         /**
          * A turn's writes said back to the owner as the tools reported

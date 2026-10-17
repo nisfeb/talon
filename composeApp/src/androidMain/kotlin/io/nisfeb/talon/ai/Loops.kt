@@ -29,10 +29,10 @@ import java.util.concurrent.TimeUnit
  * run rather than captured stale.
  *
  * One AlarmManager wake-up is armed at the earliest next-fire across all
- * enabled loops; on fire the receiver calls [runDueNow], which runs every
- * loop that's due and re-arms. Inexact (setAndAllowWhileIdle) like the
- * Loops are deferrable, which avoids the SCHEDULE_EXACT_ALARM
- * permission.
+ * enabled loops; on fire the receiver hands off to a worker that calls
+ * [runDueNow], which runs every loop that's due and re-arms. Inexact
+ * (setAndAllowWhileIdle): loops are deferrable, which avoids the
+ * SCHEDULE_EXACT_ALARM permission.
  *
  * Android-only: no desktop analog — depends on AlarmManager / BootReceiver
  * (CLAUDE.md §6). Desktop runs the same [LoopRunner] on a while-open ticker
@@ -66,14 +66,10 @@ class Loops(
      *  process can be reclaimed (fire-and-forget [reschedule] would race). */
     suspend fun rescheduleNow() = rearm()
 
-    /** Run every due loop now, then re-arm. Called by the alarm receiver
-     *  inside goAsync(). Capped so a slow agent can't hold the wake lock /
-     *  goAsync budget open indefinitely.
-     *
-     *  ponytail: goAsync + one timeout is the Stage-1 ceiling. If loops
-     *  routinely run long, or many come due at once, move execution to a
-     *  foreground service (TalonSyncService-style) — a BroadcastReceiver
-     *  isn't meant to hold the process for minutes. */
+    /** Run every due loop now, then re-arm. Called by the alarm's
+     *  [io.nisfeb.talon.LoopWorker], which WorkManager keeps alive for as
+     *  long as it takes. Capped so a slow agent can't hold the job open
+     *  indefinitely; a loop the cap cuts short says so in its result. */
     suspend fun runDueNow() {
         try {
             if (sessionStore.activeShip() == null) return
@@ -151,13 +147,23 @@ class Loops(
 
     /**
      * Maps or the dialer for a dictation's open_directions and call_place,
-     * from the application context. Allowed from the background because
+     * from the application context. Allowed from the background only while
      * the dictation's card is on screen; on a locked phone the app waits
-     * behind the lock.
+     * behind the lock. With the card gone (hidden, or a retry from the
+     * result notification) Android drops the start without a word, so it
+     * is not tried and the tool says it could not open. No user action:
+     * maps coming up is not the owner leaving the card, which hangs Archie
+     * up ([io.nisfeb.talon.QuickDictationActivity.onUserLeaveHint]).
      */
-    private fun openOnScreen(uri: String): Boolean = runCatching {
-        context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    }.onFailure { io.nisfeb.talon.util.Log.w("Dictation", "could not open $uri: ${it.message}") }.isSuccess
+    private fun openOnScreen(uri: String): Boolean {
+        if (!io.nisfeb.talon.QuickDictation.shown.value) return false
+        return runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION),
+            )
+        }.onFailure { io.nisfeb.talon.util.Log.w("Dictation", "could not open $uri: ${it.message}") }.isSuccess
+    }
 
     /**
      * A runner with the mail, calendar, task and event tools, over
@@ -257,6 +263,7 @@ class Loops(
                 zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
                 send = { whom, text -> getRepo().send(whom, text) },
                 onEvents = seen::events, onTasks = seen::tasks, onPeople = seen::people, onMail = seen::mail,
+                locked = { locked },
             )
             val webOn = cfg.assistantOn()
             // The vendor's search, not an own key: since Armillary-only an
@@ -374,9 +381,10 @@ class Loops(
          * Archie's conversation ([VoiceConversation]): a dictation's tools,
          * while [locked] only its locked writes, orrery's where it is on, and
          * orrery's proposals put to the owner by [decide] before they go ahead.
+         * [locked] is read at each turn: the phone can lock mid-conversation.
          */
         suspend fun conversation(
-            locked: Boolean,
+            locked: () -> Boolean,
             orrery: io.nisfeb.talon.orrery.OrreryRepo?,
             decide: suspend (String, List<io.nisfeb.talon.orrery.OrreryAction>) -> Boolean?,
         ): VoiceConversation {
@@ -387,9 +395,11 @@ class Loops(
                 zone = { zone() },
                 send = { whom, text -> getRepo().send(whom, text) },
                 onEvents = talkSeen::events, onTasks = talkSeen::tasks, onPeople = talkSeen::people, onMail = talkSeen::mail,
+                locked = locked,
             )
             val tools = ToolCatalog.default(getRepo(), getDb(), getEmbedder(), braveSearch = placesClient(), places = placesClient(), open = ::openOnScreen, dials = true, onMessages = talkSeen::messages, conversationLabel = known::conversationLabel) { known.displayName(it) } + actionTools(actions)
-            val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked)
+            // Every dictation tool; the conversation drops the locked ones turn by turn.
+            val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked = false)
                 .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
             return VoiceConversation(
                 completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(zone()), msgs, t) },
@@ -405,6 +415,7 @@ class Loops(
                     }
                 },
                 brief = { orrery?.briefLast()?.getOrThrow()?.let { Briefing.todays(it, today()) } },
+                locked = locked,
             )
         }
 

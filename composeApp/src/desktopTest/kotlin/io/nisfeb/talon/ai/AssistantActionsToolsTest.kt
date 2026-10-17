@@ -98,6 +98,8 @@ class AssistantActionsToolsTest {
         refuseLater: (JsonObject) -> String? = { null },
         /** outcomes.json's refusals already there, before any poke. */
         refusals: List<String> = emptyList(),
+        /** Whether the phone is locked, as a dictation says it. */
+        locked: () -> Boolean = { false },
         block: (Harness) -> Unit,
     ) {
         val scope = CoroutineScope(SupervisorJob())
@@ -168,6 +170,7 @@ class AssistantActionsToolsTest {
                 calendar = calendar,
                 zone = { TimeZone.UTC },
                 send = send,
+                locked = locked,
             )
             block(Harness(actionTools(actions), pokes))
         } finally {
@@ -214,6 +217,44 @@ class AssistantActionsToolsTest {
         assertEquals("Updated \"Dentist (moved)\".", out)
         assertTrue(System.currentTimeMillis() - began < 3_000, "took ${System.currentTimeMillis() - began} ms")
         assertEquals("edit-event", h.pokes.single()["action"]!!.jsonPrimitive.content)
+    }
+
+    // update_event was a locked phone's write, and a change to a meeting
+    // reaches its guests: Google mails each one. Anyone can speak to a
+    // locked phone, so a meeting with guests waits for the unlock.
+    private fun dentist(guests: String, key: String = "guests") =
+        """{"cat":"timed","kind":"once","start_ms":1790848800000,"dur_min":60,"cal":"default","meta":{"name":"Dentist","$key":$guests},"args":{}}"""
+
+    @Test
+    fun `a locked phone changes no meeting with guests, and the owner's own entry is no guest`() {
+        var locked = true
+        withHarness(event = dentist("""[{"email":"me@example.com","self":true},{"email":"ana@example.com"}]"""), locked = { locked }) { h ->
+            val out = h.run("update_event", argsOf("event" to "e1", "time" to "11:00"))
+            assertEquals("Not done: \"Dentist\" has guests, and a change to it reaches them. The owner can change it once the phone is unlocked.", out)
+            assertTrue(h.pokes.isEmpty(), "nothing went to the calendar: ${h.pokes}")
+            locked = false
+            assertEquals("Updated \"Dentist\".", h.run("update_event", argsOf("event" to "e1", "time" to "11:00")))
+            assertEquals(listOf("edit-event"), h.pokes.map { it["action"]!!.jsonPrimitive.content })
+        }
+        withHarness(event = dentist("""[{"email":"me@example.com","self":true}]"""), locked = { true }) { h ->
+            assertEquals("Updated \"Dentist\".", h.run("update_event", argsOf("event" to "e1", "time" to "11:00")))
+        }
+        withHarness(event = dentist("""[{"ship":"~nec"}]""", key = "ships"), locked = { true }) { h ->
+            assertTrue(h.run("update_event", argsOf("event" to "e1", "time" to "11:00")).startsWith("Not done"), "a ship guest is told too")
+            assertTrue(h.pokes.isEmpty())
+        }
+    }
+
+    // edit-at keeps the occurrence on the series' own calendar: "move this
+    // one to Family" said Updated and moved nothing.
+    @Test
+    fun `one occurrence moved to another calendar goes in two steps, there, and says so`() = withHarness(
+        window = standupRow, event = standup, invites = "[]", calendars = family,
+    ) { h ->
+        val out = h.run("update_event", argsOf("event" to "r1", "occurrence" to "2026-09-21", "calendar" to "Family"))
+        assertEquals("Updated \"Standup\" for that occurrence. It is its own event on the new calendar now, apart from the series.", out)
+        assertEquals(listOf("add-event", "skip-event"), h.pokes.map { it["action"]!!.jsonPrimitive.content })
+        assertEquals("c-0w1.94k9D", h.pokes[0]["cal"]!!.jsonPrimitive.content)
     }
 
     // An all-day "the electrician comes back" day reached the owner with no
