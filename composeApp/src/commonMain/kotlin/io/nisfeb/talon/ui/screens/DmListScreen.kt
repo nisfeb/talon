@@ -2233,12 +2233,13 @@ private fun DmRequestRow(
             url = contactMap.conversationAvatar(ship),
         )
         Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            Text(label, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 "wants to message you",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         TextButton(onClick = onDecline) {
@@ -2274,12 +2275,18 @@ private fun NoticedRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Column(Modifier.weight(1f)) {
-            Text("${who(n.subject)}: ${n.attr} is $value", style = MaterialTheme.typography.bodyLarge, maxLines = 2)
+            Text(
+                "${who(n.subject)}: ${n.attr} is $value",
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 n.snippet,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         TextButton(onClick = onDiscard) {
