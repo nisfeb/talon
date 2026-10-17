@@ -2360,14 +2360,16 @@ class TlonChatRepo(
      *
      * markRead itself swallows transient errors and retries; this
      * helper only ensures each whom gets its own attempt.
+     *
+     * On [pushScope], as [markThreadsRead]: on the list's own scope,
+     * opening a chat midway cancelled the reads not yet heard, and none
+     * was kept as owed.
      */
-    suspend fun markAllRead(whoms: Collection<String>) {
+    fun markAllRead(whoms: Collection<String>) {
         if (whoms.isEmpty()) return
-        kotlinx.coroutines.coroutineScope {
-            whoms.forEach { whom ->
-                // Asked for: told whatever the local count says.
-                launch { runCatching { markRead(whom, force = true) } }
-            }
+        whoms.forEach { whom ->
+            // Asked for: told whatever the local count says.
+            pushScope.launch { runCatching { markRead(whom, force = true) } }
         }
     }
 

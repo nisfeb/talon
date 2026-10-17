@@ -311,6 +311,22 @@ class TlonChatRepoSendTest {
         assertEquals("activity-action-2", ship.pokesTo("activity").single().mark)
     }
 
+    // Mark all read ran on the home list's scope: opening a chat midway
+    // cancelled the reads still on the wire, and none was kept as owed
+    // (review M15, 2026-10-17). Real time: the ship's hold is real.
+    @Test
+    fun `mark all read still reaches the ship when the list is left midway`() = live {
+        for (w in listOf("~bus", "~nec")) db.unreads().upsert(UnreadEntity(w, count = 2, notifyCount = 1, recencyMs = 1))
+        ship.holdPoke = 400
+        val list = CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
+        list.launch { repo.markAllRead(listOf("~bus", "~nec")) }
+        delay(100)
+        list.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+        kotlinx.coroutines.withTimeout(10_000) { while (ship.pokesTo("activity").size < 2) delay(50) }
+        assertEquals(setOf("~bus", "~nec"), ship.pokesTo("activity").map { it.json.toString().substringAfter("\"ship\":\"").substringBefore("\"") }.toSet())
+        assertEquals(listOf(0, 0), listOf("~bus", "~nec").map { db.unreads().getOne(it)!!.count })
+    }
+
     @Test
     fun `a ship too old for activity-action-2 is told under the mark it has`() = live {
         ship.refuse = { p -> if (p.mark == "activity-action-2") "no mark activity-action-2" else null }

@@ -1733,7 +1733,7 @@ fun DmListScreen(
                 val whoms = contactMap.channelGroups
                     .filter { it.groupFlag == flag }
                     .map { it.nest }
-                scope.launch { runCatching { repo.markAllRead(whoms) } }
+                repo.markAllRead(whoms)
             },
             onLeaveGroup = { repo.leaveGroup(flag) },
         )
@@ -1786,9 +1786,7 @@ fun DmListScreen(
                     enabled = unreadWhoms.isNotEmpty(),
                     onClick = {
                         dismiss()
-                        scope.launch {
-                            runCatching { repo.markAllRead(unreadWhoms) }
-                        }
+                        repo.markAllRead(unreadWhoms)
                     },
                 ) { Text("Mark read") }
             },
