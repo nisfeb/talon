@@ -81,3 +81,6 @@ actual val isAppIconBadgeSupported: Boolean = true
 
 /** Brave for iOS has had Leo's Bring your own model form since 1.88. */
 actual val isBraveLeoSupported: Boolean = true
+
+/** A tel: link offers the call. */
+actual val isPhoneDialSupported: Boolean = true

@@ -86,9 +86,10 @@ class BraveSearchClient(
         val cfg = settings()
         if (!cfg.assistantOn()) return "Place search is part of the assistant, which is off in Settings."
         val (base, key) = cfg.braveSearch() ?: return "Place search comes through your Armillary vendor's search, which it does not offer."
-        val what = query.trim()
+        // Errands: several kinds of place near the one spot, found once.
+        val whats = query.split(';').map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(MAX_PLACE_QUERIES)
         val where = near.trim()
-        if (what.isBlank()) return "Error: query is required."
+        if (whats.isEmpty()) return "Error: query is required."
         if (where.isBlank()) return "Error: near is required."
         val n = count.coerceIn(1, 10)
         return withContext(ioDispatcher) {
@@ -102,16 +103,17 @@ class BraveSearchClient(
                     if (!ok) return@runCatching body
                     parsePlaces(body).firstOrNull() ?: return@runCatching "Couldn't find \"$where\"${area?.takeIf { it.isNotBlank() }?.let { " in $it" }.orEmpty()} to search near."
                 }
-                val (ok, body) = placeSearch(base, key) {
-                    parameter("q", what)
-                    parameter("latitude", anchor.lat.toString())
-                    parameter("longitude", anchor.lon.toString())
-                    // A bias, not a cutoff: the nearest a little further out still comes.
-                    parameter("radius", PLACE_RADIUS_M.toString())
-                    parameter("count", "20")
-                }
-                if (!ok) return@runCatching body
-                placesAnswer(what, anchor, parsePlaces(body), n)
+                whats.map { what ->
+                    val (ok, body) = placeSearch(base, key) {
+                        parameter("q", what)
+                        parameter("latitude", anchor.lat.toString())
+                        parameter("longitude", anchor.lon.toString())
+                        // A bias, not a cutoff: the nearest a little further out still comes.
+                        parameter("radius", PLACE_RADIUS_M.toString())
+                        parameter("count", "20")
+                    }
+                    if (ok) placesAnswer(what, anchor, parsePlaces(body), n) else body
+                }.joinToString("\n\n")
             }.getOrElse { "Place search failed: ${it.message ?: it::class.simpleName}" }
         }
     }
@@ -137,6 +139,9 @@ class BraveSearchClient(
 
         /** Where a place search looks first around its point, in metres. */
         const val PLACE_RADIUS_M = 30_000
+
+        /** How many kinds of place one find_places searches: a request each. */
+        const val MAX_PLACE_QUERIES = 5
     }
 }
 

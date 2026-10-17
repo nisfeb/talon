@@ -70,7 +70,7 @@ class DictationAgentTest {
     @Test
     fun `a dictation is offered what a dictation uses, and a locked phone sends nothing to anyone`() {
         val all = listOf(
-            tool("search_history", false), tool("read_mail", false), tool("web_search", false),
+            tool("search_history", false), tool("read_mail", false), tool("web_search", false), tool("fetch_url", false),
             tool("orrery_file_text", true), tool("orrery_instruct", true), tool("orrery_observe", true),
             tool("create_event", true), tool("update_event", true), tool("create_task", true), tool("complete_task", true),
             tool("send_mail", true), tool("send_message", true), tool("delete_event", true), tool("react", true),
@@ -79,7 +79,7 @@ class DictationAgentTest {
         val unlocked = DictationAgent.toolsFor(all, locked = false).map { it.spec.name }.toSet()
         assertEquals(
             setOf(
-                "search_history", "read_mail", "orrery_file_text", "orrery_instruct", "orrery_observe",
+                "search_history", "read_mail", "web_search", "orrery_file_text", "orrery_instruct", "orrery_observe",
                 "create_event", "update_event", "create_task", "complete_task",
                 "send_mail", "send_message", "delete_event", "orrery_correct",
             ),
@@ -169,8 +169,8 @@ class DictationAgentTest {
 
     @Test
     fun `a question is offered reads only, and told it can only look things up`() {
-        val all = listOf(tool("search_history", false), tool("read_mail", false), tool("send_message", true), tool("create_event", true), tool("web_search", false))
-        assertEquals(listOf("search_history", "read_mail"), DictationAgent.readsFor(all).map { it.spec.name })
+        val all = listOf(tool("search_history", false), tool("read_mail", false), tool("send_message", true), tool("create_event", true), tool("web_search", false), tool("fetch_url", false))
+        assertEquals(listOf("search_history", "read_mail", "web_search"), DictationAgent.readsFor(all).map { it.spec.name })
         assertTrue(DATA_NOT_INSTRUCTIONS in DictationAgent.askPrompt)
         assertTrue("only look things up" in DictationAgent.askPrompt)
         assertTrue("read" in DictationAgent.askPrompt && "aloud" in DictationAgent.askPrompt)

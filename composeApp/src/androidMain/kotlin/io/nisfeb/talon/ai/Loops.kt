@@ -150,6 +150,16 @@ class Loops(
     private val urlFetcher by lazy { UrlFetcher { aiSettings.state.value } }
 
     /**
+     * Maps or the dialer for a dictation's open_directions and call_place,
+     * from the application context. Allowed from the background because
+     * the dictation's card is on screen; on a locked phone the app waits
+     * behind the lock.
+     */
+    private fun openOnScreen(uri: String): Boolean = runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.onFailure { io.nisfeb.talon.util.Log.w("Dictation", "could not open $uri: ${it.message}") }.isSuccess
+
+    /**
      * A runner with the mail, calendar, task and event tools, over
      * connections made for this run and closed after it. A loop fires from
      * an alarm, where the app's own mail and calendar, built by the UI, may
@@ -258,6 +268,8 @@ class Loops(
                 braveSearch = braveClient.takeIf { searchOn },
                 urlFetcher = urlFetcher.takeIf { webOn },
                 places = braveClient.takeIf { searchOn },
+                open = ::openOnScreen,
+                dials = true,
                 onMessages = seen::messages,
             ) { known.displayName(it) } + actionTools(actions)
             return withOrrery(cfg) { orrery ->
@@ -375,7 +387,7 @@ class Loops(
                 send = { whom, text -> getRepo().send(whom, text) },
                 onEvents = talkSeen::events, onTasks = talkSeen::tasks, onPeople = talkSeen::people, onMail = talkSeen::mail,
             )
-            val tools = ToolCatalog.default(getRepo(), getDb(), getEmbedder(), places = placesClient(), onMessages = talkSeen::messages) { known.displayName(it) } + actionTools(actions)
+            val tools = ToolCatalog.default(getRepo(), getDb(), getEmbedder(), braveSearch = placesClient(), places = placesClient(), open = ::openOnScreen, dials = true, onMessages = talkSeen::messages) { known.displayName(it) } + actionTools(actions)
             val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked)
                 .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
             return VoiceConversation(
@@ -442,7 +454,7 @@ class Loops(
                 zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
                 onEvents = seen::events, onTasks = seen::tasks, onPeople = seen::people, onMail = seen::mail,
             )
-            val tools = DictationAgent.readsFor(ToolCatalog.default(getRepo(), getDb(), getEmbedder(), places = placesClient(), onMessages = seen::messages) { known.displayName(it) } + actionTools(actions), orrery?.asTap())
+            val tools = DictationAgent.readsFor(ToolCatalog.default(getRepo(), getDb(), getEmbedder(), braveSearch = placesClient(), places = placesClient(), open = ::openOnScreen, dials = true, onMessages = seen::messages) { known.displayName(it) } + actionTools(actions), orrery?.asTap())
                 .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
             io.nisfeb.talon.util.Log.i("Dictation", "route=ask, ${tools.size} tools, calendar read ${if (read.isCompleted) "done" else "pending"}")
             return DictationAgent(

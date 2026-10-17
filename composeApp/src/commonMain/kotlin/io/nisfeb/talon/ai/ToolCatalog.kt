@@ -52,6 +52,13 @@ object ToolCatalog {
         // search. Apart from braveSearch so a dictation can have places
         // without the web.
         places: BraveSearchClient? = null,
+        // When non-null, open_directions is added: it hands a maps link to
+        // the device and says whether it went. Only where someone is
+        // looking at the screen, so not a scheduled loop.
+        open: ((uri: String) -> Boolean)? = null,
+        // With [open], call_place too: a phone has a dialer, a computer
+        // does not (isPhoneDialSupported).
+        dials: Boolean = false,
         // What search_history and read_conversation showed: a dictation's card draws them.
         onMessages: (List<MessageEntity>) -> Unit = {},
         displayName: (String) -> String,
@@ -202,9 +209,10 @@ object ToolCatalog {
                     "Find places near somewhere, nearest first by straight-line distance, with each one's address, today's hours and phone: " +
                         "a shop or service by name (Home Depot) or by kind (hardware store, pharmacy). " +
                         "To search near a calendar event, first read its location with list_events and pass that as near. " +
+                        "For errands, read list_tasks, turn each errand into the kind of place that does it (paint: hardware store; a prescription: pharmacy), and search them all in one call. " +
                         "The answer says what near was found as; say so if it is not the place meant.",
                     toolSchema(
-                        "query" to ("string" to "What to find: a name or a kind of place."),
+                        "query" to ("string" to "What to find: a name or a kind of place. Several, separated by ;, are each searched near the same place."),
                         "near" to ("string" to "Where to search from: an address, a place's name, or lat,lon."),
                         "area" to ("string" to "The city, state and country near is in, when known, e.g. jacksonville fl united states, so a name is found in the right town."),
                         "count" to ("integer" to "How many, nearest first (default 3, max 10)."),
@@ -214,6 +222,36 @@ object ToolCatalog {
                 write = false,
             ) { args ->
                 client.places(args.str("query").orEmpty(), args.str("near").orEmpty(), args.str("area"), (args.int("count") ?: 3))
+            }
+        },
+        // Hand-offs to the device, for "take me there" and "call it": they
+        // open an app on the screen and change nothing, so are not writes.
+        open?.let { opener ->
+            Tool(
+                spec = ToolSpec(
+                    "open_directions",
+                    "Open the device's maps app at a place, for directions there. Give the address find_places or list_events gave, with its town.",
+                    toolSchema("destination" to ("string" to "The address, or a place's name and town."), required = listOf("destination")),
+                ),
+                write = false,
+            ) { args ->
+                val to = args.str("destination")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: destination is required."
+                if (opener(io.nisfeb.talon.ui.mapsSearchUri(to))) "Opened maps at $to." else "Couldn't open a maps app."
+            }
+        },
+        open?.takeIf { dials }?.let { opener ->
+            Tool(
+                spec = ToolSpec(
+                    "call_place",
+                    "Open the phone's dialer with a number, such as the phone find_places gave. It does not call: the user taps call.",
+                    toolSchema("number" to ("string" to "The phone number."), required = listOf("number")),
+                ),
+                write = false,
+            ) { args ->
+                val number = args.str("number")?.trim().orEmpty()
+                if (number.count { it.isDigit() } < 7) return@Tool "Error: \"$number\" is not a phone number."
+                if (opener(io.nisfeb.talon.ui.telUri(number))) "Opened the dialer with $number. The call starts when the user taps call."
+                else "Couldn't open the dialer."
             }
         },
         // Fetch a specific URL — only present when the caller opts in.

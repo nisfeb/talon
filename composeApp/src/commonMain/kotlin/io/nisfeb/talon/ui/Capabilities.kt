@@ -38,12 +38,16 @@ package io.nisfeb.talon.ui
  *  - isRelayNotificationSetupNeeded — i: the app is suspended in the background, so the relay's push is its only notification. A: a foreground service keeps the ship's stream. D: notifies while it runs.
  *  - isAppIconBadgeSupported — i: the unread count on the app icon, a switch in Settings (off until turned on). A: launchers draw their own dot from the notifications. D: no icon to badge.
  *  - isArmillaryPurchaseSupported — A, D; i on the US App Store storefront only. Apple allows a button to an outside checkout there and nowhere else (guideline 3.1.1(a)), so elsewhere buying, its pitch and every "top up" go. The card, the balance and the history do not depend on it.
+ *  - isPhoneDialSupported — A, i: the assistant's call_place opens the dialer at a number. D: a computer has no phone to dial, and tel: links go nowhere.
  *  - isBraveLeoSupported: D, i, where Brave takes a model of your own (Settings > Leo > Bring your own model; iOS since Brave 1.88). A: Brave for Android has no such form yet (brave-browser#59722).
  *
  * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
  * below too — a display name and a per-feature predicate, not flags.
  */
 expect val isVoiceMessagesSupported: Boolean
+
+/** Whether a tel: link opens a dialer, so the assistant can offer call_place. */
+expect val isPhoneDialSupported: Boolean
 
 /**
  * Whether the **on-device embedder** runs on this platform — the

@@ -117,14 +117,76 @@ class FindPlacesTest {
         assertEquals("Error: near is required.", findPlaces("query" to "Home Depot"))
     }
 
-    // Asked in the car: a dictation is offered it, and it is a read, so a
-    // locked phone keeps it.
+    // Errands: "paint, a prescription and dog food near rehearsal" finds
+    // rehearsal once and each kind of place around that same point.
     @Test
-    fun `a dictation is offered it, locked or not`() {
-        val tools = ToolCatalog.default(repo, db, null, places = client) { it }
-        assertTrue(DictationAgent.toolsFor(tools, locked = false).any { it.spec.name == "find_places" })
-        assertTrue(DictationAgent.toolsFor(tools, locked = true).any { it.spec.name == "find_places" })
-        assertTrue(DictationAgent.readsFor(tools).any { it.spec.name == "find_places" })
+    fun `several kinds of place are each searched around the one spot, found once`() {
+        val said = findPlaces("query" to "hardware store; pharmacy ;;hardware store", "near" to "Florida Theatre")
+        assertEquals(1, asked.count { "latitude" !in it.second }, "one lookup of near")
+        val searches = asked.filter { "latitude" in it.second }
+        assertEquals(listOf("hardware store", "pharmacy"), searches.map { it.second["q"] }, "blanks and repeats dropped")
+        assertTrue(searches.all { it.second["latitude"] == "30.329" && it.second["longitude"] == "-81.6568" })
+        val groups = said.split("\n\n")
+        assertEquals(2, groups.size, said)
+        assertTrue(groups[0].startsWith("Nearest \"hardware store\"") && groups[1].startsWith("Nearest \"pharmacy\""), said)
+    }
+
+    /** Every link handed to the device, and whether it took it. */
+    private val opened = CopyOnWriteArrayList<String>()
+    @Volatile private var opens = true
+    private fun handOff(name: String, dials: Boolean, vararg args: Pair<String, String>): String = runBlocking {
+        ToolCatalog.default(repo, db, null, open = { opened += it; opens }, dials = dials) { it }.single { it.spec.name == name }
+            .execute(buildJsonObject { args.forEach { (k, v) -> put(k, v) } })
+    }
+
+    // "Take me there" and "call it": the device's maps and dialer, and an
+    // answer that does not claim a call was made.
+    @Test
+    fun `take me there opens maps at the address, and call it opens the dialer without calling`() {
+        assertEquals("Opened maps at 5 Main St, Jacksonville, FL 32206.", handOff("open_directions", false, "destination" to "5 Main St, Jacksonville, FL 32206"))
+        assertEquals("https://www.openstreetmap.org/search?query=5%20Main%20St%2C%20Jacksonville%2C%20FL%2032206", opened.single(), "desktop's maps are a web page")
+        opened.clear()
+        assertEquals("Opened the dialer with +1 (904) 555-0100. The call starts when the user taps call.", handOff("call_place", true, "number" to "+1 (904) 555-0100"))
+        assertEquals("tel:+19045550100", opened.single())
+    }
+
+    @Test
+    fun `a hand-off that does not go says so, and a non-number is not dialled`() {
+        opens = false
+        assertEquals("Couldn't open a maps app.", handOff("open_directions", false, "destination" to "Florida Theatre"))
+        assertEquals("Couldn't open the dialer.", handOff("call_place", true, "number" to "904 555 0100"))
+        opened.clear()
+        assertTrue(handOff("call_place", true, "number" to "ext 123456").startsWith("Error:"), "six digits")
+        assertTrue(opened.isEmpty())
+        opens = true
+        handOff("call_place", true, "number" to "555-0100")
+        assertEquals(listOf("tel:5550100"), opened.toList(), "seven digits is a local number")
+        opened.clear()
+        assertTrue(handOff("open_directions", false, "destination" to " ").startsWith("Error:"))
+        assertTrue(opened.isEmpty())
+    }
+
+    @Test
+    fun `no dialer without dials, and no hand-offs without a screen`() {
+        val phone = ToolCatalog.default(repo, db, null, open = { true }, dials = true) { it }.map { it.spec.name }
+        assertTrue("open_directions" in phone && "call_place" in phone)
+        val computer = ToolCatalog.default(repo, db, null, open = { true }) { it }.map { it.spec.name }
+        assertTrue("open_directions" in computer && "call_place" !in computer)
+        val loop = ToolCatalog.default(repo, db, null, dials = true) { it }.map { it.spec.name }
+        assertTrue("open_directions" !in loop && "call_place" !in loop, "a scheduled loop has nobody at the screen")
+    }
+
+    // Asked in the car: a dictation is offered them, and they are reads, so
+    // a locked phone keeps them.
+    @Test
+    fun `a dictation is offered places, the way there, the dialer and the web, locked or not`() {
+        val tools = ToolCatalog.default(repo, db, null, braveSearch = client, places = client, open = { true }, dials = true) { it }
+        val names = listOf("find_places", "open_directions", "call_place", "web_search")
+        for (locked in listOf(false, true)) {
+            val offered = DictationAgent.toolsFor(tools, locked).map { it.spec.name }
+            assertTrue(offered.containsAll(names), "locked=$locked: $offered")
+        }
+        assertTrue(DictationAgent.readsFor(tools).map { it.spec.name }.containsAll(names))
         assertTrue(ToolCatalog.default(repo, db, null) { it }.none { it.spec.name == "find_places" }, "only where the caller passes the client")
     }
 }
