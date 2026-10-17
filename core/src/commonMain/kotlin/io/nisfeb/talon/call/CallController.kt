@@ -1165,6 +1165,32 @@ class CallController(
 
     var onTicket: ((String, TrunkTicket) -> Unit)? = null
 
+    /** The line [joinGranted] last stepped onto, "host/name": a room is a slug, the same on two hosts. */
+    @Volatile private var grantedKey: String? = null
+
+    /**
+     * Step [line] onto the line [ticket] from [host] grants: the
+     * [onTicket] of both app roots. Off another group's line first.
+     * Kept on it, its bar took this line's name, this join was dropped
+     * because the line was busy, and its presence told that host we had
+     * left a line we were still on. A grant for the line we are on is
+     * nothing to do.
+     */
+    fun joinGranted(line: PartyLine, host: String, ticket: TrunkTicket, ourShip: String) {
+        val key = "$host/${ticket.name}"
+        val st = line.state.value
+        val busy = st is PartyState.Connecting || st is PartyState.Live
+        if (busy && grantedKey == key) return
+        if (busy) line.leave()
+        grantedKey = key
+        line.join(ticket, ourShip)
+        // The topic lives on the host's room, not in Galene.
+        line.setTopic(lineFor(host, ticket.name)?.title.orEmpty())
+        // Waits for the line to be on this room, so a rejoin, which winds
+        // the old session down first, counts too.
+        beginPresenceAnnounce(host, ticket.name, line.state)
+    }
+
     /** Diagnostic sink: iOS points it at the on-device call trace
      *  (Documents/call-trace.txt) so a user can hand back the Kotlin
      *  side of a call, not just CallKit's. */

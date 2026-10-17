@@ -950,16 +950,7 @@ fun App(
                 )
                     .also { line ->
                         callController.onTicket = { host, ticket ->
-                            // The topic lives on the host's room, not
-                            // in Galène — carry it across as we join.
-                            line.setTopic(
-                                callController.lineFor(host, ticket.name)?.title.orEmpty(),
-                            )
-                            line.join(ticket, shipKey)
-                            // The announce waits for the line to be on
-                            // this room, so a rejoin (which winds the
-                            // old session down first) counts too.
-                            callController.beginPresenceAnnounce(host, ticket.name, line.state)
+                            callController.joinGranted(line, host, ticket, shipKey)
                         }
                         callController.onDenied = { name, why -> line.showRefused(name, why) }
                     }

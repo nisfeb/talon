@@ -230,19 +230,11 @@ fun TalonApp(
                 videoSupported = io.nisfeb.talon.ui.isPartyVideoSupported,
                 displayName = { partyName(app.db.contactMap().value, loggedInShip.orEmpty()) },
             ).also { line ->
+                // Joins, titles and heartbeats the host so its "N on the
+                // line" count includes us. Mirrors App.kt.
                 callController.onTicket = { host, ticket ->
-                            // The topic lives on the host's room, not
-                            // in Galène — carry it across as we join.
-                            line.setTopic(
-                                callController.lineFor(host, ticket.name)?.title.orEmpty(),
-                            )
-                            line.join(ticket, loggedInShip ?: "")
-                            // Heartbeat the host so its "N on the line"
-                            // count includes us. Mirrors App.kt; without
-                            // it every Android member was missing from
-                            // everyone's badge.
-                            callController.beginPresenceAnnounce(host, ticket.name, line.state)
-                        }
+                    callController.joinGranted(line, host, ticket, loggedInShip ?: "")
+                }
                 callController.onDenied = { name, why -> line.showRefused(name, why) }
             }
         } else {
