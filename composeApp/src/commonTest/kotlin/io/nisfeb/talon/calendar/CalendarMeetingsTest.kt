@@ -143,6 +143,17 @@ class CalendarMeetingsTest {
         assertEquals(m, eventBody(d.copy(guests = guestText(m), call = callOf(m)), "e1")["meta"], "the editor's own starting values change nothing")
     }
 
+    // Google mails email guests on every change; ships hear from their
+    // own calendars. A copy's guests are its host's.
+    @Test fun `Google mails only email guests, and a copy is one with a host`() {
+        assertEquals(true, mailsGuests("~bus, ana@example.com"))
+        assertEquals(false, mailsGuests(" ~bus , ~nec "))
+        assertEquals(false, mailsGuests(""))
+        assertEquals(true, isCopy(meta("""{"name":"Seed swap","host":"~nec"}""")))
+        assertEquals(false, isCopy(meta("""{"name":"Seed swap","host":""}""")))
+        assertEquals(false, isCopy(meta("""{"name":"Planning"}""")))
+    }
+
     @Test fun `a join link is http or https, nothing else`() {
         assertEquals("https://meet.google.com/abc", joinLink(meta("""{"conference":"https://meet.google.com/abc"}""")))
         assertEquals("HTTP://zoom.us/j/1", joinLink(meta("""{"conference":"HTTP://zoom.us/j/1"}""")))

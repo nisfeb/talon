@@ -96,6 +96,8 @@ import io.nisfeb.talon.calendar.answerWords
 import io.nisfeb.talon.calendar.callOf
 import io.nisfeb.talon.calendar.editAtBody
 import io.nisfeb.talon.calendar.guestText
+import io.nisfeb.talon.calendar.isCopy
+import io.nisfeb.talon.calendar.mailsGuests
 import io.nisfeb.talon.calendar.guestsOf
 import io.nisfeb.talon.calendar.guestsProblem
 import io.nisfeb.talon.calendar.joinLink
@@ -152,6 +154,9 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import io.nisfeb.talon.ui.icons.TalonIcons
+
+/** An answer its host did not hear: the calendar's reply-pass sends it again an hour on. */
+private const val RETOLD = "The calendar tries again in about an hour."
 
 /**
  * The calendar section: a month with its events, the day picked out
@@ -437,8 +442,8 @@ fun CalendarScreen(
         say("Answering…", "The ship did not take the answer.") {
             val got = repo.answerInvite(key, st, cal) ?: return@say false
             status = when {
-                !got.ok -> "The event could not be put on that calendar" + if (got.told) "; $host has your answer." else ", and $host could not be told."
-                !got.told -> "Answered, but $host could not be told: their ship did not answer."
+                !got.ok -> "The event could not be put on that calendar" + if (got.told) "; $host has your answer." else ", and $host could not be told yet. $RETOLD"
+                !got.told -> "Answered, but $host could not be told yet: their ship did not answer. $RETOLD"
                 else -> null
             }
             true
@@ -447,7 +452,11 @@ fun CalendarScreen(
     fun answer(r: CalendarRow, st: String) {
         viewing = null
         if (r.host.isNotEmpty()) answerInvite("${r.host}/${r.id}", r.host, st, r.cal)
-        else say("Answering…", "The ship did not take the answer.") { repo.writeEvent(rsvpBody(r.id, r.cal, st)).ok }
+        else say("Answering…", "The ship did not take the answer.") {
+            // Refused when the event names no guest who is the owner.
+            val since = nowMs()
+            repo.writeEvent(rsvpBody(r.id, r.cal, st)).ok.also { ok -> if (ok) repo.refusal(r.id, since)?.let { status = "Not answered: $it" } }
+        }
     }
     // Sending an event on: to a chat as a message, by mail with an
     // invite file, or to a group, which is its channel and every ship
@@ -1110,6 +1119,13 @@ fun CalendarScreen(
                 val series = editingSeries
                 // The one-off went in but the ship would not skip the old.
                 var halfDone = false
+                // The calendar acks a poke before it reads it, and keeps
+                // why it refused one: looked for after [savedAt].
+                val savedAt = nowMs()
+                var refused: String? = null
+                // Whose refusal to look for: an add has no id of its own.
+                var lookFor: String? = id
+                var looked = false
                 val ghost = if (id == null) placeholderFor(d) else null
                 if (ghost != null) pendingRows = pendingRows + ghost
                 if (id != null) pendingEdits = pendingEdits + (id to d)
@@ -1129,22 +1145,30 @@ fun CalendarScreen(
                             editScope == EditScope.ALL ->
                                 repo.writeEvent(eventBody(seriesEdit(d, opened = series.second, series = series.first), id))
                             // The page's own two steps: end the old, then add.
-                            editScope == EditScope.FOLLOWING ->
+                            editScope == EditScope.FOLLOWING -> {
+                                lookFor = null
                                 if (repo.pokeEvent(buildJsonObject { put("action", "cap-event"); put("id", id); put("dom", idx) }, readBack = false)) {
                                     repo.writeEvent(eventBody(d))
                                 } else null
+                            }
                             // One step where the calendar has it: the occurrence
                             // becomes the series' own exception, and on Google
                             // it moves for every guest.
                             at != null && repo.editsAt() ->
                                 repo.writeEvent(editAtBody(d, id, home = series.first.cal, atMs = at))
-                            // Add, then skip the old: skipping first lost the
-                            // occurrence whenever the add was refused.
-                            else ->
-                                if (repo.pokeEvent(onlyBody(d), readBack = false)) {
-                                    repo.writeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
+                            // Add, then skip the old, once the add is known
+                            // kept: skipping first, or on the ship's ack alone,
+                            // lost the occurrence whenever the add was refused.
+                            else -> {
+                                looked = true
+                                if (!repo.pokeEvent(onlyBody(d), readBack = false)) null
+                                else {
+                                    refused = repo.refusal(null, savedAt)
+                                    if (refused != null) null
+                                    else repo.writeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
                                         .also { halfDone = !it.ok }
-                                } else null
+                                }
+                            }
                         }
                     }
                     val ok = written?.ok == true || halfDone
@@ -1155,7 +1179,7 @@ fun CalendarScreen(
                     // Not saved: the editor back with what was typed, and why.
                     // It closed for good, and a ship down for a restart lost the edit.
                     if (!ok && editing == null) {
-                        editFailed = repo.failedLine("The ship did not take the change.")
+                        editFailed = refused?.let { "Not saved: $it" } ?: repo.failedLine("The ship did not take the change.")
                         editing = id to d
                     }
                     if (ok) {
@@ -1168,6 +1192,15 @@ fun CalendarScreen(
                             written!!.shown.join()
                             if (kept != null) savedRows = savedRows - kept
                             if (id != null) savedEdits = savedEdits - id
+                        }
+                        // Taken, then refused: the editor back, as the page's
+                        // "Not saved".
+                        // ponytail: an add-then-skip's skip refused is not looked for; its add was
+                        if (!halfDone && !looked) scope.launch {
+                            val why = repo.refusal(lookFor, savedAt) ?: return@launch
+                            if (kept != null) savedRows = savedRows - kept
+                            if (id != null) savedEdits = savedEdits - id
+                            if (editing == null) { editFailed = "Not saved: $why"; editing = id to d } else status = "Not saved: $why"
                         }
                     }
                     // A new event, posted where it was asked to go.
@@ -1496,16 +1529,25 @@ private fun EventEditor(
                     )
                 }
                 OutlinedTextField(value = d.location, onValueChange = { d = d.copy(location = it) }, label = { Text("Place") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                // Guests and a video call, as the calendar's page has them.
-                if (meetings && (d.cat == EventCat.TIMED || d.cat == EventCat.ALLDAY)) {
+                // Guests and a video call, as the calendar's page has them;
+                // not on a copy of another ship's event, whose host keeps them.
+                val google = calendars.firstOrNull { it.id == d.cal }?.kind == "google"
+                val ownEvent = !isCopy(d.otherMeta)
+                if (meetings && ownEvent && (d.cat == EventCat.TIMED || d.cat == EventCat.ALLDAY)) {
+                    val guests = d.guests ?: guestText(d.otherMeta)
                     OutlinedTextField(
-                        value = d.guests ?: guestText(d.otherMeta), onValueChange = { d = d.copy(guests = it) },
+                        value = guests, onValueChange = { d = d.copy(guests = it) },
                         label = { Text("Guests, comma separated") }, placeholder = { Text("~sampel-palnet, or an email") },
                         singleLine = true, modifier = Modifier.fillMaxWidth(),
                     )
+                    if (google && mailsGuests(guests)) {
+                        Text(
+                            "Google emails these guests about every change.",
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-                if (meetings && d.cat == EventCat.TIMED) {
-                    val google = calendars.firstOrNull { it.id == d.cal }?.kind == "google"
+                if (meetings && ownEvent && d.cat == EventCat.TIMED) {
                     val shown = d.call ?: callOf(d.otherMeta)
                     Text("Video call", style = MaterialTheme.typography.labelMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

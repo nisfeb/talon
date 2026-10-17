@@ -258,6 +258,26 @@ class CalendarRepo(
         if (nowMs() - invitesReadMs >= fresh) refreshInvites()
     }
 
+    @kotlin.concurrent.Volatile private var saidRefusalMs = 0L
+
+    /**
+     * Why the calendar refused a write it had taken, as its own page
+     * asks: it answers a poke before reading it, and keeps what it
+     * refused, with why, in outcomes.json. After [REFUSAL_WAIT_MS], the
+     * newest refusal of [id] (any, for null) since [sinceMs], less a
+     * minute's slack for the ship's clock, each said once. Null for none,
+     * or for a calendar that keeps no record.
+     */
+    suspend fun refusal(id: String?, sinceMs: Long): String? = carry {
+        delay(REFUSAL_WAIT_MS)
+        val a = api ?: return@carry null
+        val got = runSuspendCatching { a.outcomes() }.getOrNull() ?: return@carry null
+        val r = got.refusals.lastOrNull { it.atMs > saidRefusalMs && it.atMs >= sinceMs - 60_000 && (id == null || it.id == id) }
+            ?: return@carry null
+        saidRefusalMs = r.atMs
+        r.why.ifBlank { "the calendar refused it" }
+    }
+
     /** Whether "only this one" can go as one edit-at: asked now if not yet known; unknown is no. */
     suspend fun editsAt(): Boolean {
         if (_meetings.value == null) refreshInvites()
@@ -979,6 +999,9 @@ class CalendarRepo(
     companion object {
         /** How long the nexus takes to apply a poke it has answered, read after. */
         const val APPLY_BEAT_MS = 400L
+
+        /** How long after a write the calendar's own page looks for its refusal. */
+        const val REFUSAL_WAIT_MS = 1_500L
 
         private const val TAG = "CalendarRepo"
         const val BEHIND_MS = 6 * 60 * 60 * 1000L

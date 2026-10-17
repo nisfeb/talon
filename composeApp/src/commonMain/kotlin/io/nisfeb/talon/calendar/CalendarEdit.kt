@@ -333,6 +333,20 @@ fun callOf(meta: JsonObject): VideoCall = when {
 fun guestText(meta: JsonObject): String = guestsOf(meta).filter { !it.self && (it.email.isNotEmpty() || it.ship.isNotEmpty()) }
     .joinToString(", ") { it.email.ifEmpty { it.ship } }
 
+/**
+ * Whether [text] names a guest by email: on a Google calendar, Google
+ * mails each about every change, a move, a rename, a delete (calendar 34
+ * writes with sendUpdates=all). Ships are told by their own calendars.
+ */
+fun mailsGuests(text: String): Boolean = guestNames(text).any { !it.startsWith("~") }
+
+/**
+ * Whether [meta] is a copy of another ship's event, placed by answering
+ * its invitation: its host keeps the guests and the call, and the
+ * calendar ignores them on the copy.
+ */
+fun isCopy(meta: JsonObject): Boolean = meta.str("host").isNotEmpty()
+
 private fun guestNames(text: String) = text.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 private val SHIP_NAME = Regex("~[a-z]{3,6}(-{1,2}[a-z]{6})*")
 private val EMAIL = Regex("""[^\s@,;:"<>]+@[^\s@,;:"<>]+\.[^\s@,;:"<>]+""")

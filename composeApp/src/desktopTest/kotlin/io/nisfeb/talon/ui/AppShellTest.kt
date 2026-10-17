@@ -501,16 +501,51 @@ class AppShellTest {
         assertTrue(cal.pokes.none { "edit-at" in it })
     }
 
-    // A refused edit-at must not fall back to add and skip: the ship has
-    // the feature, and said no to this one.
+    // The calendar acks every poke and refuses after, keeping why in
+    // outcomes.json, as its own page reads it. A refused edit-at must not
+    // fall back to add and skip: the ship has the feature, and said no to
+    // this one.
     @Test
-    fun `an edit-at the ship refuses reopens the editor, and nothing else is sent`() = app(setup = withCalendar { refusePoke = { "edit-at" in it } }) { ship ->
+    fun `an edit-at the calendar takes and then refuses reopens the editor with why, and nothing else is sent`() = app(
+        setup = withCalendar { refuseLater = { if ("edit-at" in it) "no repeating event has an occurrence there, or the new one could not be read" else null } },
+    ) { ship ->
         val cal = ship.calendar!!
         openCalendar()
         renameThisStandupOnly()
-        waitUntil(timeoutMillis = 10_000) { showing("The ship did not take the change.") }
+        waitUntil(timeoutMillis = 10_000) { showing("Not saved: no repeating event has an occurrence there, or the new one could not be read") }
         assertTrue(onAllNodes(hasSetTextAction() and androidx.compose.ui.test.hasText("Standup, moved")).fetchSemanticsNodes().isNotEmpty(), "the edit is still there")
         assertEquals(1, cal.pokes.size)
+        assertTrue(cal.outcomesRead.get() > 0)
+    }
+
+    // Taken is not kept: skipped on the add's ack alone, the occurrence
+    // was lost whenever the calendar then refused the add.
+    @Test
+    fun `on an older calendar, an add it refuses leaves the occurrence and reopens the editor`() = app(
+        setup = withCalendar(invites = null) { refuseLater = { if ("add-event" in it) "the event could not be read: its name, kind, start or rule" else null } },
+    ) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        renameThisStandupOnly()
+        waitUntil(timeoutMillis = 10_000) { showing("Not saved: the event could not be read: its name, kind, start or rule") }
+        assertEquals(1, cal.pokes.size, "no skip: ${cal.pokes}")
+    }
+
+    // A change the calendar keeps says nothing more: no refusal of it, and
+    // one an hour old, said or not, is not this one's.
+    @Test
+    fun `a change the calendar keeps is not said refused, whatever its record holds`() = app(
+        setup = withCalendar {
+            refusals += """{"at_ms":${System.currentTimeMillis() - hour},"action":"edit-at","id":"s1","from":"","why":"an old one"}"""
+            onPoke = { if ("edit-at" in it) rows = rows.replace("\"name\":\"Standup\"", "\"name\":\"Standup, moved\"") }
+        },
+    ) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        renameThisStandupOnly()
+        waitUntil(timeoutMillis = 10_000) { cal.outcomesRead.get() > 0 }
+        waitForIdle()
+        assertTrue(!showing("Not saved") && !showing("an old one"))
     }
 
     @Test
@@ -578,14 +613,17 @@ class AppShellTest {
 
     @Test
     fun `an answer the ship refuses, one only half done, and one that never reaches it each say so`() = app(
-        setup = withCalendar(invites = gardenParty) { answer = { null }; refusePoke = { "\"rsvp\"" in it } },
+        setup = withCalendar(invites = gardenParty) {
+            answer = { null }
+            refuseLater = { if ("\"rsvp\"" in it) "the event names no guest who is this calendar's owner" else null }
+        },
     ) { ship ->
         val cal = ship.calendar!!
         openCalendar()
         onNodeWithText("Planning").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Guests:") }
         onNodeWithText("No").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("The ship did not take the answer.") }
+        waitUntil(timeoutMillis = 5_000) { showing("Not answered: the event names no guest who is this calendar's owner") }
         assertEquals(1, cal.pokes.size)
 
         onNodeWithText("1 invitation").performClick()
@@ -595,7 +633,11 @@ class AppShellTest {
 
         cal.answer = { """{"ok":false,"cal":"work","told":false}""" }
         onNodeWithText("Going").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("The event could not be put on that calendar, and ~nec could not be told.") }
+        waitUntil(timeoutMillis = 5_000) { showing("The event could not be put on that calendar, and ~nec could not be told yet. The calendar tries again in about an hour.") }
+
+        cal.answer = { """{"ok":true,"cal":"work","told":false}""" }
+        onNodeWithText("Going").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Answered, but ~nec could not be told yet: their ship did not answer. The calendar tries again in about an hour.") }
 
         cal.lose = true
         onNodeWithText("Going").performClick()
@@ -634,7 +676,13 @@ class AppShellTest {
         onNodeWithText("Edit").performClick()
         waitUntil(timeoutMillis = 10_000) { showing("Video call") }
         assertTrue(showing("Keep the current link") && showing("Google Meet"), "a Google calendar, and an event with a link")
-        field("ana@example.com, ~bus").performTextReplacement("ana@example.com, ~bus, ~nec")
+        // Google mails its guests on every change (calendar 34 writes with sendUpdates=all).
+        val mails = "Google emails these guests about every change."
+        assertTrue(showing(mails))
+        field("ana@example.com, ~bus").performTextReplacement("~bus")
+        assertTrue(!showing(mails), "ships only: their own calendars tell them")
+        field("~bus").performTextReplacement("ana@example.com, ~bus, ~nec")
+        assertTrue(showing(mails))
         onAllNodesWithText("Save")[0].performClick()
         waitUntil(timeoutMillis = 5_000) { cal.pokes.isNotEmpty() }
         val edited = kotlinx.serialization.json.Json.parseToJsonElement(cal.pokes.single()).jsonObject["meta"]!!.jsonObject
@@ -653,6 +701,7 @@ class AppShellTest {
         assertTrue(!showing("Google Meet") && !showing("Keep the current link"))
         field("Name").performTextInput("Tea")
         field("Guests, comma separated").performTextInput("bo@example.com, ~nec")
+        assertTrue(!showing(mails), "not a Google calendar")
         onAllNodesWithText("Save")[0].performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Email guests need a calendar linked to Google") }
         assertEquals(1, cal.pokes.size)
@@ -667,6 +716,34 @@ class AppShellTest {
         assertEquals(
             """{"name":"Tea","ships":[{"ship":"~nec","status":"needs-action"}],"guests":[{"email":"bo@example.com","status":"needs-action"}],"call":"meet"}""",
             added["meta"].toString(),
+        )
+    }
+
+    // A copy's guests and call are its host's: the calendar ignores them
+    // on the copy, so the editor does not offer them there.
+    @Test
+    fun `a copy of another ship's event is edited without guests or a video call`() = app(
+        setup = withCalendar {
+            events["c1"] = """{"id":"c1","cal":"default","cat":"timed","kind":"once","start_ms":${noon + 3 * hour},"zone":"UTC","dur_min":60,"fin":"dur","meta":{"name":"Seed swap","host":"~nec","ships":[{"ship":"~nec","status":"accepted"},{"ship":"~zod","status":"needs-action","self":true}]}}"""
+        },
+    ) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        onNodeWithText("Seed swap").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Close") }
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 10_000) { onAllNodes(hasSetTextAction() and androidx.compose.ui.test.hasText("Seed swap")).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(!showing("Guests, comma separated") && !showing("Video call"), "the host's guests are not offered")
+        field("Seed swap").performTextReplacement("Seed swap, mine")
+        onAllNodesWithText("Save")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { cal.pokes.isNotEmpty() }
+        // Its meta as it came, host and guests and all: replaced whole on an edit.
+        val meta = kotlinx.serialization.json.Json.parseToJsonElement(cal.pokes.single()).jsonObject["meta"]!!.jsonObject
+        assertEquals(
+            kotlinx.serialization.json.Json.parseToJsonElement(
+                """{"name":"Seed swap, mine","host":"~nec","ships":[{"ship":"~nec","status":"accepted"},{"ship":"~zod","status":"needs-action","self":true}]}""",
+            ),
+            meta,
         )
     }
 

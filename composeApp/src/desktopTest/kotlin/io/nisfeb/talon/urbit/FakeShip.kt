@@ -20,6 +20,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -132,8 +134,20 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
         val pokes: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
         /** Every POST to invites/answer, its body, in order. */
         val answers: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
-        /** A poke the shell refuses (400), by its body. */
+        /** A poke the shell refuses (400), by its body: one it cannot read at all. */
         @Volatile var refusePoke: (String) -> Boolean = { false }
+        /**
+         * Why the calendar refuses a poke it has taken, by its body, or
+         * null to keep it: the calendar's own refusals. It answers 200,
+         * as the ship acks a poke before reading it, and keeps the
+         * refusal in outcomes.json (app.hoon's refuse, calendar-core's
+         * refusal-put): the poke's own id, why, and the ship's clock.
+         */
+        @Volatile var refuseLater: (String) -> String? = { null }
+        /** outcomes.json's refusals, oldest first, as the calendar keeps them. */
+        val refusals: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+        /** outcomes.json is asked for. */
+        val outcomesRead = java.util.concurrent.atomic.AtomicInteger()
         /** What a poke the shell took does to the calendar: the ship's own work, for what reads it back. */
         @Volatile var onPoke: FakeCalendar.(String) -> Unit = {}
         /** invites/answer's answer to a body, or null for the calendar's 404. */
@@ -341,9 +355,29 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
                     "/event.json" -> c.events[req.url.parameters["id"]]?.let(json) ?: respond("", HttpStatusCode.NotFound)
                     "/invites.json" -> if (c.invitesFail) respond("", HttpStatusCode.InternalServerError) else c.invites?.let(json) ?: respond("", HttpStatusCode.NotFound)
                     "/invites/answer" -> { c.answers += body; c.answer(c, body)?.let(json) ?: respond("", HttpStatusCode.NotFound) }
+                    "/outcomes.json" -> { c.outcomesRead.incrementAndGet(); json("""{"refusals":[${c.refusals.joinToString(",")}],"faults":{}}""") }
                     else -> if (!path.endsWith("/calendar.calendar")) respond("", HttpStatusCode.NotFound) else {
                         c.pokes += body
-                        if (c.refusePoke(body)) respond("", HttpStatusCode.BadRequest) else { c.onPoke(c, body); respond("", HttpStatusCode.OK) }
+                        val why = c.refuseLater(body)
+                        when {
+                            c.refusePoke(body) -> respond("", HttpStatusCode.BadRequest)
+                            why != null -> {
+                                val poke = Json.parseToJsonElement(body).jsonObject
+                                // Kept at once, not a beat after the ack as on the
+                                // ship: the app's scope runs on the test's virtual
+                                // clock, so its wait to read is no wait in real
+                                // time. AssistantActionsToolsTest proves the wait.
+                                c.refusals += buildJsonObject {
+                                    put("at_ms", System.currentTimeMillis())
+                                    put("action", poke["action"]?.jsonPrimitive?.content ?: "")
+                                    put("id", poke["id"]?.jsonPrimitive?.content ?: "")
+                                    put("from", "")
+                                    put("why", why)
+                                }.toString()
+                                respond("", HttpStatusCode.OK)
+                            }
+                            else -> { c.onPoke(c, body); respond("", HttpStatusCode.OK) }
+                        }
                     }
                 }
             }

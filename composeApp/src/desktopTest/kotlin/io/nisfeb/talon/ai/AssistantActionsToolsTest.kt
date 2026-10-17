@@ -19,6 +19,8 @@ import io.nisfeb.talon.ui.ContactMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.TimeZone
 import kotlinx.serialization.json.Json
@@ -90,10 +92,17 @@ class AssistantActionsToolsTest {
         mail: Map<String, String> = emptyMap(),
         /** The window as the ship answers it, given the pokes so far; [window] unless said. */
         windowFor: ((List<JsonObject>) -> String)? = null,
+        /** invites.json; null for a calendar older than meetings (34), a 404. */
+        invites: String? = null,
+        /** Why the calendar refuses a poke it took, or null: kept in outcomes.json, as app.hoon's refuse does. */
+        refuseLater: (JsonObject) -> String? = { null },
+        /** outcomes.json's refusals already there, before any poke. */
+        refusals: List<String> = emptyList(),
         block: (Harness) -> Unit,
     ) {
         val scope = CoroutineScope(SupervisorJob())
         val pokes = mutableListOf<JsonObject>()
+        val record = java.util.concurrent.CopyOnWriteArrayList(refusals)
         fun MockRequestHandleScope.json(body: String) =
             respond(ByteReadChannel(body), HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
         val http = HttpClient(
@@ -113,8 +122,23 @@ class AssistantActionsToolsTest {
                     path.startsWith("/grubbery/api/poke/") -> {
                         val body = Json.parseToJsonElement((req.body as TextContent).text).jsonObject
                         pokes += body
+                        // Acked first, read and refused a beat after, as the nexus does.
+                        refuseLater(body)?.let { why ->
+                            scope.launch {
+                                delay(300)
+                                record += buildJsonObject {
+                                    put("at_ms", System.currentTimeMillis())
+                                    put("action", body["action"]!!.jsonPrimitive.content)
+                                    put("id", body["id"]?.jsonPrimitive?.content ?: "")
+                                    put("from", "")
+                                    put("why", why)
+                                }.toString()
+                            }
+                        }
                         if (pokeSucceeds(body)) json("") else respondError(HttpStatusCode.InternalServerError, "refused")
                     }
+                    path.endsWith("/outcomes.json") -> json("""{"refusals":[${record.joinToString(",")}],"faults":{}}""")
+                    path.endsWith("/invites.json") -> invites?.let { json(it) } ?: respondError(HttpStatusCode.NotFound, "calendar: no such route")
                     path.endsWith("/window.json") -> json(windowFor?.invoke(pokes.toList()) ?: window)
                     path.endsWith("/calendars.json") -> json(calendars)
                     path.endsWith("/events.json") -> json(events)
@@ -292,6 +316,66 @@ class AssistantActionsToolsTest {
         assertEquals("Standup (moved)", h.pokes[0]["meta"]!!.jsonObject["name"]!!.jsonPrimitive.content)
         assertTrue(out.startsWith("Half done"), out)
         assertTrue(out.contains("2026-09-21"), out)
+    }
+
+    private val standupRow = """{"rows":[{"id":"r1","cal":"default","idx":0,"cat":"timed","kind":"weekly","all":false,"l":1789981200000,"r":1789983000000,"meta":{"name":"Standup"}}]}"""
+    private val standup = """{"cat":"timed","kind":"weekly","start_ms":1789948800000,"dur_min":30,"cal":"default","meta":{"name":"Standup"},"args":{"at":540,"days":["mon"]}}"""
+    private val noOccurrence = "no repeating event has an occurrence there, or the new one could not be read"
+
+    // Two steps on calendar 34 invited every guest ship again, and on
+    // Google mailed each guest a new invitation and a cancellation.
+    @Test
+    fun `on a calendar with meetings, one occurrence changes in one edit-at at its start`() = withHarness(
+        window = standupRow, event = standup, invites = "[]",
+    ) { h ->
+        val out = h.run("update_event", argsOf("event" to "r1", "occurrence" to "2026-09-21", "name" to "Standup (moved)", "time" to "10:00"))
+        assertEquals("Updated \"Standup (moved)\" for that occurrence.", out)
+        // At the occurrence's own start (the row's l), on the series' home;
+        // the new start is its wall clock as UTC, as the page sends it.
+        assertEquals(
+            listOf("""{"action":"edit-at","id":"r1","home":"default","at_ms":1789981200000,"cat":"timed","meta":{"name":"Standup (moved)"},"kind":"once","start_ms":1789984800000,"fin":"dur","dur_min":30}"""),
+            h.pokes.map { it.toString() },
+        )
+    }
+
+    // The calendar acks every poke and keeps its refusals in outcomes.json:
+    // the ack said "Updated" for a change it then refused.
+    @Test
+    fun `an edit-at the calendar refuses after taking it is said, and once only`() {
+        var refusing = true
+        withHarness(
+            window = standupRow, event = standup, invites = "[]",
+            refuseLater = { b -> noOccurrence.takeIf { refusing && b["action"]!!.jsonPrimitive.content == "edit-at" } },
+        ) { h ->
+            val out = h.run("update_event", argsOf("event" to "r1", "occurrence" to "2026-09-21", "name" to "Standup (moved)"))
+            assertEquals("The calendar refused it: $noOccurrence.", out)
+            assertEquals(listOf("edit-at"), h.pokes.map { it["action"]!!.jsonPrimitive.content }, "no fallback to add and skip")
+            refusing = false
+            assertEquals("Updated \"Standup (again)\" for that occurrence.", h.run("update_event", argsOf("event" to "r1", "occurrence" to "2026-09-21", "name" to "Standup (again)")))
+        }
+    }
+
+    // Taken is not kept: skipping on the add's ack alone lost the
+    // occurrence whenever the calendar then refused the add.
+    @Test
+    fun `on an older calendar, an add it refuses leaves the occurrence unskipped`() = withHarness(
+        window = standupRow, event = standup,
+        refuseLater = { b -> "the event could not be read: its name, kind, start or rule".takeIf { b["action"]!!.jsonPrimitive.content == "add-event" } },
+    ) { h ->
+        val out = h.run("update_event", argsOf("event" to "r1", "occurrence" to "2026-09-21", "name" to "Standup (moved)"))
+        assertEquals("The calendar refused it: the event could not be read: its name, kind, start or rule.", out)
+        assertEquals(listOf("add-event"), h.pokes.map { it["action"]!!.jsonPrimitive.content })
+    }
+
+    @Test
+    fun `only this write's refusal is said, not an older one nor another event's`() = withHarness(
+        window = standupRow, event = standup,
+        refusals = listOf(
+            """{"at_ms":${System.currentTimeMillis() - 5 * 60_000},"action":"del-event","id":"r1","from":"","why":"an old one"}""",
+            """{"at_ms":${System.currentTimeMillis()},"action":"del-event","id":"r2","from":"","why":"another event's"}""",
+        ),
+    ) { h ->
+        assertEquals("Deleted \"Standup\" and every occurrence.", h.run("delete_event", argsOf("event" to "r1")))
     }
 
     // ─── finding, cards and mail refused ───────────────────────────
