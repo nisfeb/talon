@@ -372,13 +372,10 @@ fun TalonApp(
                                     partyLine.setMuted(!ps.muted)
                             }
                         },
-                        hangUp = {
-                            if (callController.state.value is io.nisfeb.talon.call.CallUiState.None) {
-                                partyLine?.leave()
-                            } else {
-                                callController.hangup()
-                            }
-                        },
+                        // The call if one is on, else the line: a call's
+                        // Ended notice is not one, and hanging it up did
+                        // nothing for its five seconds.
+                        hangUp = { if (!callController.hangupLive()) partyLine?.leave() },
                     )
             }
             onDispose { io.nisfeb.talon.CallForegroundService.controls = null }

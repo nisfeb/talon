@@ -840,6 +840,18 @@ class CallController(
         }
     }
 
+    /**
+     * Hang up the call if one is placed or live, and say whether there
+     * was one. For a control that ends "whatever is on": the call's
+     * Ended notice is not a call, and a ring is not ours to end there.
+     */
+    fun hangupLive(): Boolean {
+        val s = _state.value
+        if (s !is CallUiState.Outgoing && s !is CallUiState.Active) return false
+        hangup()
+        return true
+    }
+
     fun hangup() {
         scope.launch {
             val id = callId ?: return@launch

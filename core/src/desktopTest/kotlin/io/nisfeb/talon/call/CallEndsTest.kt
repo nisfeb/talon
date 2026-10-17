@@ -97,4 +97,30 @@ class CallEndsTest {
             c.stop()
         }
     }
+
+    @Test
+    fun `hang up ends a call that is on, and says when there is none`() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val c = CallController(h.session, CallEngineProvider { HangingCallEngine() })
+        try {
+            c.start()
+            h.awaitConnected()
+            withTimeout(10_000) { c.policy.first { it != null } }
+            assertFalse(c.hangupLive(), "no call")
+            h.emitFact(ring("r1"))
+            withTimeout(10_000) { c.state.first { it is CallUiState.Incoming } }
+            assertFalse(c.hangupLive(), "a ring is not a call on")
+            c.reject()
+            withTimeout(10_000) { c.state.first { it is CallUiState.Ended } }
+            assertFalse(c.hangupLive(), "an Ended notice is not a call: the line beside it is what is on")
+
+            c.placeCall("~zod")
+            withTimeout(10_000) { c.state.first { it is CallUiState.Outgoing } }
+            val id = c.currentCallId!!
+            assertTrue(c.hangupLive())
+            h.awaitPut { TrunkHarness.sigIdIn(it, "hangup") == id }
+        } finally {
+            c.stop()
+        }
+    }
 }
