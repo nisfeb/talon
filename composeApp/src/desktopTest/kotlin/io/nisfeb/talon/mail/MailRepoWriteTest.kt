@@ -430,4 +430,27 @@ class MailRepoWriteTest {
 
     // ─── filing to Lattice ──────────────────────────────────────────
 
+    @Test
+    fun `a filing that fails is said in words, never the error's own text`() {
+        val down = java.util.concurrent.atomic.AtomicBoolean(true)
+        withRepo({ req ->
+            val path = req.url.encodedPath
+            when {
+                path.endsWith("/api/inbox") -> jsonOk(this, pageWith())
+                path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+                req.method.value == "POST" && down.get() -> throw java.io.IOException("Connection refused")
+                req.method.value == "POST" -> respondError(HttpStatusCode.InternalServerError, "<html>crash</html>")
+                else -> respondError(HttpStatusCode.NotFound, "")
+            }
+        }) { r, _ ->
+            r.attach("https://ship.example")
+            settle(r)
+            until("our ship known") { r.ourShip != null }
+            assertNull(r.publishToLattice("Plans", "0vt", "# Plans"))
+            assertEquals("Could not file to Lattice: your ship did not answer. Try again when it's back.", r.problem.value)
+            down.set(false)
+            assertNull(r.publishToLattice("Plans", "0vt", "# Plans"))
+            assertEquals("Could not file to Lattice: your ship did not keep it. Try again shortly.", r.problem.value)
+        }
+    }
 }

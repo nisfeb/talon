@@ -524,4 +524,25 @@ class MailComposerTest {
         assertTrue("was not saved" in kept.line, kept.line)
     }
 
+    // A file too big to attach: the cap is the ship's, 16 MiB since
+    // auspex 16, and one that could not be stored says why in words.
+    @Test
+    fun `the mail cap is the ship's, and a file not stored says why in words`() {
+        assertEquals(16_777_216, AuspexApi.MAX_BLOB_BYTES, "auspex 16's own limit for one file")
+        val noStorage = io.nisfeb.talon.urbit.UploadFailed(
+            "The upload didn't go through: this ship has no image storage set up.", IllegalStateException("no memex token"),
+        )
+        assertEquals(
+            "big.mov was not stored. The upload didn't go through: this ship has no image storage set up. A ship stores files once storage is set up in Landscape.",
+            io.nisfeb.talon.ui.screens.storeFailedLine("big.mov", noStorage),
+        )
+        val keys = io.nisfeb.talon.urbit.UploadFailed(
+            "The upload didn't go through: your ship's storage turned down its keys (see Storage in Landscape's settings).", IllegalStateException("S3 PUT failed: HTTP 403 <Error>"),
+        )
+        assertTrue("set up in Landscape" !in io.nisfeb.talon.ui.screens.storeFailedLine("big.mov", keys), "the hint only where it is the reason")
+        val down = io.nisfeb.talon.ui.screens.storeFailedLine("big.mov", IllegalStateException("not connected"))
+        assertTrue("slow or out of reach" in down && "not connected" !in down, down)
+        val raw = io.nisfeb.talon.ui.screens.storeFailedLine("big.mov", IllegalStateException("upload: {\"error\":\"<html>\"}"))
+        assertTrue("<html>" !in raw && "{" !in raw, raw)
+    }
 }

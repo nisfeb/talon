@@ -487,7 +487,7 @@ fun MailComposer(
                 onClick = {
                     scope.launch {
                         val picked = runCatching { pickFile() }
-                            .getOrElse { problem = it.message ?: "The file could not be read."; null } ?: return@launch
+                            .getOrElse { problem = io.nisfeb.talon.util.readableReason(it.message) ?: "The file could not be read."; null } ?: return@launch
                         // Refused where it is chosen rather than after the
                         // bytes have gone up and come back rejected.
                         if (picked.bytes.size > AuspexApi.MAX_BLOB_BYTES) {
@@ -500,8 +500,7 @@ fun MailComposer(
                                 oversize = picked
                                 problem = null
                             } else {
-                                problem = "${picked.displayName} is over " +
-                                    "${AuspexApi.MAX_BLOB_BYTES / 1024} KB, which is the ship's limit."
+                                problem = "${picked.displayName} is over $MAIL_CAP, which is the ship's limit."
                             }
                         } else {
                             files += picked
@@ -521,7 +520,7 @@ fun MailComposer(
             text = {
                 Text(
                     "${big.displayName} is ${if (kb >= 1024) "${kb / 1024} MB" else "$kb KB"}, and a mail " +
-                        "carries ${AuspexApi.MAX_BLOB_BYTES / 1024} KB at most. Your ship can hold it instead, " +
+                        "carries $MAIL_CAP at most. Your ship can hold it instead, " +
                         "and the message carries a link to it. Anyone who has the link can open it, " +
                         "including people the message was not sent to.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -544,10 +543,7 @@ fun MailComposer(
                                     edits.body = edits.body.trimEnd() + (if (edits.body.isBlank()) "" else "\n\n") + url
                                     problem = null
                                 }
-                                .onFailure {
-                                    problem = "${big.displayName} was not stored: ${it.message ?: "no reason given"}. " +
-                                        "A ship stores files once storage is set up in Landscape."
-                                }
+                                .onFailure { problem = storeFailedLine(big.displayName, it) }
                             progress = null
                             sending = false
                         }
@@ -559,6 +555,21 @@ fun MailComposer(
             },
         )
     }
+}
+
+/** What one file may be in a mail, as the ship caps it: "16 MB". */
+private val MAIL_CAP = "${AuspexApi.MAX_BLOB_BYTES / (1024 * 1024)} MB"
+
+/**
+ * Why a file too big to attach was not stored, in words. It showed the
+ * upload's own text, and told every failure that storage was not set up
+ * in Landscape: said now only where that is the reason.
+ */
+internal fun storeFailedLine(name: String, e: Throwable): String = when {
+    e is io.nisfeb.talon.urbit.UploadFailed ->
+        "$name was not stored. ${e.message}" +
+            if (e.message.orEmpty().contains("no image storage")) " A ship stores files once storage is set up in Landscape." else ""
+    else -> io.nisfeb.talon.util.problemOf("$name was not stored", e).line
 }
 
 /**

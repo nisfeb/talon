@@ -545,7 +545,12 @@ class MailRepo(
             io.nisfeb.talon.urbit.LatticePublish.publish(http, url, ship, slug, gemtext)
         }.onFailure {
             Log.w(TAG, "lattice publish failed", it)
-            _problem.value = "Could not file to Lattice: ${it.message}"
+            // In words: it showed the save's own text, a transport's included.
+            _problem.value = "Could not file to Lattice: " + when {
+                io.nisfeb.talon.util.isTransientNetworkError(it) || Regex("returned 50[234]$").containsMatchIn(it.message.orEmpty()) ->
+                    "your ship did not answer. Try again when it's back."
+                else -> "your ship did not keep it. Try again shortly."
+            }
         }.getOrNull()
     }.await()
 
