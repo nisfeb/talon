@@ -2441,11 +2441,9 @@ fun App(
                             // whoever is already pinned so a pin can be
                             // taken off again when they go quiet.
                             homePinCandidates = remember(homeStatuses, homeLayout, callContacts) {
-                                val pinned = homeLayout[io.nisfeb.talon.ui.HomeWidgetKind.STATUS].pinned
-                                (homeStatuses.map { it.ship } + pinned)
-                                    .distinct()
-                                    .filter { it != ship }
-                                    .map { it to callContacts.displayName(it) }
+                                io.nisfeb.talon.ui.screens.homePinCandidates(
+                                    homeStatuses, homeLayout[io.nisfeb.talon.ui.HomeWidgetKind.STATUS].pinned, ship,
+                                ) { callContacts.displayName(it) }
                             },
                             aiSettings = aiSettings,
                             themePreference = themePreference,

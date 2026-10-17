@@ -1889,6 +1889,11 @@ fun TalonApp(
         val homeStatuses by remember(app.db) {
             app.db.contacts().streamStatusFeed()
         }.collectAsState(initial = emptyList())
+        // Read here for Settings too, which offers the status widget's pins.
+        val homeLayoutRaw by app.uiSettings.homeLayout.collectAsState()
+        val homeLayout = remember(homeLayoutRaw) {
+            io.nisfeb.talon.ui.HomeLayoutCodec.decode(homeLayoutRaw)
+        }
         val weatherFor = remember(app.session.http) {
             io.nisfeb.talon.ui.OpenMeteoWeather(app.session.http).asLookup()
         }
@@ -2118,10 +2123,6 @@ fun TalonApp(
             )
 
             homeOpen -> {
-                val homeLayoutRaw by app.uiSettings.homeLayout.collectAsState()
-                val homeLayout = remember(homeLayoutRaw) {
-                    io.nisfeb.talon.ui.HomeLayoutCodec.decode(homeLayoutRaw)
-                }
                 val homeFahrenheit by app.uiSettings.homeFahrenheit.collectAsState()
                 val homeTwentyFourHour by app.uiSettings.homeTwentyFourHour.collectAsState()
                 val deviceLocation = io.nisfeb.talon.ui.rememberDeviceLocation()
@@ -2350,6 +2351,12 @@ fun TalonApp(
                     orrery = orreryRepo,
                     armillary = armillaryRepo,
                     mailRepo = mailRepo,
+                    // None were passed, so Android could pin nobody.
+                    homePinCandidates = remember(homeStatuses, homeLayout, contactMap) {
+                        io.nisfeb.talon.ui.screens.homePinCandidates(
+                            homeStatuses, homeLayout[io.nisfeb.talon.ui.HomeWidgetKind.STATUS].pinned, ourPatp,
+                        ) { contactMap.displayName(it) }
+                    },
                     aiSettings = app.aiSettings,
                     themePreference = app.themePreference,
                     uiSettings = app.uiSettings,

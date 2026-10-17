@@ -1095,6 +1095,20 @@ private fun AboutRow(label: String, value: String) {
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 
 
+/**
+ * [SettingsScreen]'s homePinCandidates, as both shells build them:
+ * anyone who has ever posted a status, plus whoever is [pinned] already
+ * so a pin can be taken off again when they go quiet, never [me]. Android
+ * passed none, so it could not pin anybody.
+ */
+fun homePinCandidates(
+    statuses: List<io.nisfeb.talon.data.ContactEntity>,
+    pinned: List<String>,
+    me: String?,
+    nameFor: (String) -> String,
+): List<Pair<String, String>> =
+    (statuses.map { it.ship } + pinned).distinct().filter { it != me }.map { it to nameFor(it) }
+
 /** Single source of truth for "is this feature toggle on?" — keeps the
  *  Settings UI's toggle state in lockstep with the gates wired across
  *  the rest of the app. */
