@@ -117,7 +117,9 @@ class OrreryLocationTest {
         val req = ship.positions.first()
         assertEquals("https://ship/apps/orrery/api/position", req.url.toString())
         assertEquals("Bearer k1.secret", req.headers[HttpHeaders.Authorization])
-        assertEquals("""{"lat":40.679000,"lon":-73.944200,"acc":12,"at":"2026-09-10T00:26:40Z"}""", (req.body as TextContent).text)
+        // The device's own zone, which the ship's brief and nudges follow.
+        val zone = kotlinx.datetime.TimeZone.currentSystemDefault().id
+        assertEquals("""{"lat":40.679000,"lon":-73.944200,"acc":12,"at":"2026-09-10T00:26:40Z","zone":"$zone"}""", (req.body as TextContent).text)
     }
 
     // On a trip a fix comes each minute, and each read the whole state,
