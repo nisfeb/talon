@@ -214,6 +214,34 @@ class ArmillaryPaymentTest {
         assertEquals("https://pay.example/late", io.nisfeb.talon.ui.screens.checkoutPage(repo.payment.value, row))
     }
 
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `the card says to wait for a checkout with no page, then opens it once the vendor sends one`() = Rig(setUp).use { r ->
+        slowVendor = true; phaseMissing = true
+        runBlocking { r.repo.topUp("btcpay", null, 10_000_000).getOrThrow() }
+        val opened = CopyOnWriteArrayList<String>()
+        runComposeUiTest {
+            setContent {
+                TalonTheme(darkTheme = false) {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.compose.ui.platform.LocalUriHandler provides object : androidx.compose.ui.platform.UriHandler {
+                            override fun openUri(uri: String) { opened += uri }
+                        },
+                    ) {
+                        Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(r.ai, orrery = null, armillary = r.repo) }
+                    }
+                }
+            }
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Do not order again", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            assertTrue(onAllNodesWithText("Open the checkout").fetchSemanticsNodes().isEmpty(), "nothing to open yet")
+            checkouts = """{"n9":{"nonce":"n9","rail":"btcpay","amount":10000000,"url":"https://pay.example/late","status":"pending"}}"""
+            runBlocking { r.repo.refresh() }
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Open the checkout").fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("Open the checkout").performScrollTo().performClick()
+            assertEquals(listOf("https://pay.example/late"), opened.toList())
+        }
+    }
+
     // Measured from a balance read before the checkout opened: spending
     // since made a $5 payment $4.97, and a credit from elsewhere read as
     // this checkout paid before anyone had paid it.
