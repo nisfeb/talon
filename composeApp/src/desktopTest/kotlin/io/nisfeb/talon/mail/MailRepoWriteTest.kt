@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -58,6 +59,8 @@ class MailRepoWriteTest {
 
     private fun <T> withRepo(
         handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
+        /** How often the repo's own poll reads; far past the test unless a test is about the poll. */
+        pollMs: Long = 60 * 60 * 1000L,
         block: suspend (MailRepo, List<String>) -> T,
     ): T {
         val scope = CoroutineScope(SupervisorJob())
@@ -68,9 +71,8 @@ class MailRepoWriteTest {
                 handler(req)
             },
         )
-        // A poll interval far past the test, so only explicit refreshes run.
         return try {
-            runBlocking { block(MailRepo(http, scope, pollIntervalMs = 60 * 60 * 1000L), hits) }
+            runBlocking { block(MailRepo(http, scope, pollIntervalMs = pollMs), hits) }
         } finally {
             scope.cancel()
         }
@@ -280,4 +282,74 @@ class MailRepoWriteTest {
             assertTrue(hits.any { it.contains("desks/stock") }, "and the probe did run")
         }
     }
+
+    private fun unread(id: String, subject: String) = row(id, subject).replace("\"unread\":false", "\"unread\":true")
+
+    // ─── the poll, wherever the reader is ───────────────────────────
+
+    // The poll read only the listing on screen, and new mail was announced
+    // from the inbox alone: after one search or folder switch no notice
+    // came, and the Mail section's pip stood still.
+    @Test
+    fun `new mail is announced and lights the pip while another folder is open`() {
+        val inboxRows = AtomicReference(listOf(row("0v1", "one")))
+        withRepo({ req ->
+            val path = req.url.encodedPath
+            when {
+                path.endsWith("/api/inbox") && req.url.parameters["view"] == "inbox" -> jsonOk(this, pageWith(*inboxRows.get().toTypedArray()))
+                path.endsWith("/api/inbox") -> jsonOk(this, pageWith())
+                path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+                else -> respondError(HttpStatusCode.NotFound, """{"error":"not found"}""")
+            }
+        }, pollMs = 200) { r, _ ->
+            val news = CopyOnWriteArrayList<MailNotification>()
+            r.onNewMail = { news += it }
+            r.attach("https://ship.example")
+            settle(r)
+            r.selectFolder(MailFolder.View(MailView.SENT))
+            until("the sent listing") { r.page.value?.threads?.isEmpty() == true }
+            inboxRows.set(listOf(row("0v1", "one"), unread("0v9", "news")))
+            until("the new mail's notice") { news.isNotEmpty() }
+            assertTrue(r.inboxUnread.value, "the pip")
+            assertEquals(MailFolder.View(MailView.SENT), r.folder.value, "and the reader stays where they were")
+            assertTrue(r.page.value!!.threads.isEmpty(), "the listing on screen is still Sent's")
+        }
+    }
+
+    // A 403 stopped the poll, and signing in again to the same ship never
+    // started it: mail was read only when somebody opened it.
+    @Test
+    fun `the poll a dead session stopped starts again with the next read that goes through`() {
+        val signedOut = java.util.concurrent.atomic.AtomicBoolean(true)
+        withRepo({ req ->
+            val path = req.url.encodedPath
+            when {
+                signedOut.get() -> respondError(HttpStatusCode.Forbidden, """{"error":"forbidden"}""")
+                path.endsWith("/api/inbox") -> jsonOk(this, pageWith(row("0v1", "one")))
+                path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+                else -> respondError(HttpStatusCode.NotFound, """{"error":"not found"}""")
+            }
+        }, pollMs = 200) { r, hits ->
+            r.attach("https://ship.example")
+            until("signed out") { r.availability.value == MailAvailability.SIGNED_OUT }
+            signedOut.set(false)
+            fun reads() = hits.count { it.endsWith("/api/inbox") }
+            val stopped = reads()
+            delay(800)
+            assertEquals(stopped, reads(), "stopped while signed out")
+            r.refresh()
+            assertEquals(MailAvailability.PRESENT, r.availability.value)
+            val back = reads()
+            until("the poll's own read") { reads() > back }
+        }
+    }
+
+    // ─── what is kept when the ship does not take it ────────────────
+
+    // ─── an attachment, with our own ship down ──────────────────────
+
+    // ─── filters and lists, past the sheet ──────────────────────────
+
+    // ─── filing to Lattice ──────────────────────────────────────────
+
 }

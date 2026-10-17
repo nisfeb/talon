@@ -281,6 +281,7 @@ class MailRepo(
         seenUnread = null
         pageCache.value = emptyMap()
         threadCache.value = emptyMap()
+        pollStopped = false
         if (poll) startPolling()
     }
 
@@ -288,6 +289,7 @@ class MailRepo(
         askAgain?.cancel()
         poller?.cancel()
         poller = null
+        pollStopped = false
         api = null
         shipUrl = null
         _availability.value = MailAvailability.UNKNOWN
@@ -305,7 +307,35 @@ class MailRepo(
     fun setForeground(on: Boolean) {
         val was = foreground
         foreground = on
-        if (on && !was) scope.launch { refresh() }
+        if (on && !was) scope.launch { refreshForNews() }
+    }
+
+    /**
+     * [refresh], and the inbox as well where another listing is open: what
+     * the poll and coming back read. New mail is announced from the inbox
+     * alone, and the Mail section's pip is read off its listing, so after a
+     * search or a folder switch no notice came and the pip stood still.
+     * Not every refresh: one after each write would read the ship twice.
+     */
+    private suspend fun refreshForNews() {
+        refresh()
+        if (pageKey() != INBOX) readInboxAside()
+    }
+
+    /** The inbox's first page, read beside the listing on screen and left off it. */
+    private suspend fun readInboxAside() = gate.withLock {
+        val a = api ?: return@withLock
+        val have = pageCache.value[INBOX]?.threads?.size ?: 0
+        val p = try {
+            a.inbox(view = MailView.INBOX, limit = have.coerceIn(AuspexApi.DEFAULT_PAGE, MAX_PAGE))
+        } catch (e: AuspexError) {
+            // The listing on screen has said whatever is wrong with the ship.
+            Log.w(TAG, "inbox not read beside the open listing", e)
+            return@withLock
+        }
+        pageCache.update { it + (INBOX to p) }
+        INBOX.stored?.let { store(it, p) }
+        announceInbox(p)
     }
 
 
@@ -332,6 +362,9 @@ class MailRepo(
         val p = read(a, maxOf(_page.value?.threads?.size ?: 0, AuspexApi.DEFAULT_PAGE), spin = asked || _page.value == null)
             ?: return@withLock
         _availability.value = MailAvailability.PRESENT
+        // A 403 stopped the poll; signed in again, this read is the first
+        // to go through, and nothing else would start it again.
+        if (pollStopped) { pollStopped = false; startPolling(readFirst = false) }
         if (ourShip == null) {
             ourShip = try {
                 a.whoami()
@@ -389,7 +422,11 @@ class MailRepo(
      * session only seeds the baseline.
      */
     private fun announce(p: InboxPage) {
-        if (viewAndLabel().first != MailView.INBOX || _query.value.isNotEmpty()) return
+        if (pageKey() == INBOX) announceInbox(p)
+    }
+
+    /** [announce] of a page known to be the inbox's. */
+    private fun announceInbox(p: InboxPage) {
         val before = seenUnread
         if (before == null) {
             seenUnread = seedMailBaseline(p.threads)
@@ -420,9 +457,9 @@ class MailRepo(
             e.isSignedOut -> {
                 _availability.value = MailAvailability.SIGNED_OUT
                 _error.value = "Signed out of the ship."
-                // Nothing retries its way back from this one.
-                poller?.cancel()
-                poller = null
+                // Nothing retries its way back from this one; the next read
+                // that goes through, once signed in again, starts it.
+                poller?.let { it.cancel(); poller = null; pollStopped = true }
             }
             probeAbsentApp && e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND -> {
                 val url = shipUrl
@@ -994,20 +1031,28 @@ class MailRepo(
      * fans out to nobody, which is why a poll is the right shape here and
      * was the wrong shape for party-line presence.
      */
-    private fun startPolling() {
+    private fun startPolling(readFirst: Boolean = true) {
         poller?.cancel()
         poller = scope.launch {
-            restore(pageKey())
-            refresh()
+            if (readFirst) {
+                restore(pageKey())
+                refresh()
+            }
             while (isActive) {
                 delay(jittered(pollIntervalMs))
-                if (foreground && _availability.value != MailAvailability.SIGNED_OUT) refresh()
+                if (foreground && _availability.value != MailAvailability.SIGNED_OUT) refreshForNews()
             }
         }
     }
 
+    /** A signed-out answer stopped the poll; the next read that goes through starts it again. */
+    @kotlin.concurrent.Volatile private var pollStopped = false
+
     companion object {
         private const val TAG = "MailRepo"
+
+        /** The inbox as it arrives: no label, no search. */
+        private val INBOX = PageKey(MailView.INBOX, null, "")
 
         /** Threads kept for a quick return; the oldest read goes first. */
         private const val THREAD_CACHE = 40
