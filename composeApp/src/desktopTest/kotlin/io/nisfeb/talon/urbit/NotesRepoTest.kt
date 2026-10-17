@@ -34,7 +34,7 @@ class NotesRepoTest {
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
     }
     private val ship = FakeShip("~zod")
-    private val notes = NotesRepo(db, CoroutineScope(SupervisorJob())).apply { attach(ship.channel) }
+    private val notes = NotesRepo(db, CoroutineScope(SupervisorJob()), deleteSettleMs = 200).apply { attach(ship.channel) }
     private val book = NotesFlag("~bus", "recipes")
 
     private fun summary(updatedAt: Long = 1784592399) =
@@ -270,6 +270,22 @@ class NotesRepoTest {
         ship.answerApi = { _, _, _ -> """{"body":{"errorType":"unknown","message":[],"type":"error"}}""" }
         assertEquals(NotesRepo.NOTE_CHANGED, notes.updateNote(book, 11, "mine", expectedRevision = 2), "the live ship's word for a stale revision")
         assertEquals("Simmer **long**.", db.notes().note(book.flagString, 11)?.bodyMd)
+    }
+
+    // A reader's delete in someone else's notebook is answered before its
+    // host has, and a host that refuses it says nothing: the note stayed
+    // hidden here until the notebook next changed.
+    @Test
+    fun `a note deleted here comes back if its host kept it, and stays gone if not`() = live {
+        notes.bootstrap()
+        assertTrue(notes.deleteNote(book, 11))
+        assertNull(db.notes().note(book.flagString, 11), "gone at once")
+        // The host kept it: its notebook still has it.
+        kotlinx.coroutines.withTimeout(5_000) { while (db.notes().note(book.flagString, 11) == null) delay(50) }
+        ship.scries["notes/v0/notes/~bus/recipes"] = "[]"
+        assertTrue(notes.deleteNote(book, 11))
+        delay(600)
+        assertNull(db.notes().note(book.flagString, 11), "the host took it: it stays gone")
     }
 
 }

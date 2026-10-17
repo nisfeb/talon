@@ -7,6 +7,7 @@ import io.nisfeb.talon.data.NotesNotebookEntity
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.nowMs
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -33,6 +34,8 @@ import kotlinx.serialization.json.put
 class NotesRepo(
     private val db: AppDatabase,
     private val scope: CoroutineScope,
+    /** How long after a delete its notebook is read again: its host's answer, for one not ours. */
+    private val deleteSettleMs: Long = 3_000,
 ) {
     private var channel: UrbitChannel? = null
 
@@ -392,8 +395,17 @@ class NotesRepo(
 
     suspend fun deleteNote(flag: NotesFlag, noteId: Long): Boolean {
         val ok = poke(NotesActions.deleteNote(flag, noteId))
-        // Drop it locally right away; the stream echo re-syncs either way.
-        if (ok) db.notes().deleteNote(flag.flagString, noteId)
+        if (ok) {
+            // Gone here at once, and read again behind it: in a notebook
+            // that is not ours the poke is answered before its host has,
+            // and a host that refused it (a reader's delete) sends nothing,
+            // so the note stayed hidden until the notebook next changed.
+            db.notes().deleteNote(flag.flagString, noteId)
+            scope.launch {
+                kotlinx.coroutines.delay(deleteSettleMs)
+                refreshNotebook(flag)
+            }
+        }
         return ok
     }
 
