@@ -1221,7 +1221,7 @@ fun App(
         // Back in front: the vendor's picks and the account read again.
         val armillaryWindow = androidx.compose.ui.platform.LocalWindowInfo.current
         LaunchedEffect(armillaryRepo) {
-            androidx.compose.runtime.snapshotFlow { armillaryWindow.isWindowFocused }.collect { if (it) armillaryRepo.resumed() }
+            androidx.compose.runtime.snapshotFlow { armillaryWindow.isWindowFocused }.collect { if (it) armillaryRepo.resumed() else armillaryRepo.paused() }
         }
         val orreryActions by orreryRepo.actions.collectAsState()
         // Whether the menu offers Orrery: on, and not known to be missing.

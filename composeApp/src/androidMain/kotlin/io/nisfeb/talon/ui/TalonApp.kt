@@ -501,7 +501,10 @@ fun TalonApp(
     // Back in front: the vendor's picks and the account read again. The
     // process outlives the screen by days, so its start is not enough.
     DisposableEffect(armillaryRepo) {
-        val back = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_START) armillaryRepo.resumed() }
+        val back = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_START) armillaryRepo.resumed()
+            else if (e == Lifecycle.Event.ON_STOP) armillaryRepo.paused()
+        }
         ProcessLifecycleOwner.get().lifecycle.addObserver(back)
         onDispose { ProcessLifecycleOwner.get().lifecycle.removeObserver(back) }
     }
