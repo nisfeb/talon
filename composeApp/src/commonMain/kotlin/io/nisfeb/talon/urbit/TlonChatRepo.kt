@@ -1550,13 +1550,17 @@ class TlonChatRepo(
     }
 
     /**
-     * Whether our queued channel [row] is on the ship already: its newest
-     * posts (or the thread) read, and a copy of ours from that moment found.
+     * Whether our queued channel [row] is on the ship already: its posts
+     * from the row's time on (or the thread) read, and a copy of ours from
+     * that moment found.
      * Its local twin goes, as an echo would have taken it.
      */
     private suspend fun landedAlready(row: MessageEntity): Boolean {
         val parent = row.parentId
-        if (parent == null) refreshConversation(row.whom, count = LANDED_CHECK_COUNT) else fetchThread(row.whom, parent)
+        // From the post's own time, less the clocks' skew: the newest
+        // thirty missed one that landed further back, which went twice.
+        if (parent == null) refreshConversation(row.whom, count = LANDED_CHECK_COUNT, fromMs = row.sentMs - LANDED_SKEW_MS)
+        else fetchThread(row.whom, parent)
         if (db.messages().shipCopyCount(row.whom, ourPatp, row.sentMs) == 0) return false
         db.messages().reapLocalTwin(row.whom, ourPatp, row.sentMs)
         db.messageMedia().reapLocalTwinMedia(row.whom, ourPatp, row.sentMs)
@@ -2802,8 +2806,12 @@ class TlonChatRepo(
      * but never applied) gets backfilled. Idempotent upsert — no dupes.
      * Throws when the ship did not answer, so a screen can tell a
      * conversation it could not load from an empty one.
+     *
+     * [fromMs], for a channel: the [count] posts from that time on are
+     * asked for first (`newer`), the newest after them for a ship
+     * without it.
      */
-    suspend fun refreshConversation(whom: String, count: Int = 100) {
+    suspend fun refreshConversation(whom: String, count: Int = 100, fromMs: Long? = null) {
         val ch = channel ?: error("not connected")
         val newest = db.messages().newestIdFor(whom)
         // In path form Urbit @ud atoms need dotted-decimal (3-digit groups).
@@ -2830,6 +2838,10 @@ class TlonChatRepo(
             val versions = listOf("v4", "v3", "v2", "v1", "v5")
             val channelMarks = listOf("post", "outline")
             val writMarks = listOf("heavy", "light")
+            if (fromMs != null && app == "channels") {
+                val from = UrbitTime.daToUd(UrbitTime.unixMsToDa(fromMs))
+                for (v in versions) for (mark in channelMarks) add("/$v/$whom/posts/newer/$from/$count/$mark")
+            }
             for (v in versions) {
                 when (app) {
                     "chat" -> for (mark in writMarks) {
@@ -5634,6 +5646,8 @@ class TlonChatRepo(
         private const val MAX_DRAIN_PAUSE_MS = 60_000L
         /** How many of a channel's newest posts are read to see whether a queued one landed. */
         private const val LANDED_CHECK_COUNT = 30
+        /** How far before a queued post's own time that read starts: the ship's clock and ours may differ. */
+        private const val LANDED_SKEW_MS = 60_000L
 
         /** How long a message menu waits to ask for the admin groups again after a read failed. */
         private const val ADMIN_RETRY_MS = 60_000L

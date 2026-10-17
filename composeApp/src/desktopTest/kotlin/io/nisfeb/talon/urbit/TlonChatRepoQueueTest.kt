@@ -149,6 +149,31 @@ class TlonChatRepoQueueTest {
         assertNotNull(db.messages().getOne(nest, "170141184506"))
     }
 
+    // The guard read the channel's newest thirty: a post that landed
+    // further back than that, the ship slow and the channel busy, went
+    // twice (review M17). It reads from the post's own time now.
+    @Test
+    fun `a queued channel post that landed thirty posts back is not posted twice`() = live {
+        ship.landThenFail = { lost }
+        val id = repo.send(nest, "landed long ago")
+        val row = db.messages().getOne(nest, id)!!
+        ship.landThenFail = { null }
+        val later = (1..30).joinToString(",") { n ->
+            val pid = "${170141184600L + n}"
+            """"$pid":{"seal":${seal(pid)},"essay":${essay("later $n", row.sentMs + n * 1_000L).replace("~zod", "~bus")}}"""
+        }
+        ship.scries["channels/v4/$nest/posts/newest/30/post"] = """{"posts":{$later}}"""
+        // Wire: %channels' newer/<start>/<count>/<mode>, start a dotted @ud
+        // of the time a minute before ours.
+        val from = UrbitTime.daToUd(UrbitTime.unixMsToDa(row.sentMs - 60_000L))
+        ship.scries["channels/v4/$nest/posts/newer/$from/30/post"] =
+            """{"posts":{"170141184506":{"seal":${seal("170141184506")},"essay":${essay("landed long ago", row.sentMs)}}}}"""
+        repo.drainQueue()
+        assertEquals(1, ship.pokesTo("channels").size, "posted once")
+        assertNull(db.messages().getOne(nest, id), "the stand-in went, as an echo takes it")
+        assertEquals("channels/v4/$nest/posts/newer/$from/30/post", ship.scried.first { "/posts/" in it })
+    }
+
     @Test
     fun `a channel post that did not land goes again, and waits for its echo`() = live {
         ship.lose = { lost }
