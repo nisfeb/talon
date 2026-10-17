@@ -924,6 +924,161 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { showing("Message") }
     }
 
+    // ---- Getting out of a page, and landing in front (review 2026-10-17) ----
+
+    private val busSaid: suspend AppDatabase.() -> Unit = {
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat"))
+    }
+
+    /** The chat with ~bus is on screen: its message, with the chat's own button beside it. */
+    private fun ComposeUiTest.busChatShown() = present("Message actions") && showing("hello there")
+
+    /** ~bus's chat, then the page of ~bus/crew from the reference in it. */
+    private fun ComposeUiTest.groupPageFromChat() {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("~bus").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("~bus")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Referenced post") }
+        onNodeWithText("Referenced post").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("You haven't joined this group") }
+    }
+
+    // A group's page was a plain value outside the registry: Escape closed
+    // the chat hidden behind it, and a shortcut (as the rail and the iOS
+    // menu) put its section down and left the page, so nothing opened.
+    @Test
+    fun `a group's page is left by Escape and by a shortcut, and does not come back`() = app(seed = {
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"block":{"cite":{"group":"~bus/crew"}}}]""", "/chat"))
+    }) {
+        groupPageFromChat()
+        press(Key.Escape)
+        waitUntil(timeoutMillis = 5_000) { !showing("You haven't joined this group") }
+        // Back on the chat it was opened from, which is still there.
+        waitUntil(timeoutMillis = 5_000) { present("Message actions") }
+        onNodeWithText("Referenced post").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("You haven't joined this group") }
+        press(Key.Comma, ctrl = true)
+        waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
+        assertTrue(!showing("You haven't joined this group"))
+        onNodeWithContentDescription("Back").performClick()
+        home()
+        Thread.sleep(300)
+        waitForIdle()
+        assertTrue(!showing("You haven't joined this group"), "the group page went with the pick")
+    }
+
+    // An iPhone tap on a chat's notification with Talon left on Home landed
+    // on Home: the chat was set behind a tab that takes the whole area.
+    @Test
+    fun `a chat asked for from Home or Mail is shown, on the Chats tab`() {
+        val ui = InMemoryUiSettings()
+        app(ui = ui, seed = busSaid) {
+            onNodeWithContentDescription("Home").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Set a location") }
+            io.nisfeb.talon.notify.OpenChatRequests.request("~bus", null)
+            waitUntil(timeoutMillis = 5_000) { busChatShown() }
+            assertTrue(!showing("Set a location"), "Home is put down")
+            assertEquals(RailTab.Chats, ui.activeRailTab.value)
+            onNodeWithContentDescription("Mail").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Mail runs in Grubbery") }
+            // A tapped DM request in Activity goes the same way.
+            io.nisfeb.talon.notify.OpenNoticeRequests.request("dm:~bus")
+            waitUntil(timeoutMillis = 5_000) { busChatShown() && !showing("Mail runs in Grubbery") }
+        }
+    }
+
+    // A chat opened from a tab that shows one beside it stays on that tab.
+    @Test
+    fun `a chat asked for from Bookmarks opens beside the bookmarks`() {
+        val ui = InMemoryUiSettings()
+        app(ui = ui, seed = busSaid) {
+            onNodeWithContentDescription("Bookmarks").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("No bookmarks yet") }
+            io.nisfeb.talon.notify.OpenChatRequests.request("~bus", null)
+            waitUntil(timeoutMillis = 5_000) { busChatShown() }
+            assertTrue(showing("No bookmarks yet"), "the list is still the bookmarks")
+            assertEquals(RailTab.Bookmarks, ui.activeRailTab.value)
+        }
+    }
+
+    // A full-screen page outside the registry: Escape (and the iOS back
+    // gesture) closed Settings, hidden behind it, and left the QR up.
+    @Test
+    fun `Escape leaves the login QR for the Settings it was opened from`() = app {
+        onNodeWithContentDescription("Settings").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
+        onNodeWithText("Account").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Login QR generator") }
+        onNodeWithText("Login QR generator").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Generate login QR") }
+        press(Key.Escape)
+        waitUntil(timeoutMillis = 5_000) { !showing("Generate login QR") }
+        assertTrue(showing("Appearance") && !present("Chats"), "Settings, where it was opened")
+        press(Key.Escape)
+        home()
+    }
+
+    // A talon:// group link from a profile opened over Contacts: the sheet
+    // handed it to the system, and the group's page, once Talon had it,
+    // went behind Contacts.
+    @Test
+    fun `a group link in a profile over Contacts opens the group in front`() = app(seed = {
+        contacts().upsert(io.nisfeb.talon.data.ContactEntity("~bus", null, null, null, status = "talon://group/~bus/crew"))
+    }) { ship ->
+        addOnContacts("~bus")
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("contacts").size >= 2 && showing("Search contacts") }
+        onAllNodesWithText("~bus")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("talon://group/~bus/crew") }
+        onAllNodesWithText("talon://group/~bus/crew").onLast().performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("You haven't joined this group") }
+        assertTrue(!showing("Search contacts") && !showing("talon://group/~bus/crew"), "Contacts and the profile are put down")
+    }
+
+    // ---- Adding a contact (review 2026-10-17) ----
+
+    private fun ComposeUiTest.addOnContacts(who: String) {
+        onNodeWithContentDescription("More").performClick()
+        onNodeWithText("Contacts").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("~patp, or a word name") }
+        onNodeWithText("~patp, or a word name").performTextInput(who)
+        waitForIdle()
+        onNodeWithText("Add").performClick()
+    }
+
+    // The fields cleared at once and the write's end was thrown away, so a
+    // refusal left nothing to try again with and said nothing.
+    @Test
+    fun `an add the ship refuses keeps what was typed and says why`() = app(setup = {
+        refuse = { if (it.app == "contacts") "not now" else null }
+    }) { ship ->
+        addOnContacts("~bus")
+        waitUntil(timeoutMillis = 10_000) { showing("Couldn't add ~bus: the ship refused it (not now).") }
+        assertTrue(ship.pokesTo("contacts").isNotEmpty())
+        assertTrue(showing("~bus"), "what was typed is still in the box")
+        assertTrue(showing("Copy error details"))
+    }
+
+    @Test
+    fun `an add that never reaches the ship says it calmly, as something to try again`() = app(setup = {
+        lose = { if (it.app == "contacts") kotlinx.io.IOException("connection reset") else null }
+    }) {
+        addOnContacts("~bus")
+        waitUntil(timeoutMillis = 10_000) { showing("Couldn't add ~bus: your ship is slow or out of reach. Try again when it's back.") }
+        assertTrue(onAllNodes(hasSetTextAction() and androidx.compose.ui.test.hasText("~bus")).fetchSemanticsNodes().isNotEmpty(), "kept")
+    }
+
+    // Leaving Contacts mid-add does not stop it: it runs on the repo's scope.
+    @Test
+    fun `an add left midway still reaches the ship`() = app { ship ->
+        ship.holdPoke = 1_500
+        addOnContacts("~bus")
+        onNodeWithContentDescription("Back").performClick()
+        home()
+        waitUntil(timeoutMillis = 10_000) { ship.pokesTo("contacts").size >= 2 }
+        ship.holdPoke = 0
+        assertTrue(ship.pokesTo("contacts").any { "page" in it.json.toString() }, ship.pokesTo("contacts").toString())
+    }
+
     // Areas of the app get shortcuts the owner sets: pressed anywhere, the
     // area opens as its rail item would open it.
     @Test

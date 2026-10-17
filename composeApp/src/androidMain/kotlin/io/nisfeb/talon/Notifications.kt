@@ -645,9 +645,20 @@ object Notifications {
      * re-running a loop replaces its own row while distinct loops keep
      * separate rows even if they share a name (Android dedupes per
      * (tag, id)). Tap just opens the app — there's no per-loop deep link yet.
+     *
+     * Recorded in the Activity feed too, as on desktop: a loop runs
+     * headless from its alarm, and this is the one place every result
+     * passes on Android.
      */
-    fun showLoop(context: Context, loopId: Long, title: String, body: String, whenMs: Long) =
+    fun showLoop(context: Context, loopId: Long, title: String, body: String, whenMs: Long) {
         post(context, "loop:$loopId", CHANNEL_LOOPS, title, body, alarm = false, whenMs = whenMs)
+        runCatching {
+            (context.applicationContext as? TalonApplication)?.notices()?.record(
+                "loop:$loopId", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_ASSISTANT,
+                "loop-result", title, body, "loop:$loopId",
+            )
+        }
+    }
 
     fun clear(context: Context, whom: String) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)

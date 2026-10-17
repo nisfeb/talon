@@ -322,8 +322,9 @@ fun App(
     var openChatFocusMessageId by remember { mutableStateOf<String?>(null) }
     /** Login-handoff QR generator. Reachable from LoginScreen
      *  ("Signing in on another device? Make a login QR →") on cold launch
-     *  and from Settings once a ship is logged in. */
-    var shareLoginQrOpen by remember { mutableStateOf(false) }
+     *  and from Settings once a ship is logged in. Full-screen, so a
+     *  section: as a dialog, Escape and back closed what lay behind it. */
+    var shareLoginQrOpen by remember { sections.flag() }
     var viewerImageUrl by remember { mutableStateOf<String?>(null) }
     // Multi-image viewer state — set by the photo / gif drilldown
     // (MediaListPane) so the viewer's prev/next + arrow-key
@@ -412,8 +413,10 @@ fun App(
     var showNewDm by remember { sections.flag() }
     var showContacts by remember { sections.flag() }
     var showGroupAdminList by remember { sections.flag() }
-    var openGroupAdminFlag by remember { mutableStateOf<String?>(null) }
-    var openGroupHomeFlag by remember { mutableStateOf<String?>(null) }
+    // A group's pages are sections too, on the group they show: plain
+    // values, the rail and Escape could not leave them.
+    var openGroupAdminFlag by remember { sections.page<String>() }
+    var openGroupHomeFlag by remember { sections.page<String>() }
     /** A ship whose invite-me code was scanned or tapped: message it, or invite it to a group. */
     var inviteShipFromCode by remember { mutableStateOf<String?>(null) }
     // Notebook overlay state. notebookComposeOpen + notebookEdit*
@@ -437,21 +440,31 @@ fun App(
     // exist here — an endless spinner on a freshly opened notebook.
     var openNoteId by remember(openChat) { mutableStateOf<Long?>(null) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
-    // Land on a chat from anywhere — a call's "Message" can be tapped
-    // from settings, the admin screens, the image viewer… every one of
-    // which outranks openChat in the right-pane `when`. Close them all
-    // first, or the tap sets openChat and shows nothing.
-    val jumpToChat: (String) -> Unit = { who -> sections.leave {
+    /**
+     * Put down everything drawn over the content (every section, a
+     * profile, an image, a side pane), then [then]. A link, a notice or a
+     * call's Message can come from any of them, and each outranks the
+     * content in the render's `when`: left up, the place asked for was
+     * set and hidden.
+     */
+    val leaveAllFor: (then: () -> Unit) -> Unit = { then -> sections.leave {
         sections.closeAll()
-        openGroupAdminFlag = null
-        openGroupHomeFlag = null
         profileSheetShip = null
         viewerImageUrl = null
         viewerImageList = null
-        groupInfoDrilldown = null
-        openThreadParent = null
-        openThreadReplyAnchor = null
+        openConversationAction()
+        then()
+    } }
+    // The rail's tab is the ship's own setting, inside the per-ship block
+    // below and out of reach here: a chat opened from outside asks for
+    // the Chats tab, and the block switches to it. Home, Mail and Calendar
+    // take the whole area, so a chat opened over them stayed hidden.
+    var chatsTabWanted by remember { mutableStateOf(false) }
+    // Land on a chat from anywhere: a call's "Message" can be tapped from
+    // settings, the admin screens, the image viewer, the home page.
+    val jumpToChat: (String) -> Unit = { who -> leaveAllFor {
         openChat = who
+        chatsTabWanted = true
     } }
     // Hoisted at App level (not inside the key block) so it survives
     // the re-key triggered by tryRestore-failure recovery. Cleared
@@ -502,10 +515,9 @@ fun App(
         switchShipAction()
         viewerImageUrl = null
         viewerImageList = null
-        showSelfProfile = false
-        showSettings = false
-        showSidebarSettings = false
-        showApps = false
+        // Every section, the old ship's group pages among them: a list
+        // that named four left those on screen over the new ship.
+        sections.closeAll()
     }
     // A tapped system notification (iOS) asks for a chat from outside
     // the composition; land there the way the call strip's Message
@@ -515,21 +527,20 @@ fun App(
     LaunchedEffect(Unit) {
         io.nisfeb.talon.notify.OpenNoticeRequests.requests.collect { tag ->
             // A tapped push, or a tapped Activity notice row, by its tag.
-            // closeAll first: the render shows the first open section, and
-            // one left open would hide the target and steal its back.
-            when {
-                tag.startsWith(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX) -> {
-                    sections.closeAll()
-                    noticeCalendarTag = tag
+            // Everything down first: the render shows the first open
+            // section, and one left open would hide the target and steal
+            // its back.
+            when (val to = io.nisfeb.talon.notify.noticeLanding(tag)) {
+                is io.nisfeb.talon.notify.NoticeLanding.Calendar -> leaveAllFor {
+                    noticeCalendarTag = to.tag
                     showCalendar = true
                 }
-                // Activity notice targets (see NoticeRepo.record): the
-                // assistant and account domains, and the chat-adjacent ones.
-                tag.startsWith("orrery:") -> { sections.closeAll(); showActions = true }
-                tag.startsWith("loop:") -> { sections.closeAll(); showLoops = true }
-                tag.startsWith("invite:") -> { sections.closeAll(); showInvites = true }
-                tag == "armillary" -> { sections.closeAll(); showAssistant = true }
-                tag.startsWith("dm:") -> jumpToChat(tag.removePrefix("dm:"))
+                io.nisfeb.talon.notify.NoticeLanding.Actions -> leaveAllFor { showActions = true }
+                io.nisfeb.talon.notify.NoticeLanding.Loops -> leaveAllFor { showLoops = true }
+                io.nisfeb.talon.notify.NoticeLanding.Invites -> leaveAllFor { showInvites = true }
+                io.nisfeb.talon.notify.NoticeLanding.Assistant -> leaveAllFor { showAssistant = true }
+                is io.nisfeb.talon.notify.NoticeLanding.Chat -> jumpToChat(to.whom)
+                null -> Unit
             }
         }
     }
@@ -629,36 +640,6 @@ fun App(
     PlatformBackHandler(enabled = viewerImageUrl != null && viewerImageList == null) {
         viewerImageUrl = null
     }
-    PlatformBackHandler(enabled = showSelfProfile) {
-        showSelfProfile = false
-    }
-    PlatformBackHandler(enabled = showStatusFeed) {
-        showStatusFeed = false
-    }
-    // Below every handler that follows in priority: it answers only for
-    // a section that has none of its own.
-    PlatformBackHandler(enabled = sections.anyOpen) { sections.closeLast() }
-    PlatformBackHandler(enabled = showInvites) {
-        showInvites = false
-    }
-    PlatformBackHandler(enabled = profileSheetShip != null) {
-        profileSheetShip = null
-    }
-    PlatformBackHandler(enabled = showBookmarks) { showBookmarks = false }
-    PlatformBackHandler(enabled = showCalendar) { showCalendar = false }
-    PlatformBackHandler(enabled = showActivity) { showActivity = false }
-    PlatformBackHandler(enabled = showAssistant) { showAssistant = false }
-    PlatformBackHandler(enabled = showSearch) { showSearch = false }
-    PlatformBackHandler(enabled = showNewDm) { showNewDm = false }
-    PlatformBackHandler(enabled = showActions) { showActions = false }
-    PlatformBackHandler(enabled = showContacts) { showContacts = false }
-    PlatformBackHandler(
-        enabled = openGroupAdminFlag != null,
-    ) { openGroupAdminFlag = null }
-    PlatformBackHandler(
-        enabled = showGroupAdminList && openGroupAdminFlag == null,
-    ) { showGroupAdminList = false }
-    PlatformBackHandler(enabled = openGroupHomeFlag != null) { openGroupHomeFlag = null }
     // Notebook: compose overlays the post viewer (which overlays the list).
     PlatformBackHandler(enabled = notebookComposeOpen) {
         notebookComposeOpen = false
@@ -699,15 +680,24 @@ fun App(
     PlatformBackHandler(
         enabled = openGalleryPostId != null && !galleryComposeOpen,
     ) { openGalleryPostId = null }
-    PlatformBackHandler(enabled = showSettings) {
-        showSettings = false
+    // Every section, the newest first, by the registry that knows them
+    // all. After everything above, which the sections are drawn over;
+    // per-section handlers here outranked the newest one, so back could
+    // close a section hidden behind the one on screen.
+    PlatformBackHandler(enabled = sections.anyOpen) { sections.closeLast() }
+    // The profile sheet floats over any section.
+    PlatformBackHandler(enabled = profileSheetShip != null) {
+        profileSheetShip = null
     }
-    PlatformBackHandler(enabled = showSidebarSettings) {
-        showSidebarSettings = false
-    }
-    PlatformBackHandler(enabled = showApps) { showApps = false }
-    PlatformBackHandler(enabled = showLoops) {
-        showLoops = false
+    // A wish to listen is for the opening it was made for. Left set, the
+    // assistant listened again on every later open, unasked. The pages a
+    // payment or a terminal asked Settings to start on are the same.
+    LaunchedEffect(showAssistant) { if (!showAssistant) assistantListen = false }
+    LaunchedEffect(showSettings) {
+        if (!showSettings) {
+            settingsStartOnAccount = false
+            settingsStartOnAi = false
+        }
     }
 
     // Ship-scoped graph. Re-keyed on (loggedInShip ?: "__loggedout__")
@@ -736,6 +726,21 @@ fun App(
         // JSON file / SharedPreferences regardless of which db is
         // passed; the impls just don't read those fields from db.
         val uiSettings = remember { createUiSettings(db) }
+        // A chat asked for from outside the Chats tab (jumpToChat): to the
+        // Chats tab from one that takes the whole area, or it stayed hidden.
+        // Leaving Mail closes its thread, as the rail does.
+        LaunchedEffect(chatsTabWanted) {
+            if (!chatsTabWanted) return@LaunchedEffect
+            chatsTabWanted = false
+            val tab = uiSettings.activeRailTab.value
+            if (tab == RailTab.Mail) {
+                openMailThread = null
+                mailComposing = null
+            }
+            if (tab == RailTab.Home || tab == RailTab.Mail || tab == RailTab.Calendar) {
+                uiSettings.setActiveRailTab(RailTab.Chats)
+            }
+        }
         // The mic processing choice is read by every audio source at creation.
         LaunchedEffect(uiSettings) {
             uiSettings.micProcessing.collect { io.nisfeb.talon.call.MicProcessingSettings.current = it }
@@ -1153,8 +1158,13 @@ fun App(
         val mailTarget: ((String) -> Unit)? =
             if (mailAvailability == io.nisfeb.talon.mail.MailAvailability.PRESENT) {
                 { peer ->
-                    mailComposing = io.nisfeb.talon.ui.screens.MailIntent(to = listOf(peer))
-                    uiSettings.setActiveRailTab(RailTab.Mail)
+                    // Out of whatever the profile was opened over: Mail is
+                    // a tab, drawn beneath every section, so over Contacts
+                    // the tap did nothing anyone could see.
+                    leaveAllFor {
+                        mailComposing = io.nisfeb.talon.ui.screens.MailIntent(to = listOf(peer))
+                        uiSettings.setActiveRailTab(RailTab.Mail)
+                    }
                 }
             } else null
         val mailShipUrl = sessionStore.active()?.shipUrl
@@ -1311,8 +1321,6 @@ fun App(
                 onDismiss = { inviteShipFromCode = null },
                 onMessage = {
                     inviteShipFromCode = null
-                    showCalendar = false; showBookmarks = false; showAssistant = false
-                    uiSettings.setActiveRailTab(RailTab.Chats)
                     jumpToChat(ship)
                 },
             )
@@ -1721,24 +1729,26 @@ fun App(
                   // A talon:// address lands on its message or mail thread.
                   onTalon = { uri ->
                       when (val link = io.nisfeb.talon.urbit.TalonLink.parse(uri)) {
+                          // Every section down, not a list of three: a chat
+                          // link in a loop's output opened behind Loops.
                           is io.nisfeb.talon.urbit.TalonLink.Message -> {
-                              showCalendar = false; showBookmarks = false; showAssistant = false
-                              uiSettings.setActiveRailTab(RailTab.Chats)
                               jumpToChat(link.whom)
                               if (link.parentId != null) { openThreadParent = link.parentId; openThreadReplyAnchor = link.id }
                               else openChatFocusMessageId = link.id
                               true
                           }
                           is io.nisfeb.talon.urbit.TalonLink.Mail -> {
-                              showCalendar = false; showBookmarks = false; showAssistant = false
-                              openMailThread = link.threadId
-                              uiSettings.setActiveRailTab(RailTab.Mail)
+                              leaveAllFor {
+                                  openMailThread = link.threadId
+                                  uiSettings.setActiveRailTab(RailTab.Mail)
+                              }
                               true
                           }
                           is io.nisfeb.talon.urbit.TalonLink.Group -> {
-                              showCalendar = false; showBookmarks = false; showAssistant = false
-                              uiSettings.setActiveRailTab(RailTab.Chats)
-                              openGroupHomeFlag = link.flag
+                              leaveAllFor {
+                                  uiSettings.setActiveRailTab(RailTab.Chats)
+                                  openGroupHomeFlag = link.flag
+                              }
                               true
                           }
                           is io.nisfeb.talon.urbit.TalonLink.InviteMe -> {
@@ -1792,20 +1802,21 @@ fun App(
                                   // list, which does nothing for a group you
                                   // have not joined (the usual case for a
                                   // shared reference), so the tap went nowhere.
-                                  showCalendar = false; showBookmarks = false; showAssistant = false
-                                  uiSettings.setActiveRailTab(RailTab.Chats)
-                                  openGroupHomeFlag = jump.flag
+                                  leaveAllFor {
+                                      uiSettings.setActiveRailTab(RailTab.Chats)
+                                      openGroupHomeFlag = jump.flag
+                                  }
                               }
+                              // A reference in a section (a loop's output,
+                              // the assistant's answer) lands in front of it.
                               is io.nisfeb.talon.ui.CiteJump.Message -> {
-                                  openConversationAction()
+                                  jumpToChat(jump.whom)
                                   jump.groupFlag?.let { revealGroupRequest = it }
                                   openChatFocusMessageId = jump.messageId
-                                  openChat = jump.whom
                               }
                               is io.nisfeb.talon.ui.CiteJump.Reply -> {
-                                  openConversationAction()
+                                  jumpToChat(jump.whom)
                                   jump.groupFlag?.let { revealGroupRequest = it }
-                                  openChat = jump.whom
                                   openThreadParent = jump.parentId
                                   openThreadReplyAnchor = jump.replyId
                               }
@@ -2441,11 +2452,9 @@ fun App(
                             // whoever is already pinned so a pin can be
                             // taken off again when they go quiet.
                             homePinCandidates = remember(homeStatuses, homeLayout, callContacts) {
-                                val pinned = homeLayout[io.nisfeb.talon.ui.HomeWidgetKind.STATUS].pinned
-                                (homeStatuses.map { it.ship } + pinned)
-                                    .distinct()
-                                    .filter { it != ship }
-                                    .map { it to callContacts.displayName(it) }
+                                io.nisfeb.talon.ui.screens.homePinCandidates(
+                                    homeStatuses, homeLayout[io.nisfeb.talon.ui.HomeWidgetKind.STATUS].pinned, ship,
+                                ) { callContacts.displayName(it) }
                             },
                             aiSettings = aiSettings,
                             themePreference = themePreference,
@@ -2535,10 +2544,11 @@ fun App(
                         db = db,
                         repo = repo,
                         onBack = { showBookmarks = false },
+                        // Opened on a phone from the menu, over whatever tab
+                        // was showing: the chat goes to one that shows it.
                         onOpenConversation = { other, postId ->
-                            showBookmarks = false
+                            jumpToChat(other)
                             openChatFocusMessageId = postId
-                            openChat = other
                         },
                     )
                     showActivity -> ActivityFeedScreen(
@@ -2546,24 +2556,21 @@ fun App(
                         repo = repo,
                         onBack = { showActivity = false },
                         onOpenConversation = { other ->
-                            showActivity = false
+                            jumpToChat(other)
                             // A plain open must drop any armed anchor: an
                             // unconsumed one (message not in the local DB)
                             // otherwise re-fires on the next open of that
                             // chat and yanks the scroll to an old message.
                             openChatFocusMessageId = null
-                            openChat = other
                         },
                         onOpenReply = { whomTarget, parentId, replyId ->
-                            showActivity = false
-                            openChat = whomTarget
+                            jumpToChat(whomTarget)
                             openThreadParent = parentId
                             openThreadReplyAnchor = replyId
                         },
                         onOpenPost = { whomTarget, postId ->
-                            showActivity = false
+                            jumpToChat(whomTarget)
                             openChatFocusMessageId = postId
-                            openChat = whomTarget
                         },
                     )
                     // showAssistant is NOT a full-screen branch — it renders
@@ -2607,11 +2614,7 @@ fun App(
                             showNewDm = false
                             openChat = peer
                         },
-                        onAddContact = { patp, nickname ->
-                            rightPaneScope.launch {
-                                runCatching { repo.addContact(patp, nickname) }
-                            }
-                        },
+                        onAddContact = { patp, nickname -> repo.carry { repo.addContact(patp, nickname) } },
                         bookContacts = bookContacts,
                         onJoinGroup = { flag ->
                             showNewDm = false
@@ -2623,9 +2626,9 @@ fun App(
                     showContacts -> io.nisfeb.talon.ui.screens.ContactsScreen(
                         db = db,
                         bookContacts = bookContacts,
-                        onAddContact = { patp, nickname ->
-                            rightPaneScope.launch { runCatching { repo.addContact(patp, nickname) } }
-                        },
+                        // On the repo's scope, awaited: Contacts keeps what was
+                        // typed until the ship has it, and says why when not.
+                        onAddContact = { patp, nickname -> repo.carry { repo.addContact(patp, nickname) } },
                         onRemoveContact = { patp ->
                             rightPaneScope.launch { runCatching { repo.removeContact(patp) } }
                         },
@@ -3657,11 +3660,8 @@ fun App(
                                             )
                                         },
                                         // Home keeps the whole content area, so the
-                                        // chat has to be on a tab that shows one.
-                                        onOpenConversation = { whom ->
-                                            uiSettings.setActiveRailTab(RailTab.Chats)
-                                            jumpToChat(whom)
-                                        },
+                                        // chat goes to a tab that shows one.
+                                        onOpenConversation = { whom -> jumpToChat(whom) },
                                         onOpenChats = { uiSettings.setActiveRailTab(RailTab.Chats) },
                                         onOpenMailThread = { id ->
                                             openMailThread = id
@@ -3740,9 +3740,11 @@ fun App(
                                         // layout so the 64dp rail can't trip the
                                         // stacked/hamburger fallback.
                                         forceExpanded = expanded,
+                                        // Opened over Home, Mail or Calendar, which
+                                        // take the whole area: the chat goes to a
+                                        // tab that shows it.
                                         onOpenMessage = { whomTarget, postId, parentId ->
-                                            showAssistant = false
-                                            openChat = whomTarget
+                                            jumpToChat(whomTarget)
                                             if (parentId != null) {
                                                 // Anchor on the cited reply, not
                                                 // the top of the thread.
@@ -3824,10 +3826,7 @@ fun App(
                         // Out of whatever the profile was opened over (Contacts,
                         // Home, a section) and into the conversation: setting
                         // the chat alone left Contacts on top of it.
-                        onMessage = {
-                            uiSettings.setActiveRailTab(RailTab.Chats)
-                            jumpToChat(peer)
-                        },
+                        onMessage = { jumpToChat(peer) },
                         onEditSelf = {
                             profileSheetShip = null
                             showSelfProfile = true

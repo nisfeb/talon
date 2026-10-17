@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import io.nisfeb.talon.data.AppDatabase
@@ -254,6 +255,7 @@ private fun GalleryTile(
                                     fontWeight = FontWeight.SemiBold,
                                 ),
                                 maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                         primary.siteName?.let {
@@ -262,6 +264,7 @@ private fun GalleryTile(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
@@ -272,6 +275,7 @@ private fun GalleryTile(
                             primary.text.text.take(280),
                             style = MaterialTheme.typography.bodyMedium,
                             maxLines = 10,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
@@ -283,6 +287,7 @@ private fun GalleryTile(
                             primary.label,
                             style = MaterialTheme.typography.bodyMedium,
                             maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }

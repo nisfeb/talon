@@ -82,7 +82,12 @@ fun ContactProfileSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val label = remember(contact, ship) { contact?.nickname ?: ship }
 
+    // The sheet is a window of its own, and a window is handed the
+    // platform's link handler again: urb:// and talon:// in a status or a
+    // bio went to the system instead of to Talon. The app's goes in with it.
+    val links = androidx.compose.ui.platform.LocalUriHandler.current
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+      androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides links) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -266,6 +271,7 @@ fun ContactProfileSheet(
             }
             Spacer(Modifier.height(12.dp))
         }
+      }
     }
 }
 
