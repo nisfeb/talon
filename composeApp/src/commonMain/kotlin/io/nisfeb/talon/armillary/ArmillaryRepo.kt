@@ -53,6 +53,8 @@ class ArmillaryRepo(
     private val picksEveryMs: Long = PICKS_EVERY_MS,
     /** The clock coming back to the front is measured on; a test's own. */
     private val now: () -> Long = { io.nisfeb.talon.util.nowMs() },
+    /** The first pause before a failed check of the ship is tried again; a test's own. */
+    private val probeRetryFirstMs: Long = io.nisfeb.talon.orrery.PROBE_RETRY_FIRST_MS,
 ) {
     private val _availability = MutableStateFlow(ArmillaryAvailability.UNKNOWN)
     val availability: StateFlow<ArmillaryAvailability> = _availability.asStateFlow()
@@ -120,7 +122,11 @@ class ArmillaryRepo(
     private var watching: Job? = null
     private var adopting: Job? = null
     private var ticking: Job? = null
+    private var retrying: Job? = null
     @kotlin.concurrent.Volatile private var resumedAtMs = 0L
+
+    /** The app is in front ([resumed]) or behind ([paused]); in front until told. */
+    @kotlin.concurrent.Volatile private var inFront = true
 
     // Coroutines alone touch the repo, so one lock is the whole of the
     // guard; commonMain has no synchronized, iOS being native.
@@ -140,11 +146,14 @@ class ArmillaryRepo(
         // The vendor's picks reach the ship within five minutes, and the
         // row took them only on a refresh: once a process, or a tap. A
         // phone's process lives for days and kept the old models. This
-        // reads the ship's own config, so it costs the vendor nothing.
+        // reads the ship's own config, so it costs the vendor nothing. Only
+        // while it is any use: with no Armillary on the ship, no row on
+        // this device, or the app behind, a read is the ship's cost for
+        // nobody, every ten minutes for the life of the process.
         ticking = scope.launch {
             while (isActive) {
                 delay(picksEveryMs)
-                readPicks()
+                if (inFront && _availability.value == ArmillaryAvailability.PRESENT && aiSettings?.state?.value?.profile()?.armillary() != null) readPicks()
             }
         }
         // The ship already buys from a vendor, set up on some device: this
@@ -168,6 +177,8 @@ class ArmillaryRepo(
         adopting = null
         ticking?.cancel()
         ticking = null
+        retrying?.cancel()
+        retrying = null
         resumedAtMs = 0L
         api = null
         shipUrl = null
@@ -197,13 +208,18 @@ class ArmillaryRepo(
         try {
             runSuspendCatching { a.probe() }
                 .onSuccess { _availability.value = it; _error.value = null }
-                .onFailure { _availability.value = ArmillaryAvailability.UNKNOWN; _error.value = it.message }
+                .onFailure {
+                    _availability.value = ArmillaryAvailability.UNKNOWN
+                    // Said on the card, which only said "Checking your ship".
+                    _error.value = checkProblemLine(it)
+                    retryCheck()
+                }
             if (_availability.value != ArmillaryAvailability.PRESENT) {
                 return Result.failure(IllegalStateException(_error.value ?: "Armillary does not answer on this ship."))
             }
             var got: Inference? = null
             runSuspendCatching { a.inference() }
-                .onSuccess { if (it is InferenceAnswer.Have) got = it.inference }
+                .onSuccess { if (it is InferenceAnswer.Have) got = it.inference else if (it is InferenceAnswer.NoKey) dropKey() }
                 .onFailure {
                     Log.i(TAG, "inference skipped: ${it.message}")
                     if (_inference.value == null) _keyProblem.value = keyProblemLine(it)
@@ -230,8 +246,39 @@ class ArmillaryRepo(
     private suspend fun readPicks() = lock.withLock {
         val a = api ?: return@withLock
         runSuspendCatching { a.inference() }
-            .onSuccess { if (it is InferenceAnswer.Have) took(it.inference) }
+            .onSuccess { if (it is InferenceAnswer.Have) took(it.inference) else if (it is InferenceAnswer.NoKey) dropKey() }
             .onFailure { Log.i(TAG, "picks skipped: ${it.message}") }
+    }
+
+    /**
+     * A check that failed, tried again further apart each time and never
+     * in step with other clients, until the ship answers: the card said
+     * "Checking your ship" all session after one 502, and nothing adopted.
+     */
+    private fun retryCheck() {
+        if (retrying?.isActive == true || api == null) return
+        retrying = scope.launch {
+            var failures = 0
+            while (_availability.value == ArmillaryAvailability.UNKNOWN && _error.value != null) {
+                delay(io.nisfeb.talon.urbit.jittered(io.nisfeb.talon.orrery.probeRetryMs(++failures, probeRetryFirstMs)))
+                refresh()
+            }
+        }
+    }
+
+    /**
+     * The ship says it holds no key for this device: a vendor changed, or
+     * the key revoked. The row kept the old key and the card said
+     * Connected; now the key goes from the row, and the card offers to
+     * set this device up. A read that failed says nothing of the kind,
+     * and keeps what the row had.
+     */
+    private fun dropKey() {
+        _inference.value = null
+        val ai = aiSettings ?: return
+        val profile = ai.state.value.savedProfile ?: return
+        val row = profile.provider(ARMILLARY_PROVIDER)?.takeIf { it.apiKey.isNotBlank() } ?: return
+        ai.setProfile(profile.copy(providers = profile.providers.map { if (it.id == ARMILLARY_PROVIDER) row.copy(apiKey = "") else it }))
     }
 
     /**
@@ -243,6 +290,7 @@ class ArmillaryRepo(
      * triggers.
      */
     fun resumed() {
+        inFront = true
         val at = now()
         if (api == null || at - resumedAtMs < RESUME_GAP_MS) return
         resumedAtMs = at
@@ -255,6 +303,11 @@ class ArmillaryRepo(
                     .onFailure { Log.i(TAG, "account skipped: ${it.message}") }
             }
         }
+    }
+
+    /** The app went behind: the picks are not read again until it is back ([resumed] reads them then). */
+    fun paused() {
+        inFront = false
     }
 
     /**
@@ -310,8 +363,8 @@ class ArmillaryRepo(
         val a = api ?: error("Not attached to a ship.")
         when (val got = a.inference()) {
             is InferenceAnswer.Have -> took(got.inference)
-            InferenceAnswer.NoKey -> error("it holds no Armillary key yet")
-            InferenceAnswer.Missing -> error("Armillary is not on it")
+            InferenceAnswer.NoKey -> error("Your ship holds no Armillary key for this device yet.")
+            InferenceAnswer.Missing -> error("Armillary is not on your ship.")
         }
     }
 
@@ -331,34 +384,44 @@ class ArmillaryRepo(
      * this ship included. The ship says hello to it, and the key is
      * asked for again, since a key belongs to one vendor.
      */
-    suspend fun setVendor(ship: String, deviceName: String): Result<Inference> = runSuspendCatching {
+    suspend fun setVendor(ship: String, deviceName: String): Result<Inference> = scope.async { runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
         a.setVendor(ship.trim())
         refresh()
         ensureKey(deviceName).getOrThrow()
-    }
+    } }.await()
 
     /**
-     * Open a checkout and answer the URL to send the person to. The
-     * balance is then watched, for a couple of minutes on a card and a
-     * quarter of an hour on bitcoin, which settles after a block, so
-     * the payment shows once made without anyone having to tap Refresh.
+     * Open a checkout and answer the URL to send the person to, or null
+     * where the vendor made it and its answer has not come back. The
+     * checkout is then watched, for a couple of minutes on a card and a
+     * quarter of an hour on bitcoin, which settles after a block, so the
+     * payment shows once made without anyone having to tap Refresh, and
+     * the card offers its page ([Payment.url], or the vendor's row once it
+     * comes). On this repo's scope: a screen left while the vendor answers
+     * does not lose the checkout it made.
      */
-    suspend fun topUp(rail: String, plan: String?, amountMicro: Long?): Result<String> = runSuspendCatching {
+    suspend fun topUp(rail: String, plan: String?, amountMicro: Long?): Result<String?> = scope.async { runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
         val first = a.checkout(rail, plan, amountMicro)
         val answer = if (first is CheckoutAnswer.Pending) followCheckout(a, first.nonce) else first
+        val start = _account.value?.takeIf { it.hasView }?.balanceMicro ?: 0L
         when (answer) {
             is CheckoutAnswer.Url -> {
-                val start = _account.value?.takeIf { it.hasView }?.balanceMicro ?: 0L
-                watchBalance(Payment(answer.nonce, rail, start, Payment.Phase.WAITING))
+                watchBalance(Payment(answer.nonce, rail, start, Payment.Phase.WAITING, url = answer.url))
                 answer.url
             }
-            is CheckoutAnswer.Pending ->
-                error("Your ship has asked the vendor and is still waiting. Do not order again: the checkout appears under your checkouts when the vendor answers.")
+            // Watched as any other: the card says not to order again, and
+            // offers the page once the vendor's row brings it. It used to
+            // say the checkout would appear "under your checkouts", which
+            // no screen shows.
+            is CheckoutAnswer.Pending -> {
+                watchBalance(Payment(answer.nonce, rail, start, Payment.Phase.WAITING))
+                null
+            }
             is CheckoutAnswer.Refused -> error(answer.reason)
         }
-    }
+    } }.await()
 
     /**
      * A checkout the ship answered 202 for. The order went out, and the
@@ -386,11 +449,11 @@ class ArmillaryRepo(
     }
 
     /** Ask the vendor to stop the subscription renewing. The view says when it is done. */
-    suspend fun cancelSubscription(): Result<Unit> = runSuspendCatching {
+    suspend fun cancelSubscription(): Result<Unit> = scope.async { runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
         a.cancelSubscription()
         watchBalance(null)
-    }
+    } }.await()
 
     /**
      * Delete this ship's account at its vendor, on the repo's scope, so
@@ -455,14 +518,20 @@ class ArmillaryRepo(
 
     /**
      * What an account just read says about the payment in flight. True
-     * once it has said something final: the balance rose, or the row
-     * says the checkout failed, expired or was refused.
+     * once it has said something final: paid, or the row says the
+     * checkout failed, expired or was refused. Where the view carries the
+     * checkout's row, the row says whether it was paid and how much: the
+     * balance was measured from one read before the checkout opened, so
+     * spending since made a $5 payment $4.97, and a credit from elsewhere
+     * read as paid before anyone had. With no row, the balance rising.
      */
     private fun settle(acct: Account): Boolean {
         val p = _payment.value ?: return false
         if (p.phase != Payment.Phase.WAITING && p.phase != Payment.Phase.UNSEEN) return false
-        if (acct.hasView && acct.balanceMicro > p.startMicro) {
-            val added = acct.balanceMicro - p.startMicro
+        val row = acct.checkouts.firstOrNull { p.nonce.isNotBlank() && it.nonce == p.nonce }
+        val rose = if (acct.hasView) acct.balanceMicro - p.startMicro else 0L
+        if (row?.status == "paid" || (row == null && rose > 0)) {
+            val added = row?.amountMicro?.takeIf { it > 0 } ?: rose.coerceAtLeast(0L)
             val paid = p.copy(phase = Payment.Phase.PAID, addedMicro = added)
             _payment.value = paid
             notifier.notify("Armillary", money(added) + " added", "armillary")
@@ -477,8 +546,7 @@ class ArmillaryRepo(
             }
             return true
         }
-        val row = acct.checkouts.firstOrNull { it.nonce == p.nonce } ?: return false
-        if (row.status in ENDED_STATUSES) {
+        if (row != null && row.status in ENDED_STATUSES) {
             _payment.value = p.copy(phase = Payment.Phase.ENDED)
             return true
         }
@@ -634,6 +702,8 @@ data class Payment(
     val phase: Phase,
     /** How much the balance rose, once it has. */
     val addedMicro: Long = 0L,
+    /** The checkout's page, as the vendor answered it; blank until it has. */
+    val url: String = "",
 ) {
     enum class Phase {
         /** The watch is running and nothing has landed. */
@@ -652,6 +722,14 @@ data class Payment(
 
 /** An account deletion the ship took: from which vendor, and how it answered. */
 data class Deletion(val vendor: String, val answer: DeleteAnswer)
+
+/** A failed check for Armillary, said plainly: no status codes and no error pages. */
+internal fun checkProblemLine(e: Throwable): String = when (e) {
+    is ArmillaryError.Refused -> io.nisfeb.talon.util.readableReason(e.reason)
+        ?.let { "Armillary on your ship could not answer: $it." } ?: "Armillary on your ship could not answer."
+    is ArmillaryError.Garbled -> "Your ship's answer about Armillary could not be read."
+    else -> "Your ship did not answer."
+} + " Talon asks again by itself."
 
 /** A failed key ask, said plainly: no HTTP codes or exception names on the card. */
 internal fun keyProblemLine(e: Throwable): String = when (e) {

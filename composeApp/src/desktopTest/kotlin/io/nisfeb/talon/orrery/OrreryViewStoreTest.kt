@@ -130,11 +130,14 @@ class OrreryViewStoreTest {
     fun `a ship that does not answer leaves the kept answer up and says why`() = runBlocking {
         val kept = Kept().apply { rows["state"] = OrreryCacheEntity("state", old.toString(), 5) }
         val scope = CoroutineScope(SupervisorJob())
-        val s = OrreryViewStore(kept, scope, readState = { error("502 Bad Gateway") }, readPlan = { null }, now = { clock })
+        val down = OrreryError.Unreachable(ProxyAnswered(502))
+        val s = OrreryViewStore(kept, scope, readState = { throw down }, readPlan = { null }, now = { clock })
         s.open()
         until { s.problem.value != null }
         assertEquals(old, s.view.value?.state)
-        assertEquals("502 Bad Gateway", s.problem.value)
+        // Kept whole, so the page can tell no answer from a refused key.
+        assertEquals(down, s.problem.value)
+        assertEquals("Your ship did not answer", readProblemLine(s.problem.value!!))
         assertEquals(old.toString(), kept.rows["state"]!!.json, "nothing written over what was kept")
         scope.cancel()
     }

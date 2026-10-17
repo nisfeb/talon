@@ -55,8 +55,9 @@ class OrreryScreenTest {
     private fun orrery(
         openItem: String? = null,
         view: io.nisfeb.talon.orrery.OrreryView? = io.nisfeb.talon.orrery.OrreryView(state, plan, System.currentTimeMillis()),
-        problem: String? = null,
+        problem: Throwable? = null,
         turnOn: (suspend () -> Result<Unit>)? = null,
+        setUpAgain: (suspend () -> Result<Unit>)? = null,
         actionsTab: @androidx.compose.runtime.Composable () -> Unit = { Text("The actions list") },
         block: ComposeUiTest.() -> Unit,
     ) = runComposeUiTest {
@@ -76,6 +77,7 @@ class OrreryScreenTest {
                         openItem = item.value,
                         onOpenedItem = { did += "opened"; item.value = null },
                         turnOn = turnOn,
+                        setUpAgain = setUpAgain,
                         actionsTab = actionsTab,
                     )
                 }
@@ -160,10 +162,12 @@ class OrreryScreenTest {
         assertTrue(!shows("Directions"), "nowhere to go, no Directions")
     }
 
+    private val down = io.nisfeb.talon.orrery.OrreryError.Unreachable(io.nisfeb.talon.orrery.ProxyAnswered(502))
+
     @Test
-    fun `a ship that never answered says so, and the Actions tab still works`() = orrery(view = null, problem = "502") {
+    fun `a ship that never answered says so, and the Actions tab still works`() = orrery(view = null, problem = down) {
         onNodeWithText("Coming up").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Orrery could not be read") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer.") }
         onNodeWithText("Actions").performClick()
         assertTrue(shows("The actions list"))
     }
@@ -171,10 +175,10 @@ class OrreryScreenTest {
     // "is this pane going to be ass slow with no caching or incremental loading"
     @Test
     fun `what was kept shows at once while the ship does not answer, and says how old it is`() =
-        orrery(view = io.nisfeb.talon.orrery.OrreryView(state, plan, System.currentTimeMillis() - 3 * hour), problem = "no answer") {
+        orrery(view = io.nisfeb.talon.orrery.OrreryView(state, plan, System.currentTimeMillis() - 3 * hour), problem = down) {
             onNodeWithText("Coming up").performClick()
             assertTrue(shows("Fencing lesson"), "the kept answer, not Looking…")
-            assertTrue(shows("The ship did not answer; this is as of"))
+            assertTrue(shows("Your ship did not answer; this is as of"))
             onNodeWithContentDescription("Refresh").performClick()
             assertTrue("refresh" in did)
         }
@@ -184,7 +188,7 @@ class OrreryScreenTest {
     // and the desktop had lost its copy weeks before.
     @Test
     fun `not set up on this device, it says so and offers to try again`() =
-        orrery(view = null, problem = "This install has no orrery key yet.", turnOn = { did += "turned on"; Result.success(Unit) }) {
+        orrery(view = null, problem = IllegalStateException("This install has no orrery key yet."), turnOn = { did += "turned on"; Result.success(Unit) }) {
             onNodeWithText("Coming up").performClick()
             waitUntil(timeoutMillis = 5_000) { shows("isn't set up on this device yet") }
             assertTrue(!shows("could not be read"), "not a failure to read")
@@ -203,9 +207,44 @@ class OrreryScreenTest {
         }
 
     @Test
-    fun `on for this device, a read that failed still says so`() = orrery(view = null, problem = "502") {
+    fun `on for this device, a read that failed still says so`() = orrery(view = null, problem = down) {
         onNodeWithText("Coming up").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Orrery could not be read") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer.") }
         assertTrue(!shows("Try again"))
+    }
+
+    // Every failure read "The ship did not answer": a revoked key and an
+    // uninstalled Orrery showed old data under that line.
+    @Test
+    fun `a key the ship refused is said, with a new one offered`() =
+        orrery(
+            view = io.nisfeb.talon.orrery.OrreryView(state, plan, System.currentTimeMillis() - hour),
+            problem = io.nisfeb.talon.orrery.OrreryError.Refused(403, "forbidden"),
+            setUpAgain = { did += "set up"; Result.success(Unit) },
+        ) {
+            onNodeWithText("Coming up").performClick()
+            assertTrue(shows("Orrery no longer takes this device's key; this is as of"))
+            assertTrue(!shows("did not answer"))
+            onNodeWithText("Set up this device again").performClick()
+            waitUntil(timeoutMillis = 5_000) { "refresh" in did }
+            assertTrue("set up" in did, did.toString())
+        }
+
+    @Test
+    fun `orrery gone from the ship is said, and a narrower refusal offers no new key`() {
+        orrery(
+            view = io.nisfeb.talon.orrery.OrreryView(state, plan, System.currentTimeMillis() - hour),
+            problem = io.nisfeb.talon.orrery.OrreryError.Refused(404, "not found"),
+            setUpAgain = { Result.success(Unit) },
+        ) {
+            onNodeWithText("Coming up").performClick()
+            assertTrue(shows("Orrery is not on your ship now; this is as of"))
+            assertTrue(!shows("Set up this device again"))
+        }
+        orrery(view = null, problem = io.nisfeb.talon.orrery.OrreryError.Refused(403, "outside this key's scope"), setUpAgain = { Result.success(Unit) }) {
+            onNodeWithText("Coming up").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Orrery could not be read: outside this key's scope.") }
+            assertTrue(!shows("Set up this device again"), "a new key would not mend a scope")
+        }
     }
 }

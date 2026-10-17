@@ -32,6 +32,7 @@ import kotlin.test.assertTrue
  */
 class OrreryAnswerProblemTest {
     @Volatile private var probeStatus = HttpStatusCode.OK
+    @Volatile private var proxied = false
 
     @Test
     fun `a refused answer outlasts a probe, and a probe clears only its own failure`() = runBlocking {
@@ -43,6 +44,7 @@ class OrreryAnswerProblemTest {
             val path = req.url.encodedPath
             val json = { status: HttpStatusCode, body: String -> respond(body, status, headersOf(HttpHeaders.ContentType, "application/json")) }
             when {
+                proxied -> respond("<html><body>502 Bad Gateway</body></html>", HttpStatusCode.BadGateway)
                 path.startsWith("/apps/orrery/api/actions/") && req.method == HttpMethod.Post -> json(HttpStatusCode.Conflict, """{"error":"already answered"}""")
                 path == "/apps/orrery/api/state" -> json(probeStatus, "{}")
                 else -> json(HttpStatusCode.OK, "[]")
@@ -57,6 +59,14 @@ class OrreryAnswerProblemTest {
             assertTrue(refused.startsWith("Orrery did not take that answer") && "already answered" in refused, refused)
             repo.probe()
             assertEquals(refused, repo.answerProblem.value, "a probe is not an answer")
+
+            // The web server in front of a ship that is down: no answer,
+            // and the action back, never the ship refusing with its page.
+            proxied = true
+            repo.answer("a2", "dismissed")
+            withTimeout(5_000) { while (repo.answerProblem.value.let { it == null || it == refused }) delay(20) }
+            assertEquals("Your ship did not answer, so that answer was not given. Try it again.", repo.answerProblem.value)
+            proxied = false
 
             probeStatus = HttpStatusCode.InternalServerError
             repo.probe()

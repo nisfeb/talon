@@ -545,6 +545,7 @@ class OrreryApi(
         } catch (t: Throwable) {
             throw OrreryError.Unreachable(t)
         }
+        throwIfProxied(resp)
         if (resp.status.value == NOT_FOUND || resp.status.value == SCRY_FAILED) {
             scryable = false
             return null
@@ -619,15 +620,25 @@ class OrreryApi(
         return text
     }
 
-    /** Anything that stops a request arriving is [OrreryError.Unreachable]. */
-    private suspend fun send(client: HttpClient, path: String, build: HttpRequestBuilder.() -> Unit): HttpResponse =
-        try {
+    /**
+     * Anything that stops a request arriving is [OrreryError.Unreachable],
+     * and so is the web server in front of the ship answering for it.
+     */
+    private suspend fun send(client: HttpClient, path: String, build: HttpRequestBuilder.() -> Unit): HttpResponse {
+        val resp = try {
             client.request(root + path, build)
         } catch (c: CancellationException) {
             throw c
         } catch (t: Throwable) {
             throw OrreryError.Unreachable(t)
         }
+        throwIfProxied(resp)
+        return resp
+    }
+
+    private suspend fun throwIfProxied(resp: HttpResponse) {
+        proxyAnswered(resp)?.let { throw OrreryError.Unreachable(it) }
+    }
 
     private inline fun <T> reading(block: () -> T): T = try {
         block()
@@ -820,6 +831,26 @@ data class ItemAnswer(val id: String?, val ok: Boolean, val existing: Boolean, v
 
 data class ObserveAnswer(val bodies: List<ItemAnswer>, val observations: List<ItemAnswer>) {
     val refused: List<ItemAnswer> get() = (bodies + observations).filter { !it.ok }
+}
+
+/**
+ * The web server in front of a ship answering for it: 502 or 503 with no
+ * ship behind it (down, restarting), 504 for one too slow to answer.
+ * Taken for the ship's refusal, its HTML page was the reason given.
+ */
+class ProxyAnswered(val status: Int) : Exception("HTTP $status from the web server in front of the ship")
+
+/**
+ * A 502 to 504 that is not the app's own JSON, as [ProxyAnswered], else
+ * null. The apps send JSON 502s of their own (a vendor or a model that
+ * refused), and those stay refusals.
+ */
+internal suspend fun proxyAnswered(resp: HttpResponse): ProxyAnswered? {
+    val s = resp.status.value
+    if (s !in 502..504) return null
+    val text = io.nisfeb.talon.util.runSuspendCatching { resp.bodyAsText() }.getOrDefault("")
+    val json = runCatching { Json.parseToJsonElement(text) is JsonObject }.getOrDefault(false)
+    return if (json) null else ProxyAnswered(s)
 }
 
 sealed class OrreryError(message: String, cause: Throwable? = null) : Exception(message, cause) {

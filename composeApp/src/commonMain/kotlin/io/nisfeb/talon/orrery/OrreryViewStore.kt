@@ -55,9 +55,13 @@ class OrreryViewStore(
     val view: StateFlow<OrreryView?> = _view.asStateFlow()
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
-    /** Why the last ask got nothing; the kept answer is what shows meanwhile. */
-    private val _problem = MutableStateFlow<String?>(null)
-    val problem: StateFlow<String?> = _problem.asStateFlow()
+    /**
+     * Why the last ask got nothing, kept whole so the page can tell no
+     * answer from a key refused or orrery gone ([readProblemLine]); the
+     * kept answer is what shows meanwhile.
+     */
+    private val _problem = MutableStateFlow<Throwable?>(null)
+    val problem: StateFlow<Throwable?> = _problem.asStateFlow()
     private var asking: Job? = null
     private var restored = false
     /** A Refresh waiting for the read in flight to end. */
@@ -135,7 +139,7 @@ class OrreryViewStore(
                         _problem.value = null
                         keep(v, state = true)
                     }
-                    .onFailure { _problem.value = it.message ?: "no answer" }
+                    .onFailure { _problem.value = it }
             }
         } finally {
             _refreshing.value = false
@@ -162,3 +166,25 @@ class OrreryViewStore(
         private const val BEACON = "beacon"
     }
 }
+
+/**
+ * What a failed read of Orrery says, by what failed: the ship not
+ * answering, Orrery gone from it, this device's key refused, or Orrery's
+ * own words. Every failure read "The ship did not answer", a revoked key
+ * and an uninstalled Orrery among them.
+ */
+fun readProblemLine(e: Throwable): String = when {
+    e is OrreryError.Unreachable -> "Your ship did not answer"
+    e is OrreryError.Refused && e.status == 404 -> "Orrery is not on your ship now"
+    isKeyRefused(e) -> "Orrery no longer takes this device's key"
+    e is OrreryError.Refused -> io.nisfeb.talon.util.readableReason(e.reason)?.let { "Orrery could not be read: $it" } ?: "Orrery could not be read"
+    e is OrreryError.Garbled -> "Orrery's answer could not be read"
+    else -> io.nisfeb.talon.util.readableReason(e.message)?.let { "Orrery could not be read: $it" } ?: "Orrery could not be read"
+}
+
+/**
+ * The ship refused this device's key, as the pass reads a refusal: 403
+ * "forbidden". A 403 for a key's scope or a read-only key is not that,
+ * and a new key would not mend it.
+ */
+fun isKeyRefused(e: Throwable): Boolean = e is OrreryError.Refused && e.status == 403 && e.reason == "forbidden"

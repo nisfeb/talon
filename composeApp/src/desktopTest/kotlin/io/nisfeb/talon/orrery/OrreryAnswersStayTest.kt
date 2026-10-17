@@ -94,6 +94,23 @@ class OrreryAnswersStayTest {
         assertEquals(mapOf("a1" to "approved", "a2" to "approved"), repo.statuses())
     }
 
+    // Mark done and Remove on an approved action came back: the list still
+    // said approved, and "no longer a proposal" counted as shown.
+    @Test
+    fun `done or removed on an approved action stays gone while the ship still lists it approved`() = ship { repo ->
+        applied["a1"] = "approved"
+        applied["a2"] = "approved"
+        repo.refreshActions()
+        repo.answer("a1", "done")
+        repo.answer("a2", "dismissed")
+        withTimeout(5_000) { while (taken.size < 2) delay(20) }
+        repo.refreshActions()
+        assertEquals(mapOf("a3" to "proposed"), repo.statuses(), "neither came back")
+        taken.forEach { (id, s) -> applied[id] = s }
+        repo.refreshActions()
+        assertEquals(mapOf("a3" to "proposed"), repo.statuses())
+    }
+
     @Test
     fun `once the ship has shown an answer, its own word wins again`() = ship { repo ->
         repo.answer("a1", "approved")

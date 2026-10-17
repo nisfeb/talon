@@ -90,6 +90,10 @@ class PassPeopleTest {
         assertFalse(OrreryRepo.costTheShip(OrreryError.Refused(503, "unavailable")))
         assertTrue(OrreryRepo.costTheShip(OrreryError.Unreachable(RuntimeException(io.ktor.client.network.sockets.SocketTimeoutException("busy")))), "a wait on its busy thread")
         assertFalse(OrreryRepo.costTheShip(OrreryError.Unreachable(java.net.ConnectException("refused"))))
+        // A proxy's page is no answer now, not a refusal: the same rule by its status.
+        assertFalse(OrreryRepo.costTheShip(OrreryError.Unreachable(ProxyAnswered(502))))
+        assertFalse(OrreryRepo.costTheShip(OrreryError.Unreachable(ProxyAnswered(503))))
+        assertTrue(OrreryRepo.costTheShip(OrreryError.Unreachable(ProxyAnswered(504))), "the proxy waited on a busy ship")
         assertTrue(OrreryRepo.costTheShip(IllegalStateException("ours")))
         assertFalse(OrreryRepo.costTheShip(java.net.ConnectException("refused")))
     }

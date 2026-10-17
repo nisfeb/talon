@@ -70,8 +70,12 @@ class ArmillaryApi(
      * asks the ship to peek the vendor first, which it waits up to
      * thirty seconds for.
      */
-    suspend fun account(fresh: Boolean = false): Account =
-        accountOf(reading { Json.parseToJsonElement(request(HttpMethod.Get, if (fresh) "/api/account?fresh=1" else "/api/account")).jsonObject })
+    suspend fun account(fresh: Boolean = false): Account {
+        // Asked outside [reading]: inside it, no answer and a refusal both
+        // read as an answer that could not be read.
+        val text = request(HttpMethod.Get, if (fresh) "/api/account?fresh=1" else "/api/account")
+        return accountOf(reading { Json.parseToJsonElement(text).jsonObject })
+    }
 
     /**
      * Who this ship buys from. The ship says hello to a fresh vendor at
@@ -82,12 +86,16 @@ class ArmillaryApi(
     }
 
     /** The vendor's plans, read live through the ship. */
-    suspend fun plans(): List<Plan> =
-        plansOf(reading { Json.parseToJsonElement(request(HttpMethod.Get, "/api/plans")) })
+    suspend fun plans(): List<Plan> {
+        val text = request(HttpMethod.Get, "/api/plans")
+        return plansOf(reading { Json.parseToJsonElement(text) })
+    }
 
     /** The vendor's public catalog with its prices, read live through the ship. */
-    suspend fun catalog(): List<CatalogRow> =
-        catalogOf(reading { Json.parseToJsonElement(request(HttpMethod.Get, "/api/catalog")) })
+    suspend fun catalog(): List<CatalogRow> {
+        val text = request(HttpMethod.Get, "/api/catalog")
+        return catalogOf(reading { Json.parseToJsonElement(text) })
+    }
 
     /**
      * Open a checkout with the vendor. One of [plan] and [amountMicro],
@@ -207,15 +215,22 @@ class ArmillaryApi(
         return text
     }
 
-    /** Anything that stops a request arriving is [ArmillaryError.Unreachable]. */
-    private suspend fun send(path: String, build: HttpRequestBuilder.() -> Unit): HttpResponse =
-        try {
+    /**
+     * Anything that stops a request arriving is [ArmillaryError.Unreachable],
+     * and so is the web server in front of the ship answering for it. The
+     * ship's own 502 for a vendor that refused is JSON, and stays a refusal.
+     */
+    private suspend fun send(path: String, build: HttpRequestBuilder.() -> Unit): HttpResponse {
+        val resp = try {
             owner.request(root + path, build)
         } catch (c: CancellationException) {
             throw c
         } catch (t: Throwable) {
             throw ArmillaryError.Unreachable(t)
         }
+        io.nisfeb.talon.orrery.proxyAnswered(resp)?.let { throw ArmillaryError.Unreachable(it) }
+        return resp
+    }
 
     private inline fun <T> reading(block: () -> T): T = try {
         block()

@@ -33,6 +33,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.CopyOnWriteArrayList
@@ -58,6 +59,12 @@ class ArmillaryPaymentTest {
     @Volatile private var phaseRefused = false
     /** The desk is older than the phase route: GET /checkout/<nonce> 404s. */
     @Volatile private var phaseMissing = false
+    /** The account view's checkout rows, keyed by nonce as the vendor writes them. */
+    @Volatile private var checkouts = "{}"
+    /** How long the ship takes over a checkout, a vendor change or a cancel. */
+    @Volatile private var holdMs = 0L
+    /** Writes the ship finished, which a request cancelled midway never does. */
+    private val finished = CopyOnWriteArrayList<String>()
     private val puts = CopyOnWriteArrayList<Pair<String, String>>()
     /** Every request that went to OpenRouter, with whatever authorised it. */
     private val toOpenRouter = CopyOnWriteArrayList<String>()
@@ -88,16 +95,21 @@ class ArmillaryPaymentTest {
                     {"id":"big/tools","provider":"openrouter","in":1,"out":30000000,"tags":["zdr"]},
                     {"id":"huge/notools","provider":"openrouter","in":1,"out":90000000,"tags":["zdr"]}]""",
             )
-            path.endsWith("/apps/armillary/api/checkout") ->
+            path.endsWith("/apps/armillary/api/checkout") -> {
+                delay(holdMs)
+                finished += "checkout"
                 if (slowVendor) respond("""{"pending":true,"nonce":"n9"}""", HttpStatusCode.Accepted, json)
                 else ok("""{"url":"https://pay.example/c1","nonce":"n1"}""")
+            }
+            path.endsWith("/apps/armillary/api/vendor") -> { delay(holdMs); finished += "vendor"; ok("""{"ok":true}""") }
+            path.endsWith("/apps/armillary/api/cancel-subscription") -> { delay(holdMs); finished += "cancel"; ok("""{"ok":true}""") }
             path.endsWith("/apps/armillary/api/checkout/n9") -> when {
                 phaseMissing -> respond("", HttpStatusCode.NotFound)
                 phaseRefused -> ok("""{"phase":"answered","status":"refused","url":"","note":"Your card was declined."}""")
                 else -> ok("""{"phase":"answered","status":"pending","url":"https://pay.example/late","note":""}""")
             }
             path.endsWith("/apps/armillary/api/account") -> ok(
-                """{"ship":"~zod","balance":$balance,"plan":"","subscription":{"active":false},"lease":{},"checkouts":{},"vendor":"~nisfeb","self":"~zod","stale":3}""",
+                """{"ship":"~zod","balance":$balance,"plan":"","subscription":{"active":false},"lease":{},"checkouts":$checkouts,"vendor":"~nisfeb","self":"~zod","stale":3}""",
             )
             path.endsWith("/apps/orrery/api/settings") -> ok("""{"chat":{"enabled":true},"generator":$generator}""")
             path.endsWith("/apps/orrery/api/generator") && req.method == HttpMethod.Put -> {
@@ -116,12 +128,18 @@ class ArmillaryPaymentTest {
     private val setUp = AiProfile(providers = listOf(device, row), defaultModel = ModelRef(ARMILLARY_PROVIDER, ""), orrery = true)
 
     /** A ship and the Armillary repo, set up and refreshed once. */
+    /** What the repo told the person, as "title: body". */
+    private val told = CopyOnWriteArrayList<String>()
+    private val notifier = object : io.nisfeb.talon.notify.Notifier {
+        override fun notify(title: String, body: String, key: String?) { told += "$title: $body" }
+    }
+
     private inner class Rig(profile: AiProfile) : AutoCloseable {
         private val scope = CoroutineScope(SupervisorJob())
         val ai = FakeAiSettings().apply {
             applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "", model = null, savedProfile = profile))
         }
-        val repo = ArmillaryRepo(http, scope, ai)
+        val repo = ArmillaryRepo(http, scope, ai, notifier)
 
         init {
             repo.attach("https://ship.test", "~zod")
@@ -187,14 +205,123 @@ class ArmillaryPaymentTest {
         assertEquals("Your card was declined.", r.exceptionOrNull()?.message)
     }
 
+    // It said the checkout would appear "under your checkouts", which no
+    // screen shows, and nothing watched for it.
     @Test
-    fun `on a desk without the phase route a 202 stays pending and warns against ordering again`() = ship(setUp) { repo, _ ->
+    fun `on a desk without the phase route a 202 is watched, and its page offered once the vendor's row brings it`() = ship(setUp) { repo, _ ->
         slowVendor = true; phaseMissing = true
-        val r = repo.topUp("btcpay", null, 10_000_000)
-        assertTrue(r.isFailure)
-        assertTrue(
-            r.exceptionOrNull()?.message?.contains("Do not order again") == true,
-            "the pending message must warn against a duplicate order",
-        )
+        assertEquals(null, repo.topUp("btcpay", null, 10_000_000).getOrThrow(), "no page yet, and not a failure")
+        val waiting = repo.payment.value!!
+        assertEquals("n9" to Payment.Phase.WAITING, waiting.nonce to waiting.phase)
+        assertTrue(io.nisfeb.talon.ui.screens.paymentLine(waiting, null)!!.contains("Do not order again"))
+        checkouts = """{"n9":{"nonce":"n9","rail":"btcpay","amount":10000000,"url":"https://pay.example/late","status":"pending"}}"""
+        repo.refresh()
+        val row = repo.account.value!!.checkouts.single()
+        assertEquals("https://pay.example/late", io.nisfeb.talon.ui.screens.checkoutPage(repo.payment.value, row))
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `the card says to wait for a checkout with no page, then opens it once the vendor sends one`() = Rig(setUp).use { r ->
+        slowVendor = true; phaseMissing = true
+        runBlocking { r.repo.topUp("btcpay", null, 10_000_000).getOrThrow() }
+        val opened = CopyOnWriteArrayList<String>()
+        runComposeUiTest {
+            setContent {
+                TalonTheme(darkTheme = false) {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.compose.ui.platform.LocalUriHandler provides object : androidx.compose.ui.platform.UriHandler {
+                            override fun openUri(uri: String) { opened += uri }
+                        },
+                    ) {
+                        Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(r.ai, orrery = null, armillary = r.repo) }
+                    }
+                }
+            }
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Do not order again", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            assertTrue(onAllNodesWithText("Open the checkout").fetchSemanticsNodes().isEmpty(), "nothing to open yet")
+            checkouts = """{"n9":{"nonce":"n9","rail":"btcpay","amount":10000000,"url":"https://pay.example/late","status":"pending"}}"""
+            runBlocking { r.repo.refresh() }
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Open the checkout").fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("Open the checkout").performScrollTo().performClick()
+            assertEquals(listOf("https://pay.example/late"), opened.toList())
+        }
+    }
+
+    // Measured from a balance read before the checkout opened: spending
+    // since made a $5 payment $4.97, and a credit from elsewhere read as
+    // this checkout paid before anyone had paid it.
+    @Test
+    fun `the checkout's own row says it was paid, and how much`() {
+        balance = 10_000_000
+        ship(setUp) { repo, _ ->
+            repo.topUp("stripe", "five", null).getOrThrow()
+            balance = 14_970_000
+            checkouts = """{"n1":{"nonce":"n1","rail":"stripe","amount":5000000,"url":"https://pay.example/c1","status":"paid"}}"""
+            repo.refresh()
+            assertEquals(Payment.Phase.PAID to 5_000_000L, repo.payment.value!!.let { it.phase to it.addedMicro })
+            assertEquals(listOf("Armillary: $5.00 added"), told.toList(), "the person is told what they paid")
+        }
+    }
+
+    @Test
+    fun `a paid row with no amount says what the balance rose by, and one that ended says so`() {
+        balance = 10_000_000
+        ship(setUp) { repo, _ ->
+            repo.topUp("stripe", "five", null).getOrThrow()
+            balance = 15_000_000
+            checkouts = """{"n1":{"nonce":"n1","rail":"stripe","amount":0,"url":"https://pay.example/c1","status":"paid"}}"""
+            repo.refresh()
+            assertEquals(5_000_000L, repo.payment.value!!.addedMicro)
+        }
+        balance = 10_000_000
+        ship(setUp) { repo, _ ->
+            repo.topUp("stripe", "five", null).getOrThrow()
+            checkouts = """{"n1":{"nonce":"n1","rail":"stripe","amount":5000000,"url":"https://pay.example/c1","status":"expired"}}"""
+            repo.refresh()
+            assertEquals(Payment.Phase.ENDED, repo.payment.value!!.phase)
+        }
+    }
+
+    @Test
+    fun `with no row and no rise nothing is paid yet`() {
+        balance = 10_000_000
+        ship(setUp) { repo, _ ->
+            repo.topUp("stripe", "five", null).getOrThrow()
+            repo.refresh()
+            assertEquals(Payment.Phase.WAITING, repo.payment.value!!.phase)
+            assertEquals(emptyList(), told.toList())
+        }
+    }
+
+    @Test
+    fun `a credit from elsewhere is not this checkout paid`() {
+        balance = 10_000_000
+        ship(setUp) { repo, _ ->
+            repo.topUp("stripe", "five", null).getOrThrow()
+            balance = 15_000_000
+            checkouts = """{"n1":{"nonce":"n1","rail":"stripe","amount":5000000,"url":"https://pay.example/c1","status":"pending"}}"""
+            repo.refresh()
+            assertEquals(Payment.Phase.WAITING, repo.payment.value!!.phase, "its row says it is not paid")
+        }
+    }
+
+    // A screen's scope: leaving Settings while the vendor answered dropped
+    // the checkout it made, the vendor change, or the cancel.
+    @Test
+    fun `leaving the screen midway, a checkout, a vendor change and a cancel all finish`() = ship(setUp) { repo, _ ->
+        holdMs = 300
+        suspend fun leftMidway(write: suspend () -> Unit) {
+            val screen = CoroutineScope(SupervisorJob())
+            screen.launch { write() }
+            delay(100)
+            screen.coroutineContext.job.cancelAndJoin()
+        }
+        leftMidway { repo.topUp("stripe", "five", null) }
+        withTimeout(10_000) { while (repo.payment.value?.nonce != "n1") delay(20) }
+        assertEquals("https://pay.example/c1", repo.payment.value!!.url, "the card can still open its page")
+        leftMidway { repo.setVendor("~wex", "test") }
+        leftMidway { repo.cancelSubscription() }
+        withTimeout(10_000) { while (!finished.containsAll(listOf("checkout", "vendor", "cancel"))) delay(20) }
     }
 }

@@ -48,6 +48,7 @@ import io.nisfeb.talon.ui.screens.dollarsToMicro
 import io.nisfeb.talon.ui.screens.historyLines
 import io.nisfeb.talon.ui.screens.minTopUp
 import io.nisfeb.talon.ui.screens.paymentLine
+import io.nisfeb.talon.ui.screens.checkoutPage
 import io.nisfeb.talon.ui.screens.planLine
 import io.nisfeb.talon.ui.screens.subscribeLabel
 import io.nisfeb.talon.ui.screens.subscriptionLine
@@ -329,7 +330,7 @@ class AiSettingsSectionTest {
     @Test
     fun `the payment line follows the watch, and the row's status once it has spoken`() {
         fun row(status: String, note: String = "") = Checkout("n1", "https://pay.example/1", status, "stripe", 5_000_000L, note)
-        val waiting = Payment("n1", "stripe", 0L, Payment.Phase.WAITING)
+        val waiting = Payment("n1", "stripe", 0L, Payment.Phase.WAITING, url = "https://pay.example/1")
         assertNull(paymentLine(null, null))
         assertEquals("Waiting for your payment", paymentLine(waiting, null))
         assertEquals("Waiting for your payment", paymentLine(waiting, row("pending")))
@@ -348,6 +349,30 @@ class AiSettingsSectionTest {
         )
         // Once the balance rose the row's own status no longer matters.
         assertEquals("Paid: $1.00 added", paymentLine(waiting.copy(phase = Payment.Phase.PAID, addedMicro = 1_000_000L), row("processing")))
+    }
+
+    // A checkout the vendor made and whose answer had not come back said
+    // "Do not order again" and pointed to a list of checkouts no screen has.
+    @Test
+    fun `a checkout with no page yet says not to order again, and its page is offered once it comes`() {
+        fun row(status: String, url: String = "https://pay.example/late") = Checkout("n9", url, status, "btcpay", 10_000_000L)
+        val pending = Payment("n9", "btcpay", 0L, Payment.Phase.WAITING)
+        assertEquals("Your ship is waiting for the vendor's checkout. Do not order again: it opens from here when it comes", paymentLine(pending, null))
+        assertEquals(paymentLine(pending, null), paymentLine(pending, row("pending", url = "")))
+        assertNull(checkoutPage(pending, null), "nothing to open yet")
+        assertEquals("https://pay.example/late", checkoutPage(pending, row("pending")), "the vendor's row brings its page")
+        assertEquals(
+            "The vendor has not sent the checkout yet. Do not order again: Refresh to look for it.",
+            paymentLine(pending.copy(phase = Payment.Phase.UNSEEN), null),
+        )
+        // Opened here: its own page, to go back to.
+        val opened = pending.copy(url = "https://pay.example/1")
+        assertEquals("https://pay.example/1", checkoutPage(opened, null))
+        assertEquals("https://pay.example/1", checkoutPage(opened.copy(phase = Payment.Phase.UNSEEN), row("pending")))
+        // Nothing to pay any more: seen, paid or over.
+        for (over in listOf("processing", "paid", "failed", "expired", "refused")) assertNull(checkoutPage(opened, row(over)), over)
+        assertNull(checkoutPage(opened.copy(phase = Payment.Phase.PAID), null))
+        assertNull(checkoutPage(null, row("pending")))
     }
 
     @Test

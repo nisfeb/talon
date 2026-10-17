@@ -70,6 +70,7 @@ import io.nisfeb.talon.armillary.LedgerRow
 import io.nisfeb.talon.armillary.Payment
 import io.nisfeb.talon.armillary.Plan
 import io.nisfeb.talon.armillary.money
+import io.nisfeb.talon.armillary.keyProblemLine
 import io.nisfeb.talon.orrery.DecideSettings
 import io.nisfeb.talon.orrery.OrreryAvailability
 import io.nisfeb.talon.orrery.OrreryRepo
@@ -122,7 +123,7 @@ fun AiSettingsSection(
     val row = profile.armillary()
 
     Heading("Armillary")
-    Quiet("Talon's AI comes through Armillary on your ship: you top up, your ship pays for what you use, and every feature below runs on the models your vendor picks. They keep nothing they read.")
+    Quiet(armillaryIntro(io.nisfeb.talon.ui.isArmillaryPurchaseSupported))
     if (profile.ownKeysDropped) Row(verticalAlignment = Alignment.CenterVertically) {
         Quiet("Your own AI keys are no longer used. To use your own provider, manage models in Armillary.", error = true)
         TextButton(onClick = { edit { it.copy(ownKeysDropped = false) } }) { Text("OK") }
@@ -180,7 +181,7 @@ fun AiSettingsSection(
     Paid(AiFeature.CatchUp, "Catch-up", "Offers a summary when you open a chat with unread messages. Those messages go to the model when you tap it.")
     if (isAssistantSupported) Paid(
         AiFeature.Assistant, "Assistant",
-        "Ask about your chats, or have it send and reply for you. It asks before changing anything. Loops and quick dictation run on it, and only while it is on.",
+        assistantLine(isQuickDictationSupported),
     )
     // Where a party line can be recorded: there is nothing to transcribe elsewhere.
     if (isCallRecordingSupported) Paid(AiFeature.Transcription, "Call transcripts", "Writes recorded calls and party lines up as text, through Armillary's speech model.")
@@ -396,6 +397,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     val keyProblem by (repo?.keyProblem ?: noProblem).collectAsState()
     val noLocal = remember { MutableStateFlow(false) }
     val noPublicUrl by (repo?.noPublicUrl ?: noLocal).collectAsState()
+    val checkProblem by (repo?.error ?: noProblem).collectAsState()
     // The ship is its own vendor on its own key (armillary 34): it pays
     // nothing, so its zero balance is no reason, and there is nothing to buy.
     val free = inference?.free == true
@@ -433,10 +435,12 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         if (inFlight) return
         inFlight = true
         note = "Asking ${account?.vendor?.ifBlank { null } ?: "the vendor"} for a checkout. From some ships this takes a minute." to false
+        // The repo carries the checkout and its watch; this only waits to
+        // open the page. With none yet, the payment line says so.
         scope.launch {
             r.topUp(rail, plan, amountMicro)
-                .onSuccess { url -> inFlight = false; note = null; uri.openUri(url) }
-                .onFailure { inFlight = false; note = (it.message ?: "The vendor did not answer.") to true }
+                .onSuccess { url -> inFlight = false; note = null; url?.let { runCatching { uri.openUri(it) } } }
+                .onFailure { inFlight = false; note = keyProblemLine(it) to true }
         }
     }
 
@@ -445,7 +449,11 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         ArmillaryAvailability.PRESENT -> Unit
         ArmillaryAvailability.MISSING -> Quiet("Armillary is not on your ship. Install it from the Apps page.")
         ArmillaryAvailability.SIGNED_OUT -> Quiet("Signed out of the ship.")
-        ArmillaryAvailability.UNKNOWN -> Quiet("Checking your ship.")
+        ArmillaryAvailability.UNKNOWN -> {
+            Quiet("Checking your ship.")
+            // Why it is still checking, where a check failed.
+            checkProblem?.let { Quiet(it, error = true) }
+        }
     }
     if (where == ArmillaryAvailability.MISSING) Quiet("Armillary is published by ~ricsul-bilwyt, the same as Orrery and the Calendar.")
     account?.let { a ->
@@ -477,7 +485,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
                     scope.launch {
                         repo?.setVendor(typed, io.nisfeb.talon.ui.platformLabel)
                             ?.onSuccess { note = "Your account is with $typed now." to false }
-                            ?.onFailure { note = (it.message ?: "The ship did not answer.") to true }
+                            ?.onFailure { note = keyProblemLine(it) to true }
                     }
                 }) { Text("Use this vendor") }
                 TextButton(onClick = { changingVendor = false }) { Text("Keep it") }
@@ -486,11 +494,17 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         if (a.hasView && !free) {
             balanceWarning(a, io.nisfeb.talon.ui.isArmillaryPurchaseSupported)?.let { Quiet(it, error = true) }
             Quiet(planLine(a))
-            paymentLine(payment, a.checkouts.firstOrNull { it.nonce == payment?.nonce })?.let { line ->
+            val row = a.checkouts.firstOrNull { it.nonce == payment?.nonce }
+            paymentLine(payment, row)?.let { line ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (payment?.phase == Payment.Phase.WAITING) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                     Quiet(line, error = payment?.phase == Payment.Phase.ENDED)
                 }
+            }
+            // The page again: the browser closed, the screen left before
+            // it opened, or a checkout whose page the vendor sent late.
+            checkoutPage(payment, row)?.let { page ->
+                TextButton(onClick = { runCatching { uri.openUri(page) } }) { Text("Open the checkout") }
             }
         } else if (a.vendor.isNotBlank()) {
             IntroducingLine()
@@ -533,7 +547,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             note = null
             scope.launch {
                 val r = repo ?: return@launch
-                r.refresh(fresh = true).onFailure { note = (it.message ?: "The ship did not answer.") to true }
+                r.refresh(fresh = true).onFailure { note = keyProblemLine(it) to true }
                 // A device with no key asks again: nothing else on the card did.
                 if (r.inference.value == null && r.availability.value == ArmillaryAvailability.PRESENT) {
                     r.setUpDevice(io.nisfeb.talon.ui.platformLabel)
@@ -591,7 +605,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
                 scope.launch {
                     repo?.cancelSubscription()
                         ?.onSuccess { note = "Asked your ship to stop it renewing. The account says so once the vendor confirms." to false }
-                        ?.onFailure { note = (it.message ?: "The ship did not answer.") to true }
+                        ?.onFailure { note = keyProblemLine(it) to true }
                 }
             }) { Text("Cancel it") }
         },
@@ -611,7 +625,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
                     scope.launch {
                         repo?.deleteAccount()
                             ?.onSuccess { answer -> deleteRefusedLine(answer, a.vendor)?.let { note = it to true } }
-                            ?.onFailure { note = (it.message ?: "The ship did not answer.") to true }
+                            ?.onFailure { note = keyProblemLine(it) to true }
                     }
                 }) { Text("Delete account") }
             },
@@ -638,7 +652,7 @@ private fun BraveLeoLines(p: AiProvider, repo: ArmillaryRepo, leaseDisabled: Boo
         return
     }
     val inf = got.getOrElse {
-        Quiet("Your ship did not answer for Leo: " + (it.message ?: "no answer from the ship"), error = true)
+        Quiet(keyProblemLine(it), error = true)
         return
     }
     when (val s = leoSetup(inf, leaseDisabled, model, p.models)) {
@@ -848,13 +862,47 @@ internal fun paymentLine(p: Payment?, row: Checkout?): String? {
         "expired" -> return "The checkout expired before it was paid"
         "refused" -> return row.note.ifBlank { "The vendor refused the checkout" }
     }
+    // No page yet: the vendor made the checkout and its answer is still on
+    // the way. Ordering again only makes a second one nobody is sent to.
+    val noPage = p.url.isBlank() && row?.url.isNullOrBlank()
     return when (p.phase) {
-        Payment.Phase.WAITING ->
-            if (p.rail == ArmillaryRepo.BTC_RAIL) "Waiting for your bitcoin payment to confirm, usually ten to twenty minutes"
-            else "Waiting for your payment"
-        Payment.Phase.UNSEEN -> "No payment seen yet. If you paid, it arrives within a few minutes; Refresh to check."
+        Payment.Phase.WAITING -> when {
+            noPage -> "Your ship is waiting for the vendor's checkout. Do not order again: it opens from here when it comes"
+            p.rail == ArmillaryRepo.BTC_RAIL -> "Waiting for your bitcoin payment to confirm, usually ten to twenty minutes"
+            else -> "Waiting for your payment"
+        }
+        Payment.Phase.UNSEEN ->
+            if (noPage) "The vendor has not sent the checkout yet. Do not order again: Refresh to look for it."
+            else "No payment seen yet. If you paid, it arrives within a few minutes; Refresh to check."
         else -> null
     }
+}
+
+/**
+ * The page of the checkout this session opened, while paying it is
+ * still to do: its own URL, or the vendor's row's once that comes.
+ * Null once paid, seen, or over.
+ */
+internal fun checkoutPage(p: Payment?, row: Checkout?): String? {
+    if (p == null || (p.phase != Payment.Phase.WAITING && p.phase != Payment.Phase.UNSEEN)) return null
+    if (row != null && row.status != "pending") return null
+    return p.url.ifBlank { row?.url.orEmpty() }.ifBlank { null }
+}
+
+/** The AI section's first line. [canBuy] false names no top up (isArmillaryPurchaseSupported). */
+internal fun armillaryIntro(canBuy: Boolean): String =
+    "Talon's AI comes through Armillary on your ship: " + (if (canBuy) "you top up, your ship pays for what you use, " else "your ship pays for what you use, ") +
+        "and every feature below runs on the models your vendor picks. They keep nothing they read."
+
+/** The assistant's row, naming quick dictation only where there is any (isQuickDictationSupported). */
+internal fun assistantLine(quickDictation: Boolean): String =
+    "Ask about your chats, or have it send and reply for you. It asks before changing anything. " +
+        (if (quickDictation) "Loops and quick dictation run on it, and only while it is on." else "Loops run on it, and only while it is on.")
+
+/** What the pitch says Armillary pays for: the features this platform has. */
+internal fun pitchFeatures(assistant: Boolean, dictation: Boolean, transcripts: Boolean): String {
+    val all = listOfNotNull("Catch-up", "the assistant".takeIf { assistant }, "dictation".takeIf { dictation }, "call transcripts".takeIf { transcripts })
+    return if (all.size == 1) all.single() else all.dropLast(1).joinToString(", ") + " and " + all.last()
 }
 
 /** How many ledger rows the history shows, which is as many as the view carries. */
@@ -940,7 +988,7 @@ private fun StartWithArmillary(onStart: () -> Unit) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Turn on AI", style = MaterialTheme.typography.titleSmall)
             Text(
-                "Catch-up, the assistant, dictation and call transcripts, paid as you go from a few dollars. " +
+                pitchFeatures(isAssistantSupported, isQuickDictationSupported, isCallRecordingSupported) + ", paid as you go from a few dollars. " +
                     "Armillary buys the models for you through your own ship: no accounts to make and no keys " +
                     "to copy in. You top up, your ship spends it, and the balance is on this screen.",
                 style = MaterialTheme.typography.bodySmall,
@@ -1009,6 +1057,8 @@ private fun ReadingRow(orrery: OrreryRepo, here: Boolean, spent: Double?) {
                     else -> "Checking your ship for Orrery."
                 },
             )
+            // Why it is still checking, where a check failed.
+            if (availability == OrreryAvailability.UNKNOWN) error?.let { Quiet(it, error = true) }
             return@Column
         }
         // Always this device's own: it reads every call and status line unasked.

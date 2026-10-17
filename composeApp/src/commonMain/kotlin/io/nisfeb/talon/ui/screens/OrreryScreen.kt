@@ -95,6 +95,7 @@ fun OrreryRepoScreen(
         openItem = openItem,
         onOpenedItem = onOpenedItem,
         turnOn = if (on) null else orreryRepo::ensureEnabled,
+        setUpAgain = orreryRepo::enable,
     ) {
         OrreryActionsScreen(
             actions = actions,
@@ -127,7 +128,7 @@ fun OrreryScreen(
     view: io.nisfeb.talon.orrery.OrreryView?,
     refreshing: Boolean,
     /** Why the last ask got nothing. */
-    problem: String?,
+    problem: Throwable?,
     /** Opened (false) or Refresh (true): ask the ship if it is due. */
     onOpen: (Boolean) -> Unit,
     /** Read on entering the section, and on Refresh. */
@@ -141,6 +142,8 @@ fun OrreryScreen(
      *  the screen offers to turn it on, as Settings does, rather than
      *  failing to read with "This install has no orrery key yet." */
     turnOn: (suspend () -> Result<Unit>)? = null,
+    /** A new key for this device, offered where the ship refused the one it has. */
+    setUpAgain: (suspend () -> Result<Unit>)? = null,
     actionsTab: @Composable () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -201,22 +204,25 @@ fun OrreryScreen(
             selected = tab.ordinal,
             onSelect = { tab = OrreryTab.entries[it]; stack = emptyList() },
         )
-        // Kept data on show and the ship not answering: say how old it is.
+        // Kept data on show and the last ask failed: say why, and how old it is.
         if (problem != null && view != null && tab != OrreryTab.ACTIONS) {
             Text(
-                "The ship did not answer; this is as of ${formatClock(view.atMs)}.",
+                "${io.nisfeb.talon.orrery.readProblemLine(problem)}; this is as of ${formatClock(view.atMs)}.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
         }
+        if (problem != null && setUpAgain != null && tab != OrreryTab.ACTIONS && io.nisfeb.talon.orrery.isKeyRefused(problem)) {
+            SetUpAgain(setUpAgain) { onOpen(true) }
+        }
         val open = stack.lastOrNull()
         when {
-            open != null -> ItemPage(open, byId[open], loaded = state != null, byId, me, plan) { stack = stack + it }
+            open != null -> ItemPage(byId[open], loaded = state != null, byId, me, plan) { stack = stack + it }
             tab == OrreryTab.ACTIONS -> actionsTab()
             state == null && turnOn != null -> NotOnHere(turnOn) { onOpen(true) }
             state == null -> Text(
-                problem?.let { "Orrery could not be read: $it" } ?: "Looking…",
+                problem?.let { io.nisfeb.talon.orrery.readProblemLine(it) + "." } ?: "Looking…",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (problem != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
@@ -291,7 +297,6 @@ private val SHOWN = setOf("next", "starts", "ends", "location", "address", "part
  */
 @Composable
 private fun ItemPage(
-    id: String,
     item: OrreryItem?,
     loaded: Boolean,
     byId: Map<String, OrreryItem>,
@@ -301,7 +306,8 @@ private fun ItemPage(
 ) {
     if (item == null) {
         Text(
-            if (loaded) "Orrery has nothing under $id now." else "Looking…",
+            // Not the id: "person/kid" means nothing to the owner.
+            if (loaded) "Orrery no longer has this." else "Looking…",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(16.dp),
         )
@@ -366,6 +372,28 @@ private fun timeSpan(startMs: Long, endMs: Long?): String =
 
 private fun leaveLine(p: LeaveBy): String =
     "Leave by ${formatClock(p.leaveByMs)}" + (if (p.minutes > 0) " · ${p.minutes} min with traffic" else "")
+
+/**
+ * The ship refused this device's key: a new one, made as turning Orrery
+ * on makes it, and the page read again with it.
+ */
+@Composable
+private fun SetUpAgain(setUp: suspend () -> Result<Unit>, onDone: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var why by remember { mutableStateOf<String?>(null) }
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        io.nisfeb.talon.ui.TextButton(enabled = !busy, onClick = {
+            why = null
+            busy = true
+            scope.launch {
+                setUp().onSuccess { onDone() }.onFailure { why = io.nisfeb.talon.orrery.readProblemLine(it) + "." }
+                busy = false
+            }
+        }) { Text(if (busy) "Setting up…" else "Set up this device again") }
+        why?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+    }
+}
 
 /**
  * Orrery is on, but this install has no key of its own yet to read it

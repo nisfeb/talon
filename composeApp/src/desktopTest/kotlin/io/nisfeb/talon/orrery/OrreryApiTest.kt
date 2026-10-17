@@ -253,9 +253,30 @@ class OrreryApiTest {
     fun `a refused key or schema is a refusal, not an answer that could not be read`() = runTest {
         val mint = assertFailsWith<OrreryError.Refused> { api(HttpStatusCode.InternalServerError, """{"error":"no keys today"}""").mint("Talon on x", "talon/x") }
         assertEquals(500 to "no keys today", mint.status to mint.reason)
-        val schema = assertFailsWith<OrreryError.Refused> { api(HttpStatusCode.ServiceUnavailable, "down").schema() }
-        assertEquals(503, schema.status, "a proxy with no ship behind it cost the ship nothing")
+        val schema = assertFailsWith<OrreryError.Refused> { api(HttpStatusCode.ServiceUnavailable, """{"error":"schema: busy"}""").schema() }
+        assertEquals(503 to "schema: busy", schema.status to schema.reason, "orrery's own 503 is its refusal")
         assertFailsWith<OrreryError.Garbled> { api(body = "not json").mint("Talon on x", "talon/x") }
+    }
+
+    // nginx's page for a ship that is down or restarting was read as the
+    // ship refusing, with "the ship answered with an error page" as why.
+    @Test
+    fun `a proxy's page for a ship that is down is no answer, never a refusal`() = runTest {
+        val page = "<html><body><h1>502 Bad Gateway</h1></body></html>"
+        for (status in listOf(HttpStatusCode.BadGateway, HttpStatusCode.ServiceUnavailable, HttpStatusCode.GatewayTimeout)) {
+            val e = assertFailsWith<OrreryError.Unreachable> { api(status, page).probe() }
+            assertEquals(status.value, (e.cause as ProxyAnswered).status)
+            assertFailsWith<OrreryError.Unreachable> { api(status, "").actions("t") }
+        }
+        // Only those three: a 501 or a 505 page is the ship's own refusal.
+        for (status in listOf(HttpStatusCode.NotImplemented, HttpStatusCode.VersionNotSupported)) {
+            assertEquals(status.value, assertFailsWith<OrreryError.Refused> { api(status, page).probe() }.status)
+        }
+        val (scry, _) = ship { HttpStatusCode.BadGateway to page }
+        assertFailsWith<OrreryError.Unreachable> { scry.beacon() }
+        // Orrery's own 502, its model failing, is still the refusal it is.
+        assertEquals("Orrery's model did not answer: the model answered 500", api(HttpStatusCode.BadGateway, """{"error":"the model answered 500"}""").instruct("x").note)
+        assertFailsWith<OrreryError.Refused> { api(HttpStatusCode.BadGateway, """{"error":"vendor: no"}""").actions("t") }
     }
 
     // ---- reads by scry (grubbery's file scry, as ricsul answered it on 2026-10-06) ----

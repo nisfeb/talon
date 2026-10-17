@@ -80,6 +80,8 @@ class OrreryAiRowsTest {
         val path = req.url.encodedPath.substringAfter("/apps/orrery")
         val json = { status: HttpStatusCode, body: String -> respond(body, status, headersOf(HttpHeaders.ContentType, "application/json")) }
         when {
+            // nginx's page, for a ship that is down or restarting.
+            path == "/api/state" && probe == HttpStatusCode.BadGateway -> respond("<html><body>502 Bad Gateway</body></html>", probe)
             path == "/api/state" -> json(probe, "{}")
             path == "/api/clients" && req.method == HttpMethod.Post -> json(HttpStatusCode.InternalServerError, """{"error":"no keys today"}""")
             path == "/api/generator" && req.method == HttpMethod.Put -> {
@@ -108,6 +110,8 @@ class OrreryAiRowsTest {
         /** This install already feeds orrery, so triage's row is open. */
         fed: Boolean = false,
         content: @androidx.compose.runtime.Composable (FakeAiSettings, OrreryRepo) -> Unit = { ai, o -> OrrerySettingsSection(ai, orrery = o) },
+        /** Wait for the ship to say whether orrery is there; false for a ship that has not. */
+        answered: Boolean = true,
         block: ComposeUiTest.(FakeAiSettings, OrreryRepo) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-orrery-ai-").toFile()
@@ -128,7 +132,7 @@ class OrreryAiRowsTest {
                         Column(Modifier.verticalScroll(rememberScrollState())) { content(ai, orrery) }
                     }
                 }
-                waitUntil(timeoutMillis = 5_000) { orrery.availability.value != OrreryAvailability.UNKNOWN }
+                if (answered) waitUntil(timeoutMillis = 5_000) { orrery.availability.value != OrreryAvailability.UNKNOWN }
                 waitForIdle()
                 block(ai, orrery)
             }
@@ -162,6 +166,19 @@ class OrreryAiRowsTest {
         }
         probe = HttpStatusCode.Forbidden
         rows { _, _ -> waitUntil(timeoutMillis = 5_000) { shows("Signed out of your ship.") } }
+    }
+
+    // A 502 while the ship restarted: the row said "Checking your ship for
+    // Orrery." all session, with the reason hidden.
+    @Test
+    fun `a check that failed is said under the reading row, and that it is asked again`() {
+        probe = HttpStatusCode.BadGateway
+        rows(answered = false) { _, orrery ->
+            waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer. Talon asks again by itself.") }
+            assertTrue(shows("Checking your ship for Orrery."))
+            assertFalse(shows("Bad Gateway"), "never the proxy's page")
+            assertEquals(OrreryAvailability.UNKNOWN, orrery.availability.value)
+        }
     }
 
     // No switch of its own: Use Orrery makes the key. Try again is for when that failed.

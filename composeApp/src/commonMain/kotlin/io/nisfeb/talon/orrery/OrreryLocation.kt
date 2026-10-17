@@ -96,7 +96,14 @@ suspend fun sendLocation(
     name: String?,
     /** The key's client, which carries no cookie. */
     bare: HttpClient = keyClient,
+    /**
+     * Whether the owner still shares where they are, asked before each
+     * send: a fix waiting for the network outlived the switch going off,
+     * and the place read can take seconds of a busy ship.
+     */
+    sharing: () -> Boolean = { true },
 ): Result<Unit> = runCatching {
+    if (!sharing()) return Result.success(Unit)
     val token = db.orreryAccounts().get(ship)?.token ?: return Result.success(Unit)
     val api = OrreryApi(http, bare, url)
     val sent = db.orrerySent()
@@ -107,7 +114,7 @@ suspend fun sendLocation(
     val state = knownPlaces(api, sent, ship, token, fix.atMs)
     val last = sent.get(ship, LAST_KEY)?.value?.let { runCatching { kotlinx.serialization.json.Json.parseToJsonElement(it) }.getOrNull() }
     val value = locationValue(fix, geoPlaces(state), name, last) ?: return Result.success(Unit)
-    if (value == last) return Result.success(Unit)
+    if (value == last || !sharing()) return Result.success(Unit)
     val me = OrreryText.me(state)
     val obs = Obs(me, "location", value, fix.atMs, conf = if (value is JsonObject) 90 else 80, sourceKind = "device", sourceId = "location")
     val answer = api.observe(batches(Facts(emptyList(), listOf(obs))).single(), token)
