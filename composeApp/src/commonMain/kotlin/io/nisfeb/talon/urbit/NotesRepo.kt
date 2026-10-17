@@ -488,7 +488,13 @@ class NotesRepo(
         groupFlag: String,
         title: String,
         readers: Set<String> = emptySet(),
-    ): String? {
+    ): String? = scope.async {
+        // On the repo's scope, like write(): made from a group's admin page,
+        // leaving it while the host answered lost the notebook it made.
+        createGroupNotebookNow(groupFlag, title, readers)
+    }.await()
+
+    private suspend fun createGroupNotebookNow(groupFlag: String, title: String, readers: Set<String>): String? {
         val ch = channel ?: return null
         val group = NotesFlag.parse(groupFlag) ?: run {
             Log.w(TAG, "createGroupNotebook: bad group flag $groupFlag")

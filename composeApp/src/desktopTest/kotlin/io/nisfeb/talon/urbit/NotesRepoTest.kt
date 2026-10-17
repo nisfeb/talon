@@ -288,4 +288,21 @@ class NotesRepoTest {
         assertNull(db.notes().note(book.flagString, 11), "the host took it: it stays gone")
     }
 
+    // Made from a group's page, on that page's scope: leaving while the
+    // host answered lost the notebook it made from the cache and the stream.
+    @Test
+    fun `a group notebook made from a page that is left still finishes`() = live {
+        ship.answerApi = { method, path, _ ->
+            if (method == "POST" && path == "/notes/~/v1/notebooks") {
+                Thread.sleep(500)
+                """{"body":{"type":"notebook","notebook":${summary()}}}"""
+            } else null
+        }
+        val page = CoroutineScope(SupervisorJob())
+        page.launch { notes.createGroupNotebook("~bus/garden", "Recipes") }
+        delay(150)
+        page.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+        kotlinx.coroutines.withTimeout(5_000) { while (db.notes().notebook(book.flagString) == null) delay(50) }
+        assertEquals(listOf("Pho"), titles(), "read in, as when the page stays")
+    }
 }
