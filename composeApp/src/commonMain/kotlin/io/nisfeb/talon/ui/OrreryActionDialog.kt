@@ -324,12 +324,21 @@ private enum class Saying { NOTHING, REFINE, TELL, REJECT }
 /** The reasons the client guide gives as examples, one tap each; the owner's own words go in the field. */
 val DISMISS_REASONS = listOf("just the event", "I always do this")
 
-/** The event as the owner reads it: local times, and the place where there is one. */
-private fun whenLine(e: io.nisfeb.talon.orrery.EventToAdd): String {
-    val zone = kotlinx.datetime.TimeZone.currentSystemDefault()
+/**
+ * The event as the owner reads it: local times, and the place where there
+ * is one. A day given with no time is that day, read where it was said
+ * (midnight UTC): read locally, west of UTC it showed the evening before.
+ */
+internal fun whenLine(e: io.nisfeb.talon.orrery.EventToAdd, zone: kotlinx.datetime.TimeZone = kotlinx.datetime.TimeZone.currentSystemDefault()): String {
+    val place = e.location?.takeIf { it.isNotBlank() }?.let { ", $it" } ?: ""
+    if (e.bareDate) {
+        fun day(ms: Long) = kotlin.time.Instant.fromEpochMilliseconds(ms).toLocalDateTime(kotlinx.datetime.TimeZone.UTC).date
+        val last = e.endMs?.let(::day)?.takeIf { it > day(e.startMs) }
+        return "${e.title}, ${day(e.startMs)}" + (last?.let { " to $it" } ?: "") + place
+    }
     fun at(ms: Long) = kotlin.time.Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone)
     val start = at(e.startMs)
     val end = e.endMs?.let(::at)
     val span = "${start.date} ${start.time}" + (end?.let { if (it.date == start.date) " to ${it.time}" else " to ${it.date} ${it.time}" } ?: "")
-    return "${e.title}, $span" + (e.location?.takeIf { it.isNotBlank() }?.let { ", $it" } ?: "")
+    return "${e.title}, $span$place"
 }
