@@ -105,6 +105,8 @@ class CallController(
     /** Fallback ICE and sidecar this build ships, adopted by a ship
      *  that has none. [CallDefaults.None] adopts nothing. */
     private val defaults: CallDefaults = CallDefaults.None,
+    /** How long a lost path may take to come back. A knob for tests. */
+    private val restartGiveUpMs: Long = RESTART_GIVE_UP_MS,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     private val _state = MutableStateFlow<CallUiState>(CallUiState.None)
@@ -281,7 +283,7 @@ class CallController(
         loop = scope.launch { runLoop() }
         scope.launch {
             io.nisfeb.talon.util.NetworkChanges.events.collect {
-                if (_state.value is CallUiState.Active && isCaller) tryIceRestart("network changed")
+                if (_state.value is CallUiState.Active && isCaller) tryIceRestart("network changed", mediaLost = false)
             }
         }
     }
@@ -1707,6 +1709,10 @@ class CallController(
                         scope.launch { poke(recv.from, TrunkSig.Hangup(old)) }
                     }
                     callId = sig.id
+                    // Theirs now, so they restart ice, not us: still the
+                    // caller here, a network change sent a restart offer
+                    // they ignore, and the call ended 25 s later.
+                    isCaller = false
                     pendingOffer = CompletableDeferred()
                     _state.value = CallUiState.Incoming(recv.from)
                     armRingWatchdog()
@@ -1878,7 +1884,7 @@ class CallController(
                         // (the unavailable-engine says how to fix the
                         // mic). Ending here first replaced it with a
                         // generic "connection failed".
-                        if (_state.value is CallUiState.Active) tryIceRestart("media failed")
+                        if (_state.value is CallUiState.Active) tryIceRestart("media failed", mediaLost = true)
                     }
                     else -> {
                         val cur = _state.value
@@ -1894,8 +1900,10 @@ class CallController(
      * caller sends a fresh offer with ICE restart over the same
      * signaling; the callee answers in place. Either side gives up and
      * hangs up if media is not back within [RESTART_GIVE_UP_MS].
+     * [mediaLost] is false for a network change, which says nothing yet
+     * about whether the call still works.
      */
-    private fun tryIceRestart(why: String) {
+    private fun tryIceRestart(why: String, mediaLost: Boolean) {
         val eng = engine ?: return
         val id = callId ?: return
         val p = peer ?: return
@@ -1908,6 +1916,16 @@ class CallController(
                     Log.w(TAG, "ice restart: $why")
                     val offer = runCatching { eng.restartIce() }.getOrNull()
                     if (offer == null) {
+                        restarting = false
+                        // An engine that cannot restart (iOS has no restartIce
+                        // yet) ended every call whose phone changed networks,
+                        // one losing cellular in a lift among them, though
+                        // most calls carry on over the path left. Failed
+                        // media comes back here and ends it if not.
+                        if (!mediaLost) {
+                            Log.i(TAG, "no ice restart here; the call goes on unless its media fails")
+                            return@launch
+                        }
                         endCall("connection failed")
                         return@launch
                     }
@@ -1916,7 +1934,7 @@ class CallController(
             } else {
                 Log.w(TAG, "waiting for the caller to restart ice: $why")
             }
-            delay(RESTART_GIVE_UP_MS)
+            delay(restartGiveUpMs)
             val cur = _state.value
             if (restartToken == token && cur is CallUiState.Active && cur.media != MediaState.Live) {
                 endCall("connection failed")
@@ -1952,6 +1970,11 @@ class CallController(
         }
         ringToken++
         connectToken++
+        // The restart is this call's: left set, the next call never
+        // restarted, and its give-up timer could end the next call while
+        // it was still connecting.
+        restarting = false
+        restartToken++
         mediaWatch?.cancel()
         mediaWatch = null
         engine?.close()
