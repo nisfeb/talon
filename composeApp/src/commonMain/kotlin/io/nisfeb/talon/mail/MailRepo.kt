@@ -997,17 +997,25 @@ class MailRepo(
         call { _rules.value = it.rules() }
     }
 
-    suspend fun saveRule(r: Rule) = mutate(::refreshRules) { it.saveRule(r) }
+    /**
+     * [block] on this repo's scope, awaited. A filter or list saved from the
+     * organise sheet ran on the sheet's scope, and closing the sheet while a
+     * busy ship held the write cancelled it. A failure is caught inside and
+     * thrown here: an async that fails takes a scope with a plain Job with it.
+     */
+    private suspend fun <T> carry(block: suspend () -> T): T = scope.async { runSuspendCatching { block() } }.await().getOrThrow()
 
-    suspend fun deleteRule(id: String) = mutate(::refreshRules) { it.deleteRule(id) }
+    suspend fun saveRule(r: Rule) = carry { mutate(::refreshRules) { it.saveRule(r) } }
+
+    suspend fun deleteRule(id: String) = carry { mutate(::refreshRules) { it.deleteRule(id) } }
 
     suspend fun refreshLists() {
         call { _lists.value = it.lists() }
     }
 
-    suspend fun saveList(l: MailingList) = mutate(::refreshLists) { it.saveList(l) }
+    suspend fun saveList(l: MailingList) = carry { mutate(::refreshLists) { it.saveList(l) } }
 
-    suspend fun deleteList(name: String) = mutate(::refreshLists) { it.deleteList(name) }
+    suspend fun deleteList(name: String) = carry { mutate(::refreshLists) { it.deleteList(name) } }
 
     // ---- drafts --------------------------------------------------------
 

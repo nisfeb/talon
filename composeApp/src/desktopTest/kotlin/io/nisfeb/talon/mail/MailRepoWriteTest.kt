@@ -395,6 +395,39 @@ class MailRepoWriteTest {
 
     // ─── filters and lists, past the sheet ──────────────────────────
 
+    // Saved from the organise sheet, on the sheet's scope: closing it while
+    // a busy ship held the write cancelled it.
+    @Test
+    fun `a filter or a list saved from a sheet that closes still lands`() {
+        val landed = CopyOnWriteArrayList<String>()
+        withRepo({ req ->
+            val path = req.url.encodedPath
+            when {
+                req.method.value == "POST" -> { delay(600); landed += path.substringAfter("/api/"); jsonOk(this, "{}") }
+                path.endsWith("/api/inbox") -> jsonOk(this, pageWith())
+                path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+                else -> jsonOk(this, "[]")
+            }
+        }) { r, hits ->
+            r.attach("https://ship.example")
+            settle(r)
+            val writes: List<Pair<String, suspend () -> Boolean>> = listOf(
+                "rule" to { r.saveRule(Rule("r1", from = "~zod")) },
+                "rule-delete" to { r.deleteRule("r1") },
+                "list" to { r.saveList(MailingList("team", listOf("~nec"))) },
+                "list-delete" to { r.deleteList("team") },
+            )
+            for ((route, write) in writes) {
+                val sheet = CoroutineScope(SupervisorJob())
+                sheet.launch { write() }
+                delay(150)
+                sheet.cancel()
+                until("$route to land") { route in landed }
+            }
+            until("the lists read again behind them") { hits.any { it.endsWith("/api/rules") } && hits.any { it.endsWith("/api/lists") } }
+        }
+    }
+
     // ─── filing to Lattice ──────────────────────────────────────────
 
 }
