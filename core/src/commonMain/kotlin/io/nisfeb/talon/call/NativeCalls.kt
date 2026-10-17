@@ -56,3 +56,12 @@ fun callEnd(incoming: Boolean, answered: Boolean, end: CallUiState): CallEnd = w
     end is CallUiState.Ended -> CallEnd.Remote
     else -> CallEnd.Local
 }
+
+/**
+ * The outgoing call reported under [reported] that a ring now showing
+ * under [ringing] leaves behind, or null. Glare adopts the peer's ring
+ * in place of our own call, and that call is over: left, it stood as a
+ * second call on the phone.
+ */
+fun abandonedOutgoing(reported: String?, outgoing: Boolean, ringing: String?): String? =
+    reported?.takeIf { outgoing && it != ringing }

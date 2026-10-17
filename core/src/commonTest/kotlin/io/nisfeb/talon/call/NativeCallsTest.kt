@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** What the phones' own call surfaces are told; the wiring around it needs a phone. */
@@ -41,5 +42,13 @@ class NativeCallsTest {
         assertEquals(CallEnd.Remote, callEnd(incoming = true, answered = true, end = ended("ended")))
         assertEquals(CallEnd.Remote, callEnd(incoming = false, answered = false, end = ended("no answer")))
         assertEquals(CallEnd.Local, callEnd(incoming = false, answered = true, end = none))
+    }
+
+    @Test
+    fun glareEndsTheOutgoingCallItReplaced() {
+        assertEquals("ours", abandonedOutgoing(reported = "ours", outgoing = true, ringing = "theirs"))
+        assertNull(abandonedOutgoing(reported = "ours", outgoing = true, ringing = "ours"), "the same call")
+        assertNull(abandonedOutgoing(reported = "theirs", outgoing = false, ringing = "theirs"), "a ring reported from the push")
+        assertNull(abandonedOutgoing(reported = null, outgoing = true, ringing = "theirs"))
     }
 }
