@@ -41,9 +41,13 @@ fun desktopUpdateFlavor(appImagePath: String?, osName: String): DesktopUpdateFla
  * The detached waiter that upgrades a Windows install after Talon has
  * exited: wait for [pid] to be gone, run the MSI with no reboot (the
  * files are free by then, so none is needed), then start the upgraded
- * launcher at [appPath]. PowerShell single-quotes each argument, so a
- * space in a path (Program Files) survives; a literal single quote in
- * a path is doubled, which is its PowerShell escape.
+ * launcher at [appPath]. PowerShell single-quotes each path, so a space
+ * in one (Program Files) survives; a literal single quote in a path is
+ * doubled, which is its PowerShell escape. Start-Process joins its
+ * -ArgumentList with spaces and quotes nothing, so msiexec would split
+ * an MSI path with a space in it (C:\Users\Jo Smith\...): the path goes
+ * in double quotes, made with [char]34 so no literal " has to survive
+ * the command line Java builds for powershell.exe.
  *
  * Pure so a test can pin the flags without spawning anything. msiexec
  * self-elevates for a per-machine product, so no RunAs is forced on a
@@ -54,7 +58,7 @@ internal fun windowsUpdateCommand(pid: Long, msiPath: String, appPath: String): 
     return listOf(
         "powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
         "Wait-Process -Id $pid -ErrorAction SilentlyContinue; " +
-            "Start-Process msiexec -Wait -ArgumentList '/i','${q(msiPath)}','/norestart'; " +
+            "Start-Process msiexec -Wait -ArgumentList ('/i ' + [char]34 + '${q(msiPath)}' + [char]34 + ' /norestart'); " +
             "Start-Process -FilePath '${q(appPath)}'",
     )
 }
