@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.ContactEntity
@@ -386,7 +387,7 @@ private fun ResultRow(m: MessageEntity, contactMap: ContactMap, onClick: () -> U
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(preview, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
+        Text(preview, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -432,12 +433,14 @@ private fun GroupRow(
                 label,
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 "Group",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -472,6 +475,7 @@ private fun PersonRow(
                 label,
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             // Subtitle: real patp when we showed a nickname above, or
             // a "tap to start" hint when this contact has never shown
@@ -485,12 +489,14 @@ private fun PersonRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 !hasChatHistory -> Text(
                     "${io.nisfeb.talon.ui.tapWord} to start a DM",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             // If the contact has both a nickname AND no chat history,
@@ -501,6 +507,7 @@ private fun PersonRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import io.nisfeb.talon.urbit.MENTION_TAG
@@ -689,7 +690,7 @@ private fun InlineCitation(cite: StoryPart.Citation) {
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
             )
             if (body.isNotBlank()) {
-                Text(body, style = MaterialTheme.typography.bodyMedium, maxLines = 3)
+                Text(body, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
         } else {
             Text(
