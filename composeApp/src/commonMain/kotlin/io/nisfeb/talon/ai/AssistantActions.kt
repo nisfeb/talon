@@ -392,6 +392,51 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             if (shown.isEmpty()) "Nothing between $from and $to."
             else shown.take(100).joinToString("\n") { describeRow(it, zone, names) }
         })
+        // "When am I free Saturday afternoon?"
+        add(Tool(
+            spec = ToolSpec(
+                "find_free_time",
+                "When the user is free: the gaps between timed events each day from from to to, inside a daily window, none in the past. " +
+                    "All-day events and tasks do not count as busy; list_events shows them.",
+                toolSchema(
+                    "from" to ("string" to "YYYY-MM-DD (default today)."),
+                    "to" to ("string" to "YYYY-MM-DD inclusive (default from)."),
+                    "start" to ("string" to "HH:MM each day's window opens (default 08:00)."),
+                    "end" to ("string" to "HH:MM it closes (default 21:00)."),
+                    "min_minutes" to ("integer" to "The shortest gap worth saying (default 30)."),
+                    required = emptyList(),
+                ),
+            ),
+            write = false,
+        ) { args ->
+            val zone = a.zone()
+            val now = nowMs()
+            val today = Instant.fromEpochMilliseconds(now).toLocalDateTime(zone).date
+            val from = parseDate(args.text("from")) ?: today
+            val to = parseDate(args.text("to")) ?: from
+            if (to < from) return@Tool "Error: to is before from."
+            if (from.plus(31, DateTimeUnit.DAY) < to) return@Tool "Error: at most a month at once."
+            val open = parseClock(args.text("start")) ?: (8 * 60)
+            val close = parseClock(args.text("end")) ?: (21 * 60)
+            if (close <= open) return@Tool "Error: end is not after start."
+            val minMs = (args.int("min_minutes") ?: 30).coerceIn(5, 24 * 60) * 60_000L
+            val fromMs = from.atTime(0, 0).toInstant(zone).toEpochMilliseconds()
+            val toMs = to.plus(1, DateTimeUnit.DAY).atTime(0, 0).toInstant(zone).toEpochMilliseconds()
+            val rows = cal.windowRows(fromMs, toMs) ?: return@Tool "The calendar did not answer."
+            val busy = rows.filter { !it.all && !it.isTask && it.r > fromMs && it.l < toMs }
+            a.onEvents(busy, from, to)
+            fun hm(ms: Long) = Instant.fromEpochMilliseconds(ms).toLocalDateTime(zone).let { "${it.hour.toString().padStart(2, '0')}:${it.minute.toString().padStart(2, '0')}" }
+            generateSequence(from) { d -> d.plus(1, DateTimeUnit.DAY).takeIf { it <= to } }.map { d ->
+                val window = d.atTime(open / 60, open % 60).toInstant(zone).toEpochMilliseconds() to
+                    d.atTime(close / 60, close % 60).toInstant(zone).toEpochMilliseconds()
+                val free = freeSlots(busy.map { it.l to it.r }, window, minMs, now)
+                "$d ${d.dayOfWeek.name.take(3).lowercase()}: " + when {
+                    window.second <= now -> "past"
+                    free.isEmpty() -> "no gap of ${minMs / 60_000} min between ${hm(window.first)} and ${hm(window.second)}"
+                    else -> free.joinToString(", ") { (s, e) -> "${hm(s)}–${hm(e)}" }
+                }
+            }.joinToString("\n")
+        })
         add(Tool(
             spec = ToolSpec(
                 "update_event",
@@ -786,6 +831,26 @@ internal fun saneCount(v: Int): Int = v.coerceIn(0, 1000)
 
 private fun mailLines(threads: List<io.nisfeb.talon.mail.InboxEntry>): String = threads.joinToString("\n") {
     "thread=${it.id} link=${io.nisfeb.talon.urbit.TalonLink.forMail(it.id)} from=${it.from} participants=${it.participants.joinToString(",")} subject=${it.subject.ifBlank { "(no subject)" }}${if (it.unread) " unread" else ""}"
+}
+
+/**
+ * What is left of [window] once [busy] is taken out: the stretches at
+ * least [minMs] long, none before [nowMs]. Spans run [start, end) in ms
+ * and may overlap one another.
+ */
+internal fun freeSlots(busy: List<Pair<Long, Long>>, window: Pair<Long, Long>, minMs: Long, nowMs: Long): List<Pair<Long, Long>> {
+    val (_, end) = window
+    var at = maxOf(window.first, nowMs)
+    val out = mutableListOf<Pair<Long, Long>>()
+    // By start, keeping the latest end so far, so overlaps merge as they go.
+    for ((s, e) in busy.sortedBy { it.first }) {
+        if (s >= end) break
+        if (e <= at) continue
+        if (s - at >= minMs) out += at to s
+        at = e
+    }
+    if (end - at >= minMs) out += at to end
+    return out
 }
 
 /** One calendar row as the model reads it: id, when, what, repeats, where, tags, note, calendar by name. */

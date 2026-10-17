@@ -99,3 +99,6 @@ actual val isAppIconBadgeSupported: Boolean = false
 
 /** Brave on a computer has Leo's Bring your own model form. */
 actual val isBraveLeoSupported: Boolean = true
+
+/** A computer has no phone to dial. */
+actual val isPhoneDialSupported: Boolean = false

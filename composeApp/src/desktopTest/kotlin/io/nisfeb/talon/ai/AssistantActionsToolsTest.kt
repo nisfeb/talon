@@ -521,6 +521,38 @@ class AssistantActionsToolsTest {
 
     // From the 2026-10-10 review.
     private val plumber = """{"cat":"allday","kind":"once","start_ms":1791936000000,"span_days":1,"cal":"default","meta":{"name":"Plumber"},"args":{},"alarms":[{"kind":"offset","from":"start","after":true,"s":32400,"desc":""}]}"""
+    // "When am I free?" on a day to come: what clips to now has to be ahead
+    // of now, or a past day would pass on an empty answer.
+    private val busyDay = """{"rows":[
+        {"id":"e1","cal":"default","cat":"timed","kind":"once","all":false,"l":1893837600000,"r":1893841200000,"meta":{"name":"Dentist"}},
+        {"id":"e2","cal":"default","cat":"timed","kind":"once","all":false,"l":1893839400000,"r":1893844800000,"meta":{"name":"Lunch"}},
+        {"id":"e3","cal":"default","cat":"allday","kind":"once","all":true,"l":1893801600000,"r":1893888000000,"meta":{"name":"Birthday"}},
+        {"id":"t1","cal":"default","cat":"todo","kind":"once","all":false,"l":1893844800000,"r":1893848400000,"meta":{"name":"Taxes"}},
+        {"id":"e4","cal":"default","cat":"timed","kind":"once","all":false,"l":1893861000000,"r":1893866400000,"meta":{"name":"Rehearsal"}}
+    ]}"""
+
+    @Test
+    fun `free time is the gaps between timed events, all-day events and tasks not counted`() = withHarness(window = busyDay) { h ->
+        val out = h.run("find_free_time", argsOf("from" to "2030-01-05", "to" to "2030-01-06", "start" to "09:00", "end" to "17:00"))
+        assertEquals("2030-01-05 sat: 09:00–10:00, 12:00–16:30\n2030-01-06 sun: 09:00–17:00", out)
+    }
+
+    @Test
+    fun `free time says a day with no gap, a past day, and a calendar that did not answer`() {
+        withHarness(window = busyDay) { h ->
+            assertEquals("2030-01-05 sat: no gap of 60 min between 10:00 and 12:00", h.run("find_free_time", argsOf("from" to "2030-01-05", "start" to "10:00", "end" to "12:00", "min_minutes" to "60")))
+            assertEquals("2020-01-05 sun: past", h.run("find_free_time", argsOf("from" to "2020-01-05")))
+            assertTrue(h.run("find_free_time", argsOf("from" to "2030-01-05", "start" to "17:00", "end" to "09:00")).startsWith("Error:"))
+            assertTrue(h.run("find_free_time", argsOf("from" to "2030-01-05", "start" to "09:00", "end" to "09:00")).startsWith("Error:"))
+            assertEquals("Error: to is before from.", h.run("find_free_time", argsOf("from" to "2030-01-05", "to" to "2030-01-04")))
+            assertTrue(h.run("find_free_time", argsOf("from" to "2030-01-01", "to" to "2030-02-02")).startsWith("Error:"))
+            assertEquals(32, h.run("find_free_time", argsOf("from" to "2030-01-01", "to" to "2030-02-01")).lines().size, "a month and a day is fine")
+        }
+        withHarness(window = "not the window") { h ->
+            assertEquals("The calendar did not answer.", h.run("find_free_time", argsOf("from" to "2030-01-05")))
+        }
+    }
+
     private val plumberRow = """{"rows":[{"id":"e2","cal":"default","cat":"allday","kind":"once","all":true,"l":1791936000000,"r":1792022400000,"meta":{"name":"Plumber"},"alarms":[{"kind":"offset","from":"start","after":true,"s":32400,"desc":""}]}]}"""
 
     @Test

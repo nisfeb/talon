@@ -61,3 +61,6 @@ actual val isAppIconBadgeSupported: Boolean = false
 
 /** Brave for Android has no Bring your own model form (brave-browser#59722). */
 actual val isBraveLeoSupported: Boolean = false
+
+/** A tel: link opens the dialer. */
+actual val isPhoneDialSupported: Boolean = true

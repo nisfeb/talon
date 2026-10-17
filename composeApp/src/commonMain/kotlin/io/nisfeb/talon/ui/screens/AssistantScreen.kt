@@ -329,6 +329,8 @@ fun AssistantScreen(
     val braveSearch = remember(aiSettings) { BraveSearchClient { aiSettings.state.value } }
     val urlFetcher = remember(aiSettings) { UrlFetcher { aiSettings.state.value } }
     val braveKeyPresent = aiState.braveSearch() != null
+    // Maps and the dialer for open_directions and call_place.
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
 
     // Shared Urbit knowledge + assistant specifics, each falling back to
     // its built-in default when the user hasn't customized it (set in
@@ -369,7 +371,11 @@ fun AssistantScreen(
                 tools = (ToolCatalog.default(
                     repo, db, embedder,
                     braveSearch = if (braveKeyPresent) braveSearch else null,
+                    places = if (braveKeyPresent) braveSearch else null,
                     urlFetcher = urlFetcher,
+                    // Throws where nothing takes the link: a desktop with no maps handler.
+                    open = { uri -> runCatching { uriHandler.openUri(uri) }.isSuccess },
+                    dials = io.nisfeb.talon.ui.isPhoneDialSupported,
                 ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) +
                     orrery?.let { io.nisfeb.talon.ai.orreryTools(it) }.orEmpty() + mcpTools + latticeTools).dedupToolNames(),
                 systemPrompt = systemPrompt,

@@ -126,14 +126,17 @@ class DictationAgent(
         /**
          * The tools a dictation is offered: the ones a spoken note,
          * question or errand uses. Not orrery's settings, calendar
-         * sharing and sync, reactions, the web: their descriptions were a
-         * third of every request, and nobody dictates them.
+         * sharing and sync, reactions, reading whole web pages: their
+         * descriptions were a third of every request, and nobody dictates
+         * them. What is asked in the car is, though: places near
+         * somewhere, the way there, a quick fact, a free hour.
          */
         val TOOLS: Set<String> = setOf(
             "search_history", "read_conversation", "send_message", "find_person", "find_conversation",
             "send_mail", "list_mail", "search_mail", "read_mail",
-            "list_calendars", "list_events", "create_event", "update_event", "delete_event",
+            "list_calendars", "list_events", "find_free_time", "create_event", "update_event", "delete_event",
             "list_tasks", "create_task", "complete_task",
+            "find_places", "open_directions", "call_place", "web_search",
             "orrery_guide", "orrery_find", "orrery_read", "orrery_observe", "orrery_file_text", "orrery_instruct", "orrery_correct",
         )
 
@@ -152,7 +155,7 @@ class DictationAgent(
          * send_mail too, for an event it sends as an invite.
          */
         val CALENDAR_TOOLS: Set<String> = setOf(
-            "list_calendars", "list_events", "create_event", "update_event", "delete_event",
+            "list_calendars", "list_events", "find_free_time", "create_event", "update_event", "delete_event",
             "list_tasks", "create_task", "complete_task", "send_mail",
         )
 
