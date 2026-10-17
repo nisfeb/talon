@@ -695,6 +695,9 @@ class MailRepo(
 
     private val _problem = MutableStateFlow<String?>(null)
 
+    /** How a message is named in a line about it: its subject, quoted, or "A message". */
+    private fun named(subject: String) = subject.ifBlank { "A message" }.let { s -> if (s == "A message") s else "\"$s\"" }
+
     /**
      * Something asked of the ship that did not happen: an archive, label
      * or delete it refused, a draft that did not land, a thread not
@@ -753,8 +756,7 @@ class MailRepo(
             null
         }
         return problem?.also {
-            val what = draft.subject.ifBlank { "A message" }.let { s -> if (s == "A message") s else "\"$s\"" }
-            val line = "$what was not sent: $it" + if (kept) " It is in Drafts." else ""
+            val line = "${named(draft.subject)} was not sent: $it" + if (kept) " It is in Drafts." else ""
             _unsent.update { list -> list + Unsent(line, draft, files) }
         }
     }
@@ -1004,12 +1006,16 @@ class MailRepo(
      * its way out of composition, whose own scope dies with it. The
      * repo's scope outlives every screen, so the save still lands.
      */
-    fun keepDraft(d: Draft) {
+    fun keepDraft(d: Draft, files: List<Outgoing> = emptyList()) {
         scope.launch {
-            // A save that does not land is said so: silence here is a
-            // message the owner believes is kept and is not.
+            // A save that does not land is kept with what did not go, to
+            // open again: said to be "still here", it was in neither Drafts
+            // nor anywhere the list could open it, and was lost.
             val ok = runSuspendCatching { saveDraft(d) }.getOrDefault(false)
-            if (!ok) _problem.value = "The draft did not reach the ship; what was written is still here until Talon closes."
+            if (!ok) {
+                val line = "${named(d.subject)} was not saved: the draft did not reach the ship. It is kept here until Talon closes."
+                _unsent.update { list -> list.filterNot { it.draft.id == d.id } + Unsent(line, d, files) }
+            }
         }
     }
 

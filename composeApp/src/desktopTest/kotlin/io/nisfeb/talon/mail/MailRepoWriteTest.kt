@@ -346,6 +346,33 @@ class MailRepoWriteTest {
 
     // ─── what is kept when the ship does not take it ────────────────
 
+    // "What was written is still here until Talon closes", said of a draft
+    // that was in neither Drafts nor anywhere the list could open it.
+    @Test
+    fun `a draft the ship did not take is kept whole, to open again`() = withRepo({ req ->
+        val path = req.url.encodedPath
+        when {
+            path.endsWith("/api/draft") -> respond(NGINX_502, HttpStatusCode.BadGateway, headersOf("Content-Type", "text/html"))
+            path.endsWith("/api/inbox") -> jsonOk(this, pageWith())
+            path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+            else -> respondError(HttpStatusCode.NotFound, """{"error":"not found"}""")
+        }
+    }) { r, _ ->
+        r.attach("https://ship.example")
+        settle(r)
+        val draft = Draft(id = "0vd", to = listOf("~nec"), subject = "Plans", body = "half a thought")
+        val file = MailRepo.Outgoing("x".encodeToByteArray(), "notes.txt", "text/plain")
+        r.keepDraft(draft, listOf(file))
+        until("the draft kept here") { r.unsent.value.isNotEmpty() }
+        val kept = r.unsent.value.single()
+        assertEquals("\"Plans\" was not saved: the draft did not reach the ship. It is kept here until Talon closes.", kept.line)
+        // What the list's Open gives back: the text, and the file.
+        val reopened = io.nisfeb.talon.ui.screens.unsentIntent(kept)
+        assertEquals("half a thought" to listOf("notes.txt"), reopened.body to reopened.edits.files.map { it.displayName })
+        r.keepDraft(draft.copy(body = "a whole thought"))
+        until("the newer one in its place") { r.unsent.value.singleOrNull()?.draft?.body == "a whole thought" }
+    }
+
     // ─── an attachment, with our own ship down ──────────────────────
 
     // ─── filters and lists, past the sheet ──────────────────────────

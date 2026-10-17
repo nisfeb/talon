@@ -234,7 +234,8 @@ fun MailComposer(
     DisposableEffect(intent) {
         onDispose {
             if (!filed && !edits.isBlank) {
-                repo.keepDraft(asDraft())
+                // The files too: a draft the ship did not take is kept whole, to open again.
+                repo.keepDraft(asDraft(), files.map { io.nisfeb.talon.mail.MailRepo.Outgoing(it.bytes, it.displayName, it.mimeType) })
             }
         }
     }

@@ -50,12 +50,15 @@ class MailComposerTest {
         sendAnswer: Pair<HttpStatusCode, String>? = null,
         /** Thread 0vt, where a test has one. */
         thread: String? = null,
+        /** The ship is down for a draft: the web server in front of it answers with its 502. */
+        draftDown: Boolean = false,
     ): MailRepo {
         val http = HttpClient(
             MockEngine { req ->
                 seen += req
                 val path = req.url.encodedPath
                 val (status, body) = when {
+                    path.endsWith("/api/draft") && draftDown -> HttpStatusCode.BadGateway to NGINX_502
                     path.endsWith("/api/send") && sendAnswer != null -> sendAnswer
                     path.endsWith("/api/thread/0vt") && thread != null -> HttpStatusCode.OK to thread
                     path.endsWith("/api/drafts") -> HttpStatusCode.OK to draftsListed()
@@ -500,4 +503,25 @@ class MailComposerTest {
         waitForIdle()
         onNodeWithText("This signed message goes to people who have not seen it.").assertIsDisplayed()
     }
+
+    // Closed with the ship down: said to be "still here until Talon
+    // closes", the draft was in neither Drafts nor the list, and was lost.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `closing with the ship down keeps what was written for the list to open`() = runComposeUiTest {
+        val showing = androidx.compose.runtime.mutableStateOf(true)
+        val r = repo(draftDown = true)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                if (showing.value) MailComposer(repo = r, intent = MailIntent(), onSent = {}, onCancel = { showing.value = false })
+            }
+        }
+        onNodeWithText("Message").performTextInput("half a thought")
+        onNodeWithContentDescription("Close").performClick()
+        waitUntil(timeoutMillis = 5_000) { r.unsent.value.isNotEmpty() }
+        val kept = r.unsent.value.single()
+        assertEquals("half a thought", kept.draft.body)
+        assertTrue("was not saved" in kept.line, kept.line)
+    }
+
 }
