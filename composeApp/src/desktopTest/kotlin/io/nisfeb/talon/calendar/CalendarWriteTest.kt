@@ -556,4 +556,41 @@ class CalendarWriteTest {
         ship.down = false
         assertTrue(repo.revoke("default", "~nec"), "the repo's scope still runs writes")
     }
+
+    // ─── the calendar's own zone ────────────────────────────────────
+
+    // A failed config read left the zone unknown, and the device's zone
+    // was written over the calendar's own: a traveller's phone moved it.
+    @Test
+    fun `a config read that fails never sets the calendar's zone`() = calendar(setup = { configFails = true }) { repo, ship ->
+        repo.refresh()
+        assertTrue(ship.pokes.none { "\"config\"" in it }, "${ship.pokes}")
+        assertEquals(null, repo.notice.value)
+    }
+
+    @Test
+    fun `a calendar that says it has no zone takes the device's`() = calendar(setup = { zone = null }) { _, ship ->
+        val config = ship.pokes.single { "\"config\"" in it }
+        assertTrue(kotlinx.datetime.TimeZone.currentSystemDefault().id in config, config)
+    }
+
+    // ─── signed out, and in again ───────────────────────────────────
+
+    // A 403 stopped the poll for the session: signed in again, the
+    // calendar was read only when somebody opened it.
+    @Test
+    fun `the poll stopped by a signed-out answer starts again with the next read that goes through`() = calendar(
+        pollMs = 200,
+        setup = { signedOut = true },
+    ) { repo, ship ->
+        assertEquals(CalendarAvailability.SIGNED_OUT, repo.availability.value)
+        ship.signedOut = false
+        ship.clear()
+        kotlinx.coroutines.delay(800)
+        assertTrue(ship.reads.isEmpty(), "stopped: ${ship.reads}")
+        repo.refresh()
+        assertEquals(CalendarAvailability.PRESENT, repo.availability.value)
+        ship.clear()
+        kotlinx.coroutines.withTimeout(5_000) { while (!ship.asked("/window.json")) kotlinx.coroutines.delay(20) }
+    }
 }

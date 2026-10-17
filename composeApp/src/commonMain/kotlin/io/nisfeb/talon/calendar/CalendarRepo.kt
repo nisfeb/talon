@@ -125,7 +125,9 @@ class CalendarRepo(
      * A calendar with no zone reads every wall clock as UTC, so an
      * event made for 4pm shows at 4pm UTC on every clock but the
      * editor's. Done once per attach: the device's zone becomes the
-     * calendar's, and the reader is told.
+     * calendar's, and the reader is told. Only after a config read that
+     * said no zone ([refresh]): after one that failed, the device's zone
+     * went over the calendar's own, a traveller's phone moving it.
      */
     private suspend fun adoptZoneIfNone() {
         if (zoneAdopted || _zone.value != null) return
@@ -180,7 +182,7 @@ class CalendarRepo(
                 // Only the month: nothing else changed by turning a page.
                 keepRange()
             }
-            .onFailure { if (it !is AuspexError) throw it; _error.value = it.message }
+            .onFailure { if (it !is AuspexError) throw it; _error.value = it.said() }
     }
 
     private var zoneNames: List<String>? = null
@@ -951,12 +953,23 @@ class CalendarRepo(
         api = CalendarApi(http, baseUrl)
         clearShipState()
         poller?.cancel()
-        if (!poll) return
+        poller = null
+        pollStopped = false
+        if (poll) startPoller(readFirst = true)
+    }
+    private var shipUrl: String? = null
+
+    /** A signed-out answer stopped the poll; the next read that goes through starts it again. */
+    @kotlin.concurrent.Volatile private var pollStopped = false
+
+    private fun startPoller(readFirst: Boolean) {
         poller = scope.launch {
-            // What the ship last said, while it is asked again. A month
-            // that was right ten minutes ago beats an empty grid.
-            restore()
-            refresh()
+            if (readFirst) {
+                // What the ship last said, while it is asked again. A month
+                // that was right ten minutes ago beats an empty grid.
+                restore()
+                refresh()
+            }
             while (isActive) {
                 // Jittered, so devices that started together do not ask together.
                 delay(io.nisfeb.talon.urbit.jittered(pollIntervalMs))
@@ -964,7 +977,6 @@ class CalendarRepo(
             }
         }
     }
-    private var shipUrl: String? = null
 
     /** Nothing of the last ship may greet the next one: a stale zone
      *  would stop adoptZoneIfNone, and stale rows would pose as the
@@ -994,6 +1006,7 @@ class CalendarRepo(
     fun detach() {
         poller?.cancel()
         poller = null
+        pollStopped = false
         api = null
         shipUrl = null
         zoneAdopted = false
@@ -1062,7 +1075,7 @@ class CalendarRepo(
             _error.value = null
         }.onFailure { e ->
             if (e is AuspexError && e.isSignedOut) _availability.value = CalendarAvailability.SIGNED_OUT
-            _error.value = e.message
+            _error.value = (e as? AuspexError)?.said() ?: "The calendar could not be read."
         }
     }
 
@@ -1085,15 +1098,19 @@ class CalendarRepo(
             _tasks.value = runSuspendCatching { a.tasks() }.getOrNull() ?: _tasks.value
             if (full && rarely) readRarely(a)
             keep()
-            if (full) runSuspendCatching { a.config() }.getOrNull()?.let { _zone.value = it.zone; ball = it.ball; _leadMin.value = it.leadMin }
+            val config = if (full) runSuspendCatching { a.config() }.getOrNull() else null
+            config?.let { _zone.value = it.zone; ball = it.ball; _leadMin.value = it.leadMin }
             noteReminders(w.rows)
             _availability.value = CalendarAvailability.PRESENT
             _error.value = null
             lastReadMs = now
             if (full) {
                 lastFullMs = now
-                adoptZoneIfNone()
+                if (config != null && config.zone == null) adoptZoneIfNone()
             }
+            // A 403 stopped the poll; signed in again, this read is the first
+            // to go through, and nothing else would start it again.
+            if (pollStopped) { pollStopped = false; startPoller(readFirst = false) }
         } catch (e: AuspexError) {
             readFailed(e)
         }
@@ -1124,12 +1141,12 @@ class CalendarRepo(
         when {
             e.isSignedOut -> {
                 _availability.value = CalendarAvailability.SIGNED_OUT
-                poller?.cancel(); poller = null
+                poller?.let { it.cancel(); poller = null; pollStopped = true }
             }
             e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND ->
                 _availability.value = CalendarAvailability.ABSENT
             else -> {
-                _error.value = e.message
+                _error.value = e.said()
                 Log.w(TAG, "calendar refresh failed", e)
             }
         }
