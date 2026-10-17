@@ -56,6 +56,7 @@ class HomeScreenTest {
         invites: List<String> = emptyList(),
         calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
         onInstallCalendar: (suspend () -> Result<Unit>)? = null,
+        onTalk: (() -> Unit)? = null,
         block: ComposeUiTest.(AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-homepage-").toFile()
@@ -74,6 +75,7 @@ class HomeScreenTest {
                             onOpenInvites = { invitesOpened++ },
                             onOpenConversation = { opened += it }, onOpenChats = { chatsOpened++ },
                             onOpenMailThread = {}, onOpenMail = {},
+                            onTalk = onTalk,
                         )
                     }
                 }
@@ -96,6 +98,20 @@ class HomeScreenTest {
         messages().upsert(msg("~bus", "~bus", "are you coming?", 1_000))
         messages().upsert(msg("~nec", "~nec", "old news", 500))
         unreads().upsert(UnreadEntity("~bus", count = 2, notifyCount = 1, recencyMs = 1_000))
+    }
+
+    // sneagan, 2026-10-17: "a button on the home screen next to good
+    // morning that engages the voice assistant", with Archie's owl on it.
+    @Test
+    fun `Archie's owl beside the greeting starts a talk, where there is a card to talk on`() {
+        var talks = 0
+        home(onTalk = { talks++ }) {
+            onNodeWithContentDescription("Talk to Archie").performClick()
+            assertEquals(1, talks)
+        }
+        home {
+            assertTrue(onAllNodesWithContentDescription("Talk to Archie").fetchSemanticsNodes().isEmpty(), "no card on this platform, no owl")
+        }
     }
 
     @Test

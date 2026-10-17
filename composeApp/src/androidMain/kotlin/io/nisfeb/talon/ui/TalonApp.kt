@@ -2124,6 +2124,15 @@ fun TalonApp(
                         { listen -> homeOpen = false; assistantListen = listen; assistantOpen = true }
                     } else null,
                     onInstallCalendar = calendarInstall,
+                    // Archie: a spoken check-in on the dictation card.
+                    onTalk = if (io.nisfeb.talon.ui.isQuickDictationSupported) {
+                        {
+                            context.startActivity(
+                                android.content.Intent(context, io.nisfeb.talon.QuickDictationActivity::class.java)
+                                    .putExtra(io.nisfeb.talon.QuickDictationActivity.EXTRA_CONVERSE, true),
+                            )
+                        }
+                    } else null,
                     contacts = contactMap,
                     ourShip = loggedInShip.orEmpty(),
                     place = homePlace,

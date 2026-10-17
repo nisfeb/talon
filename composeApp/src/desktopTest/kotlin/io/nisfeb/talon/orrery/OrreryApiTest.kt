@@ -31,6 +31,19 @@ class OrreryApiTest {
     }
 
     @Test
+    fun `the last brief is the owner's, read as orrery keeps it, and none before the first`() = runTest {
+        // Orrery's +brief-send (app.hoon): day, at, sent, tags, text, today.
+        val b = api(body = """{"day":"2026-10-17","at":"2026-10-17T11:00:03Z","sent":true,"tags":{"A1":"1791915666-ab12","A2":"1791915700-cd34"},"text":"Saturday 17 October\n\n[A1] Load the wifi","today":[]}""").briefLast()
+        assertEquals("https://ship/apps/orrery/api/brief/last", seen!!.url.toString())
+        assertEquals(
+            Brief("2026-10-17", "2026-10-17T11:00:03Z", true, mapOf("A1" to "1791915666-ab12", "A2" to "1791915700-cd34"), "Saturday 17 October\n\n[A1] Load the wifi"),
+            b,
+        )
+        assertNull(api(body = "{}").briefLast(), "a ship that has sent none keeps an empty record")
+        assertFailsWith<OrreryError.Refused> { api(HttpStatusCode.NotFound, """{"error":"not found"}""").briefLast() }
+    }
+
+    @Test
     fun `the probe reads presence off the status`() = runTest {
         assertEquals(OrreryAvailability.PRESENT, api().probe())
         assertEquals(OrreryAvailability.MISSING, api(HttpStatusCode.NotFound).probe())

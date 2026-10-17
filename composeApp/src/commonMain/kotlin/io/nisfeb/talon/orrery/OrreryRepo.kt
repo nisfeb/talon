@@ -518,6 +518,9 @@ class OrreryRepo(
     // app has never heard of is one the assistant can still write, and
     // that is the point of keeping these general.
 
+    /** The last daily brief the ship sent; null before the first. */
+    suspend fun briefLast(): Result<Brief?> = runCatching { attached().briefLast() }
+
     /** One settings document, as the ship serves it; credentials masked. */
     suspend fun readSettings(name: String): Result<String> = runCatching { attached().settingsDoc(name) }
 
