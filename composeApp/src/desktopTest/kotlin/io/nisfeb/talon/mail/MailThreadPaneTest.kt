@@ -374,5 +374,63 @@ class MailThreadPaneTest {
         onNodeWithText("Show fewer", substring = true).performClick()
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("~ful", substring = true).fetchSemanticsNodes().isEmpty() }
     }
-}
 
+    // A thread that failed to load with no copy kept was shown as deleted.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a thread the ship did not answer for says so and is read again, not called gone`() = runComposeUiTest {
+        var down = true
+        val http = HttpClient(MockEngine { req ->
+            if (down) respond(NGINX_502, HttpStatusCode.BadGateway, headersOf("Content-Type", "text/html"))
+            else respond(ByteReadChannel(branching), HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+        })
+        val repo = MailRepo(http, CoroutineScope(SupervisorJob()), pollIntervalMs = 60 * 60 * 1000L).also { it.attach("https://ship.example") }
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailThreadPane(repo = repo, threadId = "0vt", contacts = ContactMap.EMPTY, ourShip = "~nec", onCompose = {})
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("This thread could not be read", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(onAllNodesWithText("isn't answering", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(onAllNodesWithText("no longer on the ship", substring = true).fetchSemanticsNodes().isEmpty(), "not called gone")
+        down = false
+        onNodeWithText("Try again").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("the root").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    // Filed with the reader's times, a note kept for good went on saying
+    // a message came five minutes ago.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a thread filed to Lattice carries when each message was sent, not how long ago`() = runComposeUiTest {
+        val sent = System.currentTimeMillis() - 5 * 60_000L
+        val filed = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val one = """{"id":"0vt","participants":["~zod","~nec"],"last":$sent,"unreadable":0,"archived":false,"labels":[],"messages":[
+            {"id":"0vroot","from":"~zod","to":["~nec"],"subject":"Plans","body":"the root","sent":$sent,"prev":null,"verdict":"verified","read":true}]}"""
+        val http = HttpClient(MockEngine { req ->
+            val path = req.url.encodedPath
+            when {
+                path.endsWith("/apps/lattice/save") -> {
+                    filed += (req.body as io.ktor.http.content.TextContent).text
+                    respond("", HttpStatusCode.OK)
+                }
+                path.endsWith("/api/whoami") -> respond("""{"ship":"~nec"}""", HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+                path.endsWith("/api/inbox") -> respond("""{"total":0,"offset":0,"limit":50,"view":"inbox","threads":[]}""", HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+                else -> respond(ByteReadChannel(one), HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+            }
+        })
+        val repo = MailRepo(http, CoroutineScope(SupervisorJob()), pollIntervalMs = 60 * 60 * 1000L).also { it.attach("https://ship.example") }
+        setContent {
+            TalonTheme(darkTheme = false) {
+                MailThreadPane(repo = repo, threadId = "0vt", contacts = ContactMap.EMPTY, ourShip = "~nec", onCompose = {})
+            }
+        }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("the root").fetchSemanticsNodes().isNotEmpty() && repo.ourShip != null }
+        onAllNodesWithContentDescription("Thread actions")[0].performClick()
+        onNodeWithText("File to Lattice").performClick()
+        waitUntil(timeoutMillis = 5_000) { filed.isNotEmpty() }
+        val note = filed.single()
+        assertTrue(io.nisfeb.talon.ui.screens.filedAt(sent) in note, note)
+        assertTrue(io.nisfeb.talon.ui.shortRelativeTime(sent, System.currentTimeMillis()) !in note, note)
+    }
+}

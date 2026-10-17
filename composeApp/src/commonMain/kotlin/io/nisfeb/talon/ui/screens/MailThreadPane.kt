@@ -106,6 +106,9 @@ fun MailThreadPane(
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var loading by remember(threadId) { mutableStateOf(repo.cachedThread(threadId) == null) }
     var refreshing by remember(threadId) { mutableStateOf(false) }
+    // Why the last read failed, where it did: told apart from a thread
+    // that is gone, which a failed load with nothing kept was shown as.
+    var failed by remember(threadId) { mutableStateOf<String?>(null) }
     // Kept by the repo, so a reply written from the tree comes back to it.
     var drawn by remember(threadId) { mutableStateOf(repo.treeShown(threadId)) }
     // Folded subtrees, and messages read down to their header line.
@@ -133,8 +136,11 @@ fun MailThreadPane(
     suspend fun read() {
         refreshing = thread != null
         val t = repo.loadThread(threadId)
-        // Out of reach with a copy on screen: keep the copy rather than call the thread gone.
-        thread = if (t == null && repo.error.value != null && thread != null) thread else t
+        // Null and an error is a read that failed, not a thread that is gone
+        // (the repo's own test before it forgets one). With a copy on screen
+        // the copy stays.
+        failed = if (t == null) repo.error.value else null
+        thread = if (t == null && failed != null) thread else t
         loading = false
         refreshing = false
         // Reading it is what marks it read, and the mark is invisible to
@@ -224,7 +230,6 @@ fun MailThreadPane(
     }
 
     val nameFor: (String) -> String = contacts::displayName
-    fun whenAt(ms: Long) = shortRelativeTime(ms, nowMs())
     /** A reply or forward from [id]: what travels is the path down to it. */
     fun intent(forwarding: Boolean, id: String? = answering) = MailIntent(
         prev = id,
@@ -289,7 +294,7 @@ fun MailThreadPane(
                 file(
                     title = io.nisfeb.talon.mail.threadSubject(t.messages).ifBlank { "Mail thread" },
                     seed = io.nisfeb.talon.mail.MailGemtext.seedFor(threadId, null),
-                    gemtext = io.nisfeb.talon.mail.MailGemtext.thread(t, nameFor, ::whenAt),
+                    gemtext = io.nisfeb.talon.mail.MailGemtext.thread(t, nameFor, ::filedAt),
                 )
             },
         )
@@ -312,6 +317,12 @@ fun MailThreadPane(
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
+
+            t == null && failed != null -> MailAbsent(
+                "This thread could not be read. $failed",
+                actionLabel = "Try again",
+                onAction = { loading = true; scope.launch { read() } },
+            )
 
             t == null -> MailAbsent("This thread is no longer on the ship.")
 
@@ -899,6 +910,14 @@ private fun MailMessageCard(
         }
     }
 }
+
+/**
+ * When a message was sent, as a note filed to Lattice keeps it: the date
+ * and the time. The reader's "5m" went into the note as it was, and a
+ * note kept for good went on saying five minutes ago.
+ */
+internal fun filedAt(ms: Long): String =
+    "${io.nisfeb.talon.util.formatMonthDayYear(ms)} ${io.nisfeb.talon.util.formatClock(ms)}"
 
 internal fun sizeLabel(bytes: Long): String =
     if (bytes <= 0) "unknown size" else io.nisfeb.talon.util.humanFileSize(bytes)
