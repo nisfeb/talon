@@ -21,43 +21,67 @@ import androidx.compose.runtime.mutableStateOf
  * every flag this registry ever made, and [closeLast] closes the one
  * opened most recently, so one back handler covers every section,
  * including the next one somebody adds. Declare a section with
- * `var fooOpen by remember { sections.flag() }` and it is done.
+ * `var fooOpen by remember { sections.flag() }` and it is done, or one
+ * that opens on something with `var fooFor by remember { sections.page<String>() }`.
  */
 class Sections {
-    private val all = mutableListOf<Flag>()
+    private val all = mutableListOf<Slot<*>>()
 
-    /** Open flags, oldest first, so back closes the newest. */
-    private val open = mutableStateListOf<Flag>()
+    /** Open sections, oldest first, so back closes the newest. */
+    private val open = mutableStateListOf<Slot<*>>()
 
-    inner class Flag internal constructor(initial: Boolean) : MutableState<Boolean> {
+    /**
+     * One section, open while its value is not [closed]: a flag while it
+     * is true, a page (a group's, by its flag) while it names something.
+     */
+    inner class Slot<T> internal constructor(private val closed: T, initial: T) : MutableState<T> {
         private val state = mutableStateOf(initial)
 
         init {
-            if (initial) open.add(this)
+            if (initial != closed) open.add(this)
         }
 
-        override var value: Boolean
+        override var value: T
             get() = state.value
             set(v) {
                 if (state.value == v) return
                 state.value = v
                 open.remove(this)
-                if (v) open.add(this)
+                if (v != closed) open.add(this)
             }
 
-        override fun component1(): Boolean = value
-        override fun component2(): (Boolean) -> Unit = { value = it }
+        internal fun close() {
+            value = closed
+        }
+
+        override fun component1(): T = value
+        override fun component2(): (T) -> Unit = { value = it }
     }
 
     /** A new section's flag, registered so nothing can forget it. */
-    fun flag(initial: Boolean = false): Flag = Flag(initial).also { all += it }
+    fun flag(initial: Boolean = false): Slot<Boolean> = Slot(false, initial).also { all += it }
+
+    /**
+     * A section that opens on something, a group's page on the group:
+     * open while it names one, closed by setting it to null. The group
+     * pages were plain values, so neither the drawer nor back could
+     * leave them.
+     */
+    fun <T : Any> page(initial: T? = null): Slot<T?> = Slot<T?>(null, initial).also { all += it }
 
     /** Whether any section is open, which is when back has something to close. */
     val anyOpen: Boolean get() = open.isNotEmpty()
 
+    /**
+     * Whether a section other than [under] is open. A shell that draws
+     * some sections beneath the chat (Android keeps Search open under the
+     * chat it opened) lets the chat's back come before those.
+     */
+    fun anyOpenExcept(vararg under: Slot<*>): Boolean = open.any { s -> under.none { it === s } }
+
     /** Put every section down, the ones added after this line was written included. */
     fun closeAll() {
-        all.forEach { it.value = false }
+        all.forEach { it.close() }
     }
 
     /**
@@ -78,7 +102,7 @@ class Sections {
     /** Close the section opened most recently. False when none is open. */
     fun closeLast(): Boolean {
         val newest = open.lastOrNull() ?: return false
-        newest.value = false
+        newest.close()
         return true
     }
 }
