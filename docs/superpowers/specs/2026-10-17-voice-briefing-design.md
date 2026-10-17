@@ -91,3 +91,14 @@ The conversation logic lives in common code, so it is tested in commonTest with 
 2. **What goes to history.** My default saves every card conversation, ordinary dictations with follow-ups too, since it is one card. The other way saves only briefings.
 3. **Which chat messages count.** My default is the chat list's own unread total. Muted channels stay out of it, as they do there.
 4. **Ending on silence** after eight seconds.
+
+## As built, phase 1 (branch feat/voice-briefing, 2026-10-17)
+
+sneagan approved the spec's defaults: the counts said at once, every card conversation kept in history, the chat list's own unread count, and an end after eight seconds of silence.
+
+- **The button** is `onTalk` on `HomeScreen`, Archie's owl beside the greeting, labelled "Talk to Archie". The Android shell passes it where `isQuickDictationSupported`; elsewhere it is null and nothing is drawn. It opens `QuickDictationActivity` with `EXTRA_CONVERSE`.
+- **The opener** (`Briefing`, `Loops.DictationPrep.day`): the inbox is listed for the unread mail, since the card's mail does not poll, and mail is left out of the sentence when the listing fails. The unread chats are the chat list's own sum (conversations it shows). The decision model judges at most fifty unread messages in one call, a named yes-or-no each (DMs and group DMs, and channel messages that name the owner), waiting eight seconds at most. The model writes the rest from the time, the first timed event today and today's brief (`GET /api/brief/last`, today's only), while the counts are said. It falls back to "What would you like?".
+- **The conversation** (`VoiceConversation`): one model. `send_message` and `send_mail` are not offered, and `orrery_instruct` is replaced by one that goes through `DictationFlow.tell`, so orrery's proposals wait on the card for the owner's word. `read_brief` reads today's brief; with `aloud` it is read out as orrery wrote it, a paragraph at a time, with no model call to say so, and it stays in the next turns' context. Eight exchanges of context, twenty at most; "that's all", "thanks", "no" and the like end it only as the whole of what was said.
+- **The card** (`QuickDictation`, `DictationService.converse`): Archie's owl and name in the header; a turn's card stays up and listens again by itself; a tap on the answer stops the voice; Done, back or Cancel hangs up, and nothing is said or heard after that. A failed transcription is "Sorry, I didn't catch that." twice, then it ends. The wake lock is thirty minutes for a conversation.
+- **History** (`VoiceHistory`): each exchange is written as it happens, not once at the end. The history is the same, and a conversation cut short keeps what was said. Ordinary dictations go in too, a follow-up with what it follows, titled by their first words. Each turn is pushed with `pushAssistantTurn`.
+- **Not in phase 1:** `brief_action` (approve A2 by its tag) and `list_unread` (read me my messages).
