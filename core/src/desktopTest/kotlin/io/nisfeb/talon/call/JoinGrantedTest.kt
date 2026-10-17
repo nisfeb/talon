@@ -38,11 +38,18 @@ class JoinGrantedTest {
     fun `a grant for another line moves us there, and one for this line does nothing`() = runBlocking<Unit> {
         val h = TrunkHarness()
         val c = CallController(h.session, CallEngineProvider { HangingCallEngine() })
-        // The SFU never answers: the line sits Connecting, which is all this needs.
-        val line = PartyLine(HttpClient(MockEngine { awaitCancellation() }), links = { _, _ -> Link() })
+        // The SFU never answers: the line sits Connecting, which is all this
+        // needs. Which line it asked for is the GET of that line's status.
+        val asked = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val line = PartyLine(
+            HttpClient(MockEngine { asked += it.url.toString(); awaitCancellation() }),
+            links = { _, _ -> Link() },
+        )
         try {
             c.start()
             h.awaitConnected()
+            h.emitFact("""{"open":{"from":"~bus","name":"lounge","title":"Bus lounge"}}""")
+            h.await { c.lineFor("~bus", "lounge") != null }
             c.joinGranted(line, "~zod", TrunkTicket("lounge", "http://sfu.test/a/", "tok"), "~nec")
             h.await { presence(h, "enter-room", "~zod", "lounge") > 0 }
             assertEquals(PartyState.Connecting("lounge"), line.state.value)
@@ -50,13 +57,21 @@ class JoinGrantedTest {
             c.joinGranted(line, "~bus", TrunkTicket("lounge", "http://sfu.test/b/", "tok"), "~nec")
             h.await { presence(h, "leave-room", "~zod", "lounge") > 0 }
             h.await { presence(h, "enter-room", "~bus", "lounge") > 0 }
+            h.await { asked.any { it.startsWith("http://sfu.test/b/") } }
             assertEquals(PartyState.Connecting("lounge"), line.state.value, "on the new line, the same slug on another host")
+            // Its title, once the line is up.
+            line.handle(
+                kotlinx.serialization.json.Json.parseToJsonElement(
+                    """{"type":"joined","kind":"join","username":"~nec","rtcConfiguration":{"iceServers":[]}}""",
+                ) as kotlinx.serialization.json.JsonObject,
+            )
+            assertEquals("Bus lounge", (line.state.value as PartyState.Live).topic)
 
             // Asked again for the line we are on: nothing to leave.
             c.joinGranted(line, "~bus", TrunkTicket("lounge", "http://sfu.test/b/", "tok"), "~nec")
             delay(300)
             assertEquals(0, presence(h, "leave-room", "~bus", "lounge"), "left the line it was asked to join")
-            assertTrue(line.state.value is PartyState.Connecting)
+            assertTrue(line.state.value is PartyState.Live)
         } finally {
             line.leave()
             c.stop()
