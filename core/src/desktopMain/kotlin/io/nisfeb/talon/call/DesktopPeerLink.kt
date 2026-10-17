@@ -70,7 +70,7 @@ class DesktopPeerLink(
         kotlinx.atomicfu.atomic<((ByteArray, Int) -> Unit)?>(null)
     private var recSink: dev.onvoid.webrtc.media.audio.AudioTrackSink? = null
     private var micRecorder: dev.onvoid.webrtc.media.audio.AudioRecorder? = null
-    private val recFrames = kotlinx.atomicfu.atomic(0)
+    private val recFrames = java.util.concurrent.atomic.AtomicInteger(0)
 
     // Party-line video (conference). The up link (sendAudio) carries a
     // pre-negotiated send video transceiver whose camera track is
@@ -347,87 +347,9 @@ class DesktopPeerLink(
         if (closed.value) return
         detachRec()
         val cb = pcmCb.value ?: return
-        recFrames.value = 0
+        recFrames.set(0)
         if (sendAudio) {
-            // Self-mic: a LOCAL track's addSink never fires in webrtc-java
-            // (a solo recording captured only silence), so tap the mic
-            // with a standalone AudioRecorder. It's separate from the
-            // peer connection, so it cannot affect the outgoing call.
-            //
-            // That also means the self clip is the raw capture device:
-            // no AEC, NS or AGC, unlike the outgoing track, which the
-            // peer connection processes. On laptop speakers the clip
-            // therefore carries every remote speaker's echo. webrtc-java
-            // 0.14.0 exposes no processed local tap, so there is nothing
-            // to switch to — known and accepted, not an oversight.
-            //
-            // Follow the mic the call is on. Taking the first enumerated
-            // device recorded the wrong input for anyone who had picked
-            // a non-default one — silence, if that device isn't live.
-            val wanted = DesktopWebRtcFactory.preferredRecordingDeviceId
-            fun pick(all: List<dev.onvoid.webrtc.media.audio.AudioDevice>?) =
-                all?.firstOrNull { wanted != null && it.descriptor == wanted }
-                    ?: all?.firstOrNull()
-            val device = runCatching {
-                pick(DesktopWebRtcFactory.audioDeviceModule().recordingDevices)
-            }.getOrNull() ?: runCatching {
-                // Built only to enumerate, so dispose it again: this
-                // fallback runs whenever the shared module is missing,
-                // and each leaked module is a live native object.
-                val adm = dev.onvoid.webrtc.media.audio.AudioDeviceModule()
-                try {
-                    pick(adm.recordingDevices)
-                } finally {
-                    runCatching { adm.dispose() }
-                }
-            }.getOrNull()
-            if (device == null) {
-                Log.w("PartyLine", "record tap: no recording device; self clip will be silent")
-                return
-            }
-            // Held outside the runCatching so a throw part-way through
-            // start() can still be stopped: start() builds and
-            // initialises the native module before it can fail, and
-            // stop() is the only thing that disposes it.
-            val rec = dev.onvoid.webrtc.media.audio.AudioRecorder()
-            val started = runCatching {
-                rec.setAudioDevice(device)
-                rec.setAudioSink(object : dev.onvoid.webrtc.media.audio.AudioSink {
-                    // Arg order verified against webrtc-java 0.14.0:
-                    // (data, nSamples, bytesPerSample, channels, sampleRate,
-                    //  captureDelayMs, clockDrift).
-                    override fun onRecordedData(
-                        data: ByteArray,
-                        nSamples: Int,
-                        bytesPerSample: Int,
-                        channels: Int,
-                        sampleRate: Int,
-                        captureDelayMs: Int,
-                        clockDrift: Int,
-                    ) {
-                        // Do not trust `bytesPerSample`: webrtc-java
-                        // reports it as bytes per FRAME here, so a
-                        // stereo capture device (the Windows default)
-                        // sends 4 and the old `!= 2` guard dropped every
-                        // frame — the mic recorded nothing at all.
-                        // data.size / nSamples is unambiguous.
-                        val ch = if (channels in 1..2) channels else 1
-                        val frames = if (nSamples > 0) nSamples else data.size / (ch * 2)
-                        if (frames <= 0) return
-                        // Still only 16-bit PCM: 2 bytes per channel.
-                        if (data.size / frames != ch * 2) return
-                        if (recFrames.getAndIncrement() == 0) {
-                            Log.i("PartyLine", "record tap: mic first frame rate=$sampleRate ch=$ch bytes=${data.size}")
-                        }
-                        cb(toMonoLe(data, ch, frames), sampleRate)
-                    }
-                })
-                rec.start()
-            }.onFailure {
-                runCatching { rec.stop() }
-                Log.w("PartyLine", "record tap: mic recorder failed; self clip will be silent", it)
-            }.isSuccess
-            if (!started) return
+            val rec = DesktopRecordTaps.startMic(cb, recFrames, "PartyLine") ?: return
             // The device opens slowly, so a hang-up can land inside
             // start(): close() already ran detachRec, and assigning
             // micRecorder now would leave the mic open for good.
@@ -444,21 +366,7 @@ class DesktopPeerLink(
             Log.w("PartyLine", "record tap: no remote track yet; nothing recorded for this speaker")
             return
         }
-        val adapter = object : dev.onvoid.webrtc.media.audio.AudioTrackSink {
-            override fun onData(
-                audioData: ByteArray,
-                bitsPerSample: Int,
-                sampleRate: Int,
-                numberOfChannels: Int,
-                numberOfFrames: Int,
-            ) {
-                if (bitsPerSample != 16) return
-                if (recFrames.getAndIncrement() == 0) {
-                    Log.i("PartyLine", "record tap: remote first frame rate=$sampleRate ch=$numberOfChannels")
-                }
-                cb(toMonoLe(audioData, numberOfChannels, numberOfFrames), sampleRate)
-            }
-        }
+        val adapter = DesktopRecordTaps.remoteSink(cb, recFrames, "PartyLine")
         recSink = adapter
         runCatching { target.addSink(adapter) }
             .onFailure { Log.w("PartyLine", "could not tap remote for recording", it) }
@@ -468,40 +376,13 @@ class DesktopPeerLink(
     private fun detachRec() {
         micRecorder?.let {
             runCatching { it.stop() }
-            Log.i("PartyLine", "record tap: mic recorder stopped after ${recFrames.value} frames")
+            Log.i("PartyLine", "record tap: mic recorder stopped after ${recFrames.get()} frames")
         }
         micRecorder = null
         val s = recSink ?: return
         runCatching { remoteTrack?.removeSink(s) }
-        Log.i("PartyLine", "record tap: remote detached after ${recFrames.value} frames")
+        Log.i("PartyLine", "record tap: remote detached after ${recFrames.get()} frames")
         recSink = null
-    }
-
-    /** WebRTC PCM frame -> 16-bit little-endian mono bytes. Copies,
-     *  because webrtc may reuse the delivered array across callbacks.
-     *  Downmixes >1 channel by averaging. */
-    private fun toMonoLe(
-        pcm: ByteArray,
-        channels: Int,
-        frames: Int,
-    ): ByteArray {
-        if (channels <= 1) return pcm.copyOf()
-        val out = ByteArray(frames * 2)
-        for (f in 0 until frames) {
-            var acc = 0
-            for (c in 0 until channels) {
-                val b = (f * channels + c) * 2
-                if (b + 1 < pcm.size) {
-                    val lo = pcm[b].toInt() and 0xFF
-                    val hi = pcm[b + 1].toInt()
-                    acc += (hi shl 8) or lo
-                }
-            }
-            val v = acc / channels
-            out[f * 2] = (v and 0xFF).toByte()
-            out[f * 2 + 1] = ((v shr 8) and 0xFF).toByte()
-        }
-        return out
     }
 
     private val lastStatsLevel = kotlinx.atomicfu.atomic(-1f)

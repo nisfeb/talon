@@ -886,6 +886,94 @@ class CallController(
         if (cur is CallUiState.Active) _state.value = cur.copy(muted = muted)
     }
 
+    // ── recording a 1:1 call ──────────────────────────────────────
+
+    /**
+     * Posts a line in the DM with a peer and says whether our ship took
+     * it. Set by each app root. A 1:1 call is recorded only once the
+     * other person has been told in the chat (sneagan, 2026-10-17), as a
+     * party line records only where the room sees a badge; null leaves
+     * recording off.
+     */
+    @Volatile var recordingNotice: (suspend (peer: String, text: String) -> Boolean)? = null
+
+    private val callRecorder = CallRecorder(TAG) { (_state.value as? CallUiState.Active)?.muted == true }
+
+    /** Whether we are recording the live call. */
+    val callRecording: StateFlow<Boolean> get() = callRecorder.recording
+
+    /** The finished recording of a call, until the UI has dealt with it. */
+    val lastCallRecording: StateFlow<RecordedCall?> get() = callRecorder.last
+
+    fun clearLastCallRecording() = callRecorder.clearLast()
+
+    /** Who the last recorded call was with, for its title. */
+    @Volatile var lastCallPeer: String? = null
+        private set
+
+    /** Our own ship, as the recording files our voice. */
+    val ourShip: String? get() = session.shipName
+
+    /** A start in flight: a second tap while the notice goes must not send it twice. */
+    @Volatile private var startingRecording = false
+
+    /** [recordCall] on the controller's scope, so leaving the screen mid-notice still starts or refuses it; [onProblem] hears why not. */
+    fun beginCallRecording(onProblem: (String) -> Unit) {
+        scope.launch { recordCall()?.let(onProblem) }
+    }
+
+    /**
+     * Record the live call: tell the peer in the chat first, and tap
+     * both voices only once our ship has taken that. Null once
+     * recording, else why not.
+     */
+    suspend fun recordCall(): String? {
+        val p = peer
+        val eng = engine
+        val ourShip = session.shipName
+        if (p == null || eng == null || ourShip == null) return "There is no call to record."
+        val notice = recordingNotice ?: return "Recording isn't available here."
+        if (callRecorder.isRecording || startingRecording) return null
+        startingRecording = true
+        val told = try {
+            notice(p, RECORDING_ON)
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            Log.w(TAG, "the recording notice did not go", t)
+            false
+        } finally {
+            startingRecording = false
+        }
+        if (!told) return "Couldn't tell $p in your chat, so the call isn't being recorded."
+        // The call ended while the notice went: say it stopped, too.
+        if (engine !== eng || peer != p) {
+            scope.launch { runCatching { notice(p, RECORDING_OFF) } }
+            return "The call ended."
+        }
+        if (!callRecorder.start()) return null
+        eng.onPcm(callRecorder.sink(ourShip, isSelf = true), callRecorder.sink(p))
+        Log.i(TAG, "recording the call with $p")
+        return null
+    }
+
+    /** Stop recording the call: the audio goes to [lastCallRecording], and the peer is told. */
+    fun stopRecordingCall() = finishCallRecording(peer)
+
+    /** Every end of a call comes through here before the engine goes, so a recording is never stranded. */
+    private fun finishCallRecording(p: String?) {
+        if (!callRecorder.isRecording) return
+        engine?.onPcm(null, null)
+        lastCallPeer = p
+        callRecorder.stop()
+        val notice = recordingNotice
+        if (p != null && notice != null) {
+            scope.launch {
+                if (!runCatching { notice(p, RECORDING_OFF) }.getOrDefault(false)) Log.w(TAG, "the stopped-recording notice did not go")
+            }
+        }
+    }
+
     /** Clear a transient Ended banner. */
     fun dismissEnded() {
         if (_state.value is CallUiState.Ended) _state.value = CallUiState.None
@@ -1844,6 +1932,7 @@ class CallController(
     }
 
     private fun endLocal(reason: String) {
+        finishCallRecording(peer)
         // A call can end down more than one path at once — an engine
         // failure racing its own cleanup poke. The first arrival wins;
         // a second must not downgrade the Ended banner (and its
@@ -1937,6 +2026,10 @@ class CallController(
         const val PEEK_ATTEMPTS = 3
 
         private const val TAG = "Trunk"
+
+        /** What the peer reads in the chat when a recording starts, and when it stops. */
+        const val RECORDING_ON = "Recording this call."
+        const val RECORDING_OFF = "Stopped recording this call."
 
         /** Default life of a listen link. Short on purpose: the link
          *  is a bearer token nothing can revoke, so its lifetime is

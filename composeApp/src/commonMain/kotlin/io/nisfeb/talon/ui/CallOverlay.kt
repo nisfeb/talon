@@ -82,8 +82,30 @@ fun CallOverlay(
     stripShownInline: Boolean = false,
     /** Open a DM with the person on the other end. */
     onMessage: ((String) -> Unit)? = null,
+    /** For a recorded call's publish and save; null leaves the finished recording unoffered. */
+    http: io.ktor.client.HttpClient? = null,
+    aiConfig: io.nisfeb.talon.ai.AiSettings.Config? = null,
 ) {
     TrunkInstallPrompt(controller)
+
+    // A finished recording of a call, offered wherever the strip was
+    // and after the call has ended: it is held only here until it is
+    // published, saved or let go.
+    val recorded by controller.lastCallRecording.collectAsState()
+    val rec = recorded
+    if (rec != null && http != null && aiConfig != null) {
+        RecordingResultDialog(
+            rec = rec,
+            http = http,
+            sttConfig = aiConfig,
+            shipUrl = LocalShipUrl.current,
+            cookie = LocalShipCookie.current,
+            ourShip = controller.ourShip.orEmpty(),
+            title = "Call with " + nameFor(controller.lastCallPeer.orEmpty()),
+            nameFor = nameFor,
+            onClose = { controller.clearLastCallRecording() },
+        )
+    }
 
     val state by controller.state.collectAsState()
     if (state is CallUiState.None) return
@@ -162,6 +184,10 @@ fun CallStrip(
     val shareControl = remember(controller) {
         ScreenShareControl({ controller.screenSources() }, { controller.setScreenShare(it) })
     }
+    // Recording: on the controller, so the strip can come and go.
+    val recording by controller.callRecording.collectAsState()
+    var askRecord by remember { mutableStateOf<String?>(null) }
+    var recordProblem by remember { mutableStateOf<String?>(null) }
     when (val s = state) {
         is CallUiState.Active -> Column(modifier) {
             // Pictures above the strip, so the controls stay in the
@@ -190,9 +216,15 @@ fun CallStrip(
             audioDevices = audioDevices,
             // "1 on the line" is the wrong sentence for a phone call.
             headline = when (s.media) {
-                MediaState.Live -> "${nameFor(s.peer)} · ${liveDuration(s.connectedAtMs)}"
+                MediaState.Live -> "${nameFor(s.peer)} · ${liveDuration(s.connectedAtMs)}" + if (recording) " · ● Recording" else ""
                 else -> "Connecting to ${nameFor(s.peer)}…"
             },
+            recording = recording,
+            recordedBy = if (recording) setOfNotNull(controller.ourShip) else emptySet(),
+            // Only once live, and only where the peer can be told in the chat.
+            onToggleRecord = if (isCallRecordingSupported && controller.recordingNotice != null && (recording || s.media == MediaState.Live)) {
+                { if (recording) controller.stopRecordingCall() else askRecord = s.peer }
+            } else null,
             cameraOn = video.localOn,
             onToggleCamera = if (isVideoCallsSupported && engine != null) {
                 {
@@ -227,6 +259,28 @@ fun CallStrip(
         }
 
         else -> Unit
+    }
+    // Asked of the call it was asked on, and gone with it.
+    askRecord?.takeIf { (state as? CallUiState.Active)?.peer == it }?.let { peer ->
+        RecordConsentDialog(
+            show = true,
+            onDismiss = { askRecord = null },
+            onConfirm = {
+                askRecord = null
+                controller.beginCallRecording { recordProblem = it }
+            },
+            text = "Recording captures both voices. Talon first posts \"${io.nisfeb.talon.call.CallController.RECORDING_ON}\" " +
+                "in your chat with ${nameFor(peer)}, and records only once your ship has sent it. " +
+                "A transcript is made only if you publish one afterwards.",
+        )
+    }
+    recordProblem?.let { why ->
+        AlertDialog(
+            onDismissRequest = { recordProblem = null },
+            title = { Text("Not recording") },
+            text = { Text(why) },
+            confirmButton = { TextButton(onClick = { recordProblem = null }) { Text("OK") } },
+        )
     }
 }
 

@@ -970,6 +970,24 @@ class TlonChatRepo(
         postContent(whom, textToStory(text))
 
     /**
+     * [send], and whether our ship took it: false when it refused, and
+     * when it could not be reached and the message waits in the queue
+     * (behind another, too). For what must not go ahead untold, as a
+     * call's recording.
+     */
+    suspend fun sendConfirmed(whom: String, text: String): Boolean {
+        try {
+            send(whom, text)
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            Log.w(TAG, "a message that had to go did not: ${t.message}")
+            return false
+        }
+        return db.messages().queuedIn(whom) == 0
+    }
+
+    /**
      * Power-user escape hatch: poke an arbitrary agent on this ship
      * with a raw JSON payload. Used by the `/poke` slash command,
      * gated upstream by the per-device power-features toggle.

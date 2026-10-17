@@ -18,7 +18,7 @@ package io.nisfeb.talon.ui
  *  - isQuickDictationSupported — A (widget, Quick Settings tile, assist role, a microphone foreground service); D/i: no such surfaces.
  *  - isTapToOpenMenuSupported — A, i; D: left-drag belongs to text selection, the menu is right-click.
  *  - isCallsSupported — A, D, i: a libwebrtc-backed CallEngine actual exists on each.
- *  - isCallRecordingSupported — A, D; i: the Swift bridge exposes no PCM tap.
+ *  - isCallRecordingSupported — A, D (party lines and 1:1 calls); i: the Swift bridge exposes no PCM tap.
  *  - isWindowFullScreenSupported — D (window placement is ours); A/i: the app already is the whole screen.
  *  - isBackgroundCallRingSupported — A (UnifiedPush), D (long-running process), i (PushKit + CallKit).
  *  - isVideoCallsSupported — A, D, i: camera capture + render end-to-end on all three.
@@ -202,7 +202,8 @@ expect val isCallsSupported: Boolean
 
 /**
  * Whether a party line can be recorded and transcribed to Lattice
- * (wire 7). True only where PeerLink.onPcm captures BOTH remote
+ * (wire 7), and of a 1:1 call (its peer told in the chat). True only
+ * where PeerLink.onPcm and CallEngine.onPcm capture BOTH remote
  * speakers and our own mic end-to-end. Desktop: true (webrtc-java taps
  * remote tracks, and the self-mic through a standalone AudioRecorder —
  * a LOCAL track's addSink never fires). Android: true (remote via

@@ -201,7 +201,11 @@ fun TalonApp(
     val callController = remember(loggedInShip) {
         if (loggedInShip != null) {
             io.nisfeb.talon.call.CallController(app.session, callEngineProvider, sounds = callSounds, defaults = io.nisfeb.talon.call.buildCallDefaults)
-                .also { it.start() }
+                .also {
+                    // A recorded call tells the peer in the chat first.
+                    it.recordingNotice = { peer, text -> app.repo.sendConfirmed(peer, text) }
+                    it.start()
+                }
         } else {
             null
         }
@@ -1551,6 +1555,8 @@ fun TalonApp(
             // header, beside the party-line bar. Floating it as well
             // would put the same call in two places.
             stripShownInline = inlineCallUiShown.value,
+            http = app.ktorHttp,
+            aiConfig = app.aiSettings.state.value,
         )
     }
     if (partyFloats) {

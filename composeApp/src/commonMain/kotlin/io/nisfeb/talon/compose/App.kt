@@ -785,7 +785,11 @@ fun App(
             ) {
                 remember {
                     io.nisfeb.talon.call.CallController(session, callEngineProvider, sounds = callSounds, defaults = io.nisfeb.talon.call.buildCallDefaults)
-                        .also { it.start() }
+                        .also {
+                            // A recorded call tells the peer in the chat first.
+                            it.recordingNotice = { peer, text -> repo.sendConfirmed(peer, text) }
+                            it.start()
+                        }
                 }
             } else {
                 null
@@ -1997,6 +2001,8 @@ fun App(
                             // would put the same call in two places.
                             stripShownInline = inlineCallUiShown.value,
                             onMessage = jumpToChat,
+                            http = http,
+                            aiConfig = aiSettings.state.value,
                         )
                     }
                     val notifyShip = loggedInShip

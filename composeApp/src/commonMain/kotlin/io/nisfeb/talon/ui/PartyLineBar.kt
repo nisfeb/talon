@@ -337,8 +337,15 @@ fun PartyLineBarContent(
                     // CallStrip fabricates one member whose speaking/
                     // muted never update, which read as "peer is silent
                     // and never muted". The expander survives only where
-                    // it still has a job: picking audio devices.
-                    val expandable = immersive || headline == null || audioDevices.supported
+                    // it still has a job: picking audio devices, or recording.
+                    val expandable = immersive || headline == null || audioDevices.supported || onToggleRecord != null
+                    // A 1:1 call's expander holds controls, not a roster.
+                    val expandTip = when {
+                        immersive -> "Open the full-screen call"
+                        headline != null -> if (expanded) "Hide call controls" else "Call controls"
+                        expanded -> "Hide who's on the line"
+                        else -> "Who's on the line"
+                    }
                     Column(
                         Modifier.weight(1f).then(
                             if (expandable) {
@@ -440,18 +447,13 @@ fun PartyLineBarContent(
                             }
                         }
                         if (expandable) {
-                            io.nisfeb.talon.ui.IconButton(tip = if (immersive) "Open the full-screen call"
-                                        else if (expanded) "Hide who's on the line"
-                                        else "Who's on the line", onClick = {
+                            io.nisfeb.talon.ui.IconButton(tip = expandTip, onClick = {
                                 if (immersive) fullScreen = true else expanded = !expanded
                             }) {
                                 Icon(
                                     if (expanded) TalonIcons.ExpandLess
                                     else TalonIcons.ExpandMore,
-                                    contentDescription =
-                                        if (immersive) "Open the full-screen call"
-                                        else if (expanded) "Hide who's on the line"
-                                        else "Who's on the line",
+                                    contentDescription = expandTip,
                                 )
                             }
                         }
@@ -527,8 +529,8 @@ fun PartyLineBarContent(
         // Recording control for non-immersive clients (desktop): the
         // immersive full-screen has its own Record button, but desktop
         // never opens it, so the control would otherwise be unreachable
-        // where recording is actually supported. Party lines only.
-        if (onToggleRecord != null && headline == null) {
+        // where recording is actually supported. A 1:1 call too.
+        if (onToggleRecord != null) {
             RecordRow(
                 recording = recording,
                 recordedBy = recordedBy,

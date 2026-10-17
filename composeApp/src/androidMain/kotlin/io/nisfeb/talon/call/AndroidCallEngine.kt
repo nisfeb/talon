@@ -86,8 +86,15 @@ class AndroidCallEngine(
 
     private val observer = object : PeerConnection.Observer {
         override fun onTrack(transceiver: RtpTransceiver?) {
-            // The far end turned a camera on (or had one from the
-            // start). Unified Plan fires this once per transceiver.
+            // Unified Plan fires this once per transceiver. Their voice,
+            // kept for a recording to tap.
+            val audio = transceiver?.receiver?.track() as? AudioTrack
+            if (audio != null) {
+                remoteAudioTrack = audio
+                attachRemoteRec()
+                return
+            }
+            // The far end turned a camera on (or had one from the start).
             val track = transceiver?.receiver?.track() as? VideoTrack ?: return
             remoteVideoTrack = track
             // Not remoteOn = true: the video m-line is pre-negotiated on
@@ -296,6 +303,41 @@ class AndroidCallEngine(
         micTrack?.setEnabled(!muted)
     }
 
+    @Volatile private var remoteAudioTrack: AudioTrack? = null
+    private var recMic: ((ByteArray, Int) -> Unit)? = null
+    private var recRemote: ((ByteArray, Int) -> Unit)? = null
+    private var recSink: org.webrtc.AudioTrackSink? = null
+
+    /**
+     * Our mic through the audio device module's record-samples hook
+     * ([WebRtcFactory.micSink], one for the process, as a party line's up
+     * link uses it), and their voice off the remote track.
+     */
+    // ponytail: one process-wide mic hook; a party line recording at the same time would take it
+    @Synchronized
+    override fun onPcm(mic: ((pcm: ByteArray, sampleRate: Int) -> Unit)?, remote: ((pcm: ByteArray, sampleRate: Int) -> Unit)?) {
+        // A tap landing after the hang-up would outlive the call.
+        if (closed.value && (mic != null || remote != null)) return
+        val oldMic = recMic
+        recMic = mic
+        if (mic != null) WebRtcFactory.micSink = mic
+        else if (oldMic != null && WebRtcFactory.micSink === oldMic) WebRtcFactory.micSink = null
+        recRemote = remote
+        attachRemoteRec()
+    }
+
+    /** (Re)attach the remote tap: the track can arrive after a recording starts. */
+    @Synchronized
+    private fun attachRemoteRec() {
+        recSink?.let { s -> runCatching { remoteAudioTrack?.removeSink(s) } }
+        recSink = null
+        val cb = recRemote ?: return
+        val track = remoteAudioTrack ?: return
+        val s = remotePcmSink(cb)
+        recSink = s
+        runCatching { track.addSink(s) }.onFailure { Log.w(TAG, "could not tap the far end for recording", it) }
+    }
+
     /**
      * Re-point [videoTransceiver] and [videoSender] at the transceiver
      * the offer negotiated.
@@ -347,6 +389,7 @@ class AndroidCallEngine(
         // a double native teardown.
         if (!closed.compareAndSet(false, true)) return
         runCatching { micTrack?.setEnabled(false) }
+        onPcm(null, null)
         // Stop capture before the pc goes: a running capturer feeding a
         // closed source is a native callback into freed memory, the
         // same hazard as disposing the factory mid-gather.
@@ -515,4 +558,47 @@ internal object WebRtcFactory {
             .createPeerConnectionFactory()
             .also { factory = it }
     }
+}
+
+/**
+ * A recording tap on a remote track's decoded audio: 16-bit mono to
+ * [cb]. Shared by a party line's down links and a 1:1 call.
+ */
+internal fun remotePcmSink(cb: (pcm: ByteArray, sampleRate: Int) -> Unit): org.webrtc.AudioTrackSink =
+    object : org.webrtc.AudioTrackSink {
+        override fun onData(
+            audioData: java.nio.ByteBuffer,
+            bitsPerSample: Int,
+            sampleRate: Int,
+            numberOfChannels: Int,
+            numberOfFrames: Int,
+            absoluteCaptureTimestampMs: Long,
+        ) {
+            if (bitsPerSample != 16) return
+            cb(pcmMonoLe(audioData, numberOfChannels, numberOfFrames), sampleRate)
+        }
+    }
+
+/** WebRTC PCM frame -> 16-bit little-endian mono. Copies (the
+ *  buffer may be reused) and downmixes >1 channel. */
+internal fun pcmMonoLe(buf: java.nio.ByteBuffer, channels: Int, frames: Int): ByteArray {
+    val dup = buf.duplicate().order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    if (channels <= 1) {
+        val out = ByteArray(frames * 2)
+        dup.get(out, 0, minOf(out.size, dup.remaining()))
+        return out
+    }
+    val shorts = dup.asShortBuffer()
+    val out = ByteArray(frames * 2)
+    for (f in 0 until frames) {
+        var acc = 0
+        for (c in 0 until channels) {
+            val i = f * channels + c
+            if (i < shorts.limit()) acc += shorts.get(i).toInt()
+        }
+        val v = acc / channels
+        out[f * 2] = (v and 0xFF).toByte()
+        out[f * 2 + 1] = ((v shr 8) and 0xFF).toByte()
+    }
+    return out
 }
