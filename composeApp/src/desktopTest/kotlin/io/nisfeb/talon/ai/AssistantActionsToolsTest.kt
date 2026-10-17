@@ -245,6 +245,18 @@ class AssistantActionsToolsTest {
         }
     }
 
+    // edit-at keeps the occurrence on the series' own calendar: "move this
+    // one to Family" said Updated and moved nothing.
+    @Test
+    fun `one occurrence moved to another calendar goes in two steps, there, and says so`() = withHarness(
+        window = standupRow, event = standup, invites = "[]", calendars = family,
+    ) { h ->
+        val out = h.run("update_event", argsOf("event" to "r1", "occurrence" to "2026-09-21", "calendar" to "Family"))
+        assertEquals("Updated \"Standup\" for that occurrence. It is its own event on the new calendar now, apart from the series.", out)
+        assertEquals(listOf("add-event", "skip-event"), h.pokes.map { it["action"]!!.jsonPrimitive.content })
+        assertEquals("c-0w1.94k9D", h.pokes[0]["cal"]!!.jsonPrimitive.content)
+    }
+
     // An all-day "the electrician comes back" day reached the owner with no
     // reminder: the event tools sent no alarms (orrery-0c's review, 2026-10-09).
     // The bodies are the calendar's own alarm shapes (docs/using.md).

@@ -528,21 +528,25 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 // One step where the calendar has it (version 34): the
                 // occurrence becomes the series' own exception. Two steps
                 // invited every guest ship again, and on Google mailed each
-                // guest a new invitation and a cancellation.
-                if (cal.editsAt()) {
+                // guest a new invitation and a cancellation. Not to move it
+                // to another calendar: edit-at keeps it on the series' own.
+                val moved = calId != d0.cal
+                if (cal.editsAt() && !moved) {
                     cal.wrote(editAtBody(one, id, home = row.cal, atMs = row.l))?.let { return@Tool it }
                     return@Tool "Updated \"${d.name}\" for that occurrence." + droppedNote
                 }
-                // Else the page's old two steps, in the safe order: add the
-                // one-off FIRST, then skip the original once the add is known
-                // kept. Skip-first silently LOSES the occurrence when the add
-                // then fails; add-first can only leave a visible duplicate,
-                // and the partial state is reported honestly below.
+                // Else, or to move it, the page's old two steps, in the safe
+                // order: add the one-off FIRST, then skip the original once
+                // the add is known kept. Skip-first silently LOSES the
+                // occurrence when the add then fails; add-first can only
+                // leave a visible duplicate, and the partial state is
+                // reported honestly below.
                 cal.wrote(eventBody(one), readBack = false)?.let { return@Tool it }
                 cal.wrote(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })?.let {
                     return@Tool "Half done: the changed \"${d.name}\" was added, but the original occurrence on $occ is still there too. $it Skip it by hand, or try again."
                 }
-                return@Tool "Updated \"${d.name}\" for that occurrence." + droppedNote
+                val apart = if (moved) " It is its own event on the new calendar now, apart from the series." else ""
+                return@Tool "Updated \"${d.name}\" for that occurrence." + apart + droppedNote
             }
             // The lists are read back behind, as for an add.
             cal.wrote(eventBody(d, id)) ?: ("Updated \"${d.name}\"." + droppedNote)
