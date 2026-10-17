@@ -67,6 +67,8 @@ class AppShellTest {
         width: androidx.compose.ui.unit.Dp = 1200.dp,
         /** The ship as it is before the app first asks it anything. */
         setup: FakeShip.() -> Unit = {},
+        /** Media for 1:1 calls; null keeps calls dark, as on a platform without them. */
+        calls: io.nisfeb.talon.call.CallEngineProvider? = null,
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -101,6 +103,7 @@ class AppShellTest {
                             drafts = InMemoryDraftStore(),
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
                             createUiSettings = { ui },
+                            callEngineProvider = calls,
                         )
                     }
                 }
@@ -823,6 +826,81 @@ class AppShellTest {
             ),
             meta,
         )
+    }
+
+    // ---- Recording a 1:1 call (sneagan chose the chat notice, 2026-10-17) ----
+
+    /** A call's media, as the test feeds it; [chatAtTap] is how many chat pokes there were when audio was first tapped. */
+    private class RecordedEngine(val ship: FakeShip) : io.nisfeb.talon.call.CallEngine {
+        private val desc = io.nisfeb.talon.call.SessionDesc("v=0\na=fingerprint:sha-256 AA:BB\n", "sha-256 AA:BB")
+        override val state = kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.MediaState.Idle)
+        override suspend fun createOffer() = desc
+        override suspend fun acceptOffer(remote: io.nisfeb.talon.call.SessionDesc) = desc
+        override suspend fun setAnswer(remote: io.nisfeb.talon.call.SessionDesc) = Unit
+        override fun setMuted(muted: Boolean) = Unit
+        override val video = kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.VideoState())
+        override suspend fun setCameraEnabled(enabled: Boolean) = false
+        @Volatile var remote: ((ByteArray, Int) -> Unit)? = null
+        @Volatile var chatAtTap = -1
+        override fun onPcm(mic: ((pcm: ByteArray, sampleRate: Int) -> Unit)?, remote: ((pcm: ByteArray, sampleRate: Int) -> Unit)?) {
+            if (remote != null && chatAtTap < 0) chatAtTap = ship.pokesTo("chat").size
+            this.remote = remote
+        }
+        override fun close() = Unit
+    }
+
+    private val callingShip: FakeShip.() -> Unit = {
+        scries["trunk/policy"] = "{}"
+        scries["trunk/version"] = """{"wire":${io.nisfeb.talon.call.TrunkWire.WIRE_VERSION}}"""
+    }
+
+    /** ~bus rings, and the call is answered and live. */
+    private fun ComposeUiTest.liveCallFromBus(ship: FakeShip, engine: RecordedEngine) {
+        waitUntil(timeoutMillis = 10_000) { ship.subIds.containsKey("trunk/calls") }
+        fun fact(json: String) = runBlocking { ship.emit("""{"id":${ship.subIds.getValue("trunk/calls")},"response":"diff","json":$json}""") }
+        fact("""{"recv":{"from":"~bus","sig":{"ring":{"id":"r1"}}}}""")
+        waitUntil(timeoutMillis = 10_000) { onAllNodesWithContentDescription("Answer").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithContentDescription("Answer").performClick()
+        fact("""{"recv":{"from":"~bus","sig":{"offer":{"id":"r1","sdp":"v=0\na=fingerprint:sha-256 AA:BB\n","fpr":"sha-256 AA:BB"}}}}""")
+        engine.state.value = io.nisfeb.talon.call.MediaState.Live
+        waitUntil(timeoutMillis = 10_000) { showing("· 00:0") }
+    }
+
+    private fun ComposeUiTest.recordTheCall() {
+        onAllNodesWithContentDescription("Call controls")[0].performClick()
+        onAllNodesWithText("Record")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("in your chat with") }
+        onNodeWithText("Start recording").performClick()
+    }
+
+    private fun chatSaid(ship: FakeShip, text: String) = ship.pokesTo("chat").any { text in it.json.toString() }
+
+    @Test
+    fun `a call is recorded only after the DM tells them, and is offered when it ends`() {
+        lateinit var engine: RecordedEngine
+        app(setup = { callingShip(); engine = RecordedEngine(this) }, calls = io.nisfeb.talon.call.CallEngineProvider { engine }) { ship ->
+            liveCallFromBus(ship, engine)
+            recordTheCall()
+            waitUntil(timeoutMillis = 10_000) { engine.remote != null }
+            assertTrue(chatSaid(ship, io.nisfeb.talon.call.CallController.RECORDING_ON))
+            assertEquals(1, engine.chatAtTap, "the DM went, and was taken, before any audio was tapped")
+            engine.remote!!(ByteArray(960) { 1 }, 48_000)
+            onAllNodesWithContentDescription("Hang up")[0].performClick()
+            waitUntil(timeoutMillis = 10_000) { chatSaid(ship, io.nisfeb.talon.call.CallController.RECORDING_OFF) }
+            waitUntil(timeoutMillis = 10_000) { showing("Recording finished") }
+            assertTrue(showing("Captured 1 speaker"))
+        }
+    }
+
+    @Test
+    fun `a call whose DM the ship refuses is not recorded`() {
+        lateinit var engine: RecordedEngine
+        app(setup = { callingShip(); refuse = { if (it.app == "chat") "no" else null }; engine = RecordedEngine(this) }, calls = io.nisfeb.talon.call.CallEngineProvider { engine }) { ship ->
+            liveCallFromBus(ship, engine)
+            recordTheCall()
+            waitUntil(timeoutMillis = 10_000) { showing("Not recording") }
+            assertTrue(engine.chatAtTap < 0 && engine.remote == null, "nothing tapped")
+        }
     }
 
     // "When adding a new contact and pressing Message, it should exit you

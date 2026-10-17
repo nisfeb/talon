@@ -205,40 +205,12 @@ class PartyLine(
     @Volatile private var muted = false
     private var upState: MediaState = MediaState.Idle
 
-    // Call recording (wire 7). recClips maps a speaker's patp to their
-    // capture buffer. Structural writes (adding a speaker) happen on the
-    // app thread in +tap; the WebRTC audio thread only touches an
-    // already-registered [Clip] — never the map itself — so no lock is
-    // needed. Reads at stop() are fenced by Clip.open (see stopRecording).
-    /**
-     * Whether we are capturing right now. A StateFlow, and owned here,
-     * because the screen must not be able to disagree with the tap: the
-     * recording controls used to live in the chat slot, so opening a DM
-     * cleared the room-wide badge while the taps kept running.
-     */
-    private val _recording = MutableStateFlow(false)
-    val recording: StateFlow<Boolean> = _recording.asStateFlow()
-    private var recStartMs = 0L
-    private var recRate = 48_000
+    // Call recording (wire 7): the per-speaker capture, shared with 1:1 calls.
+    private val recorder = CallRecorder(TAG) { muted }
+    val recording: StateFlow<Boolean> get() = recorder.recording
     /** The patp the up link is filed under while recording, so a
      *  republish can re-tap our own mic under the same key. */
     private var recSelfShip: String? = null
-    private val recClips = mutableMapOf<String, Clip>()
-
-    /**
-     * One speaker's capture buffer. The audio thread appends to [chunks]
-     * and stamps [rate]/[frames]; it never touches the enclosing map.
-     * [open] is the fence stop() closes before it reads.
-     */
-    private class Clip {
-        val chunks = mutableListOf<ByteArray>()
-        @Volatile var rate = 0
-        /** Real captured frames, as opposed to the silence we padded in.
-         *  Zero means this speaker never spoke while we recorded, and the
-         *  clip is pure padding — not worth a Whisper upload. */
-        @Volatile var frames = 0
-        @Volatile var open = true
-    }
 
     /**
      * The finished recording. Published rather than only returned so a
@@ -246,11 +218,10 @@ class PartyLine(
      * closing the screen — still reaches the UI instead of being lost
      * with the control that would have stopped it.
      */
-    private val _lastRecording = MutableStateFlow<RecordedCall?>(null)
-    val lastRecording: StateFlow<RecordedCall?> = _lastRecording.asStateFlow()
+    val lastRecording: StateFlow<RecordedCall?> get() = recorder.last
 
     /** Drop the finished recording once the UI has dealt with it. */
-    fun clearLastRecording() { _lastRecording.value = null }
+    fun clearLastRecording() = recorder.clearLast()
 
     // Party-line video (conference). Our own camera state; re-applied
     // when the up link republishes so a flaky network doesn't silently
@@ -464,11 +435,8 @@ class PartyLine(
      * UI is gated on [io.nisfeb.talon.ui.isCallRecordingSupported].
      */
     fun startRecording(ourShip: String) {
-        if (_recording.value) return
-        recStartMs = nowMs()
-        recClips.clear()
+        if (!recorder.start()) return
         recSelfShip = ourShip
-        _recording.value = true
         Log.i(
             TAG,
             "recording start: upLink=${upLink != null} downLinks=${downLinks.size} " +
@@ -478,120 +446,28 @@ class PartyLine(
         for ((id, link) in downLinks) tap(link, streamOwner[id] ?: id)
     }
 
-    /**
-     * Register a per-speaker tap, padding the clip with silence up to
-     * where their audio starts so every speaker shares t=0.
-     *
-     * Re-entrant on purpose: an up-link republish or a ship rejoining on
-     * a new stream re-taps a speaker we already hold audio for, so the
-     * existing clip is kept and only the gap is padded. Replacing it
-     * (what this used to do) silently threw away everything captured
-     * before a mid-recording network blip.
-     */
+    /** Register [ship]'s tap on [link], filed by [CallRecorder.sink]. */
     private fun tap(link: PeerLink?, ship: String, isSelf: Boolean = false) {
         link ?: return
-        val clip = recClips.getOrPut(ship) { Clip() }
-        clip.open = true
-        // Only a clip that already holds audio is padded here: it is
-        // anchored to the timeline, so the gap since its last frame is
-        // real. A speaker we have nothing from yet is padded on their
-        // first frame instead (below) — tap() runs from onRemoteOffer,
-        // before answerTo and long before ICE connects, so measuring
-        // the lead here placed a mid-line joiner 0.5-3s early in both
-        // the mixdown and the transcript.
-        if (clip.chunks.isNotEmpty()) {
-            val rate = if (clip.rate > 0) clip.rate else recRate
-            val elapsedMs = (nowMs() - recStartMs).coerceAtLeast(0)
-            val wantBytes = ((rate.toLong() * elapsedMs / 1000L).toInt()) * 2
-            pad(clip.chunks, wantBytes - clip.chunks.sumOf { it.size })
-        }
-        link.onPcm { pcm, r ->
-            // Mute is the app's one hard privacy control, and both
-            // platforms tap outside the send path — Android's sink sits
-            // pre-encode, desktop's is a separate capture entirely — so
-            // without this a muted aside still reaches the WAV, Whisper
-            // and the published transcript.
-            if (isSelf && muted) return@onPcm
-            if (!clip.open) return@onPcm
-            clip.rate = r
-            clip.frames++
-            if (r > recRate) recRate = r
-            if (clip.chunks.isEmpty()) {
-                // The lead silence, measured where the speaker's audio
-                // actually starts and at this link's own rate.
-                val elapsedMs = (nowMs() - recStartMs).coerceAtLeast(0)
-                pad(clip.chunks, ((r.toLong() * elapsedMs / 1000L).toInt()) * 2)
-            }
-            clip.chunks.add(pcm)
-        }
-        // stopRecording can land between our caller's check and this
-        // registration: it drops every sink and closes every clip
-        // before it reads, so the sink installed just above would
-        // append into an orphaned clip for the rest of the line.
-        if (!_recording.value) {
-            clip.open = false
-            link.onPcm(null)
-        }
-    }
-
-    /** Append [bytes] of silence as bounded chunks. One contiguous array
-     *  is a ~170 MB allocation for a speaker joining 30 minutes in, on
-     *  the audio pump; these cost the same in total and never spike. */
-    private fun pad(chunks: MutableList<ByteArray>, bytes: Int) {
-        var left = bytes
-        while (left > 0) {
-            val n = if (left < PAD_CHUNK_BYTES) left else PAD_CHUNK_BYTES
-            chunks.add(ByteArray(n))
-            left -= n
-        }
+        val sink = recorder.sink(ship, isSelf) ?: return
+        link.onPcm(sink)
+        // stopRecording can land between the sink and this registration:
+        // the sink then appends nothing, but the native tap stays on for
+        // the rest of the line unless it is taken off.
+        if (!recorder.isRecording) link.onPcm(null)
     }
 
     /** Stop capturing and return the per-speaker audio. Removes every
      *  native sink first, so no callback races the read. */
     fun stopRecording(): RecordedCall {
-        if (!_recording.value) return RecordedCall(emptyMap(), recRate)
-        _recording.value = false
+        if (!recorder.isRecording) return recorder.stop()
         upLink?.onPcm(null)
         downLinks.values.toList().forEach { runCatching { it.onPcm(null) } }
-        // Close every clip before reading. Dropping the sinks is not
-        // quite enough on its own: a frame already inside the callback
-        // would otherwise append while we concatenate.
-        recClips.values.forEach { it.open = false }
-        val clips = mutableMapOf<String, ByteArray>()
-        val rates = mutableMapOf<String, Int>()
-        val entries = recClips.entries.iterator()
-        while (entries.hasNext()) {
-            val (ship, clip) = entries.next()
-            // Free each speaker's chunks as we go. Building the whole
-            // result while still holding every chunk doubled peak heap,
-            // which is what turned a long Android recording into an OOM
-            // on the Stop tap that was meant to save it.
-            if (clip.frames > 0) {
-                val total = clip.chunks.sumOf { it.size }
-                val out = ByteArray(total)
-                var at = 0
-                for (c in clip.chunks) { c.copyInto(out, at); at += c.size }
-                clips[ship] = out
-                rates[ship] = if (clip.rate > 0) clip.rate else recRate
-            }
-            clip.chunks.clear()
-            entries.remove()
-        }
-        val mixRate = rates.values.maxOrNull() ?: recRate
-        Log.i(
-            TAG,
-            "recording stop: mixRate=$mixRate " +
-                clips.entries.joinToString(", ") {
-                    "${it.key}=${it.value.size}B@${rates[it.key]}"
-                }.ifEmpty { "(no clips)" },
-        )
         recSelfShip = null
-        val call = RecordedCall(clips, mixRate, rates)
-        _lastRecording.value = call
-        return call
+        return recorder.stop()
     }
 
-    fun isRecording(): Boolean = _recording.value
+    fun isRecording(): Boolean = recorder.isRecording
 
     /** Our own mic state. internal: the UI reads it off [state], but a
      *  test with no join has no Live state to read. */
@@ -1265,7 +1141,7 @@ class PartyLine(
             // Carry an in-flight recording across the republish. The old
             // link's tap died with it, so without this our own voice simply
             // stops partway through the file while everyone else continues.
-            recSelfShip?.let { if (_recording.value) tap(up, it, isSelf = true) }
+            recSelfShip?.let { if (recorder.isRecording) tap(up, it, isSelf = true) }
             // Republish (flaky network) rebuilds the up link with the camera
             // closed; restore it so our video doesn't silently vanish.
             if (_cameraOn.value) scope.launch {
@@ -1341,7 +1217,7 @@ class PartyLine(
             }
         }
         // A speaker who joins while we're recording gets tapped too.
-        if (_recording.value && fresh) tap(link, streamOwner[id] ?: id)
+        if (recorder.isRecording && fresh) tap(link, streamOwner[id] ?: id)
         val answer = link.answerTo(sdp)
         send(buildJsonObject { put("type", "answer"); put("id", id); put("sdp", answer) })
     }
@@ -1560,13 +1436,12 @@ class PartyLine(
         // and left `recording` stuck true, which made every later
         // startRecording a silent no-op. stopRecording publishes to
         // lastRecording, so the audio still reaches the UI.
-        if (_recording.value) {
+        if (recorder.isRecording) {
             runCatching { stopRecording() }
                 .onFailure { Log.w(TAG, "could not finalize the recording on teardown", it) }
         }
-        recClips.clear()
+        recorder.reset()
         recSelfShip = null
-        recStartMs = 0L
         upOffered = false
         _cameraOn.value = false
         stopSharingState()
@@ -1584,7 +1459,6 @@ class PartyLine(
         /** Silence padding is emitted in chunks this size (64 KB ~= 0.7 s
          *  of 16-bit 48 kHz mono) so a late joiner never asks for one
          *  enormous contiguous allocation on the audio pump. */
-        private const val PAD_CHUNK_BYTES = 64 * 1024
 
         /** How recent a server notice must be to count as the reason
          *  the stream then ended. */

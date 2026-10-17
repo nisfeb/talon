@@ -36,18 +36,16 @@ fun RecordConsentDialog(
     show: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
+    /** What recording does and who is told: the room by its badge, a 1:1 call's peer in the chat. */
+    text: String = "Recording captures everyone's audio. Talon sends it to " +
+        "Armillary's speech model to make a transcript, and " +
+        "everyone on the line sees a recording badge while it's on.",
 ) {
     if (!show) return
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Record this call?") },
-        text = {
-            Text(
-                "Recording captures everyone's audio. Talon sends it to " +
-                    "your transcription provider to make a transcript, and " +
-                    "everyone on the line sees a recording badge while it's on.",
-            )
-        },
+        text = { Text(text) },
         confirmButton = { TextButton(onClick = onConfirm) { Text("Start recording") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

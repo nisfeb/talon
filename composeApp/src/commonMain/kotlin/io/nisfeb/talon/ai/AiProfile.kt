@@ -327,7 +327,6 @@ const val ARMILLARY_PROVIDER = "armillary"
  * trip there and back. A model the owner runs on modest hardware is slow.
  */
 const val ARMILLARY_WAIT_MS = 11 * 60_000L
-const val WHISPER = "whisper-1"
 
 internal fun providerOf(k: ProviderKind): AiSettings.Provider? = when (k) {
     ProviderKind.OpenRouter -> AiSettings.Provider.OpenRouter

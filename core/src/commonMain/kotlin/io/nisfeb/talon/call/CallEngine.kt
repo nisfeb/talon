@@ -103,6 +103,14 @@ interface CallEngine {
      */
     suspend fun setScreenShare(source: ScreenSource?): Boolean = false
 
+    /**
+     * For a recording: our mic's 16-bit mono PCM to [mic] and the far
+     * end's to [remote], or stop with nulls. Taps outside the send path,
+     * so mute does not silence [mic]; the recorder drops it. Nothing
+     * where the platform has no tap.
+     */
+    fun onPcm(mic: ((pcm: ByteArray, sampleRate: Int) -> Unit)?, remote: ((pcm: ByteArray, sampleRate: Int) -> Unit)?) {}
+
     fun close()
 }
 

@@ -178,7 +178,7 @@ fun AiSettingsSection(
         "Ask about your chats, or have it send and reply for you. It asks before changing anything. Loops and quick dictation run on it, and only while it is on.",
     )
     // Where a party line can be recorded: there is nothing to transcribe elsewhere.
-    if (isCallRecordingSupported) Paid(AiFeature.Transcription, "Call transcripts", "Writes recorded party lines up as text, through Armillary's speech model.")
+    if (isCallRecordingSupported) Paid(AiFeature.Transcription, "Call transcripts", "Writes recorded calls and party lines up as text, through Armillary's speech model.")
     // The on-device index: search by meaning, topics and highlights. No credit needed.
     if (isOnDeviceAiSupported) AiSettings.Feature.values()
         .filter { !it.requiresCloudKey && isOnDeviceAiFeatureSupported(it) }

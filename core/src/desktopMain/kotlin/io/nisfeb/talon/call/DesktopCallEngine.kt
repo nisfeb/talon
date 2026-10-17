@@ -106,6 +106,12 @@ class DesktopCallEngine(
             }
 
             override fun onTrack(transceiver: dev.onvoid.webrtc.RTCRtpTransceiver?) {
+                // Their voice, kept for a recording to tap.
+                (transceiver?.receiver?.track as? AudioTrack)?.let {
+                    remoteAudioTrack = it
+                    attachRemoteRec()
+                    return
+                }
                 val track = transceiver?.receiver?.track as? VideoTrack ?: return
                 remoteVideoTrack = track
                 // Deliberately NOT remoteOn = true. The video m-line is
@@ -330,6 +336,40 @@ class DesktopCallEngine(
         runCatching { micTrack?.isEnabled = !muted }
     }
 
+    @Volatile private var remoteAudioTrack: AudioTrack? = null
+    private var recRemote: ((ByteArray, Int) -> Unit)? = null
+    private var recSink: dev.onvoid.webrtc.media.audio.AudioTrackSink? = null
+    private var micRecorder: dev.onvoid.webrtc.media.audio.AudioRecorder? = null
+    private val recFrames = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** Our mic by a standalone recorder and their voice off the remote track, as a party line's links tap them. */
+    @Synchronized
+    override fun onPcm(mic: ((pcm: ByteArray, sampleRate: Int) -> Unit)?, remote: ((pcm: ByteArray, sampleRate: Int) -> Unit)?) {
+        micRecorder?.let { runCatching { it.stop() } }
+        micRecorder = null
+        recRemote = remote
+        // A tap landing after the hang-up would leave the mic open for good.
+        if (closed.value) { recRemote = null; attachRemoteRec(); return }
+        if (mic != null) {
+            val rec = DesktopRecordTaps.startMic(mic, recFrames, "Trunk")
+            // The device opens slowly: a hang-up inside start() has run past this.
+            if (rec != null && closed.value) runCatching { rec.stop() } else micRecorder = rec
+        }
+        attachRemoteRec()
+    }
+
+    /** (Re)attach the remote tap: the track can arrive after a recording starts. */
+    @Synchronized
+    private fun attachRemoteRec() {
+        recSink?.let { s -> runCatching { remoteAudioTrack?.removeSink(s) } }
+        recSink = null
+        val cb = recRemote ?: return
+        val track = remoteAudioTrack ?: return
+        val s = DesktopRecordTaps.remoteSink(cb, recFrames, "Trunk")
+        recSink = s
+        runCatching { track.addSink(s) }.onFailure { Log.w("Trunk", "could not tap the far end for recording", it) }
+    }
+
     private val closed = kotlinx.atomicfu.atomic(false)
     private val engineScope =
         CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
@@ -343,6 +383,7 @@ class DesktopCallEngine(
         // still running on a native thread is a use-after-free.
         if (!closed.compareAndSet(false, true)) return
         runCatching { micTrack?.isEnabled = false }
+        onPcm(null, null)
         remoteWatch?.cancel()
         remoteWatch = null
         remoteSink?.let { s -> runCatching { remoteVideoTrack?.removeSink(s) } }

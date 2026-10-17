@@ -20,6 +20,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -72,6 +73,21 @@ class TlonChatRepoQueueTest {
         val sent = ship.pokesTo("chat").single()
         assertEquals(ship.attempted.first().json, sent.json, "the resend is the send, byte for byte")
         assertNull(repo.shipSlow.first(), "nothing waits")
+    }
+
+    // A call is recorded only once its peer has been told in the chat: a
+    // notice the ship refused, or one waiting in the queue, is no notice.
+    @Test
+    fun `a confirmed send says whether the ship took it`() = live {
+        assertTrue(repo.sendConfirmed("~bus", "Recording this call."))
+        assertTrue("Recording this call." in ship.pokesTo("chat").single().json.toString())
+        ship.refuse = { if (it.app == "chat") "no" else null }
+        assertFalse(repo.sendConfirmed("~bus", "Recording this call."), "refused")
+        ship.refuse = { null }
+        ship.lose = { lost }
+        assertFalse(repo.sendConfirmed("~bus", "Recording this call."), "out of reach, so queued")
+        ship.lose = { null }
+        assertFalse(repo.sendConfirmed("~bus", "Recording this call."), "behind one still queued, it waits too")
     }
 
     // "Slow" covered a ship mid-event, one down behind its proxy and one
