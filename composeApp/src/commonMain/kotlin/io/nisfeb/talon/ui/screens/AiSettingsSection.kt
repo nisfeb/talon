@@ -1009,6 +1009,8 @@ private fun ReadingRow(orrery: OrreryRepo, here: Boolean, spent: Double?) {
                     else -> "Checking your ship for Orrery."
                 },
             )
+            // Why it is still checking, where a check failed.
+            if (availability == OrreryAvailability.UNKNOWN) error?.let { Quiet(it, error = true) }
             return@Column
         }
         // Always this device's own: it reads every call and status line unasked.
