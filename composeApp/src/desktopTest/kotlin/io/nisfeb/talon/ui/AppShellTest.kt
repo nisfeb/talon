@@ -926,6 +926,13 @@ class AppShellTest {
 
     // ---- Getting out of a page, and landing in front (review 2026-10-17) ----
 
+    private val busSaid: suspend AppDatabase.() -> Unit = {
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat"))
+    }
+
+    /** The chat with ~bus is on screen: its message, with the chat's own button beside it. */
+    private fun ComposeUiTest.busChatShown() = present("Message actions") && showing("hello there")
+
     /** ~bus's chat, then the page of ~bus/crew from the reference in it. */
     private fun ComposeUiTest.groupPageFromChat() {
         onNodeWithText("DMs").performClick()
@@ -960,6 +967,40 @@ class AppShellTest {
         assertTrue(!showing("You haven't joined this group"), "the group page went with the pick")
     }
 
+    // An iPhone tap on a chat's notification with Talon left on Home landed
+    // on Home: the chat was set behind a tab that takes the whole area.
+    @Test
+    fun `a chat asked for from Home or Mail is shown, on the Chats tab`() {
+        val ui = InMemoryUiSettings()
+        app(ui = ui, seed = busSaid) {
+            onNodeWithContentDescription("Home").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Set a location") }
+            io.nisfeb.talon.notify.OpenChatRequests.request("~bus", null)
+            waitUntil(timeoutMillis = 5_000) { busChatShown() }
+            assertTrue(!showing("Set a location"), "Home is put down")
+            assertEquals(RailTab.Chats, ui.activeRailTab.value)
+            onNodeWithContentDescription("Mail").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Mail runs in Grubbery") }
+            // A tapped DM request in Activity goes the same way.
+            io.nisfeb.talon.notify.OpenNoticeRequests.request("dm:~bus")
+            waitUntil(timeoutMillis = 5_000) { busChatShown() && !showing("Mail runs in Grubbery") }
+        }
+    }
+
+    // A chat opened from a tab that shows one beside it stays on that tab.
+    @Test
+    fun `a chat asked for from Bookmarks opens beside the bookmarks`() {
+        val ui = InMemoryUiSettings()
+        app(ui = ui, seed = busSaid) {
+            onNodeWithContentDescription("Bookmarks").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("No bookmarks yet") }
+            io.nisfeb.talon.notify.OpenChatRequests.request("~bus", null)
+            waitUntil(timeoutMillis = 5_000) { busChatShown() }
+            assertTrue(showing("No bookmarks yet"), "the list is still the bookmarks")
+            assertEquals(RailTab.Bookmarks, ui.activeRailTab.value)
+        }
+    }
+
     // A full-screen page outside the registry: Escape (and the iOS back
     // gesture) closed Settings, hidden behind it, and left the QR up.
     @Test
@@ -975,6 +1016,22 @@ class AppShellTest {
         assertTrue(showing("Appearance") && !present("Chats"), "Settings, where it was opened")
         press(Key.Escape)
         home()
+    }
+
+    // A talon:// group link from a profile opened over Contacts: the sheet
+    // handed it to the system, and the group's page, once Talon had it,
+    // went behind Contacts.
+    @Test
+    fun `a group link in a profile over Contacts opens the group in front`() = app(seed = {
+        contacts().upsert(io.nisfeb.talon.data.ContactEntity("~bus", null, null, null, status = "talon://group/~bus/crew"))
+    }) { ship ->
+        addOnContacts("~bus")
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("contacts").size >= 2 && showing("Search contacts") }
+        onAllNodesWithText("~bus")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("talon://group/~bus/crew") }
+        onAllNodesWithText("talon://group/~bus/crew").onLast().performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("You haven't joined this group") }
+        assertTrue(!showing("Search contacts") && !showing("talon://group/~bus/crew"), "Contacts and the profile are put down")
     }
 
     // ---- Adding a contact (review 2026-10-17) ----

@@ -1399,22 +1399,24 @@ fun TalonApp(
             // A talon:// address lands on its message or mail thread.
             onTalon = { uri ->
                 when (val link = io.nisfeb.talon.urbit.TalonLink.parse(uri)) {
+                    // Every section down, not a list of five: a chat link
+                    // in a loop's output opened behind Loops.
                     is io.nisfeb.talon.urbit.TalonLink.Message -> {
-                        calendarOpen = false; homeOpen = false; assistantOpen = false; assistantListen = false; mailOpen = false
-                        openWhom = link.whom
-                        if (link.parentId != null) { pendingThreadAnchor = link.id; openThread = link.parentId }
-                        else pendingScrollMessageId = link.id
+                        sections.leave {
+                            closeSections()
+                            openWhom = link.whom
+                            if (link.parentId != null) { pendingThreadAnchor = link.id; openThread = link.parentId }
+                            else pendingScrollMessageId = link.id
+                        }
                         true
                     }
                     is io.nisfeb.talon.urbit.TalonLink.Mail -> {
-                        calendarOpen = false; homeOpen = false; assistantOpen = false; assistantListen = false
-                        pendingMailThread = link.threadId; mailOpen = true
+                        // Mail is drawn over the chat, which waits under it.
+                        sections.leave { sections.closeAll(); pendingMailThread = link.threadId; mailOpen = true }
                         true
                     }
                     is io.nisfeb.talon.urbit.TalonLink.Group -> {
-                        calendarOpen = false; homeOpen = false; assistantOpen = false; assistantListen = false; mailOpen = false
-                        openWhom = null
-                        openGroupFlag = link.flag
+                        sections.leave { closeSections(); openGroupFlag = link.flag }
                         true
                     }
                     is io.nisfeb.talon.urbit.TalonLink.InviteMe -> {
@@ -1462,18 +1464,18 @@ fun TalonApp(
                             // non-member). The old reveal did nothing for a
                             // group you have not joined, so the tap went
                             // nowhere.
-                            calendarOpen = false; homeOpen = false; assistantOpen = false; assistantListen = false; mailOpen = false
-                            openWhom = null
-                            openGroupFlag = jump.flag
+                            sections.leave { closeSections(); openGroupFlag = jump.flag }
                         }
-                        is io.nisfeb.talon.ui.CiteJump.Message -> {
-                            openConversationAction()
+                        // A reference in a section (a loop's output, the
+                        // assistant's answer) lands in front of it.
+                        is io.nisfeb.talon.ui.CiteJump.Message -> sections.leave {
+                            closeSections()
                             jump.groupFlag?.let { revealGroupRequest = it }
                             pendingScrollMessageId = jump.messageId
                             openWhom = jump.whom
                         }
-                        is io.nisfeb.talon.ui.CiteJump.Reply -> {
-                            openConversationAction()
+                        is io.nisfeb.talon.ui.CiteJump.Reply -> sections.leave {
+                            closeSections()
                             jump.groupFlag?.let { revealGroupRequest = it }
                             openWhom = jump.whom
                             pendingThreadAnchor = jump.replyId
