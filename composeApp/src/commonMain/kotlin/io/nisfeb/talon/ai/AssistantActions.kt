@@ -12,6 +12,7 @@ import io.nisfeb.talon.calendar.EventDraft
 import io.nisfeb.talon.calendar.Repeat
 import io.nisfeb.talon.calendar.bounds
 import io.nisfeb.talon.calendar.eventBody
+import io.nisfeb.talon.calendar.editAtBody
 import io.nisfeb.talon.calendar.dueDate
 import io.nisfeb.talon.calendar.taskOrder
 import io.nisfeb.talon.call.CallController
@@ -344,7 +345,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             // they moved, fifteen seconds and more for an event off screen,
             // and a batch of adds waited it out each time. They are read
             // behind; the check below is this event's own.
-            if (!cal.writeEvent(eventBody(draft)).ok) return@Tool "The calendar did not take it."
+            cal.wrote(eventBody(draft))?.let { return@Tool it }
             val target = cal.calendars.value.firstOrNull { it.id == calId }
             val where = target?.let { "the ${it.name.ifBlank { it.id }} calendar" } ?: "the default calendar"
             val whenText = "$date${if (time != null) " at $time${zoneArg?.let { " $it" } ?: ""}" else ""}"
@@ -464,24 +465,32 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 val row = findOccurrence(cal, id, occ, zone) ?: return@Tool "Error: \"${d0.name}\" has no occurrence on $occ."
                 val evZone = d0.zone?.let { z -> runCatching { TimeZone.of(z) }.getOrNull() } ?: zone
                 val at = Instant.fromEpochMilliseconds(row.l).toLocalDateTime(if (row.all) TimeZone.UTC else evZone)
-                // The calendar page's own two steps, in the safe order: add
-                // the one-off FIRST, then skip the original. Skip-first
-                // silently LOSES the occurrence when the add then fails;
-                // add-first can only leave a visible duplicate, and the
-                // partial state is reported honestly below.
                 val one = d.copy(
                     repeat = Repeat.ONCE, rawKind = null, rawArgs = null, count = 0, until = null,
                     date = newDate ?: at.date,
                     minuteOfDay = newMinute ?: (at.hour * 60 + at.minute),
                 )
-                if (!cal.pokeEvent(eventBody(one), readBack = false)) return@Tool "The calendar did not take it."
-                if (!cal.writeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) }).ok) {
-                    return@Tool "Half done: the changed \"${d.name}\" was added, but the original occurrence on $occ is still there too — the calendar refused the skip. Skip it by hand, or try again."
+                // One step where the calendar has it (version 34): the
+                // occurrence becomes the series' own exception. Two steps
+                // invited every guest ship again, and on Google mailed each
+                // guest a new invitation and a cancellation.
+                if (cal.editsAt()) {
+                    cal.wrote(editAtBody(one, id, home = row.cal, atMs = row.l))?.let { return@Tool it }
+                    return@Tool "Updated \"${d.name}\" for that occurrence." + droppedNote
+                }
+                // Else the page's old two steps, in the safe order: add the
+                // one-off FIRST, then skip the original once the add is known
+                // kept. Skip-first silently LOSES the occurrence when the add
+                // then fails; add-first can only leave a visible duplicate,
+                // and the partial state is reported honestly below.
+                cal.wrote(eventBody(one), readBack = false)?.let { return@Tool it }
+                cal.wrote(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) })?.let {
+                    return@Tool "Half done: the changed \"${d.name}\" was added, but the original occurrence on $occ is still there too. $it Skip it by hand, or try again."
                 }
                 return@Tool "Updated \"${d.name}\" for that occurrence." + droppedNote
             }
             // The lists are read back behind, as for an add.
-            if (cal.writeEvent(eventBody(d, id)).ok) "Updated \"${d.name}\"." + droppedNote else "The calendar did not take it."
+            cal.wrote(eventBody(d, id)) ?: ("Updated \"${d.name}\"." + droppedNote)
         })
         add(Tool(
             spec = ToolSpec(
@@ -504,13 +513,10 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             if (occText != null && d?.repeats == true) {
                 val occ = parseDate(occText) ?: return@Tool "Error: occurrence must be YYYY-MM-DD."
                 val row = findOccurrence(cal, id, occ, a.zone()) ?: return@Tool "Error: \"$name\" has no occurrence on $occ."
-                return@Tool if (cal.writeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) }).ok) "Skipped \"$name\" on $occ." else "The calendar did not take it."
+                return@Tool cal.wrote(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", row.idx) }) ?: "Skipped \"$name\" on $occ."
             }
-            if (cal.writeEvent(buildJsonObject { put("action", "del-event"); put("id", id) }).ok) {
-                "Deleted \"$name\"${if (d?.repeats == true) " and every occurrence" else ""}."
-            } else {
-                "The calendar did not take it."
-            }
+            cal.wrote(buildJsonObject { put("action", "del-event"); put("id", id) })
+                ?: "Deleted \"$name\"${if (d?.repeats == true) " and every occurrence" else ""}."
         })
         add(Tool(
             spec = ToolSpec(
@@ -540,7 +546,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 cat = EventCat.TODO, date = due ?: today, due = due,
                 tags = io.nisfeb.talon.calendar.parseTags(args.text("tags").orEmpty()),
             )
-            if (cal.writeEvent(eventBody(draft)).ok) "Added task \"$name\"${if (due != null) " due $due" else ""}." else "The calendar did not take it."
+            cal.wrote(eventBody(draft)) ?: "Added task \"$name\"${if (due != null) " due $due" else ""}."
         })
         add(Tool(
             spec = ToolSpec(
@@ -802,6 +808,19 @@ internal fun describeRow(r: CalendarRow, zone: TimeZone, calNames: Map<String, S
         }
         append(" (calendar ").append(calNames[r.cal] ?: r.cal).append(')')
     }
+}
+
+/**
+ * Write [body]: null once the calendar has kept it, else what to tell
+ * the model. Its ack is not a yes: the calendar answers a poke before
+ * reading it, and keeps why it refused one ([CalendarRepo.refusal]).
+ * The lists are read back behind unless [readBack] is false.
+ */
+private suspend fun CalendarRepo.wrote(body: JsonObject, readBack: Boolean = true): String? {
+    val since = nowMs()
+    if (!writeEvent(body, readBack).ok) return "The calendar did not take it."
+    // An add's refusal is recorded with the id "", having none of its own.
+    return refusal((body["id"] as? JsonPrimitive)?.contentOrNull.orEmpty(), since)?.let { "The calendar refused it: ${it.trimEnd('.')}." }
 }
 
 /** The occurrence of [id] on [on], or else its next one, reading past the widget's window when need be. */

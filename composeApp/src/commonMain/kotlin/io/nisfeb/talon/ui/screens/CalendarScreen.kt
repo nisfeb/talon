@@ -89,6 +89,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.calendar.CalendarAvailability
 import io.nisfeb.talon.calendar.CalendarInfo
+import io.nisfeb.talon.calendar.CalendarInvite
+import io.nisfeb.talon.calendar.ANSWERS
+import io.nisfeb.talon.calendar.VideoCall
+import io.nisfeb.talon.calendar.answerWords
+import io.nisfeb.talon.calendar.callOf
+import io.nisfeb.talon.calendar.editAtBody
+import io.nisfeb.talon.calendar.guestText
+import io.nisfeb.talon.calendar.isCopy
+import io.nisfeb.talon.calendar.mailsGuests
+import io.nisfeb.talon.calendar.guestsOf
+import io.nisfeb.talon.calendar.guestsProblem
+import io.nisfeb.talon.calendar.joinLink
+import io.nisfeb.talon.calendar.rsvpBody
+import io.nisfeb.talon.calendar.splitBody
 import io.nisfeb.talon.calendar.CalendarRepo
 import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.CalendarTask
@@ -142,6 +156,9 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import io.nisfeb.talon.ui.icons.TalonIcons
 
+/** An answer its host did not hear: the calendar's reply-pass sends it again an hour on. */
+private const val RETOLD = "The calendar tries again in about an hour."
+
 /**
  * The calendar section: a month with its events, the day picked out
  * of it, and an editor for any of them. Reads the ship's calendar
@@ -187,6 +204,9 @@ fun CalendarScreen(
     val weekView by repo.weekView.collectAsState()
     val calendars by repo.calendars.collectAsState()
     val shares by repo.shares.collectAsState()
+    /** Invitations from other ships; null on a calendar too old to have them. */
+    val invites by repo.invites.collectAsState()
+    val meetings by repo.meetings.collectAsState()
     val syncRows by repo.sync.collectAsState()
     val conflicts by repo.conflicts.collectAsState()
     val defaultCalendar by repo.defaultCalendar.collectAsState()
@@ -221,6 +241,8 @@ fun CalendarScreen(
     /** The row being looked at; editing starts from here. */
     var viewing by remember { mutableStateOf<CalendarRow?>(null) }
     var editingIdx by remember { mutableStateOf<Int?>(null) }
+    /** The opened occurrence's start (its row's l): what edit-at names it by. */
+    var editingAt by remember { mutableStateOf<Long?>(null) }
     /** Opened on one occurrence of a series: the series as read, and the
      *  draft as it opened on that occurrence. Every occurrence moves as
      *  far as that one was moved. */
@@ -229,6 +251,8 @@ fun CalendarScreen(
     LaunchedEffect(availability) { if (availability == CalendarAvailability.PRESENT) zones = repo.zones() }
     var managing by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
+    // A save's refusal found after this screen had gone: said now.
+    LaunchedEffect(repo) { repo.unheard.value?.let { status = it; repo.heard() } }
 
     val grid = remember(year, month) { monthGrid(year, month) }
     // The page is read again on opening: ten minutes is a long time
@@ -245,6 +269,8 @@ fun CalendarScreen(
         val from = grid.first().atTime(0, 0).toInstant(zone).toEpochMilliseconds()
         val to = grid.last().plus(1, DateTimeUnit.DAY).atTime(0, 0).toInstant(zone).toEpochMilliseconds()
         repo.loadRange(from, to)
+        // After the month, never in front of it on the ship's one queue.
+        repo.refreshInvitesIfStale()
     }
     // A tick shows at once and holds until the calendar answers; the
     // rows only learn of it on the refresh after the poke.
@@ -295,8 +321,9 @@ fun CalendarScreen(
                 val at = if (r.repeats || d.repeats) null else placeholderFor(d)
                 r.copy(
                     meta = buildJsonObject {
+                        // The rest as the row has it: its guests, its join link, its host.
+                        r.meta.forEach { (k, v) -> if (k != "name" && k != "location" && k != "note") put(k, v) }
                         put("name", d.name.trim()); if (d.location.isNotBlank()) put("location", d.location.trim()); if (d.note.isNotBlank()) put("note", d.note.trim())
-                        r.color?.let { put("color", it) }
                     },
                     l = at?.l ?: r.l, r = at?.r ?: r.r, all = at?.all ?: r.all,
                 )
@@ -320,6 +347,7 @@ fun CalendarScreen(
             priority = if (priorityKnown) 0 else null,
         )
         editingIdx = null
+        editingAt = null
         editingSeries = null
     }
     /** What the wait says, where there is one long enough to say it. */
@@ -343,6 +371,7 @@ fun CalendarScreen(
                 ?.let { d.atOccurrence(occurrenceAt(it, allDay, d.zone?.let(::zoneFor) ?: zone)) }
             editing = id to (opened ?: d)
             editingIdx = idx
+            editingAt = startMs
             editingSeries = opened?.let { d to it }
         }
     }
@@ -352,6 +381,7 @@ fun CalendarScreen(
             taskDraft(r, zone, selected)?.let { d ->
                 editing = r.id to d
                 editingIdx = null
+                editingAt = null
                 editingSeries = null
                 return
             }
@@ -408,6 +438,33 @@ fun CalendarScreen(
             val w = repo.writeEvent(io.nisfeb.talon.calendar.deleteBody(id))
             if (w.ok) scope.launch { w.shown.join(); removing = removing - id } else removing = removing - id
             w.ok
+        }
+    }
+    /** Answer an invitation, saying what did not go: the copy, or the word to its host. */
+    fun answerInvite(key: String, host: String, st: String, cal: String) =
+        say("Answering…", "The ship did not take the answer.") {
+            val got = repo.answerInvite(key, st, cal) ?: return@say false
+            status = when {
+                !got.ok -> "The event could not be put on that calendar" + if (got.told) "; $host has your answer." else ", and $host could not be told yet. $RETOLD"
+                !got.told -> "Answered, but $host could not be told yet: their ship did not answer. $RETOLD"
+                else -> null
+            }
+            true
+        }
+    /** The owner's own answer: to the host for a copy of another ship's event, else on the event (a Google invitation). */
+    fun answer(r: CalendarRow, st: String) {
+        viewing = null
+        if (r.host.isNotEmpty()) answerInvite("${r.host}/${r.id}", r.host, st, r.cal)
+        else say("Answering…", "The ship did not take the answer.") {
+            // Refused when the event names no guest who is the owner;
+            // looked for behind the write, which leaving does not stop.
+            val since = nowMs()
+            val (ok, check) = repo.carry {
+                val ok = repo.writeEvent(rsvpBody(r.id, r.cal, st)).ok
+                ok to if (!ok) null else repo.behind { repo.refusalOfSave(r.id, since) { "Your answer to \"${r.name}\" was not taken: $it" } }
+            }
+            check?.await()?.let { repo.heard(); status = "Not answered: $it" }
+            ok
         }
     }
     // Sending an event on: to a chat as a message, by mail with an
@@ -637,6 +694,7 @@ fun CalendarScreen(
                         priority = if (priorityKnown) 0 else null,
                     )
                     editingIdx = null
+                    editingAt = null
                     editingSeries = null
                 },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -710,6 +768,11 @@ fun CalendarScreen(
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f),
                 )
+                // Unanswered invitations, a tap from where they are answered.
+                val unanswered = invites?.count { it.status.isEmpty() } ?: 0
+                if (unanswered > 0) {
+                    TextButton(onClick = { managing = true }) { Text("$unanswered invitation" + if (unanswered == 1) "" else "s") }
+                }
                 io.nisfeb.talon.ui.IconButton(tip = "New event", onClick = ::openNew) { Icon(Icons.Filled.Add, contentDescription = "New event") }
             }
             status?.let {
@@ -843,6 +906,24 @@ fun CalendarScreen(
                     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
                     fun open(uri: String) { runCatching { uriHandler.openUri(uri) }.onFailure { status = "Nothing here opens that." } }
                     fun copy(text: String) { clipboard.setText(androidx.compose.ui.text.AnnotatedString(text)); status = "Copied." }
+                    // A meeting: its join link, whose invitation a copy is, who
+                    // else is asked and how they answered, and the owner's answer.
+                    joinLink(r.meta)?.let { link -> Button(onClick = { open(link) }) { Text("Join") } }
+                    val guests = remember(r.meta) { guestsOf(r.meta) }
+                    val others = guests.filter { !it.self }
+                    val guestLine = listOfNotNull(
+                        r.host.takeIf { it.isNotEmpty() }?.let { "From $it" },
+                        others.takeIf { it.isNotEmpty() }?.let { "Guests: " + it.joinToString(", ") { g -> "${g.label} (${answerWords(g.status)})" } },
+                    ).joinToString(". ")
+                    if (guestLine.isNotEmpty()) Text(guestLine, style = MaterialTheme.typography.bodyMedium)
+                    val me = guests.firstOrNull { it.self }
+                    if (me != null && !readOnlyHere) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            ANSWERS.forEach { (st, label) ->
+                                FilterChip(selected = me.status == st, onClick = { answer(r, st) }, label = { Text(label) })
+                            }
+                        }
+                    }
                     if (r.location.isNotBlank()) {
                         // The place: on the map, or copied.
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1025,6 +1106,7 @@ fun CalendarScreen(
             recurringOccurrence = id != null && draft.repeats && editingIdx != null,
             calendars = calendars.filter { it.id !in readOnly },
             zones = zones,
+            meetings = meetings == true,
             allTags = allTags,
             twentyFourHour = twentyFourHour,
             zone = zone,
@@ -1042,50 +1124,84 @@ fun CalendarScreen(
                     return@onSave
                 }
                 val idx = editingIdx
+                val at = editingAt
                 val series = editingSeries
                 // The one-off went in but the ship would not skip the old.
                 var halfDone = false
+                val bothKept = "\"${d.name.trim()}\" is on its new day and time, but the ship kept the old one too: open it and choose Skip this one."
+                // The calendar acks a poke before it reads it, and keeps
+                // why it refused one: looked for after [savedAt], under the
+                // poke's id, an add's being "" (it has none of its own).
+                val savedAt = nowMs()
+                val lookFor = id ?: ""
+                var refused: String? = null
+                // The old two steps' skip went: refused, both are kept.
+                var skipped = false
                 val ghost = if (id == null) placeholderFor(d) else null
+                // A new event's card, posted once the calendar has kept it:
+                // one for an event it refused pointed at nothing.
+                val target = postTo?.takeIf { id == null && chat != null && ghost != null }
+                val card = if (target != null) textOf(ghost!!) else null
                 if (ghost != null) pendingRows = pendingRows + ghost
                 if (id != null) pendingEdits = pendingEdits + (id to d)
                 act(if (id == null) "Adding…" else "Saving…", "The ship did not take the change; \"${d.name.trim()}\" is as it was.") {
                     // The whole write on the repo's scope: leaving the screen
                     // no longer cancels it partway (a series edit is two pokes).
-                    val written = repo.carry {
+                    val (written, check) = repo.carry {
                         // A ticked task opened from its row lacks when it was
                         // done; read it here, behind the closed editor, or the
                         // save would stamp it done now.
                         val d = if (id != null && d.cat == EventCat.TODO && d.done && d.doneMs == null) {
                             d.copy(doneMs = repo.eventDetail(id)?.get("done_ms")?.jsonPrimitive?.longOrNull)
                         } else d
-                        when {
+                        val w = when {
                             id == null || idx == null || series == null ->
                                 repo.writeEvent(eventBody(d, id))
                             editScope == EditScope.ALL ->
                                 repo.writeEvent(eventBody(seriesEdit(d, opened = series.second, series = series.first), id))
-                            // The page's own two steps: end the old, then add.
+                            // One step, as the page has sent it since calendar
+                            // 18: in two, a cap kept and an add refused lost
+                            // every occurrence that followed.
+                            // ponytail: a calendar older than 18 drops it, the series as it was
                             editScope == EditScope.FOLLOWING ->
-                                if (repo.pokeEvent(buildJsonObject { put("action", "cap-event"); put("id", id); put("dom", idx) }, readBack = false)) {
-                                    repo.writeEvent(eventBody(d))
-                                } else null
-                            // Add, then skip the old: skipping first lost the
-                            // occurrence whenever the add was refused.
+                                repo.writeEvent(splitBody(d, id, home = series.first.cal, idx = idx))
+                            // One step where the calendar has it: the occurrence
+                            // becomes the series' own exception, and on Google
+                            // it moves for every guest.
+                            at != null && repo.editsAt() ->
+                                repo.writeEvent(editAtBody(d, id, home = series.first.cal, atMs = at))
+                            // Add, then skip the old, once the add is known
+                            // kept: skipping first, or on the ship's ack alone,
+                            // lost the occurrence whenever the add was refused.
                             else ->
-                                if (repo.pokeEvent(onlyBody(d), readBack = false)) {
-                                    repo.writeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
-                                        .also { halfDone = !it.ok }
-                                } else null
+                                if (!repo.pokeEvent(onlyBody(d), readBack = false)) null
+                                else {
+                                    refused = repo.refusalOfSave("", savedAt) { "\"${d.name.trim()}\" was not saved: $it" }
+                                    if (refused != null) null
+                                    else repo.writeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
+                                        .also { halfDone = !it.ok; skipped = true }
+                                }
+                        }
+                        // Taken, then perhaps refused: looked for here, on the
+                        // repo's scope, so leaving the calendar mid-save loses
+                        // neither the refusal nor the card.
+                        w to if (w?.ok != true || halfDone) null else repo.behind {
+                            val why = repo.refusalOfSave(lookFor, savedAt) { if (skipped) bothKept else "\"${d.name.trim()}\" was not saved: $it" }
+                            val unposted = why == null && target != null &&
+                                io.nisfeb.talon.util.runSuspendCatching { chat!!.send(target, card!!) }.isFailure
+                            why to unposted
                         }
                     }
                     val ok = written?.ok == true || halfDone
                     // Not reopened: saving again would add it twice.
-                    if (halfDone) status = "\"${d.name.trim()}\" is on its new day and time, but the ship kept the old one too: open it and choose Skip this one."
+                    if (halfDone) status = bothKept
                     if (ghost != null) pendingRows = pendingRows - ghost
                     if (id != null) pendingEdits = pendingEdits - id
+                    if (refused != null) repo.heard()
                     // Not saved: the editor back with what was typed, and why.
                     // It closed for good, and a ship down for a restart lost the edit.
                     if (!ok && editing == null) {
-                        editFailed = repo.failedLine("The ship did not take the change.")
+                        editFailed = refused?.let { "Not saved: $it" } ?: repo.failedLine("The ship did not take the change.")
                         editing = id to d
                     }
                     if (ok) {
@@ -1099,15 +1215,23 @@ fun CalendarScreen(
                             if (kept != null) savedRows = savedRows - kept
                             if (id != null) savedEdits = savedEdits - id
                         }
-                    }
-                    // A new event, posted where it was asked to go.
-                    val target = postTo
-                    if (ok && id == null && target != null && chat != null && ghost != null) {
-                        // Said when it does not go: the event is made either way.
-                        if (io.nisfeb.talon.util.runSuspendCatching { chat.send(target, textOf(ghost)) }.isFailure) {
-                            status = "The event is on the calendar, but posting it to ${labelOf(target)} did not go."
+                        if (target != null) postTo = null
+                        // Refused: the editor back, as the page's "Not saved",
+                        // with where its card was to go.
+                        if (check != null) scope.launch {
+                            val (why, unposted) = check.await()
+                            // Said when it does not go: the event is made either way.
+                            if (unposted) status = "The event is on the calendar, but posting it to ${labelOf(target!!)} did not go."
+                            if (why == null) return@launch
+                            repo.heard()
+                            if (kept != null) savedRows = savedRows - kept
+                            if (id != null) savedEdits = savedEdits - id
+                            when {
+                                skipped -> status = bothKept
+                                editing == null -> { editFailed = "Not saved: $why"; editing = id to d; if (target != null) postTo = target }
+                                else -> status = "Not saved: $why"
+                            }
                         }
-                        postTo = null
                     }
                     ok
                 }
@@ -1130,9 +1254,13 @@ fun CalendarScreen(
     if (managing) {
         var deviceZone by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(Unit) { deviceZone = repo.deviceZone() }
+        // Read again on opening, where they are answered.
+        LaunchedEffect(Unit) { if (repo.meetings.value != false) repo.refreshInvites() }
         CalendarsDialog(
             calendars = calendars,
             shares = shares,
+            invites = invites,
+            onAnswerInvite = { inv, st, cal -> answerInvite(inv.key, inv.host, st, cal) },
             zone = zoneId,
             zones = zones,
             sync = syncRows,
@@ -1218,6 +1346,8 @@ private fun EventEditor(
     recurringOccurrence: Boolean,
     calendars: List<CalendarInfo>,
     zones: List<String>,
+    /** Whether the calendar has guests and video calls (version 34); an older one would keep them as words that do nothing. */
+    meetings: Boolean = false,
     /** Every tag in use, offered as the field is typed in. */
     allTags: List<String>,
     twentyFourHour: Boolean,
@@ -1239,7 +1369,9 @@ private fun EventEditor(
     var zoneText by remember { mutableStateOf(initial.zone.orEmpty()) }
     var pickingDate by remember { mutableStateOf(false) }
     var pickingUntil by remember { mutableStateOf(false) }
-    var problem by remember { mutableStateOf(failed) }
+    // Keyed on it: a refusal that comes back before a frame reopens this
+    // editor without it ever leaving the screen, and the why was lost.
+    var problem by remember(failed) { mutableStateOf(failed) }
     val time = rememberTimePickerState(initialHour = initial.minuteOfDay / 60, initialMinute = initial.minuteOfDay % 60, is24Hour = twentyFourHour)
     val fieldFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
@@ -1418,6 +1550,35 @@ private fun EventEditor(
                     )
                 }
                 OutlinedTextField(value = d.location, onValueChange = { d = d.copy(location = it) }, label = { Text("Place") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                // Guests and a video call, as the calendar's page has them;
+                // not on a copy of another ship's event, whose host keeps them.
+                val google = calendars.firstOrNull { it.id == d.cal }?.kind == "google"
+                val ownEvent = !isCopy(d.otherMeta)
+                if (meetings && ownEvent && (d.cat == EventCat.TIMED || d.cat == EventCat.ALLDAY)) {
+                    val guests = d.guests ?: guestText(d.otherMeta)
+                    OutlinedTextField(
+                        value = guests, onValueChange = { d = d.copy(guests = it) },
+                        label = { Text("Guests, comma separated") }, placeholder = { Text("~sampel-palnet, or an email") },
+                        singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (google && mailsGuests(guests)) {
+                        Text(
+                            "Google emails these guests about every change.",
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (meetings && ownEvent && d.cat == EventCat.TIMED) {
+                    val shown = d.call ?: callOf(d.otherMeta)
+                    Text("Video call", style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        VideoCall.entries.filter {
+                            it == VideoCall.NONE || (it == VideoCall.MEET && google) || (it == VideoCall.KEEP && callOf(d.otherMeta) == VideoCall.KEEP)
+                        }.forEach { c ->
+                            FilterChip(selected = shown == c, onClick = { d = d.copy(call = c) }, label = { Text(c.label) })
+                        }
+                    }
+                }
                 OutlinedTextField(value = d.note, onValueChange = { d = d.copy(note = it) }, label = { Text("Note") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
                 var tagText by remember { mutableStateOf(d.tags.joinToString(", ")) }
                 OutlinedTextField(
@@ -1502,6 +1663,12 @@ private fun EventEditor(
                     ready.name.isBlank() -> "A name is needed."
                     ready.repeats && ready.rawKind == null && ready.repeat == Repeat.WEEKLY && ready.weekdays.isEmpty() -> "Pick the weekdays."
                     ready.cat == EventCat.TIMED && zoneText.isNotBlank() && zoneText.trim() !in zones -> "That zone is not one the calendar knows."
+                    (ready.cat == EventCat.TIMED || ready.cat == EventCat.ALLDAY) && ready.guests != null ->
+                        guestsProblem(ready.otherMeta, ready.guests, google = calendars.firstOrNull { it.id == ready.cal }?.kind == "google")
+                    else -> null
+                } ?: when {
+                    ready.cat == EventCat.TIMED && ready.call == VideoCall.MEET && calendars.firstOrNull { it.id == ready.cal }?.kind != "google" ->
+                        "Google Meet needs a calendar linked to Google"
                     else -> null
                 }
                 if (problem == null) onSave(ready, editScope)
@@ -1539,6 +1706,9 @@ private fun CalendarsDialog(
     calendars: List<CalendarInfo>,
     /** Null on a calendar too old to share with ships. */
     shares: Shares?,
+    /** Invitations from other ships; null on a calendar too old to have them. */
+    invites: List<CalendarInvite>?,
+    onAnswerInvite: (CalendarInvite, status: String, cal: String) -> Unit,
     /** The calendar's own zone, null for none; every zone it knows; the device's, if among them. */
     zone: String?,
     zones: List<String>,
@@ -1589,6 +1759,13 @@ private fun CalendarsDialog(
                         it, style = MaterialTheme.typography.bodySmall,
                         color = if (it.endsWith("…")) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                     )
+                }
+                // First, so the count on the calendar opens onto them.
+                if (!invites.isNullOrEmpty()) {
+                    Text("Invitations", style = MaterialTheme.typography.labelMedium)
+                    val writable = calendars.filter { it.id !in shares?.readOnly.orEmpty() }
+                    invites.sortedBy { it.startMs }.forEach { inv -> InviteRow(inv, writable, onAnswerInvite) }
+                    HorizontalDivider()
                 }
                 if (!shares?.offers.isNullOrEmpty()) {
                     Text("Offered to you", style = MaterialTheme.typography.labelMedium)
@@ -1780,6 +1957,46 @@ private fun CalendarsDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
+}
+
+/**
+ * One invitation: what, from whom and when, the answer so far, the
+ * calendar its copy goes on (where it is, else where that host's last
+ * one went, else the default), and Going, Maybe and No.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun InviteRow(inv: CalendarInvite, writable: List<CalendarInfo>, onAnswer: (CalendarInvite, String, String) -> Unit) {
+    var cal by remember(inv.key, inv.cal, inv.route) {
+        mutableStateOf(listOf(inv.cal, inv.route, "default").firstOrNull { c -> writable.any { it.id == c } } ?: writable.firstOrNull()?.id ?: "default")
+    }
+    var picking by remember { mutableStateOf(false) }
+    // The wall clock, kept read as UTC.
+    val day = Instant.fromEpochMilliseconds(inv.startMs).toLocalDateTime(TimeZone.UTC).date
+    Column(Modifier.fillMaxWidth()) {
+        Text(inv.name.ifBlank { inv.uid }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            "from ${inv.host}" + (if (inv.startMs > 0) " · ${d3(day.dayOfWeek)} ${day.day} ${MonthNames.ENGLISH_ABBREVIATED.names[day.month.number - 1]} ${day.year}" else "") +
+                " · " + (if (inv.status.isEmpty()) "no answer yet" else answerWords(inv.status)),
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.Center) {
+            Box {
+                TextButton(onClick = { picking = true }) {
+                    Text(writable.firstOrNull { it.id == cal }?.let { it.name.ifBlank { it.id } } ?: cal)
+                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Calendar for ${inv.name.ifBlank { inv.uid }}", modifier = Modifier.size(18.dp))
+                }
+                androidx.compose.material3.DropdownMenu(expanded = picking, onDismissRequest = { picking = false }) {
+                    writable.forEach { c ->
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(c.name.ifBlank { c.id }) }, onClick = { cal = c.id; picking = false })
+                    }
+                }
+            }
+            ANSWERS.forEach { (st, label) ->
+                FilterChip(selected = inv.status == st, onClick = { onAnswer(inv, st, cal) }, label = { Text(label) })
+            }
+        }
+    }
 }
 
 /**

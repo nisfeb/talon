@@ -72,6 +72,8 @@ data class CalendarRow(
     /** iCalendar CATEGORIES, as the calendar keeps them: `meta.tags`. */
     val tags: List<String> get() = meta.metaTags()
     val isTask: Boolean get() = cat == "todo"
+    /** The ship whose invitation this is a copy of, or "". */
+    val host: String get() = (meta["host"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull.orEmpty()
 }
 
 /**
@@ -139,6 +141,40 @@ data class Shares(
     /** Calendars whose host lets us look but not touch. */
     val readOnly: Set<String> get() = accepted.filterValues { it.mode != "edit" }.keys
 }
+
+/**
+ * An invitation to one event from another ship (invites.json), by [key]
+ * "~host/uid". [status] is "" until answered; [cal] is where its copy
+ * is, [route] where that host's last one went, each "" for none.
+ * [startMs] is the wall clock read as UTC, as the calendar keeps it.
+ */
+@Serializable
+data class CalendarInvite(
+    val key: String = "",
+    val host: String = "",
+    val uid: String = "",
+    val name: String = "",
+    @SerialName("start_ms") val startMs: Long = 0,
+    val status: String = "",
+    val cal: String = "",
+    val route: String = "",
+)
+
+/** What answering an invitation did: [ok] its copy placed or taken off, on [cal]; [told] whether the host heard. */
+@Serializable
+data class InviteAnswer(val ok: Boolean = false, val cal: String = "", val told: Boolean = false)
+
+/**
+ * A write the calendar took and then refused, with [why] (outcomes.json,
+ * version 26): it answers a poke before it reads it. [atMs] is the ship's
+ * clock; [id] the poke's own.
+ */
+@Serializable
+data class CalendarRefusal(@SerialName("at_ms") val atMs: Long = 0, val action: String = "", val id: String = "", val why: String = "")
+
+/** What outcomes.json holds that Talon reads: the last refusals, oldest first. */
+@Serializable
+data class CalendarOutcomes(val refusals: List<CalendarRefusal> = emptyList())
 
 /** A push the remote refused, or a change made on both sides; the calendar keeps the local copy here. */
 @Serializable
@@ -243,6 +279,17 @@ class CalendarApi(private val http: HttpClient, baseUrl: String) {
     suspend fun decline(key: String): Boolean = postJson("$root/share/decline", buildJsonObject { put("key", key) })
     /** Pull every accepted share now rather than on the next pass. */
     suspend fun syncShares(): Boolean = postJson("$root/share/sync", JsonObject(emptyMap()))
+
+    /** The writes the calendar took and then refused, with why; a 404 on a calendar older than 26. */
+    suspend fun outcomes(): CalendarOutcomes = decode(get("/outcomes.json"))
+
+    /** Invitations to single events from other ships; a 404 means a calendar too old to have them. */
+    suspend fun invites(): List<CalendarInvite> = decode(get("/invites.json"))
+
+    /** Answer one: accepted, tentative or declined, its copy on [cal]. Null when the calendar refused. */
+    suspend fun answerInvite(key: String, status: String, cal: String): InviteAnswer? =
+        postForJson("$root/invites/answer", buildJsonObject { put("key", key); put("status", status); put("cal", cal) })
+            ?.let { runCatching { AuspexApi.json.decodeFromJsonElement(InviteAnswer.serializer(), it) }.getOrNull() }
 
     /** One event's full rule breakdown, for the editor. */
     suspend fun event(id: String): JsonObject =

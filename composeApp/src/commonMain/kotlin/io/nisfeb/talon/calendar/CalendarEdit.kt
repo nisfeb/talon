@@ -16,6 +16,7 @@ import kotlinx.datetime.plus
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -118,6 +119,14 @@ data class EventDraft(
     val priority: Int? = null,
     /** Whether [priority] was changed here: an edit sends it only then, as with reminders. */
     val priorityChanged: Boolean = false,
+    /**
+     * The guests field as typed: emails and ship names, comma separated.
+     * Null where the editor did not show it, and then meta's guests and
+     * ships go back as they came ([withGuests]).
+     */
+    val guests: String? = null,
+    /** The video call picked; null leaves meta's `call` as it came. */
+    val call: VideoCall? = null,
 ) {
     val repeats: Boolean get() = cat != EventCat.TODO && cat != EventCat.DATE && (rawKind != null || repeat != Repeat.ONCE)
 }
@@ -153,14 +162,7 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
     put("action", if (id == null) "add-event" else "edit-event")
     if (id != null) put("id", id)
     put("cat", d.cat.wire)
-    putJsonObject("meta") {
-        d.otherMeta.forEach { (k, v) -> put(k, v) }
-        put("name", d.name.trim())
-        if (d.color.isNotBlank()) put("color", d.color.trim())
-        if (d.note.isNotBlank()) put("note", d.note.trim())
-        if (d.location.isNotBlank()) put("location", d.location.trim())
-        if (d.tags.isNotEmpty()) put("tags", JsonArray(d.tags.map { JsonPrimitive(it) }))
-    }
+    put("meta", draftMeta(d))
     d.cal?.let { put("cal", it) }
     d.alarms?.let { a -> if (id == null || d.alarmsChanged) put("alarms", JsonArray(a.map { it.raw })) }
     if (d.cat == EventCat.TODO) {
@@ -216,6 +218,27 @@ fun eventBody(d: EventDraft, id: String? = null): JsonObject = buildJsonObject {
     }
 }
 
+/**
+ * The meta [d] is written with: [EventDraft.otherMeta] as it came, the
+ * editor's own fields over it, then the guests and the video call where
+ * the editor changed them, as the calendar's page writes them.
+ */
+fun draftMeta(d: EventDraft): JsonObject {
+    val m = LinkedHashMap<String, JsonElement>(d.otherMeta)
+    m["name"] = JsonPrimitive(d.name.trim())
+    if (d.color.isNotBlank()) m["color"] = JsonPrimitive(d.color.trim())
+    if (d.note.isNotBlank()) m["note"] = JsonPrimitive(d.note.trim())
+    if (d.location.isNotBlank()) m["location"] = JsonPrimitive(d.location.trim())
+    if (d.tags.isNotEmpty()) m["tags"] = JsonArray(d.tags.map { JsonPrimitive(it) })
+    if (d.cat == EventCat.TIMED || d.cat == EventCat.ALLDAY) d.guests?.let { m.putAll(withGuests(JsonObject(m), it)) }
+    if (d.cat == EventCat.TIMED) when (d.call) {
+        VideoCall.MEET -> m["call"] = JsonPrimitive("meet")
+        VideoCall.NONE -> m.remove("call")
+        VideoCall.KEEP, null -> Unit
+    }
+    return JsonObject(m)
+}
+
 /** The draft opened on one occurrence of a series: its day and time are that occurrence's. */
 fun EventDraft.atOccurrence(at: LocalDateTime): EventDraft =
     copy(date = at.date, minuteOfDay = if (cat == EventCat.TIMED) at.hour * 60 + at.minute else minuteOfDay)
@@ -229,6 +252,170 @@ fun onlyBody(d: EventDraft): JsonObject =
     eventBody(d.copy(repeat = Repeat.ONCE, rawKind = null, rawArgs = null, count = 0, until = null))
 
 /**
+ * "This one only" as one step, on a calendar that has it (version 34):
+ * the occurrence that starts at [atMs] (its row's start, as skip-at
+ * names it) becomes the series' own exception, at the day and time in
+ * the editor. On Google it moves for every guest. The page's own body:
+ * add-event's fields for a single event, and no `cal`.
+ */
+fun editAtBody(d: EventDraft, id: String, home: String?, atMs: Long): JsonObject = buildJsonObject {
+    put("action", "edit-at")
+    put("id", id)
+    home?.let { put("home", it) }
+    put("at_ms", atMs)
+    put("cat", d.cat.wire)
+    put("meta", draftMeta(d))
+    put("kind", "once")
+    d.alarms?.let { a -> put("alarms", JsonArray(a.map { it.raw })) }
+    val at = if (d.cat == EventCat.TIMED) LocalTime(d.minuteOfDay / 60, d.minuteOfDay % 60) else LocalTime(0, 0)
+    put("start_ms", d.date.atTime(at).toInstant(TimeZone.UTC).toEpochMilliseconds())
+    if (d.cat == EventCat.TIMED) {
+        d.zone?.let { put("zone", it) }
+        put("fin", "dur")
+        put("dur_min", d.durMin.coerceAtLeast(0))
+    } else {
+        put("span_days", d.spanDays.coerceAtLeast(1))
+    }
+}
+
+/**
+ * "This and following" as one step (calendar 18 on, as its page sends
+ * it): the series [id] on [home] ends before occurrence [idx], and a new
+ * one, add-event's fields from [d], starts there, keeping the old one's
+ * skips that fall on its days.
+ */
+fun splitBody(d: EventDraft, id: String, home: String?, idx: Int): JsonObject = buildJsonObject {
+    put("action", "split-event")
+    put("id", id)
+    home?.let { put("home", it) }
+    put("idx", idx)
+    eventBody(d).forEach { (k, v) -> if (k != "action") put(k, v) }
+}
+
+/** The owner's own answer to a Google invitation: accepted, tentative or declined. */
+fun rsvpBody(id: String, home: String, status: String): JsonObject = buildJsonObject {
+    put("action", "rsvp")
+    put("id", id)
+    put("home", home)
+    put("status", status)
+}
+
+/** The answers a guest can give, in the calendar's words and the page's. */
+val ANSWERS: List<Pair<String, String>> = listOf("accepted" to "Going", "tentative" to "Maybe", "declined" to "No")
+
+/** A guest's answer in words, as the page says it. */
+fun answerWords(status: String): String = when (status) {
+    "accepted" -> "going"
+    "tentative" -> "maybe"
+    "declined" -> "not going"
+    else -> "no answer"
+}
+
+/** A meeting's guest, by email (meta `guests`) or by ship (meta `ships`). [self] is the calendar's owner. */
+data class Guest(val name: String, val email: String, val ship: String, val status: String, val self: Boolean) {
+    val label: String get() = name.ifBlank { email }.ifBlank { ship }
+}
+
+private fun JsonObject.str(k: String): String = (this[k] as? JsonPrimitive)?.contentOrNull.orEmpty()
+private val JsonElement.isSelf: Boolean get() = ((this as? JsonObject)?.get("self") as? JsonPrimitive)?.booleanOrNull == true
+private fun JsonObject.array(k: String): List<JsonElement> = (this[k] as? JsonArray).orEmpty()
+
+/** The guests by email, then by ship, as the page lists them. A peer can send anything, so what is not an object is left out. */
+fun guestsOf(meta: JsonObject): List<Guest> = (meta.array("guests") + meta.array("ships")).mapNotNull { g ->
+    (g as? JsonObject)?.let { Guest(it.str("name"), it.str("email"), it.str("ship"), it.str("status"), g.isSelf) }
+}
+
+/** The event's join link: meta `conference` when it is http or https, since a peer's share or a feed can carry anything. */
+fun joinLink(meta: JsonObject): String? = meta.str("conference").takeIf { JOIN_LINK.matches(it) }
+private val JOIN_LINK = Regex("""https?://\S+""", RegexOption.IGNORE_CASE)
+
+/** The video call choices the editor offers. */
+enum class VideoCall(val label: String) {
+    NONE("None"),
+    MEET("Google Meet"),
+    KEEP("Keep the current link"),
+}
+
+/** What the video call shows at first: Keep while the event has a link, Meet while one is asked for, else None. */
+fun callOf(meta: JsonObject): VideoCall = when {
+    meta.str("conference").isNotEmpty() -> VideoCall.KEEP
+    meta.str("call") == "meet" -> VideoCall.MEET
+    else -> VideoCall.NONE
+}
+
+/** What the guests field shows: each guest's email or ship, the owner left out. */
+fun guestText(meta: JsonObject): String = guestsOf(meta).filter { !it.self && (it.email.isNotEmpty() || it.ship.isNotEmpty()) }
+    .joinToString(", ") { it.email.ifEmpty { it.ship } }
+
+/**
+ * Whether [text] names a guest by email: on a Google calendar, Google
+ * mails each about every change, a move, a rename, a delete (calendar 34
+ * writes with sendUpdates=all). Ships are told by their own calendars.
+ */
+fun mailsGuests(text: String): Boolean = guestNames(text).any { !it.startsWith("~") }
+
+/**
+ * Whether [meta] is a copy of another ship's event, placed by answering
+ * its invitation: its host keeps the guests and the call, and the
+ * calendar ignores them on the copy.
+ */
+fun isCopy(meta: JsonObject): Boolean = meta.str("host").isNotEmpty()
+
+private fun guestNames(text: String) = text.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+private val SHIP_NAME = Regex("~[a-z]{3,6}(-{1,2}[a-z]{6})*")
+private val EMAIL = Regex("""[^\s@,;:"<>]+@[^\s@,;:"<>]+\.[^\s@,;:"<>]+""")
+
+/**
+ * Why the guests field [text] cannot be saved on an event with [meta],
+ * or null: a ship name that is not one, an email that is not one, and
+ * an email on a calendar not linked to Google, which is what mails them.
+ * An unchanged field is never refused.
+ */
+fun guestsProblem(meta: JsonObject, text: String, google: Boolean): String? {
+    val names = guestNames(text)
+    if (names.joinToString(", ") == guestText(meta)) return null
+    val (ships, emails) = names.partition { it.startsWith("~") }
+    ships.firstOrNull { !SHIP_NAME.matches(it) }?.let { return "Not a ship name: $it" }
+    emails.firstOrNull { !EMAIL.matches(it) }?.let { return "Not an email or a ship: $it" }
+    if (emails.isNotEmpty() && !google) return "Email guests need a calendar linked to Google"
+    return null
+}
+
+/**
+ * [meta] with the guests field's [text] written in, as the page does it,
+ * and only when the text differs from what [meta] holds: an untouched
+ * field leaves meta's lists, and so Google's, alone. Ships go under
+ * `ships`, which the calendar invites itself; emails under `guests`,
+ * which Google mails. A guest kept keeps their answer, the owner (self)
+ * always stays, and a new one has none yet. No list is made where there
+ * was none and none is typed.
+ */
+fun withGuests(meta: JsonObject, text: String): JsonObject {
+    val names = guestNames(text)
+    if (names.joinToString(", ") == guestText(meta)) return meta
+    val (ships, emails) = names.partition { it.startsWith("~") }
+    val m = LinkedHashMap<String, JsonElement>(meta)
+    val oldShips = meta.array("ships")
+    val byShip = oldShips.filterIsInstance<JsonObject>().filter { it.str("ship").isNotEmpty() }.associateBy { it.str("ship") }
+    val nextShips = oldShips.filter { it.isSelf }.toMutableList()
+    ships.forEach { x ->
+        val had = byShip[x]
+        if (had?.isSelf != true) nextShips += had ?: buildJsonObject { put("ship", x); put("status", "needs-action") }
+    }
+    if (nextShips.isNotEmpty() || oldShips.isNotEmpty()) m["ships"] = JsonArray(nextShips)
+    val oldGuests = meta.array("guests")
+    val byEmail = oldGuests.filterIsInstance<JsonObject>().filter { it.str("email").isNotEmpty() }.associateBy { it.str("email").lowercase() }
+    // The owner, and any guest without an email, stay as they are.
+    val next = oldGuests.filter { it.isSelf || (it as? JsonObject)?.str("email").isNullOrEmpty() }.toMutableList()
+    emails.forEach { e ->
+        val had = byEmail[e.lowercase()]
+        if (had?.isSelf != true) next += had ?: buildJsonObject { put("email", e); put("status", "needs-action") }
+    }
+    if (emails.isNotEmpty() || oldGuests.isNotEmpty()) m["guests"] = JsonArray(next)
+    return JsonObject(m)
+}
+
+/**
  * Every occurrence, edited from [opened] (the draft as it opened on one
  * of them): the series moves as far as that occurrence was moved, from
  * its own start in [series], and takes everything else as [edited].
@@ -240,7 +427,11 @@ fun seriesEdit(edited: EventDraft, opened: EventDraft, series: EventDraft): Even
 }
 
 /** The editor's draft for an event.json answer, or null for a shape it cannot edit. */
-/** The meta fields the editor shows and writes itself. Everything else rides through. */
+/**
+ * The meta fields the editor shows and writes itself. Everything else
+ * rides through; guests, ships and call too, changed only where the
+ * editor changed them ([draftMeta]).
+ */
 private val EDITED_META = setOf("name", "note", "location", "tags", "color")
 
 /**

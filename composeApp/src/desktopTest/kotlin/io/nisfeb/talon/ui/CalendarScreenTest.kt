@@ -109,6 +109,8 @@ class CalendarScreenTest {
                 json("""{"shares":{},"offers":{},"accepted":{"~nec/work":{"key":"~nec/work","mode":"read"}}}""")
             path.endsWith("/google.json") -> json("""{"connected":false,"linked":{}}""")
             path.endsWith("/zones.json") -> json("""["UTC","America/New_York"]""")
+            // A calendar older than invitations (34): "this one only" is add, then skip.
+            path.endsWith("/invites.json") -> respond("", HttpStatusCode.NotFound)
             else -> json("[]")
         }
     })
@@ -419,12 +421,13 @@ class CalendarScreenTest {
     }
 
     @Test
-    fun `this and following restarts the series at five on that day, not at midnight`() = calendar {
+    fun `this and following restarts the series at five on that day, not at midnight, in one split`() = calendar {
         moveLesson(scope = "This and following", hour = "17")
-        val cap = wrote("cap-event")
-        assertTrue("\"dom\":5" in cap, cap)
-        val added = wrote("add-event")
-        assertTrue("\"start_ms\":${wallMs(lessonDay, 17)}" in added && "FREQ=WEEKLY" in added, added)
+        val split = wrote("split-event")
+        assertTrue("\"id\":\"f1\"" in split && "\"home\":\"family\"" in split && "\"idx\":5" in split, split)
+        assertTrue("\"start_ms\":${wallMs(lessonDay, 17)}" in split && "FREQ=WEEKLY" in split, split)
+        // Two steps lost every later lesson when the add was refused after the cap.
+        assertTrue(writes.none { "cap-event" in it.second || "add-event" in it.second }, writes.toString())
     }
 
     @Test

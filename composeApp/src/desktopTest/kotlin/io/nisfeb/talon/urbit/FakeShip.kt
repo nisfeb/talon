@@ -20,6 +20,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -110,6 +112,54 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
 
     /** The request id each watch (app + path) was last made with, for [quit]. */
     val subIds = ConcurrentHashMap<String, Long>()
+
+    /**
+     * The calendar app at /apps/calendar, as its parser in calendar's
+     * app.hoon answers. Reads answer from these fields; writes (pokes
+     * through the grubbery shell, and answers to invitations) are kept in
+     * order and taken unless refused.
+     */
+    class FakeCalendar {
+        /** window.json's rows, a JSON array; every window gets them all. */
+        @Volatile var rows = "[]"
+        @Volatile var calendars = """[{"id":"default","name":"Personal","kind":"local"}]"""
+        @Volatile var zones = """["UTC"]"""
+        /** event.json, by id; one not here is a 404. */
+        val events = ConcurrentHashMap<String, String>()
+        /** invites.json; null for a calendar older than invitations (34), which answers 404. */
+        @Volatile var invites: String? = "[]"
+        /** invites.json fails (500), as a busy or crashed nexus does: not the same as a 404. */
+        @Volatile var invitesFail = false
+        /** Every poke's body, in order. */
+        val pokes: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+        /** Every POST to invites/answer, its body, in order. */
+        val answers: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+        /** A poke the shell refuses (400), by its body: one it cannot read at all. */
+        @Volatile var refusePoke: (String) -> Boolean = { false }
+        /**
+         * Why the calendar refuses a poke it has taken, by its body, or
+         * null to keep it: the calendar's own refusals. It answers 200,
+         * as the ship acks a poke before reading it, and keeps the
+         * refusal in outcomes.json (app.hoon's refuse, calendar-core's
+         * refusal-put): the poke's own id, why, and the ship's clock.
+         */
+        @Volatile var refuseLater: (String) -> String? = { null }
+        /** outcomes.json's refusals, oldest first, as the calendar keeps them. */
+        val refusals: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+        /** outcomes.json is asked for. */
+        val outcomesRead = java.util.concurrent.atomic.AtomicInteger()
+        /** What a poke the shell took does to the calendar: the ship's own work, for what reads it back. */
+        @Volatile var onPoke: FakeCalendar.(String) -> Unit = {}
+        /** invites/answer's answer to a body, or null for the calendar's 404. */
+        @Volatile var answer: FakeCalendar.(String) -> String? = { """{"ok":true,"cal":"default","told":true}""" }
+        /** Writes never reach the ship: each fails as a dropped connection does. */
+        @Volatile var lose = false
+        /** Writes wait for this before the ship sees them: a busy ship, until it completes. */
+        @Volatile var hold: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    }
+
+    /** The ship's calendar; null for none, every read of it a 404. */
+    @Volatile var calendar: FakeCalendar? = null
 
     /** Vere's own /~_~/healthz: 204 idle, 429 busy, a proxy's 502 down. */
     @Volatile var health: Int = 204
@@ -287,6 +337,50 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
                     .let { scries[it] ?: answerScry(it) }
                     ?.let { respond(it, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
                     ?: respond("", HttpStatusCode.NotFound)
+            calendar != null && (path.startsWith("/apps/calendar/") || path.endsWith("/calendar.calendar")) -> {
+                val c = calendar!!
+                val body = req.body.toByteArray().decodeToString()
+                val json = { text: String -> respond(text, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
+                if (req.method != HttpMethod.Get) {
+                    if (c.lose) throw java.io.IOException("connection reset")
+                    c.hold?.await()
+                }
+                when (path.removePrefix("/apps/calendar")) {
+                    "/window.json" -> json("""{"rows":${c.rows}}""")
+                    "/calendars.json" -> json(c.calendars)
+                    "/events.json", "/tags.json", "/google/conflicts.json", "/caldav/subscriptions.json" -> json("[]")
+                    "/config.json" -> json("""{"title":"Calendar","zone":"UTC","ball":"cal"}""")
+                    "/zones.json" -> json(c.zones)
+                    "/google.json" -> json("""{"connected":true,"linked":{}}""")
+                    "/event.json" -> c.events[req.url.parameters["id"]]?.let(json) ?: respond("", HttpStatusCode.NotFound)
+                    "/invites.json" -> if (c.invitesFail) respond("", HttpStatusCode.InternalServerError) else c.invites?.let(json) ?: respond("", HttpStatusCode.NotFound)
+                    "/invites/answer" -> { c.answers += body; c.answer(c, body)?.let(json) ?: respond("", HttpStatusCode.NotFound) }
+                    "/outcomes.json" -> { c.outcomesRead.incrementAndGet(); json("""{"refusals":[${c.refusals.joinToString(",")}],"faults":{}}""") }
+                    else -> if (!path.endsWith("/calendar.calendar")) respond("", HttpStatusCode.NotFound) else {
+                        c.pokes += body
+                        val why = c.refuseLater(body)
+                        when {
+                            c.refusePoke(body) -> respond("", HttpStatusCode.BadRequest)
+                            why != null -> {
+                                val poke = Json.parseToJsonElement(body).jsonObject
+                                // Kept at once, not a beat after the ack as on the
+                                // ship: the app's scope runs on the test's virtual
+                                // clock, so its wait to read is no wait in real
+                                // time. AssistantActionsToolsTest proves the wait.
+                                c.refusals += buildJsonObject {
+                                    put("at_ms", System.currentTimeMillis())
+                                    put("action", poke["action"]?.jsonPrimitive?.content ?: "")
+                                    put("id", poke["id"]?.jsonPrimitive?.content ?: "")
+                                    put("from", "")
+                                    put("why", why)
+                                }.toString()
+                                respond("", HttpStatusCode.OK)
+                            }
+                            else -> { c.onPoke(c, body); respond("", HttpStatusCode.OK) }
+                        }
+                    }
+                }
+            }
             // An app's own HTTP API (%notes' v1, …): recorded, and answered by [answerApi].
             req.method != HttpMethod.Get || path.startsWith("/notes/") -> {
                 val body = req.body.toByteArray().decodeToString()

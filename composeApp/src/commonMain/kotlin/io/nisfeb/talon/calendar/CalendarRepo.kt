@@ -218,6 +218,114 @@ class CalendarRepo(
     suspend fun accept(key: String): Boolean = after(settleMs = 1500) { it.accept(key) }
     suspend fun syncShares(): Boolean { lastShareSyncMs = nowMs(); return after(settleMs = 1500) { it.syncShares() } }
 
+    private val _invites = MutableStateFlow<List<CalendarInvite>?>(null)
+    /** Invitations to single events from other ships; null until read, and on a calendar too old to have them. */
+    val invites: StateFlow<List<CalendarInvite>?> = _invites.asStateFlow()
+    private val _meetings = MutableStateFlow<Boolean?>(null)
+    /**
+     * Whether the calendar has meetings (version 34): invitations, guests,
+     * video calls, and "only this one" as one step. Null until asked;
+     * invites.json's 404 says no, as shares.json's does for sharing.
+     */
+    val meetings: StateFlow<Boolean?> = _meetings.asStateFlow()
+    @kotlin.concurrent.Volatile private var invitesReadMs = 0L
+
+    /**
+     * Read the invitations, and with them whether the calendar has
+     * meetings. Not part of a refresh: the screen asks once its month is
+     * in, so the read never queues on the ship in front of the month. A
+     * hiccup keeps the last answer.
+     */
+    suspend fun refreshInvites() {
+        val a = api ?: return
+        val got = runSuspendCatching { a.invites() }
+        if (api !== a) return
+        got.onSuccess { _invites.value = it; _meetings.value = true; invitesReadMs = nowMs() }
+            .onFailure { e ->
+                if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) {
+                    _invites.value = null; _meetings.value = false; invitesReadMs = nowMs()
+                }
+            }
+    }
+
+    /**
+     * [refreshInvites], unless they were read in the last minute. A
+     * calendar without them is asked hourly, as a full read is: it may
+     * have been upgraded since.
+     */
+    suspend fun refreshInvitesIfStale() {
+        val fresh = if (_meetings.value == false) FULL_READ_EVERY_MS else OPEN_FRESH_MS
+        if (nowMs() - invitesReadMs >= fresh) refreshInvites()
+    }
+
+    @kotlin.concurrent.Volatile private var saidRefusalMs = 0L
+
+    /**
+     * Why the calendar refused a write it had taken, as its own page
+     * asks: it answers a poke before reading it, and keeps what it
+     * refused, with why, in outcomes.json. After [REFUSAL_WAIT_MS], the
+     * newest refusal of [id] (the poke's, "" for an add) since [sinceMs],
+     * less a minute's slack for the ship's clock, each said once. Null for
+     * none, or for a calendar that keeps no record.
+     */
+    suspend fun refusal(id: String, sinceMs: Long): String? = carry {
+        delay(REFUSAL_WAIT_MS)
+        val a = api ?: return@carry null
+        val got = runSuspendCatching { a.outcomes() }.getOrNull() ?: return@carry null
+        val r = got.refusals.lastOrNull { it.atMs > saidRefusalMs && it.atMs >= sinceMs - 60_000 && it.id == id }
+            ?: return@carry null
+        saidRefusalMs = r.atMs
+        r.why.ifBlank { "the calendar refused it" }
+    }
+
+    private val _unheard = MutableStateFlow<String?>(null)
+
+    /**
+     * A save's refusal found after the calendar screen that made it had
+     * gone, worded by that save: said when the calendar next opens.
+     */
+    val unheard: StateFlow<String?> = _unheard.asStateFlow()
+
+    /** [refusal] of a save on the calendar screen, kept in [unheard] as [line] words it until [heard]. */
+    suspend fun refusalOfSave(id: String, sinceMs: Long, line: (String) -> String): String? = carry {
+        refusal(id, sinceMs)?.also { _unheard.value = line(it) }
+    }
+
+    /** The calendar screen has said what [unheard] held. */
+    fun heard() { _unheard.value = null }
+
+    /**
+     * [block] on this repo's scope, not awaited: what a screen started
+     * with a write, finished after the screen has gone.
+     */
+    fun <T> behind(block: suspend () -> T): kotlinx.coroutines.Deferred<T> = scope.async { block() }
+
+    /** Whether "only this one" can go as one edit-at: asked now if not yet known; unknown is no. */
+    suspend fun editsAt(): Boolean {
+        if (_meetings.value == null) refreshInvites()
+        return _meetings.value == true
+    }
+
+    /**
+     * Answer an invitation: accepted or tentative puts its copy on [cal],
+     * declined takes it off, and the host is told. Null when the calendar
+     * refused or did not answer ([failedLine] says which). Read back
+     * behind it: the invitations, and the window and the month wherever a
+     * copy can have come or gone.
+     */
+    suspend fun answerInvite(key: String, status: String, cal: String): InviteAnswer? = carry {
+        val a = api ?: return@carry null
+        val had = _invites.value?.firstOrNull { it.key == key }
+        // A no to one never placed changes no day: six reads for nothing.
+        val reach = Reach(tasks = false, rows = status != "declined" || had == null || had.cal.isNotEmpty(), before = lists())
+        val tried = runSuspendCatching { a.answerInvite(key, status, cal) }
+        lastWriteError = tried.exceptionOrNull() as? AuspexError
+        tried.getOrNull()?.also {
+            details.clear()
+            scope.launch { refreshInvites(); afterItemWrite(reach) }
+        }
+    }
+
     /** Every sync this calendar has, prodded now: Google, followed, shared. */
     suspend fun syncNow(): Boolean {
         val a = api ?: return false
@@ -752,6 +860,9 @@ class CalendarRepo(
         _tasks.value = null
         _calendars.value = emptyList()
         _shares.value = null
+        _invites.value = null
+        _meetings.value = null
+        invitesReadMs = 0
         _tags.value = emptyList()
         _zone.value = null
         _leadMin.value = null
@@ -910,6 +1021,9 @@ class CalendarRepo(
     companion object {
         /** How long the nexus takes to apply a poke it has answered, read after. */
         const val APPLY_BEAT_MS = 400L
+
+        /** How long after a write the calendar's own page looks for its refusal. */
+        const val REFUSAL_WAIT_MS = 1_500L
 
         private const val TAG = "CalendarRepo"
         const val BEHIND_MS = 6 * 60 * 60 * 1000L
