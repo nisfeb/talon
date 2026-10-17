@@ -421,7 +421,8 @@ class DictationService : Service() {
      * history as it happens, so one cut short keeps what was said.
      */
     private suspend fun converse() {
-        val locked = getSystemService(KeyguardManager::class.java)?.isDeviceLocked == true
+        // Read at each turn, not once: the phone can lock mid-conversation.
+        val locked = { getSystemService(KeyguardManager::class.java)?.isDeviceLocked == true }
         val app = application as TalonApplication
         val cfg = app.aiSettings.state.value
         val prep = prepare()
@@ -436,7 +437,7 @@ class DictationService : Service() {
             prep.orrery { orrery ->
                 kotlinx.coroutines.coroutineScope {
                     val talk = prep.conversation(locked, orrery) { reply, waiting -> ownerDecides(reply, waiting, transcribe) }
-                    Log.i(TAG, "talking: ${talk.toolNames.size} tools, orrery ${if (orrery == null) "off" else "on"}, locked=$locked")
+                    Log.i(TAG, "talking: ${talk.toolNames.size} tools, orrery ${if (orrery == null) "off" else "on"}, locked=${locked()}")
                     val t0 = System.currentTimeMillis()
                     val day = prep.day(io.nisfeb.talon.ai.CalendarQuestion.decider(app.ktorHttp, cfg, Briefing.QUESTIONS_WAIT_MS))
                     Log.i(TAG, "the day in ${System.currentTimeMillis() - t0} ms: mail ${day.mail}, chats ${day.chats}, questions ${day.questions}")

@@ -61,6 +61,11 @@ class AssistantActions(
     val onPeople: (List<PersonMatch>) -> Unit = {},
     /** What list_mail and search_mail showed. */
     val onMail: (List<io.nisfeb.talon.mail.InboxEntry>) -> Unit = {},
+    /**
+     * Whether the phone is locked, for a dictation: update_event then
+     * refuses an event with guests, since a change to it reaches them.
+     */
+    val locked: () -> Boolean = { false },
 )
 
 /**
@@ -465,6 +470,11 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             val detail = cal.eventDetail(id) ?: return@Tool "Error: no event $id; see list_events."
             val d0 = draftFromEvent(detail, today) ?: return@Tool "Error: that event could not be read."
             if (d0.cal != null && d0.cal in cal.readOnly) return@Tool "Error: that calendar is shared with the user read-only; its host makes the changes."
+            // Anyone holding a locked phone can speak to it, and a change
+            // to a meeting reaches its guests (Google mails each one).
+            if (a.locked() && io.nisfeb.talon.calendar.guestText(detail["meta"] as? JsonObject ?: JsonObject(emptyMap())).isNotEmpty()) {
+                return@Tool "Not done: \"${d0.name}\" has guests, and a change to it reaches them. The owner can change it once the phone is unlocked."
+            }
             val dateText = args.text("date")?.trim()?.takeIf { it.isNotEmpty() }
             val newDate = if (dateText == null) null else parseDate(dateText) ?: return@Tool "Error: date must be YYYY-MM-DD."
             val timeText = args.text("time")?.trim()?.takeIf { it.isNotEmpty() }

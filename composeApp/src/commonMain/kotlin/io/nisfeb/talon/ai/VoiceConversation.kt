@@ -29,6 +29,12 @@ class VoiceConversation(
     /** Today's brief from orrery, null for none today; throws where orrery could not be asked. */
     private val brief: suspend () -> Brief?,
     private val maxSteps: Int = 8,
+    /**
+     * Whether the phone is locked now, read at each turn: one that locks
+     * mid-conversation loses the writes [DictationAgent.LOCKED_WRITES]
+     * leaves out, and gets them back once unlocked.
+     */
+    private val locked: () -> Boolean = { false },
 ) {
     /** What comes after a turn. */
     sealed interface Next {
@@ -58,8 +64,10 @@ class VoiceConversation(
         tools.filterNot { it.spec.name in NOT_OFFERED }.map { if (it.spec.name == UNREAD_TOOL) readsOut(it) else it } +
             listOfNotNull(tell?.let(::instructTool), briefTool())
 
-    /** The tools a turn may call, for a test and the log. */
-    val toolNames: List<String> get() = offered.map { it.spec.name }
+    /** The tools a turn may call now, for a test and the log. */
+    val toolNames: List<String> get() = turnTools().map { it.spec.name }
+
+    private fun turnTools(): List<Tool> = DictationAgent.whileLocked(offered, locked())
 
     /**
      * The rest of the opener, written from [digest] ([Briefing.openerDigest])
@@ -85,7 +93,7 @@ class VoiceConversation(
         reading = null
         val prior = turns.takeLast(MAX_CONTEXT).flatMap { listOf(AgentMessage.User(it.words), AgentMessage.Assistant(it.line, emptyList())) }
         val system = prompt + (lastRead?.let { "\n\nWhat you read out to the owner earlier:\n$it" }.orEmpty())
-        val line = AgentLoop(completer, offered, system, maxSteps).run(
+        val line = AgentLoop(completer, turnTools(), system, maxSteps).run(
             question = words,
             priorTurns = prior,
             // The conversation's writes go ahead, as a dictation's do; what

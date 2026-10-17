@@ -257,6 +257,7 @@ class Loops(
                 zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
                 send = { whom, text -> getRepo().send(whom, text) },
                 onEvents = seen::events, onTasks = seen::tasks, onPeople = seen::people, onMail = seen::mail,
+                locked = { locked },
             )
             val webOn = cfg.assistantOn()
             // The vendor's search, not an own key: since Armillary-only an
@@ -374,9 +375,10 @@ class Loops(
          * Archie's conversation ([VoiceConversation]): a dictation's tools,
          * while [locked] only its locked writes, orrery's where it is on, and
          * orrery's proposals put to the owner by [decide] before they go ahead.
+         * [locked] is read at each turn: the phone can lock mid-conversation.
          */
         suspend fun conversation(
-            locked: Boolean,
+            locked: () -> Boolean,
             orrery: io.nisfeb.talon.orrery.OrreryRepo?,
             decide: suspend (String, List<io.nisfeb.talon.orrery.OrreryAction>) -> Boolean?,
         ): VoiceConversation {
@@ -387,9 +389,11 @@ class Loops(
                 zone = { zone() },
                 send = { whom, text -> getRepo().send(whom, text) },
                 onEvents = talkSeen::events, onTasks = talkSeen::tasks, onPeople = talkSeen::people, onMail = talkSeen::mail,
+                locked = locked,
             )
             val tools = ToolCatalog.default(getRepo(), getDb(), getEmbedder(), braveSearch = placesClient(), places = placesClient(), open = ::openOnScreen, dials = true, onMessages = talkSeen::messages, conversationLabel = known::conversationLabel) { known.displayName(it) } + actionTools(actions)
-            val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked)
+            // Every dictation tool; the conversation drops the locked ones turn by turn.
+            val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked = false)
                 .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
             return VoiceConversation(
                 completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(zone()), msgs, t) },
@@ -405,6 +409,7 @@ class Loops(
                     }
                 },
                 brief = { orrery?.briefLast()?.getOrThrow()?.let { Briefing.todays(it, today()) } },
+                locked = locked,
             )
         }
 
