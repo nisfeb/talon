@@ -613,7 +613,7 @@ class TlonChatRepoStartupTest {
             scries[init] = initPosts
             holdScry = { if (it == "notes/v0/notebooks") 30_000 else 0 }
             refuse = { if (it.app == "chat" && "refused here" in it.json.toString()) "not allowed" else null }
-        }) { _ ->
+        }) { repo ->
             val t0 = System.currentTimeMillis()
             withTimeout(10_000) {
                 while (db.messages().getOne("~bus", refused)?.status != "failed" || db.messages().getOne("~bus", taken)?.status != null) delay(50)
@@ -621,6 +621,9 @@ class TlonChatRepoStartupTest {
             assertTrue(System.currentTimeMillis() - t0 < 10_000)
             assertTrue("notes/v0/notebooks" in ship.scried, "the pass was still reading: ${ship.scried}")
             assertEquals(2, ship.pokesTo("chat").size, "each answered, neither waited out")
+            // A confirmed poke, which fails on silence, is answered as well.
+            withTimeout(5_000) { repo.addContact("~nec") }
+            assertTrue("~nec" in repo.bookContacts.value)
         }
     }
 

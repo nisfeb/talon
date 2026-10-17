@@ -130,6 +130,18 @@ class TlonChatRepoPeopleTest {
         assertTrue("~bus" !in repo.bookContacts.value)
     }
 
+    // A ship that never answered was an add that worked, once the ack
+    // wait ran out, and the screen said so (coordinator, 2026-10-17:
+    // "addContact confirm"). Real time: the wait is the channel's 15 s.
+    @Test
+    fun `an add the ship never answers fails and leaves the book as it was`() = live {
+        ship.silent = { it.app == "contacts" }
+        assertFailsWith<PokeUnacked> { repo.addContact("~bus", nickname = "Bus") }
+        assertTrue("~bus" !in repo.bookContacts.value)
+        assertNull(db.contacts().get("~bus"), "no row made for it")
+        assertEquals(1, ship.pokesTo("contacts").size, "the page waits on the meet")
+    }
+
     @Test
     fun `removing a contact wipes them from the book`() = live {
         repo.addContact("~bus")

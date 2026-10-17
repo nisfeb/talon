@@ -75,6 +75,9 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
      */
     @Volatile var landThenFail: (Poke) -> Throwable? = { null }
 
+    /** A poke the ship takes and never answers, as a wedged flow to a peer: in [pokes], with no ack. */
+    @Volatile var silent: (Poke) -> Boolean = { false }
+
     /** Every poke sent, lost or not. */
     val attempted: MutableList<Poke> = java.util.concurrent.CopyOnWriteArrayList()
 
@@ -284,7 +287,7 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
                             lose(p)?.let { throw it }
                             pokes += p
                             val err = refuse(p)
-                            answer(
+                            if (!silent(p)) answer(
                                 path,
                                 if (err == null) """{"id":$id,"response":"poke","ok":"ok"}"""
                                 else """{"id":$id,"response":"poke","err":${JsonPrimitive(err)}}""",

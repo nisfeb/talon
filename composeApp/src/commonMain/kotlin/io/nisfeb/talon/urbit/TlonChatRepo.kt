@@ -1623,6 +1623,8 @@ class TlonChatRepo(
         val ch = channel ?: error("not connected")
         require(ship.startsWith("~")) { "addContact: $ship isn't a patp" }
         val name = nickname?.trim()?.takeIf { it.isNotBlank() }
+        // Confirmed, both: the screen says the contact was added, and a
+        // ship that never answered was that, after its 15 s wait.
         // 1. Track the peer.
         ch.poke(
             app = "contacts",
@@ -1630,11 +1632,13 @@ class TlonChatRepo(
             payload = buildJsonObject {
                 put("meet", buildJsonArray { add(JsonPrimitive(ship)) })
             },
+            confirm = true,
         )
         // 2. Create the book page (our overlay = optional nickname).
         ch.poke(
             app = "contacts",
             mark = "contact-action-1",
+            confirm = true,
             payload = buildJsonObject {
                 put("page", buildJsonObject {
                     put("kip", ship)
