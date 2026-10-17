@@ -24,7 +24,12 @@ import kotlin.concurrent.Volatile
  * entirely), so without it a muted aside still reaches the WAV, Whisper
  * and the published transcript.
  */
-class CallRecorder(private val tag: String, private val selfMuted: () -> Boolean) {
+class CallRecorder(
+    private val tag: String,
+    /** The clock the timeline is measured on; a test's own. */
+    private val now: () -> Long = ::nowMs,
+    private val selfMuted: () -> Boolean,
+) {
     /**
      * Whether we are capturing right now. A StateFlow, and owned here,
      * because the screen must not be able to disagree with the tap: the
@@ -69,7 +74,7 @@ class CallRecorder(private val tag: String, private val selfMuted: () -> Boolean
     /** Begin a recording. False when one is already running. */
     fun start(): Boolean {
         if (_recording.value) return false
-        startMs = nowMs()
+        startMs = now()
         clips.clear()
         _recording.value = true
         return true
@@ -98,7 +103,7 @@ class CallRecorder(private val tag: String, private val selfMuted: () -> Boolean
         // transcript.
         if (clip.chunks.isNotEmpty()) {
             val r = if (clip.rate > 0) clip.rate else rate
-            val elapsedMs = (nowMs() - startMs).coerceAtLeast(0)
+            val elapsedMs = (now() - startMs).coerceAtLeast(0)
             val wantBytes = ((r.toLong() * elapsedMs / 1000L).toInt()) * 2
             pad(clip.chunks, wantBytes - clip.chunks.sumOf { it.size })
         }
@@ -112,7 +117,7 @@ class CallRecorder(private val tag: String, private val selfMuted: () -> Boolean
                 if (clip.chunks.isEmpty()) {
                     // The lead silence, measured where the speaker's audio
                     // actually starts and at this link's own rate.
-                    val elapsedMs = (nowMs() - startMs).coerceAtLeast(0)
+                    val elapsedMs = (now() - startMs).coerceAtLeast(0)
                     pad(clip.chunks, ((r.toLong() * elapsedMs / 1000L).toInt()) * 2)
                 }
                 clip.chunks.add(pcm)
