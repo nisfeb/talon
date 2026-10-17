@@ -151,13 +151,23 @@ class Loops(
 
     /**
      * Maps or the dialer for a dictation's open_directions and call_place,
-     * from the application context. Allowed from the background because
+     * from the application context. Allowed from the background only while
      * the dictation's card is on screen; on a locked phone the app waits
-     * behind the lock.
+     * behind the lock. With the card gone (hidden, or a retry from the
+     * result notification) Android drops the start without a word, so it
+     * is not tried and the tool says it could not open. No user action:
+     * maps coming up is not the owner leaving the card, which hangs Archie
+     * up ([io.nisfeb.talon.QuickDictationActivity.onUserLeaveHint]).
      */
-    private fun openOnScreen(uri: String): Boolean = runCatching {
-        context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    }.onFailure { io.nisfeb.talon.util.Log.w("Dictation", "could not open $uri: ${it.message}") }.isSuccess
+    private fun openOnScreen(uri: String): Boolean {
+        if (!io.nisfeb.talon.QuickDictation.shown.value) return false
+        return runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION),
+            )
+        }.onFailure { io.nisfeb.talon.util.Log.w("Dictation", "could not open $uri: ${it.message}") }.isSuccess
+    }
 
     /**
      * A runner with the mail, calendar, task and event tools, over

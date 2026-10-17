@@ -155,6 +155,16 @@ class QuickDictationActivity : ComponentActivity() {
         super.onPause()
     }
 
+    /**
+     * Home or recents: the owner left the card, and Archie stops as on
+     * back. Not the screen going off, which calls no hint: in the car
+     * the conversation goes on with the phone dark.
+     */
+    override fun onUserLeaveHint() {
+        if (QuickDictation.talking.value) QuickDictation.hangUp()
+        super.onUserLeaveHint()
+    }
+
     private fun start() {
         val app = application as TalonApplication
         val cfg = app.aiSettings.state.value
