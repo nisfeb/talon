@@ -55,7 +55,10 @@ class AndroidCallEngine(
     private val _state = MutableStateFlow(MediaState.Idle)
     override val state: StateFlow<MediaState> = _state
 
-    private val gathered = CompletableDeferred<Unit>()
+    // One per gather: the first was already complete when a restart
+    // offer waited on it, so a restart went out with few or none of its
+    // new candidates, and signalling here does not trickle.
+    @Volatile private var gathered = CompletableDeferred<Unit>()
     private var micTrack: AudioTrack? = null
 
     // ── video ────────────────────────────────────────────────────
@@ -181,8 +184,7 @@ class AndroidCallEngine(
             mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
         }
         val offer = suspendSdp { pc.createOffer(it, constraints) }
-        suspendSet { pc.setLocalDescription(it, offer) }
-        awaitGathering()
+        setLocalAndGather(offer)
         val sdp = pc.localDescription?.description ?: return null
         return SessionDesc(sdp, sdpFingerprint(sdp))
     }
@@ -190,8 +192,7 @@ class AndroidCallEngine(
     override suspend fun createOffer(): SessionDesc {
         _state.value = MediaState.Gathering
         val offer = suspendSdp { pc.createOffer(it, MediaConstraints()) }
-        suspendSet { pc.setLocalDescription(it, offer) }
-        awaitGathering()
+        setLocalAndGather(offer)
         val sdp = pc.localDescription?.description ?: error("no local description")
         return SessionDesc(sdp, sdpFingerprint(sdp))
     }
@@ -202,8 +203,7 @@ class AndroidCallEngine(
         suspendSet { pc.setRemoteDescription(it, desc) }
         adoptVideoTransceiver()
         val answer = suspendSdp { pc.createAnswer(it, MediaConstraints()) }
-        suspendSet { pc.setLocalDescription(it, answer) }
-        awaitGathering()
+        setLocalAndGather(answer)
         val sdp = pc.localDescription?.description ?: error("no local description")
         return SessionDesc(sdp, sdpFingerprint(sdp))
     }
@@ -423,6 +423,12 @@ class AndroidCallEngine(
     /** A dead STUN/TURN server must degrade, not break: when gathering
      *  stalls (unreachable server keeps ICE in %gathering), proceed
      *  with whatever candidates we have — Tier 0 still works. */
+    private suspend fun setLocalAndGather(desc: SessionDescription) {
+        gathered = CompletableDeferred()
+        suspendSet { pc.setLocalDescription(it, desc) }
+        awaitGathering()
+    }
+
     private suspend fun awaitGathering() {
         runCatching { withTimeout(8_000) { gathered.await() } }
             .onFailure { Log.w("Trunk", "gathering incomplete after 8s — proceeding with partial candidates") }
