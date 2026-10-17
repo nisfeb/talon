@@ -31,6 +31,7 @@ import io.nisfeb.talon.ai.AiProvider
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.ModelRef
 import io.nisfeb.talon.ai.ProviderKind
+import io.nisfeb.talon.ai.profile
 import io.nisfeb.talon.armillary.Account
 import io.nisfeb.talon.armillary.ArmillaryRepo
 import io.nisfeb.talon.armillary.Checkout
@@ -61,32 +62,6 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class AiSettingsSectionTest {
-    @Test
-    fun `the first change saves the profile the old settings made`() = runComposeUiTest {
-        val ai = FakeAiSettings().apply { applyRemote(AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "sk-ant", model = "claude-opus-5")) }
-        setContent {
-            TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, catalog = quietCatalog()) }
-            }
-        }
-        onNodeWithText("Providers").assertExists()
-        onNodeWithText("claude-opus-5, Anthropic").assertExists()
-        onNodeWithText("Default: claude-opus-5, Anthropic").assertExists()
-        assertNull(ai.state.value.savedProfile, "looking saves nothing")
-        // Orrery's rows, Jev with them, are on its own page now.
-        assertTrue(onAllNodesWithText("Jev gating").fetchSemanticsNodes().isEmpty())
-
-        // Rows in order: catch-up first.
-        val switches = onAllNodes(isToggleable())
-        switches[0].performClick()
-        waitForIdle()
-        val saved = ai.state.value.savedProfile!!
-        assertFalse(saved.isOn(AiFeature.CatchUp))
-        assertFalse(ai.state.value.catchMeUpEnabled, "the old switch follows, for older installs")
-        assertEquals("sk-ant", saved.provider(saved.defaultModel!!.provider)!!.apiKey)
-        assertTrue(onAllNodesWithText("Anthropic", substring = true).fetchSemanticsNodes().isNotEmpty())
-    }
-
     /** One of the card's rarer actions, behind its More button. */
     private fun ComposeUiTest.more(item: String) {
         onNodeWithText("More").performScrollTo().performClick()
@@ -128,15 +103,15 @@ class AiSettingsSectionTest {
         val bought = repo(ai) { HttpStatusCode.NotFound to "" }
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
             }
         }
         onNodeWithText("Armillary is not on your ship. Install it from the Apps page.").assertExists()
         onNodeWithText("Armillary is published by ~ricsul-bilwyt, the same as Orrery and the Calendar.").assertExists()
         onNodeWithText("Top up").assertIsNotEnabled()
-        // No address and no key on this card: the ship holds both. The
-        // one key field on the screen is the Anthropic provider's.
-        assertEquals(1, onAllNodesWithText("API key", substring = true).fetchSemanticsNodes().size)
+        // No address and no key anywhere: the ship holds both, and an
+        // own provider left from before is not shown.
+        assertEquals(0, onAllNodesWithText("API key", substring = true).fetchSemanticsNodes().size)
     }
 
     @Test
@@ -145,7 +120,7 @@ class AiSettingsSectionTest {
         val bought = repo(ai) { HttpStatusCode.Forbidden to "" }
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
             }
         }
         onNodeWithText("Signed out of the ship.").assertExists()
@@ -170,7 +145,7 @@ class AiSettingsSectionTest {
         }
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
             }
         }
         // An app that answers needs no line saying so.
@@ -187,83 +162,6 @@ class AiSettingsSectionTest {
         onNodeWithText("In dollars. The smallest the vendor takes is $5.00.").assertExists()
         // Nothing chosen is nothing to continue with.
         onNodeWithText("Continue").assertIsNotEnabled()
-    }
-
-    @Test
-    fun `the vendor's picks drive the features until one is picked by hand, and one tap brings it back`() = runComposeUiTest {
-        val ai = FakeAiSettings().withProfile(withArmillary().copy(features = mapOf(AiFeature.CatchUp to FeatureSetting(on = true))))
-        val bought = repo(ai) { path ->
-            HttpStatusCode.OK to when {
-                path.endsWith("/api/inference") ->
-                    """{"mode":"lease","base_url":"https://openrouter.ai/api/v1","key":"sk-or-1","models":["f/1","z/1"],
-                        "suggested":{"rev":2,"models":{"default":"f/1","catch_up":"z/1"}}}"""
-                path.endsWith("/api/plans") -> "[]"
-                path.endsWith("/api/catalog") -> "[]"
-                else -> funded
-            }
-        }
-        setContent {
-            TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
-            }
-        }
-        val catchUp = { ai.state.value.savedProfile!!.resolve(AiFeature.CatchUp) }
-        onNodeWithText("Armillary picks a model for each feature. Choose your own to change it.").assertExists()
-        assertEquals(ARMILLARY_PROVIDER to "z/1", catchUp()!!.provider.id to catchUp()!!.model, "an owner who picked nothing runs on the vendor's pick")
-        assertTrue(onAllNodesWithText("Armillary's pick.").fetchSemanticsNodes().isNotEmpty())
-        // A model picked by hand, as the picker saves it.
-        ai.setProfile(ai.state.value.savedProfile!!.let { p ->
-            p.copy(features = p.features + (AiFeature.CatchUp to FeatureSetting(on = true, model = ModelRef("main", "claude-opus-5"), own = true)))
-        })
-        waitForIdle()
-        assertEquals("claude-opus-5", catchUp()!!.model)
-        // The vendor's model by its short name, as the pickers name it.
-        // One way back, on the row: the button over them all said it twice.
-        // The default, on the owner's own provider, has its own: the last is catch-up's.
-        onAllNodesWithText("Use Armillary's pick, 1").onLast().performScrollTo().performClick()
-        waitForIdle()
-        assertEquals("z/1", catchUp()!!.model)
-        assertTrue(ai.state.value.savedProfile!!.isOn(AiFeature.CatchUp), "following keeps the switch")
-        assertEquals(1, onAllNodesWithText("Use Armillary's pick, 1").fetchSemanticsNodes().size, "only the default's is left")
-    }
-
-    // "fix it so the default follows armillary unless the user explicitly
-    // changes it" (sneagan, 2026-10-12): a top-up had left Fable there.
-    @Test
-    fun `the default follows the vendor's until picked by hand, and one tap brings it back`() = runComposeUiTest {
-        val fable = ModelRef(ARMILLARY_PROVIDER, "anthropic/claude-fable-5.1")
-        val ai = FakeAiSettings().withProfile(withArmillary().copy(defaultModel = fable))
-        val bought = repo(ai) { path ->
-            HttpStatusCode.OK to when {
-                path.endsWith("/api/inference") ->
-                    """{"mode":"lease","base_url":"https://openrouter.ai/api/v1","key":"sk-or-1","models":["anthropic/claude-opus-5.5","anthropic/claude-fable-5.1"],
-                        "suggested":{"rev":2,"models":{"default":"anthropic/claude-opus-5.5"}}}"""
-                path.endsWith("/api/plans") -> "[]"
-                path.endsWith("/api/catalog") -> "[]"
-                else -> funded
-            }
-        }
-        val saved = { ai.state.value.savedProfile!! }
-        assertEquals(ModelRef(ARMILLARY_PROVIDER, ""), saved().defaultModel, "what a payment wrote follows the vendor's again")
-        setContent {
-            TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
-            }
-        }
-        onNodeWithText("Use Armillary's pick", substring = true).assertDoesNotExist()
-        // Picked by hand, in the picker: the first is the default's.
-        onAllNodesWithText("Default · Opus 5.5")[0].performScrollTo().performClick()
-        onNodeWithText("anthropic/claude-fable-5.1").performClick()
-        waitForIdle()
-        assertEquals(fable, saved().defaultModel)
-        assertTrue(saved().defaultOwn)
-        runBlocking { bought.refresh() }
-        assertEquals(fable, saved().defaultModel, "a refresh leaves a hand pick alone")
-        onNodeWithText("Use Armillary's pick, Opus 5.5").performScrollTo().performClick()
-        waitForIdle()
-        assertEquals(ModelRef(ARMILLARY_PROVIDER, ""), saved().defaultModel)
-        assertFalse(saved().defaultOwn)
-        onNodeWithText("Use Armillary's pick, Opus 5.5").assertDoesNotExist()
     }
 
     /** A ship answering [plans] and [account], with one model on offer. */
@@ -287,79 +185,12 @@ class AiSettingsSectionTest {
         "lease":{},"checkouts":{},"vendor":"~wex","self":"~feb","stale":3}"""
 
     @Test
-    fun `what works is listed first, this device's own model is Orrery's, and a keyless model is named where it is picked`() = runComposeUiTest {
-        // sneagan's screen, 2026-10-08: a keyless OpenRouter on top, "On this
-        // device" saying "OpenRouter has no key", the working Armillary last.
-        val ai = FakeAiSettings().withProfile(
-            AiProfile(
-                providers = listOf(
-                    AiProvider("or", ProviderKind.OpenRouter, "OpenRouter"),
-                    AiProvider(DEVICE_PROVIDER, ProviderKind.ThisDevice, "On this device"),
-                    AiProvider(ARMILLARY_PROVIDER, ProviderKind.Armillary, "Armillary"),
-                ),
-                defaultModel = ModelRef(ARMILLARY_PROVIDER, ""),
-                features = mapOf(AiFeature.CatchUp to FeatureSetting(on = true, model = ModelRef("or", "openai/gpt-4o"))),
-            ),
-        )
-        val bought = selling(ai, "[]", funded)
-        setContent {
-            TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
-            }
-        }
-        fun top(text: String) = onAllNodesWithText(text).fetchSemanticsNodes().first().boundsInRoot.top
-        assertTrue(top("Armillary") < top("OpenRouter"), "the working default above the keyless one")
-        // Catch-up and the assistant cannot use it: it is triage's, on the Orrery page.
-        onNodeWithText("On this device").assertDoesNotExist()
-        onNodeWithText("This device (private)").assertDoesNotExist()
-        onNodeWithText("Runs on this device. Nothing it reads leaves it.").assertDoesNotExist()
-        // Said under the feature that would fail, not on the device's card.
-        onNodeWithText("OpenRouter has no key.").assertExists()
-        assertTrue(
-            onAllNodesWithTag(ARMILLARY_LOGO, useUnmergedTree = true).fetchSemanticsNodes().size >= 2,
-            "the logo beside the card's name and the default model's",
-        )
-    }
-
-    @Test
-    fun `Armillary's default models read Default and their short name, beside the logo`() = runComposeUiTest {
-        // "it should have the armillary logo, say default, and then the short
-        // model name like opus 5.5. not its default armillary default" (sneagan, 2026-10-09)
-        val ai = FakeAiSettings().withProfile(
-            AiProfile(
-                providers = listOf(
-                    AiProvider(
-                        ARMILLARY_PROVIDER, ProviderKind.Armillary, "Armillary", apiKey = "k.s",
-                        models = listOf(ModelInfo("anthropic/claude-haiku-4.5"), ModelInfo("anthropic/claude-opus-5.5")),
-                        suggested = mapOf("default" to "anthropic/claude-opus-5.5", "catch_up" to "anthropic/claude-haiku-4.5"),
-                    ),
-                ),
-                defaultModel = ModelRef(ARMILLARY_PROVIDER, ""),
-                features = mapOf(AiFeature.CatchUp to FeatureSetting(on = true)),
-            ),
-        )
-        setContent {
-            TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, catalog = quietCatalog()) }
-            }
-        }
-        onNodeWithText("Default · Opus 5.5").assertExists()
-        onNodeWithText("Default · Haiku 4.5").assertExists()
-        assertTrue(onAllNodesWithText("its default", substring = true).fetchSemanticsNodes().isEmpty())
-        assertTrue(onAllNodesWithText("Default: ", substring = true).fetchSemanticsNodes().isEmpty())
-        assertTrue(
-            onAllNodesWithTag(ARMILLARY_LOGO, useUnmergedTree = true).fetchSemanticsNodes().size >= 3,
-            "the card, the default model and catch-up each carry the logo",
-        )
-    }
-
-    @Test
     fun `the sheet shows the sizes cheapest first, then another amount`() = runComposeUiTest {
         val ai = FakeAiSettings().withProfile(withArmillary())
         val bought = selling(ai, threeSizes, funded)
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
             }
         }
         onNodeWithText("Top up").performClick()
@@ -388,7 +219,7 @@ class AiSettingsSectionTest {
         )
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
             }
         }
         onNodeWithText("Top up").performClick()
@@ -407,7 +238,7 @@ class AiSettingsSectionTest {
         val bought = selling(ai, threeSizes, funded)
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
             }
         }
         onNodeWithText("Subscribe: Talon Pro, $10.00 a month for $12.00 of credit").performClick()
@@ -433,7 +264,7 @@ class AiSettingsSectionTest {
         )
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
             }
         }
         onNodeWithText("2026-09-21 12:35  Charge  under a cent").assertDoesNotExist()
@@ -562,7 +393,7 @@ class AiSettingsSectionTest {
         )
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
             }
         }
         waitForIdle()
@@ -589,48 +420,128 @@ class AiSettingsSectionTest {
         val ai = FakeAiSettings()
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null) }
             }
         }
         waitForIdle()
-        onNodeWithText("Let your ship handle it").assertExists()
-        onNodeWithText("no API keys to copy in", substring = true).assertExists()
+        onNodeWithText("Turn on AI").assertExists()
+        onNodeWithText("no keys to copy in", substring = true).assertExists()
         onNodeWithText("Set up Armillary").assertExists()
+        assertTrue(onAllNodesWithText("Top up to turn on.").fetchSemanticsNodes().size >= 2, "each paid feature says what it waits on")
+        // Pressing it adds the row, and nothing else is asked of the owner.
+        onNodeWithText("Set up Armillary").performClick()
+        waitForIdle()
+        assertEquals(ProviderKind.Armillary, ai.state.value.profile().armillary()?.kind)
     }
 
     // The card says there is nothing more to set up. With no default
     // model nothing resolves, so on a fresh install no feature ran.
     @OptIn(ExperimentalTestApi::class)
-    @Test
-    fun `setting up armillary makes it the default`() = runComposeUiTest {
-        val ai = FakeAiSettings()
-        setContent {
-            TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, catalog = quietCatalog()) }
+
+    // ── Armillary-only (2026-10-16) ─────────────────────────────
+
+    private fun paid(balance: Long = 12_345_000, free: Boolean = false) = FakeAiSettings().apply { applyRemote(io.nisfeb.talon.ai.paidSettings(speech = true)) }.let { ai ->
+        ai to repo(ai) { path ->
+            HttpStatusCode.OK to when {
+                path.endsWith("/api/inference") ->
+                    """{"mode":"proxy","base_url":"https://ship.example/apps/armillary/v1","key":"k.s","models":["a/1"],"suggested":{"models":{"default":"a/1"}},"free":$free}"""
+                path.endsWith("/api/plans") -> threeSizes
+                path.endsWith("/api/catalog") -> "[]"
+                else -> """{"ship":"~feb","balance":$balance,"plan":"","subscription":{"active":false},"lease":{},"checkouts":{},"vendor":"~nisfeb","self":"~feb","stale":3}"""
             }
         }
-        onNodeWithText("Set up Armillary").performClick()
-        waitForIdle()
-        assertEquals(
-            io.nisfeb.talon.ai.ModelRef(io.nisfeb.talon.ai.ARMILLARY_PROVIDER, ""),
-            ai.state.value.savedProfile!!.defaultModel,
-        )
     }
 
-    @OptIn(ExperimentalTestApi::class)
     @Test
-    fun `a profile with a provider of its own is not pitched`() = runComposeUiTest {
-        val ai = FakeAiSettings().withProfile(withArmillary())
+    fun `every paid feature is one switch, with no provider or model to pick`() = runComposeUiTest {
+        val (ai, bought) = paid()
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
             }
         }
         waitForIdle()
-        assertTrue(
-            onAllNodesWithText("Let your ship handle it").fetchSemanticsNodes().isEmpty(),
-            "the pitch is for an owner who has nothing, not a reminder for one who has",
-        )
+        onNodeWithText("$12.35 credit with ~nisfeb").assertExists()
+        listOf("Catch-up", "Call transcripts").forEach { onNodeWithText(it).assertExists() }
+        if (isAssistantSupported) onNodeWithText("Assistant").assertExists()
+        listOf("Providers", "Default model", "Add a provider", "API key", "Use Armillary's pick", "Top up to turn on.").forEach {
+            assertTrue(onAllNodesWithText(it, substring = true).fetchSemanticsNodes().isEmpty(), "no '$it' any more")
+        }
+        // A switch turned off stays off: the owner's own.
+        onNodeWithText("Catch-up").performScrollTo()
+        val row = onNodeWithText("Catch-up").fetchSemanticsNode().boundsInRoot
+        val switches = onAllNodes(isToggleable())
+        val nearest = switches.fetchSemanticsNodes().indices.minBy { kotlin.math.abs(switches[it].fetchSemanticsNode().boundsInRoot.top - row.top) }
+        switches[nearest].performClick()
+        waitForIdle()
+        assertFalse(ai.state.value.profile().isOn(io.nisfeb.talon.ai.AiFeature.CatchUp))
     }
 
+    @Test
+    fun `an empty balance says to top up, and the sheet says what paying turns on`() = runComposeUiTest {
+        val (ai, bought) = paid(balance = 0)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
+            }
+        }
+        waitForIdle()
+        assertTrue(onAllNodesWithText("Top up to turn on.").fetchSemanticsNodes().size >= 2)
+        onNodeWithText("Top up").performScrollTo().performClick()
+        waitForIdle()
+        onNodeWithText(io.nisfeb.talon.ui.screens.CONSENT_LINE).assertExists()
+    }
+
+    @Test
+    fun `Manage models in Armillary opens Armillary's page on the ship`() = runComposeUiTest {
+        val (ai, bought) = paid()
+        val opened = mutableListOf<String>()
+        setContent {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalUriHandler provides object : androidx.compose.ui.platform.UriHandler {
+                    override fun openUri(uri: String) { opened += uri }
+                },
+            ) {
+                TalonTheme(darkTheme = false) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
+                }
+            }
+        }
+        onNodeWithText("Manage models in Armillary").performScrollTo().performClick()
+        assertEquals(listOf("https://ship.example/apps/armillary#catalog"), opened)
+    }
+
+    @Test
+    fun `own keys dropped by the reset are said once, until read`() = runComposeUiTest {
+        val ai = FakeAiSettings().apply {
+            applyRemote(io.nisfeb.talon.ai.paidSettings().let { c -> c.copy(savedProfile = c.savedProfile!!.copy(ownKeysDropped = true)) })
+        }
+        setContent {
+            TalonTheme(darkTheme = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null) }
+            }
+        }
+        onNodeWithText("Your own AI keys are no longer used.", substring = true).assertExists()
+        onNodeWithText("OK").performClick()
+        waitForIdle()
+        assertFalse(ai.state.value.profile().ownKeysDropped)
+        assertTrue(onAllNodesWithText("Your own AI keys are no longer used.", substring = true).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `a ship that is its own vendor on its own key is not told to top up`() = runComposeUiTest {
+        val (ai, bought) = paid(balance = 0, free = true)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
+            }
+        }
+        waitForIdle()
+        assertTrue(onAllNodesWithText("Top up to turn on.").fetchSemanticsNodes().isEmpty(), "its zero balance is no reason")
+        onNodeWithText("Catch-up").assertExists()
+        onNodeWithText("Nothing is charged.", substring = true).assertExists()
+        listOf("Top up", "Empty:", "No credit", "Pay as you go.").forEach {
+            assertTrue(onAllNodesWithText(it, substring = it != "Top up").fetchSemanticsNodes().isEmpty(), "no '$it' for a ship that pays nothing")
+        }
+    }
 }

@@ -43,6 +43,9 @@ interface Decider {
     suspend fun ask(state: JsonObject, questions: JsonObject): Decision
 }
 
+/** What a decider says once the vendor offers no decision model: the reading model reads instead. */
+const val NOT_OFFERED = "the vendor offers no decision model"
+
 /** The answers by question key, and what the call cost. */
 data class Decision(val answers: JsonObject, val inputTokens: Long? = null, val costUsd: Double? = null)
 
@@ -78,16 +81,27 @@ data class DecideSettings(
 }
 
 /**
- * The OpenRouter decisions route. The provider rule is not optional:
- * message text leaves the machine, and zero data retention is the
- * owner's standing requirement.
+ * The decisions route: OpenRouter's own under a lease, the vendor's
+ * through Armillary's proxy (armillary 34), the same body either way.
+ * The provider rule is not optional: message text leaves the machine,
+ * and zero data retention is the owner's standing requirement.
+ *
+ * A refusal is a [io.nisfeb.talon.ai.ModelHttpError] with its status,
+ * and every caller treats any failure as no answer: the gate lets the
+ * message through to the reading model, the picks leave the bodies in
+ * order. A 404 ("decisions: not offered") will not change within a pass,
+ * so after one this decider stops asking. A 402 says the balance is
+ * empty, in the words every Armillary feature uses.
  */
 class OpenRouterDecider(
     private val http: HttpClient,
     private val key: String,
     private val settings: DecideSettings,
 ) : Decider {
+    @kotlin.concurrent.Volatile private var notOffered = false
+
     override suspend fun ask(state: JsonObject, questions: JsonObject): Decision {
+        if (notOffered) throw io.nisfeb.talon.ai.ModelHttpError(404, NOT_OFFERED)
         val body = buildJsonObject {
             put("model", settings.model)
             put("state", state)
@@ -101,7 +115,22 @@ class OpenRouterDecider(
             timeout { requestTimeoutMillis = settings.timeoutMs }
         }
         val text = resp.bodyAsText()
-        if (!resp.status.isSuccess()) error("decision model answered ${resp.status.value}: ${text.take(300)}")
+        if (!resp.status.isSuccess()) {
+            val status = resp.status.value
+            val said = runCatching {
+                val o = Json.parseToJsonElement(text).jsonObject
+                (o["error"] as? JsonObject)?.get("message")?.asText() ?: o["error"]?.asText() ?: o["message"]?.asText()
+            }.getOrNull() ?: text.take(200)
+            val host = io.ktor.http.Url(settings.url).host
+            throw io.nisfeb.talon.ai.ModelHttpError(
+                status,
+                when (status) {
+                    404 -> { notOffered = true; "$NOT_OFFERED ($said)" }
+                    402 -> io.nisfeb.talon.ai.outOfCredit(host, said)
+                    else -> "decision model answered $status: ${said.take(300)}"
+                },
+            )
+        }
         val o = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrElse { error("decision model answered no JSON: ${text.take(200)}") }
         val answers = o["answers"] as? JsonObject ?: error("decision model answered without answers: ${text.take(300)}")
         val usage = o["usage"] as? JsonObject
@@ -237,17 +266,13 @@ fun DecideSettings.under(cfg: io.nisfeb.talon.ai.AiSettings.Config?): DecideSett
     }
 }
 
-/**
- * The OpenRouter key Talon already has: the Armillary lease's when the
- * vendor names a decision model, else the frontier model's, or the
- * private model's when it points there.
- */
-fun openRouterKey(cfg: io.nisfeb.talon.ai.AiSettings.Config): String? =
-    cfg.profile().let { p -> p.vendorDecision()?.first ?: p.jevProvider()?.apiKey }
+/** The key the decision model is asked with: this device's Armillary key, where the vendor names a decision model. */
+fun decisionKey(cfg: io.nisfeb.talon.ai.AiSettings.Config): String? =
+    cfg.profile().vendorDecision()?.key
 
-/** These settings on the Armillary vendor's decision model, where it names one. */
+/** These settings on the Armillary vendor's decision model and its route, where it names one. */
 fun DecideSettings.onVendor(cfg: io.nisfeb.talon.ai.AiSettings.Config?): DecideSettings =
-    cfg?.profile()?.vendorDecision()?.let { copy(model = it.second) } ?: this
+    cfg?.profile()?.vendorDecision()?.let { copy(model = it.model, url = it.url) } ?: this
 
 /** Dollars to the millionth, never in exponent form: these calls cost fractions of a cent. */
 internal fun dollars(d: Double): String = "$" + d.formatDecimals(6)

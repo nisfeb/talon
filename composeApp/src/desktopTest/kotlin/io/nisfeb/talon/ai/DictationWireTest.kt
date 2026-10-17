@@ -29,51 +29,48 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** What a dictation sends: the audio to the transcription key's endpoint, and the words to orrery. */
+/** What a dictation sends: the audio to Armillary's transcription route, and the words to orrery. */
 class DictationWireTest {
 
     private val json = headersOf(HttpHeaders.ContentType, "application/json")
 
+    private val hearing = Hearing("https://openrouter.ai/api/v1", "sk-or-lease", "openai/whisper-large-v3-turbo")
+
+    @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
     @Test
-    fun `the recording goes to the transcription endpoint as 16 kHz mono wav`() = runBlocking {
+    fun `the recording goes to Armillary's transcription route as 16 kHz mono audio`() = runBlocking {
         var url = ""
         var auth: String? = null
-        var body = ByteArray(0)
+        var body = ""
         val http = HttpClient(MockEngine { req ->
             url = req.url.toString()
             auth = req.headers[HttpHeaders.Authorization]
-            body = req.body.toByteArray()
-            respond("""{"text":"buy milk","segments":[{"start":0.0,"text":" buy milk"},{"start":1.2,"text":"and eggs"}]}""", HttpStatusCode.OK, json)
+            body = req.body.toByteArray().decodeToString()
+            respond("""{"text":" buy milk and eggs ","usage":{"seconds":2}}""", HttpStatusCode.OK, json)
         })
-        // An Anthropic chat key and the dedicated speech key in AI settings.
-        val cfg = AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "sk-ant", model = "claude", sttApiKey = "sk-whisper")
-        val stt = CallRecordingPublisher.sttFrom(cfg)!!
         val wav = WavFile.encode(ByteArray(3_200), DictationRun.RATE)
 
-        val out = DictationRun(transcribe = DictationRun.whisper(http, stt), act = { "Filed: $it" }).fromAudio(wav)
+        val out = DictationRun(transcribe = { ArmillaryTranscribe.transcribe(http, hearing, it, "wav") }, act = { "Filed: $it" }).fromAudio(wav)
 
         assertEquals(DictationOutcome.Done("buy milk and eggs", "Filed: buy milk and eggs"), out)
-        assertEquals("https://api.openai.com/v1/audio/transcriptions", url)
-        assertEquals("Bearer sk-whisper", auth)
-        val text = body.decodeToString()
-        // Each part: its name, its own headers, a blank line, the value.
-        fun part(name: String) = Regex("name=\"$name\"[^\\r]*\\r\\n(?:[^\\r]+\\r\\n)*\\r\\n([^\\r]*)\\r\\n").find(text)?.groupValues?.get(1)
-        assertEquals("whisper-1", part("model"), text.take(400))
-        assertEquals("verbose_json", part("response_format"))
-        assertTrue("Content-Type: audio/wav" in text)
+        assertEquals("https://openrouter.ai/api/v1/audio/transcriptions", url)
+        assertEquals("Bearer sk-or-lease", auth)
+        val sent = Json.parseToJsonElement(body).jsonObject
+        assertEquals("openai/whisper-large-v3-turbo", sent["model"]!!.jsonPrimitive.content)
+        val audio = sent["input_audio"]!!.jsonObject
+        assertEquals("wav", audio["format"]!!.jsonPrimitive.content)
         // The wav itself, header and all: mono, at 16000 Hz.
-        val at = (0..body.size - 4).first { body[it] == 'R'.code.toByte() && body.copyOfRange(it, it + 4).decodeToString() == "RIFF" }
-        assertTrue(body.copyOfRange(at, at + wav.size).contentEquals(wav))
-        assertEquals(1, wav[22].toInt())
-        assertEquals(16_000, (wav[24].toInt() and 0xFF) or ((wav[25].toInt() and 0xFF) shl 8) or ((wav[26].toInt() and 0xFF) shl 16))
+        val got = kotlin.io.encoding.Base64.decode(audio["data"]!!.jsonPrimitive.content)
+        assertTrue(got.contentEquals(wav))
+        assertEquals(1, got[22].toInt())
+        assertEquals(16_000, (got[24].toInt() and 0xFF) or ((got[25].toInt() and 0xFF) shl 8) or ((got[26].toInt() and 0xFF) shl 16))
     }
 
     @Test
-    fun `a refused key is a failed transcription with the provider's reason`() = runBlocking {
-        val http = HttpClient(MockEngine { respond("""{"error":"bad key"}""", HttpStatusCode.Unauthorized, json) })
-        val stt = CallRecordingPublisher.Stt("https://api.openai.com/v1/audio/transcriptions", "sk-x", "whisper-1")
-        val out = DictationRun(transcribe = DictationRun.whisper(http, stt), act = { "x" }).fromAudio(ByteArray(44))
-        assertTrue(out is DictationOutcome.TranscribeFailed && out.why == "The transcription service said no (401)" && "bad key" in out.details, out.toString())
+    fun `a refused lease is a failed transcription said in words`() = runBlocking {
+        val http = HttpClient(MockEngine { respond("""{"error":{"message":"key disabled"}}""", HttpStatusCode.Unauthorized, json) })
+        val out = DictationRun(transcribe = { ArmillaryTranscribe.transcribe(http, hearing, it, "wav") }, act = { "x" }).fromAudio(ByteArray(44))
+        assertTrue(out is DictationOutcome.TranscribeFailed && out.why.startsWith("Armillary turned this phone away") && "key disabled" in out.details, out.toString())
     }
 
     @Test

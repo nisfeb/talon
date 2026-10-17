@@ -165,14 +165,6 @@ class ArmillaryApi(
         return true
     }
 
-    /** Give the lease back. A ship with no lease routes says so and nothing happens. */
-    suspend fun dropLease() {
-        val resp = send("/api/lease") { method = HttpMethod.Delete }
-        val text = reading { resp.bodyAsText() }
-        if (resp.status.value == NOT_FOUND || resp.status.value == NOT_IMPLEMENTED) return
-        if (!resp.status.isSuccess()) throw ArmillaryError.Refused(resp.status.value, armillaryReason(text))
-    }
-
     /** Ask the vendor to stop the subscription renewing. The view says when it is done. */
     suspend fun cancelSubscription() {
         request(HttpMethod.Post, "/api/cancel-subscription")
@@ -281,6 +273,12 @@ data class Inference(
     /** The vendor's Brave search and the key this ship sends it (armillary 19); blank where it offers none. */
     val searchUrl: String = "",
     val searchKey: String = "",
+    /**
+     * The ship is its own vendor, running on its owner's own provider key,
+     * and pays nothing (armillary 34, `free`): its balance stays at zero
+     * and is no reason to stop. Absent from older ships, so false.
+     */
+    val free: Boolean = false,
 )
 
 sealed class InferenceAnswer {
@@ -449,6 +447,7 @@ internal fun inferenceOf(o: JsonObject) = Inference(
         .mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content?.let { k to it } }.toMap(),
     searchUrl = (o["search"] as? JsonObject)?.str("url").orEmpty(),
     searchKey = (o["search"] as? JsonObject)?.str("key").orEmpty(),
+    free = (o["free"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() == true,
 )
 
 internal fun checkoutOf(o: JsonObject) = Checkout(

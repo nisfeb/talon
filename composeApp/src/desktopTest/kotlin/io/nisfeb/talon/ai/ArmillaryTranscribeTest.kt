@@ -49,7 +49,7 @@ class ArmillaryTranscribeTest {
     @Test
     fun `under a lease it goes to OpenRouter with the lease key`() = runBlocking {
         val seen = Seen()
-        val lease = Hearing.Armillary("https://openrouter.ai/api/v1", "sk-or-lease", "openai/whisper-large-v3-turbo")
+        val lease = Hearing("https://openrouter.ai/api/v1", "sk-or-lease", "openai/whisper-large-v3-turbo")
         assertEquals("Buy milk.", ArmillaryTranscribe.transcribe(ship(seen), lease, audio, "m4a", "en"))
         check(seen, "https://openrouter.ai/api/v1/audio/transcriptions", "sk-or-lease")
     }
@@ -57,14 +57,14 @@ class ArmillaryTranscribeTest {
     @Test
     fun `through the proxy it goes to the vendor's ship with the armillary key`() = runBlocking {
         val seen = Seen()
-        val proxy = Hearing.Armillary("https://vendor.example/apps/armillary/v1/", "arm-key", "openai/whisper-large-v3-turbo")
+        val proxy = Hearing("https://vendor.example/apps/armillary/v1/", "arm-key", "openai/whisper-large-v3-turbo")
         assertEquals("Buy milk.", ArmillaryTranscribe.transcribe(ship(seen), proxy, audio, "m4a"))
         check(seen, "https://vendor.example/apps/armillary/v1/audio/transcriptions", "arm-key")
     }
 
     private fun refused(status: Int, message: String): DictationOutcome = runBlocking {
         val http = ship(Seen(), HttpStatusCode.fromValue(status), """{"error":{"message":"$message"}}""")
-        val hearing = Hearing.Armillary("https://vendor.example/apps/armillary/v1", "arm-key", "openai/whisper-large-v3-turbo")
+        val hearing = Hearing("https://vendor.example/apps/armillary/v1", "arm-key", "openai/whisper-large-v3-turbo")
         DictationRun(transcribe = { ArmillaryTranscribe.transcribe(http, hearing, it, "m4a") }, act = { "x" }).fromAudio(audio)
     }
 

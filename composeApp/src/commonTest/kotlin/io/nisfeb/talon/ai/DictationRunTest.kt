@@ -111,12 +111,9 @@ class DictationRunTest {
         Unit
     }
 
-    private fun cfg(sttApiKey: String = "sk-whisper", agent: Boolean = true) = AiSettings.Config(
-        provider = AiSettings.Provider.OpenAi,
-        apiKey = "sk-chat",
-        model = "gpt-4o",
-        sttApiKey = sttApiKey,
-        agentEnabled = agent,
+    private fun cfg(speech: Boolean = true, agent: Boolean = true) = paidSettings(
+        assistant = agent,
+        row = armillaryRow(suggested = mapOf("default" to "anthropic/claude-sonnet-5.5") + if (speech) mapOf(TRANSCRIPTION to "openai/whisper-large-v3-turbo") else emptyMap()),
     )
 
     @Test
@@ -124,14 +121,8 @@ class DictationRunTest {
         assertEquals(DictationRun.NO_SHIP, DictationRun.blocker(cfg(), hasShip = false))
         assertNull(DictationRun.blocker(cfg(), hasShip = true))
         assertEquals(DictationRun.NO_MODEL, DictationRun.blocker(cfg(agent = false), hasShip = true))
-        val noSpeech = cfg(sttApiKey = "").copy(provider = AiSettings.Provider.Anthropic, apiKey = "sk-ant")
-        assertEquals(DictationRun.NO_SPEECH_TO_TEXT, DictationRun.blocker(noSpeech, hasShip = true))
+        assertEquals(DictationRun.NO_ARMILLARY, DictationRun.blocker(paidSettings(key = ""), hasShip = true))
+        assertEquals(DictationRun.NO_SPEECH_TO_TEXT, DictationRun.blocker(cfg(speech = false), hasShip = true))
     }
 
-    @Test
-    fun `whisper's segments become one line`() {
-        val text = DictationRun.text(listOf(CallTranscribe.Segment(0, " buy milk "), CallTranscribe.Segment(900, "and eggs")))
-        assertEquals("buy milk and eggs", text)
-        assertEquals("", DictationRun.text(emptyList()))
-    }
 }

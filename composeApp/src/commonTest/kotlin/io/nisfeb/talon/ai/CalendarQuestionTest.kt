@@ -122,11 +122,14 @@ class CalendarQuestionTest {
                 HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"),
             )
         })
-        val key = AiProvider("or", ProviderKind.OpenRouter, "OpenRouter", apiKey = "sk-or")
-        val on = AiSettings.Config(provider = AiSettings.Provider.OpenRouter, apiKey = "", model = null, savedProfile = AiProfile(providers = listOf(key), jev = true))
-        assertNull(CalendarQuestion.decider(http, on.copy(savedProfile = on.savedProfile!!.copy(jev = false))), "switched off")
-        assertNull(CalendarQuestion.decider(http, on.copy(savedProfile = on.savedProfile!!.copy(jev = null))), "never switched on")
-        assertNull(CalendarQuestion.decider(http, on.copy(savedProfile = AiProfile(jev = true))), "no key")
+        // The vendor's decision model on the Armillary lease (Armillary only, #29).
+        val row = armillaryRow(key = "sk-or", suggested = mapOf("default" to "a/1", "decision" to "typesafe/jev-1.13"))
+        val on = paidSettings(row = row).let { it.copy(savedProfile = it.savedProfile!!.copy(jev = true)) }
+        fun with(p: AiProfile) = on.copy(savedProfile = p)
+        assertNull(CalendarQuestion.decider(http, with(on.savedProfile!!.copy(jev = false))), "switched off")
+        assertNull(CalendarQuestion.decider(http, with(on.savedProfile!!.copy(jev = null))), "never switched on")
+        assertNull(CalendarQuestion.decider(http, with(on.savedProfile!!.copy(providers = listOf(row.copy(apiKey = ""))))), "no key")
+        assertNull(CalendarQuestion.decider(http, with(on.savedProfile!!.copy(providers = listOf(row.copy(suggested = mapOf("default" to "a/1")))))), "the vendor names no decision model")
         assertTrue(sent.isEmpty())
 
         assertEquals(LocalDate(2026, 10, 17), CalendarQuestion.decide(CalendarQuestion.decider(http, on)!!, "What do I have tomorrow?", emptyList(), today)?.from)

@@ -35,7 +35,7 @@ class DesktopAiSettings : AiSettingsRepository {
         // deviceId, so a churning id makes this machine unable to recognize
         // its own prior claim — it reads a "foreign" fresh holder and skips
         // its own scheduled fire.
-        if (!file.exists()) return defaultConfig().also(::writeAtomically)
+        if (!file.exists()) return defaultConfig().armillaryOnly().also(::writeAtomically)
         val raw = runCatching { file.readText() }.getOrElse {
             // Transient I/O failure (permissions, FS hiccup). Don't touch
             // the file — it may be fine next launch and it holds the key.
@@ -55,7 +55,7 @@ class DesktopAiSettings : AiSettingsRepository {
                 // lease keys on deviceId, so it must land on disk now.
                 Log.w(TAG, "ai_settings.json unparseable; kept as .bak, using defaults", it)
                 runCatching { backUpExisting() }
-                defaultConfig().also(::writeAtomically)
+                defaultConfig().armillaryOnly().also(::writeAtomically)
             }
             // SmartFeatures folded four pre-0.14 toggles into one. The old
             // fields are dropped by ignoreUnknownKeys and the new one defaults
@@ -66,6 +66,9 @@ class DesktopAiSettings : AiSettingsRepository {
             // Back-fill a stable device id for configs written before it
             // existed, persisting so it stays put across launches.
             .let { if (it.deviceId.isBlank()) it.copy(deviceId = newDeviceId()).also(::writeAtomically) else it }
+            // Armillary-only, once, and only over a file that was read: an
+            // unreadable one is left alone, and is reset on a launch that can read it.
+            .let { cfg -> cfg.armillaryOnly().let { next -> if (next != cfg) next.also(::writeAtomically) else cfg } }
     }
 
     /** Seed smartFeaturesEnabled from the pre-0.14 per-feature fields when
@@ -153,23 +156,6 @@ class DesktopAiSettings : AiSettingsRepository {
         onStateChange?.invoke(cfg, false)
     }
 
-    override fun setBraveApiKey(key: String) {
-        val cfg = _state.value.withBraveKey(key, io.nisfeb.talon.util.nowMs())
-        persist(cfg)
-        onStateChange?.invoke(cfg, false)
-    }
-
-    override fun setSttApiKey(key: String) {
-        val now = io.nisfeb.talon.util.nowMs()
-        val cfg = _state.value.copy(
-            sttApiKey = key,
-            sttApiKeyRemovedAtMs = if (key.isBlank()) now else 0L,
-            sttApiKeySetAtMs = if (key.isBlank()) _state.value.sttApiKeySetAtMs else now,
-        )
-        persist(cfg)
-        onStateChange?.invoke(cfg, false)
-    }
-
     override fun setPrivateModel(baseUrl: String?, model: String?, apiKey: String) {
         val cfg = _state.value.copy(
             privateBaseUrl = baseUrl?.trim()?.takeIf { it.isNotEmpty() },
@@ -186,24 +172,10 @@ class DesktopAiSettings : AiSettingsRepository {
         onStateChange?.invoke(cfg, false)
     }
 
-    override fun setFrontierReadsMessages(on: Boolean) {
-        val cfg = _state.value.copy(frontierReadsMessages = on)
-        persist(cfg)
-        onStateChange?.invoke(cfg, false)
-    }
-
     override fun setPrompt(kind: AiSettings.PromptKind, value: String) {
         val cfg = _state.value.withPrompt(kind, value)
         persist(cfg)
         onStateChange?.invoke(cfg, false)
-    }
-
-    override fun setSyncEnabled(enabled: Boolean) {
-        val cur = _state.value
-        val transitionedOff = cur.syncEnabled && !enabled
-        val cfg = cur.copy(syncEnabled = enabled)
-        persist(cfg)
-        onStateChange?.invoke(cfg, transitionedOff)
     }
 
     override fun applyRemote(config: AiSettings.Config) {

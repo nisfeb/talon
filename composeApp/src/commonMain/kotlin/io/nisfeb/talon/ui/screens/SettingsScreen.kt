@@ -78,7 +78,6 @@ import io.nisfeb.talon.ui.theme.ThemePreference
 import io.nisfeb.talon.ui.icons.TalonIcons
 import io.nisfeb.talon.ai.loopsCanRun
 import io.nisfeb.talon.ai.orreryOn
-import io.nisfeb.talon.ai.braveSearch
 
 @Composable
 fun SettingsScreen(
@@ -186,8 +185,6 @@ fun SettingsScreen(
     // feature switch, and keying on all of it re-bunted these fields
     // whenever any switch flipped. Accepted edge: an unsaved edit is
     // replaced when a remote sync changes that same field mid-edit.
-    var braveKey by remember(aiState.braveApiKey) { mutableStateOf(aiState.braveApiKey) }
-    var revealBrave by remember { mutableStateOf(false) }
     var promptEditorKind by remember { mutableStateOf<AiSettings.PromptKind?>(null) }
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -791,81 +788,17 @@ fun SettingsScreen(
                 OrrerySettingsSection(aiSettings, orrery)
             }
             if (safeTab == SettingsTab.Ai) {
-            // Providers, the default model and a row per feature.
+            // Armillary and a row per feature. Web search comes with Armillary.
             AiSettingsSection(aiSettings, orrery, armillary)
-            // The assistant subsumes MCP (ship tools) and web access, with
-            // no separate toggles. When it's on, offer the optional Brave
-            // key that powers its web search (it can open URLs without
-            // one), unless Armillary already searches for this ship.
-            if (isAssistantSupported && aiFeatureEnabled(aiState, AiSettings.Feature.Agent)) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Web search (optional)",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                )
-                if (aiState.braveApiKey.isBlank() && aiState.braveSearch() != null) {
-                    Text(
-                        "Web search comes with Armillary.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    OutlinedTextField(
-                        value = braveKey,
-                        onValueChange = { braveKey = it },
-                        label = { Text("Brave Search key") },
-                        singleLine = true,
-                        visualTransformation = if (revealBrave) VisualTransformation.None
-                        else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            io.nisfeb.talon.ui.IconButton(tip = if (revealBrave) "Hide key" else "Show key", onClick = { revealBrave = !revealBrave }) {
-                                Icon(
-                                    imageVector = if (revealBrave) TalonIcons.VisibilityOff
-                                    else TalonIcons.Visibility,
-                                    contentDescription = if (revealBrave) "Hide key" else "Show key",
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = { aiSettings.setBraveApiKey(braveKey.trim()) },
-                            enabled = braveKey.trim() != aiState.braveApiKey,
-                        ) { Text("Save key") }
-                    }
-                    Text(
-                        "Add a free Brave Search key so the assistant can search the web. " +
-                            "Get one at search.brave.com/help/api.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
 
-            // What most people never need: whether keys go to the ship for
-            // the other devices, and what the assistant is told.
+            // What most people never need: what the assistant is told.
             val showPrompts = isAssistantSupported && aiFeatureEnabled(aiState, AiSettings.Feature.Agent)
-            if (aiState.hasCredentials() || showPrompts) {
+            if (showPrompts) {
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
                 var advanced by remember { mutableStateOf(false) }
                 TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Hide advanced" else "Advanced") }
-                // Any stored credential is enough to want this switch: it
-                // used to live under hasKey(), so someone who set only a
-                // Whisper key had it pushed to %settings (syncEnabled
-                // defaults on) with no way to opt out short of pasting a
-                // chat key first.
-                if (advanced && aiState.hasCredentials()) {
-                    FeatureToggleRow(
-                        label = "Copy AI keys to my other devices",
-                        description = "Saves your AI providers, models and keys on your ship, so your " +
-                            "other devices can use them. Feature switches are shared either way.",
-                        enabled = aiState.syncEnabled,
-                        onChange = { aiSettings.setSyncEnabled(it) },
-                    )
-                }
-                if (advanced && showPrompts) {
+                if (advanced) {
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "Instructions",
@@ -1010,7 +943,7 @@ fun SettingsScreen(
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
                 // Bought speech to text: where the owner has no key of their own and the vendor offers it.
-                (io.nisfeb.talon.ai.DictationRun.hearing(aiState) as? io.nisfeb.talon.ai.Hearing.Armillary)?.let {
+                (io.nisfeb.talon.ai.DictationRun.hearing(aiState) as? io.nisfeb.talon.ai.Hearing)?.let {
                     Text(
                         "Speech to text comes from Armillary, on ${it.model}.",
                         style = MaterialTheme.typography.bodySmall,

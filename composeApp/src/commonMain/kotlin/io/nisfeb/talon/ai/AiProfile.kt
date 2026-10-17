@@ -63,8 +63,6 @@ data class AiProvider(
     val searchUrl: String? = null,
     val searchKey: String = "",
 ) {
-    fun withCatalog(c: Catalog): AiProvider = copy(models = c.models, offersJev = c.jev)
-
     /** On this device, or on a server on this machine or the owner's own network. */
     val isPrivate: Boolean
         get() = kind == ProviderKind.ThisDevice || (kind == ProviderKind.OpenAiCompatible && isPrivateUrl(baseUrl))
@@ -92,13 +90,6 @@ data class FeatureSetting(val on: Boolean = false, val model: ModelRef? = null, 
 
 /** The features an Armillary vendor picks the model for, by the vendor's names for them. */
 val VENDOR_FEATURES = mapOf(AiFeature.CatchUp to "catch_up", AiFeature.Assistant to "assistant", AiFeature.Dictation to "dictation")
-
-/**
- * This setting back on the Armillary vendor's pick: no longer the
- * owner's own, and on the Armillary row, so a private model chosen
- * before it does not hold it ([AiProfile.followsVendor]).
- */
-fun FeatureSetting.followingVendor(): FeatureSetting = copy(own = false, model = ModelRef(ARMILLARY_PROVIDER, ""))
 
 @Serializable
 data class AiProfile(
@@ -132,51 +123,33 @@ data class AiProfile(
      * gone everywhere, until the owner puts something back.
      */
     val savedHereAtMs: Long = 0,
+    /**
+     * [AiSettings.Config.armillaryOnly] has run on this device: switches
+     * set after it are the owner's, and it never runs again. Local: the
+     * profile no longer travels.
+     */
+    val armillaryOnly: Boolean = false,
+    /** Own providers or keys were dropped by [AiSettings.Config.armillaryOnly]; the AI tab says so until the owner has read it. */
+    val ownKeysDropped: Boolean = false,
 ) {
     fun provider(id: String): AiProvider? = providers.firstOrNull { it.id == id }
 
     /**
-     * What [f] runs on, whether or not it is on: the Armillary vendor's
-     * model while the feature follows it ([followsVendor]), else its own
-     * model, else the default.
+     * What [f] runs on, whether or not it is on. Armillary only
+     * (docs/superpowers/specs/2026-10-16-armillary-only-design.md): the
+     * vendor's model for the feature, else its default, else the row's
+     * first chat model. Triage reads every message unasked, so it stays
+     * on this device. A dictation the vendor names no model for runs on
+     * the assistant's. Null with no Armillary row: nothing runs.
      */
-    fun resolve(f: AiFeature): Resolved? {
-        if (followsVendor(f)) return vendorModel(f)
-        return resolve(pick(f) ?: defaultFor(f))
+    fun resolve(f: AiFeature): Resolved? = when (f) {
+        AiFeature.OrreryTriage -> Resolved(
+            provider(DEVICE_PROVIDER) ?: AiProvider(DEVICE_PROVIDER, ProviderKind.ThisDevice, ProviderKind.ThisDevice.label),
+            features[f]?.model?.takeIf { it.provider == DEVICE_PROVIDER }?.model.orEmpty(),
+        )
+        AiFeature.Dictation -> vendorModel(f) ?: resolve(AiFeature.Assistant)
+        else -> vendorModel(f) ?: armillary()?.let { resolve(ModelRef(it.id, "")) }
     }
-
-    /**
-     * [f]'s own model, or null where it follows the default. The device
-     * model triage is started on, and the one a removed provider leaves
-     * it on, are nobody's pick: triage follows the default from there.
-     */
-    fun pick(f: AiFeature): ModelRef? {
-        val s = features[f] ?: return null
-        if (f == AiFeature.OrreryTriage && !s.own && s.model?.provider == DEVICE_PROVIDER) return null
-        return s.model
-    }
-
-    /**
-     * What "Default" is for [f]: the default model. Triage reads every
-     * message unasked, so it follows only a private default and stays on
-     * this device otherwise; a cloud model picked on its own row is the
-     * opt-in that takes it off the device.
-     */
-    fun defaultFor(f: AiFeature): ModelRef? {
-        // A dictation is the assistant run on what was said: until it has
-        // a model of its own it runs on the assistant's, whatever that is.
-        if (f == AiFeature.Dictation) return resolve(AiFeature.Assistant)?.let { ModelRef(it.provider.id, it.model) }
-        if (f != AiFeature.OrreryTriage) return defaultModel
-        defaultModel?.takeIf { resolve(it)?.private == true }?.let { return it }
-        return features[f]?.model?.takeIf { it.provider == DEVICE_PROVIDER } ?: ModelRef(DEVICE_PROVIDER, "")
-    }
-
-    /**
-     * The ship's generator follows the default model: the owner picked
-     * "Default" on its row. A row with no model the owner never picked
-     * may be a generator set up on the ship itself, which is left alone.
-     */
-    fun generatorFollowsDefault(): Boolean = features[AiFeature.OrreryGenerator]?.let { it.own && it.model == null } == true
 
     /** The Armillary row, where this device buys from its ship. */
     fun armillary(): AiProvider? = providers.firstOrNull { it.kind == ProviderKind.Armillary }
@@ -193,41 +166,28 @@ data class AiProfile(
         return Resolved(row, model)
     }
 
-    /**
-     * Whether [f] runs on the vendor's model: the vendor names one, and
-     * the owner has not picked their own. A private model the owner
-     * chose before this build counts as their own: it is where they
-     * decided their messages are read, and the vendor's is a cloud one.
-     */
-    fun followsVendor(f: AiFeature): Boolean {
-        vendorModel(f) ?: return false
-        val s = features[f]
-        if (s?.own == true) return false
-        return resolve(s?.model ?: defaultModel)?.private != true
-    }
+    /** Whether [f] runs on Armillary: every feature but triage, once the row is there. */
+    fun followsVendor(f: AiFeature): Boolean = resolve(f)?.provider?.kind == ProviderKind.Armillary
 
     /**
-     * Whether [f]'s calls must go to ZDR endpoints only: on every tier
-     * the vendor runs it on, as Orrery asks on every call, so a vendor
-     * can put a feature on its frontier tier without losing the
-     * guarantee. A model the owner picks is theirs to route.
+     * Whether [f]'s calls must go to ZDR endpoints only: every call on
+     * Armillary, on whatever tier the vendor runs it, as Orrery asks on
+     * every call. The payment that turned it on promised as much.
      */
-    fun vendorZdr(f: AiFeature): Boolean {
-        // On the assistant's model, under the assistant's terms.
-        if (f == AiFeature.Dictation && pick(f) == null && vendorModel(f) == null) return vendorZdr(AiFeature.Assistant)
-        return followsVendor(f)
-    }
+    fun vendorZdr(f: AiFeature): Boolean = followsVendor(f)
 
     /**
-     * The vendor's decision model and the key it runs on: the lease's
-     * own OpenRouter key, so only under a lease, where the decisions
-     * route is OpenRouter's. Null where the vendor names none.
+     * The vendor's decision model, the route it is asked on and the key:
+     * under a lease OpenRouter's own decisions route, through the proxy
+     * the vendor's (armillary 34), both found from the row's base
+     * ([decisionsUrl]). Null where the vendor names no decision model.
      */
-    fun vendorDecision(): Pair<String, String>? {
+    fun vendorDecision(): VendorDecision? {
         val row = armillary() ?: return null
         val model = row.suggested["decision"]?.takeIf { it.isNotBlank() } ?: return null
-        if (row.apiKey.isBlank() || "openrouter.ai" !in row.baseUrl.orEmpty()) return null
-        return row.apiKey to model
+        val base = row.baseUrl?.takeIf { it.isNotBlank() } ?: return null
+        if (row.apiKey.isBlank()) return null
+        return VendorDecision(decisionsUrl(base), row.apiKey, model)
     }
 
     /** What [ref] runs on, or null where it names no provider this profile has. */
@@ -249,14 +209,6 @@ data class AiProfile(
     }
 
     fun isOn(f: AiFeature): Boolean = features[f]?.on == true
-
-    /**
-     * The provider Jev is reached through: an OpenRouter one with a key,
-     * whose ZDR list names Jev, or whose models were never fetched.
-     */
-    fun jevProvider(): AiProvider? = providers.firstOrNull {
-        it.kind == ProviderKind.OpenRouter && it.apiKey.isNotBlank() && (it.models.isEmpty() || it.offersJev)
-    }
 }
 
 /** The features besides triage that read the owner's messages. */
@@ -316,6 +268,17 @@ fun AiProfile.pinningModels(): AiProfile {
     return copy(defaultModel = pin(defaultModel), features = features.mapValues { (_, f) -> f.copy(model = pin(f.model)) })
 }
 
+/** Where the decision model is asked, with which key, and which model. */
+data class VendorDecision(val url: String, val key: String, val model: String)
+
+/**
+ * The decisions route for an inference base: a trailing "/v1" becomes
+ * "/alpha/decisions" (armillary 34; Orrery's decider-url follows the same
+ * rule). OpenRouter's https://openrouter.ai/api/v1 gives its own route,
+ * and the proxy's base gives the vendor's.
+ */
+fun decisionsUrl(base: String): String = base.trim().trimEnd('/').removeSuffix("/v1") + "/alpha/decisions"
+
 /** A feature's provider and model. */
 data class Resolved(val provider: AiProvider, val model: String) {
     val private: Boolean get() = provider.isPrivate
@@ -357,14 +320,14 @@ const val SPEECH_PROVIDER = "speech"
 
 /** The one Armillary row: a device buys from one ship, its own. */
 const val ARMILLARY_PROVIDER = "armillary"
-const val WHISPER = "whisper-1"
 
-private fun kindOf(p: AiSettings.Provider): ProviderKind = when (p) {
-    AiSettings.Provider.OpenRouter -> ProviderKind.OpenRouter
-    AiSettings.Provider.Anthropic -> ProviderKind.Anthropic
-    AiSettings.Provider.OpenAi -> ProviderKind.OpenAi
-    AiSettings.Provider.Custom -> ProviderKind.OpenAiCompatible
-}
+/**
+ * How long a call through Armillary may wait: its proxy waits up to ten
+ * minutes for an upstream (armillary 33), and a minute more covers the
+ * trip there and back. A model the owner runs on modest hardware is slow.
+ */
+const val ARMILLARY_WAIT_MS = 11 * 60_000L
+const val WHISPER = "whisper-1"
 
 internal fun providerOf(k: ProviderKind): AiSettings.Provider? = when (k) {
     ProviderKind.OpenRouter -> AiSettings.Provider.OpenRouter
@@ -378,75 +341,61 @@ internal fun providerOf(k: ProviderKind): AiSettings.Provider? = when (k) {
 }
 
 /**
- * Today's settings as a profile: the mapping table in the plan. The
- * frontier model is the main provider and the default model; the private
- * model is a provider of its own, or this device; triage reads with the
- * default model when the owner let the frontier model read messages, and
- * with the private one otherwise; a transcription key is a provider of
- * its own, and without one an OpenAI or custom chat key transcribes.
+ * A profile for settings that never saved one: this device, and the
+ * switches as the old toggles had them. Under Armillary-only an old
+ * install's own keys make no provider: the Armillary row comes from the
+ * ship ([io.nisfeb.talon.armillary.ArmillaryRepo]), and nothing else runs.
  */
-fun migrateProfile(cfg: AiSettings.Config, inputs: ProfileInputs = ProfileInputs()): AiProfile {
-    val providers = mutableListOf<AiProvider>()
-    val hasMain = cfg.apiKey.isNotBlank() || (cfg.provider == AiSettings.Provider.Custom && !cfg.baseUrl.isNullOrBlank())
-    if (hasMain) {
-        providers += AiProvider(MAIN_PROVIDER, kindOf(cfg.provider), kindOf(cfg.provider).label, cfg.baseUrl, cfg.apiKey)
-    }
-    val privateUrl = cfg.privateBaseUrl?.takeIf { it.isNotBlank() }
-    val privateRef = if (privateUrl != null) {
-        val kind = if ("openrouter.ai" in privateUrl) ProviderKind.OpenRouter else ProviderKind.OpenAiCompatible
-        providers += AiProvider(PRIVATE_PROVIDER, kind, "Private model", privateUrl, cfg.privateApiKey)
-        ModelRef(PRIVATE_PROVIDER, cfg.privateModel.orEmpty())
-    } else {
-        ModelRef(DEVICE_PROVIDER, cfg.privateModel.orEmpty())
-    }
-    // This device is always a provider: every platform has a local rung.
-    providers += AiProvider(DEVICE_PROVIDER, ProviderKind.ThisDevice, "On this device")
-    val speech = if (cfg.sttApiKey.isNotBlank()) {
-        providers += AiProvider(SPEECH_PROVIDER, ProviderKind.OpenAi, "OpenAI (transcription)", null, cfg.sttApiKey)
-        ModelRef(SPEECH_PROVIDER, WHISPER)
-    } else if (hasMain && (cfg.provider == AiSettings.Provider.OpenAi || cfg.provider == AiSettings.Provider.Custom)) {
-        ModelRef(MAIN_PROVIDER, WHISPER)
-    } else {
-        null
-    }
-    val default = if (hasMain) ModelRef(MAIN_PROVIDER, cfg.model.orEmpty()) else null
-    val generator = inputs.generatorUrl?.let { url ->
-        providers.firstOrNull { p -> p.shipBase() == url.trim().trimEnd('/') || (p.kind == ProviderKind.OpenRouter && "openrouter.ai" in url) }
-            ?.let { ModelRef(it.id, inputs.generatorModel.orEmpty()) }
-    }
-    return AiProfile(
-        providers = providers,
-        defaultModel = default,
-        features = mapOf(
-            AiFeature.CatchUp to FeatureSetting(cfg.catchMeUpEnabled),
-            AiFeature.Assistant to FeatureSetting(cfg.assistantOn()),
-            AiFeature.OrreryTriage to FeatureSetting(inputs.orreryFed, if (cfg.frontierReadsMessages && default != null) default else privateRef),
-            AiFeature.OrreryGenerator to FeatureSetting(inputs.generatorOn, generator),
-            AiFeature.Transcription to FeatureSetting(speech != null, speech),
-        ),
-        jev = inputs.jevOn,
+fun migrateProfile(cfg: AiSettings.Config, inputs: ProfileInputs = ProfileInputs()): AiProfile = AiProfile(
+    providers = listOf(AiProvider(DEVICE_PROVIDER, ProviderKind.ThisDevice, ProviderKind.ThisDevice.label)),
+    features = mapOf(
+        AiFeature.CatchUp to FeatureSetting(cfg.catchMeUpEnabled),
+        AiFeature.Assistant to FeatureSetting(cfg.assistantOn()),
+        AiFeature.OrreryTriage to FeatureSetting(inputs.orreryFed, ModelRef(DEVICE_PROVIDER, cfg.privateModel.orEmpty())),
+        AiFeature.OrreryGenerator to FeatureSetting(inputs.generatorOn),
+    ),
+    jev = inputs.jevOn,
+)
+
+/** The features a payment buys, which it turns on ([allOn]). Triage and the generator are Orrery's. */
+val PAID_FEATURES = listOf(AiFeature.CatchUp, AiFeature.Assistant, AiFeature.Transcription)
+
+/** Every feature a payment buys, on: the payment is the owner's yes (sneagan, 2026-10-16). */
+fun AiProfile.allOn(): AiProfile = copy(features = features + PAID_FEATURES.associateWith { (features[it] ?: FeatureSetting()).copy(on = true) })
+
+/**
+ * These settings as Armillary-only has them, once per device
+ * (docs/superpowers/specs/2026-10-16-armillary-only-design.md): own
+ * providers, own picks and the own keys in the old fields are dropped,
+ * and every paid feature is on, whatever it was. sneagan, 2026-10-16:
+ * the reset turns back on what someone turned off before, since most of
+ * those offs meant no key yet. Search by meaning runs on this device and
+ * keeps its switch. Triage keeps its device model and Orrery's switch.
+ */
+fun AiSettings.Config.armillaryOnly(): AiSettings.Config {
+    if (savedProfile?.armillaryOnly == true) return this
+    val p = profile()
+    val kept = p.providers.filter { it.kind == ProviderKind.Armillary || it.kind == ProviderKind.ThisDevice }
+    val hadOwn = kept.size != p.providers.size || apiKey.isNotBlank() || sttApiKey.isNotBlank() || braveApiKey.isNotBlank() || privateApiKey.isNotBlank()
+    val triage = p.features[AiFeature.OrreryTriage]?.let { s -> s.copy(model = s.model?.takeIf { it.provider == DEVICE_PROVIDER }, own = false) }
+    val profile = AiProfile(
+        providers = kept.ifEmpty { listOf(AiProvider(DEVICE_PROVIDER, ProviderKind.ThisDevice, ProviderKind.ThisDevice.label)) },
+        features = listOfNotNull(triage?.let { AiFeature.OrreryTriage to it }, p.features[AiFeature.OrreryGenerator]?.let { AiFeature.OrreryGenerator to it.copy(model = null, own = false) }).toMap(),
+        jev = p.jev,
+        orrery = p.orrery,
+        savedHereAtMs = p.savedHereAtMs,
+        armillaryOnly = true,
+        ownKeysDropped = hadOwn,
+    ).allOn()
+    return copy(
+        apiKey = "", sttApiKey = "", braveApiKey = "", privateApiKey = "", privateBaseUrl = null,
+        catchMeUpEnabled = true, askUrbitEnabled = true, agentEnabled = true,
+        savedProfile = profile,
     )
 }
 
 /** The profile these settings stand for: the one the owner saved, else the one today's fields make. */
 fun AiSettings.Config.profile(): AiProfile = savedProfile ?: migrateProfile(this)
-
-/**
- * The OpenAI-shaped base the ship's generator can call on this
- * provider: none for Anthropic's own shape, this device, or a server
- * on this machine's loopback, which the ship cannot reach.
- */
-fun AiProvider.shipBase(): String? = when (kind) {
-    ProviderKind.OpenRouter -> ModelCatalog.OPENROUTER
-    ProviderKind.OpenAi -> "https://api.openai.com/v1"
-    ProviderKind.OpenAiCompatible -> baseUrl?.trim()?.trimEnd('/')?.removeSuffix("/chat/completions")
-        ?.takeUnless { u -> u.substringAfter("://").substringBefore('/').substringBefore(':').let { it == "localhost" || it.startsWith("127.") } }
-    // Whatever the ship handed us: OpenRouter's base under a lease, the
-    // vendor's proxy otherwise. Both are OpenAI-shaped and both take
-    // the key on the row, which is what the generator needs.
-    ProviderKind.Armillary -> baseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
-    else -> null
-}
 
 /**
  * The settings a feature's chat client should see: its resolved provider
@@ -473,6 +422,7 @@ fun AiSettings.Config.forFeature(f: AiFeature): AiSettings.Config {
         // vendor's own proxy otherwise.
         usageInclude = r.provider.kind == ProviderKind.OpenRouter || r.provider.kind == ProviderKind.Armillary,
         zdrOnly = profile().vendorZdr(f),
+        upstreamTimeoutMs = if (r.provider.kind == ProviderKind.Armillary) ARMILLARY_WAIT_MS else 0,
     )
 }
 
@@ -516,44 +466,11 @@ fun isPrivateUrl(url: String?): Boolean {
 // ---- storage and sync ------------------------------------------------------
 
 /**
- * The profile as it travels between devices: no keys, and no model
- * lists, which each device fetches.
- *
- * Armillary rows do not travel at all. The key is minted per ship and
- * per device, so another device's is no use here; and an older build
- * that cannot decode the kind drops the whole profile on arrival, which
- * a blob carrying none can never make it do.
- *
- * The model list and what it says about Jev are both this device's own
- * reading: sending the flag without the list told the device that had
- * fetched one that its provider no longer offers Jev.
- */
-fun AiProfile.forSync(): AiProfile = copy(
-    features = features - AiFeature.Dictation,
-    providers = providers
-        .filterNot { it.kind == ProviderKind.Armillary }
-        .map { it.copy(apiKey = "", models = emptyList(), offersJev = false) },
-    savedHereAtMs = 0,
-)
-
-/**
  * Each provider's key, where it has one. Not Armillary's: it is minted
  * for this device, and goes nowhere else.
  */
 fun AiProfile.keys(): Map<String, String> =
     providers.filter { it.apiKey.isNotBlank() && it.kind != ProviderKind.Armillary }.associate { it.id to it.apiKey }
-
-/** Keys arriving for providers, by id. A blank never erases one. */
-fun AiProfile.withKeys(keys: Map<String, String>, from: AiProfile? = null): AiProfile =
-    copy(
-        providers = providers.map { p ->
-            // The same id means the same provider only where the kind
-            // agrees: ids are shared constants, so an Anthropic key
-            // could otherwise be sent to OpenRouter.
-            val sameKind = from == null || from.provider(p.id)?.kind == p.kind
-            keys[p.id]?.takeIf { it.isNotBlank() && sameKind }?.let { p.copy(apiKey = it) } ?: p
-        },
-    )
 
 /**
  * A profile from elsewhere keeps this device's keys and model lists for
@@ -666,51 +583,12 @@ fun AiProfile.legacyInto(cfg: AiSettings.Config): AiSettings.Config {
 }
 
 /**
- * What an older install's write means for the profile: it changed what
- * the old fields describe, the default model's provider, key and model,
- * and the catch-up and assistant switches, and nothing else it cannot
- * see.
- * ponytail: an old install's private-model or transcription edits are
- * not carried into a profile; they are rare, and the old fields keep them.
+ * The switches that travel, as the old toggles did. Transcription stays
+ * per device: an older build turned it off where it had no speech key.
+ * ponytail: under Armillary-only it could travel too; it is left as it
+ * was so an older build's write cannot reach it.
  */
-fun AiProfile.withLegacy(cfg: AiSettings.Config): AiProfile {
-    var providers = providers
-    var def = defaultModel
-    val dp = def?.let { provider(it.provider) }
-    // Not an Armillary default: the old fields no longer describe it
-    // ([legacyInto]), and an old install's key would become its key.
-    if (dp != null && providerOf(dp.kind) != null && dp.kind != ProviderKind.Armillary) {
-        providers = providers.map {
-            if (it.id != dp.id) it else it.copy(
-                kind = kindOf(cfg.provider),
-                label = if (it.label == it.kind.label) kindOf(cfg.provider).label else it.label,
-                apiKey = cfg.apiKey.ifBlank { it.apiKey },
-                baseUrl = cfg.baseUrl,
-            )
-        }
-        def = def.copy(model = cfg.model.orEmpty())
-    } else if (dp == null && providers.isEmpty() && cfg.apiKey.isNotBlank()) {
-        // Only where there is nothing here to speak of. A profile with
-        // providers in it is one somebody curated, and an old install's
-        // key used to put back the provider they had just deleted.
-        providers = listOf(AiProvider(MAIN_PROVIDER, kindOf(cfg.provider), kindOf(cfg.provider).label, cfg.baseUrl, cfg.apiKey)) +
-            providers.filterNot { it.id == MAIN_PROVIDER }
-        def = ModelRef(MAIN_PROVIDER, cfg.model.orEmpty())
-    }
-    val f = features.toMutableMap()
-    f[AiFeature.CatchUp] = (f[AiFeature.CatchUp] ?: FeatureSetting()).copy(on = cfg.catchMeUpEnabled)
-    f[AiFeature.Assistant] = (f[AiFeature.Assistant] ?: FeatureSetting()).copy(on = cfg.assistantOn())
-    return copy(providers = providers, defaultModel = def, features = f)
-}
-
-/** The switches that travel whatever the key sync says, as the old toggles did. */
-// Transcription is not here: it is migrated from what the device
-// itself can do (a speech key, or an OpenAI chat key), so syncing it
-// let a phone with neither turn transcription off on the computer.
 private val SYNCED_SWITCHES = listOf(AiFeature.CatchUp, AiFeature.Assistant)
-
-/** Features each device sets for itself, which a profile from the ship never changes. */
-private val PER_DEVICE = setOf(AiFeature.Transcription, AiFeature.Dictation)
 
 /** The switches as the config entry carries them. Triage is Feed Orrery, per install; the generator is the ship's. */
 fun AiProfile.switches(): kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.buildJsonObject {
@@ -728,69 +606,11 @@ fun AiProfile.withSwitches(s: kotlinx.serialization.json.JsonObject): AiProfile 
     orrery = (s["orrery"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: orrery,
 )
 
-/**
- * What transcription runs on: its own speech model, else whisper-1 on the
- * default provider where that one can transcribe, as
- * [CallRecordingPublisher.sttFrom] does. The row said "None chosen" while
- * whisper-1 ran.
- */
-fun AiProfile.transcriptionRef(): ModelRef? = features[AiFeature.Transcription]?.model
-    ?: defaultModel?.takeIf { d -> provider(d.provider)?.kind.let { it == ProviderKind.OpenAi || it == ProviderKind.OpenAiCompatible } }?.copy(model = WHISPER)
-
 /** Orrery is on: turned on by the owner, on some device. Off by default. */
 fun AiSettings.Config.orreryOn(): Boolean = savedProfile?.orrery == true
 
 /** The profile with Orrery turned [on], from the saved one or the one these settings make. */
 fun AiSettings.Config.withOrrery(on: Boolean): AiProfile = (savedProfile ?: migrateProfile(this)).copy(orrery = on)
-
-/**
- * The profile after one AI settings entry arrives from the ship, [merged]
- * being the old fields as already applied. The terms are the old ones:
- * switches travel always, in the config entry; providers, models and
- * keys only in the credentials entry, and only where this device syncs
- * them. What arrives keeps this device's own keys and model lists, taken
- * from its old fields where it has saved no profile. An older install's
- * write changes what the old fields describe.
- */
-fun profileAfterEntry(
-    entry: kotlinx.serialization.json.JsonObject,
-    current: AiSettings.Config,
-    merged: AiSettings.Config,
-): AiProfile? {
-    val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-    val incoming = (entry["profile"] as? kotlinx.serialization.json.JsonObject)
-        ?.takeIf { current.syncEnabled }
-        ?.let { runCatching { json.decodeFromJsonElement(AiProfile.serializer(), it) }.getOrNull() }
-    val switches = entry["switches"] as? kotlinx.serialization.json.JsonObject
-    val base = current.savedProfile
-    val fromNew = entry.containsKey("profile") || switches != null
-    val fromOld = !fromNew && base != null &&
-        (entry.containsKey("catchMeUpEnabled") || (entry.containsKey("apiKey") && !entry.containsKey("providerKeys")))
-    val local = base ?: migrateProfile(current)
-    var profile = when {
-        // Only a device with keys writes the credentials entry, so the
-        // switches in its profile can be older than the ones in config,
-        // which every device writes. Its providers and models are news;
-        // its switches are not, unless they came as switches.
-        // Transcription is not news from anywhere: it is this device's
-        // own (see SYNCED_SWITCHES), and the whole profile arriving took
-        // it anyway, so a phone with no speech model turned it off here.
-        incoming != null -> incoming.keepingLocal(local)
-            .let { it.copy(features = it.features.filterKeys { f -> f !in PER_DEVICE } + local.features.filterKeys { f -> f in PER_DEVICE }) }
-            .let { if (switches != null) it else it.withSwitches(local.switches()).copy(jev = local.jev, orrery = local.orrery) }
-        fromOld -> base!!.withLegacy(merged)
-        else -> base
-    }
-    // Switches with no profile here yet make one from this device's own settings.
-    if (switches != null) profile = (profile ?: migrateProfile(merged)).withSwitches(switches)
-    profile ?: return null
-    val keys = (entry["providerKeys"] as? kotlinx.serialization.json.JsonObject)
-        ?.mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { k to it } }?.toMap()
-    // The keys are matched against the profile they came with, so a
-    // shared id (they are constants) cannot put an Anthropic key on this
-    // device's OpenRouter provider.
-    return if (keys != null && current.syncEnabled) profile.withKeys(keys, from = incoming) else profile
-}
 
 /** The model Talon runs on [this] when none is picked; null where the provider's own list is all there is. */
 fun ProviderKind.defaultModel(): String? = when (this) {

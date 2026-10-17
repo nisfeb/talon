@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.dp
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.CallRecordingPublisher
+import io.nisfeb.talon.ai.armillaryHearing
+import io.nisfeb.talon.ai.profile
 import io.nisfeb.talon.call.RecordedCall
 import io.nisfeb.talon.call.saveFile
 import io.nisfeb.talon.call.saveWavFile
@@ -80,8 +82,8 @@ fun RecordingResultDialog(
     // re-transcribed every clip through the paid provider and wrote
     // the same Lattice slug again.
     var publishedUrl by remember { mutableStateOf<String?>(null) }
-    val stt = remember(sttConfig) { CallRecordingPublisher.sttFrom(sttConfig) }
-    val canPublish = !rec.isEmpty && stt != null && shipUrl != null && cookie != null
+    val hearing = remember(sttConfig) { CallRecordingPublisher.hearingFrom(sttConfig) }
+    val canPublish = !rec.isEmpty && hearing != null && shipUrl != null && cookie != null
     val whenLabel = remember { io.nisfeb.talon.util.formatMonthDayClock(io.nisfeb.talon.util.nowMs()) }
 
     // Track whether anything has been done with the audio, so "Done"
@@ -105,11 +107,17 @@ fun RecordingResultDialog(
                         "Captured ${if (n == 1) "1 speaker" else "$n speakers"}."
                     },
                 )
-                if (!rec.isEmpty && stt == null) {
+                if (!rec.isEmpty && hearing == null) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "To publish a transcript, set an OpenAI-compatible " +
-                            "transcription key in AI settings.",
+                        // What is missing, in order: credit, the vendor's speech model, the switch.
+                        when {
+                            sttConfig.profile().armillary()?.apiKey.isNullOrBlank() ->
+                                if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "To publish a transcript, top up Armillary under Settings, AI."
+                                else "To publish a transcript, connect Armillary under Settings, AI."
+                            sttConfig.profile().armillaryHearing() == null -> "Your Armillary vendor offers no speech model yet, so there is nothing to transcribe with."
+                            else -> "To publish a transcript, turn on Call transcripts under Settings, AI."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -117,8 +125,8 @@ fun RecordingResultDialog(
                 if (canPublish) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Publishing sends each speaker's audio to your " +
-                            "transcription provider and puts the transcript on " +
+                        "Publishing sends each speaker's audio to Armillary's " +
+                            "transcription model and puts the transcript on " +
                             "your ship, where anyone who can read your Lattice " +
                             "namespace can see it.",
                         style = MaterialTheme.typography.bodySmall,
@@ -148,7 +156,7 @@ fun RecordingResultDialog(
                     job = scope.launch {
                         runCatching {
                             CallRecordingPublisher.publishTranscript(
-                                http, stt!!, shipUrl!!, ourShip, cookie!!,
+                                http, hearing!!, shipUrl!!, ourShip, cookie!!,
                                 title, whenLabel, rec, nameFor,
                             )
                         }.onSuccess { published ->
@@ -270,13 +278,13 @@ fun RecordingResultDialog(
                     },
                 ) { Text("Save multitrack (one channel per speaker)") }
                 TextButton(
-                    enabled = !busy && !rec.isEmpty && stt != null,
+                    enabled = !busy && !rec.isEmpty && hearing != null,
                     onClick = {
                         busy = true
                         message = null
                         job = scope.launch {
                             runCatching {
-                                val t = CallRecordingPublisher.transcribeAll(http, stt!!, rec, nameFor)
+                                val t = CallRecordingPublisher.transcribeAll(http, hearing!!, rec, nameFor)
                                 val text = CallRecordingPublisher.transcriptText(
                                     title, whenLabel, rec.clips.keys.map(nameFor), t,
                                 )

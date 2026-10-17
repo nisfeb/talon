@@ -1,7 +1,6 @@
 package io.nisfeb.talon.armillary
 
 import androidx.compose.ui.test.ComposeUiTest
-import io.nisfeb.talon.ui.quietCatalog
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -26,8 +25,6 @@ import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.ai.FeatureSetting
 import io.nisfeb.talon.ai.ModelRef
 import io.nisfeb.talon.ai.ProviderKind
-import io.nisfeb.talon.ai.forSync
-import io.nisfeb.talon.ai.wantsArmillaryRow
 import io.nisfeb.talon.ui.screens.AiSettingsSection
 import io.nisfeb.talon.ui.screens.deleteAccountWarning
 import io.nisfeb.talon.ui.theme.TalonTheme
@@ -142,7 +139,6 @@ class ArmillaryDeleteTest {
         val p = ai.state.value.savedProfile!!
         assertNull(p.provider(ARMILLARY_PROVIDER))
         assertTrue(p.features.values.none { it.model?.provider == ARMILLARY_PROVIDER } && p.defaultModel?.provider != ARMILLARY_PROVIDER)
-        assertTrue(!p.forSync().wantsArmillaryRow(), "another device would adopt the row back")
         assertNull(r.account.value)
         assertEquals(Deletion("~wex", DeleteAnswer.Deleted), r.deletion.value)
         assertEquals("sk-ant", p.provider("main")?.apiKey, "the owner's own key stays")
@@ -196,7 +192,7 @@ class ArmillaryDeleteTest {
         val r = repo(ai)
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r) }
             }
         }
         more("Delete account")
@@ -223,7 +219,7 @@ class ArmillaryDeleteTest {
         val r = repo(ai)
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r) }
             }
         }
         more("Delete account")
@@ -243,7 +239,7 @@ class ArmillaryDeleteTest {
         val r = repo(ai)
         setContent {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = r) }
             }
         }
         more("Delete account")

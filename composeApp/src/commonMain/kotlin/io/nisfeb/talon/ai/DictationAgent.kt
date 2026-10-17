@@ -257,9 +257,13 @@ class DictationRun(
         const val RATE = 16_000
 
         const val NO_SHIP = "Log in to your ship in Talon first."
-        const val NO_SPEECH_TO_TEXT = "Set an OpenAI-compatible transcription key in AI settings."
-        const val NO_MODEL = "Turn on the assistant and give it a model in AI settings."
-        const val NO_MODEL_FOR_QUESTIONS = "Questions need the assistant. Turn it on and give it a model in AI settings."
+        /** No Armillary key on this device yet: credit first. Where buying is not allowed, nothing points to it. */
+        val NO_ARMILLARY: String get() =
+            if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up Armillary under Settings, AI, to dictate."
+            else "Connect Armillary under Settings, AI, to dictate."
+        const val NO_SPEECH_TO_TEXT = "Your Armillary vendor offers no speech model yet."
+        const val NO_MODEL = "Turn on the assistant under Settings, AI."
+        const val NO_MODEL_FOR_QUESTIONS = "Questions need the assistant. Turn it on under Settings, AI."
 
         /**
          * What stops a dictation before it records, in words for the owner;
@@ -268,25 +272,14 @@ class DictationRun(
          */
         fun blocker(cfg: AiSettings.Config, hasShip: Boolean): String? = when {
             !hasShip -> NO_SHIP
+            cfg.profile().armillary()?.apiKey.isNullOrBlank() -> NO_ARMILLARY
             hearing(cfg) == null -> NO_SPEECH_TO_TEXT
             !cfg.loopsCanRun() && !cfg.orreryOn() -> NO_MODEL
             else -> null
         }
 
-        /**
-         * Where a dictation is heard: the owner's own transcription
-         * provider ([CallRecordingPublisher.sttFrom]) wherever there is
-         * one, else the Armillary vendor's transcription model
-         * ([armillaryHearing]), else nowhere, and the card says to set a
-         * key, as before Armillary offered one.
-         */
-        fun hearing(cfg: AiSettings.Config): Hearing? =
-            CallRecordingPublisher.sttFrom(cfg)?.let { Hearing.Own(it) } ?: cfg.profile().armillaryHearing()
-
-        /** Speech to text with the transcription key from AI settings ([CallRecordingPublisher.sttFrom]). */
-        fun whisper(http: HttpClient, stt: CallRecordingPublisher.Stt): suspend (ByteArray) -> String = { wav ->
-            text(CallTranscribe.transcribe(http, stt.endpoint, stt.key, stt.model, wav))
-        }
+        /** Where a dictation is heard: the Armillary vendor's transcription model ([armillaryHearing]), else nowhere. */
+        fun hearing(cfg: AiSettings.Config): Hearing? = cfg.profile().armillaryHearing()
 
         /**
          * A failure as the owner is told it, in words: no network, a
@@ -310,8 +303,5 @@ class DictationRun(
             }
         }
 
-        /** Whisper's segments as one line of text. */
-        fun text(segments: List<CallTranscribe.Segment>): String =
-            segments.joinToString(" ") { it.text.trim() }.trim()
     }
 }

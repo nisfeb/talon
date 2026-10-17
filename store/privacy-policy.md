@@ -16,8 +16,8 @@ describes what Talon does (and doesn't) do with user data.
 - **The developer of Talon** does not operate any backend, does not
   collect telemetry, and does not have access to user data of any
   kind.
-- Optional AI features (catch-me-up summary, emoji suggestions) hit a cloud provider (OpenAI, Anthropic, or a custom OpenAI-compatible endpoint) **only when the user has configured an API key**. The request body, which is the message text the user is summarizing, is sent to that provider. Nothing is sent to the developer of Talon.
-- The optional **Armillary** provider is a second way to reach a model, and it is off until the user adds it. Instead of a key of their own, the user buys model inference through their own Urbit ship, from a vendor ship they choose. The ship holds the account and the balance. The user pays that vendor by card through Stripe or by bitcoin through BTCPay Server, both operated by the vendor. In lease mode the vendor mints a capped key at the model provider and Talon calls that provider directly. In proxy mode the requests pass through the vendor's ship. The vendor sees the ship's name, the balance and the ledger, and in proxy mode the requests as well. Nothing else about the user leaves the device, and nothing reaches the developer of Talon.
+- Optional AI features (catch-up summaries, the assistant, dictation, call transcripts) run **only once the user's ship has Armillary credit**. The content a feature works on (the messages being summarised, what the user said, a call's audio) is sent to the models the user's Armillary vendor picks, which keep nothing (zero data retention). Search by meaning runs on the device and sends nothing.
+- **Armillary**: the user buys model inference through their own Urbit ship, from a vendor ship they choose. The ship holds the account and the balance. The user pays that vendor by card through Stripe or by bitcoin through BTCPay Server, both operated by the vendor. In lease mode the vendor mints a capped key at the model provider and Talon calls that provider directly. In proxy mode the requests pass through the vendor's ship. The vendor sees the ship's name, the balance and the ledger, and in proxy mode the requests as well. Nothing else about the user leaves the device, and nothing reaches the developer of Talon.
 
 ## What Talon stores on your device
 
@@ -28,7 +28,7 @@ describes what Talon does (and doesn't) do with user data.
   metadata, contacts. Cached in a local Room (SQLite) database so the
   app can render offline. Per-ship database file; cleared if the user
   removes the app or signs out.
-- **AI provider settings** (provider, model, API key, base URL). An API key is stored encrypted via `EncryptedSharedPreferences`. The key is sent only to the configured provider, only when the user invokes an AI feature. An Armillary provider stores no key the user typed: the key is minted by the vendor, fetched from the user's own ship, and held for that ship and that device alone. It never travels between devices.
+- **AI settings**: which features are on, the user's instructions to the assistant, and this device's Armillary key. The user types no key: it is minted by the vendor, fetched from the user's own ship, and held for that ship and that device alone. It never travels between devices.
 - **Daily digest history** — the rolling list of past summaries the
   app has produced for the user. Stored locally; the underlying
   message text is sent to the configured AI provider only at digest

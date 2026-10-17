@@ -44,8 +44,12 @@ class CallRecordingDialogsTest {
         }
     }) { install(HttpTimeout) }
 
-    private val oneVoice = RecordedCall(clips = mapOf("~bus" to ByteArray(3_200)), sampleRate = 16_000)
-    private val withKey = AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "sk-ant", model = null, baseUrl = null, sttApiKey = "sk-whisper")
+    // A second of speech (a loud tone) between two quiet stretches: silence is not sent.
+    private val oneVoice = RecordedCall(
+        clips = mapOf("~bus" to ByteArray(32_000) { if (it % 2 == 1 && it in 8_000 until 24_000) (if (it % 64 < 32) 15 else -15).toByte() else 0 }),
+        sampleRate = 16_000,
+    )
+    private val withKey = io.nisfeb.talon.ai.paidSettings(speech = true)
 
     private fun result(rec: RecordedCall = oneVoice, stt: AiSettings.Config = withKey, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
         setContent {
@@ -85,8 +89,8 @@ class CallRecordingDialogsTest {
     }
 
     @Test
-    fun `without a transcription key nothing publishes, and discarding asks twice`() = result(stt = AiSettings.Config(provider = AiSettings.Provider.Anthropic, apiKey = "sk-ant", model = null, baseUrl = null)) {
-        assertTrue(shows("Captured 1 speaker.") && shows("set an OpenAI-compatible transcription key"))
+    fun `without a transcription model nothing publishes, and discarding asks twice`() = result(stt = io.nisfeb.talon.ai.paidSettings(speech = false)) {
+        assertTrue(shows("Captured 1 speaker.") && shows("offers no speech model yet"))
         onNodeWithText("Publish transcript").assertIsNotEnabled()
         onNodeWithText("Discard").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("This is the only copy.") }
@@ -100,7 +104,7 @@ class CallRecordingDialogsTest {
         assertTrue(shows("anyone who can read your Lattice namespace can see it"))
         onNodeWithText("Publish transcript").performClick()
         waitUntil(timeoutMillis = 10_000) { shows("Published to urb://~zod/") }
-        assertTrue(did.any { it == "POST api.openai.com/v1/audio/transcriptions" }, did.toString())
+        assertTrue(did.any { it == "POST openrouter.ai/api/v1/audio/transcriptions" }, did.toString())
         assertTrue(did.any { it == "POST zod.test/apps/lattice/save" }, did.toString())
         onNodeWithText("Publish transcript").assertIsNotEnabled()
         onNodeWithText("Done").performClick()

@@ -58,19 +58,21 @@ class AiClient(
     ): String {
         val cfg = settingsProvider()
         lastCostUsd = null
+        // Armillary's proxy may wait minutes on a slow upstream ([AiSettings.Config.upstreamTimeoutMs]).
+        val wait = maxOf(timeoutMs, cfg.upstreamTimeoutMs)
         val text = when (cfg.provider) {
-            AiSettings.Provider.Anthropic -> anthropic(cfg, systemPrompt, userPrompt, maxOutputTokens, timeoutMs)
+            AiSettings.Provider.Anthropic -> anthropic(cfg, systemPrompt, userPrompt, maxOutputTokens, wait)
             AiSettings.Provider.OpenRouter -> openaiCompat(
                 cfg, systemPrompt, userPrompt, maxOutputTokens,
                 endpoint = "https://openrouter.ai/api/v1/chat/completions",
                 defaultModel = ProviderKind.OpenRouter.defaultModel()!!,
-                timeoutMs = timeoutMs,
+                timeoutMs = wait,
             )
             AiSettings.Provider.OpenAi -> openaiCompat(
                 cfg, systemPrompt, userPrompt, maxOutputTokens,
                 endpoint = "https://api.openai.com/v1/chat/completions",
                 defaultModel = ProviderKind.OpenAi.defaultModel()!!,
-                timeoutMs = timeoutMs,
+                timeoutMs = wait,
             )
             AiSettings.Provider.Custom -> {
                 val base = cfg.baseUrl?.trimEnd('/')
@@ -84,7 +86,7 @@ class AiClient(
                     defaultModel = cfg.model ?: error(
                         "Custom provider requires a model name",
                     ),
-                    timeoutMs = timeoutMs,
+                    timeoutMs = wait,
                 )
             }
         }
@@ -199,7 +201,10 @@ class AiClient(
             contentType(ContentType.Application.Json)
             headers()
             setBody(payload)
-            timeout { requestTimeoutMillis = timeoutMs }
+            timeout {
+                requestTimeoutMillis = timeoutMs
+                socketTimeoutMillis = timeoutMs
+            }
         }
         val body = resp.bodyAsText()
         val host = Url(url).host

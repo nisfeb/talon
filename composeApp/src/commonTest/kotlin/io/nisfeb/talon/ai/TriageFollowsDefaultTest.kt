@@ -42,38 +42,6 @@ class TriageFollowsDefaultTest {
     }
 
     @Test
-    fun `a private default is where triage reads, until it has a pick of its own`() {
-        val p = profile(ModelRef("lm", "qwen3"))
-        assertNull(p.pick(AiFeature.OrreryTriage), "the device it was started on is nobody's pick")
-        assertEquals(Resolved(server, "qwen3"), p.triage())
-        assertFalse(p.cfg().triageInCloud())
-        assertEquals(AiSettings.Slot(null, "", "qwen3", server.baseUrl), p.cfg().triagePrivateSlot())
-        // A default on this device's own model is private too.
-        assertEquals(ProviderKind.ThisDevice, profile(ModelRef(DEVICE_PROVIDER, "")).triage().provider.kind)
-    }
-
-    @Test
-    fun `a pick on triage's own row wins over the default`() {
-        val here = FeatureSetting(on = true, model = ModelRef(DEVICE_PROVIDER, ""), own = true)
-        assertEquals(ProviderKind.ThisDevice, profile(ModelRef("lm", "qwen3"), here).triage().provider.kind, "this device, picked by hand")
-        // The opt-in that takes triage off the device, whoever set it.
-        for (own in listOf(true, false)) {
-            val picked = profile(ModelRef("lm", "qwen3"), FeatureSetting(on = true, model = ModelRef("or", "c"), own = own))
-            assertEquals(Resolved(cloud, "c"), picked.triage())
-            assertTrue(picked.cfg().triageInCloud())
-        }
-    }
-
-    @Test
-    fun `the device model triage was started on keeps its name`() {
-        val named = FeatureSetting(on = true, model = ModelRef(DEVICE_PROVIDER, "gemma"))
-        assertEquals(Resolved(device, "gemma"), profile(ModelRef("or", "m"), named).triage())
-        assertEquals(ModelRef(DEVICE_PROVIDER, "gemma"), profile(ModelRef("or", "m"), named).defaultFor(AiFeature.OrreryTriage))
-        assertEquals(ModelRef("lm", "q"), profile(ModelRef("lm", "q"), named).defaultFor(AiFeature.OrreryTriage))
-        assertEquals(ModelRef("or", "m"), profile(ModelRef("or", "m")).defaultFor(AiFeature.CatchUp), "every other feature's default is the default")
-    }
-
-    @Test
     fun `taking the server out puts triage back on this device`() {
         val p = profile(ModelRef("lm", "qwen3")).without("lm")
         assertEquals(ProviderKind.ThisDevice, p.triage().provider.kind)
@@ -83,43 +51,12 @@ class TriageFollowsDefaultTest {
     }
 
     @Test
-    fun `older installs are told triage reads with the default only while it is the private one`() {
-        val c = AiSettings.Config(provider = AiSettings.Provider.OpenRouter, apiKey = "sk-or", model = null)
-        val onServer = c.withProfile(profile(ModelRef("lm", "qwen3")), now = 1L)
-        assertTrue(onServer.frontierReadsMessages, "the default they know is the server")
-        val inCloud = onServer.withProfile(profile(ModelRef("or", "m")), now = 2L)
-        assertFalse(inCloud.frontierReadsMessages, "the default went to the cloud and triage did not")
-    }
-
-    @Test
-    fun `the generator follows the default only where the owner picked Default`() {
-        fun gen(s: FeatureSetting?) = AiProfile(features = listOfNotNull(s?.let { AiFeature.OrreryGenerator to it }).toMap()).generatorFollowsDefault()
-        assertTrue(gen(FeatureSetting(on = true, model = null, own = true)))
-        assertFalse(gen(FeatureSetting(on = true, model = null)), "set up on the ship, maybe: left alone")
-        assertFalse(gen(FeatureSetting(on = true, model = ModelRef("or", "m"), own = true)), "a model of its own")
-        assertFalse(gen(null))
-    }
-
-    // Transcription said "None chosen" while whisper-1 ran on the default.
-    @Test
-    fun `transcription shows what runs, its own model or whisper-1 on a default that can transcribe`() {
-        val openAi = AiProvider("oa", ProviderKind.OpenAi, "OpenAI", apiKey = "sk")
-        val p = AiProfile(providers = listOf(cloud, openAi, server), defaultModel = ModelRef("oa", "gpt-5"))
-        assertEquals(ModelRef("oa", WHISPER), p.transcriptionRef())
-        assertEquals(ModelRef("lm", WHISPER), p.copy(defaultModel = ModelRef("lm", "qwen3")).transcriptionRef(), "a server of your own may serve it")
-        assertNull(p.copy(defaultModel = ModelRef("or", "m")).transcriptionRef(), "OpenRouter has no speech endpoint")
-        assertNull(p.copy(defaultModel = null).transcriptionRef())
-        val own = p.copy(features = mapOf(AiFeature.Transcription to FeatureSetting(true, ModelRef("lm", "whisper-large"))))
-        assertEquals(ModelRef("lm", "whisper-large"), own.transcriptionRef())
-    }
-
-    @Test
     fun `loops run only with the assistant on and a model for it`() {
-        val p = AiProfile(providers = listOf(cloud), defaultModel = ModelRef("or", "m"))
-        fun cfg(assistant: Boolean, profile: AiProfile = p) =
-            AiSettings.Config(provider = AiSettings.Provider.OpenRouter, apiKey = "sk-or", model = null, agentEnabled = assistant, savedProfile = profile)
-        assertTrue(cfg(true).loopsCanRun())
-        assertFalse(cfg(false).loopsCanRun(), "a key alone does not run them")
-        assertFalse(cfg(true, p.copy(defaultModel = null)).loopsCanRun(), "nor the switch without a model")
+        assertTrue(paidSettings().loopsCanRun())
+        assertFalse(paidSettings(assistant = false).loopsCanRun(), "a key alone does not run them")
+        assertFalse(paidSettings(key = "").loopsCanRun(), "nor the switch without a key")
+        val ownOnly = AiSettings.Config(provider = AiSettings.Provider.OpenRouter, apiKey = "sk-or", model = null, agentEnabled = true,
+            savedProfile = AiProfile(providers = listOf(cloud), defaultModel = ModelRef("or", "m")))
+        assertFalse(ownOnly.loopsCanRun(), "nor an own key with no Armillary row")
     }
 }

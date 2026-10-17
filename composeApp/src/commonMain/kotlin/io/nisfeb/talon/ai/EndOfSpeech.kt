@@ -80,11 +80,11 @@ class EndOfSpeech(
         /** Where the level meter reads full: a voice close to the phone. */
         private const val LOUD_RMS = 6_000.0
 
-        /** The root mean square of [samples] 16-bit little-endian samples. */
-        fun rms(pcm: ByteArray, samples: Int): Double {
+        /** The root mean square of [samples] 16-bit little-endian samples, from byte [from]. */
+        fun rms(pcm: ByteArray, samples: Int, from: Int = 0): Double {
             var sum = 0.0
             for (i in 0 until samples) {
-                val s = (pcm[2 * i].toInt() and 0xFF) or (pcm[2 * i + 1].toInt() shl 8)
+                val s = (pcm[from + 2 * i].toInt() and 0xFF) or (pcm[from + 2 * i + 1].toInt() shl 8)
                 sum += s.toDouble() * s
             }
             return sqrt(sum / samples)

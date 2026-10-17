@@ -96,7 +96,7 @@ class BraveLeoCardTest {
             },
         ) {
             TalonTheme(darkTheme = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = repo, catalog = quietCatalog()) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = repo) }
             }
         }
     }

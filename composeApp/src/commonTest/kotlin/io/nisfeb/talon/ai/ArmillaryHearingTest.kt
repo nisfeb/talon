@@ -6,13 +6,13 @@ import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
- * Where a dictation is heard: the owner's own key, else the Armillary
- * vendor's transcription model, else nowhere, exactly as before the vendor
- * offered one. Contract: lattice /project/talon/armillary-transcription-contract.
+ * Where a dictation is heard: the Armillary vendor's transcription model,
+ * else nowhere. Contract: lattice /project/talon/armillary-transcription-contract.
  */
 class ArmillaryHearingTest {
     private val whisper = "openai/whisper-large-v3-turbo"
@@ -28,25 +28,36 @@ class ArmillaryHearingTest {
     @Test
     fun `the vendor's model hears a dictation where the owner has no key, and the blocker lifts`() {
         val c = cfg(row())
-        assertEquals(Hearing.Armillary("https://openrouter.ai/api/v1", "sk-or-lease", whisper), DictationRun.hearing(c))
-        assertEquals(DictationRun.NO_MODEL, DictationRun.blocker(c, hasShip = true), "past the key, on to the next thing missing")
+        assertEquals(Hearing("https://openrouter.ai/api/v1", "sk-or-lease", whisper), DictationRun.hearing(c))
+        assertEquals(null, DictationRun.blocker(c, hasShip = true), "the assistant is on by default, so nothing stops it")
+        val off = c.copy(agentEnabled = false, askUrbitEnabled = false)
+        assertEquals(DictationRun.NO_MODEL, DictationRun.blocker(off, hasShip = true), "past the key, on to the next thing missing")
     }
 
     @Test
     fun `before the vendor offers a model, nothing changes`() {
-        listOf(cfg(row(model = null)), cfg(row(model = " ")), cfg(row(base = null)), cfg(row(key = "")), cfg()).forEach { c ->
+        listOf(cfg(row(model = null)), cfg(row(model = " ")), cfg(row(base = null))).forEach { c ->
             assertNull(DictationRun.hearing(c))
             assertEquals(DictationRun.NO_SPEECH_TO_TEXT, DictationRun.blocker(c, hasShip = true))
+        }
+        // No Armillary key here yet: credit is what is missing, not a speech model.
+        listOf(cfg(row(key = "")), cfg()).forEach { c ->
+            assertNull(DictationRun.hearing(c))
+            assertEquals(DictationRun.NO_ARMILLARY, DictationRun.blocker(c, hasShip = true))
+        }
+        assertTrue("Top up" in DictationRun.NO_ARMILLARY || "Connect" in DictationRun.NO_ARMILLARY)
+        listOf(DictationRun.NO_ARMILLARY, DictationRun.NO_SPEECH_TO_TEXT, DictationRun.NO_MODEL, DictationRun.NO_MODEL_FOR_QUESTIONS).forEach {
+            assertFalse("key" in it.lowercase(), "no key to set any more: $it")
         }
     }
 
     @Test
-    fun `the owner's own key wins over the vendor's`() {
+    fun `an own speech key left from before is not heard through`() {
         val openAi = AiProvider("oa", ProviderKind.OpenAi, "OpenAI", apiKey = "sk-own")
         val c = cfg(row(), openAi, features = mapOf(AiFeature.Transcription to FeatureSetting(on = true, model = ModelRef("oa", "whisper-1"))))
-        val heard = DictationRun.hearing(c)
-        assertIs<Hearing.Own>(heard)
-        assertEquals("sk-own", heard.stt.key)
+            .copy(sttApiKey = "sk-whisper")
+        assertEquals(Hearing("https://openrouter.ai/api/v1", "sk-or-lease", whisper), DictationRun.hearing(c))
+        assertNull(DictationRun.hearing(cfg(row(model = null), openAi).copy(sttApiKey = "sk-whisper")), "and without the vendor's model, nothing")
     }
 
     @Test

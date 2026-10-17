@@ -9,7 +9,7 @@ import io.nisfeb.talon.orrery.Decider
 import io.nisfeb.talon.orrery.OpenRouterDecider
 import io.nisfeb.talon.orrery.attempt
 import io.nisfeb.talon.orrery.onVendor
-import io.nisfeb.talon.orrery.openRouterKey
+import io.nisfeb.talon.orrery.decisionKey
 import io.nisfeb.talon.orrery.under
 import io.ktor.client.HttpClient
 import kotlinx.datetime.DateTimeUnit
@@ -116,7 +116,7 @@ object CalendarQuestion {
      */
     fun decider(http: HttpClient, cfg: AiSettings.Config, waitMs: Long = WAIT_MS): Decider? {
         val d = DecideSettings().under(cfg).onVendor(cfg).takeIf { it.on } ?: return null
-        return openRouterKey(cfg)?.let { OpenRouterDecider(http, it, d.copy(timeoutMs = waitMs)) }
+        return decisionKey(cfg)?.let { OpenRouterDecider(http, it, d.copy(timeoutMs = waitMs)) }
     }
 
     /** The days [choice] names, from [today]; null for "other" or a choice not offered. */

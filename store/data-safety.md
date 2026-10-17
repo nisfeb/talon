@@ -8,7 +8,7 @@ does. Walk through the form with this open as a script.
 
 **No.**
 
-Rationale: Talon is a thin client. It talks only to (a) the user's own Urbit ship at a URL the user provides, (b) the user's chosen AI provider, if and only if the user configured an API key and invoked an AI feature, and (c) a vendor Urbit ship and that vendor's payment processors, if and only if the user added the optional Armillary provider. The Talon developer operates no backend and receives no data.
+Rationale: Talon is a thin client. It talks only to (a) the user's own Urbit ship at a URL the user provides, (b) the model provider of the user's Armillary account, if and only if the user has credit and invoked an AI feature, and (c) the vendor Urbit ship the user chose and that vendor's payment processors, once the user sets up Armillary. The Talon developer operates no backend and receives no data.
 
 If Play prompts a follow-up because of permissions:
 
@@ -63,10 +63,9 @@ If Play prompts a follow-up because of permissions:
 
 ### Does your app share data with a third party?
 
-**Only the two the user picks, and only when they pick them.**
-- The AI provider whose API key the user entered, which receives the message text a feature summarizes.
-- The vendor ship the user named in the optional Armillary provider, which is off until the user adds it. That vendor sees the user's ship name, balance and ledger, and in proxy mode the model requests themselves. Payment is by card through Stripe or by bitcoin through BTCPay Server, both operated by that vendor. In lease mode the vendor mints a capped key at the model provider and Talon calls that provider directly, so the vendor never sees the requests.
-- Neither is the Talon developer, who receives nothing in either case. Removing the provider ends the sharing.
+**Only the ones the user picks, and only when they pick them.**
+- The vendor ship the user named for Armillary, which nothing reaches until the user sets Armillary up, and the model provider it leases the user, which receives the content a feature works on and keeps none of it. That vendor sees the user's ship name, balance and ledger, and in proxy mode the model requests themselves. Payment is by card through Stripe or by bitcoin through BTCPay Server, both operated by that vendor. In lease mode the vendor mints a capped key at the model provider and Talon calls that provider directly, so the vendor never sees the requests.
+- Turning the AI features off ends the sharing.
 
 ### Does your app collect device or other identifiers?
 

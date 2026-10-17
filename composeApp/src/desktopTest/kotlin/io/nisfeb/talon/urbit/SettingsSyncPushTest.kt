@@ -3,7 +3,6 @@ package io.nisfeb.talon.urbit
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.ai.AiSettings
-import io.nisfeb.talon.ai.withProfile
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.AssistantConversationEntity
 import io.nisfeb.talon.data.AssistantHistoryEntity
@@ -66,22 +65,6 @@ class SettingsSyncPushTest {
     // ─── AI credentials ────────────────────────────────────────────
 
     @Test
-    fun `with sync off, only preferences go up and no key leaves the device`() = live {
-        sync(config(sync = false, key = "sk-secret")).pushAiSettings()
-        assertNull(put("ai-settings", "credentials"))
-        val prefs = put("ai-settings", "config")!!
-        assertTrue("catchMeUpEnabled" in prefs && "apiKey" !in prefs, prefs.toString())
-        assertTrue(ship.pokesTo("settings").none { "sk-secret" in it.json.toString() })
-    }
-
-    @Test
-    fun `with sync on, the key goes in its own entry and in the preferences for older builds`() = live {
-        sync(config(key = "sk-secret")).pushAiSettings()
-        assertEquals("sk-secret", put("ai-settings", "credentials")!!["apiKey"]!!.jsonPrimitive.content)
-        assertEquals("sk-secret", put("ai-settings", "config")!!["apiKey"]!!.jsonPrimitive.content)
-    }
-
-    @Test
     fun `orrery turned off on one device goes up and turns it off on the others`() = live {
         sync(config().copy(savedProfile = io.nisfeb.talon.ai.AiProfile(orrery = false))).pushAiSettings()
         val sent = put("ai-settings", "config")!!
@@ -90,63 +73,6 @@ class SettingsSyncPushTest {
         val phone = FakeAiSettings(config(device = "dev-b").copy(savedProfile = io.nisfeb.talon.ai.AiProfile(orrery = true)))
         SettingsSyncImpl(db = db, aiSettings = phone).applyBucket(SettingsSyncImpl.BUCKET_AI_SETTINGS, kotlinx.serialization.json.buildJsonObject { put("config", sent) })
         assertEquals(false, phone.state.value.savedProfile?.orrery)
-    }
-
-    @Test
-    fun `a device with no key says nothing of keys, so it cannot blank another's`() = live {
-        sync(config()).pushAiSettings()
-        assertNull(put("ai-settings", "credentials"))
-        assertFalse("apiKey" in put("ai-settings", "config")!!)
-    }
-
-    @Test
-    fun `taking out the last provider reaches the ship, and a profile that only arrived says nothing`() = live {
-        val local = io.nisfeb.talon.ai.AiProvider("local", io.nisfeb.talon.ai.ProviderKind.OpenAiCompatible, "Local", baseUrl = "http://127.0.0.1:1234/v1")
-        val had = config().copy(savedProfile = io.nisfeb.talon.ai.AiProfile(providers = listOf(local)))
-        // Arrived, not saved here: no key and no stamp, so nothing to say.
-        sync(had).pushAiSettings()
-        assertNull(put("ai-settings", "credentials"), "an unsaved profile never overwrites the ship's")
-
-        // The owner takes it out here: the empty profile goes, so it does
-        // not come back from the ship on the next connect.
-        val emptied = had.withProfile(io.nisfeb.talon.ai.AiProfile(), now = 5_000)
-        sync(emptied).pushAiSettings()
-        val creds = assertNotNull(put("ai-settings", "credentials"))
-        val profile = creds["profile"]!!.jsonObject
-        assertTrue(profile["providers"]?.jsonArray.isNullOrEmpty(), "no providers: $profile")
-        assertFalse("savedHereAtMs" in profile, "the stamp is this device's own")
-    }
-
-    @Test
-    fun `every credential this device holds goes up, and none it lacks`() = live {
-        val full = config(key = "sk-secret").copy(
-            baseUrl = "https://api.example", braveApiKey = "brv-1",
-            privateBaseUrl = "http://box:1234/v1", privateModel = "qwen3", privateApiKey = "prv-1",
-            revokedKeys = mapOf(io.nisfeb.talon.ai.keyPrint("sk-old") to io.nisfeb.talon.ai.KeyMark(at = 5)),
-        )
-        sync(full).pushAiSettings()
-        val creds = put("ai-settings", "credentials")!!
-        for (k in listOf("model", "baseUrl", "braveApiKey", "privateBaseUrl", "privateModel", "privateApiKey", "revokedKeys")) {
-            assertTrue(k in creds, "$k goes up: $creds")
-        }
-        assertEquals("brv-1" to "prv-1", creds["braveApiKey"]!!.jsonPrimitive.content to creds["privateApiKey"]!!.jsonPrimitive.content)
-    }
-
-    @Test
-    fun `a credential this device lacks is not sent, blank or zero`() = live {
-        sync(config(key = "sk-secret").copy(model = null)).pushAiSettings()
-        val creds = put("ai-settings", "credentials")!!
-        for (k in listOf("model", "baseUrl", "braveApiKey", "privateBaseUrl", "privateModel", "privateApiKey", "revokedKeys", "sttApiKey", "sttApiKeyRemovedAtMs")) {
-            assertFalse(k in creds, "$k would blank a peer's: $creds")
-        }
-    }
-
-    @Test
-    fun `a removed transcription key travels as a removal, not as an empty key`() = live {
-        sync(config(key = "sk-secret", sttRemovedAt = 1_234)).pushAiSettings()
-        val creds = put("ai-settings", "credentials")!!
-        assertFalse("sttApiKey" in creds)
-        assertEquals("1234", creds["sttApiKeyRemovedAtMs"]!!.jsonPrimitive.content)
     }
 
     @Test

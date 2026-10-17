@@ -18,44 +18,13 @@ import io.nisfeb.talon.util.nowMs
  */
 object CallRecordingPublisher {
 
-    /** A ready-to-use speech-to-text endpoint. */
-    data class Stt(val endpoint: String, val key: String, val model: String)
-
     /**
-     * Where to send audio for transcription, derived from the user's AI
-     * settings. Only OpenAI-compatible providers expose an audio
-     * endpoint, so Anthropic/OpenRouter return null and the UI explains
-     * that a Whisper-capable key is needed.
+     * Where call audio is heard: Armillary's transcription model, while
+     * transcription is on. Null where the vendor offers none, and the
+     * dialog says so.
      */
-    fun sttFrom(cfg: AiSettings.Config): Stt? {
-        // The transcription row: a dedicated Whisper key where there is
-        // one, whatever the chat provider is, else an OpenAI or custom
-        // chat key. Anthropic and OpenRouter have no audio endpoint,
-        // and neither has an Armillary base: the vendor's proxy sells
-        // chat and embeddings and nothing else.
-        val r = cfg.profile().resolve(AiFeature.Transcription)?.takeIf { cfg.profile().isOn(AiFeature.Transcription) } ?: return null
-        val key = r.provider.apiKey.takeIf { it.isNotBlank() } ?: return null
-        // The row's own speech model; one that follows the default is a chat model, so whisper-1.
-        val model = cfg.profile().features[AiFeature.Transcription]?.model?.model?.ifBlank { null } ?: WHISPER_MODEL
-        return when (r.provider.kind) {
-            ProviderKind.OpenAi -> Stt(OPENAI_STT, key, model)
-            // The chat model is not a speech model, and the saved base URL
-            // is often a full chat URL, which produced
-            // ".../chat/completions/audio/…".
-            ProviderKind.OpenAiCompatible -> r.provider.baseUrl?.takeIf { it.isNotBlank() }?.let { Stt(audioEndpoint(it), key, model) }
-            else -> null
-        }
-    }
-
-    /** A saved base URL -> its /audio/transcriptions endpoint. Accepts
-     *  a bare base, a `/v1`, or a full chat-completions URL. */
-    internal fun audioEndpoint(baseUrl: String): String {
-        var b = baseUrl.trim().trimEnd('/')
-        for (suffix in listOf("/chat/completions", "/completions", "/responses")) {
-            if (b.endsWith(suffix)) b = b.dropLast(suffix.length)
-        }
-        return "${b.trimEnd('/')}/audio/transcriptions"
-    }
+    fun hearingFrom(cfg: AiSettings.Config): Hearing? =
+        cfg.profile().takeIf { it.isOn(AiFeature.Transcription) }?.armillaryHearing()
 
     /**
      * Transcribe every speaker and publish the merged transcript to
@@ -77,7 +46,7 @@ object CallRecordingPublisher {
      */
     suspend fun transcribeAll(
         http: HttpClient,
-        stt: Stt,
+        hearing: Hearing,
         call: RecordedCall,
         nameFor: (String) -> String,
     ): Transcript {
@@ -90,7 +59,7 @@ object CallRecordingPublisher {
             // counted as the speaker failing ended in "transcription
             // failed for every speaker" over the "Stopped." it asked for.
             try {
-                transcribeClip(http, stt, pcm, call.rateOf(ship))
+                transcribeClip(http, hearing, pcm, call.rateOf(ship))
                     .forEach { utterances += TranscriptGemtext.Utterance(label, it.startMs, it.text) }
             } catch (c: kotlinx.coroutines.CancellationException) {
                 throw c
@@ -116,7 +85,7 @@ object CallRecordingPublisher {
      */
     suspend fun publishTranscript(
         http: HttpClient,
-        stt: Stt,
+        hearing: Hearing,
         shipUrl: String,
         ourShip: String,
         cookie: String,
@@ -125,7 +94,7 @@ object CallRecordingPublisher {
         call: RecordedCall,
         nameFor: (String) -> String,
     ): PublishedTranscript {
-        val t = transcribeAll(http, stt, call, nameFor)
+        val t = transcribeAll(http, hearing, call, nameFor)
         val gemtext = TranscriptGemtext.build(
             title = title.ifBlank { "Party line" },
             whenLabel = whenLabel,
@@ -160,33 +129,82 @@ object CallRecordingPublisher {
     }
 
     /**
-     * Transcribe one speaker's PCM, downsampled and split to fit the
-     * upload limit.
+     * Transcribe one speaker's PCM, a stretch of speech at a time
+     * ([speechSpans]). Armillary's speech route answers the words and no
+     * timestamps, so where each stretch starts in the clip is where its
+     * words go in the call; whole chunks put minutes of one voice in a
+     * single line. Downsampled first: Whisper works at 16 kHz.
      *
-     * Whisper resamples to 16 kHz internally, so sending 48 kHz only
-     * burns upload budget — at 48 kHz a clip passed OpenAI's 25 MB cap
-     * after about 4.5 minutes and failed the whole publish. Anything
-     * still too long after downsampling is sent in chunks, with each
-     * chunk's segment times shifted back into the clip's own timeline.
+     * ponytail: one request per stretch, one after another. A long call
+     * takes minutes; a few at a time is the upgrade if that is too slow.
      */
     private suspend fun transcribeClip(
         http: HttpClient,
-        stt: Stt,
+        hearing: Hearing,
         pcm: ByteArray,
         rate: Int,
     ): List<CallTranscribe.Segment> {
         val small = PcmResample.to(pcm, rate, STT_RATE)
-        val out = mutableListOf<CallTranscribe.Segment>()
-        val bytesPerSec = STT_RATE * 2
-        var at = 0
-        while (at < small.size) {
-            val end = minOf(at + MAX_CHUNK_BYTES, small.size)
-            val slice = small.copyOfRange(at, end)
-            val offsetMs = (at.toLong() * 1000L) / bytesPerSec
-            val wav = WavFile.encode(slice, STT_RATE)
-            CallTranscribe.transcribe(http, stt.endpoint, stt.key, stt.model, wav)
-                .forEach { out += CallTranscribe.Segment(it.startMs + offsetMs, it.text) }
-            at = end
+        return speechSpans(small, STT_RATE).mapNotNull { span ->
+            val wav = WavFile.encode(small.copyOfRange(span.first, span.last + 1), STT_RATE)
+            ArmillaryTranscribe.transcribe(http, hearing, wav, "wav").takeIf { it.isNotBlank() }
+                ?.let { CallTranscribe.Segment(span.first.toLong() * 1000L / (STT_RATE * 2), it) }
+        }
+    }
+
+    /**
+     * Where [pcm] (16-bit mono at [rate]) has speech, as byte ranges: runs
+     * of loud frames, joined across pauses shorter than [gapMs], padded by
+     * [padMs] each side, and cut at [maxMs] so each stays well under the
+     * vendor's 16 MB body. A run of less than a quarter second is a click.
+     *
+     * Loud is [overFloor] times the room, at least [minSpeechRms] and at
+     * most [ceilingRms]. The room is the quietest tenth of the track, zeros
+     * and all: a track that is digital silence between words has no hiss
+     * to measure, and its quietest frame that is not zero was speech.
+     *
+     * ponytail: the dictation's energy gate ([EndOfSpeech]), not a voice
+     * model. A track whose noise is over [ceilingRms] reads as one long
+     * stretch cut at [maxMs], which is what was sent before. The
+     * thresholds are the calibration knobs.
+     */
+    internal fun speechSpans(
+        pcm: ByteArray,
+        rate: Int,
+        gapMs: Int = 800,
+        padMs: Int = 200,
+        maxMs: Int = 25_000,
+        minSpeechRms: Double = 500.0,
+        overFloor: Double = 3.0,
+        ceilingRms: Double = 1_500.0,
+    ): List<IntRange> {
+        val frame = rate * 2 * FRAME_MS / 1000
+        val n = pcm.size / frame
+        if (n == 0) return emptyList()
+        val loud = DoubleArray(n) { EndOfSpeech.rms(pcm, frame / 2, from = it * frame) }
+        val room = loud.sorted()[n / 10]
+        val threshold = (room * overFloor).coerceIn(minSpeechRms, ceilingRms)
+        val speech = BooleanArray(n) { loud[it] >= threshold }
+        val gap = gapMs / FRAME_MS
+        val pad = padMs / FRAME_MS
+        val max = maxMs / FRAME_MS
+        val out = mutableListOf<IntRange>()
+        var i = 0
+        while (i < n) {
+            if (!speech[i]) { i++; continue }
+            var end = i
+            var j = i + 1
+            while (j < n && j - end <= gap) { if (speech[j]) end = j; j++ }
+            if ((end - i + 1) * FRAME_MS >= MIN_SPEECH_MS) {
+                var from = maxOf(0, i - pad)
+                val to = minOf(n - 1, end + pad)
+                while (from <= to) {
+                    val stop = minOf(to, from + max - 1)
+                    out += (from * frame) until ((stop + 1) * frame)
+                    from = stop + 1
+                }
+            }
+            i = end + 1
         }
         return out
     }
@@ -231,13 +249,10 @@ object CallRecordingPublisher {
     }
 
     private const val TAG = "CallRecording"
-    internal const val OPENAI_STT = "https://api.openai.com/v1/audio/transcriptions"
-    private const val WHISPER_MODEL = "whisper-1"
 
     /** What Whisper works at internally; sending more is wasted upload. */
     private const val STT_RATE = 16_000
 
-    /** Headroom under OpenAI's 25 MB multipart cap. At 16 kHz mono this
-     *  is a little over 10 minutes of audio per request. */
-    private const val MAX_CHUNK_BYTES = 20 * 1024 * 1024
+    private const val FRAME_MS = 30
+    private const val MIN_SPEECH_MS = 250
 }

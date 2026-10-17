@@ -31,7 +31,7 @@ Urbit chat that you actually use day-to-day.
 - Bookmark messages for later.
 - Drag-reorder groups; build folders for the conversations you check
   most.
-- Optional AI features, such as "catch me up on N unread" summaries and emoji-react suggestions. Off by default. Bring your own OpenAI, Anthropic or compatible API key: it is encrypted on-device and only ever sent to the provider you select. Or add the optional Armillary provider and buy model inference through your own Urbit ship, from a vendor ship you choose, paying by card or by bitcoin. Either way there is no Talon account and no Talon bill.
+- Optional AI: catch-up summaries, an assistant, dictation and call transcripts. Top up a few dollars through Armillary on your own Urbit ship, from a vendor ship you choose, by card or by bitcoin, and they all turn on. No accounts and no keys to copy in.
 
 **What it isn't**
 - Not a host. Bring your own ship (or get one from a friend, or one of

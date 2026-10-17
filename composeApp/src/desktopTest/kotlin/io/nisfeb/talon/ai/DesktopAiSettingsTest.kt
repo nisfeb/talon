@@ -48,17 +48,6 @@ class DesktopAiSettingsTest {
     }
 
     @Test
-    fun `turning sync off says it was turned off`() {
-        val seen = mutableListOf<Boolean>()
-        DesktopAiSettings().apply {
-            onStateChange = { _, off -> seen += off }
-            setSyncEnabled(false)
-            setSyncEnabled(false)
-        }
-        assertEquals(listOf(true, false), seen, "only the transition counts")
-    }
-
-    @Test
     fun `an unreadable file is kept as a backup, key and all, and defaults written`() {
         file.parentFile.mkdirs()
         file.writeText("""{"provider":"OpenAi","apiKey":"sk-precious" GARBAGE""")
@@ -86,7 +75,20 @@ class DesktopAiSettingsTest {
         val id = DesktopAiSettings().state.value.deviceId
         assertTrue(id.isNotBlank())
         assertEquals(id, DesktopAiSettings().state.value.deviceId)
-        assertEquals("sk-a", DesktopAiSettings().state.value.apiKey)
+    }
+
+    @Test
+    fun `a file from before Armillary-only is reset once and written, and an off after it stays`() {
+        file.parentFile.mkdirs()
+        file.writeText("""{"provider":"Anthropic","apiKey":"sk-a","model":null,"deviceId":"d1","catchMeUpEnabled":false,"agentEnabled":false}""")
+        val first = DesktopAiSettings().state.value
+        assertEquals("", first.apiKey, "the own key is dropped")
+        assertTrue(first.catchMeUpEnabled && first.assistantOn())
+        assertTrue(first.savedProfile!!.armillaryOnly && first.savedProfile!!.ownKeysDropped)
+        assertFalse("sk-a" in file.readText(), "and written, not only held")
+        val s = DesktopAiSettings()
+        s.setProfile(s.state.value.savedProfile!!.copy(features = s.state.value.savedProfile!!.features + (AiFeature.CatchUp to FeatureSetting(false))))
+        assertFalse(DesktopAiSettings().state.value.savedProfile!!.isOn(AiFeature.CatchUp), "the reset does not run again")
     }
 
     @Test
