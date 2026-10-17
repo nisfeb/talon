@@ -29,4 +29,17 @@ class NativeCallsTest {
         assertTrue(RingIntents.isRing { it in answer })
         assertFalse(RingIntents.isRing { it == "open_whom" })
     }
+
+    @Test
+    fun aRingAnsweredOnAnotherDeviceIsFiledSo() {
+        val none = CallUiState.None
+        val ended = { why: String -> CallUiState.Ended("~zod", why) }
+        assertEquals(CallEnd.AnsweredElsewhere, callEnd(incoming = true, answered = false, end = none))
+        assertEquals(CallEnd.Missed, callEnd(incoming = true, answered = false, end = ended("missed")))
+        assertEquals(CallEnd.Missed, callEnd(incoming = true, answered = false, end = ended("ended")))
+        assertEquals(CallEnd.Rejected, callEnd(incoming = true, answered = false, end = ended("declined")))
+        assertEquals(CallEnd.Remote, callEnd(incoming = true, answered = true, end = ended("ended")))
+        assertEquals(CallEnd.Remote, callEnd(incoming = false, answered = false, end = ended("no answer")))
+        assertEquals(CallEnd.Local, callEnd(incoming = false, answered = true, end = none))
+    }
 }

@@ -134,17 +134,16 @@ class TelecomCalls(
         conn.destroy()
     }
 
-    /** Which the call log files it as: missed if a ring nobody
-     *  answered, rejected if we declined it, otherwise who hung up. */
-    private fun endCause(incoming: Boolean, answered: Boolean): Int {
-        val end = controller.state.value
-        return when {
-            incoming && !answered && end is CallUiState.Ended && end.reason != "declined" -> DisconnectCause.MISSED
-            incoming && !answered -> DisconnectCause.REJECTED
-            end is CallUiState.Ended -> DisconnectCause.REMOTE
-            else -> DisconnectCause.LOCAL
+    /** Which the call log files it as ([callEnd]): a ring another of
+     *  our devices answered was filed as one we rejected. */
+    private fun endCause(incoming: Boolean, answered: Boolean): Int =
+        when (callEnd(incoming, answered, controller.state.value)) {
+            CallEnd.Missed -> DisconnectCause.MISSED
+            CallEnd.Rejected -> DisconnectCause.REJECTED
+            CallEnd.AnsweredElsewhere -> DisconnectCause.ANSWERED_ELSEWHERE
+            CallEnd.Remote -> DisconnectCause.REMOTE
+            CallEnd.Local -> DisconnectCause.LOCAL
         }
-    }
 
     /** 16.1+: the same lifecycle on a core-telecom call. */
     private suspend fun registerCallModern(id: String, peer: String, incoming: Boolean) {

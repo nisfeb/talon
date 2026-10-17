@@ -39,3 +39,20 @@ object RingIntents {
     /** Whether an intent is about a ring, and so may show over the lock screen. */
     fun isRing(has: (String) -> Boolean): Boolean = has(ANSWER_FROM) || has(RINGING_FROM)
 }
+
+/** How a call is filed in the system's call log. */
+enum class CallEnd { Missed, Rejected, AnsweredElsewhere, Remote, Local }
+
+/**
+ * How a call that [end]ed is filed: missed if a ring nobody answered,
+ * rejected if we declined it, answered elsewhere if another of our
+ * devices took it, otherwise who hung up.
+ */
+fun callEnd(incoming: Boolean, answered: Boolean, end: CallUiState): CallEnd = when {
+    incoming && !answered && end is CallUiState.Ended && end.reason != "declined" -> CallEnd.Missed
+    // Handled on another device is the one way a ring ends in None.
+    incoming && !answered && end is CallUiState.None -> CallEnd.AnsweredElsewhere
+    incoming && !answered -> CallEnd.Rejected
+    end is CallUiState.Ended -> CallEnd.Remote
+    else -> CallEnd.Local
+}
