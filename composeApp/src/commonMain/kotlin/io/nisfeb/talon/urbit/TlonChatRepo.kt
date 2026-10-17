@@ -249,7 +249,7 @@ class TlonChatRepo(
     /** The thread the user is reading, as [openWhom] is the chat. Set
      *  by the thread list and by the gallery / notebook post screens
      *  (whose comments are that post's thread). */
-    private var openThread: Pair<String, String>? = null
+    @Volatile private var openThread: Pair<String, String>? = null
     private fun focusedThread(): Pair<String, String>? = if (appForegrounded) openThread else null
 
     fun setOpenThread(whom: String?, parentId: String?) {
