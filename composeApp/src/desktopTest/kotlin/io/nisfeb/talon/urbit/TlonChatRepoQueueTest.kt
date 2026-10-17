@@ -207,12 +207,27 @@ class TlonChatRepoQueueTest {
         }
     }
 
+    // Nor one refused ("Not sent") or still in flight: the purge kept only
+    // queued rows, so a refusal vanished on the next refresh (review M1).
     @Test
     fun `opening the channel does not throw away a message waiting for the ship`() = live {
         db.messages().upsert(MessageEntity(nest, "local_9", "~zod", 9_000, "[]", "/chat", status = "queued"))
+        db.messages().upsert(MessageEntity(nest, "local_10", "~zod", 10_000, "[]", "/chat", status = "failed"))
+        db.messages().upsert(MessageEntity(nest, "local_11", "~zod", 11_000, "[]", "/chat", status = "pending"))
         ship.scries["channels/v4/$nest/posts/newest/100/post"] = """{"posts":{}}"""
         repo.refreshConversation(nest)
-        assertEquals("queued", db.messages().getOne(nest, "local_9")?.status)
+        assertEquals(listOf("queued", "failed", "pending"), listOf("local_9", "local_10", "local_11").map { db.messages().getOne(nest, it)?.status })
+    }
+
+    @Test
+    fun `a post refused by the ship still says so after the channel is read again`() = live {
+        ship.refuse = { if (it.app == "channels") "no" else null }
+        assertFailsWith<PokeNacked> { repo.send(nest, "refused") }
+        val id = db.messages().before(nest, Long.MAX_VALUE, 5).single().id
+        assertEquals("failed", db.messages().getOne(nest, id)?.status)
+        ship.scries["channels/v4/$nest/posts/newest/100/post"] = """{"posts":{}}"""
+        repo.refreshConversation(nest)
+        assertEquals("failed", db.messages().getOne(nest, id)?.status, "still shown as not sent")
     }
 
     @Test

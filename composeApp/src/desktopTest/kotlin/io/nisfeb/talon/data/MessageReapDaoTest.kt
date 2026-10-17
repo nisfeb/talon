@@ -65,11 +65,54 @@ class MessageReapDaoTest {
         db.messages().upsert(row("local_1", 1000, status = "pending"))
         db.messages().upsert(row("local_2", 2000, status = "pending"))
         db.messages().upsert(row("~author/999", 1500)) // server-echo white row
-        val n = db.messages().reapOldestLocalTwin(whom, me)
+        val n = db.messages().reapOldestLocalTwin(whom, me, 2000)
         assertEquals(1, n)
         assertNull(db.messages().getOne(whom, "local_1"))      // oldest twin gone
         assertNotNull(db.messages().getOne(whom, "local_2"))   // newer twin kept
         assertNotNull(db.messages().getOne(whom, "~author/999")) // white row untouched
         Unit
+    }
+
+    // The echo of a post sent from another device found no exact twin and
+    // took this device's oldest local row: a queued or failed post, or a
+    // reply, which then never went (review M2, 2026-10-17).
+    @Test
+    fun `fallback takes only a post in flight, top-level, sent no later than the echo`() = runBlocking {
+        db.messages().upsert(row("local_1", 1000, status = "queued"))
+        db.messages().upsert(row("local_2", 1100, status = "failed"))
+        db.messages().upsert(row("local_3", 1200, status = "pending").copy(parentId = "170141184506"))
+        db.messages().upsert(row("local_4", 9000, status = "pending"))
+        assertEquals(0, db.messages().reapOldestLocalTwin(whom, me, 5000), "an echo older than every post in flight takes none")
+        assertEquals(1, db.messages().reapOldestLocalTwin(whom, me, 8500), "a second of skew either way")
+        assertNull(db.messages().getOne(whom, "local_4"))
+        for (kept in listOf("local_1", "local_2", "local_3")) assertNotNull(db.messages().getOne(whom, kept), kept)
+        Unit
+    }
+
+    // A refresh's purge of old ghosts deleted every local row not queued:
+    // a refused post's "Not sent" went, and a post deleted mid-send had no
+    // row for its send to mark (review M1).
+    @Test
+    fun `the purge takes only a row with no send-state`() = runBlocking {
+        db.messages().upsert(row("local_1", 1000))
+        db.messages().upsert(row("~author/170.1", 1000))
+        for ((id, status) in listOf("local_2" to "pending", "local_3" to "queued", "local_4" to "failed")) {
+            db.messages().upsert(row(id, 2000, status = status))
+        }
+        db.messages().upsert(row("170141184506", 3000, author = "~bus"))
+        db.messages().purgeStaleLocalIds(whom)
+        assertNull(db.messages().getOne(whom, "local_1"))
+        assertNull(db.messages().getOne(whom, "~author/1701"))
+        for (kept in listOf("local_2", "local_3", "local_4", "170141184506")) assertNotNull(db.messages().getOne(whom, kept), kept)
+        Unit
+    }
+
+    @Test
+    fun `a post left in flight is queued at start, and nothing else moves`() = runBlocking {
+        db.messages().upsert(row("local_1", 1000, status = "pending"))
+        db.messages().upsert(row("local_2", 2000, status = "failed"))
+        db.messages().upsert(row("local_3", 3000, status = "queued"))
+        assertEquals(1, db.messages().requeueStalePending())
+        assertEquals(listOf("queued", "failed", "queued"), listOf("local_1", "local_2", "local_3").map { db.messages().getOne(whom, it)?.status })
     }
 }

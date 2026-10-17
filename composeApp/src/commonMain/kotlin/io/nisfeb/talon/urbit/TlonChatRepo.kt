@@ -402,6 +402,11 @@ class TlonChatRepo(
             // clean DB it's a no-op.
             runCatching { dedupeDottedIds() }
                 .onFailure { Log.w(TAG, "dotted-id dedupe failed", it) }
+            // A post left in flight by the last run (killed mid-send) goes
+            // with the queue: the refresh's purge used to delete it instead.
+            runCatching { db.messages().requeueStalePending() }
+                .onSuccess { if (it > 0) Log.i(TAG, "$it post(s) left in flight queued") }
+                .onFailure { Log.w(TAG, "in-flight posts not queued", it) }
             runSessionLoop(session)
         }
         // Rows stored before searchText existed get it, a batch at a
@@ -4033,7 +4038,7 @@ class TlonChatRepo(
             val latencyMs = nowMs() - sentMs
             Log.i(TAG, "echo reaped twin whom=$whom latencyMs=$latencyMs")
         } else if (nowMs() - sentMs < 60_000) {
-            val fallback = db.messages().reapOldestLocalTwin(whom, ourPatp)
+            val fallback = db.messages().reapOldestLocalTwin(whom, ourPatp, sentMs)
             if (fallback > 0) {
                 Log.w(TAG, "reap exact miss whom=$whom sentMs=$sentMs latencyMs=${nowMs() - sentMs}; FIFO fallback cleared grey twin")
             }

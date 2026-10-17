@@ -217,10 +217,20 @@ abstract class MessageDao {
      * echo arrived under a different id. Safe because %channels never
      * assigns author-prefixed ids.
      */
-    // Never a queued row: it is waiting for the ship, and this runs on
-    // every refresh of the conversation, opening it included.
-    @Query("DELETE FROM messages WHERE whom = :whom AND (id LIKE '~%' OR id LIKE 'local_%') AND (status IS NULL OR status != 'queued')")
+    // Only a row with no send-state: this runs on every refresh of the
+    // conversation, opening it included. A pending post is in flight and
+    // its send marks it queued or failed next; a queued one waits for the
+    // ship; a failed one says "Not sent". Deleted, each was lost unseen.
+    @Query("DELETE FROM messages WHERE whom = :whom AND (id LIKE '~%' OR id LIKE 'local_%') AND status IS NULL")
     abstract suspend fun purgeStaleLocalIds(whom: String)
+
+    /**
+     * Our posts still marked in flight when the app starts: no send of
+     * theirs can be running, so they wait with the queue, whose drain asks
+     * the ship whether each landed before sending it again.
+     */
+    @Query("UPDATE messages SET status = 'queued' WHERE status = 'pending'")
+    abstract suspend fun requeueStalePending(): Int
 
     /** Our messages waiting for the ship (status "queued"), oldest first, the order they go out in. */
     @Query("SELECT * FROM messages WHERE status = 'queued' ORDER BY sentMs ASC")
@@ -296,16 +306,22 @@ abstract class MessageDao {
      * invokes this after confirming an exact miss, so a re-delivered
      * echo (whose twin is already gone) can't clobber a different
      * in-flight post.
+     *
+     * Only a top-level post in flight, and none sent after the echo's
+     * own [sentMs] (a second either way, the skew this is for): a queued
+     * or failed post, a reply, or a later post was reaped by the echo of
+     * one sent from another device, and never went.
      */
     @Query("""
         DELETE FROM messages
         WHERE whom = :whom AND id = (
             SELECT id FROM messages
             WHERE whom = :whom AND author = :author AND id LIKE 'local_%'
+              AND status = 'pending' AND parentId IS NULL AND sentMs <= :sentMs + 1000
             ORDER BY sentMs ASC LIMIT 1
         )
     """)
-    abstract suspend fun reapOldestLocalTwin(whom: String, author: String): Int
+    abstract suspend fun reapOldestLocalTwin(whom: String, author: String, sentMs: Long): Int
 
     /**
      * Set the send-state column for one row. The send path marks a
