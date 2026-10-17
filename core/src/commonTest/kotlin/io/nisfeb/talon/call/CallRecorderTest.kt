@@ -33,7 +33,9 @@ class CallRecorderTest {
     @Test
     fun aMuteMidRecordingIsKeptAsSilenceOfItsLength() {
         var muted = false
-        val rec = CallRecorder("test") { muted }
+        // A clock of its own: a millisecond between start and the first
+        // frame is lead silence, and would be counted here.
+        val rec = CallRecorder("test", now = { 1_000L }) { muted }
         rec.start()
         val us = rec.sink("~zod", isSelf = true)!!
         us(tone(480), 48_000)
