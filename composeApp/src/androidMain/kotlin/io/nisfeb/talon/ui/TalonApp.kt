@@ -485,6 +485,13 @@ fun TalonApp(
         if (mailShipUrl != null && loggedInShip != null) armillaryRepo.attach(mailShipUrl, loggedInShip)
         else armillaryRepo.detach()
     }
+    // Back in front: the vendor's picks and the account read again. The
+    // process outlives the screen by days, so its start is not enough.
+    DisposableEffect(armillaryRepo) {
+        val back = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_START) armillaryRepo.resumed() }
+        ProcessLifecycleOwner.get().lifecycle.addObserver(back)
+        onDispose { ProcessLifecycleOwner.get().lifecycle.removeObserver(back) }
+    }
     val orreryActions by orreryRepo.actions.collectAsState()
     LaunchedEffect(app.aiSettings) {
         io.nisfeb.talon.orrery.movePrivateModelIn(app.aiSettings, app.uiSettings)
