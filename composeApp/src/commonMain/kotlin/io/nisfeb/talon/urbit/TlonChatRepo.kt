@@ -4223,9 +4223,10 @@ class TlonChatRepo(
 
     /** %activity's base notify-count: what the app-icon badge shows, the
      *  number the ship's %trunk sends with an iPhone's alerts. Null until a
-     *  summary carries it. */
+     *  summary carries it, and while a read made here is owed: the ship's
+     *  number does not know of it yet, so the badge counts what is here. */
     private val _notifiedTotal = MutableStateFlow<Int?>(null)
-    val notifiedTotal: StateFlow<Int?> = _notifiedTotal.asStateFlow()
+    val notifiedTotal: Flow<Int?> = combine(_notifiedTotal, owedReads) { total, owed -> total.takeIf { owed.isEmpty() } }
 
     internal suspend fun applyActivityUpdate(obj: JsonObject) {
         val focused = focusedWhom()

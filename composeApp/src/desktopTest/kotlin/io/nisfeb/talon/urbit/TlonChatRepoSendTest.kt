@@ -16,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonArray
@@ -325,6 +326,22 @@ class TlonChatRepoSendTest {
         kotlinx.coroutines.withTimeout(10_000) { while (ship.pokesTo("activity").size < 2) delay(50) }
         assertEquals(setOf("~bus", "~nec"), ship.pokesTo("activity").map { it.json.toString().substringAfter("\"ship\":\"").substringBefore("\"") }.toSet())
         assertEquals(listOf(0, 0), listOf("~bus", "~nec").map { db.unreads().getOne(it)!!.count })
+    }
+
+    // The iPhone's icon badge took the ship's total over the counts here,
+    // so a chat read while the ship was out of reach kept its alerts on
+    // the icon (review Low, App.kt 855-862). Real time: the read's own
+    // retries wait out about seven seconds before it is owed.
+    @Test
+    fun `the ship's badge total stands aside while a read made here is owed`() = live {
+        repo.applyActivityUpdate(Json.parseToJsonElement("""{"activity":{"base":{"count":4,"notify-count":4,"recency":1,"notify":true,"unread":null}}}""").jsonObject)
+        assertEquals(4, repo.notifiedTotal.first())
+        ship.lose = { if (it.app == "activity") java.io.IOException("The network connection was lost.") else null }
+        repo.markRead("~bus")
+        assertNull(repo.notifiedTotal.first(), "the badge counts what is here")
+        ship.lose = { null }
+        repo.drainQueue()
+        assertEquals(4, repo.notifiedTotal.first(), "heard: the ship's number again")
     }
 
     @Test
