@@ -364,10 +364,7 @@ class OrreryRepo(
         val now = nowMs()
         val waiting = answering.updateAndGet { m ->
             m.filter { (id, sent) ->
-                val there = fromShip.firstOrNull { it.id == id }
-                // Shown: gone from the open list, or no longer a proposal.
-                val shown = there == null || there.status != "proposed"
-                !shown && now - sent.second < ANSWER_GRACE_MS
+                !answerShown(fromShip.firstOrNull { it.id == id }, sent.first) && now - sent.second < ANSWER_GRACE_MS
             }
         }
         val list = waiting.entries.fold(fromShip) { l, (id, sent) -> settledActions(l, id, sent.first) }
@@ -1990,6 +1987,21 @@ class OrreryRepo(
 }
 
 /** The key's id is the part of the token before the dot; the ship answers it separately too. */
+
+/**
+ * Whether the ship's list shows an answer sent as [sent]: the action gone
+ * from it, or at that open status or past it (proposed, then approved,
+ * then claimed). An answer that closes it shows only once it is gone.
+ * "No longer a proposal" was the rule, so Mark done or Remove on an
+ * approved action came back while the ship still listed it approved.
+ */
+internal fun answerShown(there: OrreryAction?, sent: String): Boolean {
+    if (there == null) return true
+    val at = OPEN_ORDER.indexOf(sent)
+    return at >= 0 && OPEN_ORDER.indexOf(there.status) >= at
+}
+
+private val OPEN_ORDER = listOf("proposed", "approved", "claimed")
 
 /** The open list after an answer: approved stays, to be done; anything else has left it. */
 internal fun settledActions(list: List<OrreryAction>, id: String, status: String): List<OrreryAction> =
