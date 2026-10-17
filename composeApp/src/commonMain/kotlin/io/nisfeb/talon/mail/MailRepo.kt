@@ -933,7 +933,13 @@ class MailRepo(
      */
     fun markManyRead(ids: Collection<String>, read: Boolean): Job =
         many(ids, if (read) "marked read" else "marked unread") { id ->
-            val t = threadCache.value[id] ?: loadThread(id) ?: return@many null
+            // A reply since the thread was read leaves the copy here with
+            // nothing unread while its row says unread, and the mark did
+            // nothing: that copy is read again.
+            val cached = threadCache.value[id]
+            val stale = read && cached != null && cached.messages.none { !it.read } &&
+                pageCache.value.values.any { p -> p.threads.any { it.id == id && it.unread } }
+            val t = cached?.takeUnless { stale } ?: loadThread(id) ?: return@many null
             val msgs = if (read) t.messages.filter { !it.read }.map { it.id }
             else listOfNotNull(t.messages.maxByOrNull { it.sent }?.id)
             if (msgs.isEmpty()) return@many null
