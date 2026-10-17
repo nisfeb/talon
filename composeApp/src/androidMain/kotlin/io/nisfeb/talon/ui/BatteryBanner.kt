@@ -30,6 +30,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 
+/**
+ * Asks the owner to let Talon run unrestricted, while Talon keeps the
+ * stream itself ([io.nisfeb.talon.TalonSyncService]); gone once granted
+ * or dismissed.
+ *
+ * Android-only: no desktop analog. Battery optimisation that freezes a
+ * background app is Android's; a computer runs Talon as it is.
+ */
 @Composable
 fun BatteryExemptionBanner(modifier: Modifier = Modifier) {
     val context = LocalContext.current

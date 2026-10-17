@@ -5,7 +5,7 @@ JVM Desktop (Linux/macOS/Windows). Source layout:
 
 - `composeApp/src/commonMain` — most features (~26k lines, 139 files)
 - `composeApp/src/androidMain` — Android-only deps + background services
-  (BootReceiver, DigestAlarmReceiver, TalonSyncService, ShortcutsPublisher)
+  (BootReceiver, LoopAlarmReceiver, TalonSyncService, ShortcutsPublisher)
   that have no desktop concept
 - `composeApp/src/desktopMain` — leaf impls only
 - `composeApp/src/desktopTest` — most automated tests run here
@@ -25,8 +25,9 @@ Every user-visible feature that one platform doesn't support needs an
 The gating UI lives in `commonMain` as `if (isFooSupported) { … }`.
 The non-supporting platform returns `false`.
 
-Existing flags: `isDailyDigestSupported`, `isVoiceMessagesSupported`,
-`isOnDeviceAiSupported`, `isOnDeviceAiFeatureSupported(...)`.
+Existing flags include `isQuickDictationSupported`, `isVoiceMessagesSupported`,
+`isOnDeviceAiSupported`, `isOnDeviceAiFeatureSupported(...)`; the
+registry at the top of `Capabilities.kt` lists them all.
 
 When you add a feature only one platform can do, the capability flag
 is part of the same change — not a follow-up.
@@ -48,11 +49,11 @@ platform *must* implement (image pickers, `AppDatabaseConstructor`,
 
 ### 3. Don't fake a feature; gate it
 
-If desktop can't do Daily Digest because there's no AlarmManager, the
-desktop UI should *not show* the digest section. Don't grey it out;
-don't show "coming soon"; don't ship a stub that emits a Toast. Faking
-creates expectation; gating creates clarity. The capability flag plus
-the `if` block in the screen handles this.
+If desktop can't do quick dictation because it has no widget, tile or
+assistant role, the desktop UI should *not show* its setup buttons.
+Don't grey it out; don't show "coming soon"; don't ship a stub that
+emits a Toast. Faking creates expectation; gating creates clarity. The
+capability flag plus the `if` block in the screen handles this.
 
 ### 4. Document new capability flags in `Capabilities.kt`
 

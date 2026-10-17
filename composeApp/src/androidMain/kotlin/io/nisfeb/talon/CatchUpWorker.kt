@@ -32,6 +32,10 @@ import java.util.concurrent.TimeUnit
  * of work, but bounded — we delay() up to 8 seconds for an open
  * channel before giving up, so even a wedged ship doesn't burn
  * the worker's runtime budget.
+ *
+ * Android-only: no desktop analog. It is a backstop for a process
+ * Android froze or killed; a desktop Talon is one the owner keeps open,
+ * and closing it quits.
  */
 class CatchUpWorker(
     context: Context,

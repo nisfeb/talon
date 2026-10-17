@@ -31,6 +31,9 @@ import kotlinx.coroutines.launch
  *
  * Long-lived shortcuts are a prerequisite for direct share and also
  * enable chat-bubble conversations on Android 11+.
+ *
+ * Android-only: no desktop analog. Sharing Shortcuts are a launcher and
+ * share-sheet surface; a computer has neither for Talon to fill.
  */
 class ShortcutsPublisher(private val context: Context, private val db: AppDatabase) {
 
