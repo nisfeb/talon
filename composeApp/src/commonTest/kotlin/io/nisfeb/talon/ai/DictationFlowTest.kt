@@ -187,18 +187,32 @@ class DictationFlowTest {
         assertEquals("Alone.", DictationFlow.withEarlier("Alone.", emptyList()))
     }
 
+    /** A decision model that judges by [calendar]: the questions it calls calendar-only, for today. */
+    private class Judge(val calendar: Set<String>) : io.nisfeb.talon.orrery.Decider {
+        override suspend fun ask(state: JsonObject, questions: JsonObject): io.nisfeb.talon.orrery.Decision {
+            val q = (state["question"] as JsonPrimitive).content
+            return io.nisfeb.talon.orrery.Decision(kotlinx.serialization.json.buildJsonObject {
+                put("calendar_only", kotlinx.serialization.json.buildJsonObject { put("noul", JsonPrimitive(if (q in calendar) 0.96 else 0.04)) })
+                put("days", kotlinx.serialization.json.buildJsonObject { put("choice", JsonPrimitive(if (q in calendar) "today" else "tomorrow")) })
+            })
+        }
+    }
+
+    /** A flow wired as the phone wires it (Loops.calendarAnswer), judged by [judge]. */
+    private fun judged(judge: Judge, questions: MutableList<Pair<String, List<DictationFlow.Earlier>>>, told: MutableList<String>) = DictationFlow(
+        ask = { q, earlier -> questions += q to earlier; "Answered." },
+        instruct = { told += it; Instructed(reply = "Noted.") },
+        hand = { _, _ -> error("not filed") },
+        answer = { _, _ -> },
+        decide = { _, _ -> null },
+        quick = { t, earlier -> CalendarQuestion.decide(judge, t, earlier, kotlinx.datetime.LocalDate(2026, 10, 16))?.let { "The day's events." } },
+    )
+
     @Test
     fun `what is left before a trip goes to the model, and so do its follow-ups`() = runBlocking {
         val questions = mutableListOf<Pair<String, List<DictationFlow.Earlier>>>()
-        val flow = DictationFlow(
-            ask = { q, earlier -> questions += q to earlier; "Answered." },
-            instruct = { error("a question is not orrery's") },
-            hand = { _, _ -> error("a question is not orrery's") },
-            answer = { _, _ -> },
-            decide = { _, _ -> null },
-            // As the phone wires it (Loops.calendarAnswer).
-            quick = { t, earlier -> CalendarQuestion.parse(t, kotlinx.datetime.LocalDate(2026, 10, 16), earlier.lastOrNull()?.words)?.let { "The day's events." } },
-        )
+        val told = mutableListOf<String>()
+        val flow = judged(Judge(setOf("What's on today")), questions, told)
         // sneagan's conversation, 2026-10-16: the first and the last were answered with the day's events.
         var earlier = emptyList<DictationFlow.Earlier>()
         for (q in listOf("What do I have left to do before Barcelona?", "When do I arrive in Barcelona?", "What do I have to get done before I go")) {
@@ -207,6 +221,19 @@ class DictationFlowTest {
             earlier = earlier + DictationFlow.Earlier(q, r.line)
         }
         assertEquals(listOf(0, 1, 2), questions.map { it.second.size }, "each goes on from what came before it")
+        // What the decision model calls calendar-only is answered on the phone, question mark or not.
+        assertEquals(DictationFlow.Reply("The day's events.", DictationRoute.Ask), flow.handle("What's on today"))
+        assertTrue(told.isEmpty())
+    }
+
+    @Test
+    fun `a reminder with a day in it goes to orrery, not the calendar answer`() = runBlocking {
+        val questions = mutableListOf<Pair<String, List<DictationFlow.Earlier>>>()
+        val told = mutableListOf<String>()
+        val r = judged(Judge(emptySet()), questions, told).handle("Remind me about the dentist tomorrow")
+        assertEquals(DictationFlow.Reply("Noted.", DictationRoute.Tell), r)
+        assertEquals(listOf("Remind me about the dentist tomorrow"), told)
+        assertTrue(questions.isEmpty())
     }
 
     @Test
