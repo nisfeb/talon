@@ -33,6 +33,8 @@ class DesktopShipDataEraser : ShipDataEraser {
         }
         // Asked of the store that writes it, not guessed at.
         java.io.File(io.nisfeb.talon.util.AppDirs.userData, io.nisfeb.talon.ui.menuSeenFileName(ship)).delete()
+        // Drafts are kept on disk too, a file per ship (FileDraftStore).
+        java.io.File(io.nisfeb.talon.util.AppDirs.userData, io.nisfeb.talon.ui.draftsFileName(ship)).delete()
         io.nisfeb.talon.mail.MailThreadFiles.erase(ship)
         if (pendingFile.run { exists() && readText().trim() == ship }) pendingFile.delete()
         Log.i(TAG, "erased $ship ($gone files)")

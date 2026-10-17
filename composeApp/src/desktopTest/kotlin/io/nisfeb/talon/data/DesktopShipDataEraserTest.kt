@@ -50,6 +50,23 @@ class DesktopShipDataEraserTest {
     }
 
     @Test
+    fun `it deletes the ship's drafts, and only that ship's`() {
+        // Drafts went to disk with the file-backed store: "forget and
+        // erase" left them behind until this line.
+        val mine = File(AppDirs.userData, io.nisfeb.talon.ui.draftsFileName("~test-eraser-four"))
+        val theirs = File(AppDirs.userData, io.nisfeb.talon.ui.draftsFileName("~test-eraser-five"))
+        try {
+            mine.writeText("{}")
+            theirs.writeText("{}")
+            DesktopShipDataEraser().erase("~test-eraser-four").getOrThrow()
+            assertFalse(mine.exists(), "the erased ship's drafts survived")
+            assertTrue(theirs.exists())
+        } finally {
+            mine.delete(); theirs.delete()
+        }
+    }
+
+    @Test
     fun `erasing a ship that stored nothing succeeds quietly`() {
         // Somebody can sign out of a ship that never finished syncing.
         assertTrue(DesktopShipDataEraser().erase("~test-eraser-absent").isSuccess)
