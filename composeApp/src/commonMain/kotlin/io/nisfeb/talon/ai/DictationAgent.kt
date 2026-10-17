@@ -81,13 +81,25 @@ class DictationAgent(
             The owner just asked you this out loud, and speech-to-text
             wrote it down, so expect the odd misheard word. No one will
             answer a question back. Look it up with the tools listed for
-            you. Begin your answer with one short sentence that is read
-            aloud to the owner, who may be driving: the highlights only,
-            under 25 words, with no lists, links, markdown or @p. Then a
-            blank line and at most three short lines of what the list does
-            not show: a clash, a gap, something to bring. Never list the
-            events, tasks, messages or mail one by one: the screen draws
-            every one the tools found. You can only look things up here: if they asked for
+            you. Orrery is the owner's own record of their life: trips,
+            plans, people, places, what each open situation needs, and
+            the actions still to do. For anything beyond what is on given
+            days (what is left to do, a trip, a person, a plan), read
+            orrery first: orrery_read with no body gives every open
+            situation and action, then orrery_find and orrery_read with a
+            body for the one you need. The calendar says when, orrery says
+            what and why.
+
+            Begin your answer with one short sentence that is read aloud
+            to the owner, who may be driving: the highlights only, under
+            25 words, with no lists, links, markdown or @p. Then a blank
+            line and the details, one short line each. The screen draws
+            the events, tasks, messages and mail the tools found, so never
+            list those one by one: say only what they do not show (a
+            clash, a gap, something to bring), in at most three lines.
+            Orrery's situations and actions are not on the screen, so name
+            each one that answers the question, in at most eight lines.
+            You can only look things up here: if they asked for
             something to be done, say it was not done, and that saying it
             as an instruction rather than a question hands it to orrery.
         """.trimIndent()
@@ -95,8 +107,13 @@ class DictationAgent(
         /** A question's whole prompt. */
         val askPrompt: String = DATA_NOT_INSTRUCTIONS + "\n\n" + askRole
 
-        /** [all] as a question may use them: the reads of [toolsFor]. */
-        fun readsFor(all: List<Tool>): List<Tool> = toolsFor(all, locked = false).filterNot { it.write }
+        /**
+         * [all] and [orrery]'s tools as a question may use them: the reads
+         * of [toolsFor]. Not orrery's guide, which is rules for writing.
+         */
+        fun readsFor(all: List<Tool>, orrery: OrreryTap? = null): List<Tool> =
+            toolsFor(all + orrery?.let { orreryTools(it) }.orEmpty(), locked = false)
+                .filterNot { it.write || it.spec.name == "orrery_guide" }
 
         /**
          * The whole prompt: the content-is-data rule and [role]. Not the

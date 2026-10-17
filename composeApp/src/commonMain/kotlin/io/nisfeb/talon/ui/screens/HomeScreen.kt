@@ -148,6 +148,8 @@ fun HomeScreen(
     /** Opens the assistant; true asks it to start listening. Null
      *  where the assistant is off, and the widget says how to turn it on. */
     onOpenAssistant: ((listen: Boolean) -> Unit)? = null,
+    /** Starts a spoken check-in with Archie on the dictation card. Null where there is no such card. */
+    onTalk: (() -> Unit)? = null,
     contacts: ContactMap,
     ourShip: String,
     /** Where the dial thinks you are, or null before anyone has said. */
@@ -270,6 +272,16 @@ fun HomeScreen(
                         .copy(fontWeight = FontWeight.SemiBold),
                     modifier = Modifier.weight(1f),
                 )
+                if (onTalk != null && !editing) {
+                    io.nisfeb.talon.ui.IconButton(onClick = onTalk, tip = "Talk to ${io.nisfeb.talon.ui.icons.ASSISTANT_NAME}") {
+                        Icon(
+                            io.nisfeb.talon.ui.icons.ArchieMark,
+                            contentDescription = "Talk to ${io.nisfeb.talon.ui.icons.ASSISTANT_NAME}",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(32.dp),
+                        )
+                    }
+                }
                 // No Arrange button. A long press on any widget starts
                 // it, which is the gesture people already try on a page
                 // of tiles.

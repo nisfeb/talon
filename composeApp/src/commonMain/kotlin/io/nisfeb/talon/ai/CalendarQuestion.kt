@@ -4,6 +4,14 @@ import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.CalendarTask
 import io.nisfeb.talon.calendar.daysOf
 import io.nisfeb.talon.calendar.dueDate
+import io.nisfeb.talon.orrery.DecideSettings
+import io.nisfeb.talon.orrery.Decider
+import io.nisfeb.talon.orrery.OpenRouterDecider
+import io.nisfeb.talon.orrery.attempt
+import io.nisfeb.talon.orrery.onVendor
+import io.nisfeb.talon.orrery.decisionKey
+import io.nisfeb.talon.orrery.under
+import io.ktor.client.HttpClient
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
@@ -12,6 +20,15 @@ import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import kotlin.time.Instant
 
 /**
@@ -20,7 +37,8 @@ import kotlin.time.Instant
  * spoken line come from it in no time. On the phone a model took 18 s of
  * its 21 to say what the card already showed. Only plain questions about
  * what is on, for a day or a few; anything else (with whom, when is X,
- * am I free) goes to the model as before.
+ * am I free, what is left to do before a trip) goes to the model, which
+ * reads orrery too. The decision model tells which ([decide]).
  */
 object CalendarQuestion {
     /** The days asked about, and how to say them: "today", "this week", "on Friday". */
@@ -28,56 +46,100 @@ object CalendarQuestion {
         val oneDay: Boolean get() = from == to
     }
 
-    private val ASKS = listOf(
-        Regex("""\bwhat(?:'s| is| do i have)? (?:on|happening|going on|planned|scheduled|coming up)\b"""),
-        Regex("""\bwhat do i have\b"""),
-        Regex("""\b(?:do|have) i (?:have|got) anything\b"""),
-        Regex("""\b(?:what|how)(?:'s| is| does| do)? my (?:day|week|weekend|schedule|calendar|agenda|morning|afternoon|evening)\b"""),
-        Regex("""^(?:my |the )?(?:calendar|schedule|agenda)\b"""),
-        Regex("""\bwhat(?:'s| is) (?:next|my next (?:event|meeting|thing|appointment))\b"""),
-    )
-
-    /** Asked about something the card does not show by itself: the model, then. */
-    private val NOT_PLAIN = Regex("""\b(?:with|about|when is|when's|where|who|free|busy|how many|how long|add|remind|cancel|move|delete|book|schedule a|invite)\b""")
-
     private val WEEKDAYS = DayOfWeek.entries.associateBy { it.name.lowercase() }
 
+    /** How sure the decision model must be that the days are the whole answer: a wrong yes swallows a question, or a reminder. */
+    const val SURE = 0.8
+
+    /** How long the decision may take before the model is asked instead. */
+    const val WAIT_MS = 3_000L
+
     /**
-     * The days [text] asks what is on, or null where it is not plainly
-     * that. After an [earlier] calendar question a bare "and tomorrow?"
-     * asks it again for other days.
+     * Asked of the decision model in one call: whether listing some days
+     * answers the owner in full, and which days. sneagan, 2026-10-16:
+     * "instead of hard coded phrases can we use the decision model to
+     * decide whether the answer takes the fast local path or the smart
+     * one?" A word list had answered "What do I have left to do before
+     * Barcelona?" with the day's events.
      */
-    fun parse(text: String, today: LocalDate, earlier: String? = null): Span? {
-        val t = text.lowercase().replace('’', '\'').replace(Regex("""[^a-z0-9' ]"""), " ").replace(Regex("""\s+"""), " ").trim()
-        if (t.isEmpty() || NOT_PLAIN.containsMatchIn(t)) return null
-        val asked = ASKS.any { it.containsMatchIn(t) }
-        val followUp = !asked && earlier != null && parse(earlier, today) != null && t.split(' ').size <= 5
-        if (!asked && !followUp) return null
-        if (Regex("""\bwhat(?:'s| is) (?:next|my next)""").containsMatchIn(t)) return Span(today, today.plus(7, DateTimeUnit.DAY), "next", next = true)
-        return span(t, today) ?: if (asked) Span(today, today, "today") else null
+    val QUESTIONS: JsonObject = buildJsonObject {
+        putJsonObject("calendar_only") {
+            put("type", "noul")
+            put("instructions", "Is the owner only asking what is on their calendar on some days, or what is next on it, so that those days' events and due tasks answer them in full?")
+            putJsonObject("criteria") {
+                put("true", "a plain question about what is on: what's on today, what do I have tomorrow, how does my week look, anything this weekend, what's next, or a bare follow-up such as \"and tomorrow?\" to one of these")
+                put("false", "anything else: an instruction or a request (add, remind, text, send, cancel, move, something to do or to keep), what is left to do, a trip, a person, a place, when or where something is, being free or busy, a count, mail or messages")
+            }
+        }
+        putJsonObject("days") {
+            put("type", "choice")
+            put("instructions", "Which days does the owner ask about? The state gives today.")
+            putJsonObject("criteria") {
+                put("today", "today, tonight, this morning, my day, or no day named")
+                put("tomorrow", "tomorrow")
+                put("this_week", "this week: today and the six days after it")
+                put("this_weekend", "this weekend")
+                put("next_week", "next week, Monday to Sunday")
+                put("next", "only the next thing on the calendar")
+                WEEKDAYS.keys.forEach { put(it, "the coming ${it.replaceFirstChar { c -> c.uppercase() }}, today if today is one") }
+                put("other", "any other day or span: a date, a month, a day already past")
+            }
+        }
     }
 
-    private fun span(t: String, today: LocalDate): Span? {
-        val week = Regex("""\b(this|next) week\b|\bmy week\b|\bthe week\b""").find(t)
-        WEEKDAYS.entries.firstOrNull { (name, _) -> Regex("""\b$name\b""").containsMatchIn(t) }?.let { (name, day) ->
-            var ahead = (day.isoDayNumber - today.dayOfWeek.isoDayNumber + 7) % 7
-            if (ahead == 0 && Regex("""\bnext $name\b""").containsMatchIn(t)) ahead = 7
+    /** What the decision model reads: the words, the exchange before them, and today. */
+    fun state(text: String, earlier: List<DictationFlow.Earlier>, today: LocalDate): JsonObject = buildJsonObject {
+        put("question", text)
+        putJsonArray("earlier") { earlier.forEach { add("owner: ${it.words}"); add("answer: ${it.line}") } }
+        put("today", "${today.dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }}, $today")
+    }
+
+    /**
+     * The days [text] asks what is on, as the decision model judged it, or
+     * null for the smart path: not only the calendar, not sure enough, no
+     * answer in time, or days it could not name. [log] gets what it said.
+     */
+    suspend fun decide(decider: Decider, text: String, earlier: List<DictationFlow.Earlier>, today: LocalDate, log: (String) -> Unit = {}): Span? {
+        val d = decider.attempt(state(text, earlier, today), QUESTIONS)
+            .getOrElse { log("decision model did not answer: ${it.message?.take(160)}"); return null }
+        val p = ((d.answers["calendar_only"] as? JsonObject)?.get("noul") as? JsonPrimitive)?.doubleOrNull
+        val days = ((d.answers["days"] as? JsonObject)?.get("choice") as? JsonPrimitive)?.contentOrNull
+        log("decision model: calendar only ${p ?: "?"}, days ${days ?: "?"}")
+        if (p == null || p < SURE || days == null) return null
+        return spanOf(days, today)
+    }
+
+    /**
+     * The decision model for [decide], where the owner turned it on and
+     * there is a key, waiting [waitMs] at most. Null, and every question
+     * goes to the model.
+     */
+    fun decider(http: HttpClient, cfg: AiSettings.Config, waitMs: Long = WAIT_MS): Decider? {
+        val d = DecideSettings().under(cfg).onVendor(cfg).takeIf { it.on } ?: return null
+        return decisionKey(cfg)?.let { OpenRouterDecider(http, it, d.copy(timeoutMs = waitMs)) }
+    }
+
+    /** The days [choice] names, from [today]; null for "other" or a choice not offered. */
+    fun spanOf(choice: String, today: LocalDate): Span? {
+        WEEKDAYS[choice]?.let { day ->
+            val ahead = (day.isoDayNumber - today.dayOfWeek.isoDayNumber + 7) % 7
             val d = today.plus(ahead, DateTimeUnit.DAY)
-            return Span(d, d, if (ahead == 0) "today" else "on ${name.replaceFirstChar { it.uppercase() }}")
+            return Span(d, d, if (ahead == 0) "today" else "on ${choice.replaceFirstChar { it.uppercase() }}")
         }
-        return when {
-            Regex("""\b(today|tonight|this morning|this afternoon|this evening|my day)\b""").containsMatchIn(t) -> Span(today, today, "today")
-            Regex("""\btomorrow\b""").containsMatchIn(t) -> today.plus(1, DateTimeUnit.DAY).let { Span(it, it, "tomorrow") }
-            Regex("""\b(this |the |my )?weekend\b""").containsMatchIn(t) -> {
+        return when (choice) {
+            "today" -> Span(today, today, "today")
+            "tomorrow" -> today.plus(1, DateTimeUnit.DAY).let { Span(it, it, "tomorrow") }
+            "this_week" -> Span(today, today.plus(6, DateTimeUnit.DAY), "this week")
+            "this_weekend" -> {
                 val sat = today.plus((DayOfWeek.SATURDAY.isoDayNumber - today.dayOfWeek.isoDayNumber + 7) % 7, DateTimeUnit.DAY)
                 val from = if (today.dayOfWeek == DayOfWeek.SUNDAY) today else sat
                 Span(from, if (today.dayOfWeek == DayOfWeek.SUNDAY) today else sat.plus(1, DateTimeUnit.DAY), "this weekend")
             }
-            week?.groupValues?.get(1) == "next" -> {
+            "next_week" -> {
                 val monday = today.plus(7 - (today.dayOfWeek.isoDayNumber - 1), DateTimeUnit.DAY)
                 Span(monday, monday.plus(6, DateTimeUnit.DAY), "next week")
             }
-            week != null -> Span(today, today.plus(6, DateTimeUnit.DAY), "this week")
+            "next" -> Span(today, today.plus(7, DateTimeUnit.DAY), "next", next = true)
             else -> null
         }
     }
