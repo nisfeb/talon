@@ -3,8 +3,7 @@ package io.nisfeb.talon
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import io.nisfeb.talon.call.TrunkSig
-import io.nisfeb.talon.call.TrunkWire
+import io.nisfeb.talon.call.CallController
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,17 +42,15 @@ class CallActionReceiver : BroadcastReceiver() {
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                val channel = app.session.openChannel()
-                channel.poke(
-                    TrunkWire.AGENT,
-                    TrunkWire.ACTION_MARK,
-                    TrunkWire.sendAction(from, TrunkSig.Reject(callId, "declined")),
-                )
-                Log.i(TAG, "declined call $callId from $from")
+                // Its own channel, ended after, and no wait on the ack: one
+                // left open held the receiver 15 s and stayed on the ship.
+                // A decline that fails degrades to an unanswered call: the
+                // caller's own ring watchdog gives up regardless.
+                if (CallController.declineWithoutApp(app.session, from, callId)) {
+                    Log.i(TAG, "declined call $callId from $from")
+                }
             } catch (t: Throwable) {
-                // The caller's own ring watchdog gives up regardless,
-                // so a failed decline degrades to an unanswered call.
-                Log.w(TAG, "decline poke failed", t)
+                Log.w(TAG, "decline failed", t)
             } finally {
                 pending.finish()
             }

@@ -2150,5 +2150,37 @@ class CallController(
         /** How long [stop] waits on the hangup of a call it ends. */
         private const val STOP_HANGUP_MS = 3_000L
 
+        /**
+         * Decline [callId] from [from] with no controller: the ring
+         * notification's Decline, in a process that may have no app up.
+         * On a channel of its own, ended on the ship after, or eyre kept
+         * it and queued its ack for nobody. Waits at most [waitMs] on the
+         * poke, whose ack comes down a stream nothing here reads. False
+         * when it could not be sent.
+         */
+        suspend fun declineWithoutApp(
+            session: UrbitSession,
+            from: String,
+            callId: String,
+            waitMs: Long = 5_000L,
+        ): Boolean {
+            val ch = session.openChannel()
+            return try {
+                // Timed out is sent: the PUT went, only its ack is late.
+                withTimeoutOrNull(waitMs) {
+                    ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.sendAction(from, TrunkSig.Reject(callId, "declined")))
+                }
+                true
+            } catch (c: kotlin.coroutines.cancellation.CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                Log.w(TAG, "decline poke failed", t)
+                false
+            } finally {
+                withContext(NonCancellable) {
+                    io.nisfeb.talon.util.runSuspendCatching { withTimeoutOrNull(3_000) { ch.delete() } }
+                }
+            }
+        }
     }
 }

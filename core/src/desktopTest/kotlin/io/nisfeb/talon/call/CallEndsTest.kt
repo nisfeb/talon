@@ -123,4 +123,18 @@ class CallEndsTest {
             c.stop()
         }
     }
+
+    @Test
+    fun `a decline from outside the app ends its channel and does not wait on the ack`() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val started = System.currentTimeMillis()
+        assertTrue(CallController.declineWithoutApp(h.session, "~zod", "c9", waitMs = 500))
+        val took = System.currentTimeMillis() - started
+        assertTrue(took < 4_000, "held for ${took}ms")
+        val puts = h.putsSnapshot()
+        val reject = puts.indexOfFirst { TrunkHarness.sigIdIn(it, "reject") == "c9" }
+        assertTrue(reject >= 0, "$puts")
+        assertTrue("\"declined\"" in puts[reject])
+        assertTrue(puts.drop(reject + 1).any { it.contains("\"action\":\"delete\"") }, "the channel is ended on the ship")
+    }
 }
