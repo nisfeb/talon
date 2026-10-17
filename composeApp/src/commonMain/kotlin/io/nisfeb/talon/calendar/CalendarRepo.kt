@@ -23,6 +23,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -192,26 +193,26 @@ class CalendarRepo(
     }
 
     /** Make a followed or Google calendar local; false when refused. */
-    suspend fun makeLocal(calId: String): Boolean {
-        val a = api ?: return false
-        val ok = runSuspendCatching { a.migrate(calId) }.getOrDefault(false)
+    suspend fun makeLocal(calId: String): Boolean = carry {
+        val a = api ?: return@carry false
+        val ok = tried { a.migrate(calId) }
         if (ok) refresh()
-        return ok
+        ok
     }
 
     /** Share a local calendar with a ship. Null: refused. False: recorded,
      *  but the ship could not be told (down, or no calendar yet). A ship
      *  that cannot be reached at all is an error, not a refusal. */
-    suspend fun share(calId: String, ship: String, edit: Boolean): Boolean? {
-        val a = api ?: return null
+    suspend fun share(calId: String, ship: String, edit: Boolean): Boolean? = carry {
+        val a = api ?: return@carry null
         val told = try {
             a.share(calId, ship, edit)
         } catch (e: AuspexError.Unreachable) {
-            _error.value = e.message
+            _error.value = e.said()
             throw e
         }
         refresh()
-        return told
+        told
     }
     suspend fun revoke(calId: String, ship: String): Boolean = after { it.revoke(calId, ship) }
     suspend fun decline(key: String): Boolean = after { it.decline(key) }
@@ -327,23 +328,28 @@ class CalendarRepo(
     }
 
     /** Every sync this calendar has, prodded now: Google, followed, shared. */
-    suspend fun syncNow(): Boolean {
-        val a = api ?: return false
+    suspend fun syncNow(): Boolean = carry {
+        val a = api ?: return@carry false
         val kinds = _calendars.value.map { it.kind }.toSet()
         var ok = true
-        if ("google" in kinds) ok = runSuspendCatching { a.syncGoogle() }.getOrDefault(false) && ok
-        if ("caldav" in kinds) ok = runSuspendCatching { a.syncCaldav() }.getOrDefault(false) && ok
-        if (_shares.value?.accepted.orEmpty().isNotEmpty()) { lastShareSyncMs = nowMs(); ok = runSuspendCatching { a.syncShares() }.getOrDefault(false) && ok }
+        if ("google" in kinds) ok = tried { a.syncGoogle() } && ok
+        if ("caldav" in kinds) ok = tried { a.syncCaldav() } && ok
+        if (_shares.value?.accepted.orEmpty().isNotEmpty()) { lastShareSyncMs = nowMs(); ok = tried { a.syncShares() } && ok }
         delay(1500)
         refresh()
-        return ok
+        ok
     }
 
-    private suspend fun after(settleMs: Long = 0, call: suspend (CalendarApi) -> Boolean): Boolean {
-        val a = api ?: return false
-        val ok = runSuspendCatching { call(a) }.getOrDefault(false)
+    /**
+     * A write that is not an event's, then a full read. On this repo's
+     * scope: a share, a revoke or an answer to an offer was made on the
+     * calendar screen's, and leaving the screen cancelled it partway.
+     */
+    private suspend fun after(settleMs: Long = 0, call: suspend (CalendarApi) -> Boolean): Boolean = carry {
+        val a = api ?: return@carry false
+        val ok = tried { call(a) }
         if (ok) { if (settleMs > 0) delay(settleMs); refresh() }
-        return ok
+        ok
     }
 
     /** Occurrences between two moments, read without moving the screen's month or the widget's window. */
@@ -449,19 +455,33 @@ class CalendarRepo(
     private fun writableDefault(): String? =
         defaultCalendar.value.takeIf { d -> writable().any { it.id == d } } ?: writable().firstOrNull()?.id
 
-    /** An event someone shared, as moments, onto [calId] (else the calendar new events go to). False when refused. */
-    suspend fun addShared(calId: String?, title: String, startMs: Long, endMs: Long): Boolean {
+    /**
+     * An event someone shared, as moments, onto [calId] (else the calendar
+     * new events go to). False when refused, the calendar's own refusal
+     * after its ack included, whose why is kept in [unheard]: "Added" was
+     * said of an event the calendar had then refused.
+     */
+    suspend fun addShared(calId: String?, title: String, startMs: Long, endMs: Long): Boolean = carry {
         val zoneId = _zone.value ?: TimeZone.currentSystemDefault().id
         val zone = runSuspendCatching { TimeZone.of(zoneId) }.getOrElse { TimeZone.currentSystemDefault() }
-        return pokeEvent(eventBody(sharedDraft(title, startMs, endMs, calId ?: writableDefault(), zone, zoneId)))
+        val since = nowMs()
+        val w = writeEvent(eventBody(sharedDraft(title, startMs, endMs, calId ?: writableDefault(), zone, zoneId)))
+        if (!w.ok) return@carry false
+        // Before the reading back, which a refused add waits out in full.
+        if (refusalOfSave("", since) { "\"$title\" was not added: $it" } != null) {
+            w.undo()
+            return@carry false
+        }
+        w.shown.join()
+        true
     }
 
     /** Every event in an .ics onto [calId] (else the calendar new events go to). False when refused. */
-    suspend fun importIcs(calId: String?, ics: String): Boolean {
-        val a = api ?: return false
-        val ok = runSuspendCatching { a.importIcs(calId ?: writableDefault() ?: "default", ics) }.getOrDefault(false)
+    suspend fun importIcs(calId: String?, ics: String): Boolean = carry {
+        val a = api ?: return@carry false
+        val ok = tried { a.importIcs(calId ?: writableDefault() ?: "default", ics) }
         if (ok) refreshAll()
-        return ok
+        ok
     }
 
     private val _ticking = MutableStateFlow<Map<String, Boolean>>(emptyMap())
@@ -489,8 +509,10 @@ class CalendarRepo(
      * runs here, not in a screen, so leaving the screen does not lose it;
      * the stand-in stays until the refresh after the write brings the
      * calendar's own copy. A refusal takes the stand-in away and says so
-     * through [onFailed]. Not retried: a write whose answer was lost may
-     * have landed, and a retry would make it twice.
+     * through [onFailed], the calendar's own after its ack too, which is
+     * also kept in [unheard] for a screen that has gone. Not retried: a
+     * write whose answer was lost may have landed, and a retry would make
+     * it twice.
      */
     fun addTask(d: EventDraft, onFailed: (String) -> Unit = {}): CalendarTask {
         val ghost = CalendarTask(
@@ -509,8 +531,13 @@ class CalendarRepo(
         scope.launch {
             val body = eventBody(d)
             val reach = reachOf(body)
+            val since = nowMs()
             val ok = write(body)
-            if (ok) {
+            // Taken is not kept: the calendar answers before it reads, and
+            // a task it then refused stood on the list as added.
+            val said = { why: String -> "\"${d.name.trim()}\" was not added: $why" }
+            val refused = if (ok) refusalOfSave("", since, said) else null
+            if (ok && refused == null) {
                 afterItemWrite(reach)
                 // A tag the calendar has not seen before joins the list
                 // the editor offers; one it has is already there.
@@ -519,14 +546,27 @@ class CalendarRepo(
             // Why first, then the stand-in goes: the other way round, a
             // screen watching the list saw it leave before it heard why.
             if (!ok) onFailed(failedLine("The ship did not take \"${d.name.trim()}\"."))
+            refused?.let { onFailed(said(it)) }
             _pendingTasks.value = _pendingTasks.value - ghost
         }
         return ghost
     }
 
-    /** Any other write, carried on here whatever the screen does. */
-    fun writeInBackground(body: JsonObject, onFailed: () -> Unit = {}) {
-        scope.launch { if (!pokeEvent(body)) onFailed() }
+    /**
+     * Any other write, carried on here whatever the screen does. [onFailed]
+     * hears why it did not land: not taken, or taken and then refused (kept
+     * in [unheard] too), which went unseen and was said as added.
+     */
+    fun writeInBackground(body: JsonObject, onFailed: (String) -> Unit = {}) {
+        scope.launch {
+            fun str(k: String) = (body[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
+            val name = ((body["meta"] as? JsonObject)?.get("name") as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+            val said = { why: String -> "\"$name\" was not ${if (str("action") == "add-event") "added" else "saved"}: $why" }
+            val since = nowMs()
+            val w = writeEvent(body)
+            if (!w.ok) return@launch onFailed(failedLine("The calendar did not take \"$name\"."))
+            refusalOfSave(str("id").orEmpty(), since, said)?.let { w.undo(); onFailed(said(it)) }
+        }
     }
 
     /**
@@ -586,8 +626,10 @@ class CalendarRepo(
     /**
      * A write the ship has taken or refused ([ok]), and [shown]: done once
      * it has been read back into the lists, or the reading has given up.
+     * [undo] takes back what was shown of a write the ship took and the
+     * calendar then refused, where no read has put the ship's copy in since.
      */
-    class Written(val ok: Boolean, val shown: Job)
+    class Written(val ok: Boolean, val shown: Job, val undo: () -> Unit = {})
 
     /**
      * [pokeEvent] that answers as soon as the ship has taken the write, the
@@ -606,11 +648,74 @@ class CalendarRepo(
         // ship: a ticked task stays, ticked, until the ship has it done.
         val editing = (body["action"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "edit-event"
         val unassume = if (editing) assumeTask(body) else ({})
+        val unmove = assumeEvent(body)
         val ok = write(body)
-        if (ok && !editing) assumeTask(body)
-        if (!ok) { putBack(); unassume() }
+        val untick = if (ok && !editing) assumeTask(body) else ({})
+        if (!ok) { putBack(); unassume(); unmove() }
         val shown = if (ok && readBack) scope.launch { afterItemWrite(reach) } else Job().also { it.complete() }
-        Written(ok, shown)
+        Written(ok, shown, undo = if (ok) ({ putBack(); unassume(); unmove(); untick() }) else ({}))
+    }
+
+    /**
+     * An event's edit, in the window and the month at Save as the ship will
+     * have it, as [assumeTask] does for a task; returns what puts the rows
+     * back. Only the calendar screen showed it, and the home page's today
+     * kept the old event until the reading back came in. A series keeps
+     * its occurrences and only its words change here; "only this one"
+     * (edit-at) is its one occurrence, moved.
+     */
+    private fun assumeEvent(body: JsonObject): () -> Unit {
+        fun str(k: String) = (body[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        val id = str("id") ?: return {}
+        val at = if (str("action") == "edit-at") str("at_ms")?.toLongOrNull() ?: return {} else null
+        if ((at == null && str("action") != "edit-event") || str("cat") == "todo") return {}
+        val meta = body["meta"] as? JsonObject ?: return {}
+        val span = spanOf(body)
+        fun hit(r: CalendarRow) = r.id == id && (at == null || r.l == at)
+        fun edited(r: CalendarRow): CalendarRow {
+            val moved = span?.takeIf { at != null || !r.repeats }
+            return r.copy(
+                meta = JsonObject(r.meta.filterKeys { it !in EDITED_META } + meta),
+                cal = str("cal") ?: r.cal,
+                l = moved?.first ?: r.l, r = moved?.second ?: r.r, all = moved?.third ?: r.all,
+            )
+        }
+        val window = mutableListOf<Pair<CalendarRow, CalendarRow>>()
+        val month = mutableListOf<Pair<CalendarRow, CalendarRow>>()
+        fun swap(rows: List<CalendarRow>?, kept: MutableList<Pair<CalendarRow, CalendarRow>>): List<CalendarRow>? {
+            kept.clear()
+            if (rows == null || rows.none(::hit)) return rows
+            return rows.map { r -> if (hit(r)) edited(r).also { kept += r to it } else r }.sortedWith(compareBy({ it.l }, { it.r }))
+        }
+        _rows.update { swap(it, window) }
+        _rangeRows.update { swap(it, month) }
+        // Each row back only where it is still the one put in: a read since
+        // has the ship's own copy, and that stays.
+        fun back(rows: List<CalendarRow>?, kept: List<Pair<CalendarRow, CalendarRow>>) =
+            if (rows == null || kept.isEmpty()) rows
+            else rows.map { r -> kept.firstOrNull { it.second === r }?.first ?: r }.sortedWith(compareBy({ it.l }, { it.r }))
+        return { _rows.update { back(it, window) }; _rangeRows.update { back(it, month) } }
+    }
+
+    /**
+     * Where a one-off event's write puts it, as a row has it: a timed one's
+     * wall clock read in its zone (else the calendar's), an all-day one's
+     * days in date-space. Null for a series, or a date each year.
+     */
+    private fun spanOf(body: JsonObject): Triple<Long, Long, Boolean>? {
+        fun str(k: String) = (body[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        if (str("kind") != "once") return null
+        val start = str("start_ms")?.toLongOrNull() ?: return null
+        return when (str("cat")) {
+            "timed" -> {
+                val zoneId = str("zone") ?: _zone.value
+                val zone = zoneId?.let { runSuspendCatching { TimeZone.of(it) }.getOrNull() } ?: TimeZone.currentSystemDefault()
+                val l = kotlin.time.Instant.fromEpochMilliseconds(start).toLocalDateTime(TimeZone.UTC).toInstant(zone).toEpochMilliseconds()
+                Triple(l, l + (str("dur_min")?.toLongOrNull() ?: 0L) * 60_000L, false)
+            }
+            "allday" -> Triple(start, start + (str("span_days")?.toLongOrNull() ?: 1L).coerceAtLeast(1) * 86_400_000L, true)
+            else -> null
+        }
     }
 
     /**
@@ -682,8 +787,10 @@ class CalendarRepo(
      * on the screen's scope: leaving it, to see the home page's today, cancelled
      * the write, so on a busy ship an edit never reached the calendar at all.
      * The caller still waits for the answer; leaving only stops the waiting.
+     * A failure is caught inside and thrown here: an async that fails takes
+     * a scope with a plain Job down with it, and the app's is one.
      */
-    suspend fun <T> carry(block: suspend () -> T): T = scope.async { block() }.await()
+    suspend fun <T> carry(block: suspend () -> T): T = scope.async { runSuspendCatching { block() } }.await().getOrThrow()
 
     /**
      * The lists a write can change: [tasks] the task listing, [rows] the
@@ -736,13 +843,23 @@ class CalendarRepo(
     fun failedLine(refused: String): String =
         (lastWriteError as? io.nisfeb.talon.mail.AuspexError.Unreachable)?.let { it.said() + " Nothing was changed." } ?: refused
 
+    /**
+     * [call], with what stopped it kept for [failedLine]; false when it threw.
+     * Only the pokes kept it: a share, a sync or an import read the last
+     * poke's, so a ship down for a restart was called a refusal, and a
+     * refusal after one said the ship was not answering.
+     */
+    private suspend fun tried(call: suspend () -> Boolean): Boolean {
+        val t = runSuspendCatching { call() }
+        lastWriteError = t.exceptionOrNull() as? AuspexError
+        return t.getOrDefault(false)
+    }
+
     /** A write and nothing read back: the caller knows what it changed. False when refused. */
     private suspend fun write(body: JsonObject): Boolean {
         val a = api ?: return false
         if (ball.isEmpty()) ball = runSuspendCatching { a.config().ball }.getOrDefault("")
-        val tried = runSuspendCatching { a.poke(ball, body) }
-        lastWriteError = tried.exceptionOrNull() as? io.nisfeb.talon.mail.AuspexError
-        val ok = tried.getOrDefault(false)
+        val ok = tried { a.poke(ball, body) }
         // What was read of an event the write may have changed is no
         // longer what the ship says. Nothing waits here: the beat the
         // nexus needs to apply a poke is the reading's to wait, before it

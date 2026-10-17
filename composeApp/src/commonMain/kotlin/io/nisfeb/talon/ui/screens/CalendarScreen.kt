@@ -418,7 +418,7 @@ fun CalendarScreen(
     }
     fun tick(id: String, done: Boolean) {
         scope.launch {
-            if (!repo.setDone(id, done)) status = "The ship did not take the change."
+            if (!repo.setDone(id, done)) status = repo.failedLine("The ship did not take the change.")
         }
     }
     /** Closes the editor and says what is happening; the calendar's
@@ -530,7 +530,8 @@ fun CalendarScreen(
     // leaving this screen does not lose it.
     val pendingTasks by repo.pendingTasks.collectAsState()
     fun addTask(name: String, due: LocalDate?, cal: String?, note: String = "") {
-        repo.addTask(EventDraft(name = name, note = note, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = tagFilter.toList())) { status = it }
+        // Said here, so not again when the calendar next opens.
+        repo.addTask(EventDraft(name = name, note = note, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = tagFilter.toList())) { status = it; repo.heard() }
     }
 
     // A title and nine controls do not fit a phone. The title was left a
@@ -1123,7 +1124,7 @@ fun CalendarScreen(
                 // A new task goes on the list at once and is written behind it.
                 if (id == null && d.cat == EventCat.TODO && postTo == null) {
                     editing = null
-                    repo.addTask(d) { status = it }
+                    repo.addTask(d) { status = it; repo.heard() }
                     return@onSave
                 }
                 val idx = editingIdx
@@ -1190,6 +1191,9 @@ fun CalendarScreen(
                         // neither the refusal nor the card.
                         w to if (w?.ok != true || halfDone) null else repo.behind {
                             val why = repo.refusalOfSave(lookFor, savedAt) { if (skipped) bothKept else "\"${d.name.trim()}\" was not saved: $it" }
+                            // Here, not on this screen's scope: left, the refused
+                            // edit stayed on the home page until the reading gave up.
+                            if (why != null) w?.undo()
                             val unposted = why == null && target != null &&
                                 io.nisfeb.talon.util.runSuspendCatching { chat!!.send(target, card!!) }.isFailure
                             why to unposted

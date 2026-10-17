@@ -706,10 +706,12 @@ fun DmChatScreen(
                     // Written by the calendar's repo, not this screen: the
                     // task is on the list at once, and leaving the chat
                     // does not lose the write.
+                    // Why it did not land, the calendar's own refusal after its
+                    // ack too, said here and so not again when it opens.
                     if (draft.cat == io.nisfeb.talon.calendar.EventCat.TODO) {
-                        cal.addTask(draft) { composerState.sendError = "The calendar did not take it." }
+                        cal.addTask(draft) { composerState.sendError = it; cal.heard() }
                     } else {
-                        cal.writeInBackground(io.nisfeb.talon.calendar.eventBody(draft)) { composerState.sendError = "The calendar did not take it." }
+                        cal.writeInBackground(io.nisfeb.talon.calendar.eventBody(draft)) { composerState.sendError = it; cal.heard() }
                     }
                 },
             )

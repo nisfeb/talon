@@ -432,7 +432,7 @@ fun seriesEdit(edited: EventDraft, opened: EventDraft, series: EventDraft): Even
  * rides through; guests, ships and call too, changed only where the
  * editor changed them ([draftMeta]).
  */
-private val EDITED_META = setOf("name", "note", "location", "tags", "color")
+internal val EDITED_META = setOf("name", "note", "location", "tags", "color")
 
 /**
  * A task's draft from the row the screen already has: its calendar,
