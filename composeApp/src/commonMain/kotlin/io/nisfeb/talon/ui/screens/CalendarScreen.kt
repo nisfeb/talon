@@ -1239,7 +1239,9 @@ private fun EventEditor(
     var zoneText by remember { mutableStateOf(initial.zone.orEmpty()) }
     var pickingDate by remember { mutableStateOf(false) }
     var pickingUntil by remember { mutableStateOf(false) }
-    var problem by remember { mutableStateOf(failed) }
+    // Keyed on it: a refusal that comes back before a frame reopens this
+    // editor without it ever leaving the screen, and the why was lost.
+    var problem by remember(failed) { mutableStateOf(failed) }
     val time = rememberTimePickerState(initialHour = initial.minuteOfDay / 60, initialMinute = initial.minuteOfDay % 60, is24Hour = twentyFourHour)
     val fieldFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { runCatching { fieldFocus.requestFocus() } }
