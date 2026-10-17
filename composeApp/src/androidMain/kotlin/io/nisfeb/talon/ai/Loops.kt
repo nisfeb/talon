@@ -283,6 +283,8 @@ class Loops(
             fun mail(m: List<io.nisfeb.talon.mail.InboxEntry>) { mail = m }
             fun events(rows: List<io.nisfeb.talon.calendar.CalendarRow>, from: kotlinx.datetime.LocalDate, to: kotlinx.datetime.LocalDate) { events = Triple(rows, from, to) }
             fun tasks(t: List<io.nisfeb.talon.calendar.CalendarTask>) { tasks = t }
+            /** Forget what was seen, for the next of a conversation's turns. */
+            fun reset() { events = null; tasks = null; people.clear(); messages = null; mail = null }
             fun card(zone: kotlinx.datetime.TimeZone, known: io.nisfeb.talon.ui.ContactMap): DictationCard {
                 val now = System.currentTimeMillis()
                 val twentyFour = android.text.format.DateFormat.is24HourFormat(context)
@@ -298,6 +300,122 @@ class Loops(
                 )
             }
         }
+
+        /** The day as Archie opens with it ([day]). */
+        inner class Day(val mail: Int?, val chats: Int?, val questions: Int?, val firstEvent: String?, val card: DictationCard)
+
+        private fun zone() = io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value)
+
+        private fun today(): kotlinx.datetime.LocalDate =
+            kotlin.time.Instant.fromEpochMilliseconds(System.currentTimeMillis()).toLocalDateTime(zone()).date
+
+        /**
+         * What Archie opens with: the unread mail (null where the inbox
+         * could not be listed, never zero from a list not read), the chat
+         * list's unread, how many of those wait for the owner ([decider];
+         * null where it did not say), the next event today, and the card.
+         */
+        suspend fun day(decider: io.nisfeb.talon.orrery.Decider?): Day = kotlinx.coroutines.coroutineScope {
+            val db = getDb()
+            val owner = sessionStore.active()?.ship.orEmpty()
+            val inbox = async { runCatching { mail?.listing(io.nisfeb.talon.mail.MailView.INBOX) }.getOrNull() }
+            val questions = async {
+                if (decider == null) null
+                else runCatching { Briefing.questions(decider, owner, Briefing.unreadSaid(db, owner, io.nisfeb.talon.urbit.StoryCache::textFor)) }.getOrNull()
+            }
+            val chats = runCatching { Briefing.chatUnread(db) }.getOrNull()
+            read.await()
+            val zone = zone()
+            val now = System.currentTimeMillis()
+            val today = today()
+            val twentyFour = android.text.format.DateFormat.is24HourFormat(context)
+            val rows = calendar?.rows?.value.orEmpty()
+            val next = rows.filter { !it.isTask && !it.all && it.l > now && kotlin.time.Instant.fromEpochMilliseconds(it.l).toLocalDateTime(zone).date == today }.minByOrNull { it.l }
+            val unreadMail = inbox.await()?.threads?.filter { it.unread }
+            val known = contacts.await()
+            Day(
+                mail = unreadMail?.size,
+                chats = chats,
+                questions = withTimeoutOrNull(Briefing.QUESTIONS_WAIT_MS) { questions.await() },
+                firstEvent = next?.let { "${it.name.ifBlank { "an event" }} at ${DictationCards.clock(it.l, zone, twentyFour)}, ${Briefing.soon(it.l - now)}" },
+                card = DictationCard(
+                    days = DictationCards.days(rows, today, today, zone, now, twentyFour),
+                    mail = DictationCards.mail(unreadMail.orEmpty(), { known.displayName(it) }, zone, now, twentyFour),
+                ),
+            )
+        }
+
+        /** What Archie's turns read, for each turn's card. */
+        private val talkSeen = Seen()
+
+        /**
+         * Archie's conversation ([VoiceConversation]): a dictation's tools,
+         * while [locked] only its locked writes, orrery's where it is on, and
+         * orrery's proposals put to the owner by [decide] before they go ahead.
+         */
+        suspend fun conversation(
+            locked: Boolean,
+            orrery: io.nisfeb.talon.orrery.OrreryRepo?,
+            decide: suspend (String, List<io.nisfeb.talon.orrery.OrreryAction>) -> Boolean?,
+        ): VoiceConversation {
+            started.await()
+            val known = contacts.await()
+            val actions = AssistantActions(
+                db = getDb(), contacts = { known }, mail = mail, calendar = calendar,
+                zone = { zone() },
+                send = { whom, text -> getRepo().send(whom, text) },
+                onEvents = talkSeen::events, onTasks = talkSeen::tasks, onPeople = talkSeen::people, onMail = talkSeen::mail,
+            )
+            val tools = ToolCatalog.default(getRepo(), getDb(), getEmbedder(), onMessages = talkSeen::messages) { known.displayName(it) } + actionTools(actions)
+            val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked)
+                .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
+            return VoiceConversation(
+                completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(zone()), msgs, t) },
+                tools = offered,
+                tell = orrery?.let { o ->
+                    { text: String ->
+                        DictationFlow.tell(
+                            text,
+                            instruct = { o.instruct(it, apply = false).getOrThrow() },
+                            decide = decide,
+                            answer = { id, ok -> o.setAction(id, if (ok) "approved" else "dismissed").getOrThrow() },
+                        )
+                    }
+                },
+                brief = { orrery?.briefLast()?.getOrThrow()?.let { Briefing.todays(it, today()) } },
+            )
+        }
+
+        /** What the last of Archie's turns read, for its card; forgotten for the next. */
+        suspend fun turnCard(): DictationCard = talkSeen.card(zone(), contacts.await()).also { talkSeen.reset() }
+
+        /** Today's brief from [orrery], for the opener; null for none today or no answer. */
+        suspend fun brief(orrery: io.nisfeb.talon.orrery.OrreryRepo?): io.nisfeb.talon.orrery.Brief? =
+            orrery?.briefLast()?.getOrNull()?.let { Briefing.todays(it, today()) }
+
+        /**
+         * One exchange on the card into Assistant history ([io.nisfeb.talon.data.VoiceHistory]),
+         * after [conversation], and pushed to the owner's other devices: the
+         * conversation it went into. A failure keeps the card going.
+         */
+        suspend fun remember(
+            conversation: io.nisfeb.talon.data.AssistantConversationEntity?,
+            title: String,
+            question: String,
+            answer: String,
+        ): io.nisfeb.talon.data.AssistantConversationEntity? = try {
+            io.nisfeb.talon.data.VoiceHistory.record(getDb(), conversation, title, question, answer, System.currentTimeMillis()) { c, t ->
+                getRepo().settingsSync?.pushAssistantTurn(c, t)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            io.nisfeb.talon.util.Log.w("Dictation", "could not keep the exchange in Assistant history: ${e.message}")
+            conversation
+        }
+
+        /** The time, for the opener's digest. */
+        fun now(): String = nowLine(zone())
 
         /**
          * Answer a question, looking things up only: where Orrery is on,

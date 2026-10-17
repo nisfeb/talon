@@ -128,6 +128,15 @@ class OrreryApi(
         return generatorRunOf(o)
     }
 
+    /**
+     * The last daily brief the ship sent (orrery 52): its day on the
+     * owner's clock, its tags (A1 to an action id) and its text. The
+     * owner's route. Null before the first brief; throws where the ship
+     * could not be asked, or an orrery older than the brief refused it.
+     */
+    suspend fun briefLast(): Brief? =
+        briefOf(Json.parseToJsonElement(request(owner, HttpMethod.Get, "/api/brief/last")).jsonObject)
+
     /** The generator's settings, the owner's route; its key is only ever said to be set. */
     suspend fun generatorSettings(): GeneratorSettings? {
         val text = runCatching { request(owner, HttpMethod.Get, "/api/generator") }.getOrNull() ?: return null
@@ -976,6 +985,25 @@ fun generatorSettingsOf(o: JsonObject) = GeneratorSettings(
     // Said as a flag, or as the key's last four characters.
     keySet = o["api_key_set"]?.jsonPrimitive?.booleanOrNull == true || !o["api_key"]?.jsonPrimitive?.contentOrNull.isNullOrBlank(),
 )
+
+/**
+ * A daily brief as the ship keeps it in brief-last.json: [day] is
+ * "YYYY-MM-DD" on the owner's clock, [tags] maps "A1" to an action id.
+ */
+data class Brief(val day: String, val at: String?, val sent: Boolean, val tags: Map<String, String>, val text: String)
+
+/** [o] as a [Brief]; null for the empty record of a ship that has sent none. */
+internal fun briefOf(o: JsonObject): Brief? {
+    fun str(k: String) = (o[k] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+    val text = str("text")?.takeIf { it.isNotBlank() } ?: return null
+    return Brief(
+        day = str("day").orEmpty(),
+        at = str("at"),
+        sent = (o["sent"] as? kotlinx.serialization.json.JsonPrimitive)?.booleanOrNull == true,
+        tags = (o["tags"] as? JsonObject).orEmpty().mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { k to it } }.toMap(),
+        text = text,
+    )
+}
 
 data class GeneratorRun(
     val atMs: Long?,

@@ -62,29 +62,42 @@ class DictationFlow(
         return Reply(line, to)
     }
 
-    private suspend fun tell(text: String): String {
-        val said = instruct(text)
-        // How the client says a refusal (no model key, the day's limit,
-        // no answer): nothing filed, and only a note. Not news to file.
-        if (said.actions.isEmpty() && said.reply.isBlank()) error(said.note.ifBlank { "Orrery answered nothing" })
-        val reply = said.reply.ifBlank { "Orrery took it." }
-        val waiting = said.actions.filter { it.status == "proposed" }
-        if (waiting.isEmpty()) return reply
-        return when (decide(reply, waiting)) {
-            true -> {
-                waiting.forEach { answer(it.id, true) }
-                "Done. $reply"
-            }
-            false -> {
-                waiting.forEach { answer(it.id, false) }
-                "Dropped. Nothing was done."
-            }
-            // Not an error: it waits where every proposal waits.
-            null -> "$reply Waiting for you under Actions."
-        }
-    }
+    private suspend fun tell(text: String): String = tell(text, instruct, decide, answer)
 
     companion object {
+        /**
+         * [text] to orrery's instruct route without "do it", and what it
+         * proposes put to the owner ([decide]) and answered ([answer]): the
+         * line to say. A dictation's Tell and Archie's orrery tool both go
+         * this way. Throws when orrery took nothing.
+         */
+        suspend fun tell(
+            text: String,
+            instruct: suspend (String) -> Instructed,
+            decide: suspend (reply: String, waiting: List<OrreryAction>) -> Boolean?,
+            answer: suspend (id: String, approve: Boolean) -> Unit,
+        ): String {
+            val said = instruct(text)
+            // How the client says a refusal (no model key, the day's limit,
+            // no answer): nothing filed, and only a note. Not news to file.
+            if (said.actions.isEmpty() && said.reply.isBlank()) error(said.note.ifBlank { "Orrery answered nothing" })
+            val reply = said.reply.ifBlank { "Orrery took it." }
+            val waiting = said.actions.filter { it.status == "proposed" }
+            if (waiting.isEmpty()) return reply
+            return when (decide(reply, waiting)) {
+                true -> {
+                    waiting.forEach { answer(it.id, true) }
+                    "Done. $reply"
+                }
+                false -> {
+                    waiting.forEach { answer(it.id, false) }
+                    "Dropped. Nothing was done."
+                }
+                // Not an error: it waits where every proposal waits.
+                null -> "$reply Waiting for you under Actions."
+            }
+        }
+
         /** What instruct takes; more is read instead ([OrreryApi.instruct] clips at it). */
         const val INSTRUCT_BYTES = 2000
 

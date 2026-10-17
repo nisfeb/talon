@@ -80,6 +80,7 @@ import io.nisfeb.talon.ai.CardProposal
 import io.nisfeb.talon.ai.CardTask
 import io.nisfeb.talon.ai.DictationCard
 import io.nisfeb.talon.ai.DictationRun
+import io.nisfeb.talon.ai.loopsCanRun
 import io.nisfeb.talon.ui.MdBlock
 import io.nisfeb.talon.ui.dmLink
 import io.nisfeb.talon.ui.dmShip
@@ -111,9 +112,14 @@ class QuickDictationActivity : ComponentActivity() {
     /** Why it cannot listen, in words for the owner; null while it can. */
     private val problem = mutableStateOf<String?>(null)
 
+    /** Opened by Home's Archie button: a conversation, not a dictation. */
+    private val converse by lazy { intent.getBooleanExtra(EXTRA_CONVERSE, false) }
+
     private val askForMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) QuickDictation.listen(this) else problem.value = "Talon needs the microphone to hear a dictation."
+        if (granted) begin() else problem.value = "Talon needs the microphone to hear a dictation."
     }
+
+    private fun begin() = if (converse) QuickDictation.converse(this) else QuickDictation.listen(this)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -122,6 +128,8 @@ class QuickDictationActivity : ComponentActivity() {
             // hides the card, and the shade asks in its place.
             if (QuickDictation.stage.value is Stage.Listening) QuickDictation.cancel()
             if (QuickDictation.stage.value is Stage.Said) QuickDictation.close()
+            // Archie never goes on listening behind a card that is gone.
+            if (QuickDictation.talking.value) QuickDictation.hangUp()
             finish()
         }
         // Not again after a recreation, nor over a run under way: one
@@ -149,10 +157,13 @@ class QuickDictationActivity : ComponentActivity() {
 
     private fun start() {
         val app = application as TalonApplication
-        problem.value = DictationRun.blocker(app.aiSettings.state.value, app.sessionStore.activeShip() != null)
+        val cfg = app.aiSettings.state.value
+        problem.value = DictationRun.blocker(cfg, app.sessionStore.activeShip() != null)
+            // A conversation is the model's throughout, orrery or not.
+            ?: DictationRun.NO_MODEL_FOR_QUESTIONS.takeIf { converse && !cfg.loopsCanRun() }
         if (problem.value != null) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            QuickDictation.listen(this)
+            begin()
         } else {
             askForMic.launch(Manifest.permission.RECORD_AUDIO)
         }
@@ -226,7 +237,8 @@ class QuickDictationActivity : ComponentActivity() {
         LaunchedEffect(stage) {
             when (val s = stage) {
                 is Stage.Idle -> if (began) finish()
-                is Stage.Said -> {
+                // Archie's turn: the card listens again by itself, and stays.
+                is Stage.Said -> if (s.talking) began = true else {
                     began = true
                     val base = if (s.followable || s.card != null) 30_000L else 5_000L
                     delay((base + 50L * s.line.length).coerceAtMost(45_000L))
@@ -269,10 +281,15 @@ class QuickDictationActivity : ComponentActivity() {
 
     @Composable
     private fun Header(stage: Stage) {
+        val talking by QuickDictation.talking.collectAsState()
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(androidx.compose.ui.res.painterResource(R.drawable.ic_talon_mark), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            if (talking) {
+                Icon(io.nisfeb.talon.ui.icons.ArchieMark, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
+            } else {
+                Icon(androidx.compose.ui.res.painterResource(R.drawable.ic_talon_mark), contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            }
             Text(
-                "DICTATION",
+                if (talking) io.nisfeb.talon.ui.icons.ASSISTANT_NAME.uppercase() else "DICTATION",
                 style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -413,11 +430,17 @@ class QuickDictationActivity : ComponentActivity() {
     @Composable
     private fun ColumnScope.Said(s: Stage.Said) {
         Column(
-            Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+            Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
+                // While Archie talks, a tap on what it says stops the voice, and it listens.
+                .then(if (s.talking) Modifier.clickable(onClickLabel = "Stop talking") { QuickDictation.hush() } else Modifier),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             Answer(s.line, s.card?.names.orEmpty())
             s.card?.let { Card(it) }
+        }
+        if (s.talking) {
+            QuietButton("Done", { close() })
+            return
         }
         if (s.followable) BigButton("Follow up", TalonIcons.Mic) { QuickDictation.followUp(this@QuickDictationActivity) }
         QuietButton("Close", { close() })
@@ -594,9 +617,12 @@ class QuickDictationActivity : ComponentActivity() {
         }
     }
 
-    private companion object {
+    companion object {
         /** What a tap on a calendar row opens. */
-        const val CALENDAR = "calendar:"
+        private const val CALENDAR = "calendar:"
+
+        /** Start a conversation with Archie rather than a dictation. */
+        const val EXTRA_CONVERSE = "io.nisfeb.talon.extra.CONVERSE"
     }
 
     /** A calendar's "#rrggbb" as a colour, or null for one that is not. */

@@ -109,10 +109,14 @@ object CalendarQuestion {
         return spanOf(days, today)
     }
 
-    /** The decision model for [decide], where the owner turned it on and there is a key. Null, and every question goes to the model. */
-    fun decider(http: HttpClient, cfg: AiSettings.Config): Decider? {
+    /**
+     * The decision model for [decide], where the owner turned it on and
+     * there is a key, waiting [waitMs] at most. Null, and every question
+     * goes to the model.
+     */
+    fun decider(http: HttpClient, cfg: AiSettings.Config, waitMs: Long = WAIT_MS): Decider? {
         val d = DecideSettings().under(cfg).onVendor(cfg).takeIf { it.on } ?: return null
-        return openRouterKey(cfg)?.let { OpenRouterDecider(http, it, d.copy(timeoutMs = WAIT_MS)) }
+        return openRouterKey(cfg)?.let { OpenRouterDecider(http, it, d.copy(timeoutMs = waitMs)) }
     }
 
     /** The days [choice] names, from [today]; null for "other" or a choice not offered. */
