@@ -252,6 +252,10 @@ class ArmillaryApiTest {
             assertTrue(runCatching { api { status to "" }.account() }.exceptionOrNull() is ArmillaryError.Unreachable)
         }
         assertEquals(DeleteAnswer.Refused("stripe: down"), api { HttpStatusCode.BadGateway to """{"error":"stripe: down"}""" }.deleteAccount())
+        // Asked inside the reader, a refusal of the account read as an answer that could not be read.
+        assertTrue(runCatching { api { HttpStatusCode.InternalServerError to """{"error":"busy"}""" }.account() }.exceptionOrNull() is ArmillaryError.Refused)
+        assertTrue(runCatching { api { HttpStatusCode.InternalServerError to """{"error":"busy"}""" }.plans() }.exceptionOrNull() is ArmillaryError.Refused)
+        assertTrue(runCatching { api { HttpStatusCode.BadGateway to page }.catalog() }.exceptionOrNull() is ArmillaryError.Unreachable)
     }
 
     @Test

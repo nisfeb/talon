@@ -70,8 +70,12 @@ class ArmillaryApi(
      * asks the ship to peek the vendor first, which it waits up to
      * thirty seconds for.
      */
-    suspend fun account(fresh: Boolean = false): Account =
-        accountOf(reading { Json.parseToJsonElement(request(HttpMethod.Get, if (fresh) "/api/account?fresh=1" else "/api/account")).jsonObject })
+    suspend fun account(fresh: Boolean = false): Account {
+        // Asked outside [reading]: inside it, no answer and a refusal both
+        // read as an answer that could not be read.
+        val text = request(HttpMethod.Get, if (fresh) "/api/account?fresh=1" else "/api/account")
+        return accountOf(reading { Json.parseToJsonElement(text).jsonObject })
+    }
 
     /**
      * Who this ship buys from. The ship says hello to a fresh vendor at
@@ -82,12 +86,16 @@ class ArmillaryApi(
     }
 
     /** The vendor's plans, read live through the ship. */
-    suspend fun plans(): List<Plan> =
-        plansOf(reading { Json.parseToJsonElement(request(HttpMethod.Get, "/api/plans")) })
+    suspend fun plans(): List<Plan> {
+        val text = request(HttpMethod.Get, "/api/plans")
+        return plansOf(reading { Json.parseToJsonElement(text) })
+    }
 
     /** The vendor's public catalog with its prices, read live through the ship. */
-    suspend fun catalog(): List<CatalogRow> =
-        catalogOf(reading { Json.parseToJsonElement(request(HttpMethod.Get, "/api/catalog")) })
+    suspend fun catalog(): List<CatalogRow> {
+        val text = request(HttpMethod.Get, "/api/catalog")
+        return catalogOf(reading { Json.parseToJsonElement(text) })
+    }
 
     /**
      * Open a checkout with the vendor. One of [plan] and [amountMicro],
