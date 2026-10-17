@@ -434,14 +434,17 @@ class AppShellTest {
 
     private fun ComposeUiTest.field(label: String) = onNode(hasSetTextAction() and androidx.compose.ui.test.hasText(label))
 
-    /** Standup's occurrence today, opened, renamed, and saved as this one only. */
-    private fun ComposeUiTest.renameThisStandupOnly() {
+    /** Standup's occurrence today, opened, renamed, put on [calendar] if named, and saved as this one only. */
+    private fun ComposeUiTest.renameThisStandupOnly(calendar: String? = null) {
         onNodeWithText("Standup").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Close") }
         onNodeWithText("Edit").performClick()
         waitUntil(timeoutMillis = 10_000) { showing("This change applies to") }
         onNodeWithText("This one only").performScrollTo().performClick()
         field("Name").performTextReplacement("Standup, moved")
+        if (calendar != null) {
+            onNode(androidx.compose.ui.test.hasText(calendar) and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isDialog())).performScrollTo().performClick()
+        }
         onAllNodesWithText("Save")[0].performClick()
     }
 
@@ -460,7 +463,9 @@ class AppShellTest {
         val asked = ship.requests.toList()
         val month = (opened until asked.size).firstOrNull { asked[it].endsWith("/window.json") }
         assertTrue(month != null && asked.indexOfFirst { it.endsWith("/invites.json") } > month, "the month first, then invitations: $asked")
-        renameThisStandupOnly()
+        // Another calendar picked too: one occurrence stays with its series,
+        // as on the calendar's page, so home is the series' own and no cal goes.
+        renameThisStandupOnly(calendar = "Work")
         waitUntil(timeoutMillis = 5_000) { cal.pokes.isNotEmpty() }
         waitUntil(timeoutMillis = 10_000) { showing("Standup, moved") && !showing("syncing") }
         assertEquals(
@@ -480,6 +485,20 @@ class AppShellTest {
         assertEquals("""{"action":"skip-event","id":"s1","idx":7}""", cal.pokes[1])
         assertTrue(cal.pokes.none { "edit-at" in it })
         assertTrue(!showing("invitation"), "no invitations on a calendar without them")
+        // Its 404 is remembered: the save did not ask again.
+        assertEquals(1, ship.requests.count { it.endsWith("/invites.json") })
+    }
+
+    // Not knowing is not knowing yes: a hiccup on invites.json keeps the
+    // two steps every calendar takes.
+    @Test
+    fun `when the calendar's invitations cannot be read, this one only stays add then skip`() = app(setup = withCalendar { invitesFail = true }) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        renameThisStandupOnly()
+        waitUntil(timeoutMillis = 10_000) { cal.pokes.size >= 2 }
+        assertTrue("\"add-event\"" in cal.pokes[0] && "skip-event" in cal.pokes[1], cal.pokes.toString())
+        assertTrue(cal.pokes.none { "edit-at" in it })
     }
 
     // A refused edit-at must not fall back to add and skip: the ship has

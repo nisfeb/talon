@@ -73,7 +73,8 @@ class CalendarMeetingsTest {
     }
 
     @Test fun `a guest kept keeps their answer, the owner stays, and a new one has none yet`() {
-        val m = withGuests(invited, "ana@example.com, ~bus, ~nec, bo@example.com")
+        // Matched without case, and kept as it was written.
+        val m = withGuests(invited, "ANA@example.com, ~bus, ~nec, bo@example.com")
         assertEquals(
             """[{"email":"me@example.com","status":"needs-action","self":true},{"email":"Ana@Example.com","name":"Ana","status":"accepted"},{"email":"bo@example.com","status":"needs-action"}]""",
             m["guests"].toString(),
@@ -83,6 +84,12 @@ class CalendarMeetingsTest {
             m["ships"].toString(),
         )
         assertEquals("Planning", m.str("name"))
+    }
+
+    @Test fun `the owner typed in as a guest is still the one entry it was`() {
+        val m = withGuests(invited, "~bus, ~zod, me@example.com")
+        assertEquals("""[{"ship":"~zod","status":"accepted","self":true},{"ship":"~bus","status":"tentative"}]""", m["ships"].toString())
+        assertEquals("""[{"email":"me@example.com","status":"needs-action","self":true}]""", m["guests"].toString())
     }
 
     @Test fun `taking every guest off leaves the owner, and a ship alone makes no email list`() {
@@ -99,6 +106,7 @@ class CalendarMeetingsTest {
         assertEquals("Not a ship name: ~ne", guestsProblem(plain, "~ne", google = true))
         assertNull(guestsProblem(plain, "~sampel-palnet, ~nec, ~dabnev-nisseb--nidsut-tomdun", google = false), "ships work on any calendar")
         assertEquals("Not an email or a ship: bob", guestsProblem(plain, "bob", google = true))
+        assertEquals("Not an email or a ship: bo@example", guestsProblem(plain, "bo@example", google = true))
         assertEquals("Email guests need a calendar linked to Google", guestsProblem(plain, "bo@example.com", google = false))
         assertNull(guestsProblem(plain, "bo@example.com", google = true))
     }

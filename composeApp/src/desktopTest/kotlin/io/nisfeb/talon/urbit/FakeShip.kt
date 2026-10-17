@@ -126,6 +126,8 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
         val events = ConcurrentHashMap<String, String>()
         /** invites.json; null for a calendar older than invitations (34), which answers 404. */
         @Volatile var invites: String? = "[]"
+        /** invites.json fails (500), as a busy or crashed nexus does: not the same as a 404. */
+        @Volatile var invitesFail = false
         /** Every poke's body, in order. */
         val pokes: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
         /** Every POST to invites/answer, its body, in order. */
@@ -337,7 +339,7 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
                     "/zones.json" -> json(c.zones)
                     "/google.json" -> json("""{"connected":true,"linked":{}}""")
                     "/event.json" -> c.events[req.url.parameters["id"]]?.let(json) ?: respond("", HttpStatusCode.NotFound)
-                    "/invites.json" -> c.invites?.let(json) ?: respond("", HttpStatusCode.NotFound)
+                    "/invites.json" -> if (c.invitesFail) respond("", HttpStatusCode.InternalServerError) else c.invites?.let(json) ?: respond("", HttpStatusCode.NotFound)
                     "/invites/answer" -> { c.answers += body; c.answer(c, body)?.let(json) ?: respond("", HttpStatusCode.NotFound) }
                     else -> if (!path.endsWith("/calendar.calendar")) respond("", HttpStatusCode.NotFound) else {
                         c.pokes += body
