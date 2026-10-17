@@ -206,16 +206,21 @@ private suspend fun pull(
     from: String,
     say: (String) -> Unit,
 ): AttachState {
-    val held = fetching { repo.blob(a.hash, a.name, a.mime) }
-    if (held != null) return AttachState.Held(held.bytes, held.name)
+    try {
+        val held = fetching { repo.blob(a.hash, a.name, a.mime) }
+        if (held != null) return AttachState.Held(held.bytes, held.name)
 
-    say("Asking the network")
-    repo.fetchBlob(a.hash, from)
-    repeat(POLLS) {
-        delay(POLL_MS)
-        say("Waiting for it (${it + 1} of $POLLS)")
-        val now = fetching { repo.blob(a.hash, a.name, a.mime) }
-        if (now != null) return AttachState.Held(now.bytes, now.name)
+        say("Asking the network")
+        repo.fetchBlob(a.hash, from)
+        repeat(POLLS) {
+            delay(POLL_MS)
+            say("Waiting for it (${it + 1} of $POLLS)")
+            val now = fetching { repo.blob(a.hash, a.name, a.mime) }
+            if (now != null) return AttachState.Held(now.bytes, now.name)
+        }
+    } catch (e: io.nisfeb.talon.mail.AuspexError.Unreachable) {
+        // Our own ship, not the sender's: said as that, not waited out.
+        return AttachState.Failed(e.said())
     }
     return AttachState.Failed(
         "No copy came back. Whoever holds it may be offline; it can be asked for again.",
@@ -223,11 +228,14 @@ private suspend fun pull(
 }
 
 /** One blob read where null means "not here" — never "the view went
- *  away", which a blanket runCatching would swallow mid-poll. */
+ *  away", which a blanket runCatching would swallow mid-poll, nor our
+ *  own ship not answering, which [pull] says. */
 private suspend fun fetching(block: suspend () -> Blob?): Blob? = try {
     block()
 } catch (c: CancellationException) {
     throw c
+} catch (e: io.nisfeb.talon.mail.AuspexError.Unreachable) {
+    throw e
 } catch (e: Exception) {
     null
 }

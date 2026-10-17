@@ -606,14 +606,29 @@ class MailRepo(
         threadCache.update { it - threadId }
     }) { it.deleteThread(threadId); forget(threadId) }
 
-    /** Ask the network for an attachment we do not hold. */
+    /** Ask the network for an attachment we do not hold. Throws [AuspexError.Unreachable], as [blob] does. */
     suspend fun fetchBlob(hash: String, from: String) {
-        call { it.fetchBlob(hash, from) }
+        callOrDown { it.fetchBlob(hash, from) }
     }
 
-    /** An attachment's bytes, or null while this ship holds no copy. */
-    suspend fun blob(hash: String, name: String, mime: String): Blob? {
-        return call { it.blob(hash, name, mime) }
+    /**
+     * An attachment's bytes, or null while this ship holds no copy. Our own
+     * ship not answering is thrown, not null: read as "not here", the
+     * network was asked and waited on, and the row said whoever holds it
+     * may be offline, when it was the owner's ship that was.
+     */
+    suspend fun blob(hash: String, name: String, mime: String): Blob? = callOrDown { it.blob(hash, name, mime) }
+
+    /** [call], with no answer from our own ship thrown rather than null. */
+    private suspend fun <T> callOrDown(block: suspend (AuspexApi) -> T): T? {
+        val a = api ?: return null
+        return try {
+            block(a)
+        } catch (e: AuspexError) {
+            onFailure(e)
+            if (e is AuspexError.Unreachable) throw e
+            null
+        }
     }
 
     /**

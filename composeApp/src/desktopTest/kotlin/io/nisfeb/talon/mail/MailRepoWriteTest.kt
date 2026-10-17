@@ -375,6 +375,24 @@ class MailRepoWriteTest {
 
     // ─── an attachment, with our own ship down ──────────────────────
 
+    // A ship that did not answer was read as "no copy here", so the network
+    // was asked and waited on, and the sender was blamed.
+    @Test
+    fun `an attachment asked of our own ship while it is down throws, and a refusal does not`() = withRepo({ req ->
+        val path = req.url.encodedPath
+        when {
+            "/api/blob/" in path || path.endsWith("/api/fetch-blob") -> respond(NGINX_502, HttpStatusCode.BadGateway, headersOf("Content-Type", "text/html"))
+            path.endsWith("/api/inbox") -> jsonOk(this, pageWith())
+            path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+            else -> respondError(HttpStatusCode.NotFound, """{"error":"not found"}""")
+        }
+    }) { r, _ ->
+        r.attach("https://ship.example")
+        settle(r)
+        assertTrue(runCatching { r.blob("0vh", "a.pdf", "application/pdf") }.exceptionOrNull() is AuspexError.Unreachable)
+        assertTrue(runCatching { r.fetchBlob("0vh", "~nec") }.exceptionOrNull() is AuspexError.Unreachable)
+    }
+
     // ─── filters and lists, past the sheet ──────────────────────────
 
     // ─── filing to Lattice ──────────────────────────────────────────
