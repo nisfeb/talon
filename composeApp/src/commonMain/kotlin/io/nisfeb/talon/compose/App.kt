@@ -527,21 +527,20 @@ fun App(
     LaunchedEffect(Unit) {
         io.nisfeb.talon.notify.OpenNoticeRequests.requests.collect { tag ->
             // A tapped push, or a tapped Activity notice row, by its tag.
-            // closeAll first: the render shows the first open section, and
-            // one left open would hide the target and steal its back.
-            when {
-                tag.startsWith(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX) -> {
-                    sections.closeAll()
-                    noticeCalendarTag = tag
+            // Everything down first: the render shows the first open
+            // section, and one left open would hide the target and steal
+            // its back.
+            when (val to = io.nisfeb.talon.notify.noticeLanding(tag)) {
+                is io.nisfeb.talon.notify.NoticeLanding.Calendar -> leaveAllFor {
+                    noticeCalendarTag = to.tag
                     showCalendar = true
                 }
-                // Activity notice targets (see NoticeRepo.record): the
-                // assistant and account domains, and the chat-adjacent ones.
-                tag.startsWith("orrery:") -> { sections.closeAll(); showActions = true }
-                tag.startsWith("loop:") -> { sections.closeAll(); showLoops = true }
-                tag.startsWith("invite:") -> { sections.closeAll(); showInvites = true }
-                tag == "armillary" -> { sections.closeAll(); showAssistant = true }
-                tag.startsWith("dm:") -> jumpToChat(tag.removePrefix("dm:"))
+                io.nisfeb.talon.notify.NoticeLanding.Actions -> leaveAllFor { showActions = true }
+                io.nisfeb.talon.notify.NoticeLanding.Loops -> leaveAllFor { showLoops = true }
+                io.nisfeb.talon.notify.NoticeLanding.Invites -> leaveAllFor { showInvites = true }
+                io.nisfeb.talon.notify.NoticeLanding.Assistant -> leaveAllFor { showAssistant = true }
+                is io.nisfeb.talon.notify.NoticeLanding.Chat -> jumpToChat(to.whom)
+                null -> Unit
             }
         }
     }

@@ -473,10 +473,23 @@ fun TalonApp(
         val ship = loggedInShip ?: return@LaunchedEffect
         io.nisfeb.talon.orrery.settleOrreryGate(orreryGate, app.db, app.aiSettings, orreryRepo, url, ship)
     }
+    // The Activity feed's non-chat half: what notifies here and is not a
+    // chat (an orrery proposal, a loop's result, Armillary credit, an
+    // invite, a DM request) records a notice beside it, as App.kt does.
+    // Android recorded none, so Activity had nothing past the chat.
+    val noticeRepo = remember(app.db) { app.notices() }
     // Armillary rides the same surface again: the owner's cookie, and
-    // the AI settings, where the provider row it keeps lives.
-    val armillaryRepo = remember(app.session) {
-        io.nisfeb.talon.armillary.ArmillaryRepo(app.session.http, appScope, app.aiSettings)
+    // the AI settings, where the provider row it keeps lives. The
+    // notifier is for a payment landing while the browser is in front.
+    val armillaryRepo = remember(app.session, noticeRepo) {
+        io.nisfeb.talon.armillary.ArmillaryRepo(
+            app.session.http, appScope, app.aiSettings,
+            notifier = object : io.nisfeb.talon.notify.Notifier {
+                override fun notify(title: String, body: String, key: String?) =
+                    io.nisfeb.talon.Notifications.showShipPush(app, io.nisfeb.talon.notify.ShipPushMessage(title, body, key))
+            },
+            noticeRepo = noticeRepo,
+        )
     }
     DisposableEffect(armillaryRepo) {
         onDispose { runCatching { armillaryRepo.detach() } }
@@ -823,6 +836,24 @@ fun TalonApp(
     }
     // Left before its event was found, it is not opened later.
     LaunchedEffect(calendarOpen) { if (!calendarOpen) calendarPushTag = null }
+    // A tapped Activity notice, by the target it was recorded with. Nothing
+    // here read them, so every notice row on Android opened nothing.
+    LaunchedEffect(Unit) {
+        io.nisfeb.talon.notify.OpenNoticeRequests.requests.collect { tag ->
+            val to = io.nisfeb.talon.notify.noticeLanding(tag) ?: return@collect
+            sections.leave {
+                closeSections()
+                when (to) {
+                    is io.nisfeb.talon.notify.NoticeLanding.Calendar -> { calendarPushTag = to.tag; calendarOpen = true }
+                    io.nisfeb.talon.notify.NoticeLanding.Actions -> actionsOpen = true
+                    io.nisfeb.talon.notify.NoticeLanding.Loops -> loopsOpen = true
+                    io.nisfeb.talon.notify.NoticeLanding.Invites -> invitesOpen = true
+                    io.nisfeb.talon.notify.NoticeLanding.Assistant -> assistantOpen = true
+                    is io.nisfeb.talon.notify.NoticeLanding.Chat -> openWhom = to.whom
+                }
+            }
+        }
+    }
     // A tapped leave alert: Orrery, on the thing to leave for.
     LaunchedEffect(initialOpenOrreryItem) {
         if (initialOpenOrreryItem != null) {
@@ -839,8 +870,20 @@ fun TalonApp(
     val actionContext = LocalContext.current
     LaunchedEffect(orreryRepo) {
         orreryRepo.onActions = { raise, clear ->
-            clear.forEach { io.nisfeb.talon.Notifications.clearAction(actionContext, it) }
-            if (!actionsOpen) raise.forEach { io.nisfeb.talon.Notifications.showAction(actionContext, it.id, it.title, it.body) }
+            clear.forEach {
+                io.nisfeb.talon.Notifications.clearAction(actionContext, it)
+                noticeRepo.dismiss("orrery:$it")
+            }
+            raise.forEach {
+                // The inbox keeps every proposal; only the notification
+                // waits while the list is on screen.
+                val key = it.id.ifBlank { "more" }
+                noticeRepo.record(
+                    "orrery:$key", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_ASSISTANT,
+                    "orrery-proposal", it.title, it.body, "orrery:$key",
+                )
+                if (!actionsOpen) io.nisfeb.talon.Notifications.showAction(actionContext, it.id, it.title, it.body)
+            }
         }
     }
 
@@ -1222,9 +1265,12 @@ fun TalonApp(
     // Register a single message listener with the repo for the lifetime
     // of the composition. Each new non-self message fires a notification
     // unless the user is currently viewing that exact conversation in the
-    // foreground.
-    DisposableEffect(Unit) {
-        app.repo.messageListener = { m: MessageEntity, replyToUs: Boolean ->
+    // foreground. Keyed on the repo: a switch builds the next ship's, and
+    // listeners set once stayed on the old one, so the new ship notified
+    // nothing until Talon restarted.
+    val listenedRepo = app.repo
+    DisposableEffect(listenedRepo, noticeRepo) {
+        listenedRepo.messageListener = { m: MessageEntity, replyToUs: Boolean ->
             val lifecycle = ProcessLifecycleOwner.get().lifecycle
             val foreground = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
             val focused = foreground && openWhomState.value == m.whom
@@ -1265,7 +1311,11 @@ fun TalonApp(
         // New pending DM request → notify. Always fires (there's no
         // "open" state for an unaccepted request), so a brand-new DM no
         // longer arrives silently.
-        app.repo.dmInviteListener = { ship ->
+        listenedRepo.dmInviteListener = { ship ->
+            noticeRepo.record(
+                "dm:$ship", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "dm-request",
+                contactMap.displayName(ship), "wants to message you", "dm:$ship",
+            )
             appScope.launch {
                 Notifications.showMessage(
                     context = context,
@@ -1281,9 +1331,13 @@ fun TalonApp(
         }
         // New group invite → notify, same as a DM request. Tapping opens
         // the group (its flag doubles as the whom via the "group:" route).
-        app.repo.groupInviteListener = { invite ->
+        listenedRepo.groupInviteListener = { invite ->
+            val from = invite.inviter?.let { " from " + contactMap.displayName(it) } ?: ""
+            noticeRepo.record(
+                "invite:${invite.flag}", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "group-invite",
+                invite.title ?: invite.flag, "invited you to a group$from", "invite:${invite.flag}",
+            )
             appScope.launch {
-                val from = invite.inviter?.let { " from " + contactMap.displayName(it) } ?: ""
                 Notifications.showMessage(
                     context = context,
                     whom = "group:${invite.flag}",
@@ -1296,9 +1350,9 @@ fun TalonApp(
             }
         }
         onDispose {
-            app.repo.messageListener = null
-            app.repo.dmInviteListener = null
-            app.repo.groupInviteListener = null
+            listenedRepo.messageListener = null
+            listenedRepo.dmInviteListener = null
+            listenedRepo.groupInviteListener = null
         }
     }
 

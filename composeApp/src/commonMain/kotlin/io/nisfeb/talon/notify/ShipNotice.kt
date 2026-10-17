@@ -29,6 +29,34 @@ object OpenNoticeRequests {
     fun request(tag: String) { _requests.tryEmit(tag) }
 }
 
+/** Where a tapped notice lands, read off its tag by [noticeLanding]. */
+sealed interface NoticeLanding {
+    /** A calendar reminder: the calendar, on its occurrence. */
+    data class Calendar(val tag: String) : NoticeLanding
+    data object Actions : NoticeLanding
+    data object Loops : NoticeLanding
+    data object Invites : NoticeLanding
+    data object Assistant : NoticeLanding
+    /** A DM request: the conversation it asks for. */
+    data class Chat(val whom: String) : NoticeLanding
+}
+
+/**
+ * Where a notice tagged [tag] opens: a tapped push (iOS), or a tapped
+ * Activity row, which carries the target [NoticeRepo.record] was given.
+ * One reading for both shells; Android used to read none, so its
+ * Activity rows opened nothing. Null for a tag nothing opens.
+ */
+fun noticeLanding(tag: String): NoticeLanding? = when {
+    tag.startsWith(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX) -> NoticeLanding.Calendar(tag)
+    tag.startsWith("orrery:") -> NoticeLanding.Actions
+    tag.startsWith("loop:") -> NoticeLanding.Loops
+    tag.startsWith("invite:") -> NoticeLanding.Invites
+    tag == "armillary" -> NoticeLanding.Assistant
+    tag.startsWith("dm:") -> tag.removePrefix("dm:").takeIf { it.isNotBlank() }?.let { NoticeLanding.Chat(it) }
+    else -> null
+}
+
 /**
  * One line on how the ship's pushes to this device are going, from its
  * %trunk status (wire 12 debug.json), for Settings: when it last pushed

@@ -122,6 +122,13 @@ class TalonApplication : Application() {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * The Activity feed's own notices, for the ship signed in now. On the
+     * process's scope, so a loop's result, which arrives with no screen
+     * up, is kept as well as one the open app records.
+     */
+    fun notices(): io.nisfeb.talon.notify.NoticeRepo = io.nisfeb.talon.notify.NoticeRepo(db.notices(), appScope)
+
     override fun onCreate() {
         super.onCreate()
         // Images off screen leave the memory cache while Talon is in the

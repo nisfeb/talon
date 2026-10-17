@@ -42,18 +42,23 @@ class NoticeRepo(
         target: String,
     ) {
         scope.launch {
-            dao.put(
-                NoticeEntity(
-                    id = id,
-                    domain = domain,
-                    kind = kind,
-                    title = title,
-                    body = body,
-                    createdMs = now(),
-                    target = target,
-                ),
-            )
-            prune()
+            // A notice is not worth the app: Android's scope has no handler,
+            // and a write that fails there (the ship's database closing on a
+            // switch) would take the process down with it.
+            runCatching {
+                dao.put(
+                    NoticeEntity(
+                        id = id,
+                        domain = domain,
+                        kind = kind,
+                        title = title,
+                        body = body,
+                        createdMs = now(),
+                        target = target,
+                    ),
+                )
+                prune()
+            }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
         }
     }
 
@@ -67,7 +72,7 @@ class NoticeRepo(
      * match [record], since callers are notification callbacks, not suspend.
      */
     fun dismiss(id: String) {
-        scope.launch { dao.markRead(id) }
+        scope.launch { runCatching { dao.markRead(id) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it } }
     }
 
     private suspend fun prune() {
