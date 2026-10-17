@@ -50,11 +50,13 @@ class VoiceConversation(
     /** What was last read out in full, kept so "approve the second one" means something. */
     private var lastRead: String? = null
 
-    /** What this turn asked to have read out, set by the brief tool. */
-    private var reading: Brief? = null
+    /** What this turn asked to have read out, set by the brief and unread tools, and the line said before it. */
+    private var reading: String? = null
+    private var readingLine = READING
 
     private val offered: List<Tool> =
-        tools.filterNot { it.spec.name in NOT_OFFERED } + listOfNotNull(tell?.let(::instructTool), briefTool())
+        tools.filterNot { it.spec.name in NOT_OFFERED }.map { if (it.spec.name == UNREAD_TOOL) readsOut(it) else it } +
+            listOfNotNull(tell?.let(::instructTool), briefTool())
 
     /** The tools a turn may call, for a test and the log. */
     val toolNames: List<String> get() = offered.map { it.spec.name }
@@ -89,13 +91,26 @@ class VoiceConversation(
             // The conversation's writes go ahead, as a dictation's do; what
             // reaches another person waits inside [tell] for the owner.
             confirm = { _, _ -> true },
-            // A brief read out needs no model call to say so.
-            finish = { turn -> if (reading != null && turn.all { it.first.name == BRIEF_TOOL }) READING else DictationAgent.plainly(turn) },
+            // What is read out needs no model call to say so.
+            finish = { turn -> if (reading != null && turn.all { it.first.name in READS_OUT }) readingLine else DictationAgent.plainly(turn) },
         )
         turns += DictationFlow.Earlier(words, line)
         val read = reading ?: return Next.Say(line)
-        lastRead = read.text
-        return Next.Say(line, Briefing.spokenParagraphs(read.text), shown = line + "\n\n" + read.text)
+        lastRead = read
+        return Next.Say(line, Briefing.spokenParagraphs(read), shown = line + "\n\n" + read)
+    }
+
+    /**
+     * [unread] as it is, read out where the owner asked to hear it: their
+     * messages word for word, but not the ids the model needs after.
+     */
+    private fun readsOut(unread: Tool) = Tool(unread.spec, unread.write) { args ->
+        unread.execute(args).also { out ->
+            if (args["aloud"].asText() == "true" && Briefing.UNREAD_IDS in out) {
+                reading = out.substringBefore("\n\n" + Briefing.UNREAD_IDS)
+                readingLine = UNREAD_READING
+            }
+        }
     }
 
     private fun instructTool(tell: suspend (String) -> String) = Tool(
@@ -132,7 +147,10 @@ class VoiceConversation(
             return@Tool "Could not read the brief from orrery: ${e.message}"
         }
         if (b == null) return@Tool "There is no brief for today yet."
-        if (args["aloud"].asText() == "true") reading = b
+        if (args["aloud"].asText() == "true") {
+            reading = b.text
+            readingLine = READING
+        }
         b.text
     }
 
@@ -144,6 +162,10 @@ class VoiceConversation(
         const val MAX_CONTEXT = 8
 
         const val BRIEF_TOOL = "read_brief"
+        const val UNREAD_TOOL = "list_unread"
+
+        /** The tools whose text is read out as it is. */
+        private val READS_OUT = setOf(BRIEF_TOOL, UNREAD_TOOL)
 
         /** What the history calls the opener's question. */
         const val OPENED = "Opened the briefing"
@@ -151,6 +173,7 @@ class VoiceConversation(
         const val GOODBYE = "Okay. Talk soon."
         const val TOO_LONG = "That's a lot for one go. Tap me again to start fresh."
         const val READING = "Here's today's brief."
+        const val UNREAD_READING = "Here are your unread messages."
         const val WHAT_NEXT = "What would you like?"
 
         /**
@@ -179,7 +202,8 @@ class VoiceConversation(
             anything goes ahead. An event goes
             on the calendar with create_event, and a to-do with create_task.
             When they want today's brief read, call read_brief with aloud
-            true; it is read to them as it is.
+            true; it is read to them as it is. Their unread messages are
+            list_unread's, read to them the same way with aloud true.
         """.trimIndent()
     }
 }

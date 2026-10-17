@@ -165,6 +165,9 @@ class TlonChatRepo(
     @Volatile private var http: HttpClient? = null
     @Volatile private var baseUrl: String? = null
     @Volatile private var ourPatp: String = ""
+
+    /** The ship signed in, "" before [start]: the assistant leaves its own messages out of what is unread. */
+    val ownShip: String get() = ourPatp
     @Volatile private var sessionJob: Job? = null
     @Volatile private var lastEventMs: Long = 0L
 

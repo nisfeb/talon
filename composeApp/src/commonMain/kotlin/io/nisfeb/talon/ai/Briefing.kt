@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ai
 
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.latestPerConversation
 import io.nisfeb.talon.orrery.Brief
 import io.nisfeb.talon.orrery.Decider
@@ -68,6 +69,31 @@ object Briefing {
         val shown = db.latestPerConversation().first().mapTo(HashSet()) { it.whom }
         return db.unreads().getAll().filter { it.whom in shown }.sumOf { it.count }
     }
+
+    /**
+     * The unread messages themselves, for list_unread: each conversation
+     * [chatUnread] counts, newest first, with at most [per] of its unread
+     * messages, oldest first, and none of [me]'s own. Only [from]'s, when
+     * given. Unread starts at the ship's own first unread message: a
+     * conversation's count counts reactions and replies too, so it is the
+     * fallback only, and read it would have said seen messages as new.
+     */
+    suspend fun unread(db: AppDatabase, me: String, per: Int, from: String? = null): List<Pair<String, List<MessageEntity>>> {
+        val shown = db.latestPerConversation().first().mapTo(HashSet()) { it.whom }
+        val owner = "~" + me.removePrefix("~")
+        return db.unreads().getAll().filter { it.count > 0 && it.whom in shown }.sortedByDescending { it.recencyMs }.map { u ->
+            val recent = db.messages().latestAnyFor(u.whom, UNREAD_SCAN)
+            val first = recent.firstOrNull { it.id == u.firstUnreadId }
+            val new = if (first != null) recent.filter { it.sentMs >= first.sentMs } else recent.take(u.count)
+            u.whom to new.filter { it.author != owner && (from == null || it.author == from) }.take(per).asReversed()
+        }.filter { it.second.isNotEmpty() }
+    }
+
+    /** How far back [unread] looks in one conversation. */
+    private const val UNREAD_SCAN = 50
+
+    /** Where list_unread's answer gives the conversations' ids, which are not read out. */
+    const val UNREAD_IDS = "Conversation ids:"
 
     /**
      * The unread messages that could ask something of [owner], newest

@@ -59,8 +59,10 @@ object ToolCatalog {
         // With [open], call_place too: a phone has a dialer, a computer
         // does not (isPhoneDialSupported).
         dials: Boolean = false,
-        // What search_history and read_conversation showed: a dictation's card draws them.
+        // What search_history, read_conversation and list_unread showed: a dictation's card draws them.
         onMessages: (List<MessageEntity>) -> Unit = {},
+        // A conversation's name as the chat list gives it (ContactMap.conversationLabel).
+        conversationLabel: (whom: String) -> String = { it },
         displayName: (String) -> String,
     ): List<Tool> = listOfNotNull(
         Tool(
@@ -105,6 +107,38 @@ object ToolCatalog {
             val read = db.messages().latestFor(whom, count).asReversed()
             onMessages(read)
             format(read, displayName)
+        },
+        // "Read me my unread messages", "What did Andrea say?" (sneagan,
+        // 2026-10-16). Read-only: hearing them leaves them unread.
+        Tool(
+            spec = ToolSpec(
+                "list_unread",
+                "The user's unread chat messages, as the chat list counts them: a paragraph for each conversation with any, newest first, " +
+                    "its name and then its unread messages oldest first, and last the conversations' whom ids. " +
+                    "Give from for one person's only (their ship, from find_person); with nothing unread from them, read_conversation with whom = their ship gives what they said last.",
+                toolSchema(
+                    "from" to ("string" to "Only messages from this ship."),
+                    "count" to ("integer" to "Most messages per conversation (default 10, max 30)."),
+                    "aloud" to ("boolean" to "true when the owner asked to hear them: they are read out word for word, so say only a short line after."),
+                    required = emptyList(),
+                ),
+            ),
+            write = false,
+        ) { args ->
+            val from = args.str("from")?.trim()?.takeIf { it.isNotEmpty() }?.let { "~" + it.removePrefix("~") }
+            val per = (args.int("count") ?: 10).coerceIn(1, 30)
+            val found = Briefing.unread(db, repo.ownShip, per, from).take(MAX_UNREAD_CONVERSATIONS)
+            onMessages(found.flatMap { it.second })
+            if (found.isEmpty()) return@Tool if (from == null) "Nothing unread." else "Nothing unread from ${displayName(from)}."
+            found.joinToString("\n\n") { (whom, msgs) ->
+                val dm = whom.startsWith("~")
+                (listOf(if (dm) "${displayName(whom)}:" else "In ${conversationLabel(whom)}:") + msgs.map { m ->
+                    // A sentence each, so a run of them is not read as one.
+                    val text = StoryCache.textFor(m.id, m.contentJson).replace('\n', ' ').trim().take(500)
+                        .let { if (it.isEmpty() || it.last() in ".!?…") it else "$it." }
+                    if (dm) text else "${displayName(m.author)}: $text"
+                }).joinToString("\n")
+            } + "\n\n${Briefing.UNREAD_IDS} " + found.joinToString("; ") { (whom, _) -> "${conversationLabel(whom)} = $whom" }
         },
         Tool(
             spec = ToolSpec(
@@ -274,6 +308,9 @@ object ToolCatalog {
             }
         },
     )
+
+    /** How many conversations list_unread gives at most. */
+    private const val MAX_UNREAD_CONVERSATIONS = 20
 
     // ───────── helpers ─────────
 

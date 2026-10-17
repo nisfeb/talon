@@ -31,6 +31,8 @@ class DictationFlowTest {
         assertEquals(DictationRoute.Tell, DictationFlow.route("Please add milk to my list?"))
         assertEquals(DictationRoute.Ask, DictationFlow.route("Could you tell me what's on tomorrow?"))
         assertEquals(DictationRoute.Ask, DictationFlow.route("Tell me what's on tomorrow."))
+        assertEquals(DictationRoute.Ask, DictationFlow.route("Read me my unread messages"), "not a todo for orrery: something to hear")
+        assertEquals(DictationRoute.Tell, DictationFlow.route("Reading list: add Dune."), "only read me")
     }
 
     @Test

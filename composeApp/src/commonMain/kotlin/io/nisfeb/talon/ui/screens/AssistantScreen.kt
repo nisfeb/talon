@@ -376,6 +376,7 @@ fun AssistantScreen(
                     // Throws where nothing takes the link: a desktop with no maps handler.
                     open = { uri -> runCatching { uriHandler.openUri(uri) }.isSuccess },
                     dials = io.nisfeb.talon.ui.isPhoneDialSupported,
+                    conversationLabel = contactMap::conversationLabel,
                 ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) +
                     orrery?.let { io.nisfeb.talon.ai.orreryTools(it) }.orEmpty() + mcpTools + latticeTools).dedupToolNames(),
                 systemPrompt = systemPrompt,

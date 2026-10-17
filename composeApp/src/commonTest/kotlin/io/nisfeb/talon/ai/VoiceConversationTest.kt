@@ -36,10 +36,10 @@ class VoiceConversationTest {
 
     private val told = mutableListOf<String>()
 
-    private fun talk(model: Model, brief: Brief? = this.brief, tell: (suspend (String) -> String)? = { told += it; "Done. Orrery will text Andrea." }) =
+    private fun talk(model: Model, brief: Brief? = this.brief, tell: (suspend (String) -> String)? = { told += it; "Done. Orrery will text Andrea." }, extra: List<Tool> = emptyList()) =
         VoiceConversation(
             model.completer,
-            tools = listOf(tool("list_events", false), tool("send_message", true), tool("orrery_instruct", true), tool("orrery_read", false)),
+            tools = listOf(tool("list_events", false), tool("send_message", true), tool("orrery_instruct", true), tool("orrery_read", false)) + extra,
             tell = tell,
             brief = { brief },
         )
@@ -108,6 +108,35 @@ class VoiceConversationTest {
         assertEquals(VoiceConversation.Next.Say("No brief yet today."), talk(none, brief = null).next("Read me the brief"))
         val result = (none.calls.last().second.last() as AgentMessage.ToolResults).results.single().content
         assertEquals("There is no brief for today yet.", result)
+    }
+
+    // "Read me my unread messages" (sneagan, 2026-10-16): read out as
+    // list_unread gives them, but not the ids it gives the model.
+    private val unreadText = "Andrea:\ncan you grab milk?\nand eggs.\n\nIn Family · General:\nNec: lunch anyone?\n\n" +
+        "${Briefing.UNREAD_IDS} Andrea = ~bus; Family · General = chat/~nec/general"
+    private fun unread(text: String = unreadText) = tool(VoiceConversation.UNREAD_TOOL, false) { text }
+
+    @Test
+    fun `unread messages are read out word for word, without their ids, and stay in mind`() = runBlocking {
+        val model = Model(AgentTurn.Calls(null, listOf(call("list_unread", "aloud" to true))), AgentTurn.Final("Andrea asked for milk."))
+        val t = talk(model, extra = listOf(unread()))
+        val read = t.next("Read me my unread messages") as VoiceConversation.Next.Say
+        assertEquals(VoiceConversation.UNREAD_READING, read.line)
+        assertEquals(listOf("Andrea: can you grab milk? and eggs.", "In Family · General: Nec: lunch anyone?"), read.inFull)
+        assertTrue("Nec: lunch anyone?" in read.shown && Briefing.UNREAD_IDS !in read.shown && read.inFull.none { Briefing.UNREAD_IDS in it }, "the ids are the model's, neither said nor shown")
+        assertEquals(1, model.calls.size, "said by the tool's result, not a second call")
+        t.next("What did Andrea want?")
+        assertTrue("can you grab milk?" in model.calls.last().first, "the next turn knows what was read")
+        assertTrue("list_unread's, read to them the same way with aloud true" in model.calls.first().first, "Archie is told how")
+    }
+
+    @Test
+    fun `unread asked about but not to be read, or with nothing unread, is the model's to word`() = runBlocking {
+        val asked = Model(AgentTurn.Calls(null, listOf(call("list_unread", "from" to "~bus"))), AgentTurn.Final("Andrea asked for milk and eggs."))
+        assertEquals(VoiceConversation.Next.Say("Andrea asked for milk and eggs."), talk(asked, extra = listOf(unread())).next("What did Andrea say?"))
+        val none = Model(AgentTurn.Calls(null, listOf(call("list_unread", "aloud" to true))), AgentTurn.Final("Nothing new."))
+        assertEquals(VoiceConversation.Next.Say("Nothing new."), talk(none, extra = listOf(unread("Nothing unread."))).next("Read me my messages"))
+        assertEquals(2, none.calls.size)
     }
 
     @Test

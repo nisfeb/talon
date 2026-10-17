@@ -99,9 +99,10 @@ class DictationAgent(
             clash, a gap, something to bring), in at most three lines.
             Orrery's situations and actions are not on the screen, so name
             each one that answers the question, in at most eight lines.
-            You can only look things up here: if they asked for
-            something to be done, say it was not done, and that saying it
-            as an instruction rather than a question hands it to orrery.
+            You can only look things up here, and open maps or the dialer
+            when they ask: anything else they asked to be done, say it was
+            not done, and that saying it as an instruction rather than a
+            question hands it to orrery.
         """.trimIndent()
 
         /** A question's whole prompt. */
@@ -132,7 +133,7 @@ class DictationAgent(
          * somewhere, the way there, a quick fact, a free hour.
          */
         val TOOLS: Set<String> = setOf(
-            "search_history", "read_conversation", "send_message", "find_person", "find_conversation",
+            "search_history", "read_conversation", "list_unread", "send_message", "find_person", "find_conversation",
             "send_mail", "list_mail", "search_mail", "read_mail",
             "list_calendars", "list_events", "find_free_time", "create_event", "update_event", "delete_event",
             "list_tasks", "create_task", "complete_task",
