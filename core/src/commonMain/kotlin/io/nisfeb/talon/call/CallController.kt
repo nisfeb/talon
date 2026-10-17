@@ -1867,7 +1867,7 @@ class CallController(
             val cur = _state.value
             if (cur is CallUiState.Active && cur.media != MediaState.Live) {
                 Log.w(TAG, "media never connected after ${connectTimeoutMs}ms")
-                endCall("couldn't connect")
+                giveUp("couldn't connect")
             }
         }
     }
@@ -1951,9 +1951,21 @@ class CallController(
             delay(restartGiveUpMs)
             val cur = _state.value
             if (restartToken == token && cur is CallUiState.Active && cur.media != MediaState.Live) {
-                endCall("connection failed")
+                giveUp("connection failed")
             }
         }
+    }
+
+    /**
+     * Give up on the call by ourselves, after a watchdog. A callee that
+     * never went live tells nobody: two of our devices answering at once
+     * each send an accept, the caller takes the first, and the other's
+     * give-up hung up the call the first one was on. The caller's own
+     * watchdog ends its side of a call that never connected.
+     */
+    private fun giveUp(reason: String) {
+        val cur = _state.value
+        if (!isCaller && cur is CallUiState.Active && cur.connectedAtMs == 0L) endLocal(reason) else endCall(reason)
     }
 
     private fun endCall(reason: String) {

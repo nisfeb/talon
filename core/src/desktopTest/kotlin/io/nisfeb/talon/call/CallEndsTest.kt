@@ -53,4 +53,48 @@ class CallEndsTest {
         h2.awaitPut { it.contains("\"action\":\"delete\"") }
         assertTrue(h2.putsSnapshot().none { TrunkHarness.sigIdIn(it, "reject") != null || TrunkHarness.sigIdIn(it, "hangup") != null })
     }
+
+    // Two of our devices answering at once both send an accept; the
+    // caller takes the first. The other never connects, and its give-up
+    // must not hang up the call the first is on.
+    @Test
+    fun `an answered call that never connected ends here only`() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val c = CallController(h.session, CallEngineProvider { ScriptedCallEngine() }, connectTimeoutMs = 300)
+        try {
+            c.start()
+            h.awaitConnected()
+            h.emitFact(ring("c1"))
+            withTimeout(10_000) { c.state.first { it is CallUiState.Incoming } }
+            h.emitFact(offer("c1"))
+            c.accept()
+            h.awaitPut { TrunkHarness.sigIdIn(it, "accept") == "c1" }
+            val end = withTimeout(5_000) { c.state.first { it is CallUiState.Ended } }
+            assertEquals("couldn't connect", (end as CallUiState.Ended).reason)
+            delay(300)
+            assertEquals(0, hangups(h, "c1"), "the loser of the race hung up the winner's call")
+        } finally {
+            c.stop()
+        }
+    }
+
+    @Test
+    fun `a call we placed that never connected is still hung up on the peer`() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val c = CallController(h.session, CallEngineProvider { ScriptedCallEngine() }, connectTimeoutMs = 300)
+        try {
+            c.start()
+            h.awaitConnected()
+            withTimeout(10_000) { c.policy.first { it != null } }
+            c.placeCall("~zod")
+            h.awaitPut { TrunkHarness.sigIdIn(it, "offer") != null }
+            val id = c.currentCallId!!
+            h.emitFact("""{"recv":{"from":"~zod","sig":{"accept":{"id":"$id","sdp":"v=0\na=fingerprint:sha-256 AA:BB\n","fpr":"sha-256 AA:BB"}}}}""")
+            val end = withTimeout(5_000) { c.state.first { it is CallUiState.Ended } }
+            assertEquals("couldn't connect", (end as CallUiState.Ended).reason)
+            h.awaitPut { TrunkHarness.sigIdIn(it, "hangup") == id }
+        } finally {
+            c.stop()
+        }
+    }
 }
