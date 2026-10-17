@@ -25,10 +25,10 @@ import io.nisfeb.talon.util.Log
  * just couldn't hear you the moment the screen went off.
  *
  * TalonSyncService can't cover this. Its type is specialUse (chosen
- * so the SSE channel isn't subject to dataSync's 6h/day cap), it is
- * started from BootReceiver while the app is in the background where
- * a microphone-typed start would be rejected, and the user can turn
- * it off. A call needs the mic whether or not background sync is on,
+ * so the SSE channel isn't subject to dataSync's 6h/day cap), it can
+ * start from BootReceiver after a reboot, in the background where a
+ * microphone-typed start would be rejected, and it runs only while no
+ * push reaches this phone. A call needs the mic whether or not it runs,
  * so it gets its own service with its own lifetime: started when
  * media goes live, stopped when the call ends.
  */

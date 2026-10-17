@@ -18,12 +18,17 @@ import io.nisfeb.talon.util.Log
  * Only while no push reaches this phone for the ship (keepAliveNeeded):
  * with the ship's own %trunk or the relay pushing, it is stopped.
  *
- * We don't run any work inside the service — the repo lives on the
- * Application and is pinned here via the process's implicit lifetime.
+ * The repo lives on the Application and is pinned here via the
+ * process's implicit lifetime; the only work here is starting it, for a
+ * start from [BootReceiver] or a sticky restart, where no screen has.
  * The reconnect on a network change and the catch-up on screen-on live
  * on the Application too, so they work with or without this service.
  * Android will still kill us under memory pressure; that's OK, the
- * repo is idempotent and the next app open re-establishes the channel.
+ * repo is idempotent and the restart, or the next app open,
+ * re-establishes the channel.
+ *
+ * Android-only: no desktop analog. A desktop Talon is one process that
+ * keeps its own stream while its window is open, and closing it quits.
  */
 class TalonSyncService : Service() {
 
@@ -31,22 +36,35 @@ class TalonSyncService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = buildOngoing()
-        when {
-            // Android 14+ (API 34+): SPECIAL_USE has no timeout. dataSync
-            // is hard-capped at 6h/day on Android 15+ which kills the
-            // sync mid-day with a ForegroundServiceDidNotStopInTime
-            // crash — wrong fit for a chat client that can't use FCM.
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
-            )
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-            )
-            else -> startForeground(NOTIFICATION_ID, notification)
+        try {
+            when {
+                // Android 14+ (API 34+): SPECIAL_USE has no timeout. dataSync
+                // is hard-capped at 6h/day on Android 15+ which kills the
+                // sync mid-day with a ForegroundServiceDidNotStopInTime
+                // crash — wrong fit for a chat client that can't use FCM.
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+                )
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
+                else -> startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: RuntimeException) {
+            // A start Android does not allow from where it came (the
+            // background on 12 and later, a sticky restart it refuses):
+            // uncaught, that took the app down, and sticky, again.
+            Log.w(TAG, "could not keep the stream in the foreground: ${e.message}")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        // The stream this keeps, where no screen started it. Idempotent.
+        (application as? TalonApplication)?.takeIf { it.activeShipFlow.value != null }?.let { app ->
+            runCatching { app.repo.start(app.session) }.onFailure { Log.w(TAG, "could not start the stream", it) }
         }
         return START_STICKY
     }
@@ -88,6 +106,25 @@ class TalonSyncService : Service() {
 
         fun stop(context: Context) {
             context.stopService(Intent(context, TalonSyncService::class.java))
+        }
+
+        /**
+         * After a reboot, where the screen's own check has not run: started
+         * only when no push reaches this phone for the active ship, as
+         * TalonApp decides it. Whether mail needs the process is not known
+         * until the mail app is asked, so it does not count here.
+         */
+        fun startIfNeeded(app: TalonApplication) {
+            val ship = app.activeShipFlow.value ?: return
+            // An endpoint with no distributor left to deliver to is none.
+            val endpoint = io.nisfeb.talon.notify.TalonMessagingReceiver.cachedEndpoint(app)?.takeIf {
+                runCatching { org.unifiedpush.android.connector.UnifiedPush.getDistributors(app).isNotEmpty() }.getOrDefault(true)
+            }
+            val needed = io.nisfeb.talon.notify.keepAliveNeeded(
+                app.relaySettings, ship, endpoint,
+                shipPushBroken = ship in io.nisfeb.talon.notify.ShipPushHealth.broken.value,
+            )
+            if (needed) runCatching { start(app) }.onFailure { Log.w(TAG, "could not start after boot: ${it.message}") }
         }
     }
 }
