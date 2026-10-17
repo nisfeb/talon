@@ -38,7 +38,7 @@ fun RecordConsentDialog(
     onConfirm: () -> Unit,
     /** What recording does and who is told: the room by its badge, a 1:1 call's peer in the chat. */
     text: String = "Recording captures everyone's audio. Talon sends it to " +
-        "your transcription provider to make a transcript, and " +
+        "Armillary's speech model to make a transcript, and " +
         "everyone on the line sees a recording badge while it's on.",
 ) {
     if (!show) return

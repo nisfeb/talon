@@ -271,7 +271,7 @@ fun CallStrip(
             },
             text = "Recording captures both voices. Talon first posts \"${io.nisfeb.talon.call.CallController.RECORDING_ON}\" " +
                 "in your chat with ${nameFor(peer)}, and records only once your ship has sent it. " +
-                "A transcript is made only if you publish one afterwards.",
+                "A transcript is made by Armillary's speech model, only if you publish one afterwards.",
         )
     }
     recordProblem?.let { why ->
