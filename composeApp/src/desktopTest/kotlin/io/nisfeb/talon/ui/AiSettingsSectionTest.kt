@@ -1,5 +1,9 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import io.nisfeb.talon.ai.ModelInfo
 import androidx.compose.ui.test.onAllNodesWithTag
 import io.nisfeb.talon.ai.DEVICE_PROVIDER
@@ -112,6 +116,50 @@ class AiSettingsSectionTest {
         // No address and no key anywhere: the ship holds both, and an
         // own provider left from before is not shown.
         assertEquals(0, onAllNodesWithText("API key", substring = true).fetchSemanticsNodes().size)
+    }
+
+    // "Somewhere in armillary setup talon tells the user to copy an access
+    // key" (sneagan, 2026-10-17): Armillary's page went to the browser,
+    // which is not signed in to the ship. It opens in the app, signed in.
+    @Test
+    fun `Armillary's own page opens in the app, signed in, and needs no access key`() = runComposeUiTest {
+        val ai = FakeAiSettings().withProfile(withArmillary())
+        val bought = repo(ai) { HttpStatusCode.NotFound to "" }
+        val opened = mutableListOf<String>()
+        setContent {
+            TalonTheme(darkTheme = false) {
+                CompositionLocalProvider(
+                    LocalUriHandler provides object : UriHandler { override fun openUri(uri: String) { opened += uri } },
+                    LocalShipUrl provides "https://ship.example",
+                    LocalShipCookie provides "session=x",
+                ) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, inApp = true) }
+                }
+            }
+        }
+        onNodeWithText("Manage models in Armillary").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Close").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(emptyList(), opened, "not the browser")
+    }
+
+    @Test
+    fun `with no in-app browser, Armillary's page goes through the ship's login`() = runComposeUiTest {
+        val ai = FakeAiSettings().withProfile(withArmillary())
+        val bought = repo(ai) { HttpStatusCode.NotFound to "" }
+        val opened = mutableListOf<String>()
+        setContent {
+            TalonTheme(darkTheme = false) {
+                CompositionLocalProvider(
+                    LocalUriHandler provides object : UriHandler { override fun openUri(uri: String) { opened += uri } },
+                    LocalShipUrl provides "https://ship.example",
+                    LocalShipCookie provides "session=x",
+                ) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought, inApp = false) }
+                }
+            }
+        }
+        onNodeWithText("Manage models in Armillary").performScrollTo().performClick()
+        assertEquals(listOf("https://ship.example/~/login?redirect=/apps/armillary"), opened)
     }
 
     @Test

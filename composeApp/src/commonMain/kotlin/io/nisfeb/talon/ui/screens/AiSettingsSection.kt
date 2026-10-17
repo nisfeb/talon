@@ -100,8 +100,11 @@ fun AiSettingsSection(
     aiSettings: AiSettingsRepository,
     orrery: OrreryRepo?,
     armillary: ArmillaryRepo? = null,
+    /** Ship pages open in the app, signed in; a test's own. */
+    inApp: Boolean = io.nisfeb.talon.ui.isUrbWebViewSupported,
 ) {
     val uri = LocalUriHandler.current
+    val shipUrl = io.nisfeb.talon.ui.LocalShipUrl.current
     val cfg by aiSettings.state.collectAsState()
     val profile = cfg.profile()
     val spend by AiSpend.month.collectAsState()
@@ -152,7 +155,9 @@ fun AiSettingsSection(
         }
     }
     armillary?.pageUrl?.let { page ->
-        TextButton(onClick = { uri.openUri(page) }) { Text("Manage models in Armillary") }
+        // In the app, signed in: the browser asked for the access key.
+        val openModels = if (shipUrl != null) io.nisfeb.talon.ui.rememberShipPage(shipUrl, page, "Armillary", inApp) else ({ uri.openUri(page) })
+        TextButton(onClick = openModels) { Text("Manage models in Armillary") }
         Quiet("Pick your own models, or use your own provider key, on Armillary's page on your ship.")
     }
 
@@ -197,7 +202,12 @@ fun AiSettingsSection(
  * ([OrreryRepo.switchOff]).
  */
 @Composable
-fun OrrerySettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?) {
+fun OrrerySettingsSection(
+    aiSettings: AiSettingsRepository,
+    orrery: OrreryRepo?,
+    /** Orrery's page opens in the app, signed in; a test's own. */
+    inApp: Boolean = io.nisfeb.talon.ui.isUrbWebViewSupported,
+) {
     val scope = rememberCoroutineScope()
     val cfg by aiSettings.state.collectAsState()
     val noDecide = remember { MutableStateFlow(DecideSettings()) }
@@ -279,7 +289,7 @@ fun OrrerySettingsSection(aiSettings: AiSettingsRepository, orrery: OrreryRepo?)
     HorizontalDivider()
     // Until the owner flips it here, the decision model is what this device had.
     DecisionRow(profile, profile.jev ?: decide.on, spend[AiSpend.JEV]) { v -> edit { it.copy(jev = v) } }
-    if (orrery != null && orreryHere) MoreOrreryRow(orrery)
+    if (orrery != null && orreryHere) MoreOrreryRow(orrery, inApp)
 }
 
 /** What Orrery is and what turning it on allows, for someone who has never heard of it. */
@@ -1120,16 +1130,19 @@ private fun DecisionRow(profile: AiProfile, on: Boolean, spent: Double?, onSwitc
  * owner's preferences, where approved things go.
  */
 @Composable
-private fun MoreOrreryRow(orrery: OrreryRepo) {
+private fun MoreOrreryRow(orrery: OrreryRepo, inApp: Boolean) {
     val uri = LocalUriHandler.current
     val page = orrery.settingsPage() ?: return
+    val shipUrl = io.nisfeb.talon.ui.LocalShipUrl.current
+    // In the app, signed in: the browser asked for the access key.
+    val open = if (shipUrl != null) io.nisfeb.talon.ui.rememberShipPage(shipUrl, page, "Orrery", inApp) else ({ runCatching { uri.openUri(page) }; Unit })
     Spacer(Modifier.height(12.dp))
     HorizontalDivider()
-    Row(Modifier.fillMaxWidth().clickable { runCatching { uri.openUri(page) } }, verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().clickable { open() }, verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Heading("More Orrery settings")
             Quiet("Orrery's model, which chats and mail your ship reads, your preferences and where approved things go are set on Orrery's own page on your ship.")
         }
-        TextButton(onClick = { runCatching { uri.openUri(page) } }) { Text("Open") }
+        TextButton(onClick = open) { Text("Open") }
     }
 }

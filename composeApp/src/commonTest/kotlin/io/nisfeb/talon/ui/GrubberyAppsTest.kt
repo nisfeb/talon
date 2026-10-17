@@ -81,4 +81,13 @@ class GrubberyAppsTest {
         assertEquals("https://ship.example/apps/grubbery/permits", permitsUrl("https://ship.example/"))
         assertEquals("https://ship.example/~/login?redirect=/apps/grubbery/permits", permitsLoginUrl("https://ship.example/"))
     }
+
+    // The login form posts without a page's #fragment, so it is left off
+    // rather than sent where eyre would read it as part of the path.
+    @Test
+    fun `a ship page's login goes on to its path, without its fragment`() {
+        assertEquals("https://ship.example/~/login?redirect=/apps/armillary", shipLoginUrl("https://ship.example/", "https://ship.example/apps/armillary#catalog"))
+        assertEquals("https://ship.example/~/login?redirect=/apps/orrery", shipLoginUrl("https://ship.example", "https://ship.example/apps/orrery#settings"))
+        assertEquals("https://ship.example/~/login?redirect=/", shipLoginUrl("https://ship.example", "https://ship.example"))
+    }
 }

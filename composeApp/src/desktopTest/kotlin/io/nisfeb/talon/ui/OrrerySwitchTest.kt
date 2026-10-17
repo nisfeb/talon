@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -139,7 +140,13 @@ class OrrerySwitchTest {
         override fun openUri(uri: String) { opened += uri }
     }
 
-    private fun page(orrery: Boolean?, block: ComposeUiTest.(FakeAiSettings, OrreryRepo, AppDatabase) -> Unit) {
+    private fun page(
+        orrery: Boolean?,
+        /** Signed in to this ship, as the app is: null for signed out. */
+        shipUrl: String? = null,
+        inApp: Boolean = false,
+        block: ComposeUiTest.(FakeAiSettings, OrreryRepo, AppDatabase) -> Unit,
+    ) {
         val (db, dir) = db()
         runBlocking { db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "c1.secret")) }
         val scope = CoroutineScope(SupervisorJob())
@@ -151,8 +158,12 @@ class OrrerySwitchTest {
             runComposeUiTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
-                        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides uris) {
-                            Column(Modifier.verticalScroll(rememberScrollState())) { OrrerySettingsSection(ai, repo) }
+                        androidx.compose.runtime.CompositionLocalProvider(
+                            androidx.compose.ui.platform.LocalUriHandler provides uris,
+                            LocalShipUrl provides shipUrl,
+                            LocalShipCookie provides shipUrl?.let { "session=x" },
+                        ) {
+                            Column(Modifier.verticalScroll(rememberScrollState())) { OrrerySettingsSection(ai, repo, inApp = inApp) }
                         }
                     }
                 }
@@ -224,6 +235,23 @@ class OrrerySwitchTest {
     }
 
     private fun sent(doc: String) = writes.filter { it.first == doc }.map { it.second.toString() }
+
+    // The phone's browser is not signed in to the ship, so Orrery's page
+    // sent there asked for the access key: it opens in the app, signed in.
+    @Test
+    fun `Orrery's page opens in the app, signed in, not in the browser`() = page(orrery = true, shipUrl = "https://ship.test", inApp = true) { _, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("More Orrery settings") }
+        onNodeWithText("Open").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("Close").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(emptyList(), opened.toList(), "not the browser")
+    }
+
+    @Test
+    fun `with no in-app browser, Orrery's page goes through the ship's login`() = page(orrery = true, shipUrl = "https://ship.test") { _, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("More Orrery settings") }
+        onNodeWithText("Open").performScrollTo().performClick()
+        assertEquals(listOf("https://ship.test/~/login?redirect=/apps/orrery"), opened.toList())
+    }
 
     // The rest is the ship's, set on Orrery's own page; one row opens it
     // (2026-10-12: "keep the fine controls in orrery, simplify in talon").
