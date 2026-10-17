@@ -9,6 +9,7 @@ import kotlinx.cinterop.ExperimentalForeignApi
 import platform.AVFAudio.AVAudioEngine
 import platform.AVFAudio.AVAudioSession
 import platform.AVFAudio.AVAudioSessionCategoryRecord
+import platform.AVFAudio.AVAudioSessionRecordPermissionDenied
 import platform.AVFAudio.setActive
 import platform.Foundation.NSTimer
 import platform.Speech.SFSpeechAudioBufferRecognitionRequest
@@ -18,11 +19,15 @@ import platform.Speech.SFSpeechRecognizerAuthorizationStatus
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
 
-/** Apple's speech recogniser on the microphone, until the speaker stops. */
+/**
+ * Apple's speech recogniser on the microphone, until the speaker stops.
+ * Null where it cannot listen (speech or the microphone refused, or no
+ * recognition on this device), so the field takes the cursor instead.
+ */
 @Composable
 actual fun rememberDictation(onResult: (String) -> Unit): (() -> Unit)? {
     val current = rememberUpdatedState(onResult)
-    return remember { { IosDictation.start { current.value(it) } } }
+    return remember { if (IosDictation.canListen()) ({ IosDictation.start { current.value(it) } }) else null }
 }
 
 /** No quick dictation on iOS ([isQuickDictationSupported]). */
@@ -36,6 +41,17 @@ private object IosDictation {
     private var task: SFSpeechRecognitionTask? = null
     private var request: SFSpeechAudioBufferRecognitionRequest? = null
     private var quiet: NSTimer? = null
+
+    /** Whether a listen can come to anything; not yet asked counts as yes, the asking is [start]'s. */
+    fun canListen(): Boolean {
+        val speech = SFSpeechRecognizer.authorizationStatus()
+        if (speech == SFSpeechRecognizerAuthorizationStatus.SFSpeechRecognizerAuthorizationStatusDenied ||
+            speech == SFSpeechRecognizerAuthorizationStatus.SFSpeechRecognizerAuthorizationStatusRestricted
+        ) return false
+        if (AVAudioSession.sharedInstance().recordPermission == AVAudioSessionRecordPermissionDenied) return false
+        // Caught: the recogniser's init is nil for a locale it does not know.
+        return runCatching { SFSpeechRecognizer().supportsOnDeviceRecognition }.getOrDefault(false)
+    }
 
     fun start(onResult: (String) -> Unit) {
         SFSpeechRecognizer.requestAuthorization { status ->
@@ -66,7 +82,10 @@ private object IosDictation {
             Log.w(TAG, "on-device speech recognition unsupported on this device — refusing to stream audio off-device")
             return
         }
-        runCatching {
+        // During a call TalonRtc owns the shared session, already set to
+        // play and record: Record here silenced the call's audio. The tap
+        // listens through the call's session instead, as a voice message does.
+        if (!IosVoipBridge.callLive.value) runCatching {
             val session = AVAudioSession.sharedInstance()
             session.setCategory(AVAudioSessionCategoryRecord, null)
             session.setActive(true, null)

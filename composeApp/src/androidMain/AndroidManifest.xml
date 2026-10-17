@@ -31,6 +31,12 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!-- The speech recogniser the assistant's mic opens
+             (ui/Dictation.android.kt), asked for before the mic is
+             shown: a phone without one shows the keyboard instead. -->
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
     </queries>
 
     <uses-permission android:name="android.permission.INTERNET" />
