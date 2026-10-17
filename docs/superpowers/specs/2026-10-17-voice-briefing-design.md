@@ -8,9 +8,19 @@ sneagan, 2026-10-17: "I'm imagining a more conversational interaction. maybe the
 
 Then: "stick with the dictation card but maybe put the conversation into assistant history as text when it's over."
 
+And: "this is also a good opportunity to pilot the cute owl mascot idea. let's make an owl icon for the button on the home screen and give the assistant a name that's in keeping with the talon, orrery, armillary theme of a wise bird. but colloquial and friendly."
+
+## Archie
+
+The voice assistant is **Archie**, a small owl. The name is short for Archimedes: his bronze sphere of the heavens, as Cicero tells it, was the first orrery, kin to the armillary sphere, and Archimedes is Merlin's wise owl in The Sword in the Stone. "Archie" keeps it friendly.
+
+- **The mark** (`ui/icons/Archie.kt`, `ArchieMark`): an owl perched on a branch, with ear tufts, big round eyes with a sparkle in each, a beak and wing edges. It is flat and in one colour, drawn on a 24 unit grid, so it tints like any icon: amber on navy in the dark theme, ink on paper in the light. The eyes, sparkles, beak and wing edges are holes cut by the even-odd rule. `ArchieMarkTest` checks that they render as holes.
+- **Where it shows in this pilot:** the Home button, and the card's header in conversation mode with the name beside it. The Quick Settings tile and the widget keep the Talon mark, and the Assistant screen keeps its name, until the pilot has been lived with.
+- **Archie does not keep saying its name.** It says it once, in the button's label ("Talk to Archie") and on the card. The opener goes straight to the day.
+
 ## What the user sees
 
-1. **A button beside "Good morning"** on the Home page. Tapping it opens the dictation card in conversation mode. It shows only where quick dictation runs (`isQuickDictationSupported`, Android today), so no new capability flag.
+1. **Archie's owl beside "Good morning"** on the Home page, labelled "Talk to Archie". Tapping it opens the dictation card in conversation mode. It shows only where quick dictation runs (`isQuickDictationSupported`, Android today), so no new capability flag.
 2. **The card speaks first.** It says the counts at once ("You have 2 new emails and 32 chat messages, 2 of them questions for you."), then the rest of the opener as soon as the model has written it ("Your first meeting is in about 30 minutes. Andrea is out of town today, so you're on drop-off. Shall I read you the full brief?"). The card shows the same words, with today's events and the new mail under them as the card already draws them.
 3. **Then it listens.** The owner answers in their own words: "yes", "read me the questions", "who's asking?", "tell Andrea I'll do pick-up too", "approve A2". It answers aloud, shows the answer, and listens again.
 4. **Reading in full.** "Read me the brief" speaks orrery's own text of today's brief, section by section, never a model's retelling of it. A tap stops the reading and the card listens.
@@ -39,7 +49,7 @@ Two parts, so nothing waits on a model before the first word.
 
 When the conversation ends, however it ends:
 
-- One assistant conversation, titled "Briefing, Friday 17 October".
+- One assistant conversation, titled "Archie, Friday 17 October".
 - One turn per exchange: the owner's words as the question ("Opened the briefing" for the opener) and the full answer as said and shown, with `mode` "voice".
 - Pushed with `pushAssistantTurn`, the same as a typed turn, so other devices show it.
 - An empty centroid, so a typed question later does not join it by topic.
@@ -72,7 +82,7 @@ The conversation logic lives in common code, so it is tested in commonTest with 
 
 ## Phases
 
-1. The button, the opener, the conversation with context, reading the brief, and the save to history.
+1. Archie's button and card header, the opener, the conversation with context, reading the brief, and the save to history. The mark and name are done (`ArchieMark`, `ASSISTANT_NAME`).
 2. `brief_action` by tag and `list_unread` read aloud.
 
 ## Open points for sneagan
