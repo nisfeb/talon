@@ -56,6 +56,8 @@ class AndroidNoticesGuardTest {
             assertTrue(set !in talonApp, "TalonApp sets $set again, on the screen's lifetime")
         }
         assertTrue("liveMessageAlerts(" in listen && "ShownConversation.keys" in listen, listen)
+        // The open chat counts as shown in its thread too, as openWhom did.
+        assertTrue("openWhom?.let { io.nisfeb.talon.notify.ClearNotificationsWhileShown(it) }" in talonApp)
         assertTrue("forShip = ship" in listen && "\"invite:${'$'}{invite.flag}\"" in listen, listen)
     }
 

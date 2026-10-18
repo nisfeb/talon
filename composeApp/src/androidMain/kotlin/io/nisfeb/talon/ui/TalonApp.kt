@@ -1319,6 +1319,10 @@ fun TalonApp(
     LaunchedEffect(openWhom) {
         openWhom?.let { Notifications.cancelAllForChat(context, it, forShip = loggedInShip) }
     }
+    // The chat open here is on screen however it is drawn, for the alerts
+    // TalonApplication decides by ShownConversation: on a phone its thread
+    // or a post replaces the chat screen, which alone said so.
+    openWhom?.let { io.nisfeb.talon.notify.ClearNotificationsWhileShown(it) }
 
     // Screens handle their own window insets via Modifier.windowInsetsPadding
     // so that composers can push up with the IME while everything else stays
