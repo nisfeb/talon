@@ -124,7 +124,9 @@ data class PendingAttachment(
  */
 @Stable
 class ComposerState(initialDraftText: String) {
-    var draft by mutableStateOf(TextFieldValue(initialDraftText))
+    // The caret after the words, where the writer left off: at the start,
+    // the next keystroke landed in front of a restored draft.
+    var draft by mutableStateOf(TextFieldValue(initialDraftText, TextRange(initialDraftText.length)))
     var pendingQuote by mutableStateOf<MessageEntity?>(null)
     var pendingVoice by mutableStateOf<PendingVoice?>(null)
     var pendingAttachment by mutableStateOf<PendingAttachment?>(null)

@@ -708,4 +708,11 @@ class DmChatScreenTest {
         waitUntil(timeoutMillis = 20_000) { ship.pokesTo("chat").isNotEmpty() }
         assertTrue("nice :D" in ship.pokesTo("chat").single().json.toString())
     }
+
+    @Test
+    fun `a restored draft takes more words after itself`() = chat(drafts = InMemoryDraftStore().apply { save("~bus", "hello") }) { _, _ ->
+        waitUntil(timeoutMillis = 20_000) { draft() == "hello" }
+        onNode(hasSetTextAction()).performTextInput(" there")
+        waitUntil(timeoutMillis = 20_000) { draft() == "hello there" }
+    }
 }
