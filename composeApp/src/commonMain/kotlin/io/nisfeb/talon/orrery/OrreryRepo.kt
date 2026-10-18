@@ -1824,8 +1824,12 @@ class OrreryRepo(
         return occurrenceNear(rows.filter { (cal == null || it.cal == cal) && it.id == uid }.map { it.l }, nearMs)
     }
 
-    /** The person's word on an action: done, dismissed, or failed with why. */
-    suspend fun setAction(id: String, status: String, note: String = ""): Result<Unit> = runCatching {
+    /**
+     * The person's word on an action: done, dismissed, or failed with why.
+     * On this repo's scope: an assistant stopped while the ship answers
+     * does not take the answer back halfway.
+     */
+    suspend fun setAction(id: String, status: String, note: String = ""): Result<Unit> = scope.async { runCatching {
         val a = api ?: error("Not attached to a ship.")
         val s = ship ?: error("Not attached to a ship.")
         // This install's key where it has one, else the owner's own say.
@@ -1842,7 +1846,8 @@ class OrreryRepo(
             if (token != null) a.landed(token, id, status) else delay(2_000)
             refreshActions()
         }
-    }
+        Unit
+    } }.await()
 
     /**
      * Send what the owner typed under a proposal, rule 17. The ship
