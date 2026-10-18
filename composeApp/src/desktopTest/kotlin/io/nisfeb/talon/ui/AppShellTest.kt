@@ -1141,6 +1141,17 @@ class AppShellTest {
         assertTrue(onAllNodes(hasSetTextAction() and androidx.compose.ui.test.hasText("~bus")).fetchSemanticsNodes().isNotEmpty(), "kept")
     }
 
+    // Review B1-8: Remove was fire and forget, and a refusal said nothing.
+    @Test
+    fun `a remove the ship refuses says why and keeps the contact`() = app { ship ->
+        addOnContacts("~bus")
+        waitUntil(timeoutMillis = 10_000) { showing("Remove") }
+        ship.refuse = { if (it.app == "contacts") "not now" else null }
+        onNodeWithText("Remove").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("Couldn't remove ~bus: the ship refused it (not now).") }
+        assertTrue(showing("Remove"), "still in the book, to try again")
+    }
+
     // Leaving Contacts mid-add does not stop it: it runs on the repo's scope.
     @Test
     fun `an add left midway still reaches the ship`() = app { ship ->

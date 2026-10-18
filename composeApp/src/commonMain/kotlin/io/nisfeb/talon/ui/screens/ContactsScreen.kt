@@ -57,7 +57,8 @@ fun ContactsScreen(
     bookContacts: Set<String>,
     /** Adds the ship to the book, returning once the ship has it; throws when it does not. */
     onAddContact: suspend (patp: String, nickname: String?) -> Unit,
-    onRemoveContact: (patp: String) -> Unit,
+    /** Removes the ship from the book, returning once the ship agrees; throws when it does not. */
+    onRemoveContact: suspend (patp: String) -> Unit,
     onOpenContact: (patp: String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -69,6 +70,10 @@ fun ContactsScreen(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var adding by remember { mutableStateOf(false) }
     var addProblem by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
+    // A remove was fire and forget: no progress, and a refusal said
+    // nothing (review B1-8). Said as an add is.
+    var removing by remember { mutableStateOf(emptySet<String>()) }
+    var removeProblem by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
 
     // Any name a comet answers to: its @p, its twelve-word name, or a
     // short name or nickname of somebody already in the book.
@@ -177,6 +182,7 @@ fun ContactsScreen(
             }
         }
         addProblem?.let { io.nisfeb.talon.ui.ProblemLine(it) }
+        removeProblem?.let { io.nisfeb.talon.ui.ProblemLine(it) }
         HorizontalDivider()
 
         if (bookContacts.isNotEmpty()) {
@@ -212,7 +218,22 @@ fun ContactsScreen(
                     ContactRow(
                         c = c,
                         onClick = { onOpenContact(c.ship) },
-                        onRemove = { onRemoveContact(c.ship) },
+                        removing = c.ship in removing,
+                        onRemove = {
+                            removing = removing + c.ship
+                            removeProblem = null
+                            scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                                try {
+                                    onRemoveContact(c.ship)
+                                } catch (e: kotlinx.coroutines.CancellationException) {
+                                    throw e
+                                } catch (t: Throwable) {
+                                    removeProblem = io.nisfeb.talon.util.problemOf("Couldn't remove ${shipHandle(c.ship)}", t)
+                                } finally {
+                                    removing = removing - c.ship
+                                }
+                            }
+                        },
                     )
                     HorizontalDivider()
                 }
@@ -223,7 +244,7 @@ fun ContactsScreen(
 }
 
 @Composable
-private fun ContactRow(c: ContactEntity, onClick: () -> Unit, onRemove: () -> Unit) {
+private fun ContactRow(c: ContactEntity, removing: Boolean, onClick: () -> Unit, onRemove: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -247,6 +268,6 @@ private fun ContactRow(c: ContactEntity, onClick: () -> Unit, onRemove: () -> Un
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        TextButton(onClick = onRemove) { Text("Remove") }
+        TextButton(onClick = onRemove, enabled = !removing) { Text(if (removing) "Removing…" else "Remove") }
     }
 }

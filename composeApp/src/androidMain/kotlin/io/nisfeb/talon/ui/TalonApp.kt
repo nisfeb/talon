@@ -2090,9 +2090,8 @@ fun TalonApp(
                 // On the repo's scope, awaited: Contacts keeps what was typed
                 // until the ship has it, and says why when not.
                 onAddContact = { patp, nickname -> app.repo.carry { app.repo.addContact(patp, nickname) } },
-                onRemoveContact = { patp ->
-                    appScope.launch { runCatching { app.repo.removeContact(patp) } }
-                },
+                // On the repo's scope, awaited, as an add is (see App.kt).
+                onRemoveContact = { patp -> app.repo.carry { app.repo.removeContact(patp) } },
                 onOpenContact = { patp -> profileSheetShip = patp },
                 onBack = { contactsOpen = false },
                 modifier = mod,

@@ -2696,9 +2696,7 @@ fun App(
                         // On the repo's scope, awaited: Contacts keeps what was
                         // typed until the ship has it, and says why when not.
                         onAddContact = { patp, nickname -> repo.carry { repo.addContact(patp, nickname) } },
-                        onRemoveContact = { patp ->
-                            rightPaneScope.launch { runCatching { repo.removeContact(patp) } }
-                        },
+                        onRemoveContact = { patp -> repo.carry { repo.removeContact(patp) } },
                         onOpenContact = { patp -> profileSheetShip = patp },
                         onBack = { showContacts = false },
                     )
