@@ -20,6 +20,18 @@ class ActivityParserTest {
 
     // ─── sourceToWhom ───────────────────────────────────────────
 
+    // B6-1: a notification's %activity id, put in the form rows keep.
+    @Test
+    fun `a dotted activity id becomes the id rows keep for its chat`() {
+        assertEquals("~bus/170141184506", keptPostId("~bus", "~bus/170.141.184.506"))
+        assertEquals("~bus/170141184506", keptPostId("0v4.abcde", "~bus/170.141.184.506"))
+        assertEquals("170141184506", keptPostId("chat/~bus/general", "~bus/170.141.184.506"))
+        assertEquals("170141184506", keptPostId("heap/~bus/pics", "~nec/170.141.184.506"))
+        assertEquals("170141184506", keptPostId("diary/~bus/blog", "170.141.184.506"))
+        assertEquals("170141184506", keptPostId("chat/~bus/general", "170141184506"))
+        assertEquals("local_17", keptPostId("~bus", "local_17"))
+    }
+
     @Test
     fun `dm ship source resolves to the peer`() {
         val src = buildJsonObject {
