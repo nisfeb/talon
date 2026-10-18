@@ -378,3 +378,10 @@ Fix groups, one owner per file:
 - B2-20: no confirmation needed. Closed, no change.
 - Not answered yet: B2-12, B3-10, B5-16, B5-6, B5-8, B4-15, B4-17, pass 1's A4-19, A2-11, A2-4, A1-2 and M5, the judgment calls, and the OrreryKeysTest question.
 - Built: B4-3 by the lead (7d50cc33). The rest by four groups: dictation (B2-2, B2-8, B2-11), android (B3-2, B3-12, B3-3, B3-16), alerts (B6-3), loops (B2-6, B2-14).
+
+### The morning's decisions, built (2026-10-18)
+
+- All merged into `polish/overnight-2026-10-17`: android ef297a61 (B3-2, B3-12, B3-3, B3-16), dictation ba6ad34d (B2-2, B2-8, B2-11), alerts 2b9ad266 (B6-3 and catch-up alerts), loops 48e82917 (B2-14, B2-6 as a per-loop switch with held calls on the Loops screen; Room 57 to 58). The lead: B4-3 (7d50cc33), a hint filled in by its message without a second alert (43e7f487, the alerts group's find: hint ids never matched the kept ids), and B2-15 (78b72392, held overnight).
+- Full suite at 78b72392: 3,990 tests, 0 failures. All four compiles pass. OrreryKeysTest passed this time, so its overnight failures are intermittent, not a steady break.
+- Open for sneagan: whether orrery's own reads (orrery_read, orrery_find, orrery_observe, Archie's brief) also need the fingerprint while locked; a cold open now posts one notification per unread chat that changed since the last read (new volume, the live rule's); an allowed loop share the calendar refuses is recorded with a check mark and the refusal text.
+- Follow-ups not done: a staged share is not cleared on a ship switch (taken as soon as its chat opens); an Android `loop:` notification tap could open Loops; the decisions still unanswered from the morning report.
