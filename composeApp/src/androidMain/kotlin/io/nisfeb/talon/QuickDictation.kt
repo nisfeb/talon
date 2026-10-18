@@ -442,7 +442,7 @@ class DictationService : Service() {
                     val day = prep.day(io.nisfeb.talon.ai.CalendarQuestion.decider(app.ktorHttp, cfg, Briefing.QUESTIONS_WAIT_MS))
                     Log.i(TAG, "the day in ${System.currentTimeMillis() - t0} ms: mail ${day.mail}, chats ${day.chats}, questions ${day.questions}")
                     val card = day.card.takeUnless { it.isEmpty }
-                    val counts = Briefing.countsLine(day.mail, day.chats, day.questions)
+                    val counts = Briefing.countsLine(day.mail, day.chats, day.questions, day.mailLate)
                     // Written while the counts are said, and said after them:
                     // one voice, so the second would cut the first off.
                     val rest = async { talk.opener(counts, Briefing.openerDigest(prep.now(), day.firstEvent, prep.brief(orrery))) }
