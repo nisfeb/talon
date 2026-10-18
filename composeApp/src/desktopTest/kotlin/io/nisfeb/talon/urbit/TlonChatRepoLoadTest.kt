@@ -129,4 +129,30 @@ class TlonChatRepoLoadTest {
         repo.fetchThread("~bus", id)
         assertNotNull(db.messages().getOne("~bus", "~bus/170141184506"))
     }
+
+    // A channel reply whose echo was lost stayed grey beside the ship's
+    // copy until the next launch: the reads that bring the copy reaped
+    // stand-ins of posts only, and the thread's read none (review A1-4).
+    @Test
+    fun `a reply whose echo was lost loses its stand-in when the channel or its thread is read`() = runBlocking<Unit> {
+        val parent = "170141184506"
+        fun reply(rid: String, sent: Long) =
+            """"$rid":{"seal":{"id":"$rid","reacts":{}},"reply-essay":{"content":[{"inline":["mine"]}],"author":"~zod","sent":$sent,"blob":null}}"""
+        fun post(vararg replies: String) =
+            """{"seal":{"id":"$parent","reacts":{},"replies":{${replies.joinToString(",")}},"meta":{"replyCount":${replies.size},"lastReply":null,"lastRepliers":[]}},"essay":${essay("~bus", "parent", 1_000)}}"""
+        fun standIn(id: String, sent: Long) = MessageEntity(nest, id, "~zod", sent, "[]", "/chat", parentId = parent, status = "pending")
+        db.messages().upsert(standIn("local_1", 2_000))
+        db.messages().upsert(standIn("local_3", 4_000)) // still on its way: no copy yet
+        ship.scries["channels/v4/$nest/posts/newest/100/post"] = """{"posts":{"$parent":${post(reply("170141184507", 2_000))}}}"""
+        repo.refreshConversation(nest)
+        assertNull(db.messages().getOne(nest, "local_1"), "the channel's read took it")
+        assertNotNull(db.messages().getOne(nest, "170141184507"))
+
+        db.messages().upsert(standIn("local_2", 3_000))
+        ship.scries["channels/v5/$nest/posts/post/170.141.184.506"] = post(reply("170141184507", 2_000), reply("170141184508", 3_000))
+        repo.fetchThread(nest, parent)
+        assertNull(db.messages().getOne(nest, "local_2"), "the thread's read took it")
+        assertEquals("pending", db.messages().getOne(nest, "local_3")?.status, "one with no copy stays")
+        assertEquals(listOf("170141184507", "170141184508", "local_3"), db.messages().repliesSnapshot(nest, parent).map { it.id })
+    }
 }

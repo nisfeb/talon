@@ -2813,6 +2813,25 @@ class TlonChatRepo(
         ingestPost(whom, post, messages, reactions)
         if (messages.isNotEmpty()) db.messages().upsertAllWithMedia(db.messageMedia(), messages)
         if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
+        // Opening the thread is where a reply whose echo was lost shows up
+        // twice: the ship's copy, and its grey stand-in.
+        reapTwinsOf(messages)
+    }
+
+    /**
+     * Our own posts and replies among [messages], read from the ship under
+     * the ids it gave them: their `local_` stand-ins go, as the echoes
+     * would have taken them. Exact (whom, author, sentMs) only, so a post
+     * of ours still in flight is never taken for another. Replies too: a
+     * channel reply whose echo was lost stayed beside its copy, grey,
+     * until the next launch's queue found it.
+     */
+    private suspend fun reapTwinsOf(messages: List<MessageEntity>) {
+        messages.filter { it.author == ourPatp && isChannelNest(it.whom) && !it.id.startsWith("local_") }
+            .forEach {
+                db.messages().reapLocalTwin(it.whom, ourPatp, it.sentMs)
+                db.messageMedia().reapLocalTwinMedia(it.whom, ourPatp, it.sentMs)
+            }
     }
 
     /**
@@ -2929,13 +2948,8 @@ class TlonChatRepo(
         if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
         // Same grey-twin reap as the init-posts bootstrap: this refresh
         // re-adds our own posts under their real id, so clear any stranded
-        // optimistic twin (exact whom/author/sentMs) it would otherwise
-        // duplicate.
-        messages.filter { it.author == ourPatp && it.parentId == null && !it.id.startsWith("local_") }
-            .forEach {
-                db.messages().reapLocalTwin(it.whom, ourPatp, it.sentMs)
-                db.messageMedia().reapLocalTwinMedia(it.whom, ourPatp, it.sentMs)
-            }
+        // optimistic twin it would otherwise duplicate.
+        reapTwinsOf(messages)
         // Clean up stale optimistic-insert rows for channels whose id
         // format we'd gotten wrong in earlier builds. One-shot; no-op
         // once all such ghosts are gone.
@@ -3824,11 +3838,7 @@ class TlonChatRepo(
         // health. Exact-match only (not reapOwnEchoTwin) so the FIFO
         // fallback can't clobber a *different* still-pending post's twin
         // when this snapshot lands mid-flight. Idempotent once gone.
-        messages.filter { it.author == ourPatp && it.parentId == null && !it.id.startsWith("local_") }
-            .forEach {
-                db.messages().reapLocalTwin(it.whom, ourPatp, it.sentMs)
-                db.messageMedia().reapLocalTwinMedia(it.whom, ourPatp, it.sentMs)
-            }
+        reapTwinsOf(messages)
     }
 
     /**
