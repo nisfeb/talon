@@ -155,3 +155,26 @@ Fix groups, one owner per file:
 - A5-20 Med-Low: Group admin offers New channel to non-admins (`GroupAdminScreen.kt:129-133` vs `:548-554`). Fix: gate on mayAdminister.
 - A5 Lows: live channel add resets ordinal (`TlonChatRepo.kt:3995-4012`, `GroupDao.kt:35`); CatchUpWorker waits forever when the repo isn't started, and ingestPosts never notifies (`CatchUpWorker.kt:57-65`); hints for a ship no longer signed in are shown (`TalonMessagingReceiver.kt:104-109`) and stopPushesFor clears the device id even when unregister failed (`TalonApplication.kt:395-401`); Android never re-sends a rotated UnifiedPush endpoint (`TalonApp.kt:1203`); desktop re-notifies an earlier message when the newest is deleted (`NewMessageDiff.kt:86-89`); desktop notification click only raises the window (`SystemNotifier.kt:181`); desktop and iOS mail notices fire while the inbox is on screen (`App.kt:1336-1339`); orphan embedding rows never deleted; Android sign-out of the last ship leaves TalonSyncService running (`TalonApplication.kt:643-646`); desktop and iOS picking the active ship closes the chat (`App.kt:2114-2118, 2219-2222`); desktop and iOS forget skip forgetHomeListSnapshot; a pasted ship URL keeps its path (`UrbitSession.kt:26-34`); GalleryPostScreen draws a blank body with a live comment box while post is null (`:159, :269`).
 - A5 Unconfirmed: Host order may be hash order (`GroupsScryParser.kt:46-58`); whether /v1/foreigns gives an initial fact.
+
+## Pass 2 raw findings (untriaged)
+
+### Area B4, desktop and iOS leaves
+
+- B4-1 High (Linux): notifications can stop for the session. gdbus gets a bare "-1" and exits with usage (seen locally), and its exit code is never checked; notify-send is demoted to gdbus on any failure, including a title or body starting with "-" (no "--") (`SystemNotifier.kt:145-213`). Fix: "--" before positionals in both; check gdbus's exit code so the tray fallback runs.
+- B4-2 Med-High (iOS): IosSessionStore reads sessions.json once at construction; built while the device is locked it reads empty and a later save overwrites the saved ships (`IosSessionStore.ios.kt:80`, `IosFiles.ios.kt:201-252`; commit 220a2dda guarded only IosAiSettings). Same shape: relay.json, theme, drafts. Fix: IosAiSettings' unreadable guard in IosSessionStore and IosTextStore.
+- B4-3 Med-High (iOS), DECISION: the Room database directory is NSFileProtectionComplete while calls keep Talon running locked, so DB reads and writes fail ~10 s after lock (`AppDatabase.ios.kt:64-86`). Option: CompleteUntilFirstUserAuthentication. A privacy default.
+- B4-4 Med (iOS): playing a voice message during a call sets the audio session to Playback and cuts our mic (`VoiceMessages.ios.kt:244, 318`). Fix: skip setCategory when callLive.
+- B4-5 Med (desktop): leaving Settings while the local comet starts kills it and leaves Start greyed out (`LocalShipSection.kt:52, 102-116, 155`, `DesktopLocalShip.kt:325-329`). Fix: operations on a scope DesktopLocalShip owns; the catch sets Failed or Stopped and doesn't destroy on cancellation.
+- B4-6 Med (desktop, security): DesktopUriHandler hands any string to xdg-open, open or rundll32 (`DesktopUriHandler.kt:40-47`; `Story.kt:443-449` link target from the message's href). Fix: allow http, https, mailto plus internal routing; app-made files through openFile.
+- B4-7 Med-Low (desktop): a failing lock call locks the user out with "already running" (`SingleInstance.kt:119-135`). Fix: let the launch go on for a Throwable that isn't OverlappingFileLockException.
+- B4-8 Low-Med (desktop): a partly extracted vere binary is trusted forever (`Tarball.kt:30-40`, `DesktopLocalShip.kt:206`). Fix: extract to bin.part, rename after a size check.
+- B4-9 Low-Med (desktop): the 10 s exit deadline is shorter than the comet's stop budget (`ExitPolicy.kt:11`, `Main.kt:193`, `DesktopLocalShip.kt:117-134`). Fix: bound localShip.stop() itself, or stop it after the DB close.
+- B4-10 Low-Med (iOS): starting dictation again while listening kills the new listen (old task's cancel callback calls stop) (`Dictation.ios.kt:75-131`). Fix: a generation counter.
+- B4-11 Low (desktop, privacy): terminal.log records the +code answer and sessions.json holds the cookie with default permissions (`DesktopLocalShip.kt:399`, `DesktopSessionStore.kt:41-49`). Fix: 0600 as keepSecret does.
+- B4-12 Low: the notification icon is written to shared /tmp under a predictable name, following symlinks (`SystemNotifier.kt:229-235`). Fix: under AppDirs.
+- B4-13 Low: event .ics files pile up world-readable in /tmp (`Files.kt:33-37`, `StoryRenderer.kt:899`). Fix: cache dir and prune.
+- B4-14 Low: desktop log rotation only at launch (`Log.desktop.kt:19-28`). Fix: check size every N lines.
+- B4-15 Low, DECISION (a feature): desktop never plays audio inline though vlcj is present (`VoiceMessages.desktop.kt:113-115`).
+- B4-16 Low, doc: the iOS crash report is not in Documents as two comments claim (`MainViewController.kt:62-68`, `CallPush.swift:491`). Fix: the comments (Kotlin side), or write to Documents.
+- B4-17 Low, DECISION: Linux puts the pier, models, caches and logs under ~/.config (`AppDirs.kt:167-171`). Moving them is a migration.
+- B4-18 Low, doc: CLAUDE.md says macOS notifications use osascript; SystemNotifier says AWT TrayIcon.
