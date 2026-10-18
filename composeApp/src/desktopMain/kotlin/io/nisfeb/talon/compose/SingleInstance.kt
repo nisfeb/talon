@@ -54,13 +54,14 @@ object SingleInstance {
 
         val raf = runCatching { RandomAccessFile(lockFile, "rw") }.getOrNull() ?: return
         val channel = raf.channel
-        val lock: FileLock? = try {
-            channel.tryLock()
-        } catch (_: OverlappingFileLockException) {
-            null
-        } catch (_: Throwable) {
-            // Don't lock the user out over a lock-system quirk.
-            null
+        val lock: FileLock? = takeLock { channel.tryLock() }.getOrElse {
+            // Don't lock the user out over a lock-system quirk (a
+            // filesystem without locks, an I/O error): it used to say
+            // "already running" and exit.
+            io.nisfeb.talon.util.Log.w("SingleInstance", "could not take the instance lock; starting anyway", it)
+            runCatching { channel.close() }
+            runCatching { raf.close() }
+            return
         }
         if (lock == null) {
             // Another instance holds the lock. Tell the user and exit
@@ -76,6 +77,19 @@ object SingleInstance {
         // prematurely). The OS releases on process exit.
         heldLock = lock
         heldChannel = channel
+    }
+
+    /**
+     * The lock ([tryLock]'s), null when another Talon holds it, or a
+     * failure that says nothing about another Talon.
+     */
+    internal fun takeLock(tryLock: () -> FileLock?): Result<FileLock?> = try {
+        Result.success(tryLock())
+    } catch (_: OverlappingFileLockException) {
+        // This process holds it already.
+        Result.success(null)
+    } catch (e: Throwable) {
+        Result.failure(e)
     }
 
     private fun showAlreadyRunningDialog() {
