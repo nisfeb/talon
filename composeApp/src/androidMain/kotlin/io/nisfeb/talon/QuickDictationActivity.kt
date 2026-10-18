@@ -12,7 +12,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -89,7 +88,6 @@ import io.nisfeb.talon.ui.inlineAnnotated
 import io.nisfeb.talon.ui.parseMarkdownBlocks
 import io.nisfeb.talon.ui.withTalonLinks
 import io.nisfeb.talon.urbit.TalonLink
-import io.nisfeb.talon.ui.theme.talonColors
 import kotlinx.coroutines.delay
 
 /**
@@ -136,10 +134,11 @@ class QuickDictationActivity : ComponentActivity() {
         // waiting for the owner's word is shown, not recorded over.
         val now = QuickDictation.stage.value
         if (savedInstanceState == null && (now is Stage.Idle || now is Stage.Said)) start()
-        // The app's colours without TalonTheme, which paints the window's
-        // background and would hide what is behind the card.
+        // The app's theme, as the owner set it up, without painting the
+        // window: that would hide what is behind the card. It drew in the
+        // brand palette whatever the app's theme was.
         setContent {
-            MaterialTheme(colorScheme = talonColors(isSystemInDarkTheme())) {
+            io.nisfeb.talon.ui.theme.TalonAppTheme(application as TalonApplication, paintWindow = false) {
                 CompositionLocalProvider(LocalUriHandler provides links) { Sheet() }
             }
         }

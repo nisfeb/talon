@@ -198,4 +198,19 @@ class AndroidLifecycleGuardTest {
         assertTrue("syncNoticeLine(signedOutOf)" in service && "if (!live) return" in service, "the line still says it is listening")
         assertTrue("live = true" in service && "live = false" in service)
     }
+
+    // The dictation card drew in the brand palette whatever the app's
+    // theme was (sneagan, 2026-10-18: "the voice assistant cards don't
+    // follow the theme"). It draws in the app's theme, the window left
+    // alone, as the app itself does through the same function.
+    @Test
+    fun `the dictation card draws in the app's own theme`() {
+        val card = read("composeApp/src/androidMain/kotlin/io/nisfeb/talon/QuickDictationActivity.kt")
+        assertTrue("TalonAppTheme(application as TalonApplication, paintWindow = false)" in card, "the card's theme")
+        assertTrue("talonColors(" !in card, "not the brand palette")
+        val main = read("composeApp/src/androidMain/kotlin/io/nisfeb/talon/MainActivity.kt")
+        assertTrue("TalonAppTheme(app)" in main, "the app's theme, from the same function")
+        val theme = read("composeApp/src/commonMain/kotlin/io/nisfeb/talon/ui/theme/Theme.kt")
+        assertTrue("if (paintWindow) SystemBarsAppearance(" in theme, "a card leaves the window alone")
+    }
 }
