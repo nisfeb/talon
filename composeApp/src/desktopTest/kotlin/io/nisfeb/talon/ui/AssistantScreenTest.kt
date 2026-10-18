@@ -157,7 +157,8 @@ class AssistantScreenTest {
     fun `a model that fails is said so, not answered for`() = assistant {
         status = 503
         ask("anything?")
-        waitUntil(timeoutMillis = 10_000) { shows("down for maintenance") }
+        // A failing provider in calm words (B2-3); its own line is in the details.
+        waitUntil(timeoutMillis = 10_000) { shows("the model's provider is having trouble") }
         assertTrue(!shows("Tuesday, at the library."))
     }
 
