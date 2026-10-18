@@ -187,4 +187,92 @@ class DictationAgentTest {
         assertTrue("orrery_read" in DictationAgent.askPrompt && "left to do" in DictationAgent.askPrompt)
         assertTrue("not on the screen" in DictationAgent.askPrompt, "what orrery holds is said, since the card draws none of it")
     }
+
+    // ─── sends wait for the owner (B2-2) ──────────────────────────
+
+    /** A model that calls [first] once, then answers with what the tool said. */
+    private fun once(first: ToolCall, seen: MutableList<String> = mutableListOf()) = AgentLoop.Completer { _, messages, _ ->
+        val results = messages.filterIsInstance<AgentMessage.ToolResults>()
+        if (results.isEmpty()) AgentTurn.Calls(null, listOf(first))
+        else AgentTurn.Final(results.last().results.single().content.also { seen += it })
+    }
+
+    private val names = mapOf("~bus" to "Andrea", "~zod" to "Zod")
+    private fun name(s: String) = names[s] ?: s
+
+    @Test
+    fun `a dictated message goes only on the owner's word, and the card says to whom and what`() = runBlocking {
+        for (word in listOf(true, false, null)) {
+            val sent = mutableListOf<JsonObject>()
+            val asked = mutableListOf<CardProposal>()
+            val seen = mutableListOf<String>()
+            val agent = DictationAgent(
+                completer = once(call("send_message", "whom" to "~bus", "text" to " Running late "), seen),
+                tools = listOf(tool("send_message", true) { sent += it; "Sent to Andrea." }),
+                ownerSends = { asked += it; word },
+                name = ::name,
+            )
+            val said = agent.run("tell Andrea I'm running late")
+            assertEquals(listOf(CardProposal("message", "Message to Andrea", to = "Andrea", text = "Running late")), asked, "asked once, for $word")
+            if (word == true) {
+                assertEquals(1, sent.size)
+                assertEquals("Sent to Andrea.", said)
+            } else {
+                assertTrue(sent.isEmpty(), "sent without the owner's yes ($word)")
+                assertEquals(listOf(DictationAgent.NOT_SENT), seen, "the model is told plainly")
+            }
+        }
+    }
+
+    @Test
+    fun `a dictated mail is asked as a mail, to everyone it goes to`() = runBlocking {
+        val asked = mutableListOf<CardProposal>()
+        val mailed = mutableListOf<JsonObject>()
+        DictationAgent(
+            completer = once(call("send_mail", "to" to "~bus, ~zod,", "subject" to " Dinner ", "body" to "Friday at 7?")),
+            tools = listOf(tool("send_mail", true) { mailed += it; "Mailed ~bus, ~zod." }),
+            ownerSends = { asked += it; false },
+            name = ::name,
+        ).run("mail Andrea and Zod about dinner on Friday at 7")
+        assertEquals(listOf(CardProposal("message", "Mail to Andrea, Zod: Dinner", to = "Andrea, Zod", text = "Friday at 7?")), asked)
+        assertTrue(mailed.isEmpty())
+        assertEquals("Mail to Zod", DictationAgent.outgoing("send_mail", buildJsonObject { put("to", "~zod"); put("body", "x") }, ::name)?.title, "no subject, none said")
+        assertEquals("Mail to Zod", DictationAgent.outgoing("send_mail", buildJsonObject { put("to", "~zod"); put("subject", " "); put("body", "x") }, ::name)?.title)
+    }
+
+    @Test
+    fun `nobody to ask sends nothing, and the other writes go ahead unasked`() = runBlocking {
+        val ran = mutableListOf<String>()
+        var turn = 0
+        val agent = DictationAgent(
+            completer = { _, _, _ ->
+                if (turn++ == 0) AgentTurn.Calls(null, listOf(call("send_message", "whom" to "~bus", "text" to "hi"), call("create_event", "name" to "Dentist")))
+                else AgentTurn.Final("ok")
+            },
+            tools = listOf(tool("send_message", true) { ran += "send"; "Sent." }, tool("create_event", true) { ran += "event"; "Added." }),
+        )
+        agent.run("dentist on friday and tell Andrea")
+        assertEquals(listOf("event"), ran, "a send went with no one to ask, or a calendar write waited")
+    }
+
+    @Test
+    fun `a send that lacks whom or what is refused unasked, and nothing runs`() = runBlocking {
+        var asked = 0
+        val sent = mutableListOf<JsonObject>()
+        val tools = listOf(tool("send_message", true) { sent += it; "Sent." }, tool("send_mail", true) { sent += it; "Mailed." })
+            .askingToSend(::name) { asked++; true }
+        val bad = listOf(
+            "send_message" to buildJsonObject { put("text", "hi") },
+            "send_message" to buildJsonObject { put("whom", "~bus"); put("text", "  ") },
+            "send_mail" to buildJsonObject { put("to", " , "); put("body", "hi") },
+            "send_mail" to buildJsonObject { put("to", "~bus") },
+        )
+        bad.forEach { (n, a) -> assertTrue(tools.first { it.spec.name == n }.execute(a).startsWith("Error:"), "$n $a") }
+        assertEquals(0, asked)
+        assertTrue(sent.isEmpty())
+        // An empty whom is still a send the tool would try: asked, never passed by.
+        tools.first().execute(buildJsonObject { put("whom", ""); put("text", "hi") })
+        assertEquals(1, asked)
+        assertTrue(tools.all { it.write }, "a wrapped send is still a write")
+    }
 }

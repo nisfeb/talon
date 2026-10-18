@@ -547,6 +547,29 @@ class AssistantActionsToolsTest {
         assertTrue(h.run("read_mail", argsOf("thread" to "0vnope")).startsWith("No thread 0vnope"))
     }
 
+    // A dictation sent mail with no word from the owner (B2-2): it goes now
+    // only on their yes, and then as the mail app's decoder takes it, every
+    // key present.
+    @Test
+    fun `a dictated mail reaches the ship only on the owner's word`() = withHarness(mail = answering) { h ->
+        fun dictate(word: Boolean?): String = runBlocking {
+            var turn = 0
+            DictationAgent(
+                completer = { _, _, _ ->
+                    if (turn++ == 0) AgentTurn.Calls(null, listOf(ToolCall("1", "send_mail", argsOf("to" to "~bus", "subject" to "Garlic", "body" to "Plant it Saturday?"))))
+                    else AgentTurn.Final("Not sent.")
+                },
+                tools = DictationAgent.toolsFor(h.tools, locked = false),
+                ownerSends = { word },
+            ).run("mail Andrea to plant the garlic on Saturday")
+        }
+        assertEquals("Not sent.", dictate(false))
+        assertEquals("Not sent.", dictate(null))
+        assertTrue(mailed.isEmpty(), "mail went without the owner's yes")
+        assertEquals("Mailed ~bus.", dictate(true))
+        assertEquals("""{"to":["~bus"],"subject":"Garlic","body":"Plant it Saturday?","prev":null,"attachments":[]}""", mailed.single().toString())
+    }
+
     @Test
     fun `a reply takes the thread's subject and answers its last message`() = withHarness(mail = answering) { h ->
         assertEquals("Mailed ~bus.", h.run("send_mail", argsOf("to" to "~bus", "body" to "and leeks", "thread" to "0vt")))

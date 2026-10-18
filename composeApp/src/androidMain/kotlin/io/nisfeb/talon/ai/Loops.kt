@@ -245,15 +245,21 @@ class Loops(
         }
 
         /**
-         * Act on [transcript], autonomously (writes need no confirmation,
-         * see [DictationAgent]), and return the line for the notification.
+         * Act on [transcript], autonomously (writes need no confirmation
+         * but a send, which waits for [send], see [DictationAgent]), and
+         * return the line for the notification.
          * The loop's mail, calendar and message tools plus orrery's where
          * Orrery is on, [DictationAgent.TOOLS] of them; while [locked], only
          * [DictationAgent.LOCKED_WRITES] among the writes. No write
          * coordinator: a dictation runs only on the device it was spoken
          * into. Throws when the run fails.
          */
-        suspend fun dictate(transcript: String, locked: Boolean, earlier: List<DictationFlow.Earlier> = emptyList()): String {
+        suspend fun dictate(
+            transcript: String,
+            locked: Boolean,
+            earlier: List<DictationFlow.Earlier>,
+            send: suspend (CardProposal) -> Boolean?,
+        ): String {
             started.await()
             val cfg = aiSettings.state.value
             val known = contacts.await()
@@ -292,6 +298,8 @@ class Loops(
                     completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
                     tools = offered,
                     systemPrompt = DictationAgent.prompt,
+                    ownerSends = send,
+                    name = known::conversationLabel,
                 ).run(transcript, earlier).also { card = seen.card(actions.zone(), known) }
             }
         }

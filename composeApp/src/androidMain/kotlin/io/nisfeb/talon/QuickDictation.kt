@@ -63,7 +63,8 @@ import java.io.File
  * leaves waiting is put to the owner on the same card, Send or Don't send,
  * by tap or by saying it, with the fingerprint first on a locked phone
  * for anything that reaches another person. With Orrery off the agent
- * acts on the words itself ([io.nisfeb.talon.ai.Loops.DictationPrep.dictate]).
+ * acts on the words itself ([io.nisfeb.talon.ai.Loops.DictationPrep.dictate]),
+ * and a message or mail it would send waits on the same card.
  * A failure keeps what it had, the audio or the words, behind a Retry.
  *
  * Android-only: no desktop analog. The widget, the tile and the assistant
@@ -83,11 +84,12 @@ object QuickDictation {
         data class Working(val label: String = "Working on it…") : Stage
 
         /**
-         * Orrery's proposals waiting for the owner: its [reply], what each
-         * does ([proposals]), whether one is a message ([sending]), whether the
-         * card is listening for "send" or "cancel" ([hearing]), whether a
-         * locked phone needs the fingerprint first ([unlock]), and whether
-         * the owner already said send and only the fingerprint is left ([unlockNow]).
+         * Orrery's proposals, or a dictation's own send, waiting for the
+         * owner: its [reply], what each does ([proposals]), whether one is a
+         * message ([sending]), whether the card is listening for "send" or
+         * "cancel" ([hearing]), whether a locked phone needs the fingerprint
+         * first ([unlock]), and whether the owner already said send and only
+         * the fingerprint is left ([unlockNow]).
          */
         data class Approve(
             val reply: String,
@@ -640,7 +642,8 @@ class DictationService : Service() {
                     if (orrery == null) {
                         QuickDictation.show(QuickDictation.Stage.Working("Working on it…"))
                         went(DictationRoute.Ask)
-                        p.calendarAnswer(words, thread?.earlier.orEmpty(), decider) ?: p.dictate(words, locked, thread?.earlier.orEmpty())
+                        p.calendarAnswer(words, thread?.earlier.orEmpty(), decider)
+                            ?: p.dictate(words, locked, thread?.earlier.orEmpty(), { ownerSends(it, transcribe) })
                     } else {
                         DictationFlow(
                             ask = { q, earlier ->
@@ -686,9 +689,8 @@ class DictationService : Service() {
         reply: String,
         waiting: List<io.nisfeb.talon.orrery.OrreryAction>,
         transcribe: (suspend (ByteArray) -> String)?,
-    ): Boolean? = kotlinx.coroutines.coroutineScope {
-        val word = QuickDictation.asking()
-        val ask = QuickDictation.Stage.Approve(
+    ): Boolean? = putToOwner(
+        QuickDictation.Stage.Approve(
             reply = reply,
             proposals = waiting.map {
                 io.nisfeb.talon.ai.DictationCards.proposal(
@@ -700,15 +702,43 @@ class DictationService : Service() {
             sending = waiting.any { it.kind == "message" },
             hearing = transcribe != null,
             unlock = DictationFlow.needsUnlock(waiting),
-        )
+        ),
+        waiting.map { it.id }, transcribe, "Telling orrery…",
+    )
+
+    /**
+     * One of a dictation's own sends, a message or a mail ([io.nisfeb.talon.ai.askingToSend]),
+     * put to the owner as orrery's are: it goes only on their word, and
+     * with the fingerprint first on a locked phone.
+     */
+    private suspend fun ownerSends(p: io.nisfeb.talon.ai.CardProposal, transcribe: (suspend (ByteArray) -> String)?): Boolean? = putToOwner(
+        QuickDictation.Stage.Approve(
+            reply = p.title,
+            proposals = listOf(p),
+            lines = listOfNotNull(p.text),
+            sending = true,
+            hearing = transcribe != null,
+            unlock = true,
+        ),
+        emptyList(), transcribe, "Sending…",
+    )
+
+    /** [ask] on the card and in the shade, as [ownerDecides] says; [after] is what the card says once it is answered. */
+    private suspend fun putToOwner(
+        ask: QuickDictation.Stage.Approve,
+        ids: List<String>,
+        transcribe: (suspend (ByteArray) -> String)?,
+        after: String,
+    ): Boolean? = kotlinx.coroutines.coroutineScope {
+        val word = QuickDictation.asking()
         QuickDictation.show(ask)
         update(if (ask.sending) "Waiting for your OK to send…" else "Waiting for your OK…")
         // The shade, whenever the card is not in front: now, or once it goes.
         val shade = launch {
             QuickDictation.shown.first { !it }
-            askInShade(ask, waiting.map { it.id })
+            askInShade(ask, ids)
         }
-        val asked = DictationSpeech.prompt(reply, ask.sending, ask.proposals)
+        val asked = DictationSpeech.prompt(ask.reply, ask.sending, ask.proposals)
         // Asked aloud first, and only then listened for: not to hear itself.
         val hearing = launch(Dispatchers.IO) {
             say(asked)
@@ -716,14 +746,14 @@ class DictationService : Service() {
         }
         try {
             withTimeoutOrNull(APPROVE_WAIT_MS) { word.await() }
-                .also { Log.i(TAG, "the owner said ${it ?: "nothing in time"} to ${waiting.size} waiting") }
+                .also { Log.i(TAG, "the owner said ${it ?: "nothing in time"} to ${ask.proposals.size} waiting") }
         } finally {
             // Stops the answer's recording, which is a blocking loop.
             QuickDictation.ending = QuickDictation.Ending.Cancel
             hearing.cancel()
             shade.cancel()
             NotificationManagerCompat.from(this@DictationService).cancel(ASK_ID)
-            QuickDictation.show(QuickDictation.Stage.Working("Telling orrery…"))
+            QuickDictation.show(QuickDictation.Stage.Working(after))
         }
     }
 
@@ -781,6 +811,8 @@ class DictationService : Service() {
 
     /** An answer from the shade after the run that asked has gone on: straight to orrery. */
     private suspend fun decideLate(ids: List<String>, approve: Boolean) {
+        // A dictation's own send, from a run that has ended: it was not sent.
+        if (ids.isEmpty()) return tell("Dictation", "Not sent: that dictation had ended. Say it again to send it.")
         val prep = prepare() ?: return tell("Dictation", "Talon could not reach orrery to answer. It waits under Actions.")
         try {
             prep.orrery { orrery ->
