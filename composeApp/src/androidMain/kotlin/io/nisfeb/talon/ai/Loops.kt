@@ -91,7 +91,7 @@ class Loops(
                     while (!sync.canCoordinate()) kotlinx.coroutines.delay(500)
                 }
             }
-            withTimeoutOrNull(RUN_BUDGET_MS) { withRunner { it.runDue() } }
+            withTimeoutOrNull(FIRE_BUDGET_MS) { withRunner { it.runDue(perLoopMs = RUN_BUDGET_MS) } }
         } finally {
             runCatching { rearm() }
         }
@@ -588,6 +588,9 @@ class Loops(
         // schedule (LoopRunner stamps lastRunAt up front), so the value is
         // a safety ceiling, not a correctness knob.
         private val RUN_BUDGET_MS = TimeUnit.SECONDS.toMillis(120)
+        // Every loop due in one fire, each with its own budget above, under
+        // WorkManager's ten minutes for a worker, with the connect wait.
+        private val FIRE_BUDGET_MS = TimeUnit.MINUTES.toMillis(8)
         private val WAKE_LOCK_MS = TimeUnit.SECONDS.toMillis(150)
         // Bounded wait for the %settings channel on a cold headless fire
         // with a write loop due — long enough for an SSE connect on mobile

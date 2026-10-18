@@ -94,6 +94,26 @@ class LoopRunnerTest {
         assertEquals(1, told)
     }
 
+    // One budget for the whole fire: a slow first loop left the next none.
+    @Test
+    fun `each loop due in one fire gets its own time`() = runBlocking {
+        val slow = loop.copy(id = 8, prompt = "hang")
+        val loops = FakeLoopDao(listOf(slow, loop))
+        val runs = FakeLoopRunDao()
+        val runner = LoopRunner(
+            loops = loops, runs = runs, tools = emptyList(),
+            completer = { _, messages, _ ->
+                if (messages.any { it is AgentMessage.User && "hang" in it.text }) kotlinx.coroutines.awaitCancellation()
+                AgentTurn.Final("the answer")
+            },
+            aiConfig = { config("k") },
+            notify = { _, _, _ -> },
+            now = { 10_000_000 },
+        )
+        runner.runDue(perLoopMs = 200)
+        assertEquals(listOf(8L to LoopRunner.CUT_SHORT, 7L to "the answer"), runs.inserted.map { it.loopId to it.output })
+    }
+
     // A refusal said as the assistant says it, not the raw line.
     @Test
     fun `a failed run says why in words`() = runBlocking {
