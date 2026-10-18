@@ -2154,6 +2154,7 @@ fun TalonApp(
                     pendingScrollMessageId = postId
                     openWhom = whom
                 },
+                onOpenGroup = { flag -> sections.leave { closeSections(); openGroupFlag = flag } },
                 onBack = { activityOpen = false },
                 modifier = mod,
             )

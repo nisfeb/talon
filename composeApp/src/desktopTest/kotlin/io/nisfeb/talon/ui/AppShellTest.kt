@@ -218,6 +218,24 @@ class AppShellTest {
         home()
     }
 
+    // B1-5 through the shell: a group's activity row opens its page. It
+    // read "group/~bus/crew" and did nothing.
+    @Test
+    fun `a group's activity row opens the group`() = app(
+        seed = { groups().upsertGroups(listOf(io.nisfeb.talon.data.GroupEntity("~bus/crew", "The Crew", null))) },
+        setup = {
+            scries["activity/v6/feed/init/30"] = """{"all":[{"source-key":"group/~bus/crew","events":[
+                {"time":"300","event":{"group-join":{"group":"~bus/crew","ship":"~nec"}}}
+            ]}]}"""
+        },
+    ) {
+        onNodeWithContentDescription("Activity").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Joined the group · The Crew") }
+        onNodeWithText("Joined the group", substring = true).performClick()
+        // The group's page: kept here, so as a member's, with no channels.
+        waitUntil(timeoutMillis = 5_000) { showing("No channels in this group yet.") }
+    }
+
     @Test
     fun `Escape in a chat's composer closes the chat`() = app(seed = {
         messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat"))

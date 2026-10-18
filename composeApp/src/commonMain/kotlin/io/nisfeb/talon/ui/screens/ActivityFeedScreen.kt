@@ -34,6 +34,8 @@ fun ActivityFeedScreen(
      *  on the message, not just the chat. Defaults to the plain open
      *  so unwired call sites keep today's behavior. */
     onOpenPost: (whom: String, postId: String) -> Unit = { w, _ -> onOpenConversation(w) },
+    /** Open a group's page, for its join, kick, role and ask rows. */
+    onOpenGroup: ((flag: String) -> Unit)? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -56,6 +58,7 @@ fun ActivityFeedScreen(
             onOpenConversation = onOpenConversation,
             onOpenReply = onOpenReply,
             onOpenPost = onOpenPost,
+            onOpenGroup = onOpenGroup,
         )
     }
 }

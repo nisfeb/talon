@@ -1562,7 +1562,7 @@ fun App(
             // against), so a brand-new DM no longer arrives silently.
             DisposableEffect(repo, notifier) {
                 repo.dmInviteListener = { ship ->
-                    runCatching { notifier.notify(callContacts.displayName(ship), "wants to message you") }
+                    runCatching { notifier.notify(callContacts.displayName(ship), "wants to message you", "dm:$ship") }
                     noticeRepo.record(
                         "dm:$ship", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "dm-request",
                         callContacts.displayName(ship), "wants to message you", "dm:$ship",
@@ -1574,7 +1574,7 @@ fun App(
                 repo.groupInviteListener = { invite ->
                     val name = invite.title ?: invite.flag
                     val from = invite.inviter?.let { " from " + callContacts.displayName(it) } ?: ""
-                    runCatching { notifier.notify(name, "invited you to a group$from") }
+                    runCatching { notifier.notify(name, "invited you to a group$from", "invite:${invite.flag}") }
                     noticeRepo.record(
                         "invite:${invite.flag}", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "group-invite",
                         name, "invited you to a group$from", "invite:${invite.flag}",
@@ -2634,6 +2634,12 @@ fun App(
                             jumpToChat(whomTarget)
                             openChatFocusMessageId = postId
                         },
+                        onOpenGroup = { flag ->
+                            leaveAllFor {
+                                uiSettings.setActiveRailTab(RailTab.Chats)
+                                openGroupHomeFlag = flag
+                            }
+                        },
                     )
                     // showAssistant is NOT a full-screen branch — it renders
                     // inside DesktopShell's content (keeping the rail on wide;
@@ -3623,6 +3629,12 @@ fun App(
                                         openChat = whomTarget
                                         openThreadParent = parentId
                                         openThreadReplyAnchor = replyId
+                                    },
+                                    onOpenGroup = { flag ->
+                                        leaveAllFor {
+                                            uiSettings.setActiveRailTab(RailTab.Chats)
+                                            openGroupHomeFlag = flag
+                                        }
                                     },
                                 )
                             }
