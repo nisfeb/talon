@@ -120,6 +120,8 @@ internal sealed interface Line {
     data class You(val text: String) : Line
     data class Note(val text: String) : Line
     data class Said(val text: String) : Line
+    /** What the answer read, drawn under it: not kept, so a conversation opened again shows text only. */
+    data class Card(val card: io.nisfeb.talon.ai.DictationCard) : Line
 }
 
 /**
@@ -160,6 +162,8 @@ class AssistantSession(internal val scope: kotlinx.coroutines.CoroutineScope) {
     internal var pending by mutableStateOf<Pending?>(null)
     /** "Allow all" was pressed in this answer: its calendar adds and edits go ahead. */
     internal var allowAll by mutableStateOf(false)
+    /** What this run's tools read, for the card under its answer; reset as a run starts. */
+    internal val seen = io.nisfeb.talon.ai.CardSeen()
     internal var convId by mutableStateOf<Long?>(null)
     internal var convGid by mutableStateOf<String?>(null)
     internal var centroid by mutableStateOf<FloatArray?>(null)
@@ -258,6 +262,12 @@ fun AssistantScreen(
     onTopUp: (() -> Unit)? = null,
     /** The run and what it shows, kept by the host so it goes on when the screen goes. */
     session: AssistantSession,
+    /** The app's clock setting, for the times on a card. */
+    twentyFourHour: Boolean = false,
+    /** A card's person tapped: their chat. */
+    onOpenChat: (ship: String) -> Unit = {},
+    /** A card's event or task tapped: the calendar. */
+    onOpenCalendar: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     DisposableEffect(session) {
@@ -358,6 +368,17 @@ fun AssistantScreen(
     val braveKeyPresent = aiState.braveSearch() != null
     // Maps and the dialer for open_directions and call_place.
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    // Where a card's row goes: a person to their chat and the calendar's
+    // rows to the calendar, by the host; a message or mail through the
+    // app's handler, which knows talon:// addresses.
+    val openCard: (String) -> Unit = { uri ->
+        val ship = io.nisfeb.talon.ui.dmShip(uri)
+        when {
+            ship != null -> onOpenChat(ship)
+            uri == io.nisfeb.talon.ui.CALENDAR_LINK -> onOpenCalendar()
+            else -> runCatching { uriHandler.openUri(uri) }
+        }
+    }
 
     // Shared Urbit knowledge + assistant specifics, each falling back to
     // its built-in default when the user hasn't customized it (set in
@@ -374,7 +395,7 @@ fun AssistantScreen(
             if (hasMemory) "\n\n" + io.nisfeb.talon.ai.LatticeMemory.prompt else ""
     }
     val calendarZone by (calendar?.zone ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, latticeTools, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone) {
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, latticeTools, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone, session) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
         if (repo != null) {
@@ -382,6 +403,7 @@ fun AssistantScreen(
                 db = db, contacts = { contactMap }, mail = mail, calendar = calendar, calls = calls,
                 zone = { zoneFor(calendarZone) },
                 send = { whom, text -> repo.send(whom, text) },
+                onEvents = session.seen::events, onTasks = session.seen::tasks, onPeople = session.seen::people, onMail = session.seen::mail,
             )
             AgentLoop(
                 // The time is appended per call rather than baked in, so a
@@ -403,6 +425,7 @@ fun AssistantScreen(
                     // Throws where nothing takes the link: a desktop with no maps handler.
                     open = { uri -> runCatching { uriHandler.openUri(uri) }.isSuccess },
                     dials = io.nisfeb.talon.ui.isPhoneDialSupported,
+                    onMessages = session.seen::messages,
                     conversationLabel = contactMap::conversationLabel,
                 ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) +
                     orrery?.let { io.nisfeb.talon.ai.orreryTools(it) }.orEmpty() + mcpTools + latticeTools).dedupToolNames(),
@@ -490,6 +513,7 @@ fun AssistantScreen(
         if (q.isEmpty() || busy) return
         questionField = TextFieldValue("")
         busy = true; error = null; session.allowAll = false
+        session.seen.reset()
         transcript.add(Line.You(q))
         var finalAnswer = ""
         // What the run did, kept with the turn: the next "(no reply)" is
@@ -668,6 +692,8 @@ fun AssistantScreen(
                     },
                 )
             }.onSuccess {
+                session.seen.card(zoneFor(calendarZone), { contactMap.displayName(it) }, twentyFourHour)
+                    .takeUnless { it.isEmpty }?.let { transcript.add(Line.Card(it)) }
                 // Persist uncancellably: by here any confirmed write has
                 // already executed on the ship, so letting a navigation-away
                 // cancel us would lose the record of what the assistant did
@@ -934,6 +960,12 @@ fun AssistantScreen(
                                 }
                                 is Line.Said -> {
                                     MarkdownText(line.text)
+                                    i++
+                                }
+                                is Line.Card -> {
+                                    androidx.compose.foundation.text.selection.DisableSelection {
+                                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { io.nisfeb.talon.ui.AnswerCard(line.card, openCard) }
+                                    }
                                     i++
                                 }
                                 is Line.Note -> {

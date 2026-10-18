@@ -62,6 +62,27 @@ class AssistantScreenTest {
     /** Each calendar poke, when the screen is given a calendar. */
     private val calPokes: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
+    /** Rows the calendar's window holds besides the events added, as the ship sends them. */
+    @Volatile private var calRows: List<String> = emptyList()
+
+    /** Where a card's taps went: "chat ~bus", "calendar". */
+    private val opened: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+
+    /** The inbox the mail app answers with. */
+    @Volatile private var inbox = """{"total":0,"offset":0,"limit":50,"view":"inbox","threads":[]}"""
+
+    /** A mail app whose ship answers every listing with [inbox]. */
+    private fun mailOn(scope: CoroutineScope): io.nisfeb.talon.mail.MailRepo {
+        val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
+            if (req.url.encodedPath.endsWith("/api/inbox")) {
+                respond(io.ktor.utils.io.ByteReadChannel(inbox), io.ktor.http.HttpStatusCode.OK, io.ktor.http.headersOf("Content-Type", "application/json"))
+            } else {
+                respondError(io.ktor.http.HttpStatusCode.NotFound)
+            }
+        })
+        return io.nisfeb.talon.mail.MailRepo(http, scope, pollIntervalMs = 60 * 60 * 1000L).also { it.attach("https://ship.example") }
+    }
+
     /** A calendar whose ship takes every write and shows every event added. */
     private fun calendarOn(scope: CoroutineScope): io.nisfeb.talon.calendar.CalendarRepo {
         fun io.ktor.client.engine.mock.MockRequestHandleScope.json(body: String) = respond(
@@ -72,9 +93,9 @@ class AssistantScreenTest {
             when {
                 path.startsWith("/grubbery/api/poke/") -> { calPokes += (req.body as io.ktor.http.content.TextContent).text; json("") }
                 path.endsWith("/window.json") -> json(
-                    calPokes.mapNotNull { Regex("\"name\":\"([^\"]+)\"").find(it)?.groupValues?.get(1) }.mapIndexed { i, n ->
+                    (calRows + calPokes.mapNotNull { Regex("\"name\":\"([^\"]+)\"").find(it)?.groupValues?.get(1) }.mapIndexed { i, n ->
                         """{"id":"e$i","cal":"default","cat":"timed","kind":"once","all":false,"l":1790848800000,"r":1790852400000,"meta":{"name":"$n"}}"""
-                    }.joinToString(",", "{\"rows\":[", "]}"),
+                    }).joinToString(",", "{\"rows\":[", "]}"),
                 )
                 path.endsWith("/calendars.json") -> json("""[{"id":"default","name":"Personal","kind":"local"}]""")
                 path.endsWith("/config.json") -> json("""{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
@@ -87,7 +108,7 @@ class AssistantScreenTest {
         return io.nisfeb.talon.calendar.CalendarRepo(http, scope, pollIntervalMs = 60 * 60 * 1000L).also { it.attach("https://ship.example") }
     }
 
-    private fun assistant(withCalendar: Boolean = false, block: ComposeUiTest.(AppDatabase) -> Unit) {
+    private fun assistant(withCalendar: Boolean = false, withMail: Boolean = false, block: ComposeUiTest.(AppDatabase) -> Unit) {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/v1/chat/completions") { ex ->
             asked += ex.requestBody.readBytes().decodeToString()
@@ -122,6 +143,7 @@ class AssistantScreenTest {
         val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod") }
         ship.channel.events().launchIn(sessionScope)
         val calendar = if (withCalendar) calendarOn(sessionScope) else null
+        val mail = if (withMail) mailOn(sessionScope) else null
         // The host's, as the shells keep it: it outlives the screen.
         val session = AssistantSession(sessionScope)
         try {
@@ -130,7 +152,8 @@ class AssistantScreenTest {
                     TalonTheme(darkTheme = false) {
                         if (showing.value) AssistantScreen(
                             db = db, aiSettings = ai, embedder = null, onOpenMessage = { _, _, _ -> }, repo = repo,
-                            session = session, forceExpanded = true, calendar = calendar,
+                            session = session, forceExpanded = true, calendar = calendar, mail = mail,
+                            onOpenChat = { opened += "chat $it" }, onOpenCalendar = { opened += "calendar" },
                         )
                     }
                 }
@@ -300,6 +323,52 @@ class AssistantScreenTest {
         assertTrue(calPokes.none { "Picnic" in it })
         onNodeWithText("Allow").performClick()
         waitUntil(timeoutMillis = 10_000) { shows("Added the picnic.") }
+    }
+
+    // ─── the card under the answer ────────────────────────────────
+
+    private fun call(id: String, name: String, args: String = "{}") =
+        """{"id":"$id","type":"function","function":{"name":"$name","arguments":${kotlinx.serialization.json.JsonPrimitive(args)}}}"""
+
+    // sneagan, 2026-10-18: "can the text assistant do everything the voice
+    // assistant can including the nice card ui?" The rows a run read are
+    // drawn under its answer as the dictation card draws them.
+    @Test
+    fun `what a run read is drawn under its answer and each row opens where it lives`() = assistant(withCalendar = true, withMail = true) { db ->
+        val now = System.currentTimeMillis()
+        runBlocking {
+            db.contacts().upsert(io.nisfeb.talon.data.ContactEntity("~bus", "Bus", null, null))
+            db.messages().upsert(io.nisfeb.talon.data.MessageEntity("~bus", "170.1", "~bus", now - 60_000, """[{"inline":["Seeds are in the shed"]}]""", "/chat"))
+        }
+        calRows = listOf("""{"id":"d1","cal":"default","cat":"timed","kind":"once","all":false,"l":${now - 60_000},"r":${now + 3_600_000},"meta":{"name":"Seed swap"}}""")
+        inbox = """{"total":1,"offset":0,"limit":50,"view":"inbox","threads":[
+            {"id":"0v1","subject":"Seed catalogue","from":"~nec","snippet":"The spring list","verdict":"verified",
+             "forged":false,"count":1,"last":$now,"unread":true,"participants":[],
+             "unreadable":0,"archived":false,"labels":[]}]}"""
+        toolCall = listOf(
+            call("c1", "find_person", """{"name":"Bus"}"""),
+            call("c2", "list_events"),
+            call("c3", "read_conversation", """{"whom":"~bus"}"""),
+            call("c4", "list_mail"),
+        ).joinToString(",")
+        answer = "Here is what I found."
+        ask("anything about the swap?")
+        waitUntil(timeoutMillis = 15_000) { shows("Here is what I found.") && shows("Seed catalogue") }
+        // The person by name and ship, the day's event, the message and the mail.
+        assertTrue(shows("~bus") && shows("Today") && shows("Seed swap") && shows("Seeds are in the shed"))
+        assertTrue(shows("Messages") && shows("Mail") && shows("The spring list"))
+        // Under the answer, not over it.
+        val answerTop = onNodeWithText("Here is what I found.").fetchSemanticsNode().boundsInRoot.top
+        assertTrue(answerTop < onNodeWithText("Seed swap").fetchSemanticsNode().boundsInRoot.top)
+        onNodeWithText("~bus").performClick()
+        onNodeWithText("Seed swap").performClick()
+        assertEquals(listOf("chat ~bus", "calendar"), opened.toList())
+
+        // The next run reads nothing, and shows no card of the last one's.
+        answer = "Nothing else."
+        ask("thanks")
+        waitUntil(timeoutMillis = 10_000) { shows("Nothing else.") }
+        assertEquals(1, onAllNodesWithText("Seed catalogue").fetchSemanticsNodes().size)
     }
 
     // ─── Stop ──────────────────────────────────────────────────────
