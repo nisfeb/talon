@@ -4068,24 +4068,8 @@ class TlonChatRepo(
                     )
                 ))
             }
-            is GroupEventIntent.AddChannel -> {
-                db.groups().upsertChannelGroupsKeepingPin(listOf(
-                    ChannelGroupEntity(
-                        nest = intent.nest,
-                        groupFlag = intent.flag,
-                        title = intent.title,
-                    )
-                ))
-            }
-            is GroupEventIntent.EditChannel -> {
-                db.groups().upsertChannelGroupsKeepingPin(listOf(
-                    ChannelGroupEntity(
-                        nest = intent.nest,
-                        groupFlag = intent.flag,
-                        title = intent.title,
-                    )
-                ))
-            }
+            is GroupEventIntent.AddChannel -> db.groups().upsertLiveChannel(intent.nest, intent.flag, intent.title)
+            is GroupEventIntent.EditChannel -> db.groups().upsertLiveChannel(intent.nest, intent.flag, intent.title)
             is GroupEventIntent.DeleteChannel -> {
                 db.groups().deleteChannelGroup(intent.nest)
             }
